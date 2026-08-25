@@ -569,6 +569,41 @@ AstNode* parse_array_type(Lexer* lx) {
     return (AstNode*)ast_node;
 }
 
+// S16.9.5: `a?: T` marks the FIELD optional — the whole field may be absent —
+// as distinct from `a: T?`, where the field is present and its value nullable.
+// Both field positions the ruling names (map-type items and element attributes)
+// parse their own `name : type`, so the marker is read and applied here rather
+// than duplicated at each site.
+//
+// The absent-field meaning is carried by wrapping the field type in
+// OPERATOR_OPTIONAL, which is exactly what the validator's is_type_optional()
+// already reads to decide whether a missing field is an error. That reuse is
+// why `a?: T` and `a: T?` are currently indistinguishable downstream; telling
+// them apart needs a field-level flag on ShapeEntry, which is recorded as the
+// remaining half of the S16.9.5 gap rather than invented here.
+static bool eat_optional_field_marker(Lexer* lx) {
+    skip_space(lx);
+    if (lx->p < lx->end && *lx->p == '?') { lx->p++; return true; }
+    return false;
+}
+
+static AstNode* make_optional_field_type(Lexer* lx, AstNode* operand) {
+    if (!operand) { return NULL; }
+    AstUnaryNode* ast_node = (AstUnaryNode*)new_node(lx, AST_NODE_UNARY_TYPE, sizeof(AstUnaryNode));
+    TypeUnary* type = (TypeUnary*)alloc_type_kind(lx->tp->pool, TYPE_KIND_UNARY, sizeof(TypeUnary));
+    ast_node->operand = operand;
+    ast_node->op = OPERATOR_OPTIONAL;
+    type->operand = operand->type;
+    type->min_count = 0;
+    type->max_count = 1;
+    // `type->op` is the field consumers read — validator is_type_optional()
+    // checks the TypeUnary, not the AST node. apply_occurrence sets both; a
+    // wrapper that sets only the AST side parses but is invisible downstream.
+    type->op = OPERATOR_OPTIONAL;
+    ast_node->type = wrap_type(lx, (Type*)type);
+    return (AstNode*)ast_node;
+}
+
 // One `name: T` field, shaped like build_key_expr's output so shape entries and
 // downstream walks see the same node.
 AstNamedNode* parse_field(Lexer* lx) {
@@ -584,9 +619,14 @@ AstNamedNode* parse_field(Lexer* lx) {
         field = take_word(lx);
     }
     if (!field.length) { fail(lx, "expected a field name"); return NULL; }
+    bool field_optional = eat_optional_field_marker(lx);
     if (!eat(lx, ':')) { fail(lx, "expected ':' after a field name"); return NULL; }
     AstNode* field_type = parse_union(lx);
     if (!field_type) { return NULL; }
+    if (field_optional) {
+        field_type = make_optional_field_type(lx, field_type);
+        if (!field_type) { return NULL; }
+    }
 
     AstNamedNode* named = (AstNamedNode*)new_node(lx, AST_NODE_KEY_EXPR, sizeof(AstNamedNode));
     named->name = name_pool_create_strview(lx->tp->name_pool, field);
@@ -681,10 +721,15 @@ AstNode* parse_element_type(Lexer* lx) {
     while (!at(lx, '>') && lx->p < lx->end) {
         const char* save = lx->p;
         StrView field = take_attr_name(lx);
+        bool field_optional = field.length ? eat_optional_field_marker(lx) : false;
         if (!field.length || !at(lx, ':')) { lx->p = save; break; }
         lx->p++;  // ':'
         AstNode* field_type = parse_union(lx);
         if (!field_type) { return NULL; }
+        if (field_optional) {
+            field_type = make_optional_field_type(lx, field_type);
+            if (!field_type) { return NULL; }
+        }
         if (at(lx, '=')) {  // literal-only default (CT8v2); the value is not part of the type
             lx->p++;
             if (!parse_primary(lx)) { return NULL; }
@@ -994,10 +1039,13 @@ AstNode* parse_intersect(Lexer* lx) {
         lx->p++;
         AstNode* right = parse_unary(lx);
         if (!right) { return NULL; }
-        // build_binary_type maps a type-level `&` to OPERATOR_OR, not
-        // OPERATOR_INTERSECT. Odd, but it is the operator the rest of the
-        // runtime sees today, so reproduce it rather than diverge (IS3).
-        left = make_binary_node(lx, left, right, OPERATOR_OR, "&", 1);
+        // A type-level `&` is OPERATOR_INTERSECT, matching expression space
+        // (build_ast.cpp) and line ~460 in this file. It used to be lowered to
+        // OPERATOR_OR here, which is why an `int & string` annotation was
+        // rejected while `x is (int & string)` worked (LR02-9): the boundary
+        // checker keys on the set operators, and OPERATOR_OR is not one.
+        // Consumers that still recognise the old spelling accept both.
+        left = make_binary_node(lx, left, right, OPERATOR_INTERSECT, "&", 1);
     }
     return left;
 }
@@ -1065,7 +1113,7 @@ AstNode* parse_return_type_pattern(Lexer* lx) {
         AstNode* right = parse_return_pattern_atom(lx);
         if (!right) { return NULL; }
         Operator op = *op_text == '|' ? OPERATOR_UNION :
-            (*op_text == '&' ? OPERATOR_OR : OPERATOR_EXCLUDE);
+            (*op_text == '&' ? OPERATOR_INTERSECT : OPERATOR_EXCLUDE);
         left = (AstNode*)build_registered_binary_type_from_span(lx->tp, lx->origin,
             left, right, left->type, right->type, op, {op_text, 1});
     }

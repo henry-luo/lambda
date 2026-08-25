@@ -640,6 +640,14 @@ static LambdaParseValue parse_map(LambdaRdParser* parser) {
     parser_skip_newlines(parser);
     if (!parser_accept(parser, LAMBDA_TOK_RBRACE)) {
         do {
+            if (parser->current.kind == LAMBDA_TOK_STRING) {
+                parser_set_error(parser,
+                    "a map key is a symbol, not a string: write a bare name "
+                    "like {key: 1}, or single-quote it when it is not a name "
+                    "like {'data-node-id': 1}",
+                    LAMBDA_TOK_IDENTIFIER);
+                return 0;
+            }
             if (!token_is_key(parser->current.kind)) {
                 parser_set_error(parser, "expected a map key", LAMBDA_TOK_IDENTIFIER);
                 return 0;
@@ -764,6 +772,21 @@ static LambdaParseValue parse_element(LambdaRdParser* parser) {
     if (!had_attributes && parser->current.kind == LAMBDA_TOK_COMMA) {
         parser_set_error(parser,
             "an element with no attributes takes no ',' before its content",
+            LAMBDA_TOK_GT);
+        return 0;
+    }
+    // S16.9.3: `;` separates content ITEMS, so it is legal between them
+    // (`<div "a"; "b">`) but cannot open the content — there is no preceding
+    // item for it to separate. Without this the token reached parse_content and
+    // reported a bare "expected an expression", which points at the wrong place
+    // and teaches nothing. It is the likeliest mistake to make here, because
+    // `;` is the separator everywhere else in the language. The attribute-
+    // bearing form `<div k: 1; "a">` is already covered by the boundary-comma
+    // check below, which names the required `,`.
+    if (!had_attributes && parser->current.kind == LAMBDA_TOK_SEMICOLON) {
+        parser_set_error(parser,
+            "';' cannot open element content; a tag is followed directly by its "
+            "content, and ';' only separates one content item from the next",
             LAMBDA_TOK_GT);
         return 0;
     }
@@ -976,7 +999,15 @@ static bool braced_expression_is_map(const LambdaRdParser* parser) {
     if (probe.current.kind != LAMBDA_TOK_LBRACE) return false;
     parser_advance(&probe);
     parser_skip_newlines(&probe);
-    return token_is_key(probe.current.kind) && probe.next.kind == LAMBDA_TOK_COLON;
+    if (probe.next.kind != LAMBDA_TOK_COLON) return false;
+    // A double-quoted key is NOT a key (S16.9.x: keys are symbols — bare when
+    // they are names, single-quoted otherwise). Route it to the map parser
+    // anyway: read as a block, `{"k": 1}` failed at the `:` with a bare
+    // "expected an expression", naming neither the rule nor the repair. The
+    // map parser rejects it with both. This changes no accepted program —
+    // `{"k": …}` has no valid reading either way.
+    return token_is_key(probe.current.kind) ||
+        probe.current.kind == LAMBDA_TOK_STRING;
 }
 
 // S16.4.2: `{}` in an `if`/`for` body is the one genuine tie — an empty
@@ -2061,14 +2092,20 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
             }
             LambdaToken state_name = parser->current;
             parser_advance(parser);
-            if (!parser_expect(parser, LAMBDA_TOK_COLON, "expected ':' after state name")) return 0;
-            parser_skip_newlines(parser);
-            LambdaParseValue value = parse_expression(parser, 0);
-            if (!value) return 0;
+            // `name: expr` declares template-local state; a bare `name` binds
+            // engine-backed state, whose value the host owns, so it carries no
+            // initializer and reduces with no value child.
+            LambdaParseValue value = 0;
+            if (parser_accept(parser, LAMBDA_TOK_COLON)) {
+                parser_skip_newlines(parser);
+                value = parse_expression(parser, 0);
+                if (!value) return 0;
+            }
             parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW,
                 LAMBDA_REDUCTION_FORM_VIEW_STATE,
                 (SourceSpan){state_name.span.start_byte, parser->current.span.start_byte},
-                state_name, (LambdaToken){0}, 0, &value, 1);
+                state_name, (LambdaToken){0}, 0,
+                value ? &value : NULL, value ? 1 : 0);
         } while (parser_accept(parser, LAMBDA_TOK_COMMA));
     }
     if (!parser_expect(parser, LAMBDA_TOK_LBRACE, "expected '{' after view declaration")) return 0;
@@ -2129,6 +2166,17 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
     LambdaToken name = parser->current;
     parser_advance(parser);
     if (parser_accept(parser, LAMBDA_TOK_EQ)) {
+        // Pre-bind the alias name before its body parses so a self-referential
+        // type (`type Node = {left: Node?}`) resolves to this declaration
+        // instead of degrading to ANY. Pattern islands define string/symbol
+        // patterns through their own registration path, so they skip the
+        // pre-binding to avoid a duplicate-definition entry.
+        if (parser->current.kind != LAMBDA_TOK_PATTERN_ISLAND) {
+            parser_reduce_tokens(parser, LAMBDA_REDUCE_CONTEXT,
+                LAMBDA_REDUCTION_FORM_TYPE_ALIAS_BEGIN, name.span, name,
+                (LambdaToken){0},
+                is_public ? LAMBDA_REDUCTION_FLAG_PUBLIC : 0u, NULL, 0);
+        }
         LambdaParseValue type_value = 0;
         if (!parse_annotation_type_slot_value(parser, &type_value)) return 0;
         LambdaParseValue declarations = parser_reduce_tokens(parser,
@@ -2144,6 +2192,12 @@ static LambdaParseValue parse_type_declaration(LambdaRdParser* parser,
             name = parser->current;
             parser_advance(parser);
             if (!parser_expect(parser, LAMBDA_TOK_EQ, "expected '=' after type alias name")) return 0;
+            if (parser->current.kind != LAMBDA_TOK_PATTERN_ISLAND) {
+                parser_reduce_tokens(parser, LAMBDA_REDUCE_CONTEXT,
+                    LAMBDA_REDUCTION_FORM_TYPE_ALIAS_BEGIN, name.span, name,
+                    (LambdaToken){0},
+                    is_public ? LAMBDA_REDUCTION_FLAG_PUBLIC : 0u, NULL, 0);
+            }
             type_value = 0;
             if (!parse_annotation_type_slot_value(parser, &type_value)) return 0;
             LambdaParseValue alias = parser_reduce_tokens(parser,

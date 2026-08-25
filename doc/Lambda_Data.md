@@ -794,8 +794,8 @@ Key-value mappings with structural typing:
 {key: "value"}
 {name: "Alice", age: 30, active: true}
 
-// Mixed key types
-{"string_key": 1, symbol_key: 2}
+// Keys are symbols: quote one when it is not a bare name
+{'symbol-quoted': 1, name_key: 2}
 
 // Nested maps
 {

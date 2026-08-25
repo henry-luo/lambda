@@ -9,7 +9,7 @@
 - **Related:** `vibe/impl/Lambda_Impl_Tune15.md`, `vibe/impl/Lambda_Impl_Tune14 (done).md`,
   `vibe/Lambda_Tune_Typed_Vs_C2MIR.md`, `vibe/Lambda_Design_Name_Identity.md`,
   `vibe/Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Tune13.md` (R22 typed-store
-  dissection), `vibe/Lambda_Issue_Type_Support.md` (TS-3 ANY downgrade)
+  dissection), `vibe/impl/Lambda_Issue_Type_Support (retired).md` (TS-3 ANY downgrade)
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1, S4.5.3;
   `doc/Lambda_Formal_Design.md` D2.2.2, D2.4, D3.2.1–D3.2.2, D3.3.1–D3.3.3, D5.2–D5.3,
   D8.3.2–D8.3.3, D8.4.1, D8.6.1–D8.6.3
@@ -226,7 +226,7 @@ would hit; they gate everything else in this round.
   contradicted by matmul2/quicksort2/spectralnorm2, which annotate `fill()` results and
   keep packed storage. Either the defect is shape-dependent or half the corpus is carrying
   a stale workaround; both possibilities must be resolved. This is TS-3's ANY-downgrade
-  wearing a new coat [`vibe/Lambda_Issue_Type_Support.md` TS-3; D3.2.1].
+  wearing a new coat [`vibe/impl/Lambda_Issue_Type_Support (retired).md` TS-3; D3.2.1].
   Consequence: sha1's `w`/`x`, levenshtein's DP rows, fannkuch's three permutation arrays,
   triangl's five boards, navier's six grids, nbody-js's seven body arrays, hashmap's
   bucket arrays — every hot array in the tail — are deliberately bare.

@@ -896,7 +896,7 @@ holes, all found while auditing this decision.
   fix belongs with the E211 receiver check, not in the COW selector: the mutating-builtin owner
   argument should be subject to the same immutable-binding rule as an assignment target, so that
   `push` on a `let` is a compile error rather than a silent in-place write. Tracked as **LR_12 #8**
-  in [`Lambda_Issues_Outstanding.md`](Lambda_Issues_Outstanding.md).
+  in [`Lambda_Issue_Ledger.md` §15](Lambda_Issue_Ledger.md) (the Outstanding rollup was retired 2026-08-25).
 - **G2 — the `is_proc` guards did not record a semantic error. FIXED 2026-07-31.** The six guards
   (`var`, assignment, `while`, `break`, `continue`, `return`) called bare `log_error()` rather than
   `record_semantic_error()`, so `tp->error_count` stayed 0. Since

@@ -302,7 +302,7 @@ void free_document(DomDocument* doc) {
 
     Runtime* timer_runtime = doc->js.runtime;
     EvalContext* timer_owner = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
-    Runtime* state_runtime = doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
+    Runtime* state_runtime = dom_document_script_runtime(doc);
     EvalContext* state_owner = state_runtime
         ? runtime_get_eval_context(state_runtime) : nullptr;
     if (timer_owner && state_owner && timer_owner != state_owner) {

@@ -4,7 +4,7 @@
 - **Status:** PROPOSAL (survey complete; decision ledger `TI1+`)
 - **Scope:** how static type inference should be structurally carried out over expressions in the Lambda front end (`lambda/runtime/build_ast.cpp`) and the LambdaJS front end (`lambda/js/build_js_ast.cpp` + `js_mir_function_collection_class_inference.cpp`), how the two unify, and the catalog of operations that currently degrade to `any`
 - **Formal authority:** `doc/Lambda_Formal_Design.md` D2.4.1, D2.5.3, D3.1.1v2, D3.2.1, D3.2.3, D3.3.1v2–D3.3.4, D8.3.3, D8.4.3; `doc/Lambda_Formal_Semantics.md` S4.1.1–S4.1.2, S5.5.2, S7.1, S7.2.1, S11.4.1; invariant SI3v2 (revised 2026-08-18 alongside this doc: a type-error-free script's result is never affected by inference; static rejection lands straightaway; strictness is per-surface — Lambda strict, LambdaJS warn-only)
-- **Related:** `vibe/Lambda_Design_Compiling_Lane.md` (ValueRep — representation side of the same coin), `vibe/impl/Lambda_Impl_Tune19.md` (T19-1..T19-7 — the perf evidence that motivates this doc), `vibe/Lambda_Design_Type_Enforcement.md` (TE-1..TE-18 — enforcement at boundaries), `vibe/Lambda_Issue_Type_Support.md` (TS-3 ANY-downgrade)
+- **Related:** `vibe/Lambda_Design_Compiling_Lane.md` (ValueRep — representation side of the same coin), `vibe/impl/Lambda_Impl_Tune19.md` (T19-1..T19-7 — the perf evidence that motivates this doc), `vibe/Lambda_Design_Type_Enforcement.md` (TE-1..TE-18 — enforcement at boundaries), `vibe/impl/Lambda_Issue_Type_Support (retired).md` (TS-3 ANY-downgrade)
 - **ID series:** `TI#` (type-inference decisions), `TIG#` (gap catalog entries)
 - **Implementation plan:** `vibe/impl/Lambda_Impl_Type_Infer.md` (IP0–IP7 over the decided-but-unbuilt items)
 

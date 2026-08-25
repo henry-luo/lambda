@@ -491,8 +491,12 @@ ValidationResult* validate_binary_type(
             return validate_against_union_type(validator, item, union_types, type_count);
         }
 
+        case OPERATOR_INTERSECT:
         case OPERATOR_OR: {
-            // Intersection type - item must match ALL types
+            // Intersection type - item must match ALL types.
+            // `&` reaches here as OPERATOR_INTERSECT from expression/annotation
+            // space and historically as OPERATOR_OR from the type-pattern
+            // parser; both spell the same set operation, so accept either.
             // Try left first
             ValidationResult* left_result = validate_against_type(validator, item, type_binary->left);
             if (left_result && !left_result->valid) {

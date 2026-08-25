@@ -3,6 +3,7 @@
 #include "template_registry.h"
 #include "render_map.h"
 #include "edit_bridge.h"
+#include "../core/mark_reader.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
@@ -77,6 +78,8 @@ void template_registry_add(TemplateRegistry* registry,
     entry->match_attr_count = match_attr_count;
     entry->match_field_count = match_field_count;
     entry->definition_order = registry->count;
+    entry->is_behavior = registry->behavior_mode;
+    if (entry->is_behavior) registry->behavior_count++;
     entry->next = NULL;
 
     // append to linked list
@@ -136,9 +139,122 @@ TemplateEntry* template_registry_find_ref(TemplateRegistry* registry,
     return NULL;
 }
 
+void template_registry_set_behavior_mode(TemplateRegistry* registry, bool on) {
+    if (!registry) return;
+    registry->behavior_mode = on;
+    log_debug("template_registry_set_behavior_mode: %s", on ? "on" : "off");
+}
+
+bool template_registry_has_behavior(TemplateRegistry* registry) {
+    return registry && registry->behavior_count > 0;
+}
+
+TemplateHandlerEntry* template_entry_find_handler(TemplateEntry* entry,
+                                                  const char* event_name) {
+    if (!entry || !event_name) return NULL;
+    for (TemplateHandlerEntry* h = entry->handlers; h; h = h->next) {
+        if (h->event_name && strcmp(h->event_name, event_name) == 0) return h;
+    }
+    return NULL;
+}
+
+// A field pins a value only when its type is a string/symbol *literal*. A typed
+// field (`href: any`, `type: string`) arrives wrapped as LMD_TYPE_TYPE and only
+// requires presence — and `is_literal` alone cannot tell them apart, since it is
+// set on both, so the type id must be checked before the payload is read.
+static bool template_is_value_predicate(const Type* t) {
+    return t && t->is_literal &&
+        (t->type_id == LMD_TYPE_STRING || t->type_id == LMD_TYPE_SYMBOL);
+}
+
+void template_registry_set_element_pattern(TemplateEntry* entry, const void* elmt_type) {
+    if (!entry || !elmt_type) return;
+    const TypeElmt* pattern = (const TypeElmt*)elmt_type;
+    entry->match_elmt_type = elmt_type;
+    // derive both counts here so a caller cannot desynchronize them from the
+    // predicate list they describe.
+    int total = 0, literal = 0;
+    for (ShapeEntry* field = pattern->shape; field; field = field->next) {
+        if (!field->name || !field->name->str) continue;
+        total++;
+        if (template_is_value_predicate(field->type)) literal++;
+    }
+    entry->match_attr_count = total;
+    entry->match_literal_attr_count = literal;
+    log_debug("template_registry_set_element_pattern: tag=%.*s attrs=%d literal=%d",
+              entry->match_tag_len, entry->match_tag ? entry->match_tag : "",
+              total, literal);
+}
+
 // ============================================================================
 // Pattern matching
 // ============================================================================
+
+// Read the text of a string-or-symbol payload. String and Symbol have different
+// layouts (Symbol carries an `ns` field ahead of `chars`), so the type id, not a
+// cast, decides which struct the bytes are read through.
+static bool template_text_payload(TypeId tid, const void* payload,
+                                  const char** out_text, size_t* out_len) {
+    if (!payload) return false;
+    if (tid == LMD_TYPE_SYMBOL) {
+        const Symbol* sym = (const Symbol*)payload;
+        *out_text = sym->chars;  *out_len = sym->len;
+        return true;
+    }
+    if (tid == LMD_TYPE_STRING) {
+        const String* str = (const String*)payload;
+        *out_text = str->chars;  *out_len = str->len;
+        return true;
+    }
+    return false;
+}
+
+// Evaluate the element pattern's attribute predicates against a target element.
+// A shape entry whose type is a literal (`type:'checkbox'`) pins the value; any
+// other type (`href`, `type: string`) only requires the attribute to be present.
+static bool template_attrs_match(const TypeElmt* pattern, Item target) {
+    if (!pattern) return true;
+    ElementReader elem(target);
+    if (!elem.isValid()) return false;
+    for (ShapeEntry* field = pattern->shape; field; field = field->next) {
+        if (!field->name || !field->name->str) continue;
+        // shape names are not null-terminated; copy the short attribute name out
+        char key[128];
+        size_t len = field->name->length;
+        if (len >= sizeof(key)) return false;
+        memcpy(key, field->name->str, len);
+        key[len] = '\0';
+
+        Type* want = field->type;
+        if (!template_is_value_predicate(want)) {
+            // presence-only predicate (`href`, `type: string`)
+            if (!elem.has_attr(key)) return false;
+            continue;
+        }
+        const char* want_text = NULL;  size_t want_len = 0;
+        if (!template_text_payload(want->type_id, ((TypeString*)want)->string,
+                                   &want_text, &want_len)) {
+            // conservative: an unsupported literal kind must not produce a false
+            // match. Extend here when non-text predicates are needed.
+            log_debug("template_attrs_match: unsupported literal predicate on '%s' (type %d)",
+                      key, (int)want->type_id);
+            return false;
+        }
+        // compare by text across string and symbol alike: a parsed HTML
+        // attribute is a string while a Lambda literal like 'checkbox' is a
+        // symbol, and the predicate must match either spelling.
+        ItemReader actual = elem.get_attr(key);
+        const char* got_text = NULL;  size_t got_len = 0;
+        if (actual.isString()) {
+            template_text_payload(LMD_TYPE_STRING, actual.asString(), &got_text, &got_len);
+        } else if (actual.isSymbol()) {
+            template_text_payload(LMD_TYPE_SYMBOL, actual.asSymbol(), &got_text, &got_len);
+        }
+        if (!got_text) return false;
+        if (want_len != got_len || memcmp(want_text, got_text, want_len) != 0) return false;
+    }
+    return true;
+}
 
 // Check if a template's pattern matches a given item
 static bool template_matches(TemplateEntry* tmpl, Item target) {
@@ -160,7 +276,7 @@ static bool template_matches(TemplateEntry* tmpl, Item target) {
         if (tmpl->match_attr_count > 0) {
             if (etype->length < tmpl->match_attr_count) return false;
         }
-        return true;
+        return template_attrs_match((const TypeElmt*)tmpl->match_elmt_type, target);
     }
 
     // map matching: check that it's a map with at least match_field_count fields
@@ -193,7 +309,12 @@ static int template_compare(TemplateEntry* a, TemplateEntry* b) {
     if (a->specificity != b->specificity) {
         return (int)a->specificity - (int)b->specificity;
     }
-    // within same specificity: more constraints = higher priority
+    // within same specificity: a predicate that pins a value outranks one that
+    // only requires presence, so <input type:'checkbox'> beats <input type>.
+    if (a->match_literal_attr_count != b->match_literal_attr_count) {
+        return b->match_literal_attr_count - a->match_literal_attr_count;
+    }
+    // then: more constraints = higher priority
     int a_constraints = a->match_attr_count + a->match_field_count;
     int b_constraints = b->match_attr_count + b->match_field_count;
     if (a_constraints != b_constraints) {
@@ -201,6 +322,22 @@ static int template_compare(TemplateEntry* a, TemplateEntry* b) {
     }
     // tie-breaker: later definition wins (last-match-wins, like CSS)
     return b->definition_order - a->definition_order;
+}
+
+TemplateEntry* template_registry_match_behavior(TemplateRegistry* registry,
+                                                Item target,
+                                                const char* event_name) {
+    if (!registry || !registry->behavior_count || !event_name) return NULL;
+    TemplateEntry* best = NULL;
+    for (TemplateEntry* e = registry->first; e; e = e->next) {
+        if (!e->is_behavior) continue;
+        // a behavior template only governs an event it actually declares, so an
+        // unhandled event falls through to the native default action
+        if (!template_entry_find_handler(e, event_name)) continue;
+        if (!template_matches(e, target)) continue;
+        if (!best || template_compare(e, best) < 0) best = e;
+    }
+    return best;
 }
 
 static TemplateEntry* template_registry_match_mode(TemplateRegistry* registry,
@@ -221,6 +358,8 @@ static TemplateEntry* template_registry_match_mode(TemplateRegistry* registry,
     TemplateEntry* best = NULL;
     for (TemplateEntry* e = registry->first; e; e = e->next) {
         if (e->is_edit != edit_mode) continue;
+        // behavior templates attach at dispatch time, never through apply()
+        if (e->is_behavior) continue;
 
         if (!template_matches(e, target)) continue;
 

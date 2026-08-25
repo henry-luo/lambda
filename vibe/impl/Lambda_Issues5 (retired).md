@@ -1,5 +1,21 @@
 # Lambda Script Issues — Phase 2 PDF Package
 
+## Verification pass (2026-08-25)
+
+A second spot-check, again not a full audit. Results by entry number:
+
+| # | Result |
+|---|---|
+| 1 | **Unchanged, and by design.** `[1,2] + [3,4]` is `[4,6]` — element-wise vector arithmetic, not concatenation. `++` concatenates. |
+| 4 | **FIXED** — postfix `^` works in a `let`: `let v = input(path, 'json')^` binds the value. |
+| 5 | **FIXED** — `1 < 2 < 3` parses and evaluates to `true`; no parentheses needed. |
+| 10 | **Unchanged, and by design.** Reassigning a `let` inside a `pn` is rejected with `error[E211]` — that is the immutable-binding rule, not a defect. |
+| 11 | **FIXED** — string slicing exists two ways: `slice("hello", 1, 3)` → `"el"` (end-exclusive) and `"hello"[1 to 3]` → `"ell"` (range, end-inclusive). Worth knowing the two conventions differ. |
+| 15 | **FIXED** — `let x = if (true) 1 else 2` inside a `pn` binds `1`, not `null`. |
+| 23 | **Half fixed** — see the entry itself; the inline-`if` attribute value works, attribute spread does not. |
+
+Entries not listed were not re-tested in this pass.
+
 ## Current Verification Status (2026-05-05)
 
 Quick probes against the current `./lambda.exe` show that several items in
@@ -597,7 +613,15 @@ unrelated call), with no hint that the offending `++` was the culprit.
 
 ## 23. Element literal attribute set is fully static — no spread / no conditional
 
-**Status: Still open (2026-07-02)** — attribute spread is still unsupported,
+**Status: half FIXED (re-verified 2026-08-25)** — the inline `if` form for
+attribute values now works: the example below parses and evaluates to
+`<path d: "M0", stroke-dasharray: "4 2">`. **Attribute spread is still
+unsupported**: `<path *attrs>` does not error, but the map lands as a *child*
+rather than as attributes — it renders as `<path {a: 1, b: 2}>`. That residue is
+the same defect `Lambda_Issues8 (retired).md` records as "Runtime map attribute spread
+creates a nested element child"; the two entries are one issue.
+
+*(Original 2026-07-02 status follows.)* — attribute spread is still unsupported,
 and the intended inline `if` expression form for attribute values still fails
 because of the current grammar. This is workable but surprising; it forces
 N-fold duplication of element literals when only one attribute varies.

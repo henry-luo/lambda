@@ -9,7 +9,7 @@
 > [`Lambda_Design_Compiling_Dual_Func.md`](Lambda_Design_Compiling_Dual_Func.md) (DF1–DF17 — the specialization mechanism),
 > [`Lambda_Tune_Typed_Vs_C2MIR.md`](Lambda_Tune_Typed_Vs_C2MIR.md) (M1–M8 measured evidence),
 > [`Lambda_Design_Type_Enforcement.md`](Lambda_Design_Type_Enforcement.md),
-> [`Lambda_Issue_Type_Support.md`](Lambda_Issue_Type_Support.md) (TS-1..TS-9),
+> [`impl/Lambda_Issue_Type_Support (retired).md`](impl/Lambda_Issue_Type_Support%20(retired).md) (TS-1..TS-9),
 > [`Lambda_Design_MIR_Cache_L3.md`](Lambda_Design_MIR_Cache_L3.md).
 
 ---

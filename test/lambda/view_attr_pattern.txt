@@ -1,0 +1,17 @@
+"checkbox-template"
+0
+<btn kind: 'reset'>
+0
+"edit-template"
+0
+"has-href"
+0
+<link>
+0
+"header-cell"
+0
+"generic-cell"
+0
+"ready"
+0
+"true"

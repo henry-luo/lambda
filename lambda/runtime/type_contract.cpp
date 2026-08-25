@@ -272,14 +272,23 @@ static void lambda_type_format_name_inner(const Type* type, char* buffer,
     }
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
         const TypeBinary* binary = (const TypeBinary*)type;
-        if (binary->op == OPERATOR_UNION) {
+        // All three set operators render in their source spelling. Only `|` did
+        // before, so an `int & string` contract printed as the bare word "type"
+        // and the diagnostic named neither the operator nor the operands
+        // (LR02-9). `OPERATOR_OR` is the historical spelling of a type-level
+        // `&` and renders the same way.
+        const char* spelling =
+            binary->op == OPERATOR_UNION ? " | " :
+            (binary->op == OPERATOR_INTERSECT || binary->op == OPERATOR_OR) ? " & " :
+            binary->op == OPERATOR_EXCLUDE ? " ! " : NULL;
+        if (spelling) {
             char left_name[128];
             char right_name[128];
             lambda_type_format_name_inner(binary->left, left_name,
                 sizeof(left_name), depth + 1);
             lambda_type_format_name_inner(binary->right, right_name,
                 sizeof(right_name), depth + 1);
-            snprintf(buffer, capacity, "%s | %s", left_name, right_name);
+            snprintf(buffer, capacity, "%s%s%s", left_name, spelling, right_name);
             return;
         }
     }

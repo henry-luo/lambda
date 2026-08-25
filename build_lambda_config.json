@@ -4737,6 +4737,21 @@
             "icon": "⚙️"
           },
           {
+            "source": "test/test_lambda_opt_gtest.cpp",
+            "name": "Lambda Optimization Contract Tests",
+            "category": "baseline",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "binary": "test_lambda_opt_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "requires_lambda_exe": true,
+            "icon": "🧭"
+          },
+          {
             "source": "test/test_compiler_pass_gtest.cpp",
             "name": "Compiler Pass Manager Tests",
             "dependencies": [

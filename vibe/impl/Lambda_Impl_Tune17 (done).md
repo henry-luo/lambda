@@ -11,7 +11,7 @@
   explicitly evidence-gated rather than being claimed as cleared
 - **Related:** `vibe/impl/Lambda_Impl_Tune16.md`, `vibe/impl/Lambda_Impl_Tune15.md`,
   `vibe/Lambda_Tune_Typed_Vs_C2MIR.md`, `vibe/Lambda_Design_Type_Enforcement.md`,
-  `vibe/Lambda_Issue_Type_Support.md` (TS-3)
+  `vibe/impl/Lambda_Issue_Type_Support (retired).md` (TS-3)
 - **Formal authority:** `doc/Lambda_Formal_Semantics.md` S4.1, S4.5.3;
   `doc/Lambda_Formal_Design.md` D2.2.2, D2.4, D3.2.1–D3.2.2, D3.3.1–D3.3.3,
   D8.3.2–D8.3.3, D8.4.1, D8.6.1–D8.6.3

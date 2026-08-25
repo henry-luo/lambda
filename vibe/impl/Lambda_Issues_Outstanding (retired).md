@@ -1,4 +1,21 @@
-# Lambda + LambdaJS — Outstanding Issues Ledger
+# Lambda + LambdaJS — Outstanding Issues Ledger  ·  RETIRED 2026-08-25
+
+> **This rollup is retired. Do not add to it.** It was reviewed in full on
+> 2026-08-25 and its live content moved:
+>
+> | Section | Where it lives now |
+> |---|---|
+> | §1 OI-1 – OI-9 (design gaps) | `vibe/Lambda_Issue_Ledger.md` §15 — IDs unchanged; the full argument for each stays below |
+> | §2 JO1 – JO13 (JS stack-frame residue) | already owned by `vibe/Lambda_Design_Stack_Frame_JS.md` (18 JO references, verified present) |
+> | §3 Lambda core, LR_01–13 | verified **fully subsumed** by `Lambda_Issue_Ledger.md` §1–§13; every MAJOR item it bolded resolves to a ledger entry, and the ledger carries more per section. One item was missing and is now [LR12-8](../Lambda_Issue_Ledger.md#lr12-8) |
+> | §4 LambdaJS, JS_01–16 | already owned by the `doc/dev/js/JS_*.md` Known-Issues sections (present in all 17, verified) |
+> | §5 settled designs | `Lambda_Issue_Ledger.md` §15.2 — with the stale `Lambda_Design_JS_Threading.md` pointer corrected to `Lambda_Js_Thread.md` |
+> | §6 hygiene themes | `Lambda_Issue_Ledger.md` §15.1 |
+> | §7 session-verified corrections | already applied to the source docs on 2026-07-16; kept below as the record of what changed and why |
+>
+> Retained as the historical argument — the OI entries below carry reasoning and
+> decision records (notably the OI-6 PIC design record and the OI-9 "no in-band
+> tombstones" ruling) that §15 only indexes.
 
 **Status:** living rollup — index of everything open, with pointers to owning ledgers/docs; update as items close.
 **Date:** 2026-07-16
@@ -70,7 +87,7 @@ MAJOR items in bold; selected moderates. Per-doc numbering = the doc's own Known
 - **LR_11 (Mark API)**: **#2 MarkReader traversal stubbed** (leaks state, direct-children-only scan → silently wrong deep selections); **#4 ui_mode arena-provenance landmine** (wrong `pool_free` corrupts rpmalloc, no diagnostic); #3 render_map mutates while iterating; #5 truncate-vs-error cap inconsistency; #6 shallow PATH deep_copy.
 - **LR_12 (procedural)**: **#8 `push`/`splice` mutate a module-level `let` in place — breaks the no-global-mutable-state invariant** *(new, verified 2026-07-31)*; #1 `fetch` returns bare String (drops status/headers); #2 `pn_push`/`pn_splice` swallow type errors invisibly; #3 TCO fully implemented but hard-disabled + unconditional stack checks; #7 ad-hoc effect surface (no capability system).
 
-  **LR_12 #8 detail.** Lambda's language-level invariant (`vibe/Lambda_Design_Runtime_Globals.md` RG14) is that no mutable root exists at module scope: `var` is rejected there, and E211 (`build_ast.cpp:3061`) rejects mutation *through* an immutable binding — index-assign, member-assign, and mutating-`pn`-method calls are all caught. `push`/`splice` are not. A module-level `let` bound to a growable array is mutated destructively, with no diagnostic, and the change is observable afterwards from a pure `fn`:
+  **LR_12 #8 detail.** *(Re-verified 2026-08-25 — still reproduces on both tiers; now recorded in the central ledger as LR12-8.)* Lambda's language-level invariant (`vibe/Lambda_Design_Runtime_Globals.md` RG14) is that no mutable root exists at module scope: `var` is rejected there, and E211 (`build_ast.cpp:3061`) rejects mutation *through* an immutable binding — index-assign, member-assign, and mutating-`pn`-method calls are all caught. `push`/`splice` are not. A module-level `let` bound to a growable array is mutated destructively, with no diagnostic, and the change is observable afterwards from a pure `fn`:
 
   ```lambda
   let arr = [1, "two"]

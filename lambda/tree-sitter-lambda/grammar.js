@@ -962,7 +962,10 @@ module.exports = grammar({
     ),
 
     state_decl: $ => seq('state', $.state_entry, repeat(seq(',', $.state_entry))),
-    state_entry: $ => seq(field('name', $.identifier), ':', field('value', $._expr)),
+    // `name: expr` is template-local state; a bare `name` binds engine-backed
+    // state whose value the host owns, so the initializer is optional.
+    state_entry: $ => seq(field('name', $.identifier),
+      optional(seq(':', field('value', $._expr)))),
 
     event_handler: $ => seq(
       'on', field('event', $.identifier),

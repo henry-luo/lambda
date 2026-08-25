@@ -1418,6 +1418,32 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
             return left == STATIC_BOUNDARY_DEFERRED || right == STATIC_BOUNDARY_DEFERRED ?
                 STATIC_BOUNDARY_DEFERRED : STATIC_BOUNDARY_REJECTED;
         }
+        // `A & B` admits a source only if BOTH arms admit it. Without these two
+        // arms an intersection or exclusion target fell through to the generic
+        // tail and was rejected outright, so `let a: int & string` failed while
+        // `x is (int & string)` worked (LR02-9). `OPERATOR_OR` is accepted as
+        // the historical spelling of a type-level `&`.
+        if (target_binary->op == OPERATOR_INTERSECT || target_binary->op == OPERATOR_OR) {
+            StaticBoundaryResult left = static_boundary_relation(source, target_binary->left);
+            StaticBoundaryResult right = static_boundary_relation(source, target_binary->right);
+            if (left == STATIC_BOUNDARY_REJECTED || right == STATIC_BOUNDARY_REJECTED) {
+                return STATIC_BOUNDARY_REJECTED;
+            }
+            return left == STATIC_BOUNDARY_PROVEN && right == STATIC_BOUNDARY_PROVEN ?
+                STATIC_BOUNDARY_PROVEN : STATIC_BOUNDARY_DEFERRED;
+        }
+        // `A ! B` admits a source that fits A and is not B. Only the positive
+        // arm is a static question; non-membership is decided on the value
+        // unless the excluded arm is provably disjoint from the source.
+        if (target_binary->op == OPERATOR_EXCLUDE) {
+            StaticBoundaryResult keep = static_boundary_relation(source, target_binary->left);
+            if (keep == STATIC_BOUNDARY_REJECTED) return STATIC_BOUNDARY_REJECTED;
+            StaticBoundaryResult drop = static_boundary_relation(source, target_binary->right);
+            if (keep == STATIC_BOUNDARY_PROVEN && drop == STATIC_BOUNDARY_REJECTED) {
+                return STATIC_BOUNDARY_PROVEN;
+            }
+            return STATIC_BOUNDARY_DEFERRED;
+        }
     }
     // A parameter/member can carry an occurrence or optional wrapper as its
     // effective AST type. Its structural relation is not represented by the
@@ -2557,12 +2583,26 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     if (ast_called_function_signature_ready(call->function) &&
             (arg_count < func_type->required_param_count ||
              (!func_type->is_variadic && arg_count > func_type->param_count))) {
+        // Describe the accepted arity as a RANGE when optional parameters make
+        // it one. Reporting only `required_param_count` said "expects 1
+        // argument" for `fn g(a, b?)`, which is wrong in both directions — it
+        // understates what the function takes and, since S12.3.6 makes optional
+        // parameters the sanctioned answer to overloading, it is the shape
+        // callers now hit most.
+        char expected[64];
+        int min_args = func_type->required_param_count;
+        int max_args = func_type->param_count;
+        if (func_type->is_variadic) {
+            snprintf(expected, sizeof(expected), "%d or more arguments", min_args);
+        } else if (min_args >= max_args) {
+            snprintf(expected, sizeof(expected), "%d argument%s", min_args,
+                min_args == 1 ? "" : "s");
+        } else {
+            snprintf(expected, sizeof(expected), "%d to %d arguments",
+                min_args, max_args);
+        }
         record_type_error_code(tp, line, ERR_ARGUMENT_COUNT_MISMATCH,
-            "function expects %d%s argument%s, got %d",
-            func_type->required_param_count,
-            func_type->is_variadic ? " or more" : "",
-            func_type->required_param_count == 1 && !func_type->is_variadic ? "" : "s",
-            arg_count);
+            "function expects %s, got %d", expected, arg_count);
         if (!should_continue_transpiling(tp)) {
             call->type = &TYPE_ERROR;
             return false;
@@ -3930,8 +3970,14 @@ static bool ast_is_explicit_type_value(AstNode* node) {
     }
 }
 
+// `|`, `&` and `!` are all type-set operators when both operands are types.
+static bool ast_binary_is_type_set_op(Operator op) {
+    return op == OPERATOR_UNION || op == OPERATOR_INTERSECT ||
+        op == OPERATOR_EXCLUDE;
+}
+
 static bool promote_type_union_expr(Transpiler* tp, AstBinaryNode* ast_node) {
-    if (!ast_node || ast_node->op != OPERATOR_UNION ||
+    if (!ast_node || !ast_binary_is_type_set_op(ast_node->op) ||
         !ast_is_explicit_type_value(ast_node->left) ||
         !ast_is_explicit_type_value(ast_node->right)) {
         return false;
@@ -3939,13 +3985,16 @@ static bool promote_type_union_expr(Transpiler* tp, AstBinaryNode* ast_node) {
 
     // Phase 6 makes `|` union in expression position too; type-valued operands
     // must build a first-class binary type instead of falling into runtime ops.
+    // `&`/`!` reach here on the same footing: without the promotion an
+    // annotation received a LMD_TYPE_TYPE-tagged *value* rather than a type,
+    // which surfaced as "cannot initialize 'a' of type type with int" (LR02-9).
     ast_node->node_type = AST_NODE_BINARY_TYPE;
     TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
     node_type->type = (Type*)type;
     type->left = ((TypeType*)ast_node->left->type)->type;
     type->right = ((TypeType*)ast_node->right->type)->type;
-    type->op = OPERATOR_UNION;
+    type->op = ast_node->op;
     ast_node->type = (Type*)node_type;
     arraylist_append(tp->type_list, ast_node->type);
     type->type_index = tp->type_list->length - 1;
@@ -3990,8 +4039,15 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_MATCH_EXPR: {
         AstMatchNode* match_node = (AstMatchNode*)node;
         if (has_current_item_ref(match_node->scrutinee)) return true;
+        // The arm BODY can consume a current item supplied by an enclosing
+        // pipe; the pattern cannot — `case int that (~ > 0)` rebinds `~` to the
+        // match subject, the same shadowing the handler case above models. This
+        // loop used to inspect nothing and fall through to `false`, so
+        // `xs |> match (1) { case int: (~) * 10 }` evaluated to `error`: the
+        // pipe never bound `~` because nothing reported the arm needed it.
         AstMatchArm* arm = match_node->first_arm;
         while (arm) {
+            if (has_current_item_ref(arm->body)) return true;
             arm = (AstMatchArm*)arm->next;
         }
         return false;
@@ -6622,6 +6678,7 @@ struct LambdaDirectAstSink {
     AstNode* object_method_tail;
     int object_byte_offset;
     AstObjectTypeNode* completed_object;
+    AstNamedNode* pending_type_alias;
 };
 
 static LambdaParseValue direct_ast_value(AstNode* node) {
@@ -6981,14 +7038,18 @@ static bool direct_view_begin(LambdaDirectAstSink* sink,
 static bool direct_view_add_state(LambdaDirectAstSink* sink,
         const LambdaParseReduction* reduction) {
     AstViewNode* view = direct_active_view(sink);
-    if (!view || reduction->child_count != 1) return false;
+    if (!view || reduction->child_count > 1) return false;
     Transpiler* tp = sink->tp;
     AstStateEntry* state = (AstStateEntry*)alloc_ast_node_from_span(tp,
         AST_NODE_STATE_ENTRY, reduction->span, sizeof(AstStateEntry));
     state->type = set_type_any(tp, ANY_STATEMENT);
     state->name = name_pool_create_strview(tp->name_pool,
         direct_token_text(tp, reduction->detail_token));
-    state->value = direct_ast_node(reduction->children[0]);
+    // a null value marks an engine-backed binding (bare `state name`); an
+    // explicit `state name: null` still yields a literal node, so the two stay
+    // distinguishable downstream.
+    state->value = reduction->child_count == 1
+        ? direct_ast_node(reduction->children[0]) : NULL;
 
     uint32_t slot = sink->view_depth - 1;
     if (sink->view_state_tails[slot]) {
@@ -7134,6 +7195,57 @@ static AstNode* direct_type_stam(Transpiler* tp, SourceSpan span,
     return (AstNode*)node;
 }
 
+// Pre-bind a `type Name = ...` declaration before its body parses so a
+// self-referential alias (`type Node = {left: Node?}`) resolves to this
+// binding instead of degrading to ANY. The placeholder map is the map IDENTITY
+// recursive fields capture; direct_adopt_pending_alias_map publishes the
+// completed shape through that same identity when the declaration reduction
+// fires (mirrors the retired CST builder's pre-registration).
+static void direct_type_alias_begin(LambdaDirectAstSink* sink,
+        const LambdaParseReduction* reduction) {
+    Transpiler* tp = sink->tp;
+    AstNamedNode* alias = (AstNamedNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_ASSIGN, reduction->span, sizeof(AstNamedNode));
+    alias->name = name_pool_create_strview(tp->name_pool,
+        direct_token_text(tp, reduction->detail_token));
+    alias->is_type_definition = true;
+    TypeType* pre_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE,
+        sizeof(TypeType));
+    TypeMap* pre_map = (TypeMap*)alloc_type(tp->pool, LMD_TYPE_MAP,
+        sizeof(TypeMap));
+    pre_map->struct_name = alias->name->chars;
+    pre_map->is_trusted_contract = true;
+    pre_type->type = (Type*)pre_map;
+    alias->type = (Type*)pre_type;
+    lambda_ast_register_name(tp, alias);
+    sink->pending_type_alias = alias;
+}
+
+// Recursive fields were built against the pre-registered placeholder map.
+// Publish the completed shape through that same identity so function contracts
+// and self-references cannot split into placeholder and final maps.
+static void direct_adopt_pending_alias_map(Transpiler* tp, AstNamedNode* alias,
+        TypeType* pre_type) {
+    TypeMap* pre_map = (TypeMap*)pre_type->type;
+    Type* definition = alias->type;
+    Type* actual = unwrap_simple_type_type(definition);
+    if (!actual || actual->type_id != LMD_TYPE_MAP || actual == &TYPE_MAP ||
+            actual == (Type*)pre_map || !pre_map ||
+            pre_map->type_id != LMD_TYPE_MAP) return;
+    TypeMap* actual_map = (TypeMap*)actual;
+    *pre_map = *actual_map;
+    pre_map->struct_name = alias->name->chars;
+    pre_map->is_trusted_contract = true;
+    if (pre_map->type_index >= 0 && pre_map->type_index < tp->type_list->length &&
+            tp->type_list->data[pre_map->type_index] == actual_map) {
+        tp->type_list->data[pre_map->type_index] = pre_map;
+    }
+    if (definition->type_id == LMD_TYPE_TYPE) {
+        ((TypeType*)definition)->type = (Type*)pre_map;
+    }
+    alias->type = (Type*)pre_type;
+}
+
 static void direct_finalize_type_alias(Transpiler* tp, AstNamedNode* alias) {
     if (!tp || !alias || !alias->type) return;
     Type* definition = alias->type;
@@ -7181,7 +7293,8 @@ static AstNode* direct_constrained_type(Transpiler* tp, SourceSpan span,
 }
 
 static AstNode* direct_pattern_definition(Transpiler* tp,
-        SourceSpan span, StrView name, AstNode* island) {
+        SourceSpan span, StrView name, AstNode* island,
+        AstNamedNode* pre_bound) {
     AstPatternIslandNode* source = (AstPatternIslandNode*)island;
     AstPatternDefNode* pattern = (AstPatternDefNode*)alloc_ast_node_from_span(tp,
         source->is_symbol ? AST_NODE_SYMBOL_PATTERN : AST_NODE_STRING_PATTERN,
@@ -7202,7 +7315,15 @@ static AstNode* direct_pattern_definition(Transpiler* tp,
         pattern_type->regex_source = NULL;
         pattern->type = (Type*)pattern_type;
     }
-    lambda_ast_register_name(tp, (AstNamedNode*)pattern);
+    // a parenthesized island (`type P = (\..\)`) still fires the pre-binding;
+    // repoint that entry instead of registering a duplicate definition
+    NameEntry* entry = pre_bound
+        ? lookup_name_in_current_scope(tp, pattern->name) : NULL;
+    if (entry && entry->node == (AstNode*)pre_bound) {
+        entry->node = (AstNode*)pattern;
+    } else {
+        lambda_ast_register_name(tp, (AstNamedNode*)pattern);
+    }
     return (AstNode*)pattern;
 }
 
@@ -7436,7 +7557,7 @@ AstNode* build_binary_node_from_parts(Transpiler* tp, SourceSpan span,
             node->right = right = promoted;
         }
     }
-    if (node->op == OPERATOR_UNION && promote_type_union_expr(tp, node)) {
+    if (ast_binary_is_type_set_op(node->op) && promote_type_union_expr(tp, node)) {
         return (AstNode*)node;
     }
     if (node->op == OPERATOR_OR && ast_is_explicit_type_value(left) &&
@@ -9206,6 +9327,10 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 lambda_ast_enter_scope(tp, is_proc);
             return 0;
         }
+        if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_ALIAS_BEGIN) {
+            direct_type_alias_begin(sink, reduction);
+            return 0;
+        }
         if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_BEGIN) {
             direct_object_begin(sink, reduction);
             sink->type_object_depth++;
@@ -9585,22 +9710,40 @@ static LambdaParseValue direct_ast_reduce(void* context,
         }
         if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_ALIAS) {
             StrView alias_name = direct_token_text(tp, reduction->detail_token);
+            AstNamedNode* pending = sink->pending_type_alias;
+            sink->pending_type_alias = NULL;
+            if (pending && !(pending->name->len == alias_name.length &&
+                    memcmp(pending->name->chars, alias_name.str,
+                        alias_name.length) == 0)) {
+                pending = NULL;
+            }
             if (child0 && child0->node_type == AST_NODE_PATTERN_ISLAND) {
                 AstNode* pattern = direct_pattern_definition(tp, reduction->span,
-                    alias_name, child0);
+                    alias_name, child0, pending);
                 return direct_ast_value(direct_type_stam(tp, reduction->span,
                     pattern,
                     (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0));
             }
-            AstNamedNode* alias = (AstNamedNode*)alloc_ast_node_from_span(tp,
-                AST_NODE_ASSIGN, reduction->span, sizeof(AstNamedNode));
-            alias->name = name_pool_create_strview(tp->name_pool,
-                alias_name);
+            // reuse the pre-bound declaration node so every self-reference
+            // captured during body parsing keeps the same binding identity
+            AstNamedNode* alias = pending;
+            TypeType* pre_type = pending && pending->type &&
+                pending->type->type_id == LMD_TYPE_TYPE
+                ? (TypeType*)pending->type : NULL;
+            if (!alias) {
+                alias = (AstNamedNode*)alloc_ast_node_from_span(tp,
+                    AST_NODE_ASSIGN, reduction->span, sizeof(AstNamedNode));
+                alias->name = name_pool_create_strview(tp->name_pool,
+                    alias_name);
+            } else {
+                alias->source_span = reduction->span;
+            }
             alias->as = child0;
             alias->type = child0 && child0->type ? child0->type : &TYPE_ANY;
             alias->is_type_definition = true;
+            if (pre_type) direct_adopt_pending_alias_map(tp, alias, pre_type);
             direct_finalize_type_alias(tp, alias);
-            lambda_ast_register_name(tp, alias);
+            if (!pending) lambda_ast_register_name(tp, alias);
             return direct_ast_value(direct_type_stam(tp, reduction->span,
                 (AstNode*)alias,
                 (reduction->flags & LAMBDA_REDUCTION_FLAG_PUBLIC) != 0));

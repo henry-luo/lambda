@@ -11,7 +11,7 @@
   `Lambda_Impl_Tune_JS_Dynamic_Call.md`,
   `Lambda_Impl_Tune8_Result15_Bottlenecks.md`, and
   `impl/Lambda_Impl_Tune9_GC (done).md`, `Lambda_Impl_Tune10.md`, and
-  `Lambda_Issues_Outstanding.md`
+  `Lambda_Issue_Ledger.md` (§15 carries the OI design gaps; the Outstanding rollup was retired 2026-08-25)
 - **Completed Lambda tuning records:** `impl/Lambda_Impl_Tune1 (done).md`,
   `impl/Lambda_Impl_Tune2 (done).md`, `Lambda_Impl_Tune3.md`
 

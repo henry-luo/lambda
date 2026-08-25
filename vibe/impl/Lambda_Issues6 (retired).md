@@ -3,7 +3,7 @@
 Issues in the Lambda **language / parser / MIR transpiler / runtime** encountered
 while porting MathLive's `makeStackedDelim` (extensible vertical-bar delimiters)
 into `lambda/package/math/atoms/delimiters.ls`. Continues the numbering from
-`Lambda_Issues5.md` (last issue #30).
+`Lambda_Issues5 (retired).md` (last issue #30).
 
 These are pure-`.ls` package edits (no C++ rebuild), so every issue below is
 reproducible against the current `./lambda.exe` by running a `.ls` script.
@@ -346,6 +346,18 @@ longer crash.
 ---
 
 ## Summary table
+
+> **Verification pass 2026-08-25.** Four of the five open parser/runtime items
+> are now **FIXED**; the `Fix status` column below is the 2026-06-20 state and is
+> superseded by this note.
+>
+> | # | Re-tested result |
+> |---|---|
+> | 31 | **FIXED** — `if (c) {a: 1} else {a: 2}` evaluates to `{a: 1}`. Settled by the S16.4.1v2 brace-resolution ruling (interior decides). |
+> | 32 | **FIXED** — both `(let x = {a: 1}, x)` on its own and as an `if` branch return `{a: 1}`. |
+> | 33 | **FIXED** — a multi-line `++` chain returns `"abc"`; no `error` elements. |
+> | 34 | **Could not reproduce.** A synthetic reconstruction (float params, ambiguous first use, forwarded into a recursive helper mixing an int index with float accumulators, called from another function) returns `10.25` on both tiers with no MIR verify error. The original was "real only", so this is *not reproduced* rather than *fixed*. |
+> | 35 | **FIXED** — a file containing a malformed function now exits 1; a broken module no longer loads and runs. |
 
 | #   | Layer   | Issue                                                               | Repro        | Fix status                                  |
 | --- | ------- | ------------------------------------------------------------------- | ------------ | ------------------------------------------- |
