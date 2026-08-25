@@ -114,8 +114,8 @@ static bool js_runtime_state_init_well_known_refs(JsRuntimeState* state) {
         refs->symbol_match_all && refs->symbol_async_dispose && refs->symbol_dispose;
 }
 
-bool js_runtime_state_thread_initialize(EvalContext* runtime_context) {
-    if (!eval_context_thread_matches(runtime_context)) {
+bool js_runtime_state_init(EvalContext* runtime_context) {
+    if (!eval_context_matches(runtime_context)) {
         log_error("js-thread-init: EvalContext is not current owner");
         return false;
     }
@@ -183,13 +183,13 @@ bool js_runtime_state_thread_initialize(EvalContext* runtime_context) {
 }
 
 bool js_runtime_state_thread_matches(const EvalContext* runtime_context) {
-    return runtime_context && eval_context_thread_matches(runtime_context) &&
+    return runtime_context && eval_context_matches(runtime_context) &&
         runtime_context->js_state &&
         js_active_runtime_state == runtime_context->js_state;
 }
 
-bool js_runtime_state_thread_shutdown(EvalContext* runtime_context) {
-    if (!runtime_context || !eval_context_thread_matches(runtime_context) ||
+bool js_runtime_state_shutdown(EvalContext* runtime_context) {
+    if (!runtime_context || !eval_context_matches(runtime_context) ||
             (js_active_runtime_state &&
              js_active_runtime_state != runtime_context->js_state)) {
         log_error("js-thread-shutdown: owner mismatch");

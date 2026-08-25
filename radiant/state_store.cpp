@@ -985,7 +985,7 @@ bool StateStore::init(DomDocument* owner_document) {
         // Template/render maps belong to the document Runtime, never an
         // unrelated evaluator. Initialization may claim a fresh host thread,
         // but it must not switch an already-owned thread.
-        if (!eval_context_thread_initialize(semantic_context)) {
+        if (!eval_context_init(semantic_context)) {
             log_error("state_store_init: document EvalContext is not the thread owner");
             semantic_context = nullptr;
             destroy();
@@ -1050,7 +1050,7 @@ void StateStore::destroy() {
     if (!state && owner_document && owner_document->state_store == this) {
         state = owner_document->state;
     }
-    if (semantic_context && !eval_context_thread_initialize(semantic_context)) {
+    if (semantic_context && !eval_context_init(semantic_context)) {
         // State maps contain Items owned by this context; destroying them under
         // another evaluator would unregister roots from the wrong heap.
         log_error("state_store_destroy: document EvalContext is not the thread owner");

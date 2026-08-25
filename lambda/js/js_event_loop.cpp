@@ -393,7 +393,7 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
     memset(scope, 0, sizeof(JsTimerRuntimeScope));
     scope->saved_doc = js_dom_get_document();
     if (!th->runtime_context || !th->runtime_heap || !th->runtime_name_pool ||
-            !eval_context_thread_matches(th->runtime_context) ||
+            !eval_context_matches(th->runtime_context) ||
             !js_runtime_state_thread_matches(th->runtime_context)) {
         // Timer ownership is a routing check. A loop callback cannot borrow a
         // different evaluator and restore the previous one afterward.

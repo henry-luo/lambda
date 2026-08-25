@@ -2228,7 +2228,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
         handler_ctx->type_info = type_info;
         // A retained handler runs on the document's eval thread;
         // nested dispatch must never replace that thread owner.
-        if (!eval_context_thread_initialize(handler_ctx)) {
+        if (!eval_context_init(handler_ctx)) {
             log_error("lambda event handler: eval thread belongs to another context");
             return true;
         }
@@ -2341,6 +2341,57 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     return !declined;
 }
 
+// EO4: create and bind a document's evaluator at setup, for interactive
+// sessions only. A one-shot layout/render run dispatches no events and needs
+// none. A `.ls` page and a script-bearing page already own one; a script-less
+// HTML page is the only case this adds.
+//
+// Deciding here rather than at first event is the whole point: at setup the
+// parser has already seen whether the page has scripts, whereas at dispatch
+// nothing can tell whether JS will start later — which is what stranded
+// js_active_runtime_state and crashed an iframe page.
+extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
+    if (!doc) return false;
+    if (dom_document_script_runtime(doc)) return true;   // EO3: already owns one
+
+    static int s_enabled = -1;
+    if (s_enabled < 0) {
+        const char* env = getenv("RADIANT_DOM_PKG_CREATE_RUNTIME");
+        s_enabled = (env && env[0] == '1') ? 1 : 0;
+    }
+    if (!s_enabled) return false;
+    if (doc->js_has_dom_realm) return false;             // EO6 owns that case
+
+    Runtime* rt = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
+    if (!rt) return false;
+    runtime_init(rt);
+    EvalContext* ctx = runtime_get_eval_context(rt);
+    if (!ctx || !eval_context_init(ctx)) {
+        log_error("document-evaluator: could not create and bind an evaluator");
+        runtime_cleanup(rt);
+        mem_free(rt);
+        return false;
+    }
+    doc->lambda_runtime = rt;
+    doc->owns_script_runtime = true;
+    log_info("document-evaluator: created for a script-less document");
+    return true;
+}
+
+// ES5 hot-path guard: continuous events must never enter Lambda, and must never
+// trigger a package load. Real workloads deliver these per frame, so letting one
+// bootstrap the dom package puts script compilation on the pointer path — and
+// loading a package mid-mousemove inside a JS page crashed it outright.
+static bool event_is_hot_path(const char* event_name) {
+    if (!event_name) return false;
+    return strcmp(event_name, "mousemove") == 0 ||
+           strcmp(event_name, "pointermove") == 0 ||
+           strcmp(event_name, "scroll") == 0 ||
+           strcmp(event_name, "wheel") == 0 ||
+           strcmp(event_name, "dragmove") == 0 ||
+           strcmp(event_name, "dragover") == 0;
+}
+
 // Load the Lambda dom package into this document's script runtime, once, on the
 // first event. Static layout and render runs dispatch no events, so they never
 // pay for it. Every template the package declares registers as UA behavior
@@ -2351,7 +2402,9 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
 // until runtime-creation ownership is settled.
 static bool radiant_dom_package_ensure(DomDocument* doc) {
     if (!doc) return false;
-    if (doc->dom_package_loaded) return template_registry_has_behavior(g_template_registry);
+    if (doc->dom_package_loaded) {
+        return context && template_registry_has_behavior(g_template_registry);
+    }
 
     static int s_enabled = -1;
     if (s_enabled < 0) {
@@ -2360,20 +2413,105 @@ static bool radiant_dom_package_ensure(DomDocument* doc) {
     }
     if (!s_enabled) { doc->dom_package_loaded = true; return false; }
 
-    Runtime* rt = dom_document_script_runtime(doc);
-    if (!rt || !rt->heap) {
-        log_debug("dom-package: document has no script runtime yet; skipping load");
+    // A document with a live JS DOM realm is deferred: loading the package into
+    // that realm's runtime mid-session disturbs JS state (an iframe page
+    // crashed in js_observer_runtime_state). ES10 wants both realms coexisting,
+    // but sharing one runtime that way needs its own design pass (ESO27), so
+    // for now such pages keep their native default actions.
+    if (doc->js_has_dom_realm) {
+        log_debug("dom-package: deferring load on a document with a JS DOM realm");
+        doc->dom_package_loaded = true;
         return false;
     }
+
+    // Only ever load into a runtime this document *owns*. `js.runtime` may be
+    // borrowed — an iframe subdocument shares its parent's — and running a
+    // Lambda package inside a borrowed JS runtime corrupts the owner's state.
+    // EO4: dispatch never creates. The evaluator, if this document is to have
+    // one, was created and bound at document setup by
+    // radiant_document_ensure_evaluator().
+    Runtime* rt = doc->lambda_runtime;
+    if (!rt) {
+        log_debug("dom-package: document owns no evaluator; keeping native behavior");
+        doc->dom_package_loaded = true;
+        return false;
+    }
+    if (false) {
+        // A script-less HTML page owns no runtime at all, so UA behavior has to
+        // create one. It is created here, on the first event, rather than at
+        // document setup: static layout and render runs dispatch no events and
+        // must not pay for a runtime they never use. The document owns this one
+        // and releases it in free_document (ESO25).
+        // Never conjure an evaluator when one is already bound to this thread,
+        // and never for a document that owns a JS DOM realm: that realm's
+        // runtime is authoritative, and binding a second context here strands
+        // its js_state (an iframe page crashed in js_observer_runtime_state
+        // before this guard existed).
+        // Do not conjure an evaluator when anything else is live on this
+        // thread. `context` covers a bound Lambda evaluator, but JS state
+        // outlives the binding: an iframe subdocument of a JS page has neither
+        // a realm flag of its own nor a bound context between events, and
+        // creating a runtime for it stranded the parent's js_active_runtime_state.
+        // Creating an evaluator for a document that owns none is OFF by default
+        // (opt in with RADIANT_DOM_PKG_CREATE_RUNTIME=1).
+        //
+        // The guards below are necessary but demonstrably not sufficient: an
+        // HTML page can have no runtime, no bound context and no live JS at
+        // first-event time and still start JS afterwards, at which point the
+        // evaluator we bound strands js_active_runtime_state and the page
+        // crashes in js_observer_runtime_state. Deciding safely needs a real
+        // thread/realm ownership contract, not a point-in-time probe (ESO27).
+        static int s_create_ok = -1;
+        if (s_create_ok < 0) {
+            const char* env = getenv("RADIANT_DOM_PKG_CREATE_RUNTIME");
+            s_create_ok = (env && env[0] == '1') ? 1 : 0;
+        }
+        if (!s_create_ok || context || doc->js_has_dom_realm || js_active_runtime_state) {
+            log_debug("dom-package: not creating a runtime for this document");
+            doc->dom_package_loaded = true;
+            return false;
+        }
+        rt = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
+        if (!rt) { doc->dom_package_loaded = true; return false; }
+        runtime_init(rt);
+        if (!runtime_get_eval_context(rt)) {
+            log_error("dom-package: failed to create a document script runtime");
+            runtime_cleanup(rt);
+            mem_free(rt);
+            doc->dom_package_loaded = true;
+            return false;
+        }
+        doc->lambda_runtime = rt;
+        doc->owns_script_runtime = true;
+        log_info("dom-package: created a script runtime for a script-less document");
+    }
+    // No heap check here: a freshly created runtime gets its heap when the first
+    // script runs, so requiring one up front would block the very load that
+    // establishes it.
     // mark before running: a failed load must not be retried on every event
     doc->dom_package_loaded = true;
 
+    // Bind before touching the registry: it is EvalContext-scoped, and on a
+    // script-less page nothing has bound an evaluator to this thread yet.
+    //
+    // Never *change* an existing binding. The thread's evaluator is also what
+    // js_active_runtime_state is derived from, so rebinding it here strands JS
+    // state for whatever owns the thread — which crashed an iframe page inside
+    // js_observer_runtime_state. If another evaluator owns the thread, this
+    // document simply keeps its native default actions.
     EvalContext* ctx = runtime_get_eval_context(rt);
-    if (!ctx || !eval_context_thread_initialize(ctx)) {
+    if (!ctx) {
+        log_error("dom-package: runtime has no eval context");
+        return false;
+    }
+    if (context && context != ctx) {
+        log_debug("dom-package: another evaluator owns this thread; keeping native behavior");
+        return false;
+    }
+    if (!eval_context_init(ctx)) {
         log_error("dom-package: cannot bind the document eval thread");
         return false;
     }
-    if (!template_registry_current_slot()) return false;
     if (!g_template_registry) g_template_registry = template_registry_new();
 
     // behavior mode spans only this load, so the page's own templates keep
@@ -2415,7 +2553,10 @@ extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* e
 // this before running, and exactly one of the two acts.
 bool radiant_behavior_claims_event(EventContext* evcon, View* target,
                                    const char* event_name) {
-    if (!context || !target || !event_name) return false;
+    if (!target || !event_name) return false;
+    if (event_is_hot_path(event_name)) return false;
+    // ensure() binds (and if needed creates) the document's evaluator, so a
+    // script-less page must not be rejected for having no context yet
     if (!radiant_dom_package_ensure(event_context_target_document(evcon))) return false;
     for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
         if (node->node_type != DOM_NODE_ELEMENT) continue;
@@ -2439,11 +2580,18 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
                                       const char* event_name,
                                       const InputIntent* intent,
                                       bool* out_model_reconciled) {
-    if (!context) return false;
     // an author handler that returned 'prevent-default' suppresses UA behavior
     if (evcon && evcon->default_prevented) return false;
-    // first event on this document loads the package that supplies UA behavior
-    if (!radiant_dom_package_ensure(event_context_target_document(evcon))) return false;
+    DomDocument* doc = event_context_target_document(evcon);
+    if (event_is_hot_path(event_name)) {
+        // a continuous event may only reach an already-loaded package, and even
+        // then only a template that explicitly declares it (checked by the match)
+        if (!doc || !doc->dom_package_loaded || !context) return false;
+        if (!template_registry_has_behavior(g_template_registry)) return false;
+    } else if (!radiant_dom_package_ensure(doc)) {
+        // first discrete event on this document loads the UA behavior package
+        return false;
+    }
 
     DomNode* node = static_cast<DomNode*>(target);
     while (node) {
@@ -2489,7 +2637,10 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
     // skip template dispatch instead of reading the context-local registry with
     // no document owner bound.
     if (!context || !g_template_registry || g_template_registry->count == 0) {
-        return false;
+        // No author templates on this document (a plain HTML page has none),
+        // but UA behavior may still govern the target.
+        return dispatch_behavior_handler(evcon, target, event_name, intent,
+                                         out_model_reconciled);
     }
 
     log_debug("dispatch_lambda_handler: searching for '%s' handler, registry has %d templates",
@@ -5002,9 +5153,9 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->handler_ctx->type_list = runtime->type_list;
     s->handler_ctx->pool = runtime->heap->pool;
     s->saved_input_ctx = input_context;
-    if (!eval_context_thread_initialize(s->handler_ctx) ||
+    if (!eval_context_init(s->handler_ctx) ||
             (s->handler_ctx->js_state &&
-             !js_runtime_state_thread_initialize(s->handler_ctx))) {
+             !js_runtime_state_init(s->handler_ctx))) {
         return false;
     }
     input_context = nullptr;
@@ -7441,6 +7592,40 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
 // Keep the complete event turn inside the target document owner so template
 // lookup, DOM wrappers, and nested JS dispatch cannot borrow a null or
 // unrelated runtime capsule.
+// EO5v2: make `target` the thread's bound EvalContext, releasing whatever is
+// bound now. A document — including an iframe's — manages its own Runtime and
+// EvalContext, and a thread holds one at a time, so the binding moves between
+// documents here.
+//
+// Legal only at a quiescent point: no handler, nested dispatch or guest code
+// may be running, because the outgoing context's frames would still be live.
+// The side-stack roots the GC walks are per-Context, so an unbound context
+// keeps its own roots; what must not happen is a switch while frames are open.
+// This is not the replace-and-restore that `runtime-state.h` forbids: there is
+// no restore, the new owner simply holds the thread until the next boundary.
+extern "C" bool radiant_eval_context_switch(EvalContext* target) {
+    if (!target) return false;
+    if (context == target) return true;
+    if (context) {
+        EvalContext* prev = context;
+        // EO2: the JS cache is released with the binding it derives from
+        if (js_runtime_state_thread_matches(prev)) js_runtime_state_shutdown(prev);
+        if (!eval_context_shutdown(prev)) {
+            log_error("eval-switch: outgoing context refused release");
+            return false;
+        }
+    }
+    if (!eval_context_init(target)) {
+        log_error("eval-switch: incoming context refused binding");
+        return false;
+    }
+    return true;
+}
+
+// Depth of active event scopes on this thread. A switch is only taken at the
+// outermost one; a nested dispatch runs on whatever is already bound.
+static __thread int s_event_scope_depth = 0;
+
 struct EventDocumentScope {
     bool active;
 
@@ -7454,7 +7639,15 @@ struct EventDocumentScope {
         owner->name_pool = runtime->name_pool;
         owner->type_list = runtime->type_list;
         owner->pool = runtime->heap->pool;
-        if (!eval_context_thread_initialize(owner)) return;
+        // EO5v2: at the outermost dispatch this may hand the thread from
+        // another document's evaluator to this one. Nested dispatch never
+        // switches — the outer document's frames are still live.
+        if (context && context != owner) {
+            if (s_event_scope_depth > 0) return;
+            if (!radiant_eval_context_switch(owner)) return;
+        } else if (!eval_context_init(owner)) {
+            return;
+        }
         // Lambda templates initialize a JS support capsule for Jube helpers,
         // but it is not a DOM script realm. Publish the retained JavaScript
         // runtime only when the script runner actually established a realm; the
@@ -7462,14 +7655,19 @@ struct EventDocumentScope {
         bool has_document_js_runtime = dom_document_has_js_realm(doc) &&
             runtime == doc->js.runtime;
         if (has_document_js_runtime) {
-            if (!js_runtime_state_thread_initialize(owner)) return;
+            if (!js_runtime_state_init(owner)) return;
             js_dom_set_ui_context(uicon);
             js_dom_set_document(doc);
         }
+        s_event_scope_depth++;
         active = true;
     }
 
-    ~EventDocumentScope() = default;
+    ~EventDocumentScope() {
+        if (active) s_event_scope_depth--;
+        // No restore: the document that just ran keeps the thread until some
+        // other document's dispatch switches it away (EO5v2).
+    }
 };
 
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {

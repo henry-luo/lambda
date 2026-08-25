@@ -175,8 +175,8 @@ static bool capture_callable_realm(Runtime* runtime,
     EvalContext* owner = runtime_get_eval_context(runtime);
     // D5.2/D6.2.2v2: leave both heaps alive while comparing identity, but
     // detach every derived TLS cache before another realm becomes current.
-    if (!js_runtime_state_thread_shutdown(owner) ||
-            !eval_context_thread_shutdown(owner)) {
+    if (!js_runtime_state_shutdown(owner) ||
+            !eval_context_shutdown(owner)) {
         return false;
     }
     return captured;
@@ -291,7 +291,7 @@ protected:
         ASSERT_NE(pool, nullptr);
         heap.pool = pool;
         eval.heap = &heap;
-        ASSERT_TRUE(eval_context_thread_initialize(&eval));
+        ASSERT_TRUE(eval_context_init(&eval));
         err_set_heap_allocator(heap_calloc);
         scheduler = lambda_scheduler_create(3);
         ASSERT_NE(scheduler, nullptr);
@@ -304,7 +304,7 @@ protected:
         eval.scheduler = NULL;
         lambda_uv_cleanup();
         err_set_heap_allocator(NULL);
-        EXPECT_TRUE(eval_context_thread_shutdown(&eval));
+        EXPECT_TRUE(eval_context_shutdown(&eval));
         gc_heap_destroy(concurrency_test_gc);
         concurrency_test_gc = NULL;
         mem_pool_destroy(pool);
@@ -765,7 +765,7 @@ static void shared_module_stress_record_module_state(SharedModuleStressWorker* w
 
 static bool shared_module_stress_init_worker(SharedModuleStressWorker* worker) {
     memset(&worker->eval, 0, sizeof(worker->eval));
-    if (!eval_context_thread_matches(&worker->eval)) {
+    if (!eval_context_matches(&worker->eval)) {
         worker->failure = "eval thread ownership";
         return false;
     }
@@ -845,7 +845,7 @@ static bool shared_module_stress_init_worker(SharedModuleStressWorker* worker) {
 }
 
 static void shared_module_stress_destroy_worker(SharedModuleStressWorker* worker) {
-    if (!eval_context_thread_matches(&worker->eval)) {
+    if (!eval_context_matches(&worker->eval)) {
         worker->failure = "eval thread ownership during teardown";
         return;
     }
@@ -885,7 +885,7 @@ static void* shared_module_stress_worker_main(void* arg) {
     SharedModuleStressGate* gate = worker->gate;
     // Generated code and runtime helpers resolve allocation/context state
     // through TLS for the entire evaluation, not only during setup.
-    if (!eval_context_thread_initialize(&worker->eval)) {
+    if (!eval_context_init(&worker->eval)) {
         worker->failure = "eval thread initialization";
         return NULL;
     }
@@ -939,7 +939,7 @@ static void* shared_module_stress_worker_main(void* arg) {
         if (!worker->failure) worker->failure = "context initialization";
     }
     shared_module_stress_destroy_worker(worker);
-    if (!eval_context_thread_shutdown(&worker->eval) && !worker->failure) {
+    if (!eval_context_shutdown(&worker->eval) && !worker->failure) {
         worker->failure = "eval thread shutdown";
     }
     worker->stopped_ms = shared_module_stress_now_ms();

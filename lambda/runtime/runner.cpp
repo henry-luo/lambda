@@ -1474,9 +1474,9 @@ void runner_setup_context(Runner* runner) {
     }
 
     input_context = (Context*)ctx;
-    if (!eval_context_thread_initialize(ctx)) return;
+    if (!eval_context_init(ctx)) return;
     // The side-stack bind resolves its owner through the thread's context
-    // identity, so it must follow eval_context_thread_initialize: on a fresh
+    // identity, so it must follow eval_context_init: on a fresh
     // thread the earlier ordering silently bound nothing.
     if (!lambda_side_stack_bind()) {
         log_error("runner side-stack: failed to initialize execution regions");
@@ -1539,7 +1539,7 @@ void runner_setup_context(Runner* runner) {
     // Radiant/Jube Lambda calls reuse JS DOM primitives even without importing
     // JavaScript. Initialize the derived capsule once for this eval-thread
     // lifetime so those native helpers can read their paired TLS state.
-    if (!js_runtime_state_thread_initialize(ctx)) return;
+    if (!js_runtime_state_init(ctx)) return;
 
     // Initialize template registry for view/edit template dispatch
     if (!g_template_registry) {
@@ -1784,14 +1784,14 @@ void runtime_reset_heap(Runtime* runtime) {
     if (runtime->heap) {
         EvalContext* cleanup_context = runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
-        if (!eval_context_thread_initialize(cleanup_context)) return;
+        if (!eval_context_init(cleanup_context)) return;
         cleanup_context->heap = runtime->heap;
         cleanup_context->name_pool = runtime->name_pool;
         cleanup_context->type_list = runtime->type_list;
         cleanup_context->result = ItemNull;
         cleanup_context->scheduler = runtime->scheduler;
         if (cleanup_context->js_state &&
-                !js_runtime_state_thread_initialize(cleanup_context)) return;
+                !js_runtime_state_init(cleanup_context)) return;
         if (cleanup_context->last_error) {
             // Diagnostics can own allocations from the retiring heap. Clear
             // them before teardown so the next batch never frees a stale
@@ -1874,9 +1874,9 @@ void runtime_cleanup(Runtime* runtime) {
     if (!runtime) return;
     EvalContext* cleanup_owner = runtime->eval_context;
     if (cleanup_owner) {
-        if (!eval_context_thread_initialize(cleanup_owner)) return;
+        if (!eval_context_init(cleanup_owner)) return;
         if (cleanup_owner->js_state &&
-                !js_runtime_state_thread_initialize(cleanup_owner)) return;
+                !js_runtime_state_init(cleanup_owner)) return;
         if (cleanup_owner->cwd) {
             // A session can end before its first execution; unlike the JIT
             // output path, that leaves its per-execution cwd URL to cleanup.
@@ -1904,13 +1904,13 @@ void runtime_cleanup(Runtime* runtime) {
         EvalContext* cleanup_context = cleanup_owner
             ? cleanup_owner : runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
-        if (!eval_context_thread_initialize(cleanup_context)) return;
+        if (!eval_context_init(cleanup_context)) return;
         cleanup_context->heap = runtime->heap;
         cleanup_context->name_pool = runtime->name_pool;
         cleanup_context->type_list = runtime->type_list;
         cleanup_context->result = ItemNull;
         if (cleanup_context->js_state &&
-                !js_runtime_state_thread_initialize(cleanup_context)) return;
+                !js_runtime_state_init(cleanup_context)) return;
 
         // Destruction follows the same owner-bound path as heap replacement.
         edit_bridge_destroy();
@@ -1983,7 +1983,7 @@ void runtime_cleanup(Runtime* runtime) {
     }
     if (!event_loop_cleaned) {
         if (runtime->eval_context && runtime->eval_context->js_state) {
-            if (!js_runtime_state_thread_initialize(runtime->eval_context)) return;
+            if (!js_runtime_state_init(runtime->eval_context)) return;
             js_event_loop_shutdown();
         }
         lambda_uv_cleanup();
@@ -2006,7 +2006,7 @@ void runtime_cleanup(Runtime* runtime) {
         }
         js_runtime_state_destroy_context();
         lambda_module_state_destroy();
-        if (!eval_context_thread_shutdown(retiring_context)) return;
+        if (!eval_context_shutdown(retiring_context)) return;
         mem_free(runtime->eval_context);
         runtime->eval_context = NULL;
     }

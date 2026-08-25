@@ -377,6 +377,114 @@ re-land left):
   `RecursiveShapeIdentityInterpExactHits`; ratchet to 10/0 when construction
   learns this literal.
 
+**Status after the resolution fix (`7348aa111`, re-tested 2026-08-25):**
+resolution works, but the recursive-record path behind it was broken on HEAD:
+(1) minimal 14-line recursive type (`temp/prof34/rec_min.ls`: `type N = {val:
+int, next: N?}` + build/sum a 100-node list) **SIGSEGVed the release MIR JIT**
+(exit 139); (2) splay2 with `SplayNode?` links was reported to hang;
+(3) list2 with a recursive `ListElem` type was reported 14.7x slower than
+`map?` — adoption/shape-identity not engaging. ⚠ The interpreter tier masks
+all of this, so verify on `LAMBDA_TIER=jit` release.
+
+**T20-6a — recursive-record JIT segfault: ROOT-CAUSED AND FIXED 2026-08-25.**
+
+**Root cause — one bug, spelled twice.** `N?` is a `TypeUnary` whose OWN
+`type_id` is `LMD_TYPE_TYPE`, not `LMD_TYPE_MAP`. Five places tested the
+wrapper's `type_id` against `LMD_TYPE_MAP` and therefore dropped the map arm of
+every *optional* named contract — and a self-referential record is
+**necessarily** optional, since its recursion has to terminate on null. So the
+crossings that REIFY a value into the contract's packed layout were all
+skipped:
+- `transpile-mir.cpp`: the return firewall, both call-argument sites, and the
+  assignment site (`mir_decl_type_id(...) == LMD_TYPE_MAP` / `contract->type_id
+  == LMD_TYPE_MAP`);
+- `lambda-eval.cpp` `runtime_type_admit_value`: the map-contract block guarded
+  on `expected->type_id == LMD_TYPE_MAP`, so a `T?` value fell through to the
+  `lambda_type_matches` shortcut and was admitted **structurally, unchanged**.
+
+Meanwhile `emit_mir_direct_field_read` *does* index by the contract's
+`byte_offset`. So `make()` returned a map built from the literal's own inferred
+shape — in which the `N?` field classifies ANY and occupies a 9-byte
+`TypedItem` (1-byte tag + 8-byte payload) — while `total()` read that slot as a
+bare 8-byte `Container*`. The value it produced was literally `(ptr & mask) <<
+8 | 0x13` (tag byte `0x13` = `LMD_TYPE_MAP` plus seven pointer bytes); the next
+`lambda_type_check` dereferenced it in `get_type_id` and died. Debug and
+release both fault (ASan `BUS` at `lambda-eval.cpp:1705`) — the "debug works"
+reading in the brief does not reproduce.
+
+**Fix.** One shared predicate `mir_map_contract_needs_reification()` replaces
+the four open-coded transpiler tests, and `runtime_boundary_nonnull_map_arm()`
+reaches the contract through `N?` / `N | null` on the runtime side. Two
+refinements matter and are load-bearing:
+- the predicate compares the non-null **arms**, not the wrappers: `Node?` on a
+  field, a parameter and a return are three occurrence objects around one
+  TypeMap, so wrapper identity would re-admit every hop of an adopted structure;
+- the open `map` singleton is excluded — it implies no packed layout, so
+  reifying there is pure cost (it cost list2 1.7x before exclusion).
+
+This makes the invariant inductive: a value acquires the contract's static type
+only by adopting it at construction or by crossing a boundary that reified it.
+
+**T20-6b — nullable pointer-lane locals (pre-existing, found by the new test,
+FIXED).** `mir_can_inline_null_item_test` compares against `ItemNull`, but
+`transpile_box_item`'s IDENT arm boxed through the contract lane only when the
+binding had a `full_type` — which an UNANNOTATED local never has. So `var walk
+= node` off a `Node?` parameter held lane null as raw `0`, `walk != null`
+compared `0` to `ItemNull` and answered **true**, and every idiomatic `while (n
+!= null) { n = n.next }` walk ran one step past the end. Fixed by falling back
+to the node's static type for the **boxing decision only**. Publishing the same
+fact as the binding's `full_type` also reroutes the redundancy, direct-read and
+null-guard gates that read it — measured at **3.6x on list2**, so do not.
+
+**Measured after the fix** (release, `LAMBDA_TIER=jit`, quiet machine, equal
+9000-rep drivers):
+| row | before | after |
+|---|---:|---:|
+| `rec_min.ls` | SIGSEGV (139) | `sum = 5050` |
+| list2 (`map?`) | 6208 ms | 6599 ms (+6%, the null-lane decode) |
+| list2_rec (`ListElem?`) | SIGSEGV | **1826 ms — 3.6x faster than `map?`** |
+| splay2_typedlinks (8000) | 155.6 ms | 149.8 ms |
+
+So (3) inverts: the recursive record is now **3.6x faster** than the `map?`
+original, not 14.7x slower — adoption/shape identity is engaging. Symptom (2)
+**does not reproduce at HEAD**: both `splay2_typedlinks.ls` (8000 nodes) and
+`splay2_tl_small.ls` complete on the pre-fix release binary too.
+
+**Sources retyped 2026-08-25** (the §4 "do not retype" hold is lifted for
+these two; the parked variants were adopted verbatim):
+- `test/benchmark/awfy/list2.ls` — all five signatures `map?` →
+  `ListElem?` over `type ListElem = {val: int, next: ListElem?}`. Same release
+  binary, 9000-rep driver: **6597 → 1726 ms (3.8x)**. Golden `List: PASS`
+  unchanged; `awfy_list2` green. §4's "keep a dynamic-map variant as
+  untyped-path coverage" is satisfied by `test/benchmark/awfy/list.ls`, which
+  is fully unannotated and still builds dynamic maps.
+- `test/benchmark/jetstream/splay2.ls` — one line: `left`/`right` `map?` →
+  `SplayNode?`. `value` stays `map?` deliberately (arbitrary payload, no fixed
+  layout). 8000 nodes: 141.8 → 136.7 ms, i.e. **flat within noise** — do not
+  quote this as a win without the §8.4-2 ≥15 paired runs. splay2 has no `.txt`
+  golden and jetstream is not in the auto-discovered dirs, so it is
+  benchmark-only; PASS verified by hand on both tiers.
+
+`make test-lambda-baseline` 3897/3897 after both edits. The R34 list2/splay2
+cells were measured on `map?` sources and now describe a different program —
+re-measure before trending either row.
+
+**Coverage.** `test/lambda/proc/recursive_record_links.{ls,txt}` (behavioral,
+chain + tree + annotated root + nullable reassignment) and two **tier-pinned**
+tests in `test_lambda_opt_gtest.cpp` —
+`UnadoptedRecursiveLiteralReifiesOnJit` / `...MatchesInterp`. The tier pin is
+essential: the auto tier answers correctly on the pre-fix binary, so the `.ls`
+test alone would not have caught this. The pinned pair crashes the archived
+pre-fix binary and passes now. `make test-lambda-baseline` 3897/3897.
+
+⚠ `RecursiveContractJitFullyStatic`'s old `map_admit_calls == 0` assertion is
+gone: it encoded "the runtime admission path is never entered", which was only
+true because `T?` crossings silently bypassed the classifier via
+`lambda_type_matches` — the bypass that caused this segfault. The counters now
+show 20 calls / 20 `exact_shape_hits` / 0 reifications / 0 bytes copied on JIT
+and 60 / 60 storage-compatible on interp: every crossing classified trusted and
+free. Assert **trusted-and-zero-copy**, never zero-calls.
+
 **Second probe drift (needs its own minimization):** `var b: N = …;
 b.next = a; a.k = 99` — the store **aliases on v33/v34** (`b.next.k == 99`)
 but **detaches on current HEAD** (`== 1`), while plain untyped stores alias on
@@ -402,7 +510,9 @@ C4.1 catalog is supposed to pin with fixtures.
   sources stay as they are until the C4.1 catalog closes. (list2 is the
   exception: its list is immutable after construction, so a recursive record
   type is behavior-preserving post-Tune19 §11.5 — permissible, but keep a
-  dynamic-map variant as untyped-path coverage.)
+  dynamic-map variant as untyped-path coverage. **list2 and splay2 were
+  retyped 2026-08-25 once T20-6a landed — see §T20-6.** The rest of the hold
+  stands.)
 - **No flex-int revival, no C2MIR-path changes** (frozen, CLAUDE.md rule 14),
   **no vendored-dep edits** (rule 16).
 - crypto_sha1 pre-v34 MIR cells time a defective computation (Tune19 §8.5) —

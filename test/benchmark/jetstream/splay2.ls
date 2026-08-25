@@ -8,7 +8,7 @@ let TREE_MODIFICATIONS = 80
 
 // Type definitions for direct struct field access
 // Field order must match the map literal order in create_node
-type SplayNode = {key: float, left: map?, right: map?, value: map?}
+type SplayNode = {key: float, left: SplayNode?, right: SplayNode?, value: map?}
 // The root carries the same fixed record contract as nodes; keeping it open
 // forces every root handoff through runtime map admission and erases C3's
 // direct-shape proof.

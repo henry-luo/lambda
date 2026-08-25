@@ -236,7 +236,7 @@ extern "C" double it2d(Item item);
 
 static bool js_mir_owner_is_current(Context* runtime, const char* boundary) {
     EvalContext* owner = (EvalContext*)runtime;
-    if (!owner || !eval_context_thread_matches(owner) ||
+    if (!owner || !eval_context_matches(owner) ||
             !js_runtime_state_thread_matches(owner)) {
         // Retained MIR owners validate routing; they must never authorize a
         // native callback to replace this thread's evaluator.

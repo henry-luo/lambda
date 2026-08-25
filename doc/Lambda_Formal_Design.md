@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.27.2 (2026-08-25)
+**Spec version:** 1.28.0 (2026-08-25)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -431,6 +431,24 @@ that carries them.
   (declaration on the binding node, inference beside it): an annotation is
   a contract (semantics S11.4.1); inference is never a binding contract
   and may never override what it proved. [TE-1, TE §8.1]
+- **D3.2.4** **A crossing into a named map contract is a reification, not
+  merely a check.** A named contract fixes a *physical* packed layout —
+  per-field `byte_offset` and storage class — and the emitter's direct
+  field access indexes by that layout. So a boundary may be elided only
+  when the source **provably already carries the contract's layout**;
+  semantic compatibility alone is never sufficient, because the same value
+  admits under two different physical shapes. A value acquires that proof
+  in exactly two ways: adopting the contract at construction, or crossing a
+  boundary that reified it. Every consumer of this rule — static elision,
+  runtime admission, and the direct read/write pair — must reach the
+  contract **through the non-null arm** of its spelling: `N?` and `N | null`
+  are wrappers whose own `type_id` is `LMD_TYPE_TYPE`, and a
+  self-referential record is necessarily optional, so testing the wrapper
+  silently exempts precisely the recursive contracts this rule exists to
+  protect. The open `map` fixes no layout and so needs no reification.
+  Violating this is a memory-safety defect, not a missed optimization: an
+  unreified literal shape read through a contract's offsets returns a
+  malformed Item. [Tune19 §11.5, Tune20 §T20-6a]
 
 ### D3.3 Inference
 

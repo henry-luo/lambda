@@ -10,7 +10,7 @@
 // focused runtime fixtures share one provider without linking each other.
 __thread EvalContext* context = nullptr;
 
-bool eval_context_thread_initialize(EvalContext* owner) {
+bool eval_context_init(EvalContext* owner) {
     if (!owner) {
         log_error("eval-thread-init: missing EvalContext owner");
         return false;
@@ -35,11 +35,11 @@ bool eval_context_thread_initialize(EvalContext* owner) {
     return true;
 }
 
-bool eval_context_thread_matches(const EvalContext* owner) {
+bool eval_context_matches(const EvalContext* owner) {
     return owner && context == owner;
 }
 
-bool eval_context_thread_shutdown(EvalContext* owner) {
+bool eval_context_shutdown(EvalContext* owner) {
     if (!owner || context != owner) {
         log_error("eval-thread-shutdown: owner mismatch current=%p owner=%p",
                   (void*)context, (void*)owner);

@@ -21,6 +21,7 @@
 void fontface_cleanup(UiContext* uicon);
 char* load_font_path(FontContext *font_ctx, const char* font_name);
 extern "C" void radiant_dom_invalidate_document(DomDocument* doc);
+extern "C" bool radiant_eval_context_switch(EvalContext* target);
 void radiant_register_css_counter_hooks();
 void radiant_register_css_symbol_hook();
 void radiant_register_resource_processor();
@@ -312,14 +313,17 @@ void free_document(DomDocument* doc) {
         return;
     }
     EvalContext* document_owner = state_owner ? state_owner : timer_owner;
-    if (document_owner && !eval_context_thread_initialize(document_owner)) {
-        log_error("free_document: document EvalContext is not the thread owner");
+    // EO5v2: another document may hold the thread (each manages its own
+    // EvalContext). Teardown is a quiescent point, so take the binding rather
+    // than refusing — refusing here used to leak the whole document.
+    if (document_owner && !radiant_eval_context_switch(document_owner)) {
+        log_error("free_document: could not bind the document EvalContext");
         return;
     }
     if (timer_owner && timer_owner->js_state) {
         // Timer handles live in the document capsule; teardown must not inspect
         // another document's queue through an ambient host context.
-        if (!js_runtime_state_thread_initialize(timer_owner)) return;
+        if (!js_runtime_state_init(timer_owner)) return;
     }
     if (timer_owner && timer_owner->js_state) {
         if (script_runner_js_batch_cleanup_unsafe()) {
@@ -333,9 +337,9 @@ void free_document(DomDocument* doc) {
         // StateStore owns template/render maps attached to this runtime. Bind
         // its canonical context until thread teardown; nested cleanup cannot
         // save and restore a different evaluator.
-        if (!eval_context_thread_matches(state_owner)) return;
+        if (!eval_context_matches(state_owner)) return;
         if (state_owner->js_state &&
-                !js_runtime_state_thread_initialize(state_owner)) return;
+                !js_runtime_state_init(state_owner)) return;
     }
     radiant_document_destroy_state(doc);
 
@@ -367,6 +371,19 @@ void free_document(DomDocument* doc) {
         }
         url_destroy(doc->url);
         doc->url = nullptr;
+    }
+
+    // A runtime this document created for UA behavior is released here, after
+    // every consumer above has finished with its EvalContext. Runtimes that came
+    // from a loader (a `.ls` page, a script-bearing page) are owned by that
+    // loader and must not be freed twice (ESO25).
+    if (doc->owns_script_runtime && doc->lambda_runtime) {
+        Runtime* owned = doc->lambda_runtime;
+        doc->lambda_runtime = nullptr;
+        doc->owns_script_runtime = false;
+        runtime_cleanup(owned);
+        mem_free(owned);
+        log_debug("free_document: released the document-owned script runtime");
     }
 
     // Free DomDocument via dom_document_destroy (handles arena and pool)

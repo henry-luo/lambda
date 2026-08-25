@@ -853,7 +853,7 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         } else {
             input_context = nullptr;
         }
-        if (!eval_context_thread_initialize(callback_context)) {
+        if (!eval_context_init(callback_context)) {
             input_context = saved_input_context;
             g_radiant_velmt_active_pass_id = previous_pass_id;
             return false;
@@ -1099,32 +1099,35 @@ static const struct {
     const char* lambda_name;
     const char* state_name;
     bool read_only;
+    uint32_t pseudo_flag;   // 0 when the name drives no CSS pseudo-class
 } RADIANT_STATE_NAME_MAP[] = {
-    {"hover",             STATE_HOVER,          true},
-    {"active",            STATE_ACTIVE,         true},
-    {"focus",             STATE_FOCUS,          true},
-    {"focus_within",      STATE_FOCUS_WITHIN,   true},
-    {"focus_visible",     STATE_FOCUS_VISIBLE,  true},
-    {"visited",           STATE_VISITED,        false},
-    {"link",              STATE_LINK,           false},
-    {"checked",           STATE_CHECKED,        false},
-    {"indeterminate",     STATE_INDETERMINATE,  false},
-    {"disabled",          STATE_DISABLED,       false},
-    {"enabled",           STATE_ENABLED,        false},
-    {"readonly",          STATE_READONLY,       false},
-    {"valid",             STATE_VALID,          false},
-    {"invalid",           STATE_INVALID,        false},
-    {"required",          STATE_REQUIRED,       false},
-    {"optional",          STATE_OPTIONAL,       false},
-    {"placeholder_shown", STATE_PLACEHOLDER,    false},
-    {"selected",          STATE_SELECTED,       false},
+    {"hover",             STATE_HOVER,          true,  PSEUDO_STATE_HOVER},
+    {"active",            STATE_ACTIVE,         true,  PSEUDO_STATE_ACTIVE},
+    {"focus",             STATE_FOCUS,          true,  PSEUDO_STATE_FOCUS},
+    {"focus_within",      STATE_FOCUS_WITHIN,   true,  0},
+    {"focus_visible",     STATE_FOCUS_VISIBLE,  true,  0},
+    {"visited",           STATE_VISITED,        false, PSEUDO_STATE_VISITED},
+    {"link",              STATE_LINK,           false, PSEUDO_STATE_LINK},
+    {"checked",           STATE_CHECKED,        false, PSEUDO_STATE_CHECKED},
+    {"indeterminate",     STATE_INDETERMINATE,  false, PSEUDO_STATE_INDETERMINATE},
+    {"disabled",          STATE_DISABLED,       false, PSEUDO_STATE_DISABLED},
+    {"enabled",           STATE_ENABLED,        false, PSEUDO_STATE_ENABLED},
+    {"readonly",          STATE_READONLY,       false, PSEUDO_STATE_READ_ONLY},
+    {"valid",             STATE_VALID,          false, PSEUDO_STATE_VALID},
+    {"invalid",           STATE_INVALID,        false, PSEUDO_STATE_INVALID},
+    {"required",          STATE_REQUIRED,       false, PSEUDO_STATE_REQUIRED},
+    {"optional",          STATE_OPTIONAL,       false, PSEUDO_STATE_OPTIONAL},
+    {"placeholder_shown", STATE_PLACEHOLDER,    false, 0},
+    {"selected",          STATE_SELECTED,       false, 0},
 };
 
-static const char* radiant_state_name_lookup(const char* lambda_name, bool* out_read_only) {
+static const char* radiant_state_name_lookup(const char* lambda_name, bool* out_read_only,
+                                            uint32_t* out_pseudo_flag = nullptr) {
     if (!lambda_name) return nullptr;
     for (size_t i = 0; i < sizeof(RADIANT_STATE_NAME_MAP) / sizeof(RADIANT_STATE_NAME_MAP[0]); i++) {
         if (strcmp(RADIANT_STATE_NAME_MAP[i].lambda_name, lambda_name) == 0) {
             if (out_read_only) *out_read_only = RADIANT_STATE_NAME_MAP[i].read_only;
+            if (out_pseudo_flag) *out_pseudo_flag = RADIANT_STATE_NAME_MAP[i].pseudo_flag;
             return RADIANT_STATE_NAME_MAP[i].state_name;
         }
     }
@@ -1172,7 +1175,8 @@ RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item val
     const char* name = fn_to_cstr(name_item);
     if (!state || !name) return (Item){.item = b2it(0)};
     bool read_only = false;
-    const char* interned = radiant_state_name_lookup(name, &read_only);
+    uint32_t pseudo_flag = 0;
+    const char* interned = radiant_state_name_lookup(name, &read_only, &pseudo_flag);
     if (!interned) {
         log_error("JUBE_RADIANT_SET_STATE: unknown state name '%s'", name);
         return (Item){.item = b2it(0)};
@@ -1186,6 +1190,9 @@ RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item val
     // the pseudo-class restyle, so script never bypasses that bookkeeping.
     bool want = is_truthy(value_item);
     state_set_bool(state, elem, interned, want);
+    // the canonical bit is written; CSS only sees it once the pseudo-class
+    // cascade re-runs, which the native writers schedule at each call site
+    if (pseudo_flag) radiant_sync_pseudo_state((View*)elem, pseudo_flag, want);
     // Report what actually happened, not merely that a writer was called: a
     // form-state write is a no-op until layout has built the control's
     // FormControlProp, and a silent false success would hide that.
@@ -1205,6 +1212,75 @@ RADIANT_C_API Item fn_radiant_dispatch(Item node_item, Item name_item) {
     if (!elem || !name || !name[0]) return (Item){.item = b2it(0)};
     bool ok = radiant_dispatch_event_from_script((void*)elem, name);
     return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
+// Walk a subtree collecting radio controls that share `name`. The tree walk is
+// mechanism and stays native; which peers to clear, and when, is the behavior
+// template's policy (ES6).
+static void radiant_collect_radio_peers(DomNode* node, const char* name,
+                                        Item out_array, int* count, bool count_only) {
+    for (DomNode* n = node; n; n = n->next_sibling) {
+        if (n->node_type == DOM_NODE_ELEMENT) {
+            DomElement* elem = n->as_element();
+            if (!elem) continue;
+            const char* tag = elem->tag_name;
+            if (tag && (strcmp(tag, "INPUT") == 0 || strcmp(tag, "input") == 0)) {
+                const char* type = elem->get_attribute("type");
+                const char* peer = elem->get_attribute("name");
+                if (type && strcmp(type, "radio") == 0 && peer && strcmp(peer, name) == 0) {
+                    if (count_only) { (*count)++; }
+                    else { radiant_array_push_item(out_array, radiant_dom_wrap_node(elem)); }
+                }
+            }
+            radiant_collect_radio_peers(elem->first_child, name, out_array, count, count_only);
+        }
+    }
+}
+
+// Root to search from: the owning <form> when there is one, else the document.
+static DomNode* radiant_radio_scope(DomElement* elem) {
+    for (DomNode* n = (DomNode*)elem; n; n = n->parent) {
+        if (n->node_type != DOM_NODE_ELEMENT) continue;
+        DomElement* e = n->as_element();
+        if (!e) continue;
+        const char* tag = e->tag_name;
+        if (tag && (strcmp(tag, "FORM") == 0 || strcmp(tag, "form") == 0)) return n;
+    }
+    DomDocument* doc = radiant_dom_document_from_node((DomNode*)elem);
+    return doc ? (DomNode*)doc->root : nullptr;
+}
+
+RADIANT_C_API Item fn_radiant_form_of(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "FORM_OF");
+    if (!elem) return ItemNull;
+    for (DomNode* n = (DomNode*)elem; n; n = n->parent) {
+        if (n->node_type != DOM_NODE_ELEMENT) continue;
+        DomElement* e = n->as_element();
+        if (!e) continue;
+        const char* tag = e->tag_name;
+        if (tag && (strcmp(tag, "FORM") == 0 || strcmp(tag, "form") == 0)) {
+            return radiant_dom_wrap_node(e);
+        }
+    }
+    return ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_radio_group(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "RADIO_GROUP");
+    if (!elem) return ItemNull;
+    const char* name = elem->get_attribute("name");
+    // an unnamed radio forms no group; it is its own sole member
+    if (!name || !name[0]) return radiant_array_new_item(0);
+    DomNode* scope = radiant_radio_scope(elem);
+    if (!scope) return radiant_array_new_item(0);
+
+    int count = 0;
+    radiant_collect_radio_peers(scope, name, ItemNull, &count, true);
+    RootFrame roots(1);
+    Rooted<Item> rooted(roots, radiant_array_new_item(count));
+    int unused = 0;
+    radiant_collect_radio_peers(scope, name, rooted.get(), &unused, false);
+    return rooted.get();
 }
 
 RADIANT_C_API Item fn_radiant_free(Item node_item) {
@@ -1587,6 +1663,10 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_set_state(Item node, Item name, Item value)", (fn_ptr)fn_radiant_set_state},
     {"dispatch", "fn(node: dom_node, name: string) -> bool", (fn_ptr)fn_radiant_dispatch, JUBE_FN_NONE,
      "Item fn_radiant_dispatch(Item node, Item name)", (fn_ptr)fn_radiant_dispatch},
+    {"form_of", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_form_of, JUBE_FN_NONE,
+     "Item fn_radiant_form_of(Item node)", (fn_ptr)fn_radiant_form_of},
+    {"radio_group", "fn(node: dom_node) -> array", (fn_ptr)fn_radiant_radio_group, JUBE_FN_NONE,
+     "Item fn_radiant_radio_group(Item node)", (fn_ptr)fn_radiant_radio_group},
     {"free", "fn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
     {"layout", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,
