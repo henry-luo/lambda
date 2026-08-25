@@ -1229,7 +1229,9 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
             for (int i = fixed; i < actual; i++) {
                 // Reload both rooted values after each append: growth may collect.
                 rest = (List*)(uintptr_t)adapter_words[fixed];
-                list_push(rest, (Item){.item = source_words[i + 1]});
+                // Arguments are not content: append verbatim so `null` and
+                // adjacent strings survive (see emit_variadic_args).
+                array_push((Array*)rest, (Item){.item = source_words[i + 1]});
             }
         }
     }
@@ -5547,13 +5549,12 @@ Item fn_split(Item str_item, Item sep_item) {
     uint32_t str_len = str_item.get_len();
     uint32_t sep_len = null_sep ? 0 : sep_item.get_len();
 
-    // disable string merging in list_push so split results stay separate
-    bool saved_merging = false;
-    if (context) {
-        saved_merging = context->disable_string_merging;
-        context->disable_string_merging = true;
-    }
-
+    // Segments are separate elements, so every append below uses array_push,
+    // which stores the item verbatim. list_push would concatenate each string
+    // onto the previous one (S16.7 content rules). Suspending that through the
+    // eval context's global disable_string_merging flag is what this used to
+    // do; the append site is local and cannot leak the flag past an early
+    // return, of which this function has several.
     List* result = list();
     rooted_result.set(result);
     result->is_content = 1;
@@ -5565,9 +5566,8 @@ Item fn_split(Item str_item, Item sep_item) {
         // otherwise, matching "".split(",") === [""].
         if (!null_sep && sep_len != 0) {
             String* only = split_heap_string_slice(rooted_str, 0, 0);
-            list_push(rooted_result.get(), {.item = s2it(only)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(only)});
         }
-        if (context) { context->disable_string_merging = saved_merging; }
         return {.array = rooted_result.get()};
     }
 
@@ -5590,9 +5590,8 @@ Item fn_split(Item str_item, Item sep_item) {
                 p++;
             }
             String* part = split_heap_string_slice(rooted_str, word_start, p - word_start);
-            list_push(rooted_result.get(), {.item = s2it(part)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(part)});
         }
-        if (context) { context->disable_string_merging = saved_merging; }
         return {.array = rooted_result.get()};
     }
 
@@ -5604,10 +5603,9 @@ Item fn_split(Item str_item, Item sep_item) {
             int char_len = (int)str_utf8_char_len((unsigned char)str_chars[p]);
             if (char_len <= 0) char_len = 1;  // fallback for invalid UTF-8
             String* part = split_heap_string_slice(rooted_str, p, (size_t)char_len);
-            list_push(rooted_result.get(), {.item = s2it(part)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(part)});
             p += char_len;
         }
-        if (context) { context->disable_string_merging = saved_merging; }
         return {.array = rooted_result.get()};
     }
 
@@ -5622,7 +5620,7 @@ Item fn_split(Item str_item, Item sep_item) {
             // found separator
             size_t part_len = p - start;
             String* part = split_heap_string_slice(rooted_str, start, part_len);
-            list_push(rooted_result.get(), {.item = s2it(part)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
             p += sep_len;
             start = p;
@@ -5633,9 +5631,8 @@ Item fn_split(Item str_item, Item sep_item) {
 
     // add the last part
     String* part = split_heap_string_slice(rooted_str, start, str_len - start);
-    list_push(rooted_result.get(), {.item = s2it(part)});
+    array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
-    if (context) { context->disable_string_merging = saved_merging; }
     return {.array = rooted_result.get()};
 }
 
@@ -5709,17 +5706,11 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     Rooted<Item> rooted_sep(roots, sep_item);
     Rooted<List*> rooted_result(roots, (List*)NULL);
 
-    bool saved_merging = false;
-    if (context) {
-        saved_merging = context->disable_string_merging;
-        context->disable_string_merging = true;
-    }
 
     List* result = list();
     rooted_result.set(result);
     result->is_content = 1;
     if (!rooted_str.get().get_chars() || str_len == 0 || !rooted_sep.get().get_chars() || sep_len == 0) {
-        if (context) { context->disable_string_merging = saved_merging; }
         return {.array = rooted_result.get()};
     }
 
@@ -5733,11 +5724,11 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
             // push part before separator
             size_t part_len = p - start;
             String* part = split_heap_string_slice(rooted_str, start, part_len);
-            list_push(rooted_result.get(), {.item = s2it(part)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
             // push the delimiter
             String* delim = split_heap_string_slice(rooted_sep, 0, sep_len);
-            list_push(rooted_result.get(), {.item = s2it(delim)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(delim)});
 
             p += sep_len;
             start = p;
@@ -5748,9 +5739,8 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
 
     // add the last part
     String* part = split_heap_string_slice(rooted_str, start, str_len - start);
-    list_push(rooted_result.get(), {.item = s2it(part)});
+    array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
-    if (context) { context->disable_string_merging = saved_merging; }
     return {.array = rooted_result.get()};
 }
 
