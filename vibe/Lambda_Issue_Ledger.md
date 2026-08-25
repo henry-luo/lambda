@@ -2,7 +2,12 @@
 
 > **Consolidated from the per-area "Known Issues & Future Improvements" sections of
 > [`doc/dev/lambda/LR_01`–`LR_13`](../doc/dev/lambda/LR_00_Overview.md)**, plus
-> verified items from the sibling `vibe/Lambda_Issue*.md` ledgers (§14).
+> verified items from the former sibling `vibe/Lambda_Issue*.md` ledgers (§14)
+> and the retired Outstanding rollup's design gaps (§15).
+>
+> **This is now the only issue ledger in `vibe/`.** Every sibling was reviewed on
+> 2026-08-25 and retired to `vibe/impl/`; each keeps its detail and evidence,
+> while its live residue is indexed here. Add new issues here, not to an archive.
 > This is the single working list for core-runtime defects, caps, and structural
 > hazards. The `LR_*` documents remain the *design* record; this ledger is the
 > *issue* record.
@@ -27,12 +32,14 @@ Every issue below was re-checked against the tree at `c568f0f93`. Three outcomes
 
 | Doc | Result |
 |---|---|
-| `Lambda_Issues_Outstanding.md` | LR_12 #8 (`push`/`splice` mutate a module-level `let`) still reproduces and was **not** in this ledger → recorded as [LR12-8](#lr12-8). |
-| `Lambda_Issue_Type_Support.md` | TS-1, TS-2, TS-7 verified **FIXED**; TS-5's dead-code half fixed; TS-9's C16 implementation has landed. TS-6, TS-8 confirmed open; TS-3, TS-4 open pending measurement → §14. |
-| `Lambda_Issues8.md` | **All 28 entries triaged; 22 re-tested.** 17 fixed/closed, 9 open or partial (§14), 4 not re-tested (Radiant-retained, Structurizr fixtures, and an incremental-release build issue — each needs a fixture outside the core runtime). Earlier note: **Fixed:** unbraced scalar `if` in a block body; map literal after `if` (S16.4.1v2); multiline iterator + `where`; `list` as a for-binding (now a clear diagnostic); the double-quoted-key error cascade. **Ruled not a defect:** double-quoted map keys — the doc was wrong and is corrected. **Does not reproduce:** recursive params overwritten after descent. **Still open → §14:** dynamic map spread, element attribute spread, one-line Mark comprehensions, and the weak double-quoted-key diagnostic. |
-| `Lambda_Issues5.md` | §23 re-tested: the inline-`if` attribute value is **fixed**; attribute spread is still open and duplicates an Issues8 entry → §14. Remaining entries are a package-porting log, self-recorded as fixed. |
-| `Lambda_Issues6.md` | Package-porting log, self-recorded as fixed; not re-tested. |
-| `Lambda_Issues3.md`, `Lambda_Issues4_Lint.md` | A test-enhancement proposal and a lint report, not defect ledgers. |
+| `Lambda_Issues_Outstanding.md` | **Reviewed in full and RETIRED 2026-08-25** → archived as `vibe/impl/Lambda_Issues_Outstanding (retired).md`. Its §3 was verified subsumed by §1–§13; §2/§4 were pointer indexes into docs that still own them; its OI design gaps and hygiene themes moved to §15. One item was genuinely missing from this ledger — LR_12 #8, which still reproduces → [LR12-8](#lr12-8). |
+| `impl/Lambda_Issue_Type_Support (retired).md` | TS-1, TS-2, TS-7 verified **FIXED**; TS-5's dead-code half fixed; TS-9's C16 implementation has landed. TS-6, TS-8 confirmed open; TS-3, TS-4 open pending measurement → §14. |
+| `Lambda_Issues8 (retired).md` | **All 28 entries triaged; 22 re-tested.** 17 fixed/closed, 9 open or partial (§14), 4 not re-tested (Radiant-retained, Structurizr fixtures, and an incremental-release build issue — each needs a fixture outside the core runtime). Earlier note: **Fixed:** unbraced scalar `if` in a block body; map literal after `if` (S16.4.1v2); multiline iterator + `where`; `list` as a for-binding (now a clear diagnostic); the double-quoted-key error cascade. **Ruled not a defect:** double-quoted map keys — the doc was wrong and is corrected. **Does not reproduce:** recursive params overwritten after descent. **Still open → §14:** dynamic map spread, element attribute spread, one-line Mark comprehensions, and the weak double-quoted-key diagnostic. |
+| `Lambda_Issues5 (retired).md` | 7 entries re-tested. **Fixed:** postfix `^` in `let` (#4), chained comparisons (#5), string slicing (#11), `if`-expression value in a `pn` (#15), and §23's inline-`if` attribute value. **By design, not defects:** element-wise list `+` (#1), `let` reassignment rejected in a `pn` (#10). **Still open:** §23's attribute spread → §14. |
+| `Lambda_Issues6 (retired).md` | 5 open entries re-tested. **Fixed:** bare map as an `if` branch (#31, via S16.4.1v2), the paren-comma branch form (#32), multi-line `++` (#33), and non-fatal parse errors (#35 — a malformed file now exits 1). **Not reproduced:** the MIR float-param inference failure (#34); it was "real only" and a synthetic reconstruction runs clean on both tiers. |
+| `Lambda_Issues4_Lint (retired).md` | cppcheck re-run (2.17.1). E1 still stands and is now **invisible to the analyser** after the `malloc`→`mem_alloc` migration → §14. W3 (`alloca`) fixed where reported. Counts elsewhere are historical. |
+| `vibe/impl/*(fixed).md` | Archives spot-checked. `Lambda_Issue_GC_Native_Rooting` genuinely resolved (its 107/244 figure is historical discovery data — a stale memory note quoting it as live was corrected). **`Lambda_Issues0 (fixed).md` is mislabelled**: #9 and #15 are Deferred and five more items have no resolution; #9 re-verified open → §14. |
+| `Lambda_Issues3 (retired).md` | A test-enhancement proposal, not a defect ledger — and **substantially implemented**: it reported `test/std/core/` missing with 19 tests in `test/std/`; there are now 157, of which 104 sit under `core/` across all four proposed subdirectories (target was 57). |
 
 
 Counts:
@@ -52,8 +59,8 @@ Counts:
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 8 | 0 | 0 | 8 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
-| TS / Issues8 | Sibling vibe ledgers | 9 | 1 | 1 | 11 |
-| **Total** | | **105** | **11** | **35** | **151** |
+| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 11 | 1 | 1 | 13 |
+| **Total** | | **107** | **11** | **35** | **153** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -285,7 +292,7 @@ walker than `fn_eq`, with a single caller — Radiant's no-op elision
 (`radiant/event.cpp:2300`). Its missing cases (`MAP`, `DECIMAL`, `DTIME`,
 `UINT64`, `RANGE`, `VMAP`) fall to pointer equality and err conservatively
 there: a missed elision forces a spurious DOM rebuild, never a wrong answer.
-Remaining work (tracked as **OI-1** in `vibe/Lambda_Issues_Outstanding.md`):
+Remaining work (tracked as **[OI-1](#15-design-gaps-inherited-from-the-retired-outstanding-rollup-oi)**):
 reimplement over a *strict* `fn_eq` variant with cross-rank promotion disabled
 (elision must not equate `1` with `1.0`), no `set_runtime_error` side effect on
 the depth cap, and defined next to `fn_eq` so `LAMBDA_STATIC` input builds don't
@@ -363,7 +370,7 @@ conversion helpers remain an unhandled-crash risk on out-of-range magnitudes.
 On a failed operand conversion, `decimal_cmp` returns `0` with the comment
 `// error case, treat as equal` (`lambda-decimal.cpp:1004`), so a malformed
 comparand compares **equal** rather than raising — a silent-wrong-answer path
-feeding `decimal_cmp_items` (`:1023`). Also tracked under **OI-1**.
+feeding `decimal_cmp_items` (`:1023`). Also tracked under **[OI-1](#15-design-gaps-inherited-from-the-retired-outstanding-rollup-oi)**.
 
 <a id="lr04-5"></a>**LR04-5 · Float↔decimal round-trip via text is lossy and hot · OPEN**
 `decimal_mpd_to_double` reverses through `mpd_to_sci` + `strtod`
@@ -846,7 +853,7 @@ network-write or process-spawn procedure means another bespoke `pn_*` plus a
 registry row.
 
 <a id="lr12-8"></a>**LR12-8 · `push`/`splice` mutate a module-level `let` in place, falsifying `fn` purity · OPEN**
-*Recorded 2026-08-25 from `Lambda_Issues_Outstanding.md` §3 (found 2026-07-31);
+*Recorded 2026-08-25 from the retired Outstanding rollup §3 (found 2026-07-31);
 re-verified today — still reproduces on both tiers.*
 RG14 says no mutable root exists at module scope: `var` is rejected there, and
 E211 rejects mutation *through* an immutable binding. E211 does catch the
@@ -937,26 +944,26 @@ and `error_reporting.cpp` 6, writing to stdout with emoji rather than through
 > is the index. Verified 2026-08-25 unless noted.
 
 <a id="ts-3"></a>**TS-3 · `int[]`/`float[]` on a *local* is a 3–5x regression · OPEN (needs re-measurement)**
-`Lambda_Issue_Type_Support.md`. The cited cause has moved — the
+`impl/Lambda_Issue_Type_Support (retired).md`. The cited cause has moved — the
 `var_tid = LMD_TYPE_ANY` assignment and its *"treat as ANY"* comment are gone
 from `transpile-mir.cpp` — but the regression itself was not re-measured, which
 needs a release build and the typed benchmark column.
 
 <a id="ts-4"></a>**TS-4 · A named map type on a *local* is a COW value root, not a borrow · OPEN (not re-verified)**
-`Lambda_Issue_Type_Support.md`. Carries both a performance claim (raytrace3d2
+`impl/Lambda_Issue_Type_Support (retired).md`. Carries both a performance claim (raytrace3d2
 120 s → 80 ms when the annotations are stripped) and a **correctness** one
 (splay2 collapsing to 1 node instead of 8000 because rotations mutated copies).
 The correctness half overlaps the map-aliasing-vs-reification rule.
 
 <a id="ts-6"></a>**TS-6 · Binding a map literal to a local kills region allocation · OPEN**
-`Lambda_Issue_Type_Support.md`. Structurally unchanged, only relocated:
+`impl/Lambda_Issue_Type_Support (retired).md`. Structurally unchanged, only relocated:
 `mir_region_producer_candidate` is now `transpile-mir.cpp:888` and delegates to
 `mir_region_producer_node`, whose switch handles only CONTENT/LIST/BLOCK,
 IF_EXPR, RETURN_STAM and MAP — with no `AST_NODE_VAR`/`AST_NODE_LET` case, a
 `var`/`let` in the body still falls to `default:` and disqualifies the function.
 
 <a id="ts-8"></a>**TS-8 · No arity overloading for user definitions · OPEN**
-`Lambda_Issue_Type_Support.md`. `pn f(a)` plus `pn f(a, b)` in one scope still
+`impl/Lambda_Issue_Type_Support (retired).md`. `pn f(a)` plus `pn f(a, b)` in one scope still
 gives `error[E209]: duplicate definition of 'f' in the same scope`, while the
 builtin registry is keyed on name **and** arity. Related: [LR09-1](#lr09-1),
 where two registry rows sharing a name are indistinguishable to the
@@ -1023,6 +1030,36 @@ that double-quoted strings are values rather than field names and point at the
 single-quoted form. Paired with [i8-mapkey](#i8-mapkey), where the rule itself
 was ruled.
 
+<a id="issues0-9"></a>**Issues0 #9 · ShapePool keys on a hash without comparing field names · OPEN**
+`vibe/impl/Lambda_Issues0 (fixed).md` #9 — deferred there, and the archive's
+`(fixed)` name hides it. `shape_pool.cpp:22` builds the pool key with
+`HASHMAP_DEFINE_FIELD3_KEY(shape_entry, ShapePoolEntry, signature.hash,
+signature.length, signature.byte_size)`. Two different shapes that collide on
+hash **and** match on field count and byte size are treated as identical, so one
+map's shape is reused for another and fields are read from the wrong offsets —
+silent data corruption. Low probability, high blast radius.
+
+The notable part: `shape_pool_shapes_equal` (`shape_pool.cpp:316`) already
+implements the exact deep comparison this needs — names, types and byte offsets
+— and has **no callers anywhere in the tree**. Closing this is wiring an
+existing function into the lookup path as a post-hash confirmation, not writing
+new logic.
+
+<a id="lint-e1"></a>**Lint E1 · Unchecked allocation dereference in `build_ast.cpp`, now invisible to cppcheck · OPEN**
+`impl/Lambda_Issues4_Lint (retired).md` E1. Four sites allocate and dereference without a NULL
+check: `build_ast.cpp:3080` (`hex_str`) and `:970`, `:3445`, `:3531`
+(`num_str`) — each does `p = (char*)mem_alloc(n + 1, MEM_CAT_AST); memcpy(p, …);
+p[n] = '\0';`. `mem_alloc` returns NULL for a zero size, under the
+`memtrack_fault_should_fail()` injection hook, and on a failed `malloc`, so this
+is reachable rather than theoretical.
+
+Worth recording separately: the migration from `malloc` to `mem_alloc`
+**silenced the static analyser without fixing the code**. cppcheck originally
+flagged this as `nullPointerArithmeticOutOfMemory`; a 2026-08-25 re-run reports
+nothing here, because it does not model the custom allocator. The report's own
+suggested remedy — use an allocator that cannot return NULL — was only half
+applied.
+
 <a id="i8-consoleesc"></a>**Issues8 · Console formatter does not escape quotes or backslashes inside collections · OPEN**
 Printing a collection renders member strings verbatim:
 `["init: {\"flowchart\": …}", "back\\slash"]` prints as
@@ -1054,11 +1091,122 @@ same operand also loses its fields across an element-attribute spread, which is
 <a id="i8-attrspread"></a>**Issues8 / Issues5 §23 · Element attribute spread lands the map as a child · OPEN**
 `<path *attrs>` does not error, but the spread map becomes a *child* rather than
 attributes: `<path {a: 1, b: 2}>` instead of `<path a: 1, b: 2>`. Recorded twice
-— `Lambda_Issues8.md` ("Runtime map attribute spread creates a nested element
-child") and `Lambda_Issues5.md` §23 — as one issue. The sibling half of the
+— `impl/Lambda_Issues8 (retired).md` ("Runtime map attribute spread creates a nested element
+child") and `impl/Lambda_Issues5 (retired).md` §23 — as one issue. The sibling half of the
 Issues5 entry (an inline `if` as an attribute value) is **fixed**:
 `<path d: "M0", 'stroke-dasharray': if (has_dash) dash else "none">` now
 evaluates to `<path d: "M0", stroke-dasharray: "4 2">`.
+
+---
+
+## 15. Design gaps inherited from the retired Outstanding rollup (OI)
+
+> `vibe/Lambda_Issues_Outstanding.md` was **retired on 2026-08-25** and archived
+> as `vibe/impl/Lambda_Issues_Outstanding (retired).md`. Its §3 (Lambda core,
+> `LR_01–13`) was verified fully subsumed by §1–§13 above — every MAJOR item it
+> bolded resolves to a ledger entry, and the ledger carries more per section than
+> the rollup listed. Its §2 (JO1–JO13) and §4 (JS_01–16) were pointer indexes
+> into docs that still own them: `vibe/Lambda_Design_Stack_Frame_JS.md` (18 JO
+> references) and the `doc/dev/js/JS_*.md` Known-Issues sections (present in all
+> 17). What had **no other home** were the OI design gaps and the cross-cutting
+> themes, indexed below; the archived file remains the full argument for each.
+>
+> **IDs keep their `OI-n` spelling** (rule 17). These are design gaps needing an
+> ADR before code, not point defects — none was re-verified in the 2026-08-25
+> pass unless noted.
+
+- **OI-1 · Value equality & ordering contract.** The operator surface is sound
+  (verified 2026-07-16): `fn_eq` structural and cross-rank-exact, `fn_lt_scalar`
+  and `total_cmp` raw-byte and mutually consistent, `array_num_eq` width-correct
+  and NaN-aware. Residue: (a) `item_deep_equal` dedup over a new `fn_eq_strict`
+  — its only caller is Radiant no-op elision, where gaps cost missed elision, not
+  wrong answers; (b) **VMap key eq/hash rank consistency** — `fn_eq(1, 1.0)` is
+  true, so map lookup/hashing must agree across numeric ranks or the rule must be
+  stated; (c) `decimal_cmp` returning equal on conversion failure
+  ([LR04-4](#lr04-4)); (d) equal-value different-scale decimals must agree across
+  `==`, `<` and key use. Cross-refs: [LR03-1](#lr03-1), [LR09-3](#lr09-3).
+- **OI-2 · JS object model: internal metadata + GC lifetime.** (a) The
+  marker→shape-flag migration is half-done — class identity, accessors,
+  iterators and Promise branding still ride `__class_name__`/`__ctor__`/`__arr__`
+  string keys beside the typed `JsClass`/`ShapeEntry` scheme; (b) pools are never
+  GC-reclaimed (JsFunction wrappers, generator pool with index collision on
+  churn, promise pool with reactions capped at 8), and WeakMap/WeakSet/WeakRef
+  have no weak semantics. Rider: map-field tombstones and sparse-array holes are
+  two conventions over one concept — unify when the representation work happens.
+- **OI-3 · ESM correctness.** Named-import live bindings are snapshot-only;
+  circular ESM sees placeholder `undefined` instead of a TDZ ReferenceError; TLA
+  is first-await-only; `js_await_sync` busy-drains. The Lambda side has the same
+  gap from the other direction — cross-language import skips `pub` vars
+  ([LR01-11](#lr01-11)). One cross-language design.
+- **OI-4 · RegExp semantics.** RE2 leftmost-longest ≠ JS leftmost-greedy;
+  heuristic routing can silently yield wrong captures; the backtracking engine
+  bails to "no match" at its 8M-step budget. Needs an explicit decision: own
+  backtracking engine as primary, vs proven-equivalence routing.
+- **OI-5 · MIR value-representation contract (MIR Direct).** No single canonical
+  type↔representation contract per boundary. Casualties: INT64 arithmetic never
+  native, FLOAT→INT widening truncating in loops, indirect/closure calls past
+  three arguments returning wrong values, and errors silently coercing to
+  `0`/`0.0`/`false` when unboxed.
+- **OI-6 · Codegen quality cluster (JS).** Destination-passing lowering
+  (66–88% of emitted MIR is MOVs); shape-based polymorphic inline caching;
+  de-pointered relocatable MIR (~59 baked realm pointers) blocking artifact
+  caching. The **PIC design record** is the substantive part and survives in the
+  archive: the single-tier/no-patching/no-deopt constraints force a *data-driven*
+  side-table cache (`{TypeMap* shape, void* target, uint32_t guard_version}` × 2
+  ways, module-owned so it is realm-scoped by construction — the flaw in the
+  reverted process-global prototype cache). Open decision: invalidation
+  granularity, per-realm version (cheap, thrashes under test262 prototype
+  mutation) vs per-shape counters (+8 B per TypeMap; recommended). Companion:
+  re-key duplicate-class-name deopt by constructor/`TypeMap` identity rather than
+  class-name strings.
+- **OI-7 · Node compat majors.** Async `fs` runs synchronously inline; stream
+  internals are stubs (K27 shared stream core is the settled fix); `vm` does not
+  isolate (security-relevant); crypto lacks asymmetric primitives.
+- **OI-8 · DOM fidelity.** No on-read layout flush, so mutate-then-read
+  `offsetWidth` sees stale pixels; framework-blocking API gaps fail as silent
+  `undefined`; O(n) listener/wrapper storage degrades quadratically; no text
+  segmentation or Bidi.
+- **OI-9 · Unboxed scalar storage in maps and arrays · DEFERRED by decision.**
+  Shaped slots and array elements as a guaranteed, inline-addressable raw
+  representation. Two rulings were **decided 2026-07-16 and must not be
+  relitigated casually**: (1) **no in-band tombstones in unboxed scalar storage,
+  for any type** — absence is always out-of-band, delete/uninitialized forces a
+  transition back to boxed, holey arrays stay boxed; (2) **adopt the ArrayNum
+  raw-storage discipline** (element-width-aware compaction, data buffers never
+  scanned as Items) rather than inventing new rules. Open: transition policy on a
+  non-conforming write, write-path blast radius, GC/shape coherence during
+  transition, and whether scope is fields-only or fields + elements-kind.
+
+### 15.1 Cross-cutting hygiene themes
+
+One policy each, not per-site fixes.
+
+- **Silent fixed caps with inconsistent failure modes** — closure captures 16,
+  generator states 63, promise reactions 8, TypeMap hash 32, union types 32,
+  module vars 2048/1024, regex groups 256, and more. One grow-or-error doctrine
+  retires the class. Ledger instances: [LR09-6](#lr09-6), [LR13-5](#lr13-5).
+- **Layout-coupled raw offsets** — GC trace/compaction and `init_module_import`
+  ([LR01-9](#lr01-9), [LR08-6](#lr08-6)); static-assert guards or generated
+  offset tables.
+- **Two masked memory-safety bugs** — the event-loop SIGSEGV band-aid and the
+  `sys://` map-walk segfault workaround ([LR01-1](#lr01-1)). Both are
+  acknowledged *suppressed* root causes, not fixed ones.
+- **`SysFuncInfo` registry expressiveness** — data-driven argument/return
+  conventions would delete inline special-casing ([LR09-1](#lr09-1),
+  [LR09-2](#lr09-2)).
+
+### 15.2 Settled designs awaiting implementation
+
+No new decisions needed; each has an owning design doc.
+
+| Work | Design doc | Unblocks |
+|---|---|---|
+| Unified AST Phases 0–5 | `Lambda_Design_Unified_AST.md` (U1–U26) | shared emitter/inference, guest ports, OI-5 partially |
+| K27 shared stream core | `Lambda_Design_Concurrency.md` §11 | OI-7 streams, fs/event-loop integration |
+| De-pointered MIR P1–P5 | `Lambda_Design_MIR_Cache.md` (MC1–MC8) | OI-6 artifact caching |
+| JS threading P1–P3 | `Lambda_Js_Thread.md` (JT1–JT7) | worker isolation/watchdog; feeds `vm` realm isolation |
+| Concurrency Stage A/B | concurrency v3 (K11–K18) | real suspension; actor/mailbox K20 |
+| Stack-frame Python port | `Lambda_Design_Stack_Frame_Python.md` (PS1–PS10) | PO1–PO6 |
 
 ---
 

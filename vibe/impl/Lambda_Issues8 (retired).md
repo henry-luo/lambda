@@ -477,7 +477,7 @@ unsupported module path and point to the available import forms.
 ## Runtime map attribute spread creates a nested element child — still OPEN (re-verified 2026-08-25)
 
 > `<path *attrs>` renders as `<path {a: 1, b: 2}>` — the map lands as a child
-> rather than as attributes. Duplicated by `Lambda_Issues5.md` §23; recorded
+> rather than as attributes. Duplicated by `Lambda_Issues5 (retired).md` §23; recorded
 > once in the central ledger, and likely one root cause with the dynamic map
 > spread entry above.
 

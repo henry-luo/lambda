@@ -1,4 +1,23 @@
-# Lambda — Type Support Issues
+# Lambda — Type Support Issues  ·  RETIRED 2026-08-25
+
+> **Retired. Do not add to it.** Reviewed in full on 2026-08-25; every item was
+> re-tested except the two performance claims, and the live residue moved to
+> `vibe/Lambda_Issue_Ledger.md` §14 (IDs unchanged — `TS-3`, `TS-4`, `TS-6`,
+> `TS-8`).
+>
+> | Item | Outcome |
+> |---|---|
+> | TS-1 | **FIXED** — `var s: int = "abc"` now raises `E201` at the declaration |
+> | TS-2 | **FIXED** — `LMD_TYPE_STRING` admitted to the native scalar return set |
+> | TS-3 | Open, **needs re-measurement** — the cited cause is gone from the source, the benchmark was not re-run → ledger §14 |
+> | TS-4 | Open, **not re-verified** (perf + a correctness half) → ledger §14 |
+> | TS-5 | Dead-code half **FIXED** — the `if (false && …)` guard is gone |
+> | TS-6 | **Open**, structurally unchanged → ledger §14 |
+> | TS-7 | **FIXED** — `bool[]` and `string[]` work |
+> | TS-8 | **Open** → ledger §14 |
+> | TS-9 | **RESOLVED** by C16, and the implementation has since landed |
+>
+> Retained as the evidence and code-site record behind those findings.
 
 **Status:** open ledger. Items are TS-1…TS-9; each records what is wrong, the evidence, and the
 code site. Nothing here is fixed unless marked.
@@ -7,8 +26,8 @@ code site. Nothing here is fixed unless marked.
 are performance claims and were **not** re-measured in that pass.
 **Scope:** the Lambda type surface — declared types on bindings, parameters, and returns — and how
 the MIR-Direct emitter treats them. Guest-language type mapping is out of scope
-(`vibe/Lambda_Semantics_Number_Model.md` owns the numeric tower; `Lambda_Issues_Outstanding.md`
-OI-5 owns the broader MIR value-representation contract, of which several items here are
+(`vibe/Lambda_Semantics_Number_Model.md` owns the numeric tower; `Lambda_Issue_Ledger.md`
+§15 OI-5 owns the broader MIR value-representation contract, of which several items here are
 instances).
 **Line references** were re-checked against the tree on 2026-07-29 and will drift.
 

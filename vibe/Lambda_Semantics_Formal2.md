@@ -1844,7 +1844,7 @@ user's, not the language's.
 ### C16. Flex `int` redefined: the float64-representable integers (2026-08-01) — RESOLVED: total int arithmetic; `div`/`%` stay int via `int.inf`/`int.nan`; 53-bit literal band retained
 
 Decided by the designer 2026-08-01, out of the TE-15 soft-error-containment discussion
-(`Lambda_Design_Type_Enforcement.md` TE-15; issue evidence in `Lambda_Issue_Type_Support.md`
+(`Lambda_Design_Type_Enforcement.md` TE-15; issue evidence in `impl/Lambda_Issue_Type_Support (retired).md`
 TS-9 and the measured declared-boundary divergence of the same date). Supersedes the
 **promotion arm of C3 — now historical for the flex tier** (C3's machine-int rulings, literal
 strictness, and data-home philosophy stand), and revises the **`int div int → float` typing arm

@@ -20,9 +20,9 @@ syntax decided 2026-08-17
 where not, never silently dropped or lossy. This document is **only about enforcement
 (correctness)**. Leveraging annotations for faster code is the explicit *next* stage and is
 touched here only where enforcement is its prerequisite.
-**Related:** `vibe/Lambda_Issue_Type_Support.md` (TS-1…TS-9 issue ledger; evidence),
+**Related:** `vibe/impl/Lambda_Issue_Type_Support (retired).md` (TS-1…TS-9 issue ledger; evidence),
 `doc/Lambda_Formal_Semantics.md` (semantic authority), `doc/Lambda_Type.md`,
-`vibe/Lambda_Issues_Outstanding.md` OI-5 (MIR value-representation contract),
+`vibe/Lambda_Issue_Ledger.md` §15 OI-5 (MIR value-representation contract),
 `doc/dev/lambda/LR_13_Schema_Validator.md` (validator design), and
 [`vibe/Lambda_Design_Sys_Func.md`](Lambda_Design_Sys_Func.md) for
 system-function admission policy.

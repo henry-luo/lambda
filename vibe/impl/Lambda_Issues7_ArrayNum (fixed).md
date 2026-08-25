@@ -2,7 +2,7 @@
 
 Findings from a review of the "unify JS typed array with lambda" migration
 (commit series `c37dde6d8`…`dbcd9416c`, landed 2026-06-30). Continues the
-numbering from `Lambda_Issues6.md` (last issue #37).
+numbering from `Lambda_Issues6 (retired).md` (last issue #37).
 
 **Review verdict first:** the migration itself is sound. `JsTypedArray`
 (`lambda/js/js_typed_array.h:55`) holds an `ArrayNum* view` created by

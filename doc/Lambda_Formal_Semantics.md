@@ -1812,7 +1812,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 Numbered `SO#` (semantics-open) for stable reference; each links to its
 record. (The prefix is the spec's own — distinct from the historic review
 findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
-`vibe/Lambda_Issues_Outstanding.md`.)
+`vibe/Lambda_Issue_Ledger.md` §15.)
 
 **Numerics**
 - **SO1** Sized-lane `div`/`%`: [Number_Model §3.3.2](../vibe/Lambda_Semantics_Number_Model.md) says sized×sized `div` stays in the machine lane; this spec (S4.5.3, per Int_Type §2.2) says it leaves the lane — `3i8 div 0i8` needs an explicit call, and Number_Model needs a supersession note.

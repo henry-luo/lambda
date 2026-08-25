@@ -7,7 +7,7 @@
 > `temp/mir_dump.txt`, C2MIR's from `mac-deps/mir/c2m -S`. Since both feed the
 > same MIR backend, every difference is front-end attributable by construction.
 > Related: [`Lambda_Design_Dual_Func_Compiling.md`](Lambda_Design_Dual_Func_Compiling.md)
-> (DF2/DF3/DF8, O1, O3), [`Lambda_Issue_Type_Support.md`](Lambda_Issue_Type_Support.md)
+> (DF2/DF3/DF8, O1, O3), [`impl/Lambda_Issue_Type_Support (retired).md`](impl/Lambda_Issue_Type_Support%20(retired).md)
 > (TS-1, TS-3), the Result18 flexint-poisoning finding (navier-stokes),
 > [`Lambda_Impl_Tune8_Result15_Bottlenecks.md`](Lambda_Impl_Tune8_Result15_Bottlenecks.md).
 

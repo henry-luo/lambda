@@ -1,4 +1,21 @@
-# Lambda + LambdaJS — Outstanding Issues Ledger
+# Lambda + LambdaJS — Outstanding Issues Ledger  ·  RETIRED 2026-08-25
+
+> **This rollup is retired. Do not add to it.** It was reviewed in full on
+> 2026-08-25 and its live content moved:
+>
+> | Section | Where it lives now |
+> |---|---|
+> | §1 OI-1 – OI-9 (design gaps) | `vibe/Lambda_Issue_Ledger.md` §15 — IDs unchanged; the full argument for each stays below |
+> | §2 JO1 – JO13 (JS stack-frame residue) | already owned by `vibe/Lambda_Design_Stack_Frame_JS.md` (18 JO references, verified present) |
+> | §3 Lambda core, LR_01–13 | verified **fully subsumed** by `Lambda_Issue_Ledger.md` §1–§13; every MAJOR item it bolded resolves to a ledger entry, and the ledger carries more per section. One item was missing and is now [LR12-8](../Lambda_Issue_Ledger.md#lr12-8) |
+> | §4 LambdaJS, JS_01–16 | already owned by the `doc/dev/js/JS_*.md` Known-Issues sections (present in all 17, verified) |
+> | §5 settled designs | `Lambda_Issue_Ledger.md` §15.2 — with the stale `Lambda_Design_JS_Threading.md` pointer corrected to `Lambda_Js_Thread.md` |
+> | §6 hygiene themes | `Lambda_Issue_Ledger.md` §15.1 |
+> | §7 session-verified corrections | already applied to the source docs on 2026-07-16; kept below as the record of what changed and why |
+>
+> Retained as the historical argument — the OI entries below carry reasoning and
+> decision records (notably the OI-6 PIC design record and the OI-9 "no in-band
+> tombstones" ruling) that §15 only indexes.
 
 **Status:** living rollup — index of everything open, with pointers to owning ledgers/docs; update as items close.
 **Date:** 2026-07-16

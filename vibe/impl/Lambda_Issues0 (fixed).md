@@ -2,6 +2,19 @@
 
 Date: 2026-02-12
 
+> ⚠️ **The `(fixed)` in this file's name is misleading** (noted 2026-08-25). Eight
+> of the sixteen items are marked ✅ FIXED, but **#9 and #15 are explicitly
+> Deferred**, #14 is Obsolete, and #5, #6, #10, #11, #16 carry no resolution at
+> all. Do not treat this archive as closed.
+>
+> Re-verified 2026-08-25 — **#9 still stands**: `shape_pool.cpp:22` keys the pool
+> on `(signature.hash, signature.length, signature.byte_size)` via
+> `HASHMAP_DEFINE_FIELD3_KEY`, with no field-name comparison, so a hash collision
+> at equal length and byte size silently reuses one map's shape for another.
+> Worth knowing: the comparator that would close it, `shape_pool_shapes_equal`
+> (`:316`), is already written and does compare names, types and offsets — but it
+> has **no callers anywhere in the tree**. The fix is dead code, not missing code.
+
 ## Priority Summary
 
 | Priority | Items | Effort | Impact |

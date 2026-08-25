@@ -618,7 +618,7 @@ attribute values now works: the example below parses and evaluates to
 `<path d: "M0", stroke-dasharray: "4 2">`. **Attribute spread is still
 unsupported**: `<path *attrs>` does not error, but the map lands as a *child*
 rather than as attributes — it renders as `<path {a: 1, b: 2}>`. That residue is
-the same defect `Lambda_Issues8.md` records as "Runtime map attribute spread
+the same defect `Lambda_Issues8 (retired).md` records as "Runtime map attribute spread
 creates a nested element child"; the two entries are one issue.
 
 *(Original 2026-07-02 status follows.)* — attribute spread is still unsupported,
