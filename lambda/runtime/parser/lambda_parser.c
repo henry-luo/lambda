@@ -2061,14 +2061,20 @@ static LambdaParseValue parse_view_declaration(LambdaRdParser* parser) {
             }
             LambdaToken state_name = parser->current;
             parser_advance(parser);
-            if (!parser_expect(parser, LAMBDA_TOK_COLON, "expected ':' after state name")) return 0;
-            parser_skip_newlines(parser);
-            LambdaParseValue value = parse_expression(parser, 0);
-            if (!value) return 0;
+            // `name: expr` declares template-local state; a bare `name` binds
+            // engine-backed state, whose value the host owns, so it carries no
+            // initializer and reduces with no value child.
+            LambdaParseValue value = 0;
+            if (parser_accept(parser, LAMBDA_TOK_COLON)) {
+                parser_skip_newlines(parser);
+                value = parse_expression(parser, 0);
+                if (!value) return 0;
+            }
             parser_reduce_tokens(parser, LAMBDA_REDUCE_VIEW,
                 LAMBDA_REDUCTION_FORM_VIEW_STATE,
                 (SourceSpan){state_name.span.start_byte, parser->current.span.start_byte},
-                state_name, (LambdaToken){0}, 0, &value, 1);
+                state_name, (LambdaToken){0}, 0,
+                value ? &value : NULL, value ? 1 : 0);
         } while (parser_accept(parser, LAMBDA_TOK_COMMA));
     }
     if (!parser_expect(parser, LAMBDA_TOK_LBRACE, "expected '{' after view declaration")) return 0;

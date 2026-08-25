@@ -978,8 +978,7 @@ bool StateStore::init(DomDocument* owner_document) {
     owner_document->state_store = this;
     owner_document->state = doc_state;
     doc_state->owner_store = this;
-    Runtime* semantic_runtime = owner_document->lambda_runtime
-        ? owner_document->lambda_runtime : owner_document->js.runtime;
+    Runtime* semantic_runtime = dom_document_script_runtime(owner_document);
     semantic_context = semantic_runtime
         ? runtime_get_eval_context(semantic_runtime) : nullptr;
     if (semantic_context) {

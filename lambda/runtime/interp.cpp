@@ -5231,6 +5231,7 @@ static void interp_register_view_template(Script* script, AstViewNode* view,
     TypeId match_type = LMD_TYPE_ANY;
     const char* match_tag = NULL;
     int match_tag_len = 0;
+    const TypeElmt* match_elmt = NULL;
     AstNode* pattern = view->pattern;
     if (pattern && pattern->type) {
         TypeId tid = pattern->type->type_id;
@@ -5244,6 +5245,7 @@ static void interp_register_view_template(Script* script, AstViewNode* view,
                     if (element_type->name.str && element_type->name.length > 0) {
                         match_tag = element_type->name.str;
                         match_tag_len = (int)element_type->name.length;
+                        match_elmt = element_type;
                         specificity = element_type->length > 0
                             ? TMPL_SPEC_ELMT_ATTR : TMPL_SPEC_ELMT_TAG;
                     }
@@ -5261,6 +5263,7 @@ static void interp_register_view_template(Script* script, AstViewNode* view,
         match_type, match_tag, match_tag_len, 0, 0);
     TemplateEntry* entry = g_template_registry->last;
     if (!entry) return;
+    template_registry_set_element_pattern(entry, match_elmt);
     const char* generated_ref = view->name ? view->name->chars : NULL;
     if (!generated_ref) {
         char ref[48];

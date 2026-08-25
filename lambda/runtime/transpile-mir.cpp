@@ -27695,6 +27695,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                         TypeId match_type = LMD_TYPE_ANY;
                         const char* match_tag = NULL;
                         int match_tag_len = 0;
+                        const TypeElmt* match_elmt = NULL;
 
                         if (view->pattern) {
                             AstNode* pat = view->pattern;
@@ -27712,6 +27713,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                                             if (elmt_type->name.str && elmt_type->name.length > 0) {
                                                 match_tag = elmt_type->name.str;
                                                 match_tag_len = (int)elmt_type->name.length;
+                                                match_elmt = elmt_type;
                                                 spec = elmt_type->length > 0
                                                     ? TMPL_SPEC_ELMT_ATTR : TMPL_SPEC_ELMT_TAG;
                                             }
@@ -27736,6 +27738,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 
                         // get the just-added entry (it's the last one)
                         TemplateEntry* tmpl_entry = g_template_registry->last;
+                        template_registry_set_element_pattern(tmpl_entry, match_elmt);
 
                         // set template_ref for state store keying
                         // func_name is stack-local, so we need a persistent copy
