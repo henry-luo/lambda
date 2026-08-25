@@ -41,11 +41,8 @@ static float resolved_space_width(UiContext* uicon, FontHandle* handle, const Fo
 
 void font_prop_release_handle(FontProp* fprop) {
     if (!fprop) return;
-    if (fprop->owns_font_handle && fprop->font_handle) {
-        font_handle_release(fprop->font_handle);
-    }
+    font_cache_unpin_handle(fprop->font_handle);
     fprop->font_handle = NULL;
-    fprop->owns_font_handle = false;
 }
 
 static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
@@ -101,7 +98,6 @@ static void populate_font_prop_metrics(UiContext* uicon, FontProp* fprop,
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     fbox->style = fprop;
     fbox->current_font_size = font_prop_used_size(fprop);
-    fbox->font_handle = NULL;
 
     if (!uicon || !uicon->font_ctx) {
         log_error("setup_font: missing UiContext or FontContext");
@@ -137,7 +133,6 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     style.slant   = fs;
 
     if (font_handle_matches_prop(fprop->font_handle, fprop, family, fw, fs)) {
-        fbox->font_handle = fprop->font_handle;
         populate_font_prop_metrics(uicon, fprop, fprop->font_handle, &style);
         return;
     }
@@ -148,9 +143,9 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     // database lookup, platform fallback, and fallback font chain — all with caching.
     FontHandle* handle = family ? font_resolve(uicon->font_ctx, &style) : NULL;
     if (handle) {
-        fbox->font_handle = handle;
         fprop->font_handle = handle;
-        fprop->owns_font_handle = true;
+        // Transfer font_resolve's caller ref into the cache-managed alias.
+        font_cache_adopt_handle_alias(handle);
 
         // populate FontProp derived fields from unified metrics
         populate_font_prop_metrics(uicon, fprop, handle, &style);

@@ -345,7 +345,7 @@ void render_simple_string(RenderContext* rdcon, const char* text, float x, float
     // Setup font for rendering
     FontBox fbox = {0};
     setup_font(rdcon->ui_context, &fbox, font);
-    if (!fbox.font_handle) {
+    if (!font_box_handle(&fbox)) {
         return;
     }
 
@@ -354,11 +354,11 @@ void render_simple_string(RenderContext* rdcon, const char* text, float x, float
     rdcon->color = color;
 
     // Get font metrics (all in physical pixels after setup_font)
-    const FontMetrics* _fm = font_get_metrics(fbox.font_handle);
+    const FontMetrics* _fm = font_get_metrics(font_box_handle(&fbox));
     float ascender = _fm ? (_fm->hhea_ascender * rdcon->ui_context->pixel_ratio) : 12.0f;
 
     FormGlyphRun run;
-    form_glyph_run_init(&run, fbox.font_handle, font, text, strlen(text), true);
+    form_glyph_run_init(&run, font_box_handle(&fbox), font, text, strlen(text), true);
     FormGlyphStep step;
     float pen_x = x;
     while (form_glyph_run_next(&run, &step)) {
@@ -391,8 +391,8 @@ static float measure_input_text_width(RenderContext* rdcon, FontProp* font,
     if (!text || byte_count <= 0 || !font || !rdcon->ui_context) return 0.0f;
     FontBox fbox = {0};
     setup_font(rdcon->ui_context, &fbox, font);
-    if (!fbox.font_handle) return 0.0f;
-    return form_measure_glyph_width(fbox.font_handle, font,
+    if (!font_box_handle(&fbox)) return 0.0f;
+    return form_measure_glyph_width(font_box_handle(&fbox), font,
                                     form_render_pixel_ratio(rdcon),
                                     text, (size_t)byte_count);
 }
@@ -1360,8 +1360,8 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
         // Setup font
         FontBox fbox = {0};
         setup_font(rdcon->ui_context, &fbox, render_font);
-        if (fbox.font_handle) {
-            const FontMetrics* fm = font_get_metrics(fbox.font_handle);
+        if (font_box_handle(&fbox)) {
+            const FontMetrics* fm = font_get_metrics(font_box_handle(&fbox));
             float ascender = fm ? (fm->hhea_ascender * rdcon->ui_context->pixel_ratio) : 12.0f;
             float descender = fm ? (-(fm->hhea_descender) * rdcon->ui_context->pixel_ratio) : 4.0f;
             float text_lead_y = line_height - (ascender + descender);
@@ -1385,7 +1385,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                 // render this line's characters
                 float pen_x = content_x - scroll_x_px;
                 FormGlyphRun glyph_run;
-                form_glyph_run_init(&glyph_run, fbox.font_handle, render_font,
+                form_glyph_run_init(&glyph_run, font_box_handle(&fbox), render_font,
                                     line_start, line_byte_len, true);
                 FormGlyphStep glyph_step;
                 while (form_glyph_run_next(&glyph_run, &glyph_step)) {
@@ -1436,13 +1436,13 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
             line_start = textarea_line_start(preedit_display, start_line);
             FontBox fbox = {0};
             setup_font(rdcon->ui_context, &fbox, block->font);
-            if (fbox.font_handle) {
+            if (font_box_handle(&fbox)) {
                 float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
                     ? rdcon->ui_context->pixel_ratio : 1.0f;
-                float ux0 = content_x + measure_text_width(fbox.font_handle, block->font,
+                float ux0 = content_x + measure_text_width(font_box_handle(&fbox), block->font,
                                                            pixel_ratio, preedit_display + line_start,
                                                            start_col) * s;
-                float ux1 = content_x + measure_text_width(fbox.font_handle, block->font,
+                float ux1 = content_x + measure_text_width(font_box_handle(&fbox), block->font,
                                                            pixel_ratio, preedit_display + line_start,
                                                            end_col) * s;
                 if (ux1 > ux0) {
@@ -1505,11 +1505,11 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                 if (value && caret_col > 0 && block->font) {
                 FontBox fbox = {0};
                 setup_font(rdcon->ui_context, &fbox, block->font);
-                if (fbox.font_handle) {
+                if (font_box_handle(&fbox)) {
                     float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
                         ? rdcon->ui_context->pixel_ratio : 1.0f;
                     int line_off = textarea_line_start(value, caret_line);
-                    caret_x = content_x + measure_text_width(fbox.font_handle, block->font,
+                    caret_x = content_x + measure_text_width(font_box_handle(&fbox), block->font,
                                                               pixel_ratio, value + line_off, caret_col) * s
                         - (form ? form->scroll_x * s : 0.0f);
                 }

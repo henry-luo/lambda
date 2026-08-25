@@ -27,7 +27,7 @@ One structural fact frames the rest: **MIR Direct is the only supported code-gen
 
 ## 3. The functional run path (default)
 
-`lambda script.ls` with no subcommand falls through `main()`'s `strcmp` ladder to the script-options parser (`main.cpp:4247`), defaulting `use_mir = true`. A bare (non-`-`) argument becomes `script_file` (`main.cpp:4324`), and `run_script_file(&runtime, script_file, use_mir, transpile_only=false, run_main=false)` is called (`main.cpp:4351`).
+`lambda script.ls` with no subcommand falls through `main()`'s `strcmp` ladder to the script-options parser (`main.cpp:4247`), defaulting `use_mir = true`. A bare (non-`-`) argument becomes `script_file` (`main.cpp:4324`), and `run_script_file(&runtime, script_file, run_main=false)` is called (`main.cpp:4351`).
 
 `run_script_file` immediately calls `run_script_mir(runtime, nullptr, script_path, run_main=false)`; there is no alternate C2MIR entry path.
 

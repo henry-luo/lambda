@@ -203,7 +203,7 @@ float compute_font_baseline_ascender(
 
     FontBox fbox = {};
     setup_font(lycon->ui_context, &fbox, font);
-    if (!fbox.font_handle) {
+    if (!font_box_handle(&fbox)) {
         if (font->ascender > 0.0f) return font->ascender;
         if (font->font_size > 0.0f) return font->font_size * 0.8f;
         return fallback_ascender;
@@ -212,16 +212,16 @@ float compute_font_baseline_ascender(
     if (use_normal_line_height) {
         float split_asc = 0.0f;
         float split_desc = 0.0f;
-        font_get_normal_lh_split(fbox.font_handle, &split_asc, &split_desc);
+        font_get_normal_lh_split(font_box_handle(&fbox), &split_asc, &split_desc);
         return split_asc;
     }
 
-    TypoMetrics typo = get_os2_typo_metrics(fbox.font_handle);
+    TypoMetrics typo = get_os2_typo_metrics(font_box_handle(&fbox));
     if (typo.valid && typo.use_typo_metrics) {
         return typo.ascender;
     }
 
-    const FontMetrics* metrics = font_get_metrics(fbox.font_handle);
+    const FontMetrics* metrics = font_get_metrics(font_box_handle(&fbox));
     if (metrics) return metrics->hhea_ascender;
 
     if (font->ascender > 0.0f) return font->ascender;

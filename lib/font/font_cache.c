@@ -23,10 +23,10 @@
 
 char* font_cache_make_key(Arena* arena, const char* family,
                            FontWeight weight, FontSlant slant, float size_px) {
-    // "family:weight:slant:size" — e.g. "Arial:400:0:16.0"
-    // Use float precision for size to avoid cache collisions between e.g. 13.33px and 13.67px
+    // "family:weight:slant:size" — preserve enough digits to round-trip a
+    // float; CSS percentages commonly resolve to sizes such as 10.048px.
     char buf[256];
-    int n = snprintf(buf, sizeof(buf), "%s:%d:%d:%.1f",
+    int n = snprintf(buf, sizeof(buf), "%s:%d:%d:%.9g",
                      family ? family : "",
                      (int)weight,
                      (int)slant,
@@ -169,7 +169,8 @@ static bool lru_scan_callback(const void* item, void* udata) {
     const FontCacheKey* entry = (const FontCacheKey*)item;
     LruScanState* state = (LruScanState*)udata;
 
-    if (entry->handle && entry->handle->lru_tick < state->min_tick) {
+    if (entry->handle && entry->handle->cache_alias_count == 0 &&
+        entry->handle->lru_tick < state->min_tick) {
         state->min_tick = entry->handle->lru_tick;
         state->min_key = entry->key_str;
     }
@@ -197,6 +198,8 @@ void font_cache_evict_lru(FontContext* ctx) {
             log_debug("font_cache: evicted '%s' (tick=%u)", state.min_key, state.min_tick);
             font_handle_release(removed->handle);
         }
+    } else {
+        log_debug("font_cache: deferred eviction because every handle is pinned");
     }
 }
 
@@ -210,8 +213,34 @@ void font_cache_trim(FontContext* ctx) {
     size_t max_faces = ctx->config.max_cached_faces > 0 ? ctx->config.max_cached_faces : 64;
     size_t target = max_faces * 3 / 4; // trim to 75% capacity
     while (hashmap_count(ctx->face_cache) > target) {
+        size_t count = hashmap_count(ctx->face_cache);
         font_cache_evict_lru(ctx);
+        if (hashmap_count(ctx->face_cache) == count) break;
     }
+}
+
+void font_cache_pin_handle(FontHandle* handle) {
+    if (!handle) return;
+    // A pin is a cache-managed lease: key replacement must not invalidate a
+    // live FontProp alias before its release callback runs.
+    font_handle_retain(handle);
+    handle->cache_alias_count++;
+}
+
+void font_cache_adopt_handle_alias(FontHandle* handle) {
+    if (!handle) return;
+    // font_resolve transfers one caller ref; bind it as this alias's lease.
+    handle->cache_alias_count++;
+}
+
+void font_cache_unpin_handle(FontHandle* handle) {
+    if (!handle) return;
+    if (handle->cache_alias_count == 0) {
+        log_error("font_cache: alias pin underflow");
+        return;
+    }
+    handle->cache_alias_count--;
+    font_handle_release(handle);
 }
 
 // ============================================================================
@@ -239,10 +268,18 @@ static FontHandle* font_resolve_single(FontContext* ctx, const FontStyleDesc* st
                                      style->size_px);
     if (!key) return NULL;
 
+    // Resolve the document descriptor before accepting a same-family system
+    // cache entry. CSS @font-face shadows installed fonts for this document.
+    const FontFaceEntry* face_entry = font_face_find_internal(ctx, style->family,
+                                                               style->weight, style->slant);
+
     // 2. check face cache
-    FontHandle* handle = font_cache_lookup(ctx, key, allow_global_fallback,
+    // A declared face gets a cached global fallback only after its sources
+    // fail. Other family-list candidates must still reject it and continue.
+    bool allow_cached_global_fallback = allow_global_fallback || face_entry != NULL;
+    FontHandle* handle = font_cache_lookup(ctx, key, allow_cached_global_fallback,
                                            out_is_global_fallback);
-    if (handle) {
+    if (handle && (!face_entry || handle->is_document_font)) {
         font_handle_retain(handle);
         return handle;
     }
@@ -251,8 +288,6 @@ static FontHandle* font_resolve_single(FontContext* ctx, const FontStyleDesc* st
     float physical_size = style->size_px * pixel_ratio;
 
     // 3. check @font-face descriptors
-    const FontFaceEntry* face_entry = font_face_find_internal(ctx, style->family,
-                                                               style->weight, style->slant);
     if (face_entry) {
         // delegate to font_face_load() which handles caching-by-size internally
         const FontFaceDesc* desc = font_face_find(ctx, style);
@@ -260,10 +295,18 @@ static FontHandle* font_resolve_single(FontContext* ctx, const FontStyleDesc* st
             handle = font_face_load(ctx, desc, style->size_px);
             if (handle) {
                 log_info("font_resolve: loaded @font-face for '%s'", style->family);
+                if (out_is_global_fallback) *out_is_global_fallback = false;
                 font_cache_insert(ctx, key, handle, false);
                 return handle;
             }
         }
+    }
+
+    // A declared face whose sources failed may still fall back to an installed
+    // family cached under the same style key.
+    if (handle) {
+        font_handle_retain(handle);
+        return handle;
     }
 
     // 3.5. Browser-compatible family aliases that must win before exact local
@@ -425,12 +468,22 @@ static FontHandle* font_resolve_single(FontContext* ctx, const FontStyleDesc* st
 FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style) {
     if (!ctx || !style || !style->family) return NULL;
 
+    bool has_document_face = false;
+    const char* face_cursor = style->family;
+    char face_family[256];
+    while (font_family_list_next(&face_cursor, face_family, sizeof(face_family))) {
+        if (font_face_family_registered(ctx, face_family)) {
+            has_document_face = true;
+            break;
+        }
+    }
+
     char* list_key = font_cache_make_key(ctx->arena, style->family,
                                          style->weight, style->slant,
                                          style->size_px);
     if (!list_key) return NULL;
     FontHandle* cached = font_cache_lookup(ctx, list_key, true, NULL);
-    if (cached) {
+    if (cached && (!has_document_face || cached->is_document_font)) {
         font_handle_retain(cached);
         return cached;
     }

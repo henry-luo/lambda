@@ -727,12 +727,12 @@ bool inline_span_float_continuation_x(
 }
 
 static void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* span) {
-    if (!lycon || !span || !lycon->font.font_handle) return;
+    if (!lycon || !span || !font_box_handle(&lycon->font)) return;
     float ascender = 0.0f, descender = 0.0f;
     if (lycon->block.line_height_is_normal) {
-        font_get_normal_lh_split(lycon->font.font_handle, &ascender, &descender);
+        font_get_normal_lh_split(font_box_handle(&lycon->font), &ascender, &descender);
     } else {
-        font_get_content_area_split(lycon->font.font_handle, &ascender, &descender);
+        font_get_content_area_split(font_box_handle(&lycon->font), &ascender, &descender);
         float content_height = ascender + descender;
         float half_leading = (lycon->block.line_height - content_height) / 2.0f;
         ascender += half_leading;
@@ -749,7 +749,7 @@ static void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewS
         lycon->line.max_ascender = max(lycon->line.max_ascender, ascender);
         lycon->line.max_descender = max(lycon->line.max_descender, descender);
         if (lycon->block.line_height_is_normal) {
-            float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
+            float normal_lh = font_calc_normal_line_height(font_box_handle(&lycon->font));
             lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
         }
     }
@@ -776,7 +776,7 @@ static void span_record_current_split_line_fragment(LayoutContext* lycon, ViewSp
                                                     float span_line_height) {
     if (!lycon || !span || lycon->line.is_line_start) return;
     FontProp* font = span->font ? span->font : lycon->font.style;
-    FontHandle* font_handle = span->font ? span->fontp()->font_handle : lycon->font.font_handle;
+    FontHandle* font_handle = span->font ? span->fontp()->font_handle : font_box_handle(&lycon->font);
     if (!font || !font_handle || span_line_height <= 0.0f) return;
 
     float line_height = 0.0f;
@@ -1507,7 +1507,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             br_view->x = lycon->line.advance_x - lycon->line.trailing_space_width;
         }
         br_view->width = 0;
-        struct FontHandle* br_fh = lycon->font.font_handle;
+        struct FontHandle* br_fh = font_box_handle(&lycon->font);
         float br_font_height = br_fh ? font_get_cell_height(br_fh) : lycon->block.line_height;
         ViewBlock* br_parent = layout_nearest_block_ancestor(br_view->parent_view());
         bool vertical_parent = br_parent && layout_block_inline_axis_is_vertical(br_parent);
@@ -1530,9 +1530,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
         if (!vertical_parent && !was_line_clamped &&
             lycon->block.line_clamped && !line_had_replaced_content &&
-            lycon->font.font_handle) {
+            font_box_handle(&lycon->font)) {
             // ellipsis line width only when text supplies that line; an
-            GlyphInfo ellipsis = font_get_glyph(lycon->font.font_handle, 0x2026);
+            GlyphInfo ellipsis = font_get_glyph(font_box_handle(&lycon->font), 0x2026);
             br_view->width = ellipsis.id != 0
                 ? ellipsis.advance_x : lycon->font.current_font_size * 0.5f;
         }
@@ -1596,7 +1596,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     float saved_parent_ascender = lycon->line.parent_font_ascender;
     float saved_parent_descender = lycon->line.parent_font_descender;
     float saved_parent_font_size = lycon->line.parent_font_size;
-    struct FontHandle* saved_parent_font_handle = lycon->line.parent_font_handle;
+    FontProp* saved_parent_font_style = lycon->line.parent_font_style;
     float pa_line_height = lycon->block.line_height;
     bool pa_line_height_is_normal = lycon->block.line_height_is_normal;
     lycon->elmt = elmt;
@@ -1627,7 +1627,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.parent_font_ascender = saved_parent_ascender;
         lycon->line.parent_font_descender = saved_parent_descender;
         lycon->line.parent_font_size = saved_parent_font_size;
-        lycon->line.parent_font_handle = saved_parent_font_handle;
+        lycon->line.parent_font_style = saved_parent_font_style;
         lycon->block.line_height = pa_line_height;
         lycon->block.line_height_is_normal = pa_line_height_is_normal;
         return;
@@ -1716,7 +1716,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.parent_font_descender = pa_font.style->descender;
         lycon->line.parent_font_size = pa_font.current_font_size > 0.0f
             ? pa_font.current_font_size : pa_font.style->font_size;
-        lycon->line.parent_font_handle = pa_font.font_handle;
+        lycon->line.parent_font_style = pa_font.style;
     }
     if (span->font) {
         span->font->used_zoom = layout_effective_zoom((View*)span);
@@ -1859,7 +1859,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         lycon->line.advance_x += inline_right_edge;
         // CSS 2.1 §9.2.1.1: When an inline element contains block-level children,
-        compute_span_bounding_box(span, true, lycon->font.font_handle);  // get vertical bounds from children
+        compute_span_bounding_box(span, true, font_box_handle(&lycon->font));  // get vertical bounds from children
         float containing_line_width = lycon->line.right - lycon->line.left;
         float measured_right = span->x + span->width;
         float span_line_left = lycon->line.left;
@@ -1999,7 +1999,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         DomElementExt* ruby_ext = span->ensure_ext();
         if (ruby_ext) ruby_ext->has_simple_ruby_column_geometry = false;
         float available_ruby_start_overhang = lycon->line.has_space
-            ? layout_measure_space_advance(lycon, lycon->font.font_handle,
+            ? layout_measure_space_advance(lycon, font_box_handle(&lycon->font),
                                            lycon->font.style)
             : 0.0f;
         bool has_simple_ruby_pair = ruby_has_simple_text_pair(child);
@@ -2012,7 +2012,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
         float base_start_x = span->x + inline_left_edge;
         float base_end_x = lycon->line.advance_x;
-        compute_span_bounding_box(span, false, lycon->font.font_handle);
+        compute_span_bounding_box(span, false, font_box_handle(&lycon->font));
         float base_top_y = span->y;
 
         CssEnum ruby_position = span->inl()->ruby_position;
@@ -2159,8 +2159,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         CssEnum valign = span->inl()->vertical_align;
         if (valign == CSS_VALUE_MIDDLE) {
             float x_height_half = lycon->font.current_font_size * 0.25f;
-            if (lycon->line.parent_font_handle) {
-                float x_ratio = font_get_x_height_ratio(lycon->line.parent_font_handle);
+            FontHandle* parent_handle = lycon->line.parent_font_style
+                ? lycon->line.parent_font_style->font_handle : nullptr;
+            if (parent_handle) {
+                float x_ratio = font_get_x_height_ratio(parent_handle);
                 x_height_half = lycon->line.parent_font_size * x_ratio / 2.0f;
             }
             asc_contribution = span->content_height / 2.0f + x_height_half;
@@ -2200,7 +2202,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
 
-    compute_span_bounding_box(span, span_is_multi_line, lycon->font.font_handle);
+    compute_span_bounding_box(span, span_is_multi_line, font_box_handle(&lycon->font));
     if (!had_children && has_inline_axis_decoration) {
         float border_left = 0.0f;
         float padding_left = 0.0f;
@@ -2231,7 +2233,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     // CSS 2.1 §10.6.1: For inline non-replaced elements, the bounding box height
     if (span->height > 0) {
-        struct FontHandle* fh = span->font ? span->fontp()->font_handle : lycon->font.font_handle;
+        struct FontHandle* fh = span->font ? span->fontp()->font_handle : font_box_handle(&lycon->font);
         if (fh) {
             float content_area = font_get_cell_height(fh);
             float bt = 0, bb = 0, pt_val = 0, pb_val = 0;
@@ -2325,7 +2327,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->line.parent_font_ascender = saved_parent_ascender;
     lycon->line.parent_font_descender = saved_parent_descender;
     lycon->line.parent_font_size = saved_parent_font_size;
-    lycon->line.parent_font_handle = saved_parent_font_handle;
+    lycon->line.parent_font_style = saved_parent_font_style;
     lycon->block.line_height = pa_line_height;
     lycon->block.line_height_is_normal = pa_line_height_is_normal;
     if (pushed_counter_scope) {

@@ -680,7 +680,7 @@ static void pdf_render_glyph_run(PdfRenderContext* ctx, const PaintGlyphRun* run
                               &composed_transform);
 
     FontBox* font = (FontBox*)run->font;
-    FontHandle* font_handle = font ? font->font_handle : nullptr;
+    FontHandle* font_handle = font ? font_box_handle(font) : nullptr;
     float space_width = font && font->style ? font->style->space_width : 4.0f;
     float adjusted_space_width = space_width + run->word_spacing;
     if (adjusted_space_width < 0.0f) adjusted_space_width = space_width;
@@ -1413,13 +1413,13 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
         content_len--;
     }
 
-    if (ctx->font.font_handle) {
+    if (font_box_handle(&ctx->font)) {
         for (size_t i = 0; i < content_len; i++) {  // Only count up to content_len
             if (text_content[i] == ' ') {
                 natural_width += space_width;
                 space_count++;
             } else {
-                natural_width += font_measure_char(ctx->font.font_handle, (uint32_t)text_content[i]);
+                natural_width += font_measure_char(font_box_handle(&ctx->font), (uint32_t)text_content[i]);
             }
         }
     }

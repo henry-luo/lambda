@@ -514,8 +514,7 @@ struct FontProp {
     float descender;   // font descender in pixels
     float font_height; // font height in pixels
     bool has_kerning;  // whether the font has kerning
-    struct FontHandle* font_handle; // unified font handle (populated by setup_font)
-    bool owns_font_handle; // true when this FontProp owns a retained font_handle ref
+    struct FontHandle* font_handle; // cache-owned handle pinned while this prop aliases it
     TextShadow* text_shadow;  // CSS text-shadow (linked list for multiple shadows)
     CssEnum text_deco_style;          // CSS text-decoration-style: solid, dashed, dotted, wavy, double
     Color text_deco_color;            // CSS text-decoration-color (default: {0} = use currentColor)
@@ -527,6 +526,14 @@ inline float font_prop_used_size(const FontProp* fp) {
     if (!fp) return 0.0f;
     float zoom = fp->used_zoom > 0.0f ? fp->used_zoom : 1.0f;
     return fp->font_size * zoom;
+}
+
+inline void font_prop_copy(FontProp* destination, const FontProp* source) {
+    if (!destination || !source || destination == source) return;
+    // A copied FontProp is another alias, so keep its cache entry pinned.
+    font_cache_unpin_handle(destination->font_handle);
+    *destination = *source;
+    font_cache_pin_handle(destination->font_handle);
 }
 
 // build a FontStyleDesc from a FontProp (for font_load_glyph fallback resolution)
@@ -1555,9 +1562,12 @@ typedef struct BlockProp {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FontBox {
     FontProp *style;  // current font style
-    struct FontHandle* font_handle; // unified font handle (opaque, ref-counted)
     float current_font_size;  // font size of current element
 } FontBox;
+
+inline struct FontHandle* font_box_handle(const FontBox* fbox) {
+    return fbox && fbox->style ? fbox->style->font_handle : nullptr;
+}
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct TextRect {

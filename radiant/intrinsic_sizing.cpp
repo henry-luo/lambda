@@ -588,8 +588,8 @@ static float intrinsic_element_line_height(LayoutContext* lycon,
         ? view->fontp()->font_size
         : (lycon->font.style && lycon->font.style->font_size > 0.0f
             ? lycon->font.style->font_size : 16.0f);
-    float line_height = lycon->font.font_handle
-        ? font_calc_normal_line_height(lycon->font.font_handle)
+    float line_height = font_box_handle(&lycon->font)
+        ? font_calc_normal_line_height(font_box_handle(&lycon->font))
         : font_size * 1.2f;
     const CssValue* line_height_value = view && view->blk
         ? view->block()->line_height : nullptr;
@@ -862,7 +862,7 @@ static bool intrinsic_can_shape_simple_latin_run(LayoutContext* lycon,
                                                  CssEnum font_variant,
                                                  bool break_anywhere,
                                                  bool break_word) {
-    if (!lycon || !lycon->font.style || !lycon->font.font_handle) return false;
+    if (!lycon || !lycon->font.style || !font_box_handle(&lycon->font)) return false;
     if (text_transform != CSS_VALUE_NONE && text_transform != 0) return false;
     if (font_variant == CSS_VALUE_SMALL_CAPS) return false;
     if (break_anywhere) return false;
@@ -892,7 +892,7 @@ static bool intrinsic_measure_shaped_simple_latin_run(LayoutContext* lycon,
     }
     LayoutSimpleLatinRun result = {};
     if (!layout_measure_simple_latin_run(
-            lycon, lycon->font.font_handle, str, remaining, &result)) {
+            lycon, font_box_handle(&lycon->font), str, remaining, &result)) {
         return false;
     }
     *out_bytes = result.bytes;
@@ -1292,7 +1292,7 @@ static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const 
         unsigned char ch = str[i];
         if (ch == '\t') {
             float raw_space = layout_measure_space_advance(
-                lycon, lycon->font.font_handle, lycon->font.style);
+                lycon, font_box_handle(&lycon->font), lycon->font.style);
             float tab_period = raw_space * tab_size;
             if (tab_period > 0.0f) {
                 float current_x = start_offset + width;
@@ -1307,7 +1307,7 @@ static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const 
 
         if (ch == ' ' || ch == '\r' || ch == '\n') {
             float space_width = layout_measure_space_advance(
-                lycon, lycon->font.font_handle, lycon->font.style);
+                lycon, font_box_handle(&lycon->font), lycon->font.style);
             if (lycon->font.style) {
                 space_width += lycon->font.style->word_spacing;
                 space_width += lycon->font.style->letter_spacing;
@@ -1380,8 +1380,8 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
     // Intrinsic sizing must use the current FontStyleDesc because font_get_glyph()
     // can retain stale advances after a dynamic @font-face load.
     LoadedGlyph* glyph = emoji_presentation
-        ? font_load_glyph_emoji(lycon->font.font_handle, &style, codepoint, false)
-        : font_load_glyph(lycon->font.font_handle, &style, codepoint, false);
+        ? font_load_glyph_emoji(font_box_handle(&lycon->font), &style, codepoint, false)
+        : font_load_glyph(font_box_handle(&lycon->font), &style, codepoint, false);
     *loaded = glyph != nullptr;
     if (!glyph) return 0.0f;
 
@@ -1389,7 +1389,7 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
         ? lycon->ui_context->pixel_ratio : 1.0f;
     float advance = glyph->advance_x / pixel_ratio + kerning;
     if (small_caps_lower) {
-        advance *= font_get_small_caps_scale(lycon->font.font_handle);
+        advance *= font_get_small_caps_scale(font_box_handle(&lycon->font));
     }
     if (lycon->font.style) advance += lycon->font.style->letter_spacing;
     return advance;
@@ -1437,7 +1437,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         return result;  // min_content=0, max_content=0
     }
 
-    if (!lycon->font.font_handle) {
+    if (!font_box_handle(&lycon->font)) {
         float total_width = 0.0f;
         float current_word = 0.0f;
         float longest_word = 0.0f;
@@ -1477,7 +1477,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     float longest_word = 0.0f;
 
     uint32_t prev_codepoint = 0;
-    const FontMetrics* fm = lycon->font.font_handle ? font_get_metrics(lycon->font.font_handle) : NULL;
+    const FontMetrics* fm = font_box_handle(&lycon->font) ? font_get_metrics(font_box_handle(&lycon->font)) : NULL;
     bool has_kerning = fm ? fm->has_kerning : false;
     if (lycon->font.style && lycon->font.style->font_kerning == CSS_VALUE_NONE) has_kerning = false;
     const unsigned char* str = (const unsigned char*)text;
@@ -1505,11 +1505,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
             float kerning_adj = 0.0f;
             if (has_kerning && prev_codepoint) {
-                kerning_adj = font_get_kerning(lycon->font.font_handle, prev_codepoint, (uint32_t)ch);
+                kerning_adj = font_get_kerning(font_box_handle(&lycon->font), prev_codepoint, (uint32_t)ch);
             }
 
             float space_width = layout_measure_space_advance(
-                lycon, lycon->font.font_handle, lycon->font.style);
+                lycon, font_box_handle(&lycon->font), lycon->font.style);
             if (lycon->font.style) {
                 space_width += lycon->font.style->word_spacing;
             }
@@ -1549,7 +1549,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                     &shaped_first_cp, &shaped_last_cp)) {
                 float kerning = 0.0f;
                 if (has_kerning && prev_codepoint) {
-                    kerning = font_get_kerning(lycon->font.font_handle,
+                    kerning = font_get_kerning(font_box_handle(&lycon->font),
                                                prev_codepoint, shaped_first_cp);
                 }
                 float advance = shaped_width + kerning;
@@ -1615,11 +1615,11 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
 
         is_word_start = false;  // No longer at word start after first character
 
-        uint32_t glyph_index = font_get_glyph_index(lycon->font.font_handle, codepoint);
+        uint32_t glyph_index = font_get_glyph_index(font_box_handle(&lycon->font), codepoint);
 
         float kerning = 0.0f;
         if (glyph_index && has_kerning && prev_codepoint) {
-            kerning = font_get_kerning(lycon->font.font_handle, prev_codepoint, codepoint);
+            kerning = font_get_kerning(font_box_handle(&lycon->font), prev_codepoint, codepoint);
         }
 
         bool emoji_presentation = false;
@@ -1843,8 +1843,8 @@ float compute_text_height_at_width(LayoutContext* lycon,
     float current_word_width = 0;
 
     // Use font metrics if available, otherwise rough estimate
-    bool has_font = lycon->font.font_handle != nullptr;
-    const FontMetrics* fm2 = has_font ? font_get_metrics(lycon->font.font_handle) : NULL;
+    bool has_font = font_box_handle(&lycon->font) != nullptr;
+    const FontMetrics* fm2 = has_font ? font_get_metrics(font_box_handle(&lycon->font)) : NULL;
     bool has_kerning = fm2 ? fm2->has_kerning : false;
     if (lycon->font.style && lycon->font.style->font_kerning == CSS_VALUE_NONE) has_kerning = false;
     uint32_t prev_codepoint = 0;
@@ -1896,7 +1896,7 @@ float compute_text_height_at_width(LayoutContext* lycon,
             current_word_width = 0;
             // add space width
             float space_width = layout_measure_space_advance(
-                lycon, lycon->font.font_handle, lycon->font.style);
+                lycon, font_box_handle(&lycon->font), lycon->font.style);
             if (lycon->font.style) {
                 space_width += lycon->font.style->word_spacing;
             }
@@ -1931,9 +1931,9 @@ float compute_text_height_at_width(LayoutContext* lycon,
         }
         bool glyph_loaded = false;
         bool primary_glyph = has_font &&
-            font_get_glyph_index(lycon->font.font_handle, codepoint) != 0;
+            font_get_glyph_index(font_box_handle(&lycon->font), codepoint) != 0;
         float kerning = primary_glyph && has_kerning && prev_codepoint
-            ? font_get_kerning(lycon->font.font_handle, prev_codepoint, codepoint) : 0.0f;
+            ? font_get_kerning(font_box_handle(&lycon->font), prev_codepoint, codepoint) : 0.0f;
         float advance = has_font ? intrinsic_loaded_glyph_advance(
             lycon, codepoint, is_small_caps_lower, kerning, false, &glyph_loaded) : 0.0f;
         if (!glyph_loaded) advance = 11.0f;
@@ -2237,7 +2237,7 @@ static bool intrinsic_element_has_explicit_box_decoration_break(DomElement* elem
 
 static float intrinsic_collapsed_space_width(LayoutContext* lycon) {
     float width = layout_measure_space_advance(
-        lycon, lycon->font.font_handle, lycon->font.style);
+        lycon, font_box_handle(&lycon->font), lycon->font.style);
     if (lycon && lycon->font.style) {
         width += lycon->font.style->word_spacing;
         width += lycon->font.style->letter_spacing;
@@ -4069,7 +4069,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         if (!text || !*text) continue;
                         if (inline_run_has_content && layout_text_edge_has_whitespace(text, false)) {
                             inline_run_max += layout_measure_space_advance(
-                                lycon, lycon->font.font_handle, lycon->font.style);
+                                lycon, font_box_handle(&lycon->font), lycon->font.style);
                         }
                         TextIntrinsicWidths text_widths = measure_text_intrinsic_widths(
                             lycon, text, strlen(text),
@@ -4123,7 +4123,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         bool starts_with_ws = layout_element_edge_has_whitespace(item, false);
                         if (inline_run_has_content && (prev_ended_with_space || starts_with_ws)) {
                             inline_run_max += layout_measure_space_advance(
-                                lycon, lycon->font.font_handle, lycon->font.style);
+                                lycon, font_box_handle(&lycon->font), lycon->font.style);
                         }
                         inline_run_max += child_sizes.max_content;
                         if (child_sizes.min_content > inline_run_min) {
@@ -5043,7 +5043,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     if (preserve_space_after_table_cell &&
                         (out_pos == 0 || normalized_buffer[0] != ' ')) {
                         text_widths.max_content += layout_measure_space_advance(
-                            lycon, lycon->font.font_handle, lycon->font.style);
+                            lycon, font_box_handle(&lycon->font), lycon->font.style);
                     }
                     if (preserve_spaces && text_line_has_tab(normalized_buffer, out_pos)) {
                         text_widths.max_content = measure_preserved_line_width_with_tabs(
@@ -5612,11 +5612,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 vertical_block_axis_max > 0.0f) {
                 float sideways_ascender = 0.0f;
                 float sideways_descender = 0.0f;
-                if (lycon->font.font_handle) {
+                if (font_box_handle(&lycon->font)) {
                     // sideways-rl maps the font's cross-axis content area into
                     // the inline box; the descender therefore contributes to
                     // the physical block extent alongside the child box.
-                    font_get_content_area_split(lycon->font.font_handle,
+                    font_get_content_area_split(font_box_handle(&lycon->font),
                         &sideways_ascender, &sideways_descender);
                 }
                 block_axis_extent = max(block_axis_extent,
@@ -6053,8 +6053,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
         // Use actual font metrics for line-height:normal when available
         float line_height = font_size * 1.2f;  // fallback if no font loaded
-        if (lycon->font.font_handle) {
-            float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
+        if (font_box_handle(&lycon->font)) {
+            float normal_lh = font_calc_normal_line_height(font_box_handle(&lycon->font));
             if (normal_lh > 0) line_height = normal_lh;
         }
 

@@ -3583,7 +3583,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             break;
         }
         case CSS_UNIT_EX: {
-            float x_height_ratio = font_get_x_height_ratio(lycon->font.font_handle);
+            float x_height_ratio = font_get_x_height_ratio(font_box_handle(&lycon->font));
             float font_size = lycon->font.style && lycon->font.style->font_size > 0.0f
                 ? lycon->font.style->font_size : lycon->font.current_font_size;
             result = num * font_size * x_height_ratio;
@@ -3593,9 +3593,9 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             // CSS Values 4 §6.1.1: equal to the advance width of the "0" (zero) glyph
             float font_size = lycon->font.style && lycon->font.style->font_size > 0.0f
                 ? lycon->font.style->font_size : lycon->font.current_font_size;
-            if (lycon->font.font_handle) {
+            if (font_box_handle(&lycon->font)) {
                 FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
-                LoadedGlyph* zero_glyph = font_load_glyph(lycon->font.font_handle, &style, (uint32_t)'0', false);
+                LoadedGlyph* zero_glyph = font_load_glyph(font_box_handle(&lycon->font), &style, (uint32_t)'0', false);
                 if (zero_glyph && zero_glyph->advance_x > 0.0f) {
                     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0.0f)
                         ? lycon->ui_context->pixel_ratio : 1.0f;
@@ -4525,8 +4525,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
     if (has_placeholder_font_prop && base_font) {
         FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
         if (placeholder_font) {
-            *placeholder_font = *base_font;
-            placeholder_font->owns_font_handle = false;
+            font_prop_copy(placeholder_font, base_font);
         }
     } else {
         form->placeholder_font = nullptr;
@@ -4637,7 +4636,7 @@ static void apply_initial_letter_used_font_size(DomElement* dom_elem,
     }
     InitialLetterInfo initial = {};
     if (!layout_get_initial_letter_info(dom_elem, &initial) ||
-        !parent_font.style || !parent_font.font_handle ||
+        !parent_font.style || !font_box_handle(&parent_font) ||
         lycon->block.line_height <= 0.0f) {
         return;
     }
@@ -4647,8 +4646,8 @@ static void apply_initial_letter_used_font_size(DomElement* dom_elem,
     if (!span->font || span->fontp()->font_size <= 0.0f) return;
     FontBox computed_font = {};
     setup_font(lycon->ui_context, &computed_font, span->font);
-    const FontMetrics* parent_metrics = font_get_metrics(parent_font.font_handle);
-    const FontMetrics* initial_metrics = font_get_metrics(computed_font.font_handle);
+    const FontMetrics* parent_metrics = font_get_metrics(font_box_handle(&parent_font));
+    const FontMetrics* initial_metrics = font_get_metrics(font_box_handle(&computed_font));
     if (!parent_metrics || !initial_metrics || parent_metrics->cap_height <= 0.0f ||
         initial_metrics->cap_height <= 0.0f) {
         return;

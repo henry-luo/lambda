@@ -6790,7 +6790,7 @@ static bool event_text_glyph_advance(FontBox* font, unsigned char* p, unsigned c
         *out_bytes = 1;
         codepoint = *p;
     }
-    GlyphInfo glyph = font_get_glyph(font->font_handle, codepoint);
+    GlyphInfo glyph = font_get_glyph(font_box_handle(font), codepoint);
     if (glyph.id == 0) return false;
     *out_advance = glyph.advance_x;
     return true;
@@ -6870,7 +6870,7 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
             }
             // Use font_load_glyph to match layout calculation
             FontStyleDesc _sd = font_style_desc_from_prop(evcon->font.style);
-            LoadedGlyph* glyph = font_load_glyph(evcon->font.font_handle, &_sd, codepoint, false);
+            LoadedGlyph* glyph = font_load_glyph(font_box_handle(&evcon->font), &_sd, codepoint, false);
             if (!glyph) {
                 log_error("Could not load codepoint U+%04X", codepoint);
                 p += bytes;
@@ -6928,7 +6928,7 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     // Debug: log initial state
     log_debug("[CALC-POS] target_offset=%d, rect->x=%.1f, rect->start_index=%d, pixel_ratio=%.1f, y_ppem=%d",
         target_offset, rect->x, rect->start_index, pixel_ratio,
-        evcon->font.font_handle ? (int)font_handle_get_physical_size_px(evcon->font.font_handle) : -1);
+        font_box_handle(&evcon->font) ? (int)font_handle_get_physical_size_px(font_box_handle(&evcon->font)) : -1);
 
     while (p < end && byte_offset < target_offset) {
         float wd = 0;
@@ -6996,7 +6996,7 @@ static float event_glyph_x_resolver(UiContext* uicon, ViewText* text,
     FontBox fbox;
     memset(&fbox, 0, sizeof(fbox));
     if (text->font) setup_font(uicon, &fbox, text->font);
-    if (!fbox.font_handle || !fbox.style) return rect->x;
+    if (!font_box_handle(&fbox) || !fbox.style) return rect->x;
 
     unsigned char* str = text->text_data();
     unsigned char* p = str + rect->start_index;
@@ -7055,7 +7055,7 @@ static int event_byte_offset_for_x_resolver(UiContext* uicon, ViewText* text,
     FontBox fbox;
     memset(&fbox, 0, sizeof(fbox));
     if (text->font) setup_font(uicon, &fbox, text->font);
-    if (!fbox.font_handle || !fbox.style) return rect->start_index;
+    if (!font_box_handle(&fbox) || !fbox.style) return rect->start_index;
 
     unsigned char* str = text->text_data();
     unsigned char* p = str + rect->start_index;

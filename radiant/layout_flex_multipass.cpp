@@ -203,7 +203,7 @@ static void flex_normalize_break_item_boxes(LayoutContext* lycon,
         LayoutFontScope font_scope(lycon);
         if (br->font) setup_font(lycon->ui_context, &lycon->font, br->font);
         float break_height = layout_br_line_box_extent(
-            lycon, lycon->font.font_handle);
+            lycon, font_box_handle(&lycon->font));
         if (break_height <= 0.0f) continue;
 
         bool vertical_writing = flex->writing_mode == WM_VERTICAL_LR ||

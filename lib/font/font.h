@@ -102,6 +102,12 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style);
 FontHandle* font_handle_retain(FontHandle* handle);
 void        font_handle_release(FontHandle* handle);
 
+// Bind/unbind a non-owning FontProp alias. The cache-managed pin retains the
+// handle and excludes it from LRU eviction until the alias is released.
+void        font_cache_adopt_handle_alias(FontHandle* handle);
+void        font_cache_pin_handle(FontHandle* handle);
+void        font_cache_unpin_handle(FontHandle* handle);
+
 // get the resolved style identity of a font handle (for comparison/reuse checks)
 // returns false if handle is NULL, true otherwise
 bool font_handle_get_style(FontHandle* handle, const char** out_family,

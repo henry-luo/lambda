@@ -167,7 +167,7 @@ is per-boundary and dynamic; v3 makes it per-birth and static.
 adopt population in two. Emitting v3 and re-running the analyzer over the
 same benchmarks shows it is **three** populations, and only the first is
 addressed by this design. Method: `utils/analyze_scalar_homes.py` over
-`--transpile-only` dumps, flag off vs flag on, plus a per-entry-kind
+normal-execution MIR dumps from separate v2 and v3 runs, plus a per-entry-kind
 breakdown. The v2 column reproduces §1.2's table exactly.
 
 | bench | return-side, internal bodies | return-side, public `_b` wrappers | helper-call | v2 total | v3 total |

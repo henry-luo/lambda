@@ -164,8 +164,7 @@ FontProp* DomElement::ensure_font(LayoutContext* lycon) {
     if (value && was_absent && lycon) {
         if (lycon->font.style) {
             // Font groups inherit as a value snapshot so later cascade mutation remains element-owned.
-            *value = *lycon->font.style;
-            value->owns_font_handle = false;
+            font_prop_copy(value, lycon->font.style);
             // The inherited FontProp snapshot owns its mutable text-shadow chain;
             // sharing the parent's list would make retained reset double-free it.
             value->text_shadow = clone_text_shadows(prop_pool(lycon), lycon->font.style->text_shadow);

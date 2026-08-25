@@ -959,10 +959,10 @@ void run_repl(Runtime *runtime) {
 }
 
 // Run a script file and return 0 on success, 1 on failure
-int run_script_file(Runtime *runtime, const char *script_path, bool transpile_only = false, bool run_main = false) {
+int run_script_file(Runtime *runtime, const char *script_path, bool run_main = false) {
     log_debug("run_script_file called: %s", script_path);
     Input* output_input = nullptr;
-    output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main, transpile_only);
+    output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main);
 
     log_debug("run_script_file: output_input = %p", output_input);
     if (!output_input) {
@@ -993,12 +993,6 @@ int run_script_file(Runtime *runtime, const char *script_path, bool transpile_on
         }
         // Do NOT delete output_input - it was allocated from the pool we just destroyed
         return 1;  // failure
-    }
-
-    // --transpile-only: compilation is the deliverable and nothing executed, so
-    // there is no result value to print. The MIR artifact was already written.
-    if (transpile_only) {
-        return 0;
     }
 
     StrBuf *output = strbuf_new_cap(256);
@@ -4040,7 +4034,7 @@ int main(int argc, char *argv[]) {
                 batch_timeout_active = 1;
                 if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                     alarm(batch_timeout);
-                    result = run_script_file(&runtime, script_path, false, run_main);
+                    result = run_script_file(&runtime, script_path, run_main);
                     alarm(0);
                     batch_timeout_active = 0;
                 } else {
@@ -4050,10 +4044,10 @@ int main(int argc, char *argv[]) {
                 }
                 sigaction(SIGALRM, &old_sa, NULL);
             } else {
-                result = run_script_file(&runtime, script_path, false, run_main);
+                result = run_script_file(&runtime, script_path, run_main);
             }
 #else
-            result = run_script_file(&runtime, script_path, false, run_main);
+            result = run_script_file(&runtime, script_path, run_main);
 #endif
             fflush(stdout);
 
@@ -4866,13 +4860,12 @@ int main(int argc, char *argv[]) {
         log_debug("Running script '%s' with run_main=true", script_file);
 
         // Execute script with run_main enabled
-        int result = run_script_file(&runtime, script_file, false, true);  // true for run_main
+        int result = run_script_file(&runtime, script_file, true);  // true for run_main
 
         runtime_cleanup(&runtime);
         return lambda_main_finish(result);
     }
 
-    bool transpile_only = false;
     bool help_only = false;
     char* script_file = NULL;
     int max_errors = 0;  // 0 means use default (10)
@@ -4881,20 +4874,7 @@ int main(int argc, char *argv[]) {
     // Parse arguments
     int ret_code = 0;
     for (int i = 1; i < argc; i++) {
-        // Compile without executing. MIR Direct honors it so emission fixtures
-        // so emission fixtures can be compiled and their MIR artifact checked
-        // without running the script.
-        if (strcmp(argv[i], "--transpile-only") == 0) {
-            transpile_only = true;
-            // The flag exists to PRODUCE a MIR artifact, so it must pin the
-            // JIT tier. Under the default LAMBDA_TIER_AUTO an eligible script
-            // is planned for the T0 interpreter, no MIR is emitted, and the
-            // run finishes "successfully" having written nothing — which is
-            // how the whole MIR emission suite came to fail at once. An
-            // explicit --tier= later on the command line still wins.
-            lambda_tier_set(LAMBDA_TIER_JIT);
-        }
-        else if (apply_common_mir_option(argv[i], &runtime)) {
+        if (apply_common_mir_option(argv[i], &runtime)) {
         }
         else if (strcmp(argv[i], "--help") == 0) {
             help_only = true;
@@ -4969,12 +4949,7 @@ int main(int argc, char *argv[]) {
         print_help();
     }
     else if (script_file) {
-        ret_code = run_script_file(&runtime, script_file, transpile_only, false);  // false for run_main in regular execution
-    }
-    else if (transpile_only) { // without a script file
-        printf("Error: --transpile-only requires a script file\n");
-        print_help();
-        ret_code = 1;
+        ret_code = run_script_file(&runtime, script_file, false);  // false for run_main in regular execution
     } else {
         // Start the MIR-Direct REPL by default.
         run_repl(&runtime);
