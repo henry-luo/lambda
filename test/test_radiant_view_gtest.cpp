@@ -377,6 +377,44 @@ TEST(RadiantViewTest, JsMirCacheKeepsFreshDocumentRealms) {
         timing_path, "\"script_cache_compiles\":0"));
 }
 
+TEST(RadiantViewTest, BatchDocumentFontFaceOverridesSystemCache) {
+    const char* system_font_page =
+        "test/layout/data/baseline/fixed-table-layout-001.htm";
+    const char* document_font_page =
+        "test/layout/data/baseline/grid_span_2_max_content_max_content_indefinite.html";
+    ASSERT_TRUE(test_radiant_view_file_readable(system_font_page));
+    ASSERT_TRUE(test_radiant_view_file_readable(document_font_page));
+    test_radiant_view_ensure_temp_dir();
+
+    const char* output_dir = "./temp/test_document_font_cache";
+#ifdef _WIN32
+    _mkdir(output_dir);
+#else
+    mkdir(output_dir, 0755);
+#endif
+    const char* result_path =
+        "./temp/test_document_font_cache/baseline__grid_span_2_max_content_max_content_indefinite.json";
+    const char* args[] = {
+        "./lambda.exe", "layout", system_font_page, document_font_page,
+        "--output-dir", output_dir,
+        "--font-dir", "test/layout/data/font",
+        "--auto-close", "--no-log", NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+
+    // The second document's embedded Ahem must replace the earlier installed
+    // face, keeping the zero-width-space text on one 80px line.
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        result_path, "\"content\": \"HHHH\xE2\x80\x8B" "HHHH\""));
+    EXPECT_FALSE(test_radiant_view_file_contains(
+        result_path, "\"content\": \"HHHH\""));
+}
+
 struct RadiantViewWorkQueue {
     const size_t* selected;
     size_t selected_count;

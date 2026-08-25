@@ -402,7 +402,7 @@ static FontHandle* resolve_marker_font_for_layout(LayoutContext* lycon,
                                                   FontProp* temporary_font) {
     if (!lycon || !list_elem || !marker_font_size || !temporary_font) return nullptr;
     FontProp* base_font = list_elem->font ? list_elem->font : lycon->font.style;
-    if (!base_font) return lycon->font.font_handle;
+    if (!base_font) return font_box_handle(&lycon->font);
 
     StyleTree* marker_style = list_elem->pseudo_style(PSEUDO_STYLE_MARKER);
     CssDeclaration* font_size_decl = marker_style
@@ -412,29 +412,27 @@ static FontHandle* resolve_marker_font_for_layout(LayoutContext* lycon,
         if (base_font->used_zoom > 0.0f && base_font->used_zoom != 1.0f) {
             *temporary_font = *base_font;
             temporary_font->font_handle = nullptr;
-            temporary_font->owns_font_handle = false;
             FontBox marker_box = {};
             setup_font(lycon->ui_context, &marker_box, temporary_font);
-            return marker_box.font_handle;
+            return font_box_handle(&marker_box);
         }
-        return base_font->font_handle ? base_font->font_handle : lycon->font.font_handle;
+        return base_font->font_handle ? base_font->font_handle : font_box_handle(&lycon->font);
     }
 
     *temporary_font = *base_font;
     temporary_font->font_handle = nullptr;
-    temporary_font->owns_font_handle = false;
     LayoutFontSizeResult resolved = layout_resolve_font_size_value(
         lycon, font_size_decl->value, base_font, true);
     if (resolved.value < 0.0f || isnan(resolved.value)) {
         *marker_font_size = base_font->font_size;
-        return base_font->font_handle ? base_font->font_handle : lycon->font.font_handle;
+        return base_font->font_handle ? base_font->font_handle : font_box_handle(&lycon->font);
     }
     temporary_font->font_size = resolved.value;
     temporary_font->font_size_from_medium = resolved.from_medium;
     FontBox marker_box = {};
     setup_font(lycon->ui_context, &marker_box, temporary_font);
     *marker_font_size = temporary_font->font_size;
-    return marker_box.font_handle;
+    return font_box_handle(&marker_box);
 }
 
 static void sync_marker_line_height(LayoutContext* lycon, ViewBlock* block,

@@ -117,6 +117,9 @@ struct FontHandle {
 
     // LRU tracking for face cache eviction
     uint32_t    lru_tick;
+    // Number of FontProp aliases currently bound to this cache-owned handle.
+    // Pinned handles cannot be evicted from the face cache.
+    uint32_t    cache_alias_count;
 
     // font info
     float       size_px;                // requested size in CSS pixels
@@ -508,6 +511,9 @@ FontHandle*         font_cache_lookup(FontContext* ctx, const char* key,
 void                font_cache_insert(FontContext* ctx, const char* key, FontHandle* handle,
                                       bool is_global_fallback);
 void                font_cache_evict_lru(FontContext* ctx);
+void                font_cache_adopt_handle_alias(FontHandle* handle);
+void                font_cache_pin_handle(FontHandle* handle);
+void                font_cache_unpin_handle(FontHandle* handle);
 char*               font_cache_make_key(Arena* arena, const char* family,
                                          FontWeight weight, FontSlant slant, float size_px);
 FontHandle*         font_resolve_authored_for_codepoint(FontContext* ctx,

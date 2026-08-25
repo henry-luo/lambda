@@ -3556,8 +3556,9 @@ static void determine_hypothetical_cross_sizes(LayoutContext* lycon, FlexContain
                     item->font && item->fontp()->font_size > 0 && lycon->ui_context) {
                     FontBox temp_font;
                     setup_font(lycon->ui_context, &temp_font, item->font);
-                    if (temp_font.font_handle) {
-                        float line_h = calc_normal_line_height(temp_font.font_handle);
+                    FontHandle* temp_handle = font_box_handle(&temp_font);
+                    if (temp_handle) {
+                        float line_h = calc_normal_line_height(temp_handle);
                         if (line_h > cross_size) cross_size = line_h;
                     }
                 }

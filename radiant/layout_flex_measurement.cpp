@@ -56,7 +56,7 @@ static bool flex_element_has_declared_line_height(DomElement* elem) {
 
 static float flex_font_line_height(LayoutContext* lycon, float fallback) {
     if (!lycon) return fallback;
-    if (lycon->font.font_handle) return calc_normal_line_height(lycon->font.font_handle);
+    if (font_box_handle(&lycon->font)) return calc_normal_line_height(font_box_handle(&lycon->font));
     return lycon->font.style && lycon->font.style->font_size > 0.0f
         ? lycon->font.style->font_size : fallback;
 }
@@ -592,8 +592,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 if (text_width > 0.0f) {
                     float button_height = FormDefaults::TEXT_HEIGHT -
                         2.0f * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER);
-                    if (lycon->font.font_handle) {
-                        button_height = calc_normal_line_height(lycon->font.font_handle);
+                    if (font_box_handle(&lycon->font)) {
+                        button_height = calc_normal_line_height(font_box_handle(&lycon->font));
                     }
                     item->form->intrinsic_width = text_width;
                     item->form->intrinsic_height = button_height;
@@ -959,7 +959,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             if (flex_layout && !is_main_axis_horizontal(flex_layout) &&
                 flex_break_has_block_siblings(item)) {
                 break_height = layout_br_line_box_extent(
-                    lycon, lycon ? lycon->font.font_handle : nullptr);
+                    lycon, lycon ? font_box_handle(&lycon->font) : nullptr);
             }
             min_height = max_height = break_height;
         } else if (has_pseudo_content) {

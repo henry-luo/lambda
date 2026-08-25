@@ -1124,8 +1124,8 @@ float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* val
         return value->data.number.value * target_font_size;
     }
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        return value->data.keyword == CSS_VALUE_NORMAL && lycon->font.font_handle
-            ? calc_normal_line_height(lycon->font.font_handle) : 0.0f;
+        return value->data.keyword == CSS_VALUE_NORMAL && font_box_handle(&lycon->font)
+            ? calc_normal_line_height(font_box_handle(&lycon->font)) : 0.0f;
     }
 
     float owner_font_size = owner && owner->font && owner->fontp()->font_size > 0.0f
@@ -1274,7 +1274,7 @@ CssValue inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
                         if (unit == CSS_UNIT_EM) {
                             computed_px = multiplier * parent_fs;
                         } else if (unit == CSS_UNIT_EX) {
-                            float x_ratio = font_get_x_height_ratio(lycon->font.font_handle);
+                            float x_ratio = font_get_x_height_ratio(font_box_handle(&lycon->font));
                             computed_px = multiplier * parent_fs * x_ratio;
                         } else { // CSS_UNIT_CH
                             computed_px = multiplier * parent_fs * 0.5f;
@@ -1329,12 +1329,12 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         value = inherit_line_height(lycon, block);
     }
     if (value.type == CSS_VALUE_TYPE_KEYWORD && value.data.keyword == CSS_VALUE_NORMAL) {
-        lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
+        lycon->block.line_height = calc_normal_line_height(font_box_handle(&lycon->font));
         lycon->block.line_height_is_normal = true;
     } else {
         const CssValue* resolved_value = resolve_var_function(lycon, &value);
         if (!resolved_value) {
-            lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
+            lycon->block.line_height = calc_normal_line_height(font_box_handle(&lycon->font));
             lycon->block.line_height_is_normal = true;
             return;
         }
@@ -1350,7 +1350,7 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
             resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, resolved_value);
         // CSS 2.1 §10.8.1: "Negative values are not allowed" for line-height
         if (resolved_height < 0 || isnan(resolved_height)) {
-            lycon->block.line_height = calc_normal_line_height(lycon->font.font_handle);
+            lycon->block.line_height = calc_normal_line_height(font_box_handle(&lycon->font));
             lycon->block.line_height_is_normal = true;
         } else {
             lycon->block.line_height = resolved_height;
@@ -1360,17 +1360,17 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
 }
 
 void layout_setup_block_font_metrics(LayoutContext* lycon) {
-    if (!lycon || !lycon->font.font_handle) return;
+    if (!lycon || !font_box_handle(&lycon->font)) return;
     if (lycon->block.line_height_is_normal) {
-        font_get_normal_lh_split(lycon->font.font_handle,
+        font_get_normal_lh_split(font_box_handle(&lycon->font),
             &lycon->block.init_ascender, &lycon->block.init_descender);
     } else {
-        TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+        TypoMetrics typo = get_os2_typo_metrics(font_box_handle(&lycon->font));
         if (typo.valid && typo.use_typo_metrics) {
             lycon->block.init_ascender = typo.ascender;
             lycon->block.init_descender = typo.descender;
         } else {
-            const FontMetrics* metrics = font_get_metrics(lycon->font.font_handle);
+            const FontMetrics* metrics = font_get_metrics(font_box_handle(&lycon->font));
             if (metrics) {
                 lycon->block.init_ascender = metrics->hhea_ascender;
                 lycon->block.init_descender = -metrics->hhea_descender;
@@ -1526,8 +1526,10 @@ float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float
     case CSS_VALUE_MIDDLE: {
         // CSS 2.1 §10.8.1: "Align the vertical midpoint of the box with the baseline
         float x_height_half;
-        if (lycon->line.parent_font_handle) {
-            float x_ratio = font_get_x_height_ratio(lycon->line.parent_font_handle);
+        FontHandle* parent_handle = lycon->line.parent_font_style
+            ? lycon->line.parent_font_style->font_handle : nullptr;
+        if (parent_handle) {
+            float x_ratio = font_get_x_height_ratio(parent_handle);
             x_height_half = pa_fsize * x_ratio / 2.0f;
         } else {
             x_height_half = pa_fsize * 0.25f; // fallback: ~0.5em x-height
@@ -1634,7 +1636,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     float saved_pa_asc = lycon->line.parent_font_ascender;
     float saved_pa_desc = lycon->line.parent_font_descender;
     float saved_pa_fsize = lycon->line.parent_font_size;
-    struct FontHandle* saved_pa_handle = lycon->line.parent_font_handle;
+    FontProp* saved_pa_style = lycon->line.parent_font_style;
     View* child = span->first_child;
     if (child) {
         // CSS 2.1 §10.8.1: Before updating to the span's own font, capture current font
@@ -1642,7 +1644,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
             lycon->line.parent_font_ascender = lycon->font.style->ascender;
             lycon->line.parent_font_descender = lycon->font.style->descender;
             lycon->line.parent_font_size = lycon->font.style->font_size;
-            lycon->line.parent_font_handle = lycon->font.font_handle;
+            lycon->line.parent_font_style = lycon->font.style;
         }
         if (span->font) {
             setup_font(lycon->ui_context, &lycon->font, span->font);
@@ -1661,7 +1663,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     lycon->line.parent_font_ascender = saved_pa_asc;
     lycon->line.parent_font_descender = saved_pa_desc;
     lycon->line.parent_font_size = saved_pa_fsize;
-    lycon->line.parent_font_handle = saved_pa_handle;
+    lycon->line.parent_font_style = saved_pa_style;
 }
 
 bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
@@ -2230,7 +2232,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
         span_vertical_align(lycon, span);
         // CSS 2.1 §10.8.1: After vertical alignment adjusts children's positions,
-        struct FontHandle* span_fh = span->font ? span->fontp()->font_handle : lycon->font.font_handle;
+        struct FontHandle* span_fh = span->font ? span->fontp()->font_handle : font_box_handle(&lycon->font);
         bool preserve_inline_list_marker_fragment = span->display.list_item &&
             span->display.outer == CSS_VALUE_INLINE;
         // CSS 2.1 §9.2.1.1 and §17.2.1: table fix-up leaves an inline-table
@@ -3207,16 +3209,16 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                         }
                         // Apply half-leading model same as inline text (CSS 2.1 §10.8.1)
                         float ascender = 0, descender = 0;
-                        if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
-                            font_get_normal_lh_split(lycon->font.font_handle, &ascender, &descender);
+                        if (lycon->block.line_height_is_normal && font_box_handle(&lycon->font)) {
+                            font_get_normal_lh_split(font_box_handle(&lycon->font), &ascender, &descender);
                         } else {
-                            TypoMetrics typo = get_os2_typo_metrics(lycon->font.font_handle);
+                            TypoMetrics typo = get_os2_typo_metrics(font_box_handle(&lycon->font));
                             if (typo.valid && typo.use_typo_metrics) {
                                 ascender = typo.ascender;
                                 descender = typo.descender;
-                            } else if (lycon->font.font_handle) {
-                                ascender = font_get_metrics(lycon->font.font_handle)->hhea_ascender;
-                                descender = -(font_get_metrics(lycon->font.font_handle)->hhea_descender);
+                            } else if (font_box_handle(&lycon->font)) {
+                                ascender = font_get_metrics(font_box_handle(&lycon->font))->hhea_ascender;
+                                descender = -(font_get_metrics(font_box_handle(&lycon->font))->hhea_descender);
                             } else {
                                 ascender = 12.0f; descender = 4.0f;
                             }
@@ -3231,8 +3233,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                         if (!lycon->line.start_view) lycon->line.start_view = (View*)marker_span;
                         lycon->line.is_line_start = false;
 
-                        if (lycon->block.line_height_is_normal && lycon->font.font_handle) {
-                            float normal_lh = font_calc_normal_line_height(lycon->font.font_handle);
+                        if (lycon->block.line_height_is_normal && font_box_handle(&lycon->font)) {
+                            float normal_lh = font_calc_normal_line_height(font_box_handle(&lycon->font));
                             lycon->line.max_normal_line_height = max(lycon->line.max_normal_line_height, normal_lh);
                         }
                     }
@@ -3461,9 +3463,9 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         lycon->root_font_size = lycon->font.current_font_size < 0 ?
             lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
     }
-    if (lycon->font.font_handle) {
+    if (font_box_handle(&lycon->font)) {
         float split_asc = 0, split_desc = 0;
-        font_get_normal_lh_split(lycon->font.font_handle, &split_asc, &split_desc);
+        font_get_normal_lh_split(font_box_handle(&lycon->font), &split_asc, &split_desc);
         lycon->block.init_ascender = split_asc;
         lycon->block.init_descender = split_desc;
     } else {
@@ -3718,7 +3720,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             content_block_size = layout_compute_in_flow_child_width_extent(body_view);
         }
         if (content_block_size <= 0.0f) {
-            FontHandle* line_font = body_view->font ? body_view->fontp()->font_handle : lycon->font.font_handle;
+            FontHandle* line_font = body_view->font ? body_view->fontp()->font_handle : font_box_handle(&lycon->font);
             float line_extent = line_font ? calc_normal_line_height(line_font) : 0.0f;
             content_block_size = line_extent > 0.0f ? line_extent : body_view->height;
         }

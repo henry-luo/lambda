@@ -847,8 +847,8 @@ static void layout_block_prepare_canvas_auto_size(
 
 static float text_wrap_balance_ellipsis_width(LayoutContext* lycon) {
     if (!lycon) return 0.0f;
-    if (lycon->font.font_handle) {
-        GlyphInfo ellipsis = font_get_glyph(lycon->font.font_handle, 0x2026);
+    if (font_box_handle(&lycon->font)) {
+        GlyphInfo ellipsis = font_get_glyph(font_box_handle(&lycon->font), 0x2026);
         if (ellipsis.id != 0 && ellipsis.advance_x > 0.0f) {
             return ellipsis.advance_x;
         }
@@ -3874,7 +3874,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
         flow_height -= text_box_trim_amount;
         block->content_height -= text_box_trim_amount;
         lycon->block.advance_y -= text_box_trim_amount;
-        recompute_inline_descendant_bounds(static_cast<View*>(block), lycon->font.font_handle);
+        recompute_inline_descendant_bounds(static_cast<View*>(block), font_box_handle(&lycon->font));
     }
     bool uses_axis_aware_layout = block->display.inner == CSS_VALUE_FLEX ||
         block->display.inner == CSS_VALUE_GRID ||
@@ -5661,14 +5661,14 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->line.line_start_font = lycon->font;
     setup_line_height(lycon, block);
     // CSS 2.1 §10.8.1: The strut is a zero-width inline box with the block's font.
-    if (lycon->font.font_handle) {
+    if (font_box_handle(&lycon->font)) {
         if (lycon->block.line_height_is_normal) {
             float split_asc = 0, split_desc = 0;
-            font_get_normal_lh_split(lycon->font.font_handle, &split_asc, &split_desc);
+            font_get_normal_lh_split(font_box_handle(&lycon->font), &split_asc, &split_desc);
             lycon->block.init_ascender = split_asc;
             lycon->block.init_descender = split_desc;
         } else {
-            font_get_content_area_split(lycon->font.font_handle,
+            font_get_content_area_split(font_box_handle(&lycon->font),
                                         &lycon->block.init_ascender,
                                         &lycon->block.init_descender);
         }
@@ -7997,7 +7997,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         }
     }
     layout_block_inner_content(lycon, block);
-    recompute_inline_descendant_bounds(static_cast<View*>(block), lycon->font.font_handle);
+    recompute_inline_descendant_bounds(static_cast<View*>(block), font_box_handle(&lycon->font));
     if (block->tag() == MARKUP_NAME_SVG && block->blk) {
         bool is_border_box = layout_uses_border_box(block);
         if (block->block()->given_width >= 0.0f) {
@@ -8800,8 +8800,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         if (parent_font_size <= 0.0f) {
                             parent_font_size = lycon->block.init_ascender + lycon->block.init_descender;
                         }
-                        if (lycon->font.font_handle) {
-                            float x_ratio = font_get_x_height_ratio(lycon->font.font_handle);
+                        if (font_box_handle(&lycon->font)) {
+                            float x_ratio = font_get_x_height_ratio(font_box_handle(&lycon->font));
                             float x_height_font_size = lycon->font.current_font_size > 0.0f
                                 ? lycon->font.current_font_size : parent_font_size;
                             x_height_half = x_height_font_size * x_ratio / 2.0f;
@@ -8884,7 +8884,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             // zero; otherwise following collapsible whitespace is misclassified
             // as line-start whitespace and removed (CSS Inline 3 §5).
             lycon->line.is_line_start = false;
-            recompute_inline_descendant_bounds(static_cast<View*>(block), lycon->font.font_handle);
+            recompute_inline_descendant_bounds(static_cast<View*>(block), font_box_handle(&lycon->font));
             // CSS Flexbox §4.1: Re-resolve abs-pos children of inline-level flex/grid
             if (dom_elem && (display.inner == CSS_VALUE_FLEX || display.inner == CSS_VALUE_GRID)) {
                 bool is_containing_block = block->position &&
