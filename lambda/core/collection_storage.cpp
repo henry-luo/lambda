@@ -15,8 +15,7 @@ void list_relocate_owned_tail(List* list, Item* old_items, int64_t old_capacity,
     int64_t dense_count = list->length < dense_capacity ? list->length : dense_capacity;
     for (int64_t i = 0; i < dense_count; i++) {
         Item item = new_items[i];
-        if (!(((item._type_id == LMD_TYPE_FLOAT && item.double_ptr > 1) ||
-                    item._type_id == LMD_TYPE_FLOAT64) ||
+        if (!(item._type_id == LMD_TYPE_FLOAT && item.double_ptr > 1 ||
                 item._type_id == LMD_TYPE_INT64 || item._type_id == LMD_TYPE_UINT64)) continue;
         Item* old_pointer = (Item*)item.double_ptr;
         if (old_pointer < old_items || old_pointer >= old_items + old_capacity) continue;

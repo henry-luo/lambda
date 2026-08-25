@@ -30,6 +30,10 @@ float is decimal;
 "=== f64 type ==="
 type(1.0f64)
 
+"=== f64 annotation ==="
+let f64_alias: f64 = 1.0
+type(f64_alias)
+
 "=== mixed arithmetic ==="
 type(1.0f16 + 1.0f32)
 type(1.0f32 + 1)

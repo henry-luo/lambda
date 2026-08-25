@@ -295,7 +295,7 @@ static inline bool lambda_item_uses_scalar_home(Item item) {
     // home protocol covers exactly int64, uint64 and cell-backed (tiny) floats.
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT64 || type == LMD_TYPE_UINT64) return true;
-    return (type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64) &&
+    return type == LMD_TYPE_FLOAT &&
         !(item.item & ITEM_DBL_MASK) && item.item != ITEM_FLOAT_P0 &&
         item.item != ITEM_FLOAT_N0;
 }
@@ -579,7 +579,7 @@ static inline bool array_native_lane_store(Array* array, int64_t index, Item val
             array->items[index] = {.item = FLOAT_LANE_NULL_BITS};
             return true;
         }
-        if (value_type != LMD_TYPE_FLOAT && value_type != LMD_TYPE_FLOAT64) return false;
+        if (value_type != LMD_TYPE_FLOAT) return false;
         array->items[index] = {.item = lambda_float_lane_from_double(value.get_double())};
         return true;
     case LANE_STORAGE_ITEM:

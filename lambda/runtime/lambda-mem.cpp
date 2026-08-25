@@ -559,7 +559,7 @@ extern "C" void heap_unregister_gc_weak(uint64_t* slot) {
 
 void* heap_alloc(int size, TypeId type_id) {
     if (type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
-            type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+            type_id == LMD_TYPE_FLOAT) {
         log_error("heap-scalar-invariant: rejected scalar allocation type=%u",
             (unsigned)type_id);
         abort();
@@ -577,7 +577,7 @@ void* heap_alloc(int size, TypeId type_id) {
 // declared extern "C" to allow calling from C code (path.c)
 extern "C" void* heap_calloc(size_t size, TypeId type_id) {
     if (type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
-            type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+            type_id == LMD_TYPE_FLOAT) {
         log_error("heap-scalar-invariant: rejected scalar calloc type=%u",
             (unsigned)type_id);
         abort();
@@ -628,7 +628,7 @@ extern "C" void* heap_calloc_class(size_t size, TypeId type_id, int cls) {
         return NULL;
     }
     if (type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
-            type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+            type_id == LMD_TYPE_FLOAT) {
         log_error("heap-scalar-invariant: rejected scalar class allocation type=%u",
             (unsigned)type_id);
         abort();
@@ -1018,8 +1018,7 @@ extern "C" Item lambda_item_adopt_scalar_home(Item item, uint64_t* home) {
     case LMD_TYPE_UINT64:
         *(uint64_t*)home = item.get_uint64();
         return {.item = u2it((uint64_t*)home)};
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
+    case LMD_TYPE_FLOAT: {
         double value = item.get_double();
         memcpy(home, &value, sizeof(value));
         return lambda_float_ptr_to_item((double*)home);

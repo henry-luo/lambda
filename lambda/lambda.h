@@ -96,15 +96,14 @@ enum EnumTypeId {
     LMD_TYPE_INT64,  // int literal, 64-bit
     LMD_TYPE_UINT64, // unsigned 64-bit integer (number-home or owned pointer)
     LMD_TYPE_FLOAT,  // float literal, 64-bit
-    LMD_TYPE_FLOAT64, // legacy reserved tag; f64 syntax canonicalizes to LMD_TYPE_FLOAT
     LMD_TYPE_DECIMAL,
+    // A GC-managed pair of binary64 components.  It is a direct pointer Item
+    // so the payload stays distinct from the self-tagged float encoding.
+    LMD_TYPE_COMPLEX,
     LMD_TYPE_DTIME,
     LMD_TYPE_SYMBOL,
     LMD_TYPE_STRING,
     LMD_TYPE_BINARY,
-    // A GC-managed pair of binary64 components.  It is a direct pointer Item
-    // so the payload stays distinct from the self-tagged float encoding.
-    LMD_TYPE_COMPLEX,
 
     // Path type for file/URL paths
     LMD_TYPE_PATH,  // segmented path with scheme (file, http, https, sys, etc.)
@@ -208,7 +207,6 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_INT), "int tag must be non-
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_INT64), "int64 tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_UINT64), "uint64 tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_FLOAT), "float tag must be non-double");
-LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_FLOAT64), "float64 tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_DECIMAL), "decimal tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_DTIME), "datetime tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_SYMBOL), "symbol tag must be non-double");
@@ -1387,7 +1385,7 @@ static inline bool is_numeric_type_id(TypeId type_id) {
 // `em_scalar_return_mode_for_type()` defers to it, and the C-side sys-func
 // metadata fallback in mir.c uses it directly, so the two cannot drift.
 static inline bool lambda_type_id_may_be_wide_scalar(TypeId type_id) {
-    return type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64 ||
+    return type_id == LMD_TYPE_FLOAT ||
            type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
            type_id == LMD_TYPE_ANY;
 }
@@ -1402,7 +1400,7 @@ static inline bool is_integer_type_id(TypeId type_id) {
 }
 
 static inline bool is_float_type_id(TypeId type_id) {
-    return type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64;
+    return type_id == LMD_TYPE_FLOAT;
 }
 
 static inline bool is_native_numeric_or_bool_type_id(TypeId type_id) {
@@ -1504,23 +1502,22 @@ LAMBDA_STATIC_ASSERT((uint8_t)(ITEM_JS_DELETED_SENTINEL >> 56) != (uint8_t)ITEM_
                      "storable JS sentinels must not share the pending high byte");
 LAMBDA_STATIC_ASSERT(PENDING_KIND_FLOAT <= PENDING_KIND_MASK,
                      "pending kinds must fit the reserved low bits");
-// The four wide-scalar tags are CONTIGUOUS, and the JIT's pending-pair builder
-// depends on it: `(unsigned)(tag - LMD_TYPE_INT64) <= 3` is the whole fast-path
+// The three wide-scalar tags are CONTIGUOUS, and the JIT's pending-pair builder
+// depends on it: `(unsigned)(tag - LMD_TYPE_INT64) <= 2` is the whole fast-path
 // test, and `tag - LMD_TYPE_INT64` IS the pending kind for the two integer
 // tags. Reordering EnumTypeId without preserving this run silently
 // mis-classifies returns, so pin it here.
 LAMBDA_STATIC_ASSERT(LMD_TYPE_UINT64 == LMD_TYPE_INT64 + 1 &&
-                     LMD_TYPE_FLOAT == LMD_TYPE_INT64 + 2 &&
-                     LMD_TYPE_FLOAT64 == LMD_TYPE_INT64 + 3,
+                     LMD_TYPE_FLOAT == LMD_TYPE_INT64 + 2,
                      "wide scalar tags must stay contiguous from LMD_TYPE_INT64");
 LAMBDA_STATIC_ASSERT((uint64_t)(LMD_TYPE_INT64 - LMD_TYPE_INT64) == PENDING_KIND_INT64 &&
                      (uint64_t)(LMD_TYPE_UINT64 - LMD_TYPE_INT64) == PENDING_KIND_UINT64,
                      "integer pending kinds must equal their tag offset");
-// Tags 0x06-0x09 have bits 6 and 5 clear, so an Item whose high byte lands in
+// Tags 0x06-0x08 have bits 6 and 5 clear, so an Item whose high byte lands in
 // the wide-scalar run can never be an inline double. The pair builder relies on
 // that to skip the ITEM_DBL_MASK test on the wide arm.
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)LMD_TYPE_INT64) &&
-                     ITEM_TAG_IS_NON_DOUBLE((uint8_t)LMD_TYPE_FLOAT64),
+                     ITEM_TAG_IS_NON_DOUBLE((uint8_t)LMD_TYPE_FLOAT),
                      "wide scalar tags must be outside inline-double space");
 
 static inline void lambda_item_debug_trap(void) {
@@ -1769,8 +1766,6 @@ inline uint64_t b2it(uint8_t bool_val) {
 #define bi2it(decimal_ptr)   c2it(decimal_ptr)
 #define l2it(long_ptr)       lambda_int64_ptr_to_item_bits((const int64_t*)(long_ptr))
 #define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
-// f64 is a type-language alias for binary64; runtime Items use canonical float encoding.
-#define f642it(double_ptr)   lambda_float_ptr_to_item(double_ptr)
 
 #ifdef __cplusplus
 static inline Item lambda_float_ptr_to_item(const double* double_ptr);

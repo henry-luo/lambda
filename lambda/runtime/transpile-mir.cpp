@@ -4787,8 +4787,7 @@ static MIR_reg_t emit_load_const_boxed(MirTranspiler* mt, int const_index, TypeI
         return emit_box_string(mt, ptr);
     case LMD_TYPE_SYMBOL:
         return emit_box_symbol(mt, ptr);
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
+    case LMD_TYPE_FLOAT: {
         // f64 is a source-level alias; emit the canonical runtime float tag.
         return emit_box_tagged_const_ptr(mt, ptr, LMD_TYPE_FLOAT, "boxd");
     }
@@ -5791,7 +5790,7 @@ static LambdaNumericKind mir_bitwise_kind_from_type_id(TypeId type_id) {
     case LMD_TYPE_INT: return LAMBDA_NUM_INT;
     case LMD_TYPE_INT64: return LAMBDA_NUM_I64;
     case LMD_TYPE_UINT64: return LAMBDA_NUM_U64;
-    case LMD_TYPE_FLOAT: case LMD_TYPE_FLOAT64: return LAMBDA_NUM_FLOAT;
+    case LMD_TYPE_FLOAT: return LAMBDA_NUM_FLOAT;
     default: return LAMBDA_NUM_INVALID;
     }
 }
@@ -19606,16 +19605,6 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
             MIR_reg_t reg = new_reg(mt, "fconst", MIR_T_I64);
             // Literal floats already have a stable TypeFloat slot, so emit the
             // canonical Item bits directly instead of re-tagging the const pointer.
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, reg),
-                MIR_new_int_op(mt->ctx, (int64_t)encoded.item)));
-            return reg;
-        }
-        case LMD_TYPE_FLOAT64: {
-            TypeFloat* t = (TypeFloat*)node->type;
-            Item encoded = lambda_float_ptr_to_item(&t->double_val);
-            MIR_reg_t reg = new_reg(mt, "fconst", MIR_T_I64);
-            // f64 is an alias for runtime float Items; keep its literal encoding
-            // identical to float so equality and unboxing see one canonical shape.
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, reg),
                 MIR_new_int_op(mt->ctx, (int64_t)encoded.item)));
             return reg;

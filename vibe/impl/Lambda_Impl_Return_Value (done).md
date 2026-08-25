@@ -1313,11 +1313,11 @@ so a forward contract can never promise the home while the body returns a
 pair (the v27 havlak mismatch class).
 
 **`em_build_pending_pair`** (`mir_emitter_shared.hpp`) came out considerably
-cheaper than the plan's "reduced classify" estimate. The four wide tags are
-CONTIGUOUS (`LMD_TYPE_INT64`=6 … `LMD_TYPE_FLOAT64`=9), so one `sub` plus one
+cheaper than the plan's "reduced classify" estimate. The three wide tags are
+CONTIGUOUS (`LMD_TYPE_INT64`=6 … `LMD_TYPE_FLOAT`=8), so one `sub` plus one
 unsigned `ubgt` rejects every packed int, bool, null, string, container and
 inline double at once, and `tag - LMD_TYPE_INT64` *is* the pending kind for
-the two integer tags. Tags 0x06–0x09 also have the double-discriminator bits
+the two integer tags. Tags 0x06–0x08 also have the double-discriminator bits
 clear, so the wide arm needs no `ITEM_DBL_MASK` test at all. Measured on a
 real dump: **12 static instructions, 5 on the fast path** (`mov`, `mov`,
 `ursh`, `sub`, `ubgt`) versus the v2 cluster's 20 static / 11–16 dynamic plus

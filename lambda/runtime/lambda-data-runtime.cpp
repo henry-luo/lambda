@@ -918,7 +918,6 @@ void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
     // Convert item to double based on its type
     switch (type_id) {
         case LMD_TYPE_FLOAT:
-        case LMD_TYPE_FLOAT64:
             dval = value.get_double();
             break;
         case LMD_TYPE_INT64:
@@ -2370,7 +2369,6 @@ static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
         return Item{.item = u2it(field_ptr)};
     }
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
         return lambda_float_ptr_to_item((double*)field_ptr);
     case LMD_TYPE_DTIME:
         return {.item = k2it(*(DateTime**)field_ptr)};

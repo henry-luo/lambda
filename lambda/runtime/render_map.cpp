@@ -579,7 +579,7 @@ static int render_map_flattened_scalar_tail_count(Item node, int depth) {
     }
     TypeId type_id = get_type_id(node);
     return type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
-           type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64 ? 1 : 0;
+           type_id == LMD_TYPE_FLOAT ? 1 : 0;
 }
 
 static int64_t render_map_store_flattened_children(List* parent, int64_t index,

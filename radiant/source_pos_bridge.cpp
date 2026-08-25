@@ -608,7 +608,7 @@ static bool source_position_index_from_item(ItemReader value,
         *out = (uint32_t)unsigned_value; // INT_CAST_OK: validated source coordinate is uint32_t-bounded.
         return true;
     }
-    if (type != LMD_TYPE_FLOAT && type != LMD_TYPE_FLOAT64 &&
+    if (type != LMD_TYPE_FLOAT &&
         type != LMD_TYPE_NUM_SIZED) {
         return false;
     }

@@ -1272,7 +1272,7 @@ extern "C" Item js_set(Item target, JsPropertyLane lane, Item observable_key,
     bool primitive_target = target_type == LMD_TYPE_BOOL ||
         target_type == LMD_TYPE_NUM_SIZED || target_type == LMD_TYPE_INT ||
         target_type == LMD_TYPE_INT64 || target_type == LMD_TYPE_UINT64 ||
-        target_type == LMD_TYPE_FLOAT || target_type == LMD_TYPE_FLOAT64 ||
+        target_type == LMD_TYPE_FLOAT ||
         target_type == LMD_TYPE_DECIMAL || target_type == LMD_TYPE_SYMBOL ||
         target_type == LMD_TYPE_STRING;
     if (primitive_target) {
