@@ -2711,7 +2711,14 @@ static MIR_reg_t emit_variadic_args(MirTranspiler* mt, AstNode** resolved_args,
             int val_root = create_gc_root_slot(mt, val);
             val = load_gc_root_slot(mt, val_root, "varg_val");
             vargs_reg = load_gc_root_slot(mt, vargs_root, "vargs_live");
-            emit_call_void_2(mt, "list_push",
+            // An argument list is not element content. `list_push` applies
+            // S16.7's content rules — it drops `null` outright and
+            // concatenates a string onto the previous element — which
+            // silently collapsed f("a","b") to ["ab"] and f(1,null,2) to
+            // [1,2], losing both arity and values. `array_push` appends
+            // verbatim; it keeps the same content-list flattening, so only
+            // the normalization this list never wanted is dropped.
+            emit_call_void_2(mt, "array_push",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, vargs_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
         }
@@ -28023,8 +28030,7 @@ static bool interp_script_needs_large_stack(const Script* script) {
 }
 #endif
 
-Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main,
-                      bool compile_only) {
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main) {
     log_notice("Running script with MIR JIT compilation (direct)");
 
     // Initialize runner
@@ -28064,12 +28070,6 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
     // interpreter's job. Imports still fall back to JIT in P0/P1, so a planned
     // main script with an import cone is not yet reachable (P1.5).
     if (runner.script->interp_supported) {
-        if (compile_only) {
-            Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
-            Input* output = Input::create(output_pool, nullptr);
-            if (output) output->root = ItemNull;
-            return output;
-        }
         runner_setup_context(&runner);
         if (!runner.context) return nullptr;
         Item result;
@@ -28109,20 +28109,6 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, b
         Pool* error_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
         Input* output = Input::create(error_pool, nullptr);
         if (output) output->root = ItemError;
-        return output;
-    }
-
-    if (compile_only) {
-        // --transpile-only: the script and its whole import cone are compiled
-        // and their MIR artifacts written, so stop before any user code runs.
-        Pool* output_pool = mem_pool_create(NULL, MEM_ROLE_AST, "script.result");
-        Input* output = Input::create(output_pool, nullptr);
-        if (!output) {
-            log_error("Failed to create compile-only output Input");
-            if (output_pool) pool_destroy(output_pool);
-            return nullptr;
-        }
-        output->root = ItemNull;
         return output;
     }
 

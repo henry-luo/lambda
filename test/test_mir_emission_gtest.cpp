@@ -1,7 +1,7 @@
 // test_mir_emission_gtest.cpp
 //
 // Lambda MIR emission fixtures (MT1). Every `test/mir/lambda/*.ls` script is
-// compiled with --transpile-only and its finalized MIR artifact is checked
+// run through the normal CLI path and its finalized MIR artifact is checked
 // against the matching `.mir-check` sidecar.
 //
 // See vibe/Lambda_Design_MIR_Emission_Test.md and test_mir_check_helpers.hpp.

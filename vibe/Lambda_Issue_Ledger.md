@@ -32,12 +32,12 @@ Counts:
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 9 | 9 |
 | LR_07 | MIR Direct transpiler & JIT | 13 | 1 | 2 | 16 |
 | LR_08 | Memory management & GC | 10 | 0 | 0 | 10 |
-| LR_09 | Runtime builtins | 8 | 0 | 2 | 10 |
+| LR_09 | Runtime builtins | 7 | 0 | 3 | 10 |
 | LR_10 | Error handling | 5 | 1 | 2 | 8 |
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 7 | 0 | 0 | 7 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
-| **Total** | | **96** | **10** | **33** | **139** |
+| **Total** | | **95** | **10** | **34** | **139** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -663,29 +663,6 @@ by reading the commented-out block, the "transpiler special case" notes, and the
 `NULL` pointers.
 
 
-<a id="lr09-9"></a>**LR09-9 · `varg()` applies content normalization to the argument list · OPEN**
-*Found 2026-08-25 while repairing `test/std/core/functions/variadic_args.ls`; pre-existing (reproduced at clean HEAD).*
-A variadic function's arguments are collected as **element content** rather than
-as a plain array, so S16.7's content rules — adjacent strings merged, nulls
-stripped — are applied to them:
-
-| Call (`fn n(...) => varg()`) | Result | Expected |
-|---|---|---|
-| `n("a", "b")` | `["ab"]` | `["a", "b"]` |
-| `n("a", "b", "c")` | `["abc"]` | `["a", "b", "c"]` |
-| `n("a", null, "b")` | `["ab"]` | `["a", null, "b"]` |
-| `n(1, null, 2)` | `[1, 2]` | `[1, null, 2]` |
-| `n("a", 1, "b")` | `["a", 1, "b"]` | ✓ (non-adjacent strings survive) |
-
-Numeric arguments are unaffected, which is why it went unnoticed: every
-variadic example in the docs and tests sums numbers. `len(varg())` is the
-quickest tell — it reports 1 for `n("a","b")`.
-
-S16.7 governs the **script top level**, and containers explicitly do *not*
-normalize; an argument list is neither, so the normalization has no ruling
-behind it here. Fixing it means collecting varargs as a plain array rather
-than through the content builder.
-
 ---
 
 ## 10. Error handling (LR_10)
@@ -1266,6 +1243,30 @@ an edge-case table and the `doc/Lambda_Cheatsheet.md` defect note is removed.
 Note the original ledger table's expected value for `split("a1b22c3", \(d+))`
 was internally inconsistent — it omitted the trailing empty segment that the
 spec and the sibling `\(d)` row require.
+
+<a id="lr09-r3"></a>**LR09-R3 · `varg()` applies content normalization to the argument list · RESOLVED**
+A variadic call collected its rest arguments with `list_push`, which applies
+S16.7's content rules: `null` is dropped outright (`collection_runtime.cpp:286`)
+and a string is concatenated onto the previous element unless the eval context
+suspends merging. An argument list is neither the script top level nor a
+container, so neither rule had a ruling behind it — and both destroy arity:
+`n("a","b")` arrived as `["ab"]`, `n(1,null,2)` as `[1,2]`, and
+`n("x",null,"y")` as `["xy"]`, three arguments collapsed into one. Numeric
+arguments are unaffected, which is why it survived: every variadic example in
+the docs and tests summed numbers, and `len(varg())` was the only quick tell.
+
+Both builders now append with `array_push`, which writes the item verbatim:
+`emit_variadic_args` (`transpile-mir.cpp`) for the MIR tier, and the
+dynamic-call adapter (`lambda-eval.cpp:1231`) for T0 and `call()`. `array_push`
+keeps the same content-list flattening as `list_push`, so the change removes
+exactly the normalization this list never wanted and nothing else — an argument
+that *is* a content list still arrives as one value
+(`n(for (x in [1,2]) x)` → `[[1, 2]]`).
+
+Verified on both tiers, including `varg(i)` indexing, a fixed-plus-rest
+signature, an all-`null` argument list, and `call()` (S12.3.4), which shares the
+adapter. `test/std/core/functions/variadic_args.ls` loses the note that kept it
+to numeric arguments and now covers the string/`null` cases directly.
 
 ---
 

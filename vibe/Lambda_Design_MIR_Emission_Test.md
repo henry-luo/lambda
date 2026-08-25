@@ -8,8 +8,8 @@ finalized; its future direction is documented, but it is not an implementation
 phase or current acceptance gate. MT6 remains optional behind a coupling spike.
 MT8 and OQ3 (Python/Bash/Ruby scope) remain deferred.
 
-**P1, P2 and P3 are IMPLEMENTED (2026-07-22).** The MT2 artifact contract, a real
-MIR-Direct `--transpile-only`, the MT1 harness with its baseline drivers, the
+**P1, P2 and P3 are IMPLEMENTED (2026-07-22).** The MT2 artifact contract, the
+MT1 harness with its baseline drivers, the
 MT7 zero-slack ratchet, an 11-fixture MT5 corpus, and the retirement of the
 four orphaned `.transpile` files are landed and green inside
 `make test-lambda-baseline` (3533/3533), verified against both a debug and a
@@ -112,12 +112,9 @@ Facts that shape the design:
 - JS runs must also set `LAMBDA_DISABLE_MIR_CACHE=1` — a module-cache hit
   skips emission and the dump is stale/absent (recipe from
   `Lambda_Stack_JS_MIR.md` §18).
-- There is **no MIR-Direct dump-without-execute CLI mode**: `--transpile-only` is parsed
-  (`lambda/main.cpp:4812`, `LAMBDA_C2MIR`-gated) but ignored by
-  `run_script_file` (`lambda/main.cpp:820–827`). Although the dump currently
-  lands before execution, relying on that while accepting a crashing child can
-  let a partial dump satisfy substring checks. P1 makes compile-only real for
-  Lambda; the harness never accepts nonzero exit codes by default.
+- There is **no MIR-Direct dump-without-execute CLI mode**. The normal Lambda
+  and JS paths emit their canonical dump before execution, and the harness
+  requires a successful child exit so a partial dump cannot satisfy checks.
 
 ### 2.2 Existing MIR-assertion precedent (ad hoc)
 
@@ -297,10 +294,9 @@ Rationale: `make build-test` pairs debug test exes with a **release**
 item_repr test needs `GTEST_SKIP()`. Emission tests must not silently skip in
 the configuration CI actually runs.
 
-Make `--transpile-only` real for Lambda MIR-Direct in P1 — thread the flag
-through `run_script_file` to a compile-only MIR-Direct path. JS fixtures still
-execute in v1 and therefore must exit successfully; a JS compile-only entry
-point can be added later if execution cost or side effects justify it.
+Use the normal Lambda execution path for emission fixtures. The canonical dump
+is produced before execution, while the harness still requires successful
+execution so emission checks cannot accept a partial run.
 
 The active MT1/MT7 corpus is deliberately single-module. A multi-artifact dump
 directory/callback for imported modules and batch processes is deferred with
@@ -324,9 +320,9 @@ when all of these entry criteria hold:
 3. A spike proves that the selected artifact can be loaded losslessly with
    `MIR_scan_string`, including reliable error capture. `MIR_scan_string`
    returns `void`, so successful loading and diagnostics must be made explicit.
-4. The compiler exposes a compile-only live-context visitor if text rescanning
-   is not lossless. The current `runner_init` + `run_script` path is not such a
-   fallback because it returns `Input*`, not the `Script`/MIR context.
+4. The compiler exposes an emission callback or live-context visitor if text
+   rescanning is not lossless. The current `runner_init` + `run_script` path is
+   not such a fallback because it returns `Input*`, not the `Script`/MIR context.
 5. Multi-compilation processes have a real artifact sink — for example a dump
    directory with unique `(frontend, module, pid, sequence)` filenames or an
    emission callback. Reusing one `LAMBDA_MIR_DUMP_PATH` would overwrite every
@@ -587,7 +583,7 @@ exhaustive proof over all emitted functions or CFG paths.
 
 | Phase | Content | Notes |
 |---|---|---|
-| **P1 — DONE 2026-07-22** | MT2 canonical/private dump contract + real Lambda MIR-Direct compile-only + MT1 harness + first 5 MT5 fixtures | Landed green in `test-lambda-baseline`; see §8. The item_repr *window* assertion stayed in `test_item_repr_gtest.cpp` (§8.3) |
+| **P1 — DONE 2026-07-22** | MT2 canonical/private dump contract + MT1 harness + first 5 MT5 fixtures | Landed green in `test-lambda-baseline`; see §8. The item_repr *window* assertion stayed in `test_item_repr_gtest.cpp` (§8.3) |
 | **P2 — DONE 2026-07-22** | MT7 zero-slack ratchet (10 probes) + revived `.transpile` cases + MT5 grown to 11 fixtures | Green on debug and release hosts; see §9 |
 | **P3 — DONE 2026-07-22** | MT4 forced-GC stress sweep over the corpus, cost-measured and promoted to baseline | 7.8s, stable across runs; see §10. Shadow mode remains diagnostic and ungated |
 | **P4** | MT6 spike; drop it if coupling is deep or MT1 already supplies sufficient coverage | Optional helper-level unit tier |
@@ -634,7 +630,7 @@ acceptance gate depends on either one.
 | JS/TS frontends | Both dump sites route through `mir_dump_finalized`, honor `LAMBDA_MIR_DUMP_PATH` in every build, and obey `--no-log`. This also removed two copy-pasted NULL-label pre-scans (a third would have been added for Lambda) |
 | Guest frontends | Python/Bash/Ruby dumps now obey the `--no-log` master gate (still debug-only, still default-path — OQ3 unchanged) |
 | Telemetry | `LAMBDA_MIR_LOG_FRAME_SLOTS` reads are gated on the master switch at both sites in `mir_emitter_shared.hpp` |
-| Compile-only | `--transpile-only` moved out of the `LAMBDA_C2MIR` block and threaded through `run_script_file` → `run_script_mir(..., compile_only)`. It compiles the script and its whole import cone, writes the artifact, prints nothing, and exits 0 |
+| Execution path | Lambda emission fixtures use the normal CLI path with `--tier=jit`; finalized MIR is checked after a successful child run |
 | Harness | `test/test_mir_check_helpers.hpp` — self-contained JSON reader, whole-context dump parser, sidecar validation, evaluator, diagnostics, fixture discovery |
 | Drivers | `test/test_mir_emission_gtest.cpp`, `test/test_js_mir_emission_gtest.cpp`, both registered in the `lambda` suite (category `baseline`, `requires_lambda_exe`) |
 | Fixtures | `test/mir/lambda/{scalar_home_donation,scalar_home_tail_forward,sized_int_boxing}`, `test/mir/js/{numeric_inference_call,hoisted_modvar_write_through}`, each with a `.mir-check` sidecar |
@@ -703,8 +699,8 @@ constructing one deliberately is P2 work rather than a guessed assertion.
 building tests and `mv`s it back afterwards, but the restore fired on the
 backup file merely *existing*. A stale backup from an earlier interrupted run
 silently replaced a freshly built `lambda.exe` with an older binary, which
-presented as "`--transpile-only` is an unknown option" long after that flag
-was implemented — the symptom points at the source, not the build system, so
+presented as an unknown emission option long after the implementation had
+changed — the symptom points at the source, not the build system, so
 it costs real debugging time.
 
 Fixed by clearing the backup at the start of `build-test`, which makes "the
