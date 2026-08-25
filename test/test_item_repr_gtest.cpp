@@ -1060,7 +1060,11 @@ TEST(ItemRepresentation, MirMemberAccessUsesPackedFieldWithoutReconstruction) {
         {NULL, NULL},
     };
     const char* args[] = {
-        "./lambda.exe", "test/lambda/item_repr_container_member_load.ls", NULL,
+        // This test asserts the SHAPE of emitted MIR, so it must pin the JIT
+        // tier: under the default LAMBDA_TIER_AUTO an eligible script is
+        // planned for the T0 interpreter and no MIR is emitted at all.
+        "./lambda.exe", "--tier=jit",
+        "test/lambda/item_repr_container_member_load.ls", NULL,
     };
     ShellOptions options = {0};
     options.env = env;

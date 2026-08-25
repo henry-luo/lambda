@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 14.1.0 (2026-08-24)
+**Spec version:** 15.1.0 (2026-08-25)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -87,6 +87,18 @@ Standing invariants distilled from the rulings — the checkable face of the
 principles. Any observed violation is a bug, never a semantics change; the
 representation-facing subset is verified by the differential and forced-GC
 harnesses.
+
+- **S1.11 — References, not authorities.** When a system function's semantics
+  are otherwise under-determined, resolve them by consulting **ECMAScript
+  first, Python second**. Both are references, not authorities: Lambda departs
+  from either whenever a Lambda principle (S1.1–S1.10), an existing Lambda
+  ruling, or internal consistency with a sibling operation says otherwise, and
+  the departure is then recorded as a ruling rather than left implicit. A
+  *hosted* language keeps its own specification — LambdaJS follows ECMAScript
+  and the Python guest follows CPython regardless of what Lambda chose for the
+  same-named Lambda builtin. Two orderings are settled by this: closing an
+  under-determined edge case beats inventing one, and matching a sibling
+  Lambda operation beats matching the reference. [S17]
 
 - **SI1 — Boxing invisibility.** Representation choices — tagging, unboxed
   arrays, decimal width, lane selection — never affect results. [S1.6]
@@ -1187,6 +1199,15 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 - **S12.1.3** Reactive templates are the doctrine applied: template body =
   pure `fn` transformation; mutation only in `on` handlers (`pn`) — the Elm
   architecture enforced by the effect bit. [Features §3.7]
+- **S12.1.4*** **Effect polymorphism, admitted narrowly.** A function may
+  take its colour from an argument rather than declaring one. `call` (S12.3.4)
+  is the first and, for now, only such function: `call(f, args)` is `fn` when
+  `f` is `fn` and `pn` when `f` is `pn`. The colour is resolved **statically
+  whenever `f`'s is statically known**, and checked at **run time** otherwise
+  — a dynamic callee is exactly the case where the bit cannot be read off the
+  source. This is the minimal instance of SO28's pure-iff-argument-pure
+  polymorphism; it does not generalize to user-declared signatures, which
+  still carry one declared bit each (S12.1.1).
 
 ### S12.2 Assignment
 
@@ -1217,6 +1238,28 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   builtin accepts the receiver as its first argument and returns its own
   result rather than erroring. The shadow-proof accessor for intrinsic names
   remains `name(item)` (S15.4).
+
+- **S12.3.4*** **`call(f, args)` is the dynamic-application form.** It
+  applies `f` to the members of the array `args` as individual arguments,
+  and is the sanctioned way to forward a collected argument list — notably
+  `fn outer(...) => call(inner, varg())`, which nothing else expresses when
+  `inner` is itself variadic. Its colour follows `f` (S12.1.4). Three
+  consequences follow from its being dynamic by construction, and are
+  accepted rather than worked around: arity is checked at run time, not
+  statically (S12.3.1 still bounds the callee's own slots); the result type
+  is `any`; and the call takes the dynamic ABI, not a direct-call fast path.
+  A `pn` target reached from `fn` context is an error — statically when `f`'s
+  colour is known, at run time otherwise. Error convention follows the
+  resolved colour: an `fn`-coloured `call` **returns** an error value, a
+  `pn`-coloured `call` **raises**. `args` must be an array; any other type is
+  an error.
+- **S12.3.5*** **Spread does not expand into an argument list.** `*x`
+  splices where a **container** is being built — array, list, and map
+  literals (S16.8.6) — and nowhere else; in argument position it passes its
+  operand as one value. The expansion was considered and **rejected**: it
+  would need call-site syntax and semantics of its own, cost the static
+  arity check that S12.3.1 relies on, and silently divert calls to the
+  dynamic ABI, all for a case `call` already covers generally.
 
 ### S12.4 Resources
 
@@ -1682,6 +1725,37 @@ below by its section.
 
 ---
 
+## S17 System Library
+
+Per-builtin semantics that the general rules above do not already fix. S1.11
+governs how an under-determined case here is resolved.
+
+### S17.1 String splitting
+
+- **S17.1.1** **`split` follows ECMAScript `String.prototype.split`.** The
+  delimiter may be a string or a pattern, and both spellings obey one rule set:
+  a match consumes its span and opens a new segment; the segment before the
+  first match and after the last are both emitted, so a leading or trailing
+  delimiter yields an empty string at that end (`split(",a,b", ",")` is
+  `["", "a", "b"]`, `split("a1b1", \(d))` is `["a", "b", ""]`); a subject with
+  no match yields a one-element result holding the whole subject. In
+  particular Lambda adopts ECMAScript's `e == p` rule: **a match whose end
+  lands on the current segment's start contributes no segment and only
+  advances the search.** That rule is what suppresses the leading and trailing
+  empties of a zero-width delimiter, so `split("ab", \(d*))` is `["a", "b"]`
+  where Python's `re.split` would give `['', 'a', 'b', '']`. A zero-width
+  advance steps a whole codepoint, never a byte. An **empty subject** yields
+  `[]` when the delimiter matches the empty string and `[""]` otherwise
+  (`split("", ",")` is `[""]`, `split("", \(d*))` is `[]`).
+  The Python-shaped whitespace form `split(str, null)` — runs of whitespace,
+  outer whitespace stripped — has no ECMAScript analogue and is retained.
+  Deciding this by S1.11 was over-determined: ECMAScript and Lambda's own
+  empty-**string** delimiter (`split("ab", "")` = `["a", "b"]`) already agreed,
+  so following Python would have made the pattern path disagree with its own
+  sibling. [S1.11, LR09-8]
+
+---
+
 ## Appendix A — Implementation Footnotes
 
 Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
@@ -1780,7 +1854,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 **Sys funcs and surface**
 - **SO26** RF6 mutator convention: updated-owner vs unit; and `splice`'s public result (owner / unit / removed members).
 - **SO27** Whether debug logging inside `fn` is a permitted non-observable effect — the purity boundary's one undefined edge; best pre-decided before users ask. [Features §3.6]
-- **SO28** Effect polymorphism (pure-iff-argument-pure HOFs) — dodged by convention; Flix-style Boolean effect polymorphism is the recorded minimal fix.
+- **SO28** Effect polymorphism (pure-iff-argument-pure HOFs) — still dodged by convention for user-declared signatures; Flix-style Boolean effect polymorphism remains the recorded minimal fix. **Partially answered 2026-08-24**: S12.1.4 admits the first effect-polymorphic function, `call` (S12.3.4), whose colour follows its first argument, resolved statically where possible and checked at run time otherwise. Whether that mechanism should be exposed to user signatures — letting an HOF declare "pure iff its function argument is pure" — is the part that stays open.
 - **SO29** File write/append syntax (C6a: `into`/`onto` candidates); string interpolation syntax (note the `$` collision with quote splices); a set type; `assert`/`expect` unification.
 - **SO31** The `<file>` element shape (name/size/mime, content as child) — pin with file-I/O spec.
 - **SO32** Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns.
@@ -1795,7 +1869,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 
 | Section | Records | Where argued |
 |---|---|---|
-| S1 principles | C1–C17 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
+| S1 principles | C1–C18 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
 | S2 value domain | C1, C1.6a, C2, C8.6-R; PTH1v2, PTH2v2, PTH3–PTH29 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md` |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
@@ -1811,6 +1885,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
 | S16 surface syntax | Design_Syntax §3–§5 (18 decided points) | `Lambda_Design_Syntax.md` |
+| S17 system library | C18 | `Lambda_Semantics_Formal2.md` |
 
 The decision records preserve the full deliberations — every alternative that
 lost and the arguments that did not persuade. This specification is their

@@ -350,7 +350,10 @@ void jm_writeback_scope_env_pattern_bindings(JsMirTranspiler* mt, JsAstNode* pat
 void jm_collect_param_default_refs(JsAstNode* params, struct hashmap* refs);
 void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
                                 struct hashmap* module_consts,
-                                struct hashmap* ancestor_func_locals);
+                                struct hashmap* ancestor_func_locals,
+                                bool captures_with_scope);
+bool jm_ast_contains_node(JsAstNode* root, JsAstNode* target);
+bool jm_ast_node_has_with_ancestor(JsAstNode* root, JsAstNode* target);
 JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
     MIR_type_t ret_type, int nargs, MIR_var_t* args, int nres);
 JsMirImportEntry* jm_ensure_import_ii_i(JsMirTranspiler* mt, const char* name);

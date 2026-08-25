@@ -25,19 +25,19 @@ Counts:
 | Source doc | Area | Open | Partial | Resolved | Total |
 |---|---|---:|---:|---:|---:|
 | LR_01 | Compilation pipeline, CLI & REPL | 11 | 2 | 2 | 15 |
-| LR_02 | Parsing & AST construction | 5 | 4 | 9 | 18 |
+| LR_02 | Parsing & AST construction | 6 | 4 | 10 | 20 |
 | LR_03 | Value & type model | 6 | 1 | 2 | 9 |
 | LR_04 | Numbers, decimal & datetime | 8 | 0 | 0 | 8 |
 | LR_05 | Strings, symbols & vectors | 7 | 1 | 2 | 10 |
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 9 | 9 |
 | LR_07 | MIR Direct transpiler & JIT | 13 | 1 | 2 | 16 |
 | LR_08 | Memory management & GC | 10 | 0 | 0 | 10 |
-| LR_09 | Runtime builtins | 8 | 0 | 1 | 9 |
+| LR_09 | Runtime builtins | 8 | 0 | 2 | 10 |
 | LR_10 | Error handling | 5 | 1 | 2 | 8 |
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 7 | 0 | 0 | 7 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
-| **Total** | | **95** | **10** | **31** | **136** |
+| **Total** | | **96** | **10** | **33** | **139** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -217,6 +217,47 @@ defensive-recovery arm is gone.
 *Residue:* the cycle guard itself is still a safety net standing in for a
 stronger structural invariant on scope entry lists.
 
+
+<a id="lr02-9"></a>**LR02-9 · Binary `&` / `!` type operators work in pattern position but not in annotation position · OPEN**
+*Found during the 2026-08-24 verification pass; not from the LR_02 section.*
+Intersection (`&`) and exclusion (`!`) parse everywhere `|` does, and evaluate
+**correctly as patterns** — but a declaration annotation rejects them:
+
+| Position | `int \| string` | `int & string` | `int ! string` |
+|---|---|---|---|
+| `x is (…)` | ✓ | ✓ (`false` for `x = 1`) | ✓ (`true` for `x = 1`) |
+| `match { case … }` | ✓ | ✓ | ✓ |
+| `let a: … = 1` | ✓ | `E201: cannot initialize 'a' of type type with int` | same |
+| `fn f(a: …)` | ✓ | `E207: argument 1 expected type, got int` | same |
+
+So the type expression is built, and the pattern path consumes it, but the
+annotation path receives a `LMD_TYPE_TYPE`-tagged *value* instead of a type. The
+asymmetry is visible in the consumers: `pattern_ast_literal_set`
+(`build_ast.cpp:4309`) and `interp_pattern_matches` (`interp.cpp:2013`) each
+branch on `OPERATOR_UNION` **only**, and `OPERATOR_INTERSECT` /
+`OPERATOR_EXCLUDE` (`build_ast.cpp:3713`–`3714`) fall through them — the
+`is`/`match` results above come from a separate `fn_is` path, not these.
+
+Two consequences worth separating: the **capability** gap (annotations cannot
+use `&`/`!`) and the **diagnostic** gap — both errors name the binding or the
+argument, never the unsupported operator, so a reader is sent to the wrong
+place. The diagnostic is the cheap half.
+
+This is the implementation face of **SO9** ("a surface spelling for
+`any \ error`; the `!` exclusion operator route is broken") and of the
+`&`/`!`-unimplemented warning in the string-pattern design record.
+
+
+<a id="lr02-13"></a>**LR02-13 · `call()`'s runtime colour check cannot see closures with a NULL `fn_type` · OPEN**
+*Found 2026-08-25 implementing S12.1.4.* The pn-from-fn check reads the target's
+colour from `Function.fn_type` → `TypeFunc.is_proc`, but `to_closure` and
+`to_closure_named` leave `fn_type` NULL; it is filled only by
+`lambda_function_set_type`. A **dynamically selected** pn target therefore slips
+through: `fn f() => call([p][0], [1])` runs the procedure instead of erroring.
+The static check in `build_ast` covers the ordinary case — a directly named
+target is rejected at compile time — so the gap is confined to a callee the
+static side cannot resolve, which is exactly where S12.1.4 expected the runtime
+check to carry the weight. Fix by populating `fn_type` at closure creation.
 
 ---
 
@@ -622,33 +663,28 @@ by reading the commented-out block, the "transpiler special case" notes, and the
 `NULL` pointers.
 
 
-<a id="lr09-8"></a>**LR09-8 · `split` does not split on a pattern delimiter · OPEN**
-*Found during the 2026-08-24 doc sweep; not from the LR_09 section.*
-`split(str, delim)` is documented to accept "both plain strings and named
-patterns" as the delimiter. It works for a **string** delimiter and silently
-misbehaves for a **pattern** one — the matches are stripped and the remainder is
-returned as a single element, i.e. it behaves like `replace(pattern, "")`:
+<a id="lr09-9"></a>**LR09-9 · `varg()` applies content normalization to the argument list · OPEN**
+*Found 2026-08-25 while repairing `test/std/core/functions/variadic_args.ls`; pre-existing (reproduced at clean HEAD).*
+A variadic function's arguments are collected as **element content** rather than
+as a plain array, so S16.7's content rules — adjacent strings merged, nulls
+stripped — are applied to them:
 
-| Call | Result | Expected |
+| Call (`fn n(...) => varg()`) | Result | Expected |
 |---|---|---|
-| `split("a,b,c", ",")` | `["a", "b", "c"]` | ✓ |
-| `split("a-b-c", "-")` | `["a", "b", "c"]` | ✓ |
-| `split("a1b2c3", \(d))` | `["abc"]` | `["a", "b", "c", ""]` |
-| `split("hello   world", \(s+))` | `["helloworld"]` | `["hello", "world"]` |
-| `split("a1b22c3", \(d+))` | `["abc"]` | `["a", "b", "c"]` |
-| `split("a1b2c3", \(d), true)` | `["a1b2c3"]` | keep-delimiters form; input returned unchanged |
+| `n("a", "b")` | `["ab"]` | `["a", "b"]` |
+| `n("a", "b", "c")` | `["abc"]` | `["a", "b", "c"]` |
+| `n("a", null, "b")` | `["ab"]` | `["a", null, "b"]` |
+| `n(1, null, 2)` | `[1, 2]` | `[1, null, 2]` |
+| `n("a", 1, "b")` | `["a", 1, "b"]` | ✓ (non-adjacent strings survive) |
 
-The failure is silent: the return is a well-formed one-element array, so a caller
-that indexes `[0]` gets a plausible-looking string rather than an error. `len()`
-is the quickest tell — it is `1` for every pattern case above.
+Numeric arguments are unaffected, which is why it went unnoticed: every
+variadic example in the docs and tests sums numbers. `len(varg())` is the
+quickest tell — it reports 1 for `n("a","b")`.
 
-The sibling pattern-aware functions are **correct**, which localises the defect
-to `split`'s delimiter handling rather than to pattern matching itself:
-`replace("a1b2c3", \(d), "X")` → `"aXbXcX"`, and
-`len(find("a1b22c333", \(d+)))` → `3`.
-
-`doc/Lambda_Cheatsheet.md` now shows the intended results with a note pointing
-here, rather than results it does not produce.
+S16.7 governs the **script top level**, and containers explicitly do *not*
+normalize; an argument list is neither, so the normalization has no ruling
+behind it here. Fixing it means collecting varargs as a plain array rather
+than through the content builder.
 
 ---
 
@@ -1025,6 +1061,33 @@ been run and all three were wrong; they now match. Regression test
 `test/lambda/for_at_pairs.ls` + `.txt` pins all six shapes (paired/single `at`,
 `where`, element attrs-vs-children, empty array). Baseline 3868/3868.
 
+<a id="lr02-r10"></a>**LR02-R10 · Spread does not expand into a call's argument list · CLOSED 2026-08-25 (won't fix; `call()` supersedes)**
+*Was LR02-10.* Ruled **container-only** as S12.3.5 rather than implemented.
+
+**Why not.** Expansion needs call-site syntax and semantics of its own, costs
+the static arity check S12.3.1 relies on (a spread's length is unknown until run
+time), and silently diverts calls to the dynamic ABI — a same-source-shape perf
+cliff. Demand was thin: 7 variadic functions and 24 `varg()` sites in the whole
+test corpus, **0** in `lambda/` packages. And `varg()` returns an *array*, so
+forwarding already worked for any callee taking a collection; the only shape
+with no workaround was forwarding to a callee that is itself variadic.
+
+**What replaced it.** `call(f, args)` (S12.3.4) — one registry row over the
+existing `fn_call_into` dynamic ABI, versus three sites that would have had to
+agree forever. Honestly dynamic, so no static guarantee is silently lost, and
+strictly more general: it forwards to fixed-arity and variadic callees alike.
+`fn outer(...) => call(inner, varg())` is the motivating case and works on both
+tiers. S12.1.4 admits `call` as Lambda's first effect-polymorphic function,
+the first partial answer to SO28.
+
+**Follow-through.** Docs corrected in `Lambda_Expr_Stam.md` (the "not yet
+implemented" spread note became the container-only ruling), `Lambda_Func.md`,
+and `Lambda_Sys_Func.md` (new Dynamic Application section).
+`test/std/core/functions/variadic_args.ls` — which never parsed, using a third
+spelling `values...` — is repaired and now covers the forwarding case.
+Regression test `test/lambda/call_dynamic_apply.ls` + `.txt`. Residue tracked as
+LR02-13.
+
 ## A.3 Value & type model (LR_03)
 
 <a id="lr03-r1"></a>**LR03-R1 · Two parallel type vocabularies · RESOLVED**
@@ -1159,6 +1222,50 @@ comparators are markup-parser-only and their Item-level wrappers have no callers
 ([LR05-3](#lr05-3)). Any future
 collation support must be an explicit opt-in governing equality and ordering
 together, not an operator change.
+
+<a id="lr09-r2"></a>**LR09-R2 · `split` does not split on a pattern delimiter · RESOLVED**
+Not a missing implementation: `pattern_split` (`re2_wrapper.cpp:1124`) computed
+the right segments all along, and `list_push` then merged them back together.
+`list_push` concatenates a pushed string onto the previous element unless
+`context->disable_string_merging` is set (`collection_io.cpp:90` — the condition
+does not consult `is_content`, so it applies to every string push). `fn_split`'s
+**string** path suspends merging around its own loop (`lambda-eval.cpp:5553`),
+but the **pattern** path returns before reaching it (`:5530`, and `fn_split3` at
+`:5677`), so every pattern split collapsed into one element. The keep-delimiters
+form was the proof: segments *and* delimiters were all produced correctly, then
+concatenated back into the input verbatim.
+
+`pattern_split` now owns the suspension via an RAII guard, covering both callers
+and restoring the flag on all of its early-return paths.
+
+Fixing that exposed a second, independent defect in the same loop: one `pos`
+cursor served as both the start of the pending segment and the resume point for
+the next search, so a zero-length match's `pos++` stepped the *segment start*
+over a character that then appeared in no segment at all —
+`split("ab", \(d*))` returned `["", "", ""]`, losing `a` and `b`. The cursor is
+now split into `seg_start` and `search`, and a zero-width advance steps a whole
+codepoint so slices stay on character boundaries.
+
+With the segments correct, the zero-width edge was still under-determined —
+Python emits leading/trailing empties there, ECMAScript does not. Ratified as
+**S17.1.1 / S1.11 (spec v15.1.0, decision record C18): `split` follows
+ECMAScript.** The argument was internal rather than comparative: Lambda's own
+empty-*string* delimiter already behaved like JS (`split("ab", "")` =
+`["a", "b"]`), so following Python would have made the pattern path contradict
+its sibling in the same function — the very inconsistency this fix set out to
+remove. `pattern_split` now implements ECMAScript's `e == p` rule (a match
+ending on the segment start contributes no segment, only advancing the search),
+its loop bound is `search < len` rather than `<= len`, and both paths return
+`[]` for an empty subject whose delimiter matches empty and `[""]` otherwise.
+
+All 14 edge cases — leading, trailing, no-match, empty subject, empty
+delimiter, zero-width, and UTF-8 zero-width — now match Node byte-for-byte, and
+the six examples in `doc/Lambda_Sys_Func.md:463`–`468` hold. Covered by
+`test/lambda/split_pattern.ls` across both tiers; `doc/Lambda_Sys_Func.md` gains
+an edge-case table and the `doc/Lambda_Cheatsheet.md` defect note is removed.
+Note the original ledger table's expected value for `split("a1b22c3", \(d+))`
+was internally inconsistent — it omitted the trailing empty segment that the
+spec and the sibling `\(d)` row require.
 
 ---
 

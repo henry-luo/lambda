@@ -468,6 +468,28 @@ split("a1b2c3", digit, true)          // ["a", "1", "b", "2", "c", "3", ""]  —
 split("a,b,c", ",", true)             // ["a", ",", "b", ",", "c"]           — works with strings too
 ```
 
+**Edge cases (S17.1.1).** `split` follows ECMAScript's `String.prototype.split`,
+so string and pattern delimiters behave identically at the edges:
+
+| Call | Result | |
+|---|---|---|
+| `split(",a,b", ",")` | `["", "a", "b"]` | leading delimiter → empty first segment |
+| `split("a1b1", digit)` | `["a", "b", ""]` | trailing delimiter → empty last segment |
+| `split("abc", ",")` | `["abc"]` | no match → whole subject, one element |
+| `split("", ",")` | `[""]` | empty subject, delimiter does not match empty |
+| `split("", \(d*))` | `[]` | empty subject, delimiter matches empty |
+| `split("ab", "")` | `["a", "b"]` | empty delimiter → characters |
+| `split("ab", \(d*))` | `["a", "b"]` | zero-width match → no leading/trailing empty |
+
+The last row is where ECMAScript and Python differ: a match ending on the
+current segment's start contributes no segment, so a zero-width delimiter
+yields neither a leading nor a trailing empty. Python's `re.split` would give
+`['', 'a', 'b', '']`. Zero-width advances step whole codepoints, so
+`split("日本", \(d*))` is `["日", "本"]`.
+
+`split(str, null)` splits on runs of whitespace with outer whitespace stripped
+(a Python-shaped form with no ECMAScript analogue).
+
 ### join(strs, separator)
 
 Join a list of strings with a separator. Returns a string.
@@ -863,6 +885,39 @@ sum_all(1, 2, 3, 4)        // 10
 first_arg("a", "b", "c")   // "a"
 count_args(1, 2, 3)        // 3
 ```
+
+---
+
+## Dynamic Application
+
+`call(f, args)` applies `f` to the members of the array `args` as individual
+arguments. It is the way to forward a collected argument list — including to
+another variadic function, which nothing else expresses. Spread does **not**
+expand into an argument list (S12.3.5): `f(*xs)` passes `xs` as one value.
+
+| Function | Description | Example | Result |
+|----------|-------------|---------|--------|
+| `call(f, args)` | Apply `f` to the members of `args` | `call(add, [1, 2])` | `3` |
+
+```lambda
+fn add(a, b) => a + b
+call(add, [1, 2])                 // 3
+call((x) => x * 3, [4])           // 12
+
+// forwarding a variadic argument list
+fn sum_all(...) => sum(varg())
+fn wrapper(...) => call(sum_all, varg())
+wrapper(1, 2, 3)                  // 6
+```
+
+`call` is Lambda's one **effect-polymorphic** function (S12.1.4): its colour
+follows `f`, so `call(f, …)` is a `fn` call when `f` is an `fn` and a `pn` call
+when `f` is a `pn`. Calling a `pn` from `fn` context is therefore an error —
+reported at compile time when `f` is statically known, at run time otherwise.
+
+Because the call is dynamic by construction, three things follow (S12.3.4):
+arity is checked at run time rather than statically, the result type is `any`,
+and the call does not take a direct-call fast path.
 
 ---
 
@@ -1513,3 +1568,4 @@ if (result is error) {
 |----------|------|-------------|
 | `error` | 1 | Create error |
 | `varg` | 0-1 | Variadic args |
+| `call` | 2 | Apply `f` to an array of arguments |

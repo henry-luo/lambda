@@ -1157,7 +1157,15 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     // MIR Direct backend explicitly before loading the module.
     bool was_mir_direct = runtime->use_mir_direct;
     runtime->use_mir_direct = true;
+    // The JS membrane reaches a Lambda export through a native function
+    // pointer, so this module must actually be JIT-compiled. Under AUTO the
+    // planner would stop at T0 and produce no MIR context at all, leaving
+    // module_build_lambda_namespace with nothing to export and the JS side
+    // reporting "is not a function". Pin the tier for the load only.
+    LambdaTier was_tier = lambda_tier_selected();
+    lambda_tier_set(LAMBDA_TIER_JIT);
     Script* script = load_script(runtime, script_path, source, is_import);
+    lambda_tier_set(was_tier);
     runtime->use_mir_direct = was_mir_direct;
     return script;
 }
@@ -1175,6 +1183,19 @@ static void repl_restore_source(Script* script, size_t length) {
     script->repl_source->length = length;
     script->repl_source->str[length] = '\0';
     script->source = script->repl_source->str;
+}
+
+// The REPL owns its diagnostics: nothing downstream prints a rejected
+// fragment's errors, so they are reported here before the list is released.
+// Freeing them silently left the user with a bare "rolled back" notice and no
+// diagnosis at all — every parse and type message the REPL exists to teach
+// with was being dropped.
+static void repl_report_transpiler_errors(ArrayList* errors) {
+    if (!errors) return;
+    for (int i = 0; i < errors->length; i++) {
+        LambdaError* error = (LambdaError*)errors->data[i];
+        if (error) err_print(error);
+    }
 }
 
 static void repl_free_transpiler_errors(ArrayList* errors) {
@@ -1250,11 +1271,12 @@ bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
 }
 
 Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
+    if (session) session->last_input_rejected = false;
     if (!session || !session->initialized || !session->runner.runtime ||
-            !session->runner.script || !source) return ItemError;
+            !session->runner.script || !source) return (session->last_input_rejected = true), ItemError;
     Script* script = session->runner.script;
     AstScript* root = (AstScript*)script->ast_root;
-    if (!root || !script->repl_source) return ItemError;
+    if (!root || !script->repl_source) return (session->last_input_rejected = true), ItemError;
 
     size_t saved_source_length = script->repl_source->length;
     size_t prefix_length = saved_source_length;
@@ -1293,9 +1315,10 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         if (script->type_list) script->type_list->length = saved_type_count;
         script->interp_slab_count = saved_slab_count;
         repl_restore_source(script, saved_source_length);
+        repl_report_transpiler_errors(tp.errors);
         repl_free_transpiler_errors(tp.errors);
         log_error("interp-repl: direct parser rejected completed input");
-        return ItemError;
+        return (session->last_input_rejected = true), ItemError;
     }
 
     AstNode* fragment = parsed_root->child;
@@ -1306,7 +1329,7 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         script->interp_slab_count = saved_slab_count;
         repl_restore_source(script, saved_source_length);
         repl_free_transpiler_errors(tp.errors);
-        return ItemError;
+        return (session->last_input_rejected = true), ItemError;
     }
     // Direct parsing is intentionally fragment-local for REPL latency. Rebase
     // every retained AST span before the fragment sees the append-only source.
@@ -1332,7 +1355,7 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         repl_restore_source(script, saved_source_length);
         log_error("interp-repl: rejected fragment node=%s",
             interp_node_kind_name(reject));
-        return ItemError;
+        return (session->last_input_rejected = true), ItemError;
     }
 
     AstNode* prior_last = script->repl_last_top_level;
@@ -1349,7 +1372,7 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         if (script->type_list) script->type_list->length = saved_type_count;
         ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
         repl_restore_source(script, saved_source_length);
-        return ItemError;
+        return (session->last_input_rejected = true), ItemError;
     }
 
     LambdaModuleStateSnapshot snapshot = {};
@@ -1361,7 +1384,7 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         if (script->type_list) script->type_list->length = saved_type_count;
         ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
         repl_restore_source(script, saved_source_length);
-        return ItemError;
+        return (session->last_input_rejected = true), ItemError;
     }
     Item result = interp_run_repl_fragment(&session->runner, fragment);
     if (item_is_error(result)) {

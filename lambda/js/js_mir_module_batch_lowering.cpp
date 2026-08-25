@@ -2204,6 +2204,20 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
             }
         }
+        // Class definition evaluation, including a heritage expression, is
+        // strict.  A function created in `extends expr` therefore needs the
+        // strict arguments object even though it is not a class method.
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFuncCollected* e = &mt->func_entries[fi];
+            for (int ci = 0; ci < mt->class_count; ci++) {
+                JsClassNode* cls = (JsClassNode*)mt->class_entries[ci].node;
+                if (cls && cls->superclass && e->node &&
+                    jm_ast_contains_node(cls->superclass, (JsAstNode*)e->node)) {
+                    e->is_strict = true;
+                    break;
+                }
+            }
+        }
     }
 
     // Phase 1.1: Pre-scan top-level const declarations with literal values
@@ -3200,7 +3214,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 ancestor_idx = anc->parent_index;
             }
 
-            jm_analyze_captures(fc, ancestor_names, mt->module_consts, ancestor_func_locals);
+            bool captures_with_scope = jm_ast_node_has_with_ancestor(root,
+                (JsAstNode*)fc->node);
+            jm_analyze_captures(fc, ancestor_names, mt->module_consts,
+                ancestor_func_locals, captures_with_scope);
 
             // v29 TDZ: Mark captures that reference let/const variables.
             // Collect let/const names from the enclosing scope(s) and check each capture.

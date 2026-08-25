@@ -222,7 +222,9 @@ struct JsFuncCollected {
     bool has_direct_eval;            // true if own function body contains syntactic eval(...)
     bool observes_this;              // own body or lexical arrows read this
     bool observes_new_target;        // own body or lexical arrows read new.target
-    bool uses_with;                  // own body contains a with statement
+    // The function either contains a `with` body or is created inside one.
+    // Both forms need dynamic Object Environment Record lookup when invoked.
+    bool uses_with;
     // A5: Constructor shape pre-allocation
     int ctor_prop_count;            // number of this.xxx = yyy properties found
     bool ctor_shape_overflow;       // optimization disabled after exceeding shape metadata capacity
@@ -595,7 +597,7 @@ struct JsMirTranspiler {
     MIR_reg_t eval_completion_reg;           // 0 if not tracking completion values
     MIR_reg_t eval_local_frame_reg;           // non-zero when direct eval pushed a caller-local frame
     bool in_typeof;                          // true when transpiling operand of typeof
-    int with_depth;                           // nesting depth of 'with' statements (for break/continue/return cleanup)
+    int with_depth;                           // nesting depth of `with` during collection or body lowering
     bool destructure_assignment_mode;         // true for assignment-pattern destructuring targets
 
     // Js57 Track A: synthetic module-level scope env. Captures of top-level closures

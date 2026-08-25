@@ -106,22 +106,20 @@ The spread operator `*` expands a collection's items into the enclosing containe
 | `let base = {x: 1, y: 2}` | `{*:base, x: 10}` | `{x: 10, y: 2}` — copy map fields, override `x` |
 | `let nested = [[1, 2], [3, 4]]` | `[*nested[0], *nested[1]]` | `[1, 2, 3, 4]` |
 
-### Spread in function calls
+### Spread is container-only
 
-Spread is intended to supply the arguments of a [variadic
-function](Lambda_Func.md#variadic-parameters) — expanding a collection into one
-argument per item:
+Spread splices where a **container** is being built — the array, tuple, and map
+literals above — and nowhere else. In argument position it passes its operand as
+one value, so `f(*xs)` calls `f` with the array `xs`, not with its members
+(S12.3.5).
+
+To apply a function to a list of arguments, use
+[`call(f, args)`](Lambda_Sys_Func.md#dynamic-application):
 
 ```lambda
 fn sum_all(...) => sum(varg())
-sum_all(*[1, 2, 3])    // intended: 6, same as sum_all(1, 2, 3)
+call(sum_all, [1, 2, 3])    // 6 — same as sum_all(1, 2, 3)
 ```
-
-> **Not yet implemented.** At a call site `*x` currently degenerates to `x`, so
-> the array arrives as a **single** argument: `sum_all(*[1, 2, 3])` behaves like
-> `sum_all([1, 2, 3])` and `len(varg())` reports `1`, not `3`. On a fixed-arity
-> function the mismatch surfaces as `function expects 2 arguments, got 1`.
-> Expansion is implemented only for container construction (the table above).
 
 Map literals construct only the fields they list. Use map spread when an update
 should preserve the fields of an existing map or record-shaped value.

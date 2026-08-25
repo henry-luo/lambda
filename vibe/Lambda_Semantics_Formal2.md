@@ -2119,3 +2119,58 @@ and §10.4's rich payloads.
   line (it follows from where the value came from), not a carve-out list, and it is the
   reason C14c and C17 point in opposite directions without conflicting. Recorded in
   spec §4.
+
+---
+
+### C18. Reference order for system-function semantics; `split` follows ECMAScript (2026-08-25) — RESOLVED
+
+Raised while fixing LR09-8. Two rulings came out of it: one general (S1.11), one specific
+(S17.1.1).
+
+**How it surfaced.** `split` with a *pattern* delimiter returned a single merged element —
+`split("a1b2c3", \(d))` gave `["abc"]`, and the keep-delimiters form returned the input
+verbatim. The cause was not a missing implementation: `pattern_split` computed the right
+segments and `list_push` merged them back, because only the *string* path suspended
+adjacent-string merging. Fixing that exposed a second defect — one cursor served as both
+the pending-segment start and the search resume point, so a zero-length match stepped over
+a character that then appeared in no segment (`split("ab", \(d*))` → `["", "", ""]`, losing
+`a` and `b`).
+
+**The question.** With the segments finally correct, the zero-width edge was still
+under-determined. Python's `re.split(r'\d*', 'ab')` gives `['', 'a', 'b', '']`; ECMAScript's
+`"ab".split(/\d*/)` gives `["a", "b"]`. Nothing in `doc/Lambda_Sys_Func.md` ruled on it, and
+the six documented examples all use non-empty matches, where the two references agree.
+
+**Resolved: ECMAScript.** The decisive argument was internal, not comparative. Lambda's own
+empty-**string** delimiter already behaved like JS — `split("ab", "")` = `["a", "b"]` — so
+adopting Python would have made the pattern path contradict its own sibling in the same
+function, which is precisely the inconsistency the LR09-8 fix set out to remove. That JS
+also happened to be the reference-order winner made the choice over-determined rather than
+close.
+
+The operative mechanism is ECMAScript's `e == p` rule: a match whose *end* lands on the
+current segment's start contributes no segment and only advances the search. One condition
+suppresses both the leading and the trailing empty of a zero-width delimiter. Two
+consequences follow that are easy to get wrong: the loop bound is `search < len`, not
+`<= len` (the tail segment is pushed unconditionally afterwards, so searching at `len`
+emits one segment too many), and the zero-width advance must step a whole codepoint — a
+bare `+1` tears multi-byte characters apart.
+
+Empty subject follows the same source: `[]` when the delimiter matches the empty string,
+`[""]` otherwise. The Python-shaped `split(str, null)` whitespace form has no ECMAScript
+analogue and is retained as-is.
+
+**Generalized to S1.11 — references, not authorities.** ECMAScript first, Python second,
+consulted only when a system function's semantics are otherwise under-determined. Neither
+is binding: a Lambda principle, an existing ruling, or consistency with a sibling Lambda
+operation overrides both, and the departure gets recorded rather than left implicit. Hosted
+languages are unaffected — LambdaJS follows ECMAScript and the Python guest follows CPython
+whatever Lambda chose for a same-named builtin. The `split` case fixes the tie-break order:
+matching a sibling Lambda operation beats matching the reference.
+
+**Not a precedent for wholesale JS alignment.** S1.11 is a tie-breaker for
+*under-determined* cases only. It does not reopen settled Lambda departures from JS
+(equality, truthiness, numerics), each of which was decided on Lambda principle.
+
+Recorded in spec §1 (S1.11) and §17 (S17.1.1); implementation and coverage in
+`test/lambda/split_pattern.ls`; ledger entry LR09-R2.

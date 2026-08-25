@@ -1699,6 +1699,18 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     return (JsAstNode*)func;
 }
 
+// Build a statement branch under its own lexical scope.  Tree-sitter exposes an
+// unbraced `if (...) function f(){}` directly as the branch statement, but it
+// still has Annex B's block function binding; without this scope the builder
+// incorrectly hoists `f` as a top-level declaration before the branch runs.
+static JsAstNode* build_js_branch_statement(JsTranspiler* tp, TSNode branch_node) {
+    JsScope* branch_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    js_scope_push(tp, branch_scope);
+    JsAstNode* branch = build_js_statement(tp, branch_node);
+    js_scope_pop(tp);
+    return branch;
+}
+
 // Build JavaScript if statement node
 JsAstNode* build_js_if_statement(JsTranspiler* tp, TSNode if_node) {
     JsIfNode* if_stmt = (JsIfNode*)alloc_js_ast_node(tp, JS_AST_NODE_IF_STATEMENT, if_node, sizeof(JsIfNode));
@@ -1712,13 +1724,13 @@ JsAstNode* build_js_if_statement(JsTranspiler* tp, TSNode if_node) {
     // Get consequent (then branch)
     TSNode consequent_node = ts_node_child_by_field_name(if_node, "consequence", strlen("consequence"));
     if (!ts_node_is_null(consequent_node)) {
-        if_stmt->consequent = build_js_statement(tp, consequent_node);
+        if_stmt->consequent = build_js_branch_statement(tp, consequent_node);
     }
 
     // Get alternate (else branch) - optional
     TSNode alternate_node = ts_node_child_by_field_name(if_node, "alternative", strlen("alternative"));
     if (!ts_node_is_null(alternate_node)) {
-        if_stmt->alternate = build_js_statement(tp, alternate_node);
+        if_stmt->alternate = build_js_branch_statement(tp, alternate_node);
     }
 
     if_stmt->type = &TYPE_NULL; // if statements don't have a value
@@ -3235,6 +3247,12 @@ JsAstNode* build_js_switch_statement(JsTranspiler* tp, TSNode switch_node) {
         body_node = switch_node;
     }
 
+    // A switch body is one lexical environment shared by every case.  Keep
+    // Annex B function declarations in that scope so they cannot be mistaken
+    // for direct program/function-body declarations and hoisted as functions.
+    JsScope* switch_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    js_scope_push(tp, switch_scope);
+
     JsAstNode* prev_case = NULL;
     uint32_t child_count = ts_node_named_child_count(body_node);
     for (uint32_t i = 0; i < child_count; i++) {
@@ -3285,6 +3303,8 @@ JsAstNode* build_js_switch_statement(JsTranspiler* tp, TSNode switch_node) {
             prev_case = (JsAstNode*)case_node;
         }
     }
+
+    js_scope_pop(tp);
 
     sw->type = &TYPE_NULL;
     return (JsAstNode*)sw;

@@ -426,6 +426,11 @@ MIR_item_t find_import(MIR_context_t ctx, const char *mod_name) {
 
 void* find_func(MIR_context_t ctx, const char *fn_name) {
     log_debug("finding function: %s, %p", fn_name, ctx);
+    // A script planned for T0 never builds a MIR context, so callers that look
+    // up a generated entry legitimately arrive with NULL. Answering "not
+    // found" lets them fall back; dereferencing it segfaulted the cross-
+    // language namespace builder the moment the AUTO tier interpreted a module.
+    if (!ctx) return NULL;
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {
         log_debug("checking module: %s", module->name);
@@ -443,6 +448,7 @@ void* find_func(MIR_context_t ctx, const char *fn_name) {
 }
 
 void* find_func_prefix(MIR_context_t ctx, const char *prefix) {
+    if (!ctx) return NULL;  // same T0 case as find_func above
     size_t prefix_len = strlen(prefix);
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {

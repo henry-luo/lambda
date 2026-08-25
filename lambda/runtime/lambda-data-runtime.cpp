@@ -3138,12 +3138,19 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         if (item_tid == LMD_TYPE_ARRAY_NUM) {
             ArrayNum* src = item.array_num;
             Array* boxed = array();
+            // array_push allocates as it grows, so the half-built result is
+            // collectable for the whole loop and only the caller's source is
+            // rooted. A GC mid-widening freed `boxed` and every element read
+            // back null. Root it for the construction interval.
+            RootFrame roots(2);
+            Rooted<Array*> rooted_boxed(roots, boxed);
+            Rooted<ArrayNum*> rooted_src(roots, src);
             // any[] is a boxed value array; ARRAY_NUM annotations must widen
             // at the boundary instead of leaving a packed numeric layout behind.
-            for (int64_t i = 0; i < src->length; i++) {
-                array_push(boxed, array_num_get(src, i));
+            for (int64_t i = 0; i < rooted_src.get()->length; i++) {
+                array_push(rooted_boxed.get(), array_num_get(rooted_src.get(), i));
             }
-            return (void*)boxed;
+            return (void*)rooted_boxed.get();
         }
     }
 
@@ -3225,11 +3232,15 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
     // convert generic Array/List to typed array (Array and List are the same struct)
     if (item_tid == LMD_TYPE_ARRAY) {
         Array* arr = item.array;
-        Item* items = arr->items;
         int64_t length = arr->length;
+        // arr->items must be read *after* the destination allocation in each
+        // branch below: allocating the typed array can run a GC that relocates
+        // the source's element buffer, and a hoisted pointer then read freed
+        // memory — every element came back null at an any[] -> int[] boundary.
 
         if (element_type_id == LMD_TYPE_INT) {
             ArrayNum* typed = array_int_new(length);
+            Item* items = arr->items;
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (!item_is_integer_typed_array_source(items[i])) {
@@ -3238,13 +3249,17 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
                 }
                 // boxed sized numerics carry their value in NUM_SIZED payload bits,
                 // not the compact-int slot; decode before widening to int[].
-                // C16: the int lane is double-backed.
-                typed->float_items[i] = item_to_float_value(items[i]);
+                // v5: ELEM_INT stores an i64 lane in items[], so land the LANE
+                // value — writing raw double bits through float_items[] here
+                // made every element read back as a >INT53_MAX lane, i.e. `inf`.
+                typed->items[i] = lambda_double_to_int_lane(
+                    item_to_float_value(items[i]));
             }
             return typed;
         }
         else if (element_type_id == LMD_TYPE_FLOAT) {
             ArrayNum* typed = array_float_new(length);
+            Item* items = arr->items;
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_FLOAT && elem_tid != LMD_TYPE_INT &&
@@ -3263,6 +3278,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         }
         else if (element_type_id == LMD_TYPE_INT64) {
             ArrayNum* typed = array_int64_new(length);
+            Item* items = arr->items;
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (!item_is_integer_typed_array_source(items[i])) {
@@ -3277,6 +3293,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         }
         else if (element_type_id == LMD_TYPE_UINT64) {
             ArrayNum* typed = array_num_new(ELEM_UINT64, length);
+            Item* items = arr->items;
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (!item_is_integer_typed_array_source(items[i])) {
@@ -3290,6 +3307,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         }
         else if (element_type_id == LMD_TYPE_BOOL) {
             ArrayNum* typed = array_num_new(ELEM_BOOL, length);
+            Item* items = arr->items;
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_BOOL) {

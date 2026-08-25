@@ -19186,6 +19186,17 @@ static Item js_regexp_symbol_search(Item this_val, Item arg0) {
 
 // RegExp.prototype[@@split](string, limit)
 // RegExp.prototype[@@split](string, limit) — ES spec §22.2.5.13
+// True when a UTF-16 code-unit index names the *trailing* half of an astral
+// character. The subject stays UTF-8, where that boundary lives inside a single
+// 4-byte sequence and therefore has no byte offset — `exec` cannot be seated
+// there at all. In a well-formed UTF-8 subject a low surrogate code unit only
+// ever arises as the second half of such a pair, so this is exact.
+static bool js_split_index_is_trailing_surrogate(String* s, int index) {
+    if (!s || s->is_ascii || index <= 0) return false;
+    int unit = js_utf16_code_unit_at(s->chars, (int)s->len, (bool)s->is_ascii, index);
+    return utf_is_low_surrogate((uint32_t)unit);
+}
+
 static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     // Step 2: Type(rx) must be Object
     if (!js_is_object_value(this_val)) {
@@ -19231,9 +19242,18 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
         if (fl[i] == 'u') unicode_matching = true;
         if (fl[i] == 'y') has_y = true;
     }
-    int size = unicode_matching
-        ? (int)(s_str ? js_utf16_len(s_str->chars, (int)s_str->len, (bool)s_str->is_ascii) : 0)
-        : byte_size;
+    // RegExpExec reports match positions and writes lastIndex in UTF-16 code
+    // units whatever the flags say, so @@split's own cursors must count the
+    // same unit. Sizing and slicing this loop in UTF-8 bytes only agreed with
+    // `e` for ASCII subjects; on any wider character the two drifted apart and
+    // the loop both sliced mid-character and compared incommensurable offsets.
+    // `unicode_matching` still selects surrogate-pair handling in
+    // AdvanceStringIndex below — that, and not the index unit, is what `u`
+    // governs here.
+    int size = (int)(s_str
+        ? js_utf16_len(s_str->chars, (int)s_str->len, (bool)s_str->is_ascii)
+        : 0);
+    (void)byte_size;
     // Step 7: newFlags = has_y ? flags : flags + "y"
     Item new_flags_item;
     if (has_y) {
@@ -19273,8 +19293,6 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     // Step 12: If lim == 0, return A.
     if (lim == 0) return A;
 
-    const char* chars = s_str ? s_str->chars : "";
-
     // Step 13: If size == 0:
     if (size == 0) {
         // a. z = ? RegExpExec(splitter, S)
@@ -19288,37 +19306,73 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
 
     // Step 14-onwards: q = p = 0; loop
     int p = 0, q = 0;
+    // Without `u`, AdvanceStringIndex steps one code unit, so `q` can land
+    // between an astral character's surrogate halves — a position this UTF-8
+    // subject cannot express as a byte offset. Only a zero-width match is
+    // possible there: a pattern needing surrogate granularity would already
+    // have had its subject expanded (needs_utf16_subject), and anything
+    // consuming input cannot start inside a character. So carry the splitter's
+    // zero-width answer from the last position we *could* seat it and apply it
+    // to the one we cannot, instead of asking exec for an impossible offset.
+    JsRegexData* split_rd = js_get_regex_data(splitter);
+    bool subject_is_utf8 = !unicode_matching &&
+        (!split_rd || !split_rd->needs_utf16_subject);
+    bool zero_width_at_last_seat = false;
+    // The last successful match object, replayed for its captures when the
+    // synthesized branch below stands in for an unseatable position.
+    Item last_z = ItemNull;
     Item li_key = js_name_item("lastIndex", 9);
     while (q < size) {
-        // a. ? Set(splitter, "lastIndex", q, true)
-        JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(splitter, li_key, q));
-        // b. z = ? RegExpExec(splitter, S)
-        JS_ASSIGN_OR_RETURN(z, js_regexp_exec_dispatch(splitter, str));
+        Item z = ItemNull;
+        bool synthesized = subject_is_utf8 &&
+            js_split_index_is_trailing_surrogate(s_str, q);
+        if (synthesized) {
+            if (!zero_width_at_last_seat) {
+                q = (int)js_regex_advance_string_index_units(s_str, q, unicode_matching);
+                continue;
+            }
+            // Stand in for exec: a zero-width match at q, carrying the last
+            // match object so the capture replay below stays identical.
+            z = last_z;
+        } else {
+            // a. ? Set(splitter, "lastIndex", q, true)
+            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(splitter, li_key, q));
+            // b. z = ? RegExpExec(splitter, S)
+            JS_ASSIGN_OR_RETURN_INTO(z, js_regexp_exec_dispatch(splitter, str));
+        }
         // c. If z is null, q = AdvanceStringIndex(S, q, unicode)
         if (get_type_id(z) == LMD_TYPE_NULL || z.item == ItemNull.item) {
+            zero_width_at_last_seat = false;
             q = (int)js_regex_advance_string_index_units(s_str, q, unicode_matching);
         } else {
             // d. e = ? ToLength(? Get(splitter, "lastIndex"))
-            JS_ASSIGN_OR_RETURN(li_val, js_get_key_default(splitter, li_key));
-            JS_ASSIGN_OR_RETURN(li_num, js_to_number(li_val));
-            double dle = js_get_number(li_num);
             int64_t e_int;
-            if (isnan(dle) || dle <= 0) e_int = 0;
-            else if (dle > 9007199254740991.0) e_int = (int64_t)9007199254740991LL;
-            else e_int = (int64_t)dle;
+            if (synthesized) {
+                e_int = q;  // zero-width by construction; lastIndex is stale here
+            } else {
+                JS_ASSIGN_OR_RETURN(li_val, js_get_key_default(splitter, li_key));
+                JS_ASSIGN_OR_RETURN_INTO(li_val, js_to_number(li_val));
+                double dle = js_get_number(li_val);
+                if (isnan(dle) || dle <= 0) e_int = 0;
+                else if (dle > 9007199254740991.0) e_int = (int64_t)9007199254740991LL;
+                else e_int = (int64_t)dle;
+            }
             // e. e = min(e, size)
             int e = (e_int > size) ? size : (int)e_int;
+            if (!synthesized) {
+                // the splitter is sticky, so a match begins at q; e == q means
+                // it matched zero-width right here.
+                zero_width_at_last_seat = (e == q);
+                last_z = z;
+            }
             // f. If e == p, q = AdvanceStringIndex(S, q, unicode)
             if (e == p) {
                 q = (int)js_regex_advance_string_index_units(s_str, q, unicode_matching);
             } else {
                 // i. T = substring(S, p, q)
                 int t_len = q - p;
-                Item T = (t_len > 0)
-                    ? (unicode_matching
-                        ? js_str_substring_utf16(str, p, q)
-                        : (Item){.item = s2it(heap_strcpy((char*)(chars + p), t_len))})
-                    : js_name_item("", 0);
+                Item T = (t_len > 0) ? js_str_substring_utf16(str, p, q)
+                                     : js_name_item("", 0);
                 // ii. Append T to A; lengthA++; if lengthA == lim, return A
                 js_array_push(A, T); lengthA++;
                 if ((uint32_t)lengthA == lim) return A;
@@ -19348,11 +19402,8 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     }
     // Step 17-18: T = substring(S, p, size); append T
     int t_len = size - p;
-    Item T = (t_len > 0)
-        ? (unicode_matching
-            ? js_str_substring_utf16(str, p, size)
-            : (Item){.item = s2it(heap_strcpy((char*)(chars + p), t_len))})
-        : js_name_item("", 0);
+    Item T = (t_len > 0) ? js_str_substring_utf16(str, p, size)
+                         : js_name_item("", 0);
     js_array_push(A, T);
     return A;
 }
@@ -22433,6 +22484,23 @@ static Item js_string_intrinsic_algorithm(Item str,
             Item result = js_array_new(0);
             js_array_push(result, js_name_item("", 0));
             return result;
+        }
+        String* sep_str = it2s(sep);
+        if (sep_str && sep_str->len == 0 && !sstr->is_ascii) {
+            // An empty separator splits into UTF-16 code units in ECMAScript,
+            // so an astral character becomes its two surrogate halves.
+            // Lambda's fn_split splits by code point (S17.1.1) — right for
+            // Lambda, wrong here. ASCII keeps the shared path: there the two
+            // readings coincide and fn_split is cheaper.
+            Item units_result = js_array_new(0);
+            int64_t units = js_utf16_len(sstr->chars, (int)sstr->len,
+                (bool)sstr->is_ascii);
+            for (int64_t i = 0; i < units; i++) {
+                if ((uint64_t)i >= (uint64_t)lim) break;
+                js_array_push(units_result,
+                    js_str_substring_utf16(str, (int)i, (int)i + 1));
+            }
+            return units_result;
         }
         Item result = fn_split(str, sep);
         // Clear is_content flag to prevent array flattening in JS context

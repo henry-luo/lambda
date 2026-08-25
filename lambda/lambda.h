@@ -599,6 +599,12 @@ typedef enum SysFunc {
     // file-based find/replace (procedural)
     SYSPROC_REPLACE_FILE,    // pn replace(path, pattern, repl) - sed-like file replace
     SYSPROC_REPLACE_FILE4,   // pn replace(path, pattern, repl, options)
+    // S12.3.4 dynamic application. Two enum rows for one surface name `call`:
+    // the lowering picks the fn- or pn-coloured entry from the ENCLOSING
+    // context, which fixes the error convention (return vs raise), while the
+    // TARGET's colour is what S12.1.4 checks.
+    SYSFUNC_CALL,            // fn  call(f, args) - apply f to array args; returns error
+    SYSPROC_CALL,            // pn  call(f, args) - apply f to array args; raises
     // view/edit template apply
     SYSFUNC_APPLY1,          // apply(target) - apply view templates to target
     SYSFUNC_APPLY2,          // apply(target, options) - apply with options map
@@ -1159,6 +1165,10 @@ Item fn_call3(Function* fn, Item a, Item b, Item c);
 // entries resolve their companion lane in Context; hosted callbacks may still
 // supply an explicit payload owner across this C boundary.
 Item fn_call_into(Function* fn, List* args, uint64_t* result_home);
+// S12.3.4 dynamic application; colour-split for the error convention.
+// Named *_apply_args, not *_call: `fn_call` is already the dynamic dispatcher.
+Item fn_apply_args(Item callee, Item args);
+Item pn_apply_args(Item callee, Item args);
 Item fn_call0_into(Function* fn, uint64_t* result_home);
 Item fn_call1_into(Function* fn, Item a, uint64_t* result_home);
 Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home);
@@ -2360,6 +2370,8 @@ extern "C" {
     Item fn_avg(Item a);
     Item fn_avg_skip_null(Item a, bool skip_null);
     Item fn_union(Item a, Item b);
+    Item fn_intersect(Item a, Item b);
+    Item fn_exclude(Item a, Item b);
     Item fn_pos(Item a);
     Item fn_neg(Item a);
 

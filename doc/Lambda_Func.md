@@ -194,6 +194,16 @@ Access variadic arguments with `varg()`:
 | `varg()` | List of all variadic arguments |
 | `varg(n)` | The nth variadic argument (0-indexed) |
 
+To forward a collected argument list to another function — including another
+variadic one — use [`call(f, args)`](Lambda_Sys_Func.md#dynamic-application).
+Spread does not expand into an argument list (S12.3.5):
+
+```lambda
+fn sum_all(...) => sum(varg())
+fn wrapper(...) => call(sum_all, varg())
+wrapper(1, 2, 3)              // 6
+```
+
 ```lambda
 fn first_or_default(fallback, ...) => {
     if (len(varg()) > 0) varg(0)

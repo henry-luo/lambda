@@ -643,15 +643,13 @@ Given `type digit = \(d)`, `type digits = \(d+)`, `type ws = \(s+)`:
 | Form | Result |
 |---|---|
 | `split("a,b,c", ",")` | `["a", "b", "c"]` |
-| `split("a1b2c3", digit)` | intended `["a", "b", "c", ""]` — **see note** |
-| `split("hello   world", ws)` | intended `["hello", "world"]` — **see note** |
-| `split("a1b2c3", digit, true)` | intended `["a", "1", "b", "2", "c", "3", ""]` — keep delimiters — **see note** |
+| `split("a1b2c3", digit)` | `["a", "b", "c", ""]` |
+| `split("hello   world", ws)` | `["hello", "world"]` |
+| `split("a1b2c3", digit, true)` | `["a", "1", "b", "2", "c", "3", ""]` — keep delimiters |
+| `split("ab", \(d*))` | `["a", "b"]` — zero-width: no end empties |
+| `split("", ",")` | `[""]`; `split("", \(d*))` → `[]` |
 
-> **Known defect.** `split` splits correctly on a plain **string** delimiter, but
-> a **pattern** delimiter is not split on — the matches are stripped and the
-> remainder is returned as a single element: `split("a1b2c3", digit)` yields
-> `["abc"]`, and the keep-delimiters form returns `["a1b2c3"]` unchanged.
-> `replace` and `find` handle patterns correctly. Tracked as LR09-8.
+Follows ECMAScript `String.prototype.split` (S17.1.1).
 
 `find(str, pattern_or_string)` → `[{value, index}, ...]`
 
