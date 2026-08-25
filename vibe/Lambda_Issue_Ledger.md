@@ -47,7 +47,7 @@ Counts:
 | Source doc | Area | Open | Partial | Resolved | Total |
 |---|---|---:|---:|---:|---:|
 | LR_01 | Compilation pipeline, CLI & REPL | 11 | 2 | 2 | 15 |
-| LR_02 | Parsing & AST construction | 5 | 4 | 11 | 20 |
+| LR_02 | Parsing & AST construction | 4 | 4 | 12 | 20 |
 | LR_03 | Value & type model | 6 | 1 | 2 | 9 |
 | LR_04 | Numbers, decimal & datetime | 8 | 0 | 0 | 8 |
 | LR_05 | Strings, symbols & vectors | 7 | 1 | 2 | 10 |
@@ -59,8 +59,8 @@ Counts:
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 8 | 0 | 0 | 8 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
-| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 11 | 1 | 2 | 14 |
-| **Total** | | **106** | **11** | **37** | **154** |
+| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 9 | 1 | 5 | 15 |
+| **Total** | | **103** | **11** | **41** | **155** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -211,19 +211,37 @@ representation oracle" is the same defect class.
 wrong-type cast reads the wrong field offset. Existing capture code casts
 explicitly, but any new code handling loop nodes generically is exposed.
 
-<a id="lr02-5"></a>**LR02-5 · `match`-arm `~` references can be missed · OPEN**
-`has_current_item_ref` (`build_ast.cpp:3954`) walks a match node's scrutinee and
-then iterates the arm list **without inspecting anything**:
+<a id="lr02-5"></a>**LR02-5 · `match`-arm `~` references were missed · RESOLVED 2026-08-25**
+`has_current_item_ref` (`build_ast.cpp`) walked a match node's scrutinee and
+then iterated the arm list with an **empty loop body**, falling through to
+`false`. The loop was provably dead code.
 
-```c
-AstMatchArm* arm = match_node->first_arm;
-while (arm) { arm = (AstMatchArm*)arm->next; }
-return false;                                  // build_ast.cpp:3987–3991
+**Observable failure:** a pipe never established the current-item context an arm
+needed, so
+
+```lambda
+xs |> match (1) { case int: (~) * 10
+                  default: 0 }        // was: error   now: [10, 10, 10]
 ```
 
-A `~` reference inside a match arm under a pipe goes undetected. The loop is now
-provably dead code, which makes this strictly worse than the doc's "may be
-missed" phrasing.
+evaluated to `error`. Only this shape broke — an arm whose enclosing `match`
+carries no `~` in its *scrutinee*. `xs |> match (~) { … }` always worked,
+because the scrutinee walk detected the reference.
+
+**The arm PATTERN is deliberately not walked.** `doc/Lambda_Expr_Stam.md:961`
+rules that `~` inside an arm body is the **matched value**, and a `that`
+constraint's `~` is the match subject as well — both rebind, so neither can
+consume an enclosing pipe's item. This mirrors the `HANDLER_EXPR` case directly
+above, which already models exactly that shadowing.
+
+*Worth recording for the next reader:* the correct result of the repro is
+`[10, 10, 10]`, not `[10, 20, 30]`. The scrutinee is the constant `1`, so the
+arm's `~` is `1` for every piped item. Reading `~` as the pipe item is the
+natural first guess and it is wrong; the docs settle it.
+
+Covered by `test/lambda/match_arm_current_item.ls` on both tiers — five shapes
+including the constraint and no-pipe controls, and verified to fail
+(`subject_is_const: error`) when the walk is emptied again.
 
 <a id="lr02-6"></a>**LR02-6 · Object literal routing · OPEN (note)**
 Object construction goes through the element reduction path and resolves
@@ -1056,13 +1074,26 @@ residue. Fixing the parse also closed the Issues8 entry it was blocking
 element schema using `fontname?: string`, explicitly-null attributes validate,
 absent attributes validate, and a real type violation still fails.
 
-<a id="i8-dqdiag"></a>**Issues8 · Double-quoted map key gives a generic diagnostic · OPEN (low severity)**
-The error cascade is fixed — one diagnostic now, not a run of them — but the
-message is still `error[E100]: expected an expression`. Since a double-quoted
-key is a genuine mistake with a one-character fix, the diagnostic should say
-that double-quoted strings are values rather than field names and point at the
-single-quoted form. Paired with [i8-mapkey](#i8-mapkey), where the rule itself
-was ruled.
+<a id="i8-dqdiag"></a>**Issues8 · Double-quoted map key gives a generic diagnostic · RESOLVED 2026-08-25**
+`{"key": 1}` reported `expected an expression` at the `:`. It now says:
+
+> `a map key is a symbol, not a string: write a bare name like {key: 1}, or
+> single-quote it when it is not a name like {'data-node-id': 1}`
+
+**Why it was generic.** The brace resolver decides by interior (S16.4.1v2), and
+a string is not a key — so `{"k": 1}` was read as a **block**, parsed `"k"` as
+an expression statement, and failed on the following `:`. No amount of work in
+`parse_map` could have helped, because control never reached it.
+
+**Fix.** `braced_expression_is_map` now also routes `{ STRING : … }` to the map
+parser, which rejects the key with the message above. That changes no accepted
+program — `{"k": …}` has no valid reading as either a map or a block — and one
+message covers every brace position, since `control_body_brace_is_map`
+delegates to the same probe. Verified unchanged: `{key: 1}`, `{'a-b': 2}`,
+`{a: 1, b: 2}`, `{}`, and the block forms `{ let x = 1; x }`,
+`{ "just a string" }` → `"just a string"`, `{ 1 + 2 }` → `3`. Covered by
+`test/std/negative/map_key_double_quoted.ls` +
+`NegativeScriptTest.DoubleQuotedMapKeyNamesTheRule`.
 
 <a id="issues0-9"></a>**Issues0 #9 · ShapePool keys on a hash without comparing field names · OPEN**
 `vibe/impl/Lambda_Issues0 (fixed).md` #9 — deferred there, and the archive's
@@ -1128,10 +1159,45 @@ dependency direction is already left-to-right), or rule the ordering explicitly
 and have the diagnostic say so. Either is fine; the current state — an unruled
 restriction with a diagnostic that reports *what* but not *why* — is not.
 
-<a id="i8-markcomp"></a>**Issues8 · One-line Mark child comprehensions fail at the closing delimiter · OPEN**
-`<diagnostics; for (value in values) value>` fails with `error[E100]`, while the
-same constructor split across lines parses. Whitespace should not change the
-grammar, or the diagnostic should name the required break.
+<a id="i8-markcomp"></a>**Issues8 · One-line Mark child comprehensions fail at the closing delimiter · RESOLVED (not a defect — wrong spelling)**
+The entry reported `<diagnostics; for (v in vs) v>` failing with `E100` where
+"the valid multiline constructor" parsed, concluding that whitespace changes the
+grammar. **Both halves of that are wrong.** `;` was never an element separator,
+and the multiline form it presents as valid fails identically — verified
+2026-08-25.
+
+**S16.9.3** settles the spelling: `;` has exactly one role language-wide,
+statement separation; `,` takes over inside elements, and the attribute/content
+boundary comma is a **biconditional** — present exactly when the element has
+both. `diagnostics` here is the *tag*, not an attribute, so the element is
+content-only and takes no separator:
+
+```lambda
+<diagnostics for (v in vs) v>                 // correct — parses, <diagnostics 1 2>
+<diagnostics kind: "x", for (v in vs) v>      // correct — both present, comma required
+<diagnostics; for (v in vs) v>                // E100 — `;` is not an element separator
+<diagnostics, for (v in vs) v>                // E100 — no attributes, so no comma
+<diagnostics kind: "x" for (v in vs) v>       // E100 — both present, comma missing
+```
+
+Whitespace is irrelevant; the spelling was wrong in both layouts. The author most
+likely carried `;` over from statement separation — the confusion S16.9.3 exists
+to retire. Residue filed separately as [i8-semidiag](#i8-semidiag).
+
+<a id="i8-semidiag"></a>**Issues8 · `;` inside an element gives a generic diagnostic · RESOLVED 2026-08-25**
+`<diagnostics; for (v in vs) v>` reported only `expected an expression`, while
+the two comma mistakes already named their rule. It now says:
+
+> `';' cannot open element content; a tag is followed directly by its content,
+> and ';' only separates one content item from the next`
+
+**Scoped by what is actually legal.** `;` *is* valid between content items —
+`<div "a"; "b">` and `<div k: 1, "a"; "b">` both parse — so the check fires only
+at the content-start position, where no preceding item exists. The
+attribute-bearing form `<div k: 1; "a">` was already covered by the
+boundary-comma check and is untouched. `lambda_parser.c` `parse_element`;
+covered by `test/std/negative/element_semicolon_opens_content.ls` +
+`NegativeScriptTest.ElementSemicolonCannotOpenContent`.
 
 <a id="i8-dynspread"></a>**Issues8 · Spreading a dynamically-constructed map yields a null-key nested map · OPEN**
 Map spread flattens a statically shaped map but not one built at runtime, even

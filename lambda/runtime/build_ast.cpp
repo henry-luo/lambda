@@ -4039,8 +4039,15 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_MATCH_EXPR: {
         AstMatchNode* match_node = (AstMatchNode*)node;
         if (has_current_item_ref(match_node->scrutinee)) return true;
+        // The arm BODY can consume a current item supplied by an enclosing
+        // pipe; the pattern cannot — `case int that (~ > 0)` rebinds `~` to the
+        // match subject, the same shadowing the handler case above models. This
+        // loop used to inspect nothing and fall through to `false`, so
+        // `xs |> match (1) { case int: (~) * 10 }` evaluated to `error`: the
+        // pipe never bound `~` because nothing reported the arm needed it.
         AstMatchArm* arm = match_node->first_arm;
         while (arm) {
+            if (has_current_item_ref(arm->body)) return true;
             arm = (AstMatchArm*)arm->next;
         }
         return false;

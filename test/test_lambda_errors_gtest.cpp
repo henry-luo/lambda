@@ -1124,6 +1124,22 @@ TEST_F(NegativeScriptTest, StaticArityMismatchIsRejected) {
 // S12.3.6 makes optional parameters the sanctioned alternative to overloading,
 // so the accepted arity is a range whenever one exists. Reporting only the
 // required count understated it in both directions.
+// A map key is a symbol, not a string. The brace resolver reads `{"k": 1}` by
+// interior and used to fall through to a block, failing at the `:` with a bare
+// "expected an expression".
+TEST_F(NegativeScriptTest, DoubleQuotedMapKeyNamesTheRule) {
+    ExpectErrorMessage("test/std/negative/map_key_double_quoted.ls",
+        "a map key is a symbol, not a string");
+}
+
+// S16.9.3: `;` separates content items, so it cannot open element content.
+// The generic "expected an expression" sent a real user to conclude the grammar
+// was whitespace-sensitive; the diagnostic must name the rule.
+TEST_F(NegativeScriptTest, ElementSemicolonCannotOpenContent) {
+    ExpectErrorMessage("test/std/negative/element_semicolon_opens_content.ls",
+        "';' cannot open element content");
+}
+
 // LR02-9: a `&`/`!` contract must be rejected on a non-conforming value AND
 // named in the diagnostic — it used to print the bare word "type".
 TEST_F(NegativeScriptTest, TypeSetOperatorContractIsNamed) {
