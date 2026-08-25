@@ -2214,7 +2214,13 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     // Retained handlers borrow the document Runtime's canonical
     // context; no heap-only stack context may outlive dispatch.
     EvalContext* handler_ctx = nullptr;
-    DomDocument* doc = event_context_target_document(evcon);
+    // An attach-time dispatch has no EventContext; the document then comes from
+    // the element the template governs.
+    DomDocument* doc = evcon ? event_context_target_document(evcon) : nullptr;
+    if (!doc && target && target->is_element()) {
+        DomElement* te = target->as_element();
+        doc = te ? te->doc : nullptr;
+    }
     // the document's one shared script runtime: a behavior template governs
     // plain HTML pages too, where the Lambda runtime is the JS realm's.
     Runtime* rt = dom_document_script_runtime(doc);
@@ -2307,7 +2313,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
 
         if (any_changed) {
             // incremental DOM rebuild (falls back to full if map not ready)
-            rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
+            if (evcon) rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
             if (out_model_reconciled) *out_model_reconciled = true;
         }
         auto t_rebuild = high_resolution_clock::now();
@@ -2326,7 +2332,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     }
 
     if (emit_ctx.has_pending_selection) {
-        if (apply_source_selection_to_doc(evcon->ui_context, doc, emit_ctx.pending_selection)) {
+        if (evcon && apply_source_selection_to_doc(evcon->ui_context, doc, emit_ctx.pending_selection)) {
             log_debug("dispatch_lambda_handler: applied pending source selection");
             evcon->need_repaint = true;
         } else {
@@ -2587,9 +2593,16 @@ bool radiant_behavior_claims_event(EventContext* evcon, View* target,
                                    const char* event_name) {
     if (!target || !event_name) return false;
     if (event_is_hot_path(event_name)) return false;
+    // Callers outside dispatch (native validation, for one) have no
+    // EventContext; fall back to the element's own document.
+    DomDocument* doc = evcon ? event_context_target_document(evcon) : nullptr;
+    if (!doc && target->is_element()) {
+        DomElement* te = target->as_element();
+        doc = te ? te->doc : nullptr;
+    }
     // ensure() binds (and if needed creates) the document's evaluator, so a
     // script-less page must not be rejected for having no context yet
-    if (!radiant_dom_package_ensure(event_context_target_document(evcon))) return false;
+    if (!radiant_dom_package_ensure(doc)) return false;
     for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
         if (node->node_type != DOM_NODE_ELEMENT) continue;
         DomElement* dom_elem = lam::dom_require_element(node);
@@ -2614,7 +2627,13 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
                                       bool* out_model_reconciled) {
     // an author handler that returned 'prevent-default' suppresses UA behavior
     if (evcon && evcon->default_prevented) return false;
-    DomDocument* doc = event_context_target_document(evcon);
+    // Attach-time dispatch carries no EventContext; fall back to the element's
+    // own document, as the claim check and the handler invoke both do.
+    DomDocument* doc = evcon ? event_context_target_document(evcon) : nullptr;
+    if (!doc && target && target->is_element()) {
+        DomElement* te = target->as_element();
+        doc = te ? te->doc : nullptr;
+    }
     if (event_is_hot_path(event_name)) {
         // a continuous event may only reach an already-loaded package, and even
         // then only a template that explicitly declares it (checked by the match)
@@ -2661,9 +2680,56 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
     return false;
 }
 
+// Attach-time dispatch: a control has become live, so let the behavior template
+// governing it run its `init` handler. This is the moment native validation used
+// (tc_ensure_init) — without it a required-empty field would only become
+// :invalid once the user touched it (ESO31). There is no EventContext here; the
+// handler path derives the document from the element.
+// Controls initialize during layout (tc_ensure_init), and a handler must not
+// run there: ES5 requires handlers to see a quiescent state, and writing state
+// mid-layout leaves a reflow pending inside the pass that is still running.
+// So attach is queued here and drained at the next quiescent point.
+#define RADIANT_ATTACH_QUEUE_CAP 64
+static __thread View* s_attach_queue[RADIANT_ATTACH_QUEUE_CAP];
+static __thread int s_attach_queue_len = 0;
+
+extern "C" bool radiant_dispatch_behavior_attach(View* target) {
+    if (!target) return false;
+    for (int i = 0; i < s_attach_queue_len; i++) {
+        if (s_attach_queue[i] == target) return false;   // already queued
+    }
+    if (s_attach_queue_len >= RADIANT_ATTACH_QUEUE_CAP) {
+        // Dropping is safe rather than silent: the control keeps whatever the
+        // native fallback seeded, and the next event revalidates it anyway.
+        log_debug("behavior-attach: queue full, dropping one control");
+        return false;
+    }
+    s_attach_queue[s_attach_queue_len++] = target;
+    return true;
+}
+
+// Drain the attach queue. Called at the start of event handling, where layout
+// has finished and nothing is mid-pass.
+static void radiant_drain_behavior_attach(void) {
+    if (s_attach_queue_len <= 0) return;
+    int count = s_attach_queue_len;
+    s_attach_queue_len = 0;              // clear first: a handler may attach more
+    for (int i = 0; i < count; i++) {
+        dispatch_behavior_handler(nullptr, s_attach_queue[i], "init", nullptr, nullptr);
+    }
+}
+
+// Post-mutation `input` for UA behavior templates. The pre-mutation `input`
+// belongs to app templates that own their text; validation and anything else
+// that must observe the committed value hooks here instead (F3).
+extern "C" bool radiant_dispatch_behavior_input(EventContext* evcon, View* target) {
+    return dispatch_behavior_handler(evcon, target, "input", nullptr, nullptr);
+}
+
 static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name,
                                     const InputIntent* intent = nullptr,
-                                    bool* out_model_reconciled = nullptr) {
+                                    bool* out_model_reconciled = nullptr,
+                                    bool allow_behavior = true) {
     if (out_model_reconciled) *out_model_reconciled = false;
     // Plain HTML documents have no Lambda template Runtime.  Native input must
     // skip template dispatch instead of reading the context-local registry with
@@ -2671,8 +2737,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
     if (!context || !g_template_registry || g_template_registry->count == 0) {
         // No author templates on this document (a plain HTML page has none),
         // but UA behavior may still govern the target.
-        return dispatch_behavior_handler(evcon, target, event_name, intent,
-                                         out_model_reconciled);
+        return allow_behavior && dispatch_behavior_handler(evcon, target, event_name,
+                                                           intent, out_model_reconciled);
     }
 
     log_debug("dispatch_lambda_handler: searching for '%s' handler, registry has %d templates",
@@ -2721,8 +2787,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
     }
 
     log_debug("dispatch_lambda_handler: no handler found after walking %d levels", depth);
-    return dispatch_behavior_handler(evcon, target, event_name, intent,
-                                     out_model_reconciled);
+    return allow_behavior && dispatch_behavior_handler(evcon, target, event_name, intent,
+                                                       out_model_reconciled);
 }
 
 bool editing_template_invoke_handler(EventContext* evcon, View* target,
@@ -7722,6 +7788,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_error("No document to handle event");
         return;
     }
+    // Controls that initialized during the last layout get their `init` turn
+    // here, before this event is processed: layout has finished, so the state
+    // they write lands in a quiescent pass rather than inside one.
+    radiant_drain_behavior_attach();
     if (!doc->html_root && !doc->view_tree) {
         log_error("No document content to handle event");
         return;
@@ -10339,7 +10409,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     char utf8_buf[5];
                     size_t utf8_len = utf8_encode_z(text_event->codepoint, utf8_buf);
                     if (utf8_len > 0) {
-                        if (dispatch_lambda_handler(&evcon, focused, "input")) {
+                        // Pre-mutation `input`: the Reactive_UI contract where an
+                        // app template owns the text and splices it itself, so
+                        // claiming it skips the engine's own insert below. UA
+                        // behavior must NOT see this one — it fires before the
+                        // value exists, and claiming it would stop typing.
+                        if (dispatch_lambda_handler(&evcon, focused, "input", nullptr,
+                                                    nullptr, /*allow_behavior=*/false)) {
                             evcon.need_repaint = true;
                             View* live_focus = focus_get(state);
                             if (live_focus && live_focus->is_element()) {

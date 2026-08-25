@@ -1,0 +1,31 @@
+{
+  "name": "dom package drives constraint validation",
+  "html": "test/lambda/ui/dom_pkg_validate.ls",
+  "viewport": {
+    "width": 400,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "=== email validation from the Lambda package (post-mutation input) ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".em"
+      }
+    },
+    {
+      "type": "type",
+      "text": "abc"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".em"
+      },
+      "count": 1
+    }
+  ]
+}

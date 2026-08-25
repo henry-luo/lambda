@@ -51,6 +51,14 @@ struct DomNode;
 // Re-apply selector-dependent style and schedule layout after a live pseudo
 // state changes outside the native pointer dispatcher (for example JS .checked).
 void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set);
+
+// True when a dom-package behavior template owns the default action for this
+// event on this target. Native default actions consult it and stand down
+// (ES5, fallback-until-registered). `evcon` may be null for callers outside
+// event dispatch; the document is then taken from the target element.
+struct EventContext;
+bool radiant_behavior_claims_event(struct EventContext* evcon, View* target,
+                                   const char* event_name);
 #endif
 
 typedef enum  {

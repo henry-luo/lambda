@@ -696,6 +696,8 @@ bool editing_dispatch_form_beforeinput(EventContext* evcon,
     return dispatchable;
 }
 
+extern "C" bool radiant_dispatch_behavior_input(EventContext* evcon, View* target);
+
 void editing_dispatch_form_input(EventContext* evcon,
                                  const EditingSurface* surface,
                                  const EditingIntent* intent,
@@ -716,4 +718,7 @@ void editing_dispatch_form_input(EventContext* evcon,
         editing_log_record(evcon, surface, intent, "editing.input",
                            false);
     }
+    // UA behavior templates observe the *committed* value here, after the
+    // buffer mutation — unlike the pre-mutation `input` app templates receive.
+    radiant_dispatch_behavior_input(evcon, surface->view);
 }
