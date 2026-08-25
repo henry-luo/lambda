@@ -5559,8 +5559,16 @@ Item fn_split(Item str_item, Item sep_item) {
     result->is_content = 1;
 
     if (!rooted_str.get().get_chars() || str_len == 0) {
+        // S17.1.1 (ECMAScript rule): an empty subject yields [] when the
+        // delimiter matches the empty string — the empty separator, and the
+        // Python-shaped whitespace form which has no JS analogue — and [""]
+        // otherwise, matching "".split(",") === [""].
+        if (!null_sep && sep_len != 0) {
+            String* only = split_heap_string_slice(rooted_str, 0, 0);
+            list_push(rooted_result.get(), {.item = s2it(only)});
+        }
         if (context) { context->disable_string_merging = saved_merging; }
-        return {.array = rooted_result.get()};  // empty list for empty string
+        return {.array = rooted_result.get()};
     }
 
     if (null_sep) {

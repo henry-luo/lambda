@@ -13,6 +13,7 @@
 #endif
 #include "../../lib/re2_glue.hpp"
 #include "../../lib/log.h"
+#include "../../lib/str.h"
 #include "../../lib/mempool.h"
 
 #include <re2/re2.h>
@@ -1121,7 +1122,24 @@ static String* make_heap_rooted_slice(Rooted<Item>& rooted_source, size_t offset
 }
 
 // Split string by pattern matches
+// list_push concatenates a pushed string onto the previous element unless the
+// eval context suspends it. Split segments are separate elements by definition,
+// so every pattern split collapsed into one string — with keep_delim the pieces
+// merged back into the input verbatim. fn_split's string path already suspends
+// merging around its own loop; the pattern path returns before reaching it, so
+// own the suspension here and cover both fn_split and fn_split3 at once.
+namespace {
+struct SuspendStringMerging {
+    bool saved;
+    SuspendStringMerging() : saved(context && context->disable_string_merging) {
+        if (context) context->disable_string_merging = true;
+    }
+    ~SuspendStringMerging() { if (context) context->disable_string_merging = saved; }
+};
+}  // namespace
+
 List* pattern_split(TypePattern* pattern, Item source, bool keep_delim) {
+    SuspendStringMerging no_merge;  // restored on every return below
     RootFrame roots(2);
     Rooted<Item> rooted_source(roots, source);
     Rooted<List*> rooted_result(roots, (List*)NULL);
@@ -1129,28 +1147,65 @@ List* pattern_split(TypePattern* pattern, Item source, bool keep_delim) {
     rooted_result.set(result);
     if (!pattern || !source.get_chars()) return rooted_result.get();
     size_t len = source.get_len();
-    if (len == 0) return rooted_result.get();
 
     re2::RE2* re = pattern_get_unanchored(pattern);
     if (!re) return rooted_result.get();
 
-    size_t pos = 0;
+    if (len == 0) {
+        // S17.1.1: an empty subject yields [] when the delimiter matches the
+        // empty string and [""] otherwise — the delimiter "consumes" the whole
+        // (empty) subject in the first case but not the second.
+        re2::StringPiece probe(source.get_chars(), (size_t)0);
+        re2::StringPiece hit;
+        if (re->Match(probe, 0, 0, re2::RE2::UNANCHORED, &hit, 1)) {
+            return rooted_result.get();
+        }
+        String* only = make_heap_rooted_slice(rooted_source, 0, 0);
+        list_push(rooted_result.get(), {.item = s2it(only)});
+        return rooted_result.get();
+    }
 
-    while (pos <= len) {
+    // `seg_start` opens the pending segment; `search` is where the next match
+    // is looked for. They only differ after a zero-length match, which must
+    // advance the search alone — one shared cursor stepped the segment start
+    // over the character at the match position and dropped it from the output
+    // entirely (split("ab", \(d*)) returned three empty strings, no "a"/"b").
+    size_t seg_start = 0;
+    size_t search = 0;
+
+    // S17.1.1 follows ECMAScript here: the bound is `search < len`, not `<= len`.
+    // The trailing segment is always pushed after the loop, so searching at
+    // `len` would let a zero-width match there emit one segment too many.
+    while (search < len) {
         // Each preceding result allocation can move the source string.
         const char* str = rooted_source.get().get_chars();
         re2::StringPiece input(str, len);
         re2::StringPiece match;
-        if (!re->Match(input, pos, len, re2::RE2::UNANCHORED, &match, 1)) {
+        if (!re->Match(input, search, len, re2::RE2::UNANCHORED, &match, 1)) {
             break;
         }
 
         size_t match_start = match.data() - str;
         size_t match_len_val = match.size();
+        size_t match_end = match_start + match_len_val;
+
+        if (match_end == seg_start) {
+            // ECMAScript's `e == p` rule: a match ending where the pending
+            // segment starts contributes nothing and only advances the search.
+            // This is the whole reason JS reports ["a","b"] for
+            // "ab".split(/\d*/) where Python reports ['','a','b',''] — it
+            // suppresses the leading and trailing empties alike. Step a whole
+            // codepoint so the next slice stays on a character boundary.
+            const char* lead = rooted_source.get().get_chars();
+            size_t step = str_utf8_char_len((unsigned char)lead[match_start]);
+            if (step == 0) step = 1;
+            search = match_start + step;
+            continue;
+        }
 
         // push the part before the match
-        size_t part_len = match_start - pos;
-        String* part = make_heap_rooted_slice(rooted_source, pos, part_len);
+        size_t part_len = match_start - seg_start;
+        String* part = make_heap_rooted_slice(rooted_source, seg_start, part_len);
         list_push(rooted_result.get(), {.item = s2it(part)});
 
         // optionally push the delimiter
@@ -1159,15 +1214,16 @@ List* pattern_split(TypePattern* pattern, Item source, bool keep_delim) {
             list_push(rooted_result.get(), {.item = s2it(delim)});
         }
 
-        // advance past match; handle zero-length matches
-        pos = match_start + match_len_val;
-        if (match_len_val == 0) pos++;
+        // A zero-length match here sits past seg_start, so it yields a real
+        // segment; the next pass sees match_end == seg_start and advances.
+        seg_start = match_end;
+        search = match_end;
     }
 
     // push remaining part after last match
-    if (pos <= len) {
-        size_t part_len = len - pos;
-        String* part = make_heap_rooted_slice(rooted_source, pos, part_len);
+    if (seg_start <= len) {
+        size_t part_len = len - seg_start;
+        String* part = make_heap_rooted_slice(rooted_source, seg_start, part_len);
         list_push(rooted_result.get(), {.item = s2it(part)});
     }
 

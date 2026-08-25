@@ -468,6 +468,28 @@ split("a1b2c3", digit, true)          // ["a", "1", "b", "2", "c", "3", ""]  —
 split("a,b,c", ",", true)             // ["a", ",", "b", ",", "c"]           — works with strings too
 ```
 
+**Edge cases (S17.1.1).** `split` follows ECMAScript's `String.prototype.split`,
+so string and pattern delimiters behave identically at the edges:
+
+| Call | Result | |
+|---|---|---|
+| `split(",a,b", ",")` | `["", "a", "b"]` | leading delimiter → empty first segment |
+| `split("a1b1", digit)` | `["a", "b", ""]` | trailing delimiter → empty last segment |
+| `split("abc", ",")` | `["abc"]` | no match → whole subject, one element |
+| `split("", ",")` | `[""]` | empty subject, delimiter does not match empty |
+| `split("", \(d*))` | `[]` | empty subject, delimiter matches empty |
+| `split("ab", "")` | `["a", "b"]` | empty delimiter → characters |
+| `split("ab", \(d*))` | `["a", "b"]` | zero-width match → no leading/trailing empty |
+
+The last row is where ECMAScript and Python differ: a match ending on the
+current segment's start contributes no segment, so a zero-width delimiter
+yields neither a leading nor a trailing empty. Python's `re.split` would give
+`['', 'a', 'b', '']`. Zero-width advances step whole codepoints, so
+`split("日本", \(d*))` is `["日", "本"]`.
+
+`split(str, null)` splits on runs of whitespace with outer whitespace stripped
+(a Python-shaped form with no ECMAScript analogue).
+
 ### join(strs, separator)
 
 Join a list of strings with a separator. Returns a string.
