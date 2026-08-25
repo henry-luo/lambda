@@ -3573,7 +3573,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         mem_free(runtime);
         return nullptr;
     }
-    if (!eval_context_thread_initialize(layout_context)) {
+    if (!eval_context_init(layout_context)) {
         log_error("load_lambda_script_doc: failed to initialize eval thread");
         release_layout_runtime(runtime);
         return nullptr;
@@ -3599,7 +3599,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             layout_context->ui_mode = true;
             layout_context->arena = runtime->result_arena;
         }
-        if (!eval_context_thread_matches(layout_context)) {
+        if (!eval_context_matches(layout_context)) {
             log_error("load_lambda_script_doc: eval owner changed during execution");
             release_layout_runtime(runtime);
             pool_destroy(result_pool);
@@ -4984,7 +4984,7 @@ static bool layout_single_file(
         }
         Runtime* render_runtime = dom_document_script_runtime(doc);
         if (render_runtime &&
-                !eval_context_thread_initialize(runtime_get_eval_context(render_runtime))) {
+                !eval_context_init(runtime_get_eval_context(render_runtime))) {
             log_error("[Layout] document cleanup reached a foreign eval thread");
         }
         source_pos_bridge_reset();

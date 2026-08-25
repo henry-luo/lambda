@@ -2935,7 +2935,7 @@ static int jube_host_execution_activate(void* execution_context, void** out_inpu
         execution->active_context = runtime_get_eval_context(
             jube_guest_execution_runtime(execution));
         if (!execution->active_context) return -1;
-        if (!eval_context_thread_initialize(execution->active_context)) return -1;
+        if (!eval_context_init(execution->active_context)) return -1;
         heap_init();
         context->pool = context->heap->pool;
         context->name_pool = name_pool_create_runtime(context->pool);

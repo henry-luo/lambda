@@ -944,9 +944,9 @@ struct JsRuntimeState {
 // This derived TLS cache is initialized once after the eval thread acquires
 // its context. It must stay paired with `context` until thread teardown.
 extern __thread JsRuntimeState* js_active_runtime_state;
-bool js_runtime_state_thread_initialize(EvalContext* context);
+bool js_runtime_state_init(EvalContext* context);
 bool js_runtime_state_thread_matches(const EvalContext* context);
-bool js_runtime_state_thread_shutdown(EvalContext* context);
+bool js_runtime_state_shutdown(EvalContext* context);
 void js_runtime_state_release_heap_resources(void);
 void js_runtime_state_destroy_context(void);
 extern "C" bool js_promise_initial_unhandled_rejections_strict(void);

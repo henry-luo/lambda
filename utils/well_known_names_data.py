@@ -61,7 +61,7 @@ font-weight font-style font-variant font-size-adjust font-kerning font-variant-l
 font-variant-caps font-variant-numeric font-variant-alternates font-variant-east-asian
 font-feature-settings font-language-override font-optical-sizing font-variation-settings
 font-display letter-spacing word-spacing text-shadow line-height text-align text-decoration
-text-transform initial-letter text-wrap-style text-spacing-trim white-space vertical-align
+text-transform initial-letter text-wrap-style text-spacing-trim text-autospace white-space vertical-align
 background-color background-image background-repeat background-position background-size
 flex-direction flex-wrap flex-flow justify-content align-items align-content align-self
 flex-grow flex-shrink flex-basis order grid-template-columns grid-template-rows
@@ -95,7 +95,7 @@ pointer-events float-defer float-offset float-reference image-orientation image-
 mask-image mask-type nesting overflow-block overflow-clip-margin overflow-inline overscroll-behavior
 ruby-align ruby-position scroll-behavior scroll-margin scroll-padding scroll-snap-align
 scroll-snap-type transition-delay transition-duration transition-property transition-timing-function
-wrap-flow wrap-through line-clamp -webkit-line-clamp contain-intrinsic-inline-size contain-intrinsic-block-size scrollbar-gutter content-visibility all zoom
+wrap-flow wrap-through line-clamp -webkit-line-clamp contain-intrinsic-inline-size contain-intrinsic-block-size scrollbar-gutter content-visibility all zoom text-wrap text-wrap-mode
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

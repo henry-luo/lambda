@@ -5463,7 +5463,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // entrypoint directly; without this bind, TLA state dereferences a null
     // capsule before the module can be parsed.
     if (!runtime || !context || !context->heap ||
-            !js_runtime_state_thread_initialize(context)) {
+            !js_runtime_state_init(context)) {
         log_error("js-mir: module compilation requires a bound runtime context");
         return ItemError;
     }

@@ -252,9 +252,9 @@ static FontHandle* resolve_exact_fallback_family(FontContext* ctx,
 
 static uint64_t cp_fallback_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const CodepointFallbackEntry* e = (const CodepointFallbackEntry*)item;
-    // hash on (codepoint, size_px) — same codepoint at different sizes needs separate entries
-    // to avoid returning a wrong-size fallback handle (e.g., 36px first-letter vs 16px body)
-    struct { uint32_t cp; float sz; } key = { e->codepoint, e->size_px };
+    // include the source face because platform fallback depends on its coverage and traits.
+    struct { uint32_t cp; float sz; FontHandle* source; } key = {
+        e->codepoint, e->size_px, e->source_handle};
     return hashmap_xxhash3(&key, sizeof(key), seed0, seed1);
 }
 
@@ -264,6 +264,11 @@ static int cp_fallback_compare(const void* a, const void* b, void* udata) {
     const CodepointFallbackEntry* eb = (const CodepointFallbackEntry*)b;
     if (ea->codepoint != eb->codepoint) return (ea->codepoint < eb->codepoint ? -1 : 1);
     if (ea->size_px != eb->size_px) return (ea->size_px < eb->size_px ? -1 : 1);
+    if (ea->source_handle != eb->source_handle) {
+        uintptr_t ea_source = (uintptr_t)ea->source_handle;
+        uintptr_t eb_source = (uintptr_t)eb->source_handle;
+        return ea_source < eb_source ? -1 : 1;
+    }
     return 0;
 }
 
@@ -271,6 +276,9 @@ static void cp_fallback_free(void* item) {
     CodepointFallbackEntry* entry = (CodepointFallbackEntry*)item;
     if (entry && entry->handle) {
         font_handle_release(entry->handle);
+    }
+    if (entry && entry->source_handle) {
+        font_handle_release(entry->source_handle);
     }
 }
 
@@ -343,7 +351,8 @@ static void platform_fb_insert(FontHandle* handle, int face_index, float size_px
 }
 
 FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* style,
-                                          uint32_t codepoint) {
+                                          uint32_t codepoint,
+                                          FontHandle* source_handle) {
     if (!ctx || !style) return NULL;
 
     FontHandle* authored = font_resolve_authored_for_codepoint(ctx, style, codepoint);
@@ -356,7 +365,9 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
     // check codepoint fallback cache
     struct hashmap* cache = ensure_codepoint_cache(ctx);
     if (cache) {
-        CodepointFallbackEntry key = {.codepoint = codepoint, .size_px = style->size_px, .handle = NULL};
+        CodepointFallbackEntry key = {
+            .codepoint = codepoint, .size_px = style->size_px,
+            .source_handle = source_handle, .handle = NULL};
         CodepointFallbackEntry* cached = (CodepointFallbackEntry*)hashmap_get(cache, &key);
         if (cached) {
             if (cached->handle) {
@@ -381,8 +392,10 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                 ctx, style, ctx->fallback_fonts[i], codepoint);
             if (handle) {
                 CodepointFallbackEntry entry = {
-                    .codepoint = codepoint, .size_px = style->size_px, .handle = handle};
+                    .codepoint = codepoint, .size_px = style->size_px,
+                    .source_handle = source_handle, .handle = handle};
                 font_handle_retain(handle);
+                if (source_handle) font_handle_retain(source_handle);
                 hashmap_set(cache, &entry);
                 log_debug("font_fallback: codepoint U+%04X → '%s'",
                           codepoint, ctx->fallback_fonts[i]);
@@ -396,13 +409,42 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
     // the same Unicode block resolve to the same font file.
     {
         int face_index = 0;
-        char* font_path = font_platform_find_codepoint_font(codepoint, &face_index);
+        void* platform_font_ref = NULL;
+        void* base_font_ref = NULL;
+#ifdef __APPLE__
+        if (source_handle) {
+            base_font_ref = source_handle->ct_font_ref
+                ? source_handle->ct_font_ref : source_handle->ct_raster_ref;
+        }
+#endif
+        char* font_path = font_platform_find_codepoint_font(
+            base_font_ref, codepoint, &face_index, &platform_font_ref);
         if (font_path) {
+            // CoreText descriptor positions are not SFNT collection indices;
+            // discover the usable table face by coverage below.
+            face_index = 0;
             // fast path: reuse an existing handle for this font file
             FontHandle* reused = platform_fb_lookup(font_path, face_index, style->size_px, codepoint);
             if (reused) {
-                CodepointFallbackEntry entry = {.codepoint = codepoint, .size_px = style->size_px, .handle = reused};
+#ifdef __APPLE__
+                // a cached file can expose different CoreText fallback faces per codepoint;
+                // refresh the retained face before measuring or rasterizing this glyph.
+                if (platform_font_ref) {
+                    font_backend_use_ct_font(reused, platform_font_ref);
+                    font_platform_destroy_ct_font(platform_font_ref);
+                    platform_font_ref = NULL;
+                }
+#endif
+                if (platform_font_ref) {
+#ifdef __APPLE__
+                    font_platform_destroy_ct_font(platform_font_ref);
+#endif
+                }
+                CodepointFallbackEntry entry = {
+                    .codepoint = codepoint, .size_px = style->size_px,
+                    .source_handle = source_handle, .handle = reused};
                 font_handle_retain(reused);
+                if (source_handle) font_handle_retain(source_handle);
                 hashmap_set(cache, &entry);
                 font_handle_retain(reused);
                 log_debug("font_fallback: codepoint U+%04X → reused cached handle (face %d)",
@@ -417,8 +459,18 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                 style->weight, style->slant);
             if (handle && font_has_codepoint(handle, codepoint)) {
                 // cache positive result
-                CodepointFallbackEntry entry = {.codepoint = codepoint, .size_px = style->size_px, .handle = handle};
+#ifdef __APPLE__
+                if (platform_font_ref) {
+                    font_backend_use_ct_font(handle, platform_font_ref);
+                    font_platform_destroy_ct_font(platform_font_ref);
+                    platform_font_ref = NULL;
+                }
+#endif
+                CodepointFallbackEntry entry = {
+                    .codepoint = codepoint, .size_px = style->size_px,
+                    .source_handle = source_handle, .handle = handle};
                 font_handle_retain(handle);
+                if (source_handle) font_handle_retain(source_handle);
                 hashmap_set(cache, &entry);
                 platform_fb_insert(handle, face_index, style->size_px);
                 log_debug("font_fallback: codepoint U+%04X → platform font (face %d)", codepoint, face_index);
@@ -439,8 +491,18 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
                         style->size_px, physical_size,
                         style->weight, style->slant);
                     if (handle && font_has_codepoint(handle, codepoint)) {
-                        CodepointFallbackEntry entry = {.codepoint = codepoint, .size_px = style->size_px, .handle = handle};
+#ifdef __APPLE__
+                        if (platform_font_ref) {
+                            font_backend_use_ct_font(handle, platform_font_ref);
+                            font_platform_destroy_ct_font(platform_font_ref);
+                            platform_font_ref = NULL;
+                        }
+#endif
+                        CodepointFallbackEntry entry = {
+                            .codepoint = codepoint, .size_px = style->size_px,
+                            .source_handle = source_handle, .handle = handle};
                         font_handle_retain(handle);
+                        if (source_handle) font_handle_retain(source_handle);
                         hashmap_set(cache, &entry);
                         platform_fb_insert(handle, (int)fi, style->size_px);
                         log_debug("font_fallback: codepoint U+%04X → platform font (face %ld of %ld)",
@@ -453,10 +515,16 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
             }
             mem_free(font_path);
         }
+#ifdef __APPLE__
+        if (platform_font_ref) font_platform_destroy_ct_font(platform_font_ref);
+#endif
     }
 
     // negative cache — no fallback has this codepoint
-    CodepointFallbackEntry neg = {.codepoint = codepoint, .size_px = style->size_px, .handle = NULL};
+    CodepointFallbackEntry neg = {
+        .codepoint = codepoint, .size_px = style->size_px,
+        .source_handle = source_handle, .handle = NULL};
+    if (source_handle) font_handle_retain(source_handle);
     hashmap_set(cache, &neg);
     log_debug("font_fallback: no fallback for codepoint U+%04X", codepoint);
     return NULL;

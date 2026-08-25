@@ -149,7 +149,6 @@ bool font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepoint,
     out->width     = (int)ceilf((float)bbox.size.width * bitmap_scale);
     out->height    = (int)ceilf((float)bbox.size.height * bitmap_scale);
     out->is_color  = CTFontGetSymbolicTraits(font) & kCTFontTraitColorGlyphs;
-
     return true;
 }
 

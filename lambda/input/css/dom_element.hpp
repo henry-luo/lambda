@@ -295,6 +295,11 @@ struct DomDocument {
     // never pay for it.
     bool dom_package_loaded;
 
+    // True when this document created its own script runtime because it had
+    // none — a script-less HTML page owns no runtime until UA behavior needs
+    // one. The document then owns that runtime's teardown (ESO25).
+    bool owns_script_runtime;
+
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -317,7 +322,7 @@ struct DomDocument {
                     pending_scroll_into_view_target_id(0),
                     mutation_epoch(0), editing_action_registry(nullptr),
                     page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
-                    dom_package_loaded(false) {}
+                    dom_package_loaded(false), owns_script_runtime(false) {}
 
     bool init(Input* input);
     void destroy();
@@ -465,6 +470,7 @@ enum FragmentUnionKind : uint8_t {
     FRAGMENT_UNION_COLLAPSED_LINE,
     FRAGMENT_UNION_SPLIT_INLINE,
     FRAGMENT_UNION_INLINE_CB,
+    FRAGMENT_UNION_LINE_BOX,
     FRAGMENT_UNION_COUNT,
 };
 

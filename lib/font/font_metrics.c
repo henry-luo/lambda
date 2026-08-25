@@ -306,8 +306,9 @@ static int font_get_handle_platform_metrics(FontHandle* handle,
                                             float* out_line_height) {
     if (!handle) return 0;
 #ifdef __APPLE__
-    if (handle->is_document_font && handle->ct_raster_ref) {
-        // document-family aliases may resolve to a substitute; measure the data-backed face.
+    if ((handle->is_document_font || handle->metrics_from_platform_ref) &&
+        handle->ct_raster_ref) {
+        // aliases and platform fallbacks may resolve to a substitute; measure the retained face.
         return font_platform_get_metrics_from_ref(handle->ct_raster_ref,
             out_ascent, out_descent, out_line_height);
     }

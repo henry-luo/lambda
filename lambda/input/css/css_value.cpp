@@ -495,6 +495,12 @@ static const CssEnumInfo css_value_definitions[] = {
     // Animation iteration-count keyword
     {"infinite", 8, CSS_VALUE_INFINITE, CSS_VALUE_GROUP_ANIMATION},
     {"base-select", 11, CSS_VALUE_BASE_SELECT, CSS_VALUE_GROUP_MISC},
+    {"no-autospace", 12, CSS_VALUE_NO_AUTOSPACE, CSS_VALUE_GROUP_MISC},
+    {"ideograph-alpha", 15, CSS_VALUE_IDEOGRAPH_ALPHA, CSS_VALUE_GROUP_MISC},
+    {"ideograph-numeric", 17, CSS_VALUE_IDEOGRAPH_NUMERIC, CSS_VALUE_GROUP_MISC},
+    {"punctuation", 11, CSS_VALUE_PUNCTUATION, CSS_VALUE_GROUP_MISC},
+    {"insert", 6, CSS_VALUE_INSERT, CSS_VALUE_GROUP_MISC},
+    {"replace", 7, CSS_VALUE_REPLACE, CSS_VALUE_GROUP_MISC},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 

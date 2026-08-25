@@ -12,17 +12,17 @@
 
 __thread EvalContext* context = NULL;
 
-bool eval_context_thread_initialize(EvalContext* owner) {
+bool eval_context_init(EvalContext* owner) {
     if (!owner || (context && context != owner)) return false;
     context = owner;
     return true;
 }
 
-bool eval_context_thread_matches(const EvalContext* owner) {
+bool eval_context_matches(const EvalContext* owner) {
     return owner && context == owner;
 }
 
-bool eval_context_thread_shutdown(EvalContext* owner) {
+bool eval_context_shutdown(EvalContext* owner) {
     if (!owner || context != owner) return false;
     context = NULL;
     return true;

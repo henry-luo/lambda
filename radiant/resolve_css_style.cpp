@@ -19,6 +19,11 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 static bool css_value_is_background_color_candidate(const CssValue* value);
 static CssEnum css_resolve_content_alignment_keyword(const CssValue* value);
+static CssEnum find_inherited_block_keyword(DomElement* element,
+                                            CssPropertyCode property,
+                                            bool check_specified,
+                                            bool reject_match_parent,
+                                            CssEnum fallback);
 static float resolve_spacing_with_inherit(LayoutContext* lycon,
                                           CssPropertyCode prop_id,
                                           const CssValue* value);
@@ -4990,6 +4995,19 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 inheritance_span->font->font_size_from_medium = ancestor->font->font_size_from_medium;
                 continue;  // Move to next property
             }
+            if (prop_id == CSS_PROPERTY_DIRECTION && !dom_elem->get_attribute("dir")) {
+                // css writing modes: direction inherits from the computed parent value;
+                // html dir can supply that value without a specified CSS declaration.
+                CssEnum inherited_direction = find_inherited_block_keyword(
+                    dom_elem, CSS_PROPERTY_DIRECTION, false, false, CSS_VALUE_LTR);
+                // preserve the canonical LTR default without materializing a block prop
+                // on ordinary elements; some layout paths use prop presence as state.
+                if (inherited_direction != CSS_VALUE_LTR || inheritance_span->blk) {
+                    inheritance_span->ensure_block(lycon);
+                    inheritance_span->blk->direction = inherited_direction;
+                }
+                continue;
+            }
             while (ancestor && !inherited_decl) {
                 if (ancestor->specified_style) {
                     inherited_decl = style_tree_get_declaration(ancestor->specified_style, prop_id);
@@ -6303,6 +6321,166 @@ static void resolve_text_box_edge_property(ViewBlock* block, const CssValue* val
     }
 }
 
+static bool text_wrap_style_keyword(CssEnum keyword) {
+    return keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_BALANCE;
+}
+
+static bool resolve_text_wrap_mode_keyword(CssEnum keyword, CssEnum* mode) {
+    if (!mode) return false;
+    if (keyword == CSS_VALUE_WRAP || keyword == CSS_VALUE_NOWRAP) {
+        *mode = keyword;
+        return true;
+    }
+    return false;
+}
+
+static bool resolve_text_wrap_value(const CssValue* value, CssEnum* mode,
+                                    CssEnum* style) {
+    if (!value || !mode || !style) return false;
+    *mode = CSS_VALUE_WRAP;
+    *style = CSS_VALUE_AUTO;
+    bool has_mode = false;
+    bool has_style = false;
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (count < 1 || count > 2) return false;
+    for (int i = 0; i < count; i++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+            ? value->data.list.values[i] : value;
+        if (!item || item->type != CSS_VALUE_TYPE_KEYWORD) return false;
+        if (resolve_text_wrap_mode_keyword(item->data.keyword, mode)) {
+            if (has_mode) return false;
+            has_mode = true;
+        } else if (text_wrap_style_keyword(item->data.keyword)) {
+            if (has_style) return false;
+            *style = item->data.keyword;
+            has_style = true;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void resolve_text_wrap_property(LayoutContext* lycon, ViewSpan* span,
+                                       CssPropertyCode property,
+                                       const CssValue* value) {
+    if (!lycon || !span || !value) return;
+    BlockProp* target = span->ensure_block(lycon);
+    if (!target) return;
+    if (property == CSS_PROPERTY_TEXT_WRAP_MODE) {
+        if (value->type != CSS_VALUE_TYPE_KEYWORD) return;
+        CssEnum mode = value->data.keyword;
+        if (mode == CSS_VALUE_INHERIT || mode == CSS_VALUE_UNSET) {
+            target->text_wrap_mode = get_text_wrap_mode_value(
+                dom_parent_element(lam::dom_require_element(lycon->view)));
+        } else if (mode == CSS_VALUE_INITIAL || mode == CSS_VALUE_REVERT) {
+            target->text_wrap_mode = CSS_VALUE_WRAP;
+        } else if (!resolve_text_wrap_mode_keyword(mode, &target->text_wrap_mode)) {
+            target->text_wrap_mode = (CssEnum)0;
+        }
+        return;
+    }
+    CssEnum mode = CSS_VALUE_WRAP;
+    CssEnum style = CSS_VALUE_AUTO;
+    if (!resolve_text_wrap_value(value, &mode, &style)) return;
+    target->text_wrap_mode = mode;
+    target->text_wrap_style = style;
+}
+
+static bool parse_text_autospace_value(const CssValue* value, uint8_t* flags) {
+    if (!value || !flags) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        switch (value->data.keyword) {
+            case CSS_VALUE_NORMAL:
+            case CSS_VALUE_AUTO:
+                *flags = TEXT_AUTOSPACE_NORMAL;
+                return true;
+            case CSS_VALUE_NO_AUTOSPACE:
+                *flags = 0;
+                return true;
+            case CSS_VALUE_IDEOGRAPH_ALPHA:
+                *flags = TEXT_AUTOSPACE_IDEOGRAPH_ALPHA;
+                return true;
+            case CSS_VALUE_IDEOGRAPH_NUMERIC:
+                *flags = TEXT_AUTOSPACE_IDEOGRAPH_NUMERIC;
+                return true;
+            case CSS_VALUE_PUNCTUATION:
+                *flags = 0;
+                return true;
+            default:
+                return false;
+        }
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST || value->data.list.count == 0) return false;
+    uint8_t parsed = 0;
+    bool has_spacing_class = false;
+    for (int i = 0; i < value->data.list.count; i++) {
+        const CssValue* item = value->data.list.values[i];
+        if (!item || item->type != CSS_VALUE_TYPE_KEYWORD) return false;
+        switch (item->data.keyword) {
+            case CSS_VALUE_IDEOGRAPH_ALPHA:
+                parsed |= TEXT_AUTOSPACE_IDEOGRAPH_ALPHA;
+                has_spacing_class = true;
+                break;
+            case CSS_VALUE_IDEOGRAPH_NUMERIC:
+                parsed |= TEXT_AUTOSPACE_IDEOGRAPH_NUMERIC;
+                has_spacing_class = true;
+                break;
+            case CSS_VALUE_PUNCTUATION:
+                // punctuation spacing is language-specific at this level.
+                has_spacing_class = true;
+                break;
+            case CSS_VALUE_INSERT:
+                parsed &= (uint8_t)~TEXT_AUTOSPACE_REPLACE;
+                break;
+            case CSS_VALUE_REPLACE:
+                parsed |= TEXT_AUTOSPACE_REPLACE;
+                break;
+            default:
+                return false;
+        }
+    }
+    if (!has_spacing_class) return false;
+    *flags = parsed;
+    return true;
+}
+
+static uint8_t inherited_text_autospace(ViewSpan* span) {
+    DomElement* element = span && span->is_element()
+        ? lam::dom_require_element(span) : nullptr;
+    DomElement* parent = element ? dom_parent_element(element) : nullptr;
+    while (parent) {
+        if (parent->blk && parent->block()->text_autospace_is_set) {
+            return parent->block()->text_autospace;
+        }
+        parent = dom_parent_element(parent);
+    }
+    return TEXT_AUTOSPACE_NORMAL;
+}
+
+static void resolve_text_autospace_property(LayoutContext* lycon,
+                                             ViewSpan* span,
+                                             const CssValue* value) {
+    if (!lycon || !span || !value) return;
+    BlockProp* target = span->ensure_block(lycon);
+    if (!target) return;
+    uint8_t flags = TEXT_AUTOSPACE_NORMAL;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) {
+            flags = inherited_text_autospace(span);
+        } else if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_REVERT) {
+            flags = TEXT_AUTOSPACE_NORMAL;
+        } else if (!parse_text_autospace_value(value, &flags)) {
+            return;
+        }
+    } else if (!parse_text_autospace_value(value, &flags)) {
+        return;
+    }
+    target->text_autospace = flags;
+    target->text_autospace_is_set = true;
+}
+
 static LayoutShadowValue resolve_shadow_value(LayoutContext* lycon,
                                               CssPropertyCode property,
                                               const CssValue* value,
@@ -6489,6 +6667,10 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         resolve_common_keyword_property(lycon, span, block, prop_id, decl, value)) {
         return;
     }
+    if (prop_id == CSS_PROPERTY_TEXT_AUTOSPACE) {
+        resolve_text_autospace_property(lycon, span, value);
+        return;
+    }
     if (prop_id >= CSS_PROPERTY_BORDER_TOP_WIDTH &&
         prop_id <= CSS_PROPERTY_BORDER_LEFT_COLOR) {
         resolve_border_physical_longhand(lycon, span, prop_id, value, specificity);
@@ -6657,6 +6839,10 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             }
             break;
         }
+        case CSS_PROPERTY_TEXT_WRAP:
+        case CSS_PROPERTY_TEXT_WRAP_MODE:
+            resolve_text_wrap_property(lycon, span, prop_id, value);
+            break;
         case CSS_PROPERTY_DIRECTION: {
             if (!block) {
                 ViewSpan* span = lycon->view->is_element() ? lam::view_require_element(lycon->view) : nullptr;
