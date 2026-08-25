@@ -3200,7 +3200,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 ancestor_idx = anc->parent_index;
             }
 
-            jm_analyze_captures(fc, ancestor_names, mt->module_consts, ancestor_func_locals);
+            bool captures_with_scope = jm_ast_node_has_with_ancestor(root,
+                (JsAstNode*)fc->node);
+            jm_analyze_captures(fc, ancestor_names, mt->module_consts,
+                ancestor_func_locals, captures_with_scope);
 
             // v29 TDZ: Mark captures that reference let/const variables.
             // Collect let/const names from the enclosing scope(s) and check each capture.

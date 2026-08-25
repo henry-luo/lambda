@@ -1354,7 +1354,8 @@ static bool jm_analysis_ast_has_with(JsAstNode* node, bool root) {
 
 void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
                          struct hashmap* module_consts,
-                         struct hashmap* ancestor_func_locals) {
+                         struct hashmap* ancestor_func_locals,
+                         bool captures_with_scope) {
     JsFunctionNode* fn = fc->node;
     fc->capture_count = 0;
     fc->analysis.captures = fc->captures;
@@ -1390,7 +1391,9 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     fc->observes_this = jm_name_set_has(refs, "_js_this") || fc->has_direct_eval;
     fc->observes_new_target = jm_name_set_has(refs, "_js_new.target") ||
         fc->has_direct_eval;
-    fc->uses_with = fc->has_direct_eval || (fn->body &&
+    // A function nested below a `with` is created with that Object Environment
+    // Record and must keep dynamic name lookup after the enclosing body returns.
+    fc->uses_with = captures_with_scope || fc->has_direct_eval || (fn->body &&
         jm_analysis_ast_has_with(fn->body, true));
 
     // Find captures: referenced identifiers that are not params/locals but ARE in outer scope

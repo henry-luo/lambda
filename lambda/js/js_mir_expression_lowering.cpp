@@ -555,25 +555,22 @@ static bool jm_ast_has_with_body_target(JsAstNode* root, JsAstNode* target) {
         JsWithStatementNode* with_node = (JsWithStatementNode*)root;
         if (with_node->body && jm_ast_contains_target(with_node->body, target)) return true;
     }
-    if (root->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-            root->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-            root->node_type == JS_AST_NODE_ARROW_FUNCTION ||
-            root->node_type == JS_AST_NODE_METHOD_DEFINITION ||
-            root->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-            root->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
-        return false;
-    }
     return js_ast_any_child(root, jm_ast_has_with_body_target_child, target);
+}
+
+bool jm_ast_node_has_with_ancestor(JsAstNode* root, JsAstNode* target) {
+    return jm_ast_has_with_body_target(root, target);
 }
 
 static bool jm_node_has_with_ancestor(JsMirTranspiler* mt, JsAstNode* target) {
     if (!mt || !target || !mt->current_fc || !mt->current_fc->node ||
             !mt->current_fc->node->body) return false;
-    return jm_ast_has_with_body_target(mt->current_fc->node->body, target);
+    return jm_ast_node_has_with_ancestor(mt->current_fc->node->body, target);
 }
 
 static bool jm_current_function_captures_with_scope(JsMirTranspiler* mt) {
-    return mt && mt->with_depth > 0;
+    return mt && (mt->with_depth > 0 ||
+        (mt->current_fc && mt->current_fc->uses_with));
 }
 
 static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
