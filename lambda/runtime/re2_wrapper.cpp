@@ -26,6 +26,7 @@
 extern "C" {
     List* list();
     void list_push(List *list, Item item);
+    void array_push(Array *array, Item item);
     void* heap_calloc(size_t size, TypeId type_id);
     void* heap_data_calloc(size_t size);
     String* heap_strcpy(const char* src, int64_t len);
@@ -1122,24 +1123,15 @@ static String* make_heap_rooted_slice(Rooted<Item>& rooted_source, size_t offset
 }
 
 // Split string by pattern matches
-// list_push concatenates a pushed string onto the previous element unless the
-// eval context suspends it. Split segments are separate elements by definition,
-// so every pattern split collapsed into one string — with keep_delim the pieces
-// merged back into the input verbatim. fn_split's string path already suspends
-// merging around its own loop; the pattern path returns before reaching it, so
-// own the suspension here and cover both fn_split and fn_split3 at once.
-namespace {
-struct SuspendStringMerging {
-    bool saved;
-    SuspendStringMerging() : saved(context && context->disable_string_merging) {
-        if (context) context->disable_string_merging = true;
-    }
-    ~SuspendStringMerging() { if (context) context->disable_string_merging = saved; }
-};
-}  // namespace
-
+// Split segments are separate elements by definition, so every append here uses
+// array_push, which stores the item verbatim. list_push applies S16.7's content
+// rules — it concatenates a string onto the previous element — which collapsed
+// every pattern split into one string, and with keep_delim reassembled the
+// input. Suppressing that through the eval context's disable_string_merging
+// flag would work, but the flag is global: it would stay suspended across every
+// allocation and match below, and each early return would have to restore it.
+// The append site is the local, leak-proof place to decide.
 List* pattern_split(TypePattern* pattern, Item source, bool keep_delim) {
-    SuspendStringMerging no_merge;  // restored on every return below
     RootFrame roots(2);
     Rooted<Item> rooted_source(roots, source);
     Rooted<List*> rooted_result(roots, (List*)NULL);
@@ -1161,7 +1153,7 @@ List* pattern_split(TypePattern* pattern, Item source, bool keep_delim) {
             return rooted_result.get();
         }
         String* only = make_heap_rooted_slice(rooted_source, 0, 0);
-        list_push(rooted_result.get(), {.item = s2it(only)});
+        array_push((Array*)rooted_result.get(), {.item = s2it(only)});
         return rooted_result.get();
     }
 
@@ -1206,12 +1198,12 @@ List* pattern_split(TypePattern* pattern, Item source, bool keep_delim) {
         // push the part before the match
         size_t part_len = match_start - seg_start;
         String* part = make_heap_rooted_slice(rooted_source, seg_start, part_len);
-        list_push(rooted_result.get(), {.item = s2it(part)});
+        array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
         // optionally push the delimiter
         if (keep_delim && match_len_val > 0) {
             String* delim = make_heap_rooted_slice(rooted_source, match_start, match_len_val);
-            list_push(rooted_result.get(), {.item = s2it(delim)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(delim)});
         }
 
         // A zero-length match here sits past seg_start, so it yields a real
@@ -1224,7 +1216,7 @@ List* pattern_split(TypePattern* pattern, Item source, bool keep_delim) {
     if (seg_start <= len) {
         size_t part_len = len - seg_start;
         String* part = make_heap_rooted_slice(rooted_source, seg_start, part_len);
-        list_push(rooted_result.get(), {.item = s2it(part)});
+        array_push((Array*)rooted_result.get(), {.item = s2it(part)});
     }
 
     return rooted_result.get();

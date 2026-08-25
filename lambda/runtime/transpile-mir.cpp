@@ -2711,7 +2711,14 @@ static MIR_reg_t emit_variadic_args(MirTranspiler* mt, AstNode** resolved_args,
             int val_root = create_gc_root_slot(mt, val);
             val = load_gc_root_slot(mt, val_root, "varg_val");
             vargs_reg = load_gc_root_slot(mt, vargs_root, "vargs_live");
-            emit_call_void_2(mt, "list_push",
+            // An argument list is not element content. `list_push` applies
+            // S16.7's content rules — it drops `null` outright and
+            // concatenates a string onto the previous element — which
+            // silently collapsed f("a","b") to ["ab"] and f(1,null,2) to
+            // [1,2], losing both arity and values. `array_push` appends
+            // verbatim; it keeps the same content-list flattening, so only
+            // the normalization this list never wanted is dropped.
+            emit_call_void_2(mt, "array_push",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, vargs_reg),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
         }
