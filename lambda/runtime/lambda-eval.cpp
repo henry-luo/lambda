@@ -1515,6 +1515,31 @@ static Type* runtime_boundary_unwrap_type(Type* type) {
     return type;
 }
 
+// The named map contract carried by a boundary type, looking through the
+// nullable spellings `N?` and `N | null`. Returns NULL when the contract is not
+// a named map (an open `map` implies no layout, so it is excluded too).
+//
+// Both wrappers report LMD_TYPE_TYPE as their own type_id, so a plain
+// `expected->type_id == LMD_TYPE_MAP` test silently drops every optional record
+// contract -- which is every self-referential one.
+static Type* runtime_boundary_nonnull_map_arm(Type* expected) {
+    Type* type = runtime_boundary_unwrap_type(expected);
+    if (!type) return NULL;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY &&
+            ((TypeUnary*)type)->op == OPERATOR_OPTIONAL) {
+        type = runtime_boundary_unwrap_type(((TypeUnary*)type)->operand);
+    } else if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY &&
+            ((TypeBinary*)type)->op == OPERATOR_UNION) {
+        TypeBinary* binary = (TypeBinary*)type;
+        Type* left = runtime_boundary_unwrap_type(binary->left);
+        Type* right = runtime_boundary_unwrap_type(binary->right);
+        if (left && left->type_id == LMD_TYPE_NULL) type = right;
+        else if (right && right->type_id == LMD_TYPE_NULL) type = left;
+    }
+    if (!type || type->type_id != LMD_TYPE_MAP || type == &TYPE_MAP) return NULL;
+    return type;
+}
+
 static bool runtime_validate_value_against_type(Item item, Type* expected,
         ValidationResult** validation) {
     if (!context || !context->validator) return false;
@@ -8877,10 +8902,18 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     // A trusted compiler-built map contract is an admission certificate only
     // when the candidate carries that exact TypeMap. Dynamic and JS-created
     // shapes still take the validator/conversion path even if their bytes line up.
-    if (get_type_id(value) == LMD_TYPE_MAP && expected->type_id == LMD_TYPE_MAP &&
-            expected != &TYPE_MAP) {
+    //
+    // The named contract is reached through its non-null arm: `N?` is a
+    // TypeUnary whose OWN type_id is LMD_TYPE_TYPE, so testing the wrapper hid
+    // the map arm and the value fell through to the lambda_type_matches
+    // shortcut below -- structurally admitted, never reified. A self-referential
+    // record is necessarily optional (its recursion terminates on null), so the
+    // whole graph kept the literal's packed layout while direct field reads
+    // addressed it with the contract's byte offsets (D3.2.4).
+    Type* expected_map_contract = runtime_boundary_nonnull_map_arm(expected);
+    if (get_type_id(value) == LMD_TYPE_MAP && expected_map_contract) {
         if (cow_profile_enabled()) g_cow_profile.map_admit_calls++;
-        TypeMap* expected_map = (TypeMap*)expected;
+        TypeMap* expected_map = (TypeMap*)expected_map_contract;
         TypeMap* candidate_map = value.map ? (TypeMap*)value.map->type : NULL;
         if (candidate_map && typemap_ptr_is_plausible(candidate_map)) {
             MapContractRelation relation = runtime_map_contract_relation_cached(
@@ -8912,7 +8945,7 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
                 // Route that conservative result through field admission rather
                 // than letting the generic validator accept a physically
                 // incompatible shape that direct MIR reads would misaddress.
-                return runtime_type_admit_map(value, expected, converted,
+                return runtime_type_admit_map(value, expected_map_contract, converted,
                     relation == MAP_CONTRACT_NEEDS_REIFICATION);
             }
         }

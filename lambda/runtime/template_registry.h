@@ -30,6 +30,9 @@ typedef struct TemplateHandlerEntry {
     struct TemplateHandlerEntry* next;
 } TemplateHandlerEntry;
 
+typedef Item (*template_interp_body_fn)(Context* host, struct Script* module,
+                                        struct AstViewNode* view, Item model);
+
 // A compiled template entry in the registry
 typedef struct TemplateEntry {
     const char* name;           // template name (NULL for anonymous)
@@ -72,6 +75,7 @@ typedef struct TemplateEntry {
     // dispatches here; generated MIR entries leave these fields null.
     struct AstViewNode* interp_view;
     struct Script* interp_module;
+    template_interp_body_fn interp_body_func;
 
     struct TemplateEntry* next; // linked list
 } TemplateEntry;

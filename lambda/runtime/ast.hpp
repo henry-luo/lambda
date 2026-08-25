@@ -397,6 +397,8 @@ typedef struct AstEventHandler : AstNode {
     AstNamedNode* param;        // optional event parameter
     AstNode* body;              // procedural body
     NameScope* vars;            // handler scope
+    FnFramePlan interp_plan;    // T0 activation shape for handler locals
+    bool interp_planned;
     struct AstEventHandler* next_handler; // next handler in list
 } AstEventHandler;
 
