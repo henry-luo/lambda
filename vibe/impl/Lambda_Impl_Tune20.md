@@ -356,6 +356,27 @@ ANY-bearing contracts) could never fire on a degraded contract — the recursive
 fast path is reachable from source again. Re-measure binarytrees/splay before
 any emitter work.
 
+**Internal coverage added 2026-08-25** (closes the D8.6.2 gap the §11.5
+re-land left):
+- `test/test_lambda_opt_gtest.exe` (baseline, js_opt-style): runs one fixture
+  per child with `COW_EXEC_PROFILE=1` and pins the `map_admit_*` counters —
+  recursive contract under `--tier=jit` = ZERO runtime admissions (fully
+  static), under `--tier=interp` = 20 trusted classifications with 0
+  reifications/copies; ANY-bearing union contract = refused and reified on
+  both tiers (the §11.3 misaddressing guard). Validated against the archived
+  v34 binary via `LAMBDA_JS_OPT_EXE`: 3 of 6 tests fail on it (regression
+  signature 20 calls / 20 reifications).
+- `test/mir/lambda/recursive_record_adoption.{ls,mir-check}`: emission-level
+  pin — `_build_#` must lower to direct allocation + field stores
+  (`heap_calloc_class` / `map_with_region*`), forbidding the degraded
+  signature (`map_with_tl` + `map_fill` + `lambda_type_check`);
+  `_total_#` capped at ≤1 `fn_member_by_id` call.
+- Noted while pinning: on the interp tier, `let a: Node = {val: 7, next:
+  null}` (null recursive field) takes the runtime path and reifies once where
+  `next: <var>` adopts statically — pinned at 11 calls / 1 reification in
+  `RecursiveShapeIdentityInterpExactHits`; ratchet to 10/0 when construction
+  learns this literal.
+
 **Second probe drift (needs its own minimization):** `var b: N = …;
 b.next = a; a.k = 99` — the store **aliases on v33/v34** (`b.next.k == 99`)
 but **detaches on current HEAD** (`== 1`), while plain untyped stores alias on
