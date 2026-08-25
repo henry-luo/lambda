@@ -763,7 +763,6 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
                               uint32_t codepoint, bool for_rendering) {
     if (!handle) return NULL;
     if (handle->backend_kind == FONT_BACKEND_NONE && !handle->tables) return NULL;
-
     // Phase 17: check loaded glyph cache before loading
     FontContext* ctx = handle->ctx;
     if (ctx) {
@@ -843,7 +842,7 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
     // step 2: try codepoint fallback via FontContext
     if (!ctx || !style) return NULL;
 
-    FontHandle* fallback = font_find_codepoint_fallback(ctx, style, codepoint);
+    FontHandle* fallback = font_find_codepoint_fallback(ctx, style, codepoint, handle);
     if (fallback) {
 #ifdef __APPLE__
         if (fallback->ct_raster_ref) {

@@ -308,6 +308,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum white_space = CSS_VALUE_NORMAL,
                                                    CssEnum overflow_wrap = CSS_VALUE_NORMAL,
                                                    CssEnum word_break = CSS_VALUE_NORMAL);
+uint8_t layout_text_autospace_flags(LayoutContext* lycon, DomNode* text_node = nullptr);
+bool layout_text_contains_rtl_codepoint(const char* text, size_t length);
+bool layout_text_autospace_pair(uint8_t flags, uint32_t previous, uint32_t current);
+float layout_text_autospace_advance(LayoutContext* lycon);
 float layout_vertical_text_block_extent(const char* text, size_t length,
                                          float line_advance,
                                          float available_inline_size);
@@ -1305,6 +1309,7 @@ float compute_view_last_text_baseline(
 } // namespace radiant
 
 CssEnum get_white_space_value(DomNode* node);
+CssEnum get_text_wrap_mode_value(DomNode* node);
 bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span);
 inline bool layout_white_space_collapses(CssEnum white_space) {
     return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
@@ -1808,6 +1813,42 @@ typedef enum BreakKind {
     // Ideographic space
     BRK_IDEOGRAPHIC_SPACE,      // U+3000 (full-width space, hangable, break opportunity)
 } BreakKind;
+
+// CSS 2.1 §10.8.1: discarded overflow must not enlarge the line box after
+// layout backtracks to the saved legal opportunity.
+typedef struct LineMetricsSnapshot {
+    bool valid;
+    float max_ascender;
+    float max_descender;
+    float max_css_baseline_ascender;
+    float ruby_annotation_min_line_height;
+    float ruby_annotation_over_shift;
+    float initial_letter_origin_advance;
+    bool has_initial_letter;
+    bool has_drop_initial_letter;
+    bool has_phantom_inline_fragment;
+    bool has_replaced_content;
+    int atomic_inline_count;
+    float max_desc_before_last_text;
+    bool has_expanded_inline_lh;
+    float max_inline_line_height;
+    float max_atomic_inline_height;
+    float max_text_ascender;
+    float max_text_descender;
+    float clamped_baseline_tail;
+    bool has_clamped_baseline_tail;
+    bool has_different_inline_font;
+    float max_normal_line_height;
+    bool has_c1_control_text;
+    bool has_non_c1_text;
+    bool has_direct_block_text;
+    float c1_control_line_height;
+    bool has_cjk_text;
+    float max_top_bottom_height;
+    float max_top_height;
+    float max_bottom_height;
+} LineMetricsSnapshot;
+
 // tier-3: layout-transient, valid within pass
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
@@ -1831,6 +1872,8 @@ typedef struct Linebox {
     BreakKind last_non_shy_space_kind;
     float last_non_shy_space_hanging_width;
     float last_non_shy_space_hanging_text_trim;
+    LineMetricsSnapshot last_space_metrics;
+    LineMetricsSnapshot last_non_shy_space_metrics;
     View* start_view;
     bool has_phantom_inline_fragment; // zero-height inline run still needing text-align
     CssEnum vertical_align;
@@ -1882,6 +1925,7 @@ typedef struct Linebox {
                                          // position (from collapsed inter-element whitespace in a wrappable
                                          // parent); allows nowrap content to break at this boundary
     bool is_last_line;              // CSS 2.1 §16.2: true when this is the last line of a block (for justify)
+    CssEnum inline_base_direction;   // css text 3 §8.3: start/end direction for this line box
     float inline_start_edge_pending;  // CSS 2.1 §8.3: accumulated left margin+border+padding from
                                       // inline spans that haven't produced content yet; re-applied
                                       // after line break so the span's first content is indented
@@ -1890,6 +1934,8 @@ typedef struct Linebox {
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
     uint32_t prev_codepoint = 0;     // for CoreText GPOS kerning (codepoint-based)
+    uint32_t prev_text_spacing_codepoint = 0; // previous character for CSS text-spacing pairs
+    uint32_t prev_text_autospace_codepoint = 0; // previous typographic unit for CSS text-autospace
     FontProp* prev_kerning_font_style = nullptr;
     bool has_cjk_text = false;       // true if line contains CJK characters (for line-height blending)
     float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
@@ -1905,6 +1951,8 @@ typedef struct Linebox {
         last_non_shy_space = NULL;  last_non_shy_space_pos = 0;
         last_non_shy_space_kind = BRK_TEXT;  last_non_shy_space_hanging_width = 0;
         last_non_shy_space_hanging_text_trim = 0;
+        last_space_metrics.valid = false;
+        last_non_shy_space_metrics.valid = false;
         trailing_space_width = 0;
         committed_trailing_rect = NULL;
         committed_trailing_view = NULL;
@@ -3597,6 +3645,7 @@ void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
 void layout_bidi_line(LayoutContext* lycon);
 int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);
 CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback);
+CssEnum layout_resolve_line_base_direction(LayoutContext* lycon);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
 void layout_refresh_html_body_ua_margin(LayoutContext* lycon, DomElement* dom_elem);

@@ -845,18 +845,6 @@ static void layout_block_prepare_canvas_auto_size(
     }
 }
 
-static float text_wrap_balance_ellipsis_width(LayoutContext* lycon) {
-    if (!lycon) return 0.0f;
-    if (font_box_handle(&lycon->font)) {
-        GlyphInfo ellipsis = font_get_glyph(font_box_handle(&lycon->font), 0x2026);
-        if (ellipsis.id != 0 && ellipsis.advance_x > 0.0f) {
-            return ellipsis.advance_x;
-        }
-    }
-    return lycon->font.current_font_size > 0.0f ?
-        lycon->font.current_font_size * 0.5f : 8.0f;
-}
-
 static float text_wrap_balance_line_height(LayoutContext* lycon) {
     if (!lycon) return 16.0f;
     if (lycon->block.line_height > 0.0f) return lycon->block.line_height;
@@ -875,27 +863,48 @@ static int text_wrap_balance_normal_line_count(LayoutContext* lycon, ViewBlock* 
     return line_count;
 }
 
+static int text_wrap_balance_intrinsic_line_count(float max_content,
+                                                  float content_width) {
+    if (max_content <= 0.0f || content_width <= 0.0f) return 1;
+    int line_count = (int)ceilf((max_content - 0.01f) / content_width); // INT_CAST_OK: line-count estimate from intrinsic width
+    return line_count > 0 ? line_count : 1;
+}
+
 static float text_wrap_balance_measure(LayoutContext* lycon, ViewBlock* block,
                                        float content_width) {
     if (!lycon || !block || !block->blk || content_width <= 0.0f) return 0.0f;
     if (lycon->block.text_wrap_style != CSS_VALUE_BALANCE) return 0.0f;
     if (block->block()->white_space == CSS_VALUE_NOWRAP || block->block()->white_space == CSS_VALUE_PRE) return 0.0f;
     if (block->display.inner != CSS_VALUE_FLOW && block->display.inner != CSS_VALUE_FLOW_ROOT) return 0.0f;
-    float max_content = calculate_max_content_width(lycon, static_cast<DomNode*>(block));
+    bool clamp_active = lycon->block.line_clamp > 0;
+    float max_content = 0.0f;
+    float min_content = 0.0f;
+    IntrinsicSizes balance_sizes = measure_element_intrinsic_widths(
+        lycon, static_cast<DomElement*>(static_cast<DomNode*>(block)), true);
+    BoxMetrics balance_box = layout_box_metrics(block);
+    max_content = max(balance_sizes.max_content - balance_box.pad_border_h, 0.0f);
+    min_content = max(balance_sizes.min_content - balance_box.pad_border_h, 0.0f);
     if (max_content <= content_width + 0.5f) return 0.0f;
-    float min_content = calculate_min_content_width(lycon, static_cast<DomNode*>(block));
     if (min_content >= content_width - 0.5f) return 0.0f;
-    int target_lines = lycon->block.line_clamp > 0 ?
-        lycon->block.line_clamp : text_wrap_balance_normal_line_count(lycon, block, content_width);
+    int target_lines = clamp_active ? lycon->block.line_clamp :
+        text_wrap_balance_intrinsic_line_count(max_content, content_width);
     if (target_lines <= 1) return 0.0f;
     // CSS Text 4 permits UAs to skip balancing above a small line-count limit.
     if (target_lines > 5) return 0.0f;
+    int balance_line_limit = target_lines;
     float content_measure = max_content;
-    if (lycon->block.line_clamp > 0) {
-        content_measure += text_wrap_balance_ellipsis_width(lycon);
+    if (clamp_active) {
+        // css overflow 4 §5.3: clamp the stable layout first, then balance
+        // the remaining visible lines without letting a discarded unbreakable
+        // tail prevent the balance pass from starting.
+        balance_line_limit = max(target_lines,
+            text_wrap_balance_normal_line_count(lycon, block, content_width));
+        content_measure = max(max_content - min_content, 0.0f);
     }
     float lower_bound = content_measure / (float)target_lines;
-    if (lower_bound < min_content) lower_bound = min_content;
+    if (!clamp_active && lower_bound < min_content) {
+        lower_bound = min_content;
+    }
     if (lower_bound >= content_width - 0.5f) return 0.0f;
     float low = lower_bound;
     float high = content_width;
@@ -903,7 +912,7 @@ static float text_wrap_balance_measure(LayoutContext* lycon, ViewBlock* block,
         float mid = (low + high) * 0.5f;
         float measured_height = calculate_max_content_height(lycon, static_cast<DomNode*>(block), mid);
         int line_count = (int)ceilf((measured_height - 0.01f) / text_wrap_balance_line_height(lycon)); // INT_CAST_OK: probe result as line count
-        if (line_count <= target_lines) {
+        if (line_count <= balance_line_limit) {
             high = mid;
         } else {
             low = mid;
@@ -911,7 +920,9 @@ static float text_wrap_balance_measure(LayoutContext* lycon, ViewBlock* block,
     }
     float balanced = ceilf(high * 2.0f) * 0.5f;
     if (balanced < lower_bound) balanced = lower_bound;
-    if (balanced < min_content) balanced = min_content;
+    if (!clamp_active && balanced < min_content) {
+        balanced = min_content;
+    }
     if (balanced >= content_width - 0.5f) return 0.0f;
     return balanced;
 }
@@ -3386,10 +3397,13 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
     float previous_atomic_x_end = 0.0f;
     bool have_previous_atomic = false;
     int previous_atomic_line = -1;
+    CssEnum text_orientation = layout_specified_keyword(
+        block->as_element(), CSS_PROPERTY_TEXT_ORIENTATION, CSS_VALUE_MIXED);
     bool sideways_lr_ltr_inline_flow = layout_element_css_writing_mode(block->as_element()) ==
         CSS_VALUE_SIDEWAYS_LR &&
         block->blk && block->block()->given_height >= 0.0f &&
-        block->block()->direction == CSS_VALUE_LTR;
+        (block->block()->direction == CSS_VALUE_LTR ||
+         text_orientation == CSS_VALUE_UPRIGHT);
     bool vertical_multicol = layout_block_inline_axis_is_vertical(block) &&
         is_multicol_container(block);
     bool sideways_lr_multicol_columns = vertical_multicol &&
@@ -5464,9 +5478,13 @@ void layout_publish_vertical_flow_geometry(LayoutContext* lycon, ViewBlock* bloc
     float physical_block_origin = writing_mode == WM_VERTICAL_RL
         ? block_box.border.right + block_box.padding.right
         : block_box.border.left + block_box.padding.left;
+    CssEnum text_orientation = layout_specified_keyword(
+        block->as_element(), CSS_PROPERTY_TEXT_ORIENTATION, CSS_VALUE_MIXED);
     bool reverse_vertical_inline = block->is_element() &&
         ((layout_element_css_writing_mode(block->as_element()) ==
-            CSS_VALUE_SIDEWAYS_LR && block->block()->direction == CSS_VALUE_LTR) ||
+            CSS_VALUE_SIDEWAYS_LR && block->blk &&
+            (block->block()->direction == CSS_VALUE_LTR ||
+             text_orientation == CSS_VALUE_UPRIGHT)) ||
          layout_element_css_writing_mode(block->as_element()) ==
             CSS_VALUE_SIDEWAYS_RL);
     float physical_inline_extent = block->height > 0.0f
@@ -5498,6 +5516,10 @@ static bool layout_block_has_multicol_ancestor(ViewBlock* block) {
 void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     float content_width = lycon->block.content_width;
     float line_content_width = content_width;
+    CssEnum text_orientation = layout_specified_keyword(
+        block->as_element(), CSS_PROPERTY_TEXT_ORIENTATION, CSS_VALUE_MIXED);
+    bool upright_vertical_text = layout_block_inline_axis_is_vertical(block) &&
+        text_orientation == CSS_VALUE_UPRIGHT;
     bool rtl_vertical_block = block->blk &&
         block->block()->direction == CSS_VALUE_RTL;
     if ((rtl_vertical_block || layout_block_has_multicol_ancestor(block)) &&
@@ -5636,6 +5658,11 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     // CSS 2.1 §9.2.1: Propagate direction to block context
     if (block->blk) {
         lycon->block.direction = block->block()->direction;
+        if (upright_vertical_text) {
+            // css writing modes 4 §6.4: upright vertical text uses an LTR
+            // inline direction even when the authored direction is RTL.
+            lycon->block.direction = CSS_VALUE_LTR;
+        }
         bool has_outside_marker = block->display.list_item && block->pseudo &&
             block->pseudo->marker_generated && block->pseudo->marker &&
             block->pseudo->marker->blk &&
@@ -7862,7 +7889,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             *out_sibling_margin_collapsed_before_layout = true;
         }
     }
+    float collapsed_margin_top = block->bound ? block->boundary()->margin.top : 0.0f;
     setup_inline(lycon, block);
+    if (out_sibling_margin_collapsed_before_layout &&
+        *out_sibling_margin_collapsed_before_layout && block->bound &&
+        fabsf(block->boundary()->margin.top - collapsed_margin_top) > 0.01f) {
+        // css 2.1 §8.3.1: intrinsic balance measurement may re-resolve the
+        // authored margin; keep the already-consumed used margin collapsed.
+        block->boundary_mut()->margin.top = collapsed_margin_top;
+    }
     if (pa_block && pa_block->line_clamp > 0 && !pa_block->line_clamped &&
         lycon->block.line_clamp == 0 && block->blk) {
         lycon->block.line_clamp = pa_block->line_clamp;
@@ -8768,14 +8803,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 } else if (block->tag() == MARKUP_NAME_TEXTAREA &&
                            textarea_uses_explicit_baseline_source) {
                     item_baseline = inline_block_box.margin.top + content_last_line_ascender;
-                } else if (block->tag() == MARKUP_NAME_TEXTAREA) {
+                } else if (block->tag() == MARKUP_NAME_TEXTAREA && overflow_visible) {
                     item_baseline = block->height + inline_block_box.margin.top;
                 } else if (!layout_inline_box_is_orthogonal_to_parent(block) &&
                            content_has_line_boxes &&
                            (overflow_visible || radiant::layout_uses_explicit_baseline_source(block))) {
                     // CSS Writing Modes synthesizes an orthogonal inline-block
                     item_baseline = inline_block_box.margin.top + content_last_line_ascender;
-                } else if (block->display.inner == RDT_DISPLAY_REPLACED) {
+                } else if (block->display.inner == RDT_DISPLAY_REPLACED && overflow_visible) {
                     item_baseline = block->height + inline_block_box.margin.top;
                 } else {
                     item_baseline = item_height;
@@ -9019,11 +9054,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 } else {
                     // CSS 2.1 §10.8.1 says the baseline is the bottom MARGIN edge,
                     bool is_replaced_inline = (block->display.inner == RDT_DISPLAY_REPLACED);
+                    bool replaced_uses_margin_edge_baseline = is_replaced_inline &&
+                        !overflow_visible;
                     if (block->bound) {
                         if (is_replaced_inline) {
+                            float baseline_extent = replaced_uses_margin_edge_baseline
+                                ? block->height + inline_block_box.margin_v
+                                : block->height + inline_block_box.margin.top;
                             lycon->line.max_ascender = max(lycon->line.max_ascender,
-                                block->height + inline_block_box.margin.top);
-                            if (inline_block_box.margin.bottom > 0) {
+                                baseline_extent);
+                            if (!replaced_uses_margin_edge_baseline &&
+                                inline_block_box.margin.bottom > 0) {
                                 lycon->line.max_descender = max(lycon->line.max_descender,
                                     inline_block_box.margin.bottom);
                             }

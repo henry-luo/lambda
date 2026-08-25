@@ -1455,6 +1455,15 @@ typedef struct PseudoContentProp {
     bool marker_generated;         // True if marker element created
 } PseudoContentProp;
 
+enum TextAutospaceFlags : uint8_t {
+    TEXT_AUTOSPACE_IDEOGRAPH_ALPHA = 1u << 0,
+    TEXT_AUTOSPACE_IDEOGRAPH_NUMERIC = 1u << 1,
+    TEXT_AUTOSPACE_REPLACE = 1u << 2,
+};
+
+static constexpr uint8_t TEXT_AUTOSPACE_NORMAL =
+    TEXT_AUTOSPACE_IDEOGRAPH_ALPHA | TEXT_AUTOSPACE_IDEOGRAPH_NUMERIC;
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct BlockProp {
     CssEnum text_align;
@@ -1485,11 +1494,14 @@ typedef struct BlockProp {
     CssEnum box_sizing;  // CSS_VALUE_CONTENT_BOX or CSS_VALUE_BORDER_BOX
     CssEnum box_decoration_break;  // CSS_VALUE_SLICE (default) | CSS_VALUE_CLONE
     CssEnum white_space;  // CSS_VALUE_NORMAL, CSS_VALUE_NOWRAP, CSS_VALUE_PRE, etc.
+    CssEnum text_wrap_mode;  // CSS Text 4 text-wrap-mode; zero derives from white-space
     CssEnum text_wrap_style;  // CSS Text 4 text-wrap-style
     CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL
     CssEnum overflow_wrap;  // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_WORD, CSS_VALUE_ANYWHERE
     CssEnum line_break;    // CSS_VALUE_AUTO, CSS_VALUE_LOOSE, CSS_VALUE_NORMAL, CSS_VALUE_STRICT, CSS_VALUE_ANYWHERE
     CssEnum text_spacing_trim;  // CSS Text 4 text-spacing-trim
+    uint8_t text_autospace;  // CSS Text 4 text-autospace feature flags
+    bool text_autospace_is_set;
     CssEnum break_before;  // CSS Fragmentation: auto, column, page, always
     CssEnum break_after;   // CSS Fragmentation: auto, column, page, always
     int orphans;           // CSS Fragmentation: minimum lines before a break

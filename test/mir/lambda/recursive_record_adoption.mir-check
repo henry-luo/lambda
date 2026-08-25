@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Tune19 §11.5 / T20-6: a self-referential record contract (type Node = {val: int, next: Node?}) passes the adoption gate (mir_map_contract_storage_valid), so a function returning the literal under the declared contract lowers to direct allocation with inline field stores. The v33→v34 self-reference regression degraded `next` to ANY, refused the gate, and emitted map_with_tl + map_fill + a lambda_type_check per construction instead — the forbid list below is that regression's exact signature.",
+  "checks": [
+    {
+      "in_func": "_build_#",
+      "expect_any": [
+        "call\theap_calloc_class_p, heap_calloc_class",
+        "call\tmap_with_region"
+      ],
+      "forbid": [
+        "call\tmap_fill_",
+        "call\tmap_with_tl_p, map_with_tl",
+        "call\tlambda_type_check"
+      ]
+    },
+    {
+      "in_func": "_total_#",
+      "count": {
+        "call\tfn_member_by_id": {"max": 1}
+      }
+    }
+  ]
+}

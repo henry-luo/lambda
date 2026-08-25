@@ -1475,8 +1475,12 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
     float total_width = 0.0f;
     float current_word = 0.0f;
     float longest_word = 0.0f;
+    uint8_t text_autospace = layout_text_autospace_flags(lycon);
+    bool text_autospace_bidi_unsupported = layout_text_contains_rtl_codepoint(
+        text, length);
 
     uint32_t prev_codepoint = 0;
+    uint32_t prev_text_autospace_codepoint = 0;
     const FontMetrics* fm = font_box_handle(&lycon->font) ? font_get_metrics(font_box_handle(&lycon->font)) : NULL;
     bool has_kerning = fm ? fm->has_kerning : false;
     if (lycon->font.style && lycon->font.style->font_kerning == CSS_VALUE_NONE) has_kerning = false;
@@ -1553,9 +1557,15 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                prev_codepoint, shaped_first_cp);
                 }
                 float advance = shaped_width + kerning;
+                if (!text_autospace_bidi_unsupported && layout_text_autospace_pair(
+                        text_autospace, prev_text_autospace_codepoint,
+                        shaped_first_cp)) {
+                    advance += layout_text_autospace_advance(lycon);
+                }
                 current_word += advance;
                 total_width += advance;
                 prev_codepoint = shaped_last_cp;
+                prev_text_autospace_codepoint = shaped_last_cp;
                 prev_is_zwj_base = false;
                 is_word_start = false;
                 i += shaped_bytes;
@@ -1638,6 +1648,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             lycon, codepoint, is_small_caps_lower, kerning,
             emoji_presentation, &glyph_loaded);
         if (!glyph_loaded) advance = 11.0f;
+        if (!text_autospace_bidi_unsupported && layout_text_autospace_pair(
+                text_autospace, prev_text_autospace_codepoint, codepoint)) {
+            advance += layout_text_autospace_advance(lycon);
+        }
         if (glyph_loaded && codepoint == 0x00A0 && lycon->font.style) {
             advance += lycon->font.style->word_spacing;
             is_word_start = true;
@@ -1646,6 +1660,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
         total_width += advance;
 
         if (glyph_index) prev_codepoint = codepoint;
+        prev_text_autospace_codepoint = codepoint;
         i += bytes;  // Advance by the number of bytes consumed
 
         if (break_anywhere || intrinsic_allows_soft_wrap_after_codepoint(codepoint)) {
@@ -5983,6 +5998,56 @@ static bool intrinsic_has_definite_css_height(LayoutContext* lycon, DomElement* 
 
 
 
+static bool intrinsic_append_inline_text(StrBuf* output, DomNode* node,
+                                         bool* pending_space, bool* has_content,
+                                         bool allow_inline_descendants) {
+    if (!output || !node || !pending_space || !has_content) return false;
+    if (node->is_text()) {
+        const char* data = reinterpret_cast<const char*>(node->text_data());
+        if (!data) return true;
+        for (size_t i = 0; data[i] != '\0'; i++) {
+            if (data[i] == ' ' || data[i] == '\t' ||
+                data[i] == '\n' || data[i] == '\r') {
+                *pending_space = true;
+            } else {
+                if (*pending_space && output->length > 0 &&
+                    output->str[output->length - 1] != '\v') {
+                    strbuf_append_char(output, ' ');
+                }
+                strbuf_append_char(output, data[i]);
+                *pending_space = false;
+                *has_content = true;
+            }
+        }
+        return true;
+    }
+    if (!node->is_element()) return false;
+
+    DomElement* element = node->as_element();
+    ViewElement* element_view = lam::view_require_element(static_cast<View*>(element));
+    if (layout_display_is_none(element_view->display)) return true;
+    if (element->tag_id == MARKUP_NAME_BR) {
+        // preserve a forced break without making it ordinary collapsible whitespace.
+        strbuf_append_char(output, '\v');
+        *pending_space = false;
+        *has_content = true;
+        return true;
+    }
+
+    DisplayValue display = resolve_display_value(node);
+    if (display.outer != CSS_VALUE_INLINE && display.outer != CSS_VALUE_CONTENTS) {
+        return false;
+    }
+    if (!allow_inline_descendants) return false;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (!intrinsic_append_inline_text(output, child, pending_space, has_content,
+                                          allow_inline_descendants)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* element,
                                               ViewBlock* view, float width) {
     if (!lycon || !element || !view || width <= 0.0f) return -1.0f;
@@ -5991,35 +6056,15 @@ static float intrinsic_text_br_content_height(LayoutContext* lycon, DomElement* 
     if (!text) return -1.0f;
     bool has_content = false;
     bool pending_space = false;
+    // balance measurement must flatten nested inline runs before probing line count;
+    // ordinary flex intrinsic heights retain their block-flow fallback.
+    bool allow_inline_descendants = lycon->block.text_wrap_style == CSS_VALUE_BALANCE;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        if (child->is_text()) {
-            const char* data = reinterpret_cast<const char*>(child->text_data());
-            if (data && data[0] != '\0') {
-                for (size_t i = 0; data[i] != '\0'; i++) {
-                    if (data[i] == ' ' || data[i] == '\t' ||
-                        data[i] == '\n' || data[i] == '\r') {
-                        pending_space = true;
-                    } else {
-                        if (pending_space && text->length > 0 &&
-                            text->str[text->length - 1] != '\v') {
-                            strbuf_append_char(text, ' ');
-                        }
-                        strbuf_append_char(text, data[i]);
-                        pending_space = false;
-                        has_content = true;
-                    }
-                }
-            }
-            continue;
-        }
-        if (!child->is_element() || child->as_element()->tag_id != MARKUP_NAME_BR) {
+        if (!intrinsic_append_inline_text(text, child, &pending_space, &has_content,
+                                          allow_inline_descendants)) {
             strbuf_free(text);
             return -1.0f;
         }
-        // vertical-tab marks a DOM <br> without changing ordinary source newlines.
-        strbuf_append_char(text, '\v');
-        pending_space = false;
-        has_content = true;
     }
     if (!has_content || text->length == 0) {
         strbuf_free(text);
@@ -6722,7 +6767,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 if (layout_display_is_none(child_ve->display)) {
                     continue;
                 }
-                ViewBlock* child_block = lam::view_as_block(child_ve);
                 if (intrinsic_should_skip_height_child(child_elem)) continue;
             }
             // CSS 2.1 §10.3.3: The available width for a child element's content

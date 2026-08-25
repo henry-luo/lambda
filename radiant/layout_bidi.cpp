@@ -61,6 +61,7 @@ typedef struct BidiLineCounts {
     bool has_bidi_trigger;
     bool has_bidi_inline_content;
     bool has_bidi_layout_feature;
+    bool has_inline_block;
 } BidiLineCounts;
 
 static bool bidi_element_has_layout_feature(DomElement* element) {
@@ -152,6 +153,10 @@ int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir) {
         (element->tag_name && strcmp(element->tag_name, "::marker") == 0)) {
         return 0;
     }
+    // html form-control values are editing state, not descendant content for an
+    // ancestor's dir=auto scan; treating textarea's raw child as content flips
+    // the containing block direction when the value starts with Arabic text.
+    if (element->tag_id == MARKUP_NAME_TEXTAREA) return 0;
     if (skip_explicit_dir && element->get_attribute("dir")) return 0;
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         int strong_class = layout_find_first_strong_direction(child, skip_explicit_dir);
@@ -165,6 +170,59 @@ CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback
     if (strong_class > 0) return CSS_VALUE_RTL;
     if (strong_class < 0) return CSS_VALUE_LTR;
     return fallback;
+}
+
+static int bidi_first_strong_in_line_view(View* view, int line_number) {
+    for (View* current = view; current; current = current->next()) {
+        if (current->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require_text(current);
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                if (!bidi_is_line_text_rect(text, rect, line_number)) continue;
+                const char* cursor = (const char*)text->text_data() + rect->start_index;
+                int remaining = rect->length;
+                while (remaining > 0) {
+                    uint32_t codepoint = 0;
+                    int consumed = str_utf8_decode(cursor, (size_t)remaining, &codepoint);
+                    if (consumed <= 0 || consumed > remaining) consumed = 1;
+                    int strong_class = utf_bidi_strong_class(codepoint);
+                    if (strong_class != 0) return strong_class;
+                    cursor += consumed;
+                    remaining -= consumed;
+                }
+            }
+        } else if (current->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(current);
+            int strong_class = span->first_child
+                ? bidi_first_strong_in_line_view(span->first_child, line_number) : 0;
+            if (strong_class != 0) return strong_class;
+        }
+    }
+    return 0;
+}
+
+CssEnum layout_resolve_line_base_direction(LayoutContext* lycon) {
+    if (!lycon) return CSS_VALUE_LTR;
+    View* content = nullptr;
+    ViewBlock* line_block = nullptr;
+    if (lycon->view && lycon->view->is_block()) {
+        line_block = lam::view_require_block(lycon->view);
+    } else if (lycon->view) {
+        line_block = layout_nearest_block_ancestor(lycon->view->parent_view());
+    }
+    if (line_block) {
+        content = line_block->first_child;
+    }
+    int strong_class = bidi_first_strong_in_line_view(
+        content, lycon->block.line_number);
+    if (strong_class == 0) {
+        for (int line_number = lycon->block.line_number - 1;
+             line_number >= 0 && strong_class == 0; line_number--) {
+            strong_class = bidi_first_strong_in_line_view(content, line_number);
+        }
+    }
+    if (strong_class > 0) return CSS_VALUE_RTL;
+    if (strong_class < 0) return CSS_VALUE_LTR;
+    return lycon->block.direction;
 }
 
 static bool bidi_is_line_break_codepoint(uint32_t codepoint) {
@@ -243,6 +301,11 @@ static void bidi_count_views(View* view, int line_number, int depth,
                     bidi_codepoint_triggers_reorder(
                         bidi_marker_representative_codepoint(direction));
             }
+            return false;
+        }
+        if (current->view_type == RDT_VIEW_INLINE_BLOCK) {
+            counts->has_inline_block = true;
+            counts->chars++;
             return false;
         }
         if (current->view_type != RDT_VIEW_BR) counts->has_atomic = true;
@@ -391,6 +454,21 @@ static void bidi_fill_views(View* view, int line_number, int depth,
             }
             continue;
         }
+        if (current->view_type == RDT_VIEW_INLINE_BLOCK) {
+            BidiCharFragment* fragment = &chars[(*char_cursor)++];
+            fragment->text = nullptr;
+            fragment->atomic_view = current;
+            fragment->rect = nullptr;
+            fragment->rect_slot = -1;
+            fragment->logical_index = *char_cursor - 1;
+            // UAX #9 treats an atomic inline box as an object, not as a letter
+            // from the box's fallback font; U+FFFC gives it neutral bidi type.
+            fragment->codepoint = 0xFFFC;
+            fragment->width = current->width;
+            fragment->advance_width = fragment->width;
+            fragment->visual_x = 0.0f;
+            continue;
+        }
     }
 }
 
@@ -478,6 +556,7 @@ static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
         }
     }
 }
+
 // use the pass's stable index type here; FriBidi is optional and its type is unavailable
 // when the platform omits the header even though these shared helpers still compile.
 static void bidi_update_span_visual_ranges(BidiCharFragment* chars,
@@ -589,6 +668,13 @@ static void bidi_place_visual_line(LayoutContext* lycon,
         rects[i].rect->x = min_x[i];
         rects[i].rect->width = max_x[i] - min_x[i];
     }
+    for (int i = 0; i < rect_count; i++) {
+        for (int j = 0; j < rects[i].char_count; j++) {
+            if (chars[rects[i].first_char + j].codepoint == 0x00AD) {
+                break;
+            }
+        }
+    }
 }
 
 static void bidi_refresh_bounds(View* view, int line_number,
@@ -610,14 +696,22 @@ static void bidi_refresh_bounds(View* view, int line_number,
     (void)spans;
     (void)span_count;
 }
+
 void layout_bidi_line(LayoutContext* lycon) {
-    if (!lycon || !lycon->line.start_view || lycon->line.has_replaced_content) return;
+    if (!lycon || !lycon->line.start_view) return;
     View* root = layout_inline_fragment_root(lycon->line.start_view);
     if (!root) return;
 
+    CssEnum line_direction = lycon->line.inline_base_direction;
     BidiLineCounts counts = {};
     bidi_count_views(root, lycon->block.line_number, 0,
-                     lycon->block.direction, &counts);
+                     line_direction, &counts);
+    if (counts.has_inline_block && counts.has_bidi_layout_feature &&
+        !counts.has_bidi_trigger) {
+        // keep atomic lines without a directional run in their native geometry;
+        // orthogonal descendants do not need a second UAX #9 placement pass.
+        return;
+    }
     // Ordinary LTR lines already have correct fragment geometry; UAX #9 must
     // only rewrite lines whose bidi data can change visual order.
     // CSS Writing Modes applies bidi to the paragraph, but an ordinary line
@@ -648,7 +742,7 @@ void layout_bidi_line(LayoutContext* lycon) {
     int span_cursor = 0;
     bidi_fill_views(root, lycon->block.line_number, 0, chars, rects, spans,
                     &char_cursor, &rect_cursor, &span_cursor,
-                    lycon->block.direction);
+                    line_direction);
     if (char_cursor != counts.chars || rect_cursor != counts.rects) return;
     for (int i = 0; i < rect_cursor; i++) {
         rects[i].line_has_bidi_inline_content = counts.has_bidi_inline_content;
@@ -671,7 +765,7 @@ void layout_bidi_line(LayoutContext* lycon) {
         !fri_levels) return;
     for (int i = 0; i < counts.chars; i++) logical[i] = chars[i].codepoint;
 
-    FriBidiParType base_direction = lycon->block.direction == CSS_VALUE_RTL
+    FriBidiParType base_direction = line_direction == CSS_VALUE_RTL
         ? FRIBIDI_PAR_RTL : FRIBIDI_PAR_LTR;
     FriBidiLevel fri_max_level = fribidi_log2vis(
         logical, counts.chars, &base_direction, visual,
@@ -684,7 +778,7 @@ void layout_bidi_line(LayoutContext* lycon) {
 #else
     int embedding_stack[64];
     int embedding_depth = 0;
-    int current_level = lycon->block.direction == CSS_VALUE_RTL ? 1 : 0;
+    int current_level = line_direction == CSS_VALUE_RTL ? 1 : 0;
     max_level = current_level;
     for (int i = 0; i < counts.chars; i++) {
         uint32_t cp = chars[i].codepoint;

@@ -34,6 +34,13 @@ bool font_backend_create(FontHandle* handle, const uint8_t* data, size_t len,
                                                            handle->size_px, (int)weight,
                                                            slant);
         handle->platform_aux_ref = handle->ct_font_ref;
+        if (!handle->ct_raster_ref && handle->ct_font_ref) {
+            // some system TTC faces resolve through CoreText but cannot be
+            // reconstructed from the collection's raw face index.
+            handle->ct_raster_ref = font_platform_retain_ct_font(handle->ct_font_ref);
+            handle->platform_font_ref = handle->ct_raster_ref;
+            handle->backend_kind = FONT_BACKEND_CORETEXT;
+        }
     }
     return handle->backend_kind != FONT_BACKEND_NONE;
 #elif defined(LAMBDA_HAS_DWRITE)
@@ -91,6 +98,20 @@ void font_backend_destroy(FontHandle* handle) {
     handle->platform_aux_ref = NULL;
     handle->backend_kind = FONT_BACKEND_NONE;
 }
+
+#ifdef __APPLE__
+void font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref) {
+    if (!handle || !ct_font_ref) return;
+    if (handle->ct_font_ref) font_platform_destroy_ct_font(handle->ct_font_ref);
+    if (handle->ct_raster_ref) font_platform_destroy_ct_font(handle->ct_raster_ref);
+    handle->ct_font_ref = font_platform_retain_ct_font(ct_font_ref);
+    handle->ct_raster_ref = font_platform_retain_ct_font(ct_font_ref);
+    handle->platform_font_ref = handle->ct_raster_ref;
+    handle->platform_aux_ref = handle->ct_font_ref;
+    handle->backend_kind = FONT_BACKEND_CORETEXT;
+    handle->metrics_from_platform_ref = true;
+}
+#endif
 
 bool font_backend_metrics(FontHandle* handle, uint32_t codepoint, GlyphInfo* out) {
     if (!handle || !out) return false;

@@ -115,6 +115,24 @@ static bool span_has_direct_visible_text(ViewSpan* span) {
     return false;
 }
 
+static bool inline_span_has_line_clamp_overflow(ViewSpan* span) {
+    if (!span) return false;
+    ViewBlock* block = layout_nearest_block_ancestor(span);
+    if (!block || !block->blk || block->block()->line_clamp <= 0) return false;
+    int clamp_line = block->block()->line_clamp;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (child->view_type != RDT_VIEW_TEXT) continue;
+        ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
+        for (TextRect* rect = text->rect; rect; rect = rect->next) {
+            if (rect->line_number >= clamp_line && rect->width > 0.0f &&
+                rect->height > 0.0f) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static bool span_has_direct_text_on_both_sides_of_block(ViewSpan* span) {
     bool saw_in_flow_block = false;
     bool has_text_before_block = false;
@@ -1170,6 +1188,15 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         ? min(visual_min_y, parent_border_top_y) : parent_border_top_y;
     float final_max_y = span->has_split_inline_fragment_union()
         ? max(visual_max_y, parent_border_bottom_y) : parent_border_bottom_y;
+    if (is_multi_line && span_has_direct_visible_text(span) &&
+        inline_span_has_line_clamp_overflow(span) &&
+        span->has_fragment_union(FRAGMENT_UNION_LINE_BOX)) {
+        const FragmentUnion* line_box = span->fragment_union(FRAGMENT_UNION_LINE_BOX);
+        // CSS Inline: multi-line inline boxes expose the union of their line
+        // fragments, including leading and trailing line-box space.
+        final_min_y = min(final_min_y, line_box->min_y);
+        final_max_y = max(final_max_y, line_box->max_y);
+    }
     if (span->has_split_inline_fragment_union() && !span_has_direct_visible_text(span)) {
         if (span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_x < min_x) min_x = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->min_x;
         if (span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x > max_x) max_x = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x;
