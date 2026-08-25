@@ -1,7 +1,8 @@
 # Lambda Core Runtime — Central Issue Ledger
 
 > **Consolidated from the per-area "Known Issues & Future Improvements" sections of
-> [`doc/dev/lambda/LR_01`–`LR_13`](../doc/dev/lambda/LR_00_Overview.md).**
+> [`doc/dev/lambda/LR_01`–`LR_13`](../doc/dev/lambda/LR_00_Overview.md)**, plus
+> verified items from the sibling `vibe/Lambda_Issue*.md` ledgers (§14).
 > This is the single working list for core-runtime defects, caps, and structural
 > hazards. The `LR_*` documents remain the *design* record; this ledger is the
 > *issue* record.
@@ -20,6 +21,20 @@ Every issue below was re-checked against the tree at `c568f0f93`. Three outcomes
 | **PARTIAL** | Some sub-claims fixed, a real residue remains. The residue is stated. |
 | **RESOLVED** | Verified fixed or removed; moved to [Appendix A](#appendix-a--resolved-and-obsolete-issues). |
 
+### Second pass — 2026-08-25 (sibling ledgers)
+
+`vibe/Lambda_Issue*.md` were reviewed and their claims re-tested. Outcome:
+
+| Doc | Result |
+|---|---|
+| `Lambda_Issues_Outstanding.md` | LR_12 #8 (`push`/`splice` mutate a module-level `let`) still reproduces and was **not** in this ledger → recorded as [LR12-8](#lr12-8). |
+| `Lambda_Issue_Type_Support.md` | TS-1, TS-2, TS-7 verified **FIXED**; TS-5's dead-code half fixed; TS-9's C16 implementation has landed. TS-6, TS-8 confirmed open; TS-3, TS-4 open pending measurement → §14. |
+| `Lambda_Issues8.md` | **All 28 entries triaged; 22 re-tested.** 17 fixed/closed, 9 open or partial (§14), 4 not re-tested (Radiant-retained, Structurizr fixtures, and an incremental-release build issue — each needs a fixture outside the core runtime). Earlier note: **Fixed:** unbraced scalar `if` in a block body; map literal after `if` (S16.4.1v2); multiline iterator + `where`; `list` as a for-binding (now a clear diagnostic); the double-quoted-key error cascade. **Ruled not a defect:** double-quoted map keys — the doc was wrong and is corrected. **Does not reproduce:** recursive params overwritten after descent. **Still open → §14:** dynamic map spread, element attribute spread, one-line Mark comprehensions, and the weak double-quoted-key diagnostic. |
+| `Lambda_Issues5.md` | §23 re-tested: the inline-`if` attribute value is **fixed**; attribute spread is still open and duplicates an Issues8 entry → §14. Remaining entries are a package-porting log, self-recorded as fixed. |
+| `Lambda_Issues6.md` | Package-porting log, self-recorded as fixed; not re-tested. |
+| `Lambda_Issues3.md`, `Lambda_Issues4_Lint.md` | A test-enhancement proposal and a lint report, not defect ledgers. |
+
+
 Counts:
 
 | Source doc | Area | Open | Partial | Resolved | Total |
@@ -35,9 +50,10 @@ Counts:
 | LR_09 | Runtime builtins | 7 | 0 | 3 | 10 |
 | LR_10 | Error handling | 5 | 1 | 2 | 8 |
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
-| LR_12 | Procedural runtime | 7 | 0 | 0 | 7 |
+| LR_12 | Procedural runtime | 8 | 0 | 0 | 8 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
-| **Total** | | **95** | **10** | **34** | **139** |
+| TS / Issues8 | Sibling vibe ledgers | 9 | 1 | 1 | 11 |
+| **Total** | | **105** | **11** | **35** | **151** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -829,6 +845,42 @@ procedure; there is no general effect/capability system, so adding a
 network-write or process-spawn procedure means another bespoke `pn_*` plus a
 registry row.
 
+<a id="lr12-8"></a>**LR12-8 · `push`/`splice` mutate a module-level `let` in place, falsifying `fn` purity · OPEN**
+*Recorded 2026-08-25 from `Lambda_Issues_Outstanding.md` §3 (found 2026-07-31);
+re-verified today — still reproduces on both tiers.*
+RG14 says no mutable root exists at module scope: `var` is rejected there, and
+E211 rejects mutation *through* an immutable binding. E211 does catch the
+assignment forms — `arr[0] = 9` and `m.a = 9` on a module-level `let` both
+raise it, confirmed — but the mutating builtins are not subject to the same
+check:
+
+```lambda
+let arr = [1, "two"]
+fn  peek()   => len(arr)
+pn  helper() { push(arr, "x") }
+pn  main()   { print(peek())      // 2
+               helper() helper()
+               print(peek())      // 4   ← module-level state changed
+               print(arr) }       // [1, "two", "x", "x"]
+```
+
+`splice(arr, 0, 2)` likewise shortens it in place (verified: `len` 4 → 2, value
+`[3, 4]`). This is a **semantics** bug, not only hygiene: `peek()` takes no
+arguments and returns two different values, so a `fn` is observably impure.
+
+**Root cause.** The COW path (`transpile-mir.cpp:9955`–`9985`) fires only when
+`mir_direct_root_binding()` finds a local `MirVarEntry` with `cow_marked` set. A
+module-level binding referenced from inside a `pn` is not a local var entry in
+that function, so the lookup returns NULL and emission falls through to the raw
+in-place `pn_push`/`pn_splice` (`collection_runtime.cpp:179`/`195`).
+
+**Fix belongs with the E211 receiver check, not the COW selector.** A mutating
+builtin's owner argument should obey the same immutable-binding rule as an
+assignment target, so `push` on a `let` is a compile error. Doing it in the COW
+selector instead would silently copy where the program means to mutate — a
+different wrong answer. Related: [LR12-2](#lr12-2) (same two builtins,
+error-reporting gap) and `vibe/Lambda_Design_COW.md`.
+
 ---
 
 ## 13. Schema validator (LR_13)
@@ -874,6 +926,139 @@ Contrary to CLAUDE.md rule 4, `ast_validate.cpp` has 59 direct `printf` calls
 and `error_reporting.cpp` 6, writing to stdout with emoji rather than through
 `log_*`. Also `error->actual.item` truthiness treats a `0`/null actual as
 "absent", which can misreport a legitimately-null value.
+
+---
+
+## 14. Sibling vibe ledgers (TS, Issues8)
+
+> Issues raised in the sibling `vibe/Lambda_Issue*.md` docs rather than in an
+> `LR_*` Known-Issues section. **IDs are kept as their owning doc assigns them**
+> (rule 17: no new ID series); those docs stay the detail record and this section
+> is the index. Verified 2026-08-25 unless noted.
+
+<a id="ts-3"></a>**TS-3 · `int[]`/`float[]` on a *local* is a 3–5x regression · OPEN (needs re-measurement)**
+`Lambda_Issue_Type_Support.md`. The cited cause has moved — the
+`var_tid = LMD_TYPE_ANY` assignment and its *"treat as ANY"* comment are gone
+from `transpile-mir.cpp` — but the regression itself was not re-measured, which
+needs a release build and the typed benchmark column.
+
+<a id="ts-4"></a>**TS-4 · A named map type on a *local* is a COW value root, not a borrow · OPEN (not re-verified)**
+`Lambda_Issue_Type_Support.md`. Carries both a performance claim (raytrace3d2
+120 s → 80 ms when the annotations are stripped) and a **correctness** one
+(splay2 collapsing to 1 node instead of 8000 because rotations mutated copies).
+The correctness half overlaps the map-aliasing-vs-reification rule.
+
+<a id="ts-6"></a>**TS-6 · Binding a map literal to a local kills region allocation · OPEN**
+`Lambda_Issue_Type_Support.md`. Structurally unchanged, only relocated:
+`mir_region_producer_candidate` is now `transpile-mir.cpp:888` and delegates to
+`mir_region_producer_node`, whose switch handles only CONTENT/LIST/BLOCK,
+IF_EXPR, RETURN_STAM and MAP — with no `AST_NODE_VAR`/`AST_NODE_LET` case, a
+`var`/`let` in the body still falls to `default:` and disqualifies the function.
+
+<a id="ts-8"></a>**TS-8 · No arity overloading for user definitions · OPEN**
+`Lambda_Issue_Type_Support.md`. `pn f(a)` plus `pn f(a, b)` in one scope still
+gives `error[E209]: duplicate definition of 'f' in the same scope`, while the
+builtin registry is keyed on name **and** arity. Related: [LR09-1](#lr09-1),
+where two registry rows sharing a name are indistinguishable to the
+`(name, arg_count)` map.
+
+<a id="i8-mapkey"></a>**Issues8 · Double-quoted map keys rejected · RESOLVED (not a defect — doc was wrong)**
+Every double-quoted map key fails: `{"key": 1}` gives
+`error[E100]: expected an expression` at the `:`, while `{'key': 1}` and
+`{key: 1}` both work. Ruled 2026-08-25: **the parser is correct** — a map key is
+a *symbol*, written bare when it is a name and single-quoted otherwise; a
+double-quoted string is not a key form. The Issues8 entry framed this as a
+hyphen problem, but hyphens were never the issue: `{'other-key': 2}` already
+works. The real defect was the documentation — `doc/Lambda_Data.md` presented
+`{"string_key": 1, symbol_key: 2}` as a valid "mixed key types" example, and
+that line did not parse. It now reads
+`{'symbol-quoted': 1, name_key: 2}` under the comment *"Keys are symbols: quote
+one when it is not a bare name"*, which does parse. The two `"..."` key hits
+elsewhere in `doc/` are inside ```json fences and are correct as JSON.
+
+<a id="s16-9-5-gap"></a>**S16.9.5 · `a?: T` optional-field marker · PARTIAL (parsing fixed 2026-08-25)**
+Found while trying to write a schema for the Issues8 explicit-null attribute
+entry. S16.9.5 says the marker "applies in every type-field position", and the
+spec shipped it **unmarked** on a 2026-08-22 spot-check — but two of the three
+named positions did not parse:
+
+```
+fn f(a: int, b?: int)     parameter        OK
+type R = {a?: int}        map-type field   error[E103]  <- now fixed
+type E = <e a?: int>      element attr     error[E103]  <- now fixed
+```
+
+**Fixed:** both field sites now read the marker through one shared helper in
+`parse_type_pattern.cpp`, and the validator honours it — the fixture
+`test/validator_test_data/maps.ls`, which contains `optional?: int`, no longer
+reports an invalid-type-pattern error against itself. Covered by
+`test/lambda/optional_field_marker.ls` on both tiers. Note the subtlety that
+made the first attempt silently useless: `is_type_optional()` reads `type->op`
+on the `TypeUnary`, not the AST node's `op`; a wrapper that sets only the AST
+side parses but is invisible to every consumer.
+
+**Residue (why this stays PARTIAL):**
+1. The marker is carried by wrapping the field type in `OPERATOR_OPTIONAL` — the
+   same representation `a: T?` produces — so the two spellings S16.9.5 calls
+   *distinct* ("field may be absent" vs "field present, value nullable") are
+   indistinguishable downstream. Separating them needs a field-level flag on
+   `ShapeEntry`; that was not invented here.
+2. The declaration binding checker treats an optional field as required:
+   `type Rec = {name: string, opt?: int}` with `let v: Rec = {name: "a"}` gives
+   `error[E205]: missing required field 'opt'`. This is **pre-existing and not
+   specific to the new marker** — `opt: int?` behaves identically — so the
+   binding path ignores field optionality for every spelling.
+
+`Lambda_Formal_Semantics.md` is v15.1.2 with the footnote narrowed to this
+residue. Fixing the parse also closed the Issues8 entry it was blocking
+("Explicit null Mark attributes fail optional schema type checks"): with an
+element schema using `fontname?: string`, explicitly-null attributes validate,
+absent attributes validate, and a real type violation still fails.
+
+<a id="i8-dqdiag"></a>**Issues8 · Double-quoted map key gives a generic diagnostic · OPEN (low severity)**
+The error cascade is fixed — one diagnostic now, not a run of them — but the
+message is still `error[E100]: expected an expression`. Since a double-quoted
+key is a genuine mistake with a one-character fix, the diagnostic should say
+that double-quoted strings are values rather than field names and point at the
+single-quoted form. Paired with [i8-mapkey](#i8-mapkey), where the rule itself
+was ruled.
+
+<a id="i8-consoleesc"></a>**Issues8 · Console formatter does not escape quotes or backslashes inside collections · OPEN**
+Printing a collection renders member strings verbatim:
+`["init: {\"flowchart\": …}", "back\\slash"]` prints as
+`["init: {"flowchart": {"curve": "basis"}}", "back\slash"]`. The inner quotes
+are unescaped and the escaped backslash collapses to one, so the output is
+ambiguous and is not re-readable as Lambda notation.
+
+<a id="i8-markcomp"></a>**Issues8 · One-line Mark child comprehensions fail at the closing delimiter · OPEN**
+`<diagnostics; for (value in values) value>` fails with `error[E100]`, while the
+same constructor split across lines parses. Whitespace should not change the
+grammar, or the diagnostic should name the required break.
+
+<a id="i8-dynspread"></a>**Issues8 · Spreading a dynamically-constructed map yields a null-key nested map · OPEN**
+Map spread flattens a statically shaped map but not one built at runtime, even
+though both are `type() == map`:
+
+```
+let stat    = {shape: "box"}
+let dynamic = map(["shape", "box"])
+{*: stat,    id: "a"}   ->  {shape: "box", id: "a"}       correct
+{*: dynamic, id: "a"}   ->  {[null nested map], id: "a"}  wrong
+```
+
+`dynamic` itself is sound (`type` is `map`, prints as `{shape: "box"}`), so the
+defect is in the spread's handling of a runtime-built shape, not in the map. The
+same operand also loses its fields across an element-attribute spread, which is
+[the entry below](#i8-attrspread) — likely one root cause for both.
+
+<a id="i8-attrspread"></a>**Issues8 / Issues5 §23 · Element attribute spread lands the map as a child · OPEN**
+`<path *attrs>` does not error, but the spread map becomes a *child* rather than
+attributes: `<path {a: 1, b: 2}>` instead of `<path a: 1, b: 2>`. Recorded twice
+— `Lambda_Issues8.md` ("Runtime map attribute spread creates a nested element
+child") and `Lambda_Issues5.md` §23 — as one issue. The sibling half of the
+Issues5 entry (an inline `if` as an attribute value) is **fixed**:
+`<path d: "M0", 'stroke-dasharray': if (has_dash) dash else "none">` now
+evaluates to `<path d: "M0", stroke-dasharray: "4 2">`.
 
 ---
 

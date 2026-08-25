@@ -2,7 +2,18 @@
 
 Issues encountered while implementing the Lambda graph Stage 2 package.
 
-## Compile-error path reports tracked allocations as leaks
+## Compile-error path reports tracked allocations as leaks — still OPEN (re-verified 2026-08-25)
+
+> Reproduces on **any** rejected compilation, not just the `E228` case. A
+> one-line script with a syntax error (`let m = {"key": 1}`) reports
+> `1 error(s) found` and then
+> `memtrack: LEAK — 2 allocations (183 bytes) still live at shutdown`, category
+> `system` — the same two-allocation shape as the original 166-byte report. A
+> clean script leaks nothing, so it is the failed-compilation cleanup path.
+>
+> Note the original `E228` reproduction no longer triggers: `let value =
+> input(path, spec)` with a plain `let` is now accepted, so the unhandled
+> fallible-binding diagnostic is not what surfaces it any more.
 
 Running a script with an intentionally unhandled fallible `input()` binding
 correctly reports `E228`, but shutdown then reports two live `system`
@@ -19,7 +30,12 @@ compilation cleanup path appears to retain these allocations. A rejected
 script should release compiler diagnostics and temporary source state before
 the runtime leak check.
 
-## Console array formatting does not escape quotes inside strings
+## Console array formatting does not escape quotes inside strings — still OPEN (re-verified 2026-08-25)
+
+> Reproduces, and backslashes too. Printing
+> `["init: {\"flowchart\": …}", "back\\slash"]` emits
+> `["init: {"flowchart": {"curve": "basis"}}", "back\slash"]` — the inner
+> quotes are verbatim and the escaped backslash renders as a single one.
 
 Printing an array that contains the Mermaid initialization string
 `init: {"flowchart": ...}` emits the inner double quotes verbatim:
@@ -32,7 +48,12 @@ The result is visually ambiguous and is not valid Lambda/JSON-like notation.
 The console formatter should escape embedded quotes and backslashes when a
 string is rendered inside a collection.
 
-## Function-body parser diagnostic points at valid syntax
+## Function-body parser diagnostic points at valid syntax — FIXED (verified 2026-08-25)
+
+> A block-bodied function immediately following an expression-bodied function
+> that returns a map now compiles: `fn shape(x) => {a: x, b: x}` followed by a
+> `{...}`-bodied `fn route(p)` returns `3`, with no
+> `Function body requires => or {...}`.
 
 While adding graph obstacle routing, a normal block-bodied function immediately
 following an expression-bodied function that returned a map was rejected with:
@@ -63,7 +84,11 @@ missing its body. Inlining the small comprehension removed the error. This
 further suggests the reported block function is only where stale expression
 parser state becomes visible.
 
-## Comprehension binding named `list` resolves incorrectly
+## Comprehension binding named `list` resolves incorrectly — RESOLVED 2026-08-25
+
+> Closed by the second of the two remedies this entry proposed. `for (list in xs)`
+> is now rejected outright with `error[E100]: expected a for binding name`
+> pointing at the binding, instead of silently producing empty inner arrays.
 
 While adding the Graphviz source-Mark parser fixture, a nested comprehension
 using `for (list in values)` produced empty nested results even though `list`
@@ -82,7 +107,20 @@ binding to `group`:
 resolution. The compiler should either treat the lexical binding normally or
 reject the reserved name with a clear diagnostic.
 
-## Dynamic map spread becomes a nested null-key map
+## Dynamic map spread becomes a nested null-key map — still OPEN (re-verified 2026-08-25)
+
+> Reproduces, and the contrast is exact. With `stat = {shape: "box"}` and
+> `dynamic = map(["shape", "box"])`:
+>
+> ```
+> {*: stat,    id: "a"}  ->  {shape: "box", id: "a"}      correct
+> {*: dynamic, id: "a"}  ->  {[null nested map], id: "a"}  wrong
+> ```
+>
+> `dynamic` is itself sound — `type(dynamic)` is `map` and it prints as
+> `{shape: "box"}`. Only the spread of it fails, so the split is between a
+> statically shaped map and a dynamically constructed one, not between map and
+> non-map.
 
 While implementing Graphviz normalization, spreading a map returned by
 `map(array)` inside another map literal did not flatten its fields:
@@ -131,7 +169,18 @@ separate missing-result failure. It should preserve one process-crash diagnostic
 for the unexecuted entries instead of presenting them as unrelated missing
 scripts.
 
-## Recursive function parameters are overwritten after descent
+## Recursive function parameters are overwritten after descent — does NOT reproduce (2026-08-25)
+
+> A reduced form reads the attribute before and after a recursive descent and
+> gets the same value both times (`before: "right"`, `after: "right"`,
+> `same: true`). What the reduced form *did* surface is the likely original
+> confusion: `for (c in element)` walks **attribute values as well as content**
+> (S8's `in` axis), so `[for (child in value) walk(child)]` descends into the
+> attribute *string* — `for (c in <td align: "right">)` yields `["right"]`,
+> while `len` of the same element is `0`. A `walk` written that way recurses
+> into scalars rather than children, which matches the reported symptoms better
+> than parameters being overwritten. Reopen with the original nested Graphviz
+> label if it still misbehaves once the iteration axis is accounted for.
 
 While sanitizing nested Graphviz HTML labels, a recursive function read element
 attributes after recursively processing its children. The attributes were
@@ -165,7 +214,12 @@ The callback now saves, switches, and restores `_lambda_rt` together with
 `context` and `input_context`. `graphviz/render.ls` covers grouping inside the
 custom layout through final SVG and Graph Scene adaptation.
 
-## Incremental release rebuild can produce a runtime that returns null
+## Incremental release rebuild can produce a runtime that returns null — NOT re-tested (2026-08-25)
+
+> Build-environment issue; reproducing it means deliberately corrupting an
+> incremental release tree, which was out of scope for this verification pass.
+> The recommendation it makes — have the release gate run a known script before
+> backing up or restoring `lambda.exe` — still stands on its own.
 
 After `make test-lambda-baseline` rebuilt a marked release tree incrementally,
 the restored `lambda.exe` returned only `null` for ordinary scripts, including
@@ -179,7 +233,12 @@ runtime defect, not the graph package. The release gate should execute a small
 known script before backing up or restoring `lambda.exe`, and the optimized
 runtime still needs an isolated clean-build reproduction.
 
-## Multiline iterator calls can obscure comprehension parse errors
+## Multiline iterator calls can obscure comprehension parse errors — FIXED (verified 2026-08-25)
+
+> The filtered form now parses and evaluates. A comprehension whose iterator is
+> a call split across lines, with a `where` clause, returns the filtered result
+> (`[{scale: 0.5}]` from a two-element source) instead of reporting an unclosed
+> `{` at the enclosing function.
 
 While implementing Graphviz route intersection checks, a comprehension used a
 multiline function call directly as its iterator and added a `where` clause:
@@ -201,7 +260,15 @@ any([for (point in intersections) point.scale <= 1.0])
 The grammar or error recovery should either accept the filtered form or report
 the `for` iterator as the failure location.
 
-## Double-quoted map keys produce cascading syntax errors
+## Double-quoted map keys produce cascading syntax errors — cascade FIXED, diagnostic still weak (2026-08-25)
+
+> The cascade is gone: `{attrs: {"data-node-id": "a", "data-record-port":
+> "west"}}` now reports exactly **one** error instead of a run of unrelated
+> ones at following fields and closing braces. The second half of the ask is
+> outstanding — the message is still the generic
+> `error[E100]: expected an expression`, and does not say that double-quoted
+> strings are values rather than field names or point at the single-quoted
+> form. See also the sibling entry below, where the same rule was ruled on.
 
 While building synthetic Velmt maps, JavaScript-style string keys such as
 `{"data-node-id": "a"}` produced a cascade of unrelated errors at following
@@ -214,7 +281,13 @@ fields and closing braces. Lambda requires a quoted name for these fields:
 The first diagnostic should explain that double-quoted strings are values, not
 map field names, and suggest the single-quoted name syntax.
 
-## Recursive accumulator return inference can change array construction
+## Recursive accumulator return inference can change array construction — FIXED (verified 2026-08-25)
+
+> `collect(["west", "east"], 0, [])` now returns `["west", "east"]`. The
+> reported `["westeast"]` was **adjacent-string merging**, not a return-type
+> misinference: `reverse` built its result with `list_push`, which concatenates
+> adjacent strings. `reverse` was one of the 17 sites converted to `array_push`
+> under D2.6.5 / LR09-R3, which is what closed this.
 
 A tail-recursive collector returned `reverse(result)` at its base case and
 prepended strings during descent:
@@ -235,7 +308,12 @@ of reporting a diagnostic. Recursive return unification must preserve the
 accumulator container type, and malformed or unsupported return type syntax
 must never crash the compiler.
 
-## A local transformation named `lower` silently shadows string lowering
+## A local transformation named `lower` silently shadows string lowering — FIXED (verified 2026-08-25)
+
+> Closed by the first of the two remedies proposed. A local `fn lower(a, b)`
+> called as `lower(string(v))` is now rejected with
+> `error[E206]: function expects 2 arguments, got 1` instead of silently
+> binding and returning a wrong-shaped value.
 
 `graph.transform.content` exports `lower(source, label_format)`. An earlier
 helper in that same module used `lower(string(value))`, intending the system
@@ -249,7 +327,12 @@ fixed the result. Either overload resolution should reject the incompatible
 local call, or diagnostics/tooling should make system-function shadowing clear;
 the previous behavior looked like a data or GC failure far downstream.
 
-## Conditional Mark attributes can collapse the parser diagnostic to line 1
+## Conditional Mark attributes can collapse the parser diagnostic to line 1 — FIXED (verified 2026-08-25)
+
+> The construct compiles now. Three adjacent attributes with inline `if`
+> values, including a quoted attribute name, evaluate to
+> `<path fill: "none", stroke: "red", stroke-width: 1.2>` — no line-1
+> collapse, no whole-module rejection.
 
 While composing Graphviz SVG markers, several adjacent Mark attributes used
 inline `if` expressions, including a quoted attribute name:
@@ -271,7 +354,10 @@ consistently or reject the first ambiguous attribute at its own location. AST
 diagnostics should also prefer the smallest error node instead of the enclosing
 file-wide recovery node.
 
-## A map literal immediately after `if` is parsed as a statement block
+## A map literal immediately after `if` is parsed as a statement block — FIXED (verified 2026-08-25)
+
+> Settled by the S16.4.1v2 brace-resolution ruling (interior decides).
+> `if (c) {a: 1} else {a: 2}` now evaluates to the map `{a: 1}`.
 
 The compact parser-result form below is visually consistent with a map-valued
 conditional but is not accepted:
@@ -286,7 +372,10 @@ condition select statement-block syntax. Calling a small map-constructor
 function avoids the ambiguity. Documentation or a targeted diagnostic should
 state how to return a map literal directly from an `if` expression.
 
-## Missing dynamic Velmt attributes can evaluate to errors instead of null
+## Missing dynamic Velmt attributes can evaluate to errors instead of null — NOT re-tested (2026-08-25)
+
+> Needs a retained Radiant render to reproduce; outside this pass, which was
+> scoped to the Lambda core runtime.
 
 The graph layout adapter used a generic optional-attribute helper that expected
 both map-backed and Velmt-backed missing fields to evaluate to `null`. During a
@@ -302,7 +391,26 @@ object/element/Velmt indexing should ideally use the same missing-member
 contract as maps, or expose a non-throwing attribute lookup primitive for
 optional metadata.
 
-## Explicit null Mark attributes fail optional schema type checks
+## Explicit null Mark attributes fail optional schema type checks — FIXED (verified 2026-08-25)
+
+> The structural claim reproduces: `<annotation 'font-name': null,
+> 'font-size': null>` keeps both attributes present and dynamic reads return
+> `null`.
+>
+> The schema half was blocked at first: writing the schema needs `a?: T`, which
+> was rejected with `error[E103]` in element-attribute position. That S16.9.5
+> gap is now fixed, and with it this entry closes. Against
+> `type Document = <annotation fontname?: string, fontsize?: string>`:
+>
+> ```
+> <annotation fontname: null, fontsize: null>   ✓ Validation successful
+> <annotation>                                  ✓ Validation successful
+> <annotation fontname: 42>                     ✗ TYPE_MISMATCH — string vs int
+> ```
+>
+> Explicitly-null optional attributes validate, absent ones validate, and a
+> genuine type violation still fails. The map-building workaround the entry
+> describes is no longer needed.
 
 Graphviz annotations gained optional font attributes through a direct Mark
 constructor:
@@ -323,7 +431,11 @@ look identical. The element literal documentation and schema diagnostic should
 make this distinction clear, or the schema API should offer an explicit policy
 for treating null optional attributes as absent.
 
-## A comparison after a multiline comprehension is rejected
+## A comparison after a multiline comprehension is rejected — FIXED (verified 2026-08-25)
+
+> `len([for (item in styles where …)\n item]) > 0` as a block's final
+> expression now compiles and returns `true`; the parentheses workaround is no
+> longer needed.
 
 This valid-looking final expression in a function block failed at `> 0`:
 
@@ -339,7 +451,14 @@ final expression required grouping here. The grammar should accept the
 expression consistently or suggest parentheses at the actual ambiguous
 boundary.
 
-## Parent-relative module imports are parsed as path expressions
+## Parent-relative module imports are parsed as path expressions — diagnostic improved, feature still unsupported (2026-08-25)
+
+> `import conformance: ..conformance` is still rejected, but the diagnostic is
+> now located and named: `error[E100]: expected a relative import component`
+> pointing at the `..`, rather than `Unexpected syntax near '..'
+> [path_parent]`. Still missing the second half of the ask — it does not point
+> at the available import forms — and parent-relative imports remain
+> unsupported.
 
 Graph conformance runners in sibling test directories needed one shared module
 from their parent directory. The intuitive import below is rejected:
@@ -355,7 +474,12 @@ module spelling and the diagnostic does not suggest one. The helper had to move
 under the absolute `lambda.package.graph` namespace to remain shared. Lambda
 should either support parent-relative imports or explicitly diagnose this as an
 unsupported module path and point to the available import forms.
-## Runtime map attribute spread creates a nested element child
+## Runtime map attribute spread creates a nested element child — still OPEN (re-verified 2026-08-25)
+
+> `<path *attrs>` renders as `<path {a: 1, b: 2}>` — the map lands as a child
+> rather than as attributes. Duplicated by `Lambda_Issues5.md` §23; recorded
+> once in the central ledger, and likely one root cause with the dynamic map
+> spread entry above.
 
 While lowering optional Graphviz annotation fonts, this construction:
 
@@ -370,7 +494,9 @@ literal attribute spreads make the syntax look valid. Until runtime map
 attribute spreading is defined or rejected clearly, element constructors must
 spell dynamic optional attributes explicitly.
 
-## Added map lanes fail only in retained custom-layout JIT calls
+## Added map lanes fail only in retained custom-layout JIT calls — NOT re-tested (2026-08-25)
+
+> Needs a retained Radiant custom-layout fixture; outside this pass.
 
 Adding nullable `shape_width` and `shape_height` fields to graph node maps
 worked in direct Lambda calls to `layout.compute()`, but the same module called
@@ -383,7 +509,9 @@ fixed-shape ratios in its already-established port record instead. The retained
 JIT should either support compatible map-shape extension or reject the call at
 the actual field boundary.
 
-## Structurizr package syntax errors are reported at the next declaration or file root
+## Structurizr package syntax errors are reported at the next declaration or file root — NOT re-tested (2026-08-25)
+
+> Needs the Structurizr package fixtures; outside this pass.
 
 Several malformed but plausible constructs in the Structurizr Lambda modules
 produced diagnostics far from the cause:
@@ -407,7 +535,15 @@ reserved binder. In a multi-statement `fn` block, nested `if` branches also
 require braces; the diagnostic for that case is clear once earlier recovery
 has not consumed the surrounding function.
 
-## Quoted strings are rejected as hyphenated map keys
+## Quoted strings are rejected as hyphenated map keys — RESOLVED 2026-08-25 (not a defect)
+
+> Hyphens were never the issue — `{'other-key': 2}` already works. What fails is
+> **double-quoted** keys specifically: `{"key": 1}` gives
+> `error[E100]: expected an expression` at the `:`. Ruled: the parser is right.
+> A map key is a *symbol* — bare when it is a name, single-quoted otherwise — and
+> a double-quoted string is not a key form. The actual defect was in the docs,
+> where `doc/Lambda_Data.md` showed `{"string_key": 1, symbol_key: 2}` as valid;
+> it now reads `{'symbol-quoted': 1, name_key: 2}`.
 
 Structurizr deployment projection needed temporary edge maps carrying source
 spans. Bracket access and Mark attributes accept quoted hyphenated names, but
@@ -422,7 +558,11 @@ the quoted symbol `'source-start'` works. The diagnostic should say that map
 keys use names or symbols, or map literals should accept string keys
 consistently with bracket access.
 
-## Empty-array branches can be reported as a missing function body
+## Empty-array branches can be reported as a missing function body — FIXED (verified 2026-08-25)
+
+> The block-bodied recursive helper with an `[]` branch compiles;
+> `chain_of([], 1, [])` returns `[1]`. No `Function body requires '=>' or
+> '{...}'` diagnostic.
 
 A recursive helper returning arrays was rejected at the function declaration:
 
@@ -437,7 +577,12 @@ body was present. Returning `slice(stack, 0, 0)` for the typed empty result
 compiled. The diagnostic should identify the unresolved empty-array return
 type, or empty arrays should infer consistently in block-bodied functions.
 
-## Collection slice merged adjacent strings
+## Collection slice merged adjacent strings — FIXED (self-recorded; confirmed 2026-08-25)
+
+> Confirmed still fixed, and now generalized: this entry's `array_push` remedy
+> is the prior art behind ruling **D2.6.5**, and an audit of all 152
+> `list_push` sites found 19 more with the same defect (`reverse`, `take`,
+> `drop`, `zip`, argument lists, …) — see ledger LR09-R3.
 
 `slice(["shop.web", "shop"], 0, 2)` returned `["shop.webshop"]`. The generic
 slice path built its result with `list_push()`, whose document-content behavior
@@ -445,7 +590,10 @@ merges adjacent strings. The runtime now builds collection slices with
 `array_push()` so item boundaries are preserved, with a regression in
 `slice_two_arg.ls`.
 
-## Scalar `if` expressions inside block functions need unexplained braces
+## Scalar `if` expressions inside block functions need unexplained braces — FIXED (verified 2026-08-25)
+
+> `pn rec(done) { if (done) -1 else 0 }` now compiles and returns `-1`; the
+> unbraced value-producing form is accepted inside a block body.
 
 While implementing the Structurizr expression parser, a block-bodied helper
 containing `if (done) -1 else recurse(...)` was diagnosed as `Missing { } for
@@ -454,7 +602,10 @@ although both forms are ordinary value-producing branches elsewhere. The error
 should explain when `if` is parsed as a statement, or the expression form should
 be accepted consistently inside function blocks.
 
-## One-line Mark child comprehensions fail at the closing delimiter
+## One-line Mark child comprehensions fail at the closing delimiter — still OPEN (re-verified 2026-08-25)
+
+> `<diagnostics; for (value in values) value>` still fails with `error[E100]`,
+> while the multiline form parses.
 
 The valid multiline constructor:
 
@@ -469,7 +620,13 @@ was rejected when written as `<diagnostics; for (value in values) value>` with
 diagnostic at end of file. Whitespace should not change this constructor's
 grammar, or the diagnostic should identify the required line break explicitly.
 
-## A comprehension generator after `let` is diagnosed at the first generator
+## A comprehension generator after `let` is diagnosed at the first generator — diagnostic FIXED, ordering restriction stands (2026-08-25)
+
+> The mis-location is gone. The parser now reports `error[E100]: expected let
+> clause` **at `entry`** — the generator that actually conflicts — instead of
+> `Unexpected syntax` at the first `value in values`. The restriction itself
+> remains: a generator may not follow a `let` clause. Whether that ordering is
+> intended is still undecided; if it is, the diagnostic could say so outright.
 
 The Structurizr semantic adapter needed to compute a parent key and then flatten
 the entries produced from that key. This natural ordering is rejected:

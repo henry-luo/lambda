@@ -597,7 +597,15 @@ unrelated call), with no hint that the offending `++` was the culprit.
 
 ## 23. Element literal attribute set is fully static — no spread / no conditional
 
-**Status: Still open (2026-07-02)** — attribute spread is still unsupported,
+**Status: half FIXED (re-verified 2026-08-25)** — the inline `if` form for
+attribute values now works: the example below parses and evaluates to
+`<path d: "M0", stroke-dasharray: "4 2">`. **Attribute spread is still
+unsupported**: `<path *attrs>` does not error, but the map lands as a *child*
+rather than as attributes — it renders as `<path {a: 1, b: 2}>`. That residue is
+the same defect `Lambda_Issues8.md` records as "Runtime map attribute spread
+creates a nested element child"; the two entries are one issue.
+
+*(Original 2026-07-02 status follows.)* — attribute spread is still unsupported,
 and the intended inline `if` expression form for attribute values still fails
 because of the current grammar. This is workable but surprising; it forces
 N-fold duplication of element literals when only one attribute varies.
