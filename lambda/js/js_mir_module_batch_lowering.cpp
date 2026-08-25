@@ -2204,6 +2204,20 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 }
             }
         }
+        // Class definition evaluation, including a heritage expression, is
+        // strict.  A function created in `extends expr` therefore needs the
+        // strict arguments object even though it is not a class method.
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFuncCollected* e = &mt->func_entries[fi];
+            for (int ci = 0; ci < mt->class_count; ci++) {
+                JsClassNode* cls = (JsClassNode*)mt->class_entries[ci].node;
+                if (cls && cls->superclass && e->node &&
+                    jm_ast_contains_node(cls->superclass, (JsAstNode*)e->node)) {
+                    e->is_strict = true;
+                    break;
+                }
+            }
+        }
     }
 
     // Phase 1.1: Pre-scan top-level const declarations with literal values

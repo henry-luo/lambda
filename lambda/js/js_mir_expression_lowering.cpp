@@ -531,13 +531,11 @@ static bool jm_binding_statement_precedes_reference(JsMirTranspiler* mt,
     return binding_index >= 0 && reference_index > binding_index;
 }
 
-static bool jm_ast_contains_target(JsAstNode* root, JsAstNode* target);
-
 static bool jm_ast_contains_target_child(JsAstNode* child, void* data) {
-    return jm_ast_contains_target(child, (JsAstNode*)data);
+    return jm_ast_contains_node(child, (JsAstNode*)data);
 }
 
-static bool jm_ast_contains_target(JsAstNode* root, JsAstNode* target) {
+bool jm_ast_contains_node(JsAstNode* root, JsAstNode* target) {
     if (!root || !target) return false;
     if (root == target) return true;
     return js_ast_any_child(root, jm_ast_contains_target_child, target);
@@ -553,7 +551,7 @@ static bool jm_ast_has_with_body_target(JsAstNode* root, JsAstNode* target) {
     if (!root || !target) return false;
     if (root->node_type == JS_AST_NODE_WITH_STATEMENT) {
         JsWithStatementNode* with_node = (JsWithStatementNode*)root;
-        if (with_node->body && jm_ast_contains_target(with_node->body, target)) return true;
+        if (with_node->body && jm_ast_contains_node(with_node->body, target)) return true;
     }
     return js_ast_any_child(root, jm_ast_has_with_body_target_child, target);
 }
