@@ -4345,6 +4345,9 @@ struct DocState;
 // View tree printing functions (output CSS logical pixels directly)
 void print_view_tree(ViewElement* view_root, Url* url, const char* output_path = nullptr);
 void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_path = nullptr);
+bool stream_view_tree_json(ViewElement* view_root, const char* input_file, FILE* stream);
+bool write_layout_result_frame(FILE* stream, const char* input_file, bool success,
+                               const char* json = nullptr, size_t json_length = 0);
 bool view_memory_profile_write(DomDocument* doc, const char* input_file,
                                const char* output_path);
 // Print caret state to view_tree.txt (appends caret info)

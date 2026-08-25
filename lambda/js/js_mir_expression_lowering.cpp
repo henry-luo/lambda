@@ -5961,9 +5961,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 // non-tail self recursion must use js_call_function so the call-depth RangeError is catchable.
                 fc = NULL;
             }
-            if (fc && (mt->with_depth > 0 ||
+            if (fc && (jm_current_function_captures_with_scope(mt) ||
                     jm_node_has_with_ancestor(mt, (JsAstNode*)call) ||
                     jm_node_has_with_ancestor(mt, (JsAstNode*)resolved_fn))) {
+                // A closure created below `with` restores that Object Environment
+                // Record at call time, so a syntactically direct callee is dynamic.
                 fc = NULL;
             }
             // Yield in args inside a generator: the direct paths below evaluate
