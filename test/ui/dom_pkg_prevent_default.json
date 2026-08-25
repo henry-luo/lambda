@@ -1,0 +1,45 @@
+{
+  "name": "author prevent-default suppresses UA behavior",
+  "html": "test/lambda/ui/dom_pkg_prevent_default.ls",
+  "viewport": {
+    "width": 400,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "=== author 'prevent-default' suppresses the dom package's UA behavior ==="
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".changed"
+      },
+      "count": 0
+    },
+    {
+      "type": "log",
+      "message": "--- click: author handler prevents default, so no UA change event ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".cb"
+      }
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".changed"
+      },
+      "count": 0
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".pristine"
+      },
+      "count": 1
+    }
+  ]
+}

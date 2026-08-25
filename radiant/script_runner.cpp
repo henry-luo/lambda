@@ -2505,6 +2505,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         dom_doc->js.preamble_state = preamble;
         dom_doc->js.mir_ctx = preamble->mir_ctx;
         dom_doc->js.runtime = runtime;
+        // the preamble installed document/window bindings: this document now
+        // owns a real DOM script realm, which routing gates test explicitly.
+        dom_doc->js_has_dom_realm = true;
         if (s_retain_js_state) {
             log_info("execute_document_scripts: retained MIR context for event handlers");
             // Do NOT destroy heap/pool — they're retained on the document
@@ -2847,6 +2850,10 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
 
 extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (!dom_doc) return;
+
+    // the realm dies with the state torn down below; clear before any early
+    // return so a partially cleaned document never reports a live realm.
+    dom_doc->js_has_dom_realm = false;
 
     // Destroy retained MIR context via preamble_state_destroy
     if (dom_doc->js.preamble_state) {

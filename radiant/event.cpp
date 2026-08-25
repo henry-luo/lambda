@@ -24,7 +24,8 @@
 #include "../lambda/runtime/edit_bridge.h"
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
-#include "../lambda/runtime/transpiler.hpp"   // Runtime (heap and name_pool)
+#include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/module/radiant/radiant_dom_bridge.hpp"   // Runtime (heap and name_pool)
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/io/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
@@ -2168,6 +2169,318 @@ void radiant_register_event_hooks() {
  * @param event_name The event name to dispatch (e.g., "click")
  * @return true if a handler was found and invoked
  */
+// Handler return protocol (ES5, return-value form). A handler signals intent
+// through what it returns rather than through a callable on the event object:
+//   'pass'            — decline; dispatch keeps looking for another handler and,
+//                       finding none, the event falls through as unhandled
+//   'prevent-default' — handled, and the remaining default actions for this
+//                       event are suppressed
+//   anything else     — handled
+// String and Symbol have different layouts, so the type id picks the reader.
+static bool handler_verdict_is(Item verdict, const char* word) {
+    TypeId tid = get_type_id(verdict);
+    const char* text = nullptr;
+    size_t len = 0;
+    if (tid == LMD_TYPE_SYMBOL) {
+        Symbol* sym = (Symbol*)(uintptr_t)verdict.symbol_ptr;
+        if (!sym) return false;
+        text = sym->chars;  len = sym->len;
+    } else if (tid == LMD_TYPE_STRING) {
+        String* str = (String*)(uintptr_t)verdict.string_ptr;
+        if (!str) return false;
+        text = str->chars;  len = str->len;
+    } else {
+        return false;
+    }
+    size_t want = strlen(word);
+    return len == want && memcmp(text, word, want) == 0;
+}
+
+// Bind the document's script runtime, build the event value, invoke one template
+// handler, then reconcile any model change back into layout. Shared by both
+// dispatch walks: the author-template walk passes the item apply() matched as the
+// model, the behavior walk passes the element itself.
+static bool invoke_template_handler(EventContext* evcon, View* target,
+                                    const char* event_name, const InputIntent* intent,
+                                    TemplateEntry* tmpl, TemplateHandlerEntry* h,
+                                    Item model_item, const char* template_ref,
+                                    bool* out_model_reconciled) {
+    log_debug("invoke_template_handler: invoking '%s' handler on tmpl=%s",
+              event_name, tmpl->name ? tmpl->name : tmpl->template_ref);
+
+    using namespace std::chrono;
+    auto t_start = high_resolution_clock::now();
+
+    // Retained handlers borrow the document Runtime's canonical
+    // context; no heap-only stack context may outlive dispatch.
+    EvalContext* handler_ctx = nullptr;
+    DomDocument* doc = event_context_target_document(evcon);
+    // the document's one shared script runtime: a behavior template governs
+    // plain HTML pages too, where the Lambda runtime is the JS realm's.
+    Runtime* rt = dom_document_script_runtime(doc);
+    Context* saved_input_context = input_context;
+    if (rt && rt->heap) {
+        handler_ctx = runtime_get_eval_context(rt);
+        if (!handler_ctx) return true;
+        handler_ctx->heap = rt->heap;
+        handler_ctx->name_pool = rt->name_pool;
+        handler_ctx->pool = rt->heap->pool;
+        handler_ctx->type_info = type_info;
+        // A retained handler runs on the document's eval thread;
+        // nested dispatch must never replace that thread owner.
+        if (!eval_context_thread_initialize(handler_ctx)) {
+            log_error("lambda event handler: eval thread belongs to another context");
+            return true;
+        }
+        // Retained handlers outlive Runner's stack context; bind a
+        // live side stack before generated code enters its context ABI.
+        if (!lambda_side_stack_bind()) {
+            log_error("lambda event handler: failed to bind side stack");
+            return true;
+        }
+    }
+    // Phase 5: Set ui_mode + arena so retransformed body functions
+    // allocate fat DomElements/DomTexts on the result arena.
+    if (handler_ctx && rt && rt->ui_mode && rt->result_arena) {
+        handler_ctx->ui_mode = true;
+        handler_ctx->arena = rt->result_arena;
+        input_context = (Context*)handler_ctx;
+    } else {
+        // Clear input_context to prevent stale arena access
+        // during list expansion in retransformed body functions.
+        input_context = nullptr;
+    }
+
+    // build event object map: {type, target_class, target_tag, x, y}
+    Item event_item = build_lambda_event_map(doc, target, event_name, evcon, intent);
+
+    // set up emit context so handlers can call emit()
+    EmitHandlerContext emit_ctx;
+    emit_ctx.doc = doc;
+    emit_ctx.target = target;
+    emit_ctx.model_item = model_item;
+    emit_ctx.template_ref = template_ref;
+    emit_ctx.evcon = evcon;
+    emit_ctx.has_pending_selection = false;
+    emit_ctx.pending_selection = ItemNull;
+    EmitHandlerContext* saved_emit_ctx = g_emit_handler_ctx;
+    g_emit_handler_ctx = &emit_ctx;
+
+    uint64_t mutation_epoch = edit_bridge_mutation_epoch();
+
+    // invoke handler: Item handler(Item model, Item event)
+    Item verdict = call_template_event_handler(h, model_item, event_item);
+    bool declined = handler_verdict_is(verdict, "pass");
+    if (evcon && handler_verdict_is(verdict, "prevent-default")) {
+        evcon->default_prevented = true;
+    }
+
+    auto t_handler = high_resolution_clock::now();
+
+    // restore emit context
+    g_emit_handler_ctx = saved_emit_ctx;
+
+    // A bubbled form-control click can be a no-op; rebuilding its
+    // edit template drops the focus just established by mouse down.
+    // State writes mark themselves dirty, while inline MarkEditor
+    // writes advance this epoch and need this explicit invalidation.
+    if (tmpl->is_edit &&
+        edit_bridge_mutation_epoch() != mutation_epoch) {
+        render_map_mark_dirty(model_item, template_ref);
+    }
+
+    // after handler, check for dirty entries and retransform
+    if (render_map_has_dirty()) {
+        RetransformResult results[16];
+        int count = render_map_retransform_with_results(results, 16);
+        auto t_retransform = high_resolution_clock::now();
+
+        // Phase 14: No-op elision — skip rebuild if output unchanged
+        bool any_changed = false;
+        int reported = count <= 16 ? count : 16;
+        for (int i = 0; i < reported; i++) {
+            if (!item_deep_equal(results[i].old_result, results[i].new_result)) {
+                any_changed = true;
+                break;
+            }
+        }
+
+        if (any_changed) {
+            // incremental DOM rebuild (falls back to full if map not ready)
+            rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
+            if (out_model_reconciled) *out_model_reconciled = true;
+        }
+        auto t_rebuild = high_resolution_clock::now();
+
+        using std::chrono::duration;
+        using std::chrono::duration_cast;
+        log_info("[TIMING] event dispatch: handler=%.2fms retransform=%.2fms rebuild=%.2fms total=%.2fms%s",
+            duration<double, std::milli>(t_handler - t_start).count(),
+            duration<double, std::milli>(t_retransform - t_handler).count(),
+            duration<double, std::milli>(t_rebuild - t_retransform).count(),
+            duration<double, std::milli>(t_rebuild - t_start).count(),
+            any_changed ? "" : " (no-op elided)");
+    } else {
+        log_info("[TIMING] event dispatch: handler=%.2fms (no dirty entries)",
+            duration<double, std::milli>(t_handler - t_start).count());
+    }
+
+    if (emit_ctx.has_pending_selection) {
+        if (apply_source_selection_to_doc(evcon->ui_context, doc, emit_ctx.pending_selection)) {
+            log_debug("dispatch_lambda_handler: applied pending source selection");
+            evcon->need_repaint = true;
+        } else {
+            log_debug("dispatch_lambda_handler: pending source selection did not resolve");
+        }
+    }
+
+    // input construction is call-scoped; the eval owner is thread-scoped.
+    input_context = saved_input_context;
+
+    // a declining handler leaves the event unclaimed so dispatch keeps looking
+    return !declined;
+}
+
+// Load the Lambda dom package into this document's script runtime, once, on the
+// first event. Static layout and render runs dispatch no events, so they never
+// pay for it. Every template the package declares registers as UA behavior
+// rather than as an author template (ES1/ES7).
+//
+// Loading requires a runtime: a `.ls` page and a script-bearing HTML page both
+// have one, but a script-less HTML page owns none yet (ESO25) and is skipped
+// until runtime-creation ownership is settled.
+static bool radiant_dom_package_ensure(DomDocument* doc) {
+    if (!doc) return false;
+    if (doc->dom_package_loaded) return template_registry_has_behavior(g_template_registry);
+
+    static int s_enabled = -1;
+    if (s_enabled < 0) {
+        const char* env = getenv("RADIANT_DOM_PKG");
+        s_enabled = (env && env[0] == '0') ? 0 : 1;
+    }
+    if (!s_enabled) { doc->dom_package_loaded = true; return false; }
+
+    Runtime* rt = dom_document_script_runtime(doc);
+    if (!rt || !rt->heap) {
+        log_debug("dom-package: document has no script runtime yet; skipping load");
+        return false;
+    }
+    // mark before running: a failed load must not be retried on every event
+    doc->dom_package_loaded = true;
+
+    EvalContext* ctx = runtime_get_eval_context(rt);
+    if (!ctx || !eval_context_thread_initialize(ctx)) {
+        log_error("dom-package: cannot bind the document eval thread");
+        return false;
+    }
+    if (!template_registry_current_slot()) return false;
+    if (!g_template_registry) g_template_registry = template_registry_new();
+
+    // behavior mode spans only this load, so the page's own templates keep
+    // registering as author templates
+    template_registry_set_behavior_mode(g_template_registry, true);
+    const char* source = "import dom: lambda.package.dom.dom\nnull\n";
+    run_script_mir(rt, source, (char*)"<dom-package>", false);
+    template_registry_set_behavior_mode(g_template_registry, false);
+
+    bool ok = template_registry_has_behavior(g_template_registry);
+    log_info("dom-package: %s (%d behavior templates)",
+             ok ? "loaded" : "loaded no behavior templates",
+             g_template_registry ? g_template_registry->behavior_count : 0);
+    return ok;
+}
+
+// Fire a synthetic DOM event from a behavior handler. Exposed as the dom
+// package's `dispatch()` primitive (ES6). The event enters the normal pipeline
+// as a fresh event, so anything it triggers is dispatched in a quiescent state
+// rather than nested inside the handler that raised it.
+extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* event_name) {
+    if (!dom_node || !event_name || !event_name[0]) return false;
+    EmitHandlerContext* ctx = g_emit_handler_ctx;
+    if (!ctx || !ctx->evcon) {
+        log_error("dispatch(): no active event context — only callable from a handler");
+        return false;
+    }
+    View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
+    // `input` and `change` are the notifications a control emits after its own
+    // state settles: they bubble and are not cancelable (HTML 4.10.5).
+    bool ok = radiant_dispatch_simple_event(ctx->evcon, view, event_name, true, false);
+    log_debug("dispatch-from-script: '%s' -> %s", event_name, ok ? "dispatched" : "no listener");
+    return ok;
+}
+
+// Does a behavior template own the default action for this event on this
+// target? The engine keeps its native default action as the fallback until the
+// package registers a replacement (ES5), so each native activation path asks
+// this before running, and exactly one of the two acts.
+bool radiant_behavior_claims_event(EventContext* evcon, View* target,
+                                   const char* event_name) {
+    if (!context || !target || !event_name) return false;
+    if (!radiant_dom_package_ensure(event_context_target_document(evcon))) return false;
+    for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+        if (node->node_type != DOM_NODE_ELEMENT) continue;
+        DomElement* dom_elem = lam::dom_require_element(node);
+        if (dom_elem->is_synthetic()) continue;
+        Item elem_item;
+        elem_item.element = dom_element_render_source(dom_elem);
+        if (template_registry_match_behavior(g_template_registry, elem_item, event_name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// UA default behavior: after no author template claimed the event, find the
+// behavior template governing the target (or an ancestor) and run its handler.
+// Behavior templates attach to elements they did not produce, so this walk
+// matches on the element itself rather than through the render map. Inert until
+// the dom package registers behavior templates.
+static bool dispatch_behavior_handler(EventContext* evcon, View* target,
+                                      const char* event_name,
+                                      const InputIntent* intent,
+                                      bool* out_model_reconciled) {
+    if (!context) return false;
+    // an author handler that returned 'prevent-default' suppresses UA behavior
+    if (evcon && evcon->default_prevented) return false;
+    // first event on this document loads the package that supplies UA behavior
+    if (!radiant_dom_package_ensure(event_context_target_document(evcon))) return false;
+
+    DomNode* node = static_cast<DomNode*>(target);
+    while (node) {
+        if (node->node_type == DOM_NODE_ELEMENT) {
+            DomElement* dom_elem = lam::dom_require_element(node);
+            if (!dom_elem->is_synthetic()) {
+                Item elem_item;
+                elem_item.element = dom_element_render_source(dom_elem);
+                TemplateEntry* tmpl = template_registry_match_behavior(
+                    g_template_registry, elem_item, event_name);
+                if (tmpl) {
+                    TemplateHandlerEntry* h = template_entry_find_handler(tmpl, event_name);
+                    if (h) {
+                        log_debug("dispatch_behavior_handler: '%s' -> behavior tmpl=%s",
+                                  event_name, tmpl->template_ref ? tmpl->template_ref : "(anon)");
+                        // The element is its own model. Bind `~` to the module's
+                        // dom_node wrapper, not the raw Mark element: handlers
+                        // reach engine state through the radiant primitives, and
+                        // those speak wrappers. Matching above still runs on the
+                        // Mark element, where tag and attributes live.
+                        Item model = radiant_dom_wrap_node(dom_elem);
+                        if (get_type_id(model) == LMD_TYPE_NULL) model = elem_item;
+                        if (invoke_template_handler(evcon, target, event_name, intent,
+                                tmpl, h, model, tmpl->template_ref, out_model_reconciled)) {
+                            return true;
+                        }
+                        // behavior declined with 'pass': the native default
+                        // action for this class stays in charge
+                    }
+                }
+            }
+        }
+        node = node->parent;
+    }
+    return false;
+}
+
 static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name,
                                     const InputIntent* intent = nullptr,
                                     bool* out_model_reconciled = nullptr) {
@@ -2204,140 +2517,15 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                     TemplateEntry* tmpl = template_registry_find_ref(
                         g_template_registry, lookup.template_ref);
 
-                    if (tmpl && tmpl->handlers) {
-                        // find handler for this event name
-                        for (TemplateHandlerEntry* h = tmpl->handlers; h; h = h->next) {
-                            if (strcmp(h->event_name, event_name) == 0) {
-                                log_debug("dispatch_lambda_handler: invoking '%s' handler on tmpl=%s",
-                                         event_name, tmpl->name ? tmpl->name : tmpl->template_ref);
-
-                                using namespace std::chrono;
-                                auto t_start = high_resolution_clock::now();
-
-                                // Retained handlers borrow the document Runtime's canonical
-                                // context; no heap-only stack context may outlive dispatch.
-                                EvalContext* handler_ctx = nullptr;
-                                DomDocument* doc = event_context_target_document(evcon);
-                                Runtime* rt = doc ? doc->lambda_runtime : nullptr;
-                                Context* saved_input_context = input_context;
-                                if (rt && rt->heap) {
-                                    handler_ctx = runtime_get_eval_context(rt);
-                                    if (!handler_ctx) return true;
-                                    handler_ctx->heap = rt->heap;
-                                    handler_ctx->name_pool = rt->name_pool;
-                                    handler_ctx->pool = rt->heap->pool;
-                                    handler_ctx->type_info = type_info;
-                                    // A retained handler runs on the document's eval thread;
-                                    // nested dispatch must never replace that thread owner.
-                                    if (!eval_context_thread_initialize(handler_ctx)) {
-                                        log_error("lambda event handler: eval thread belongs to another context");
-                                        return true;
-                                    }
-                                    // Retained handlers outlive Runner's stack context; bind a
-                                    // live side stack before generated code enters its context ABI.
-                                    if (!lambda_side_stack_bind()) {
-                                        log_error("lambda event handler: failed to bind side stack");
-                                        return true;
-                                    }
-                                }
-                                // Phase 5: Set ui_mode + arena so retransformed body functions
-                                // allocate fat DomElements/DomTexts on the result arena.
-                                if (handler_ctx && rt && rt->ui_mode && rt->result_arena) {
-                                    handler_ctx->ui_mode = true;
-                                    handler_ctx->arena = rt->result_arena;
-                                    input_context = (Context*)handler_ctx;
-                                } else {
-                                    // Clear input_context to prevent stale arena access
-                                    // during list expansion in retransformed body functions.
-                                    input_context = nullptr;
-                                }
-
-                                // build event object map: {type, target_class, target_tag, x, y}
-                                Item event_item = build_lambda_event_map(doc, target, event_name, evcon, intent);
-
-                                // set up emit context so handlers can call emit()
-                                EmitHandlerContext emit_ctx;
-                                emit_ctx.doc = doc;
-                                emit_ctx.target = target;
-                                emit_ctx.model_item = lookup.source_item;
-                                emit_ctx.template_ref = lookup.template_ref;
-                                emit_ctx.evcon = evcon;
-                                emit_ctx.has_pending_selection = false;
-                                emit_ctx.pending_selection = ItemNull;
-                                EmitHandlerContext* saved_emit_ctx = g_emit_handler_ctx;
-                                g_emit_handler_ctx = &emit_ctx;
-
-                                uint64_t mutation_epoch = edit_bridge_mutation_epoch();
-
-                                // invoke handler: Item handler(Item model, Item event)
-                                call_template_event_handler(h,
-                                    lookup.source_item, event_item);
-
-                                auto t_handler = high_resolution_clock::now();
-
-                                // restore emit context
-                                g_emit_handler_ctx = saved_emit_ctx;
-
-                                // A bubbled form-control click can be a no-op; rebuilding its
-                                // edit template drops the focus just established by mouse down.
-                                // State writes mark themselves dirty, while inline MarkEditor
-                                // writes advance this epoch and need this explicit invalidation.
-                                if (tmpl->is_edit &&
-                                    edit_bridge_mutation_epoch() != mutation_epoch) {
-                                    render_map_mark_dirty(lookup.source_item, lookup.template_ref);
-                                }
-
-                                // after handler, check for dirty entries and retransform
-                                if (render_map_has_dirty()) {
-                                    RetransformResult results[16];
-                                    int count = render_map_retransform_with_results(results, 16);
-                                    auto t_retransform = high_resolution_clock::now();
-
-                                    // Phase 14: No-op elision — skip rebuild if output unchanged
-                                    bool any_changed = false;
-                                    int reported = count <= 16 ? count : 16;
-                                    for (int i = 0; i < reported; i++) {
-                                        if (!item_deep_equal(results[i].old_result, results[i].new_result)) {
-                                            any_changed = true;
-                                            break;
-                                        }
-                                    }
-
-                                    if (any_changed) {
-                                        // incremental DOM rebuild (falls back to full if map not ready)
-                                        rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
-                                        if (out_model_reconciled) *out_model_reconciled = true;
-                                    }
-                                    auto t_rebuild = high_resolution_clock::now();
-
-                                    using std::chrono::duration;
-                                    using std::chrono::duration_cast;
-                                    log_info("[TIMING] event dispatch: handler=%.2fms retransform=%.2fms rebuild=%.2fms total=%.2fms%s",
-                                        duration<double, std::milli>(t_handler - t_start).count(),
-                                        duration<double, std::milli>(t_retransform - t_handler).count(),
-                                        duration<double, std::milli>(t_rebuild - t_retransform).count(),
-                                        duration<double, std::milli>(t_rebuild - t_start).count(),
-                                        any_changed ? "" : " (no-op elided)");
-                                } else {
-                                    log_info("[TIMING] event dispatch: handler=%.2fms (no dirty entries)",
-                                        duration<double, std::milli>(t_handler - t_start).count());
-                                }
-
-                                if (emit_ctx.has_pending_selection) {
-                                    if (apply_source_selection_to_doc(evcon->ui_context, doc, emit_ctx.pending_selection)) {
-                                        log_debug("dispatch_lambda_handler: applied pending source selection");
-                                        evcon->need_repaint = true;
-                                    } else {
-                                        log_debug("dispatch_lambda_handler: pending source selection did not resolve");
-                                    }
-                                }
-
-                                // input construction is call-scoped; the eval owner is thread-scoped.
-                                input_context = saved_input_context;
-
-                                return true;
-                            }
+                    TemplateHandlerEntry* h = template_entry_find_handler(tmpl, event_name);
+                    if (tmpl && h) {
+                        if (invoke_template_handler(evcon, target, event_name, intent,
+                                tmpl, h, lookup.source_item, lookup.template_ref,
+                                out_model_reconciled)) {
+                            return true;
                         }
+                        // handler returned 'pass': keep walking ancestors
+                    } else {
                         log_debug("dispatch_lambda_handler: tmpl found but no '%s' handler", event_name);
                     }
                 }
@@ -2350,7 +2538,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
     }
 
     log_debug("dispatch_lambda_handler: no handler found after walking %d levels", depth);
-    return false;
+    return dispatch_behavior_handler(evcon, target, event_name, intent,
+                                     out_model_reconciled);
 }
 
 bool editing_template_invoke_handler(EventContext* evcon, View* target,
@@ -2386,10 +2575,10 @@ static bool dispatch_editing_input_event(EventContext* evcon, View* target,
 static bool event_document_has_js_runtime(EventContext* evcon) {
     DomDocument* document = event_context_target_document(evcon);
     // Lambda template documents retain a Jube support capsule in `js`, but it
-    // is not a DOM script realm. Route their events through the template
-    // action instead of constructing JS event values on the Lambda runtime.
-    return document && !document->lambda_runtime && document->js.mir_ctx &&
-        document->js.runtime;
+    // is not a DOM script realm. Test the realm bit the script runner sets
+    // rather than the absence of a Lambda runtime: a document may host page JS
+    // and Lambda code at once, so runtime presence cannot classify the page.
+    return dom_document_has_js_realm(document);
 }
 
 static bool dispatch_editing_notification_beforeinput(
@@ -7257,8 +7446,7 @@ struct EventDocumentScope {
 
     EventDocumentScope(UiContext* uicon, DomDocument* doc)
         : active(false) {
-        Runtime* runtime = doc && doc->lambda_runtime
-            ? doc->lambda_runtime : (doc ? doc->js.runtime : nullptr);
+        Runtime* runtime = dom_document_script_runtime(doc);
         if (!runtime) return;
         EvalContext* owner = runtime_get_eval_context(runtime);
         if (!owner || !runtime->heap || !runtime->name_pool) return;
@@ -7268,10 +7456,11 @@ struct EventDocumentScope {
         owner->pool = runtime->heap->pool;
         if (!eval_context_thread_initialize(owner)) return;
         // Lambda templates initialize a JS support capsule for Jube helpers,
-        // but it is not a DOM script realm. Only plain HTML documents publish
-        // the retained JavaScript runtime to native event dispatch.
-        bool has_document_js_runtime = !doc->lambda_runtime &&
-            runtime == doc->js.runtime && doc->js.mir_ctx;
+        // but it is not a DOM script realm. Publish the retained JavaScript
+        // runtime only when the script runner actually established a realm; the
+        // shared runtime must still be the one JS bound to.
+        bool has_document_js_runtime = dom_document_has_js_realm(doc) &&
+            runtime == doc->js.runtime;
         if (has_document_js_runtime) {
             if (!js_runtime_state_thread_initialize(owner)) return;
             js_dom_set_ui_context(uicon);
@@ -8455,7 +8644,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                 }
                 if (evcon.target && !evcon.default_prevented &&
-                    (!js_click_dispatched || (click_check_radio && !click_check_radio_changed))) {
+                    (!js_click_dispatched || (click_check_radio && !click_check_radio_changed)) &&
+                    !radiant_behavior_claims_event(&evcon, evcon.target, "click")) {
+                    // a registered behavior template owns this activation; the
+                    // native path stands down so the two never both toggle
                     handle_checkbox_radio_click(&evcon, evcon.target);
                 }
 

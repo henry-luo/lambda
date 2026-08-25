@@ -7038,14 +7038,18 @@ static bool direct_view_begin(LambdaDirectAstSink* sink,
 static bool direct_view_add_state(LambdaDirectAstSink* sink,
         const LambdaParseReduction* reduction) {
     AstViewNode* view = direct_active_view(sink);
-    if (!view || reduction->child_count != 1) return false;
+    if (!view || reduction->child_count > 1) return false;
     Transpiler* tp = sink->tp;
     AstStateEntry* state = (AstStateEntry*)alloc_ast_node_from_span(tp,
         AST_NODE_STATE_ENTRY, reduction->span, sizeof(AstStateEntry));
     state->type = set_type_any(tp, ANY_STATEMENT);
     state->name = name_pool_create_strview(tp->name_pool,
         direct_token_text(tp, reduction->detail_token));
-    state->value = direct_ast_node(reduction->children[0]);
+    // a null value marks an engine-backed binding (bare `state name`); an
+    // explicit `state name: null` still yields a literal node, so the two stay
+    // distinguishable downstream.
+    state->value = reduction->child_count == 1
+        ? direct_ast_node(reduction->children[0]) : NULL;
 
     uint32_t slot = sink->view_depth - 1;
     if (sink->view_state_tails[slot]) {

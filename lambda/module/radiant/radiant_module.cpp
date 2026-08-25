@@ -7,6 +7,7 @@
 #include "radiant_dom_bridge.hpp"
 #include "../../../radiant/layout.hpp"
 #include "../../../radiant/render.hpp"
+#include "../../../radiant/event.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/mem_context.h"
@@ -1083,6 +1084,129 @@ RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item valu
     return node_item;
 }
 
+// ---------------------------------------------------------------------------
+// Interaction-state primitives (vibe/Lambda_Design_DOM_State.md ES4/ES6).
+// Behavior templates read and write canonical engine state through these; the
+// storage itself stays native so layout, paint, and the CSS selector matcher
+// keep reading it directly.
+// ---------------------------------------------------------------------------
+
+// Lambda spells state names in snake_case; the engine interns CSS pseudo-class
+// spellings. `read_only` marks the hot states the native transition code owns —
+// hover/active/focus change per pointer move, so script may observe but not
+// drive them (the hot-path guard would otherwise be meaningless).
+static const struct {
+    const char* lambda_name;
+    const char* state_name;
+    bool read_only;
+} RADIANT_STATE_NAME_MAP[] = {
+    {"hover",             STATE_HOVER,          true},
+    {"active",            STATE_ACTIVE,         true},
+    {"focus",             STATE_FOCUS,          true},
+    {"focus_within",      STATE_FOCUS_WITHIN,   true},
+    {"focus_visible",     STATE_FOCUS_VISIBLE,  true},
+    {"visited",           STATE_VISITED,        false},
+    {"link",              STATE_LINK,           false},
+    {"checked",           STATE_CHECKED,        false},
+    {"indeterminate",     STATE_INDETERMINATE,  false},
+    {"disabled",          STATE_DISABLED,       false},
+    {"enabled",           STATE_ENABLED,        false},
+    {"readonly",          STATE_READONLY,       false},
+    {"valid",             STATE_VALID,          false},
+    {"invalid",           STATE_INVALID,        false},
+    {"required",          STATE_REQUIRED,       false},
+    {"optional",          STATE_OPTIONAL,       false},
+    {"placeholder_shown", STATE_PLACEHOLDER,    false},
+    {"selected",          STATE_SELECTED,       false},
+};
+
+static const char* radiant_state_name_lookup(const char* lambda_name, bool* out_read_only) {
+    if (!lambda_name) return nullptr;
+    for (size_t i = 0; i < sizeof(RADIANT_STATE_NAME_MAP) / sizeof(RADIANT_STATE_NAME_MAP[0]); i++) {
+        if (strcmp(RADIANT_STATE_NAME_MAP[i].lambda_name, lambda_name) == 0) {
+            if (out_read_only) *out_read_only = RADIANT_STATE_NAME_MAP[i].read_only;
+            return RADIANT_STATE_NAME_MAP[i].state_name;
+        }
+    }
+    return nullptr;
+}
+
+// Resolve the element and its document's state store in one step; every state
+// primitive needs both and must fail the same way when either is missing.
+static DocState* radiant_state_for_element(Item node_item, const char* op,
+                                           DomElement** out_elem) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, op);
+    if (!elem) return nullptr;
+    DomDocument* doc = radiant_dom_document_from_node((DomNode*)elem);
+    if (!doc) {
+        log_error("JUBE_RADIANT_%s: element has no owning document", op);
+        return nullptr;
+    }
+    // The store is created lazily — a headless `radiant.load()` document has
+    // none until something asks for state, so ensure rather than require it.
+    DocState* state = radiant_document_ensure_state(doc, op);
+    if (!state) {
+        log_error("JUBE_RADIANT_%s: could not open document state store", op);
+        return nullptr;
+    }
+    if (out_elem) *out_elem = elem;
+    return state;
+}
+
+RADIANT_C_API Item fn_radiant_get_state(Item node_item, Item name_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "GET_STATE", &elem);
+    const char* name = fn_to_cstr(name_item);
+    if (!state || !name) return ItemNull;
+    const char* interned = radiant_state_name_lookup(name, nullptr);
+    if (!interned) {
+        log_error("JUBE_RADIANT_GET_STATE: unknown state name '%s'", name);
+        return ItemNull;
+    }
+    return (Item){.item = b2it(state_get_bool(state, elem, interned) ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item value_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_STATE", &elem);
+    const char* name = fn_to_cstr(name_item);
+    if (!state || !name) return (Item){.item = b2it(0)};
+    bool read_only = false;
+    const char* interned = radiant_state_name_lookup(name, &read_only);
+    if (!interned) {
+        log_error("JUBE_RADIANT_SET_STATE: unknown state name '%s'", name);
+        return (Item){.item = b2it(0)};
+    }
+    if (read_only) {
+        log_error("JUBE_RADIANT_SET_STATE: '%s' is engine-owned and read-only", name);
+        return (Item){.item = b2it(0)};
+    }
+    // state_set_bool routes each name to its canonical home — packed ViewState
+    // bits, the form-control writers, or the generic state map — and schedules
+    // the pseudo-class restyle, so script never bypasses that bookkeeping.
+    bool want = is_truthy(value_item);
+    state_set_bool(state, elem, interned, want);
+    // Report what actually happened, not merely that a writer was called: a
+    // form-state write is a no-op until layout has built the control's
+    // FormControlProp, and a silent false success would hide that.
+    bool got = state_get_bool(state, elem, interned);
+    if (got != want) {
+        log_error("JUBE_RADIANT_SET_STATE: '%s' did not take on <%s> (control state needs layout?)",
+                  name, elem->tag_name ? elem->tag_name : "?");
+    }
+    return (Item){.item = b2it(got == want ? 1 : 0)};
+}
+
+extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* event_name);
+
+RADIANT_C_API Item fn_radiant_dispatch(Item node_item, Item name_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "DISPATCH");
+    const char* name = fn_to_cstr(name_item);
+    if (!elem || !name || !name[0]) return (Item){.item = b2it(0)};
+    bool ok = radiant_dispatch_event_from_script((void*)elem, name);
+    return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
 RADIANT_C_API Item fn_radiant_free(Item node_item) {
     DomNode* node = radiant_dom_node_from_item(node_item, "FREE");
     if (!node) return ItemNull;
@@ -1457,6 +1581,12 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_attr(Item node, Item name)", (fn_ptr)fn_radiant_attr},
     {"set_attr", "fn(node: dom_node, name: string, value: string) -> dom_node", (fn_ptr)fn_radiant_set_attr, JUBE_FN_NONE,
      "Item fn_radiant_set_attr(Item node, Item name, Item value)", (fn_ptr)fn_radiant_set_attr},
+    {"get_state", "fn(node: dom_node, name: string) -> bool", (fn_ptr)fn_radiant_get_state, JUBE_FN_NONE,
+     "Item fn_radiant_get_state(Item node, Item name)", (fn_ptr)fn_radiant_get_state},
+    {"set_state", "fn(node: dom_node, name: string, value: bool) -> bool", (fn_ptr)fn_radiant_set_state, JUBE_FN_NONE,
+     "Item fn_radiant_set_state(Item node, Item name, Item value)", (fn_ptr)fn_radiant_set_state},
+    {"dispatch", "fn(node: dom_node, name: string) -> bool", (fn_ptr)fn_radiant_dispatch, JUBE_FN_NONE,
+     "Item fn_radiant_dispatch(Item node, Item name)", (fn_ptr)fn_radiant_dispatch},
     {"free", "fn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
     {"layout", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,

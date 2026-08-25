@@ -171,6 +171,27 @@ static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
     }
 }
 
+// Document provenance: what the author actually wrote. Routing and script-realm
+// decisions must consult this (and js_has_dom_realm) rather than inferring page
+// nature from which runtime pointer happens to be set — a document may legally
+// host both page JS and Lambda code.
+typedef enum DomPageKind {
+    DOM_PAGE_KIND_UNKNOWN = 0,     // not yet classified by a loader
+    DOM_PAGE_KIND_HTML,            // parsed HTML/JS page; may host a JS DOM realm
+    DOM_PAGE_KIND_LAMBDA_SCRIPT,   // .ls page whose script produced the tree
+    DOM_PAGE_KIND_GENERATED        // engine-generated tree (markdown, XML, LaTeX, bridges)
+} DomPageKind;
+
+static inline const char* dom_page_kind_name(DomPageKind kind) {
+    switch (kind) {
+        case DOM_PAGE_KIND_HTML: return "html";
+        case DOM_PAGE_KIND_LAMBDA_SCRIPT: return "lambda-script";
+        case DOM_PAGE_KIND_GENERATED: return "generated";
+        case DOM_PAGE_KIND_UNKNOWN:
+        default: return "unknown";
+    }
+}
+
 /**
  * DomDocument - Root container for DOM tree
  * Manages memory (arena) and Lambda integration (Input*)
@@ -258,6 +279,22 @@ struct DomDocument {
     uint64_t mutation_epoch;
     void* editing_action_registry;
 
+    // Document provenance, set by the loader that built this tree. Kept here at
+    // the tail (rather than beside html_version) so no existing member offset
+    // shifts for the native/JIT consumers noted above.
+    DomPageKind page_kind;
+
+    // True once the script runner has established a real JS DOM script realm on
+    // this document. A Lambda-script page may retain a Jube support capsule in
+    // `js` without owning a script realm, so realm presence needs its own bit
+    // and must never be inferred from lambda_runtime being null.
+    bool js_has_dom_realm;
+
+    // The Lambda dom package supplies this document's UA behavior templates. It
+    // loads at most once, on the first event, so static layout and render runs
+    // never pay for it.
+    bool dom_package_loaded;
+
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -278,11 +315,29 @@ struct DomDocument {
                     pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f),
                     pending_scroll_into_view_target(nullptr),
                     pending_scroll_into_view_target_id(0),
-                    mutation_epoch(0), editing_action_registry(nullptr) {}
+                    mutation_epoch(0), editing_action_registry(nullptr),
+                    page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
+                    dom_package_loaded(false) {}
 
     bool init(Input* input);
     void destroy();
 };
+
+// The one script runtime a document owns. JS and Lambda share it: `js.runtime`
+// is itself a Lambda Runtime (shared lambda-rt layer), and one document may not
+// multiplex independent evaluators on a host thread, so both realms resolve to
+// the same Runtime/EvalContext through this accessor.
+static inline Runtime* dom_document_script_runtime(const DomDocument* doc) {
+    if (!doc) return nullptr;
+    return doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
+}
+
+// Does this document own a live JS DOM script realm? Capability, not provenance:
+// a page may carry Lambda code and a JS realm at once, so callers must test this
+// instead of `!doc->lambda_runtime`.
+static inline bool dom_document_has_js_realm(const DomDocument* doc) {
+    return doc && doc->js_has_dom_realm && doc->js.runtime;
+}
 
 uint32_t dom_document_alloc_node_id(DomDocument* doc);
 
