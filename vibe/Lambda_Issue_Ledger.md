@@ -1204,8 +1204,9 @@ together, not an operator change.
 Not a missing implementation: `pattern_split` (`re2_wrapper.cpp:1124`) computed
 the right segments all along, and `list_push` then merged them back together.
 `list_push` concatenates a pushed string onto the previous element unless
-`context->disable_string_merging` is set (`collection_io.cpp:90` — the condition
-does not consult `is_content`, so it applies to every string push). `fn_split`'s
+the eval context suspends it (`collection_io.cpp:90` — the condition does not
+consult `is_content`, so it applies to every string push; the suspension flag
+has since been retired, see below). `fn_split`'s
 **string** path suspends merging around its own loop (`lambda-eval.cpp:5553`),
 but the **pattern** path returns before reaching it (`:5530`, and `fn_split3` at
 `:5677`), so every pattern split collapsed into one element. The keep-delimiters
@@ -1244,6 +1245,11 @@ Note the original ledger table's expected value for `split("a1b22c3", \(d+))`
 was internally inconsistent — it omitted the trailing empty segment that the
 spec and the sibling `\(d)` row require.
 
+Follow-up: `pattern_split` and `fn_split`/`fn_split3` were later converted from
+`list_push` + a merging suspension to plain `array_push` (D2.6.5), removing the
+RAII guard, both flag set-sites and all six restore points — net −18 lines, and
+`split` no longer touches the global flag at all. Output is byte-identical.
+
 <a id="lr09-r3"></a>**LR09-R3 · `varg()` applies content normalization to the argument list · RESOLVED**
 A variadic call collected its rest arguments with `list_push`, which applies
 S16.7's content rules: `null` is dropped outright (`collection_runtime.cpp:286`)
@@ -1267,6 +1273,47 @@ Verified on both tiers, including `varg(i)` indexing, a fixed-plus-rest
 signature, an all-`null` argument list, and `call()` (S12.3.4), which shares the
 adapter. `test/std/core/functions/variadic_args.ls` loses the note that kept it
 to numeric arguments and now covers the string/`null` cases directly.
+
+**Generalized to D2.6.5** (Formal Design v1.27.0): the append API *is* the
+choice of content normalization — `list_push` for element and script top-level
+content, `array_push` for every other collection — and a builder must never
+re-express the choice as ambient state — the process-wide suppression flag that
+used to exist for exactly that purpose has been retired.
+
+A sweep of all 152 `list_push` call sites followed. The ~120 in
+`lambda/input/markup/**` are correct: they build genuine element content. Of the
+rest, **19 more sites had the same defect** and were converted: 17 in
+`lambda-vector.cpp` (`reverse`, `take`, `drop`, `zip`, `array_split`, `shape`,
+`math_random`, pipe-collect, vector ops), the JS→Lambda `start()` argument list
+(`concurrency_js.cpp:169`), and `call()`'s packed-array widening
+(`lambda-eval.cpp:1284`). `reverse(["a","b","c"])` returned `["cba"]` and
+`take(["a","b","c"], 2)` returned `["ab"]`; `reverse([1,null,2])` returned
+`[2,1]`. Reviewed and deliberately left on `list_push`: the markup parsers,
+`collection_runtime.cpp` (that *is* the content recursion), `pattern_find`/
+`fn_find` (push maps), `input-mark.cpp` (pushes into an element), and `path.c`.
+
+`test/std/core/functions/collection_reverse.expected` had **encoded both bugs as
+expected output** (`["cba"]`, `[false, true]`) — the suite was ratifying the
+defect. Regenerated. The neighbouring tests could not have caught it either:
+`take_drop.ls` used only numbers and `zip.ls` only ever paired a number with a
+string, so two adjacent strings never met; both now cover strings and `null`.
+
+Note the merge half is ambient-dependent — string merging is gated on an active
+input context while null-stripping is unconditional (Design Appendix A, D2.6.5),
+which is why the same function could merge in one call path and not another.
+
+The `disable_string_merging` flag turned out to be **vestigial**: its sole
+assignment set it to `false` (`input.cpp:1061`) and nothing anywhere set it
+`true`, so no input format selected normalization through it. It has now been
+retired — removed from `EvalContext` and `InputAllocationContext`, from
+`list_push_with_owner`'s signature and both of its callers, and from the merge
+gate — with output byte-identical before and after. Per-format policy
+lives in the *builder* instead — MarkBuilder formats (latex, json, xml, yaml,
+toml, csv, pdf, …) append with `array_append` and never normalize, which is why
+LaTeX may hold consecutive strings, while the markup family (markdown, asciidoc,
+textile, wiki) calls `list_push` and merges them. `input-ics.cpp` and
+`input-mark.cpp` use both and so mix the two policies — worth reconciling, along
+with retiring the dead flag.
 
 ---
 

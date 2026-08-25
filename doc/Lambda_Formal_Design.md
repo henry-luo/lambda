@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.26.5 (2026-08-25)
+**Spec version:** 1.27.2 (2026-08-25)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -305,6 +305,27 @@ language-visible counterparts are the semantics spec's SI ledger.
 - **D2.6.4** Wide-scalar Items inside a container point **only into that
   container's own buffer** (tail regions, `extra` = uniform tail count);
   headers are never reallocated out from under an identity. [SF15]
+- **D2.6.5** **The append API selects content normalization.** Two runtime
+  appends exist and they are not interchangeable. `list_push()` is the
+  **content** constructor: it applies S16.7's normalization — a `null` is
+  dropped, a pushed string is concatenated onto a preceding string, and a
+  pushed content list is spliced in — and is correct **only** when building
+  element content or script top-level content. `array_push()` is the
+  **collection** constructor: it stores the item verbatim, preserving `null`
+  as an element and keeping adjacent strings separate. Every other
+  collection — array and vector results, argument and rest lists, split
+  segments, zipped pairs — is built with `array_push()`, because for those
+  the element count *is* the contract and normalization silently destroys it.
+  Which normalization an input format gets is therefore a property of the
+  **builder it uses**, not of a per-format switch: MarkBuilder appends with
+  `array_append` and never normalizes — which is why LaTeX may hold
+  consecutive strings — while the markup family calls `list_push` and merges
+  them. The choice belongs at the **append site**, which is local and cannot
+  leak. It must not be re-expressed as ambient state: a process-wide
+  "suppress merging" flag stays suspended across every allocation in the
+  interval and leaks on any early return that forgets to restore it. Such a
+  flag existed on `EvalContext`/`InputAllocationContext` and was retired once
+  the append-site split made it dead.* [LR09-R3]
 
 ### D2.7 The scalar-GC invariant
 
@@ -1280,6 +1301,7 @@ Status of `*`-marked rulings as of 2026-08-24.
 |---|---|
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
+| D2.6.5 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S16.7 does not run. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
 | D2.4.1–D2.4.3 | `MirValue`/`em_require_rep` infrastructure exists; LambdaJS uses it; propagation through Lambda expression lowering not started (phases L0–L6), sequenced after nullable-lane work. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
@@ -1462,7 +1484,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.2 | Double_Boxing; Int_Type §5.1; Stack_API §15 | `Lambda_Type_Double_Boxing.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Design_Stack_API.md` |
 | D2.3 | Box_Unbox, Box_Unbox2 | `Lambda_Box_Unbox.md`, `Lambda_Box_Unbox2.md` |
 | D2.4 | Lane §1–§9 | `Lambda_Design_Compiling_Lane.md` |
-| D2.5–D2.6 | Nullable §1–§10; CW16 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md` |
+| D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md` |
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
 | D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
 | D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |

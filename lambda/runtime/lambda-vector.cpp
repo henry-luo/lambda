@@ -497,7 +497,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         if (!is_scalar_numeric(elem_type)) {
             // non-numeric element: produce ERROR, continue
             if (return_array) array_push(arr_result, ItemError);
-            else list_push(list_result, ItemError);
+            else array_push((Array*)list_result, ItemError);
             continue;
         }
 
@@ -526,7 +526,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         }
 
         if (return_array) array_push(arr_result, res_item);
-        else list_push(list_result, res_item);
+        else array_push((Array*)list_result, res_item);
     }
     if (!return_array && list_result) list_result->is_content = 1;
     return return_array ? Item{ .array = arr_result } : Item{ .array = list_result };
@@ -1079,7 +1079,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
 
         if (!is_scalar_numeric(ta) || !is_scalar_numeric(tb)) {
             if (return_array) array_push(arr_result, ItemError);
-            else list_push(list_result, ItemError);
+            else array_push((Array*)list_result, ItemError);
             continue;
         }
 
@@ -1106,7 +1106,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         }
 
         if (return_array) array_push(arr_result, res_item);
-        else list_push(list_result, res_item);
+        else array_push((Array*)list_result, res_item);
     }
     if (!return_array && list_result) list_result->is_content = 1;
     return return_array ? Item{ .array = arr_result } : Item{ .array = list_result };
@@ -1950,7 +1950,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
                 Item value = map_get(mp, key_item);
                 Item transformed = transform(value, key_item);
                 if (!filter || is_truthy(transformed)) {
-                    list_push(result, filter ? value : transformed);
+                    array_push((Array*)result, filter ? value : transformed);
                 }
             }
             symbol_key_list_free(keys);
@@ -1968,7 +1968,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
             Item idx = index_to_item(i);
             Item transformed = transform(child, idx);
             if (!filter || is_truthy(transformed)) {
-                list_push(result, filter ? child : transformed);
+                array_push((Array*)result, filter ? child : transformed);
             }
         }
         result->is_content = 1;
@@ -1984,7 +1984,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
         Item idx = index_to_item(i);
         Item transformed = transform(elem, idx);
         if (!filter || is_truthy(transformed)) {
-            list_push(result, filter ? elem : transformed);
+            array_push((Array*)result, filter ? elem : transformed);
         }
     }
     result->is_content = 1;
@@ -2334,8 +2334,8 @@ Item fn_math_random(Item seed_item) {
     // convert to double in [0.0, 1.0)
     double value = (double)(z >> 11) * 0x1.0p-53;
     List* result = list();
-    list_push(result, push_d(value));
-    list_push(result, box_int64_value((int64_t)state));
+    array_push((Array*)result, push_d(value));
+    array_push((Array*)result, box_int64_value((int64_t)state));
     return { .array = result };
 }
 
@@ -2364,7 +2364,7 @@ Item fn_reverse(Item item) {
         bool preserve_array = type == LMD_TYPE_ARRAY && !item.array->is_spreadable;
         List* result = list();
         for (int64_t i = len - 1; i >= 0; i--) {
-            list_push(result, vector_get(item, i));
+            array_push((Array*)result, vector_get(item, i));
         }
         // sort() returns a plain non-spreadable array; reverse() must preserve that
         // container mode so method chains keep bracketed array output.
@@ -2740,7 +2740,7 @@ Item fn_take(Item vec, Item n_item) {
     }
     else {
         List* result = list();
-        for (int64_t i = 0; i < n; i++) list_push(result, vector_get(vec, i));
+        for (int64_t i = 0; i < n; i++) array_push((Array*)result, vector_get(vec, i));
         result->is_content = 1;
         return { .array = result };
     }
@@ -2803,7 +2803,7 @@ Item fn_drop(Item vec, Item n_item) {
     }
     else {
         List* result = list();
-        for (int64_t i = n; i < len; i++) list_push(result, vector_get(vec, i));
+        for (int64_t i = n; i < len; i++) array_push((Array*)result, vector_get(vec, i));
         result->is_content = 1;
         return { .array = result };
     }
@@ -3081,7 +3081,7 @@ Item fn_shape(Item vec) {
         // off the number stack entirely.
         Item dim = {.item = i2it(dims[i])};
         result = rooted_result.get();
-        list_push(result, dim);
+        array_push((Array*)result, dim);
     }
     return { .array = rooted_result.get() };
 }
@@ -3489,7 +3489,7 @@ Item fn_array_split(Item arr_item, int64_t n, int64_t axis) {
         ArrayNum* part = arr_num_slice_axis(arr, ndim, shp, str, (int)axis, c * chunk, (c + 1) * chunk);
         if (!part) return ItemError;
         result = rooted_result.get();
-        list_push(result, (Item){ .array_num = part });
+        array_push((Array*)result, (Item){ .array_num = part });
     }
     return { .array = rooted_result.get() };
 }
@@ -4731,9 +4731,9 @@ Item fn_zip(Item a, Item b) {
         rooted_pair.set(pair);
         rooted_left.set(vector_get(rooted_a.get(), i));
         rooted_right.set(vector_get(rooted_b.get(), i));
-        list_push(rooted_pair.get(), rooted_left.get());
-        list_push(rooted_pair.get(), rooted_right.get());
-        list_push(rooted_result.get(), { .array = rooted_pair.get() });
+        array_push((Array*)rooted_pair.get(), rooted_left.get());
+        array_push((Array*)rooted_pair.get(), rooted_right.get());
+        array_push((Array*)rooted_result.get(), { .array = rooted_pair.get() });
         rooted_pair.set((List*)NULL);
         rooted_left.set(ItemNull);
         rooted_right.set(ItemNull);

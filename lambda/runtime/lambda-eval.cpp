@@ -1281,7 +1281,9 @@ static Item lambda_dynamic_apply(Item callee, Item args_item, bool caller_is_pro
         ArrayNum* packed = (ArrayNum*)(uintptr_t)args_item.item;
         List* widened = list();
         for (int64_t i = 0; i < packed->length; i++) {
-            list_push(widened, array_num_get(packed, i));
+            // Widening must be length-preserving, and this is an argument
+            // list: append verbatim (LR09-R3).
+            array_push((Array*)widened, array_num_get(packed, i));
         }
         return fn_call_into(fn, widened, NULL);
     }
@@ -5546,11 +5548,8 @@ Item fn_split(Item str_item, Item sep_item) {
     uint32_t sep_len = null_sep ? 0 : sep_item.get_len();
 
     // Segments are separate elements, so every append below uses array_push,
-    // which stores the item verbatim. list_push would concatenate each string
-    // onto the previous one (S16.7 content rules). Suspending that through the
-    // eval context's global disable_string_merging flag is what this used to
-    // do; the append site is local and cannot leak the flag past an early
-    // return, of which this function has several.
+    // which stores the item verbatim (D2.6.5). list_push would concatenate each
+    // string onto the previous one under S16.7's content rules.
     List* result = list();
     rooted_result.set(result);
     result->is_content = 1;
