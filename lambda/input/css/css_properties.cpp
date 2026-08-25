@@ -157,8 +157,11 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_TEXT_DECORATION, "text-decoration", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_TRANSFORM, "text-transform", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_INITIAL_LETTER, "initial-letter", PROP_TYPE_STRING, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_TEXT_WRAP, "text-wrap", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "wrap", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_WRAP_MODE, "text-wrap-mode", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "wrap", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_WRAP_STYLE, "text-wrap-style", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_SPACING_TRIM, "text-spacing-trim", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_AUTOSPACE, "text-autospace", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_WHITE_SPACE, "white-space", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_VERTICAL_ALIGN, "vertical-align", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "baseline", true, false, NULL, 0, validate_keyword, NULL},
 

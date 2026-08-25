@@ -559,6 +559,13 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_INFINITE,
     // CSS UI 4 form-control appearance
     CSS_VALUE_BASE_SELECT,
+    // CSS Text 4 automatic contextual spacing
+    CSS_VALUE_NO_AUTOSPACE,
+    CSS_VALUE_IDEOGRAPH_ALPHA,
+    CSS_VALUE_IDEOGRAPH_NUMERIC,
+    CSS_VALUE_PUNCTUATION,
+    CSS_VALUE_INSERT,
+    CSS_VALUE_REPLACE,
     // Radiant extensions
     CSS_VALUE__REPLACED,
     CSS_VALUE__LAST_ENTRY

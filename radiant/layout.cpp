@@ -2099,6 +2099,9 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         bool is_inline_table = view->view_type == RDT_VIEW_TABLE &&
             (block->display.outer == CSS_VALUE_INLINE ||
              block->display.outer == CSS_VALUE_INLINE_BLOCK);
+        bool overflow_visible = !block->scroller ||
+            (block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
+             block->scroll()->overflow_y == CSS_VALUE_VISIBLE);
         float item_height = layout_inline_atomic_extent(lycon, block);
         // CSS 2.1 §10.8.1: For inline-blocks, the baseline depends on content:
         float item_baseline;
@@ -2124,7 +2127,10 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             item_baseline = control_baseline > 0.0f
                 ? (block->bound ? block->boundary()->margin.top : 0.0f) + control_baseline
                 : block->height + (block->bound ? block->boundary()->margin.top : 0.0f);
-        } else if (block->display.inner == RDT_DISPLAY_REPLACED) {
+        } else if (block->tag() == MARKUP_NAME_TEXTAREA && overflow_visible) {
+            item_baseline = block->height +
+                (block->bound ? block->boundary()->margin.top : 0);
+        } else if (block->display.inner == RDT_DISPLAY_REPLACED && overflow_visible) {
             item_baseline = block->height +
                 (block->bound ? block->boundary()->margin.top : 0);
         } else {
@@ -2158,9 +2164,6 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
                 (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute(MARKUP_NAME_DATA)) ||
                 block->tag() == MARKUP_NAME_TEXTAREA);
-            bool overflow_visible = !block->scroller ||
-                (block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
-                 block->scroll()->overflow_y == CSS_VALUE_VISIBLE);
             if (!is_replaced_elem &&
                 (overflow_visible || radiant::layout_uses_explicit_baseline_source(block))) {
                 item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
@@ -2541,7 +2544,8 @@ static float rtl_initial_letter_place_line(View* view, int line_number,
 
 void place_rtl_initial_letter_line(LayoutContext* lycon) {
     if (!lycon || !lycon->line.has_initial_letter ||
-        lycon->block.direction != CSS_VALUE_RTL || !lycon->line.start_view) return;
+        lycon->line.inline_base_direction != CSS_VALUE_RTL ||
+        !lycon->line.start_view) return;
 
     CssEnum text_align = lycon->block.text_align;
     if (text_align == CSS_VALUE_START) text_align = CSS_VALUE_RIGHT;
@@ -2711,9 +2715,25 @@ float layout_rtl_inline_item_x(Linebox* line, float item_width) {
 }
 
 void line_align(LayoutContext* lycon) {
+    ViewBlock* line_block = lycon->view && lycon->view->is_block()
+        ? lam::view_require_block(lycon->view)
+        : (lycon->view
+            ? layout_nearest_block_ancestor(lycon->view->parent_view())
+            : lycon->block.establishing_element);
+    // css lists 3 §3.5: an outside marker is separate from the principal block;
+    // keep its line alignment in the list item's inherited direction.
+    bool has_outside_list_marker = line_block && line_block->pseudo &&
+        line_block->pseudo->marker && layout_marker_is_outside(
+            static_cast<View*>(line_block->pseudo->marker));
+    if (line_block && line_block->blk &&
+        line_block->block()->unicode_bidi == CSS_VALUE_PLAINTEXT &&
+        !has_outside_list_marker) {
+        lycon->line.inline_base_direction =
+            layout_resolve_line_base_direction(lycon);
+    }
     layout_bidi_line(lycon);
     // CSS 2.1 §16.2: 'start' maps to 'left' for LTR and 'right' for RTL
-    bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
+    bool is_rtl = lycon->line.inline_base_direction == CSS_VALUE_RTL;
     CssEnum text_align = lycon->block.text_align;
     // CSS Text 3 §7.2: text-align-last overrides text-align on the last line
     bool text_align_last_applied = false;

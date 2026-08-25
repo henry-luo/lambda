@@ -13,6 +13,8 @@ static BlockProp make_block_prop_default() {
     value.writing_mode = WM_HORIZONTAL_TB;
     value.zoom = 1.0f;
     value.text_spacing_trim = CSS_VALUE_NORMAL;
+    value.text_autospace = TEXT_AUTOSPACE_NORMAL;
+    value.text_autospace_is_set = false;
     value.break_before = CSS_VALUE_AUTO;
     value.break_after = CSS_VALUE_AUTO;
     value.orphans = 2;

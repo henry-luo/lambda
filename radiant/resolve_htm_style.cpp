@@ -1572,6 +1572,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->ensure_block(lycon);
         apply_html_textarea_font(lycon, block);
+        // html rendering defaults textarea overflow to auto; baseline synthesis
+        // needs the used overflow state, not only the serialized computed value.
+        block->ensure_scroll(lycon);
+        block->scroller->overflow_x = block->scroller->overflow_y = CSS_VALUE_AUTO;
         // Note: textarea uses content-box (CSS default), same as Chrome UA
         // Intrinsic size: Chrome default 182x36 border-box (20 cols, 2 rows)
         block->form->intrinsic_width = 182.0f;
@@ -1657,6 +1661,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
             // HTML5 §14.3.4: dir="auto" — resolve direction from first strong character
             CssEnum resolved = resolve_dir_auto(lam::dom_require_element(elmt));
             block->blk->direction = resolved;
+            if (elmt->tag() == MARKUP_NAME_PRE || elmt->tag() == MARKUP_NAME_TEXTAREA) {
+                // html rendering maps pre/textarea dir=auto to plaintext bidi.
+                block->blk->unicode_bidi = CSS_VALUE_PLAINTEXT;
+            }
         }
     }
 }

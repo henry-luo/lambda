@@ -540,7 +540,10 @@ FontHandle* font_resolve_authored_for_codepoint(FontContext* ctx,
 FontHandle* font_resolve_for_codepoint(FontContext* ctx, const FontStyleDesc* style,
                                         uint32_t codepoint) {
     if (!ctx || !style) return NULL;
-    return font_find_codepoint_fallback(ctx, style, codepoint);
+    FontHandle* source = font_resolve(ctx, style);
+    FontHandle* fallback = font_find_codepoint_fallback(ctx, style, codepoint, source);
+    if (source) font_handle_release(source);
+    return fallback;
 }
 
 bool font_handle_is_document_font(FontHandle* handle) {

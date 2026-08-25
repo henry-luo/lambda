@@ -1479,7 +1479,6 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     }
 
     apply_css_transforms_to_bounds(view, &css_x, &css_y, &css_width, &css_height);
-
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"x\": %.1f,\n", css_x);
     strbuf_append_char_n(buf, ' ', indent + 4);
