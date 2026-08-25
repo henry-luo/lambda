@@ -299,6 +299,8 @@ static bool interp_note_tail_call(InterpFrame* frame);
 static bool interp_tail_handoff_candidate(const InterpFrame* frame);
 static bool interp_promote_function_from_tail(Function* fn);
 static uint32_t interp_jit_threshold(void);
+static void interp_format_parameter_boundary(char* boundary, size_t capacity,
+    const AstFuncNode* fn_node, const char* fallback_name, int index);
 static bool interp_eval_constrained_predicate(InterpFrame* f,
     AstConstrainedTypeNode* constrained, Scratch& subject);
 
@@ -655,7 +657,7 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
 }
 
 static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
-        AstNamedNode* parameter) {
+        AstNamedNode* parameter, const char* boundary) {
     if (!parameter) return value;
     TypeParam* parameter_type = parameter->type &&
         parameter->type->kind == TYPE_KIND_PARAM ? (TypeParam*)parameter->type : NULL;
@@ -666,7 +668,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         return value;
     }
     return interp_coerce_declared_binding(f, value, parameter->declared_type,
-        "declared parameter binding");
+        boundary ? boundary : "declared parameter binding");
 }
 
 static bool interp_bind_declared_value(InterpFrame* f, AstNamedNode* named,
@@ -1201,8 +1203,11 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             if (tail_handoff_candidate) handoff_words[i] = words[i];
             if (parameter) {
                 Item source = (Item){.item = words[i]};
+                char boundary[192];
+                interp_format_parameter_boundary(boundary, sizeof(boundary),
+                    f->fn, f->fn && f->fn->name ? f->fn->name->chars : NULL, i);
                 Item coerced = interp_coerce_parameter_binding(f,
-                    source, parameter);
+                    source, parameter, boundary);
                 words[i] = coerced.item;
                 // An incoming ItemError is an expression value returned to the
                 // tail-call expression; only a failed non-error conversion
@@ -4461,6 +4466,23 @@ static bool interp_parameter_rejects_error(const AstNamedNode* parameter,
         !lambda_type_accepts_error(parameter->declared_type);
 }
 
+// Keep T0's deferred parameter diagnostics at the call boundary, matching the
+// MIR wrapper. The generic declaration label used here before made the same
+// rejected argument report different provenance by execution tier.
+static void interp_format_parameter_boundary(char* boundary, size_t capacity,
+        const AstFuncNode* fn_node, const char* fallback_name, int index) {
+    if (!boundary || capacity == 0) return;
+    boundary[0] = '\0';
+    StrBuf* function_name = strbuf_new_cap(96);
+    if (function_name && fn_node) {
+        write_fn_name(function_name, (AstFuncNode*)fn_node, NULL);
+    }
+    const char* display_name = function_name && function_name->str
+        ? function_name->str : (fallback_name ? fallback_name : "<anonymous>");
+    snprintf(boundary, capacity, "argument %d of %s", index + 1, display_name);
+    if (function_name) strbuf_free(function_name);
+}
+
 typedef struct InterpBorrowedCall {
     InterpFrame* caller;
     NameEntry* entries[LAMBDA_MAX_FUNCTION_ARGS];
@@ -4590,7 +4612,10 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 value = fallback ? eval_expr(frame, fallback) : ItemNull;
             }
             Item source = value;
-            value = interp_coerce_parameter_binding(frame, value, p);
+            char boundary[192];
+            interp_format_parameter_boundary(boundary, sizeof(boundary), fn_node,
+                fn->name, index);
+            value = interp_coerce_parameter_binding(frame, value, p, boundary);
             frame->slots[index] = value.item;
             if (interp_parameter_rejects_error(p, value)) {
                 // Direct MIR enters neither body for a rejected parameter.
