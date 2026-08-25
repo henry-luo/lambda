@@ -63,7 +63,7 @@ void array_append(Array* arr, Item item, Pool* pool, Arena* arena) {
 }
 
 static void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena,
-        bool disable_string_merging, bool ui_mode) {
+        bool ui_mode) {
     if (!list || (!pool && !arena)) return;
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_NULL) return;
@@ -77,8 +77,7 @@ static void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena
                 return;
             }
             for (int64_t i = 0; i < nested->length; i++) {
-                list_push_with_owner(list, nested->items[i], pool, arena,
-                    disable_string_merging, ui_mode);
+                list_push_with_owner(list, nested->items[i], pool, arena, ui_mode);
             }
             return;
         }
@@ -87,8 +86,7 @@ static void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena
     if (type_id == LMD_TYPE_STRING && list->is_content && ui_mode && arena) {
         item = ui_copy_string_to_arena(arena, item);
     }
-    if (type_id == LMD_TYPE_STRING && !disable_string_merging && list->length > 0 &&
-            list->items) {
+    if (type_id == LMD_TYPE_STRING && list->length > 0 && list->items) {
         String* previous = list->items[list->length - 1].get_safe_string();
         String* next = item.get_safe_string();
         if (previous && next) {
@@ -124,9 +122,9 @@ void list_push_io(List* list, Item item) {
         return;
     }
     list_push_with_owner(list, item, allocation->pool, allocation->arena,
-        allocation->disable_string_merging, allocation->ui_mode);
+        allocation->ui_mode);
 }
 
 void list_push_pooled(List* list, Item item, Pool* pool) {
-    list_push_with_owner(list, item, pool, nullptr, false, false);
+    list_push_with_owner(list, item, pool, nullptr, false);
 }

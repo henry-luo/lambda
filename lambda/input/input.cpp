@@ -1058,7 +1058,6 @@ static Input* input_from_source_n_with_name_parent(const char* source,
         }
         allocation_context.pool = input->pool;
         allocation_context.arena = input->arena;
-        allocation_context.disable_string_merging = false;
         allocation_context.ui_mode = input->ui_mode;
         input_allocation_context = &allocation_context;
 

@@ -4,3 +4,9 @@
 [1, "a"]
 [2, "b"]
 [1, "a"]
+{
+  both_strings: [["a", "c"], ["b", "d"]],
+  with_null: [[1, 2], [null, 3]],
+  pair_count: 2,
+  pair_len: 2
+}

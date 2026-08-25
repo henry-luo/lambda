@@ -12,7 +12,6 @@ typedef struct Arena Arena;
 typedef struct InputAllocationContext {
     Pool* pool;
     Arena* arena;
-    bool disable_string_merging;
     bool ui_mode;
 } InputAllocationContext;
 

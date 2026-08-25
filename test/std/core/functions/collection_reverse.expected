@@ -1,4 +1,4 @@
 [3, 2, 1]
 [1]
-["cba"]
-[false, true]
+["c", "b", "a"]
+[null, false, true]

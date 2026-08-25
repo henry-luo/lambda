@@ -1124,13 +1124,10 @@ static String* make_heap_rooted_slice(Rooted<Item>& rooted_source, size_t offset
 
 // Split string by pattern matches
 // Split segments are separate elements by definition, so every append here uses
-// array_push, which stores the item verbatim. list_push applies S16.7's content
-// rules — it concatenates a string onto the previous element — which collapsed
-// every pattern split into one string, and with keep_delim reassembled the
-// input. Suppressing that through the eval context's disable_string_merging
-// flag would work, but the flag is global: it would stay suspended across every
-// allocation and match below, and each early return would have to restore it.
-// The append site is the local, leak-proof place to decide.
+// array_push, which stores the item verbatim (D2.6.5). list_push applies
+// S16.7's content rules — it concatenates a string onto the previous element —
+// which collapsed every pattern split into one string, and with keep_delim
+// reassembled the input.
 List* pattern_split(TypePattern* pattern, Item source, bool keep_delim) {
     RootFrame roots(2);
     Rooted<Item> rooted_source(roots, source);

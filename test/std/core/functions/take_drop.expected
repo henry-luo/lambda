@@ -4,3 +4,13 @@
 [3, 4, 5]
 [1, 2, 3]
 []
+{
+  take_str: ["a", "b"],
+  take_str_len: 2,
+  drop_str: ["b", "c"],
+  drop_str_len: 2,
+  take_null: [1, null],
+  take_null_len: 2,
+  drop_null: [null, 2],
+  drop_null_len: 2
+}

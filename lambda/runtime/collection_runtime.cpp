@@ -320,9 +320,9 @@ void list_push(List* list, Item item) {
             item = ui_copy_string_to_arena(ui_arena, item);
         }
 
+        // Merging is a content-construction rule, so it applies only while an
+        // input parse owns the allocation (D2.6.5).
         bool should_merge = (input_context || input_allocation_context) &&
-            !(input_allocation_context ? input_allocation_context->disable_string_merging :
-                input_context->disable_string_merging) &&
             list->length > 0 && list->items;
         if (should_merge) {
             Item previous_item = list->items[list->length - 1];
