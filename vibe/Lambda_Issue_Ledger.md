@@ -47,7 +47,7 @@ Counts:
 | Source doc | Area | Open | Partial | Resolved | Total |
 |---|---|---:|---:|---:|---:|
 | LR_01 | Compilation pipeline, CLI & REPL | 11 | 2 | 2 | 15 |
-| LR_02 | Parsing & AST construction | 6 | 4 | 10 | 20 |
+| LR_02 | Parsing & AST construction | 5 | 4 | 11 | 20 |
 | LR_03 | Value & type model | 6 | 1 | 2 | 9 |
 | LR_04 | Numbers, decimal & datetime | 8 | 0 | 0 | 8 |
 | LR_05 | Strings, symbols & vectors | 7 | 1 | 2 | 10 |
@@ -59,8 +59,8 @@ Counts:
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 8 | 0 | 0 | 8 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
-| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 11 | 1 | 1 | 13 |
-| **Total** | | **107** | **11** | **35** | **153** |
+| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 11 | 1 | 2 | 14 |
+| **Total** | | **106** | **11** | **37** | **154** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -241,35 +241,41 @@ defensive-recovery arm is gone.
 stronger structural invariant on scope entry lists.
 
 
-<a id="lr02-9"></a>**LR02-9 · Binary `&` / `!` type operators work in pattern position but not in annotation position · OPEN**
-*Found during the 2026-08-24 verification pass; not from the LR_02 section.*
-Intersection (`&`) and exclusion (`!`) parse everywhere `|` does, and evaluate
-**correctly as patterns** — but a declaration annotation rejects them:
+<a id="lr02-9"></a>**LR02-9 · Binary `&` / `!` type operators rejected in annotation position · RESOLVED 2026-08-25**
+Intersection and exclusion evaluated correctly as patterns but were rejected by
+a declaration or parameter annotation, with a diagnostic that named the binding
+rather than the contract. Both halves are fixed.
 
-| Position | `int \| string` | `int & string` | `int ! string` |
-|---|---|---|---|
-| `x is (…)` | ✓ | ✓ (`false` for `x = 1`) | ✓ (`true` for `x = 1`) |
-| `match { case … }` | ✓ | ✓ | ✓ |
-| `let a: … = 1` | ✓ | `E201: cannot initialize 'a' of type type with int` | same |
-| `fn f(a: …)` | ✓ | `E207: argument 1 expected type, got int` | same |
+**Three defects, not one.** The chain broke in three places, and each had to be
+found from the one before:
+1. `static_boundary_relation` (`build_ast.cpp`) recognised a binary **target**
+   only for `OPERATOR_UNION`; `&`/`!` fell through to the generic tail and were
+   rejected outright. This was the actual capability gap.
+2. The type-pattern parser lowered a type-level `&` to **`OPERATOR_OR`**
+   (`parse_type_pattern.cpp`, with a comment calling it "odd" but reproducing
+   it), so even after (1) the annotation carried an operator the boundary
+   checker does not treat as a set operation. Normalised to
+   `OPERATOR_INTERSECT`, matching expression space and the sibling site in the
+   same file; consumers accept `OPERATOR_OR` as the historical spelling.
+3. `lambda_type_format_name` rendered only `|`, so an `int & string` contract
+   printed as the bare word `type` — the diagnostic half of this entry.
 
-So the type expression is built, and the pattern path consumes it, but the
-annotation path receives a `LMD_TYPE_TYPE`-tagged *value* instead of a type. The
-asymmetry is visible in the consumers: `pattern_ast_literal_set`
-(`build_ast.cpp:4309`) and `interp_pattern_matches` (`interp.cpp:2013`) each
-branch on `OPERATOR_UNION` **only**, and `OPERATOR_INTERSECT` /
-`OPERATOR_EXCLUDE` (`build_ast.cpp:3713`–`3714`) fall through them — the
-`is`/`match` results above come from a separate `fn_is` path, not these.
+Also widened `promote_type_union_expr` so a type-set operator between two type
+values builds a first-class binary type in expression position too.
 
-Two consequences worth separating: the **capability** gap (annotations cannot
-use `&`/`!`) and the **diagnostic** gap — both errors name the binding or the
-argument, never the unsupported operator, so a reader is sent to the wrong
-place. The diagnostic is the cheap half.
+**Semantics are unchanged and now agree across positions** — `1` is admitted by
+`number & int` and by `int ! string`, and rejected by `int & string`, exactly as
+`is` reports. The rejection of `let a: int & string = 1` is *correct*: nothing
+satisfies that intersection. Diagnostics now read
+`cannot initialize 'a' of type int & string with int` and
+`argument 1 expected int & string, got int`.
 
-This is the implementation face of **SO9** ("a surface spelling for
-`any \ error`; the `!` exclusion operator route is broken") and of the
-`&`/`!`-unimplemented warning in the string-pattern design record.
-
+Covered by `test/lambda/type_set_operators.ls` (pattern, alias, inline
+annotation and parameter positions, both tiers) and
+`test/std/negative/type_set_operator_mismatch.ls` +
+`NegativeScriptTest.TypeSetOperatorContractIsNamed`. Closes the implementation
+half of **SO9** and the `&`/`!`-unimplemented warning in the string-pattern
+design record.
 
 <a id="lr02-13"></a>**LR02-13 · `call()`'s runtime colour check cannot see closures with a NULL `fn_type` · OPEN**
 *Found 2026-08-25 implementing S12.1.4.* The pn-from-fn check reads the target's
@@ -962,14 +968,42 @@ The correctness half overlaps the map-aliasing-vs-reification rule.
 IF_EXPR, RETURN_STAM and MAP — with no `AST_NODE_VAR`/`AST_NODE_LET` case, a
 `var`/`let` in the body still falls to `default:` and disqualifies the function.
 
-<a id="ts-8"></a>**TS-8 · No arity overloading for user definitions · OPEN**
-`impl/Lambda_Issue_Type_Support (retired).md`. `pn f(a)` plus `pn f(a, b)` in one scope still
-gives `error[E209]: duplicate definition of 'f' in the same scope`, while the
-builtin registry is keyed on name **and** arity. Related: [LR09-1](#lr09-1),
-where two registry rows sharing a name are indistinguishable to the
-`(name, arg_count)` map.
+<a id="ts-8"></a>**TS-8 · No arity overloading for user definitions · RESOLVED (not a defect — ruled S12.3.6)**
+`impl/Lambda_Issue_Type_Support (retired).md`. `pn f(a)` plus `pn f(a, b)` in
+one scope gives `error[E209]: duplicate definition of 'f' in the same scope`.
+**Ruled 2026-08-25 as intended behaviour** (`Lambda_Formal_Semantics.md`
+S12.3.6, spec v15.2.0): a name binds to exactly one function, following
+ECMAScript per S1.11.
 
-<a id="i8-mapkey"></a>**Issues8 · Double-quoted map keys rejected · RESOLVED (not a defect — doc was wrong)**
+The entry framed this as an asymmetry against the builtin registry, which *is*
+keyed on `(name, arity)`. That keying is a **dispatch optimization** — it lets
+an intrinsic select a specialized row without a runtime arity branch — not a
+language rule, so builtins are not overloadable in source either and the
+asymmetry is only apparent.
+
+Nor is expressiveness lost: Lambda already covers the intent with **optional
+parameters**. Verified — `pn f(a, b?)` accepts `f(1)` → `[1]` and `f(1, 2)` →
+`[1, 2]`, the `fn` form behaves the same, and `g(1, 2, 3)` past the declared
+slots is rejected. `pn f(a)` and `pn f(a, b)` are one `pn f(a, b?)`.
+
+*Adjacent nit, since fixed 2026-08-25:* the over-arity diagnostic counted only
+required parameters — `fn g(a, b?)` with three arguments reported "expects **1**
+argument, got 3". It now reports the range, which matters more once S12.3.6
+makes optional parameters the sanctioned alternative to overloading:
+
+| Signature | Call | Message |
+|---|---|---|
+| `fn g(a, b?)` | `g(1,2,3)` | expects **1 to 2** arguments, got 3 |
+| `fn g(a, b, c?)` | `g(1)` | expects **2 to 3** arguments, got 1 |
+| `fn add(a, b)` | `add(1)` | expects 2 arguments, got 1 *(unchanged)* |
+| `fn h(a)` | `h(1,2)` | expects 1 argument, got 2 *(unchanged)* |
+| `fn v(a, ...)` | `v()` | expects 1 or more arguments, got 0 *(unchanged)* |
+
+`build_ast.cpp` `lambda_ast_validate_call_arguments`; covered by
+`test/std/negative/wrong_arg_count_optional.ls` +
+`NegativeScriptTest.OptionalParamArityReportsARange`.
+
+<a id="i8-mapkey"></a><a id="i8-mapkey"></a>**Issues8 · Double-quoted map keys rejected · RESOLVED (not a defect — doc was wrong)**
 Every double-quoted map key fails: `{"key": 1}` gives
 `error[E100]: expected an expression` at the `:`, while `{'key': 1}` and
 `{key: 1}` both work. Ruled 2026-08-25: **the parser is correct** — a map key is
@@ -1066,6 +1100,33 @@ Printing a collection renders member strings verbatim:
 `["init: {"flowchart": {"curve": "basis"}}", "back\slash"]`. The inner quotes
 are unescaped and the escaped backslash collapses to one, so the output is
 ambiguous and is not re-readable as Lambda notation.
+
+<a id="i8-genafterlet"></a>**Issues8 · A comprehension generator may not follow a `let` clause · OPEN (unruled)**
+Clause order is constrained, and nothing in the spec says so. This is rejected:
+
+```lambda
+[for (value in values, let key = semantic_key(value),
+      entry in entries(value, key)) entry]
+```
+
+with `error[E100]: expected let clause` at `entry`. Putting every generator
+before every `let` works — `[for (v in vs, e in entries(v, v * 10), let k = v) e]`
+evaluates to `[10, 20]` — but that ordering cannot express the natural case the
+entry was raised for: *compute a key from the current binding, then iterate what
+that key yields*. The workaround is to hoist the computation into a helper
+(`entries_for(value)`), which is a real loss of expressiveness rather than a
+formatting preference.
+
+**Half already fixed:** the diagnostic used to point at the *first* generator
+(`Unexpected syntax` at `value in values`); it now names the clause kind it
+expected and points at the generator that actually conflicts.
+
+**Unruled.** S14.1 covers group-by and joins, not clause ordering, so there is no
+`S#` behind this restriction — it is parser-imposed. Two ways out: allow a
+generator after a computed binding (the ordering is a parser artefact, and the
+dependency direction is already left-to-right), or rule the ordering explicitly
+and have the diagnostic say so. Either is fine; the current state — an unruled
+restriction with a diagnostic that reports *what* but not *why* — is not.
 
 <a id="i8-markcomp"></a>**Issues8 · One-line Mark child comprehensions fail at the closing delimiter · OPEN**
 `<diagnostics; for (value in values) value>` fails with `error[E100]`, while the

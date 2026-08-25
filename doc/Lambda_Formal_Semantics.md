@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 15.1.2 (2026-08-25)
+**Spec version:** 15.2.0 (2026-08-25)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1261,6 +1261,22 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   arity check that S12.3.1 relies on, and silently divert calls to the
   dynamic ABI, all for a case `call` already covers generally.
 
+- **S12.3.6** **No arity overloading for user definitions.** Two definitions
+  sharing a name in one scope are a duplicate-definition error regardless of
+  parameter count; a name binds to exactly one function. This follows
+  ECMAScript (S1.11) and costs nothing, because Lambda already expresses the
+  same intent with **optional parameters**: `pn f(a)` and `pn f(a, b)` are one
+  `pn f(a, b?)`, which accepts either arity and rejects anything beyond its
+  declared slots. Overloading would buy only a second spelling for that, at the
+  price of an arity-directed resolution rule interacting with optionals, rest
+  collectors, and dynamic calls.
+
+  The **builtin registry is keyed on `(name, arity)`, but that is a dispatch
+  optimization, not a language rule** — it lets an intrinsic select a
+  specialized row without a runtime arity branch. It does not make builtins
+  overloadable in the source language, and the asymmetry with user definitions
+  is therefore only apparent. [S1.11, TS-8]
+
 ### S12.4 Resources
 
 *Auto-close is `with` without the `with`. Close is not just release — it is
@@ -1881,7 +1897,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S9 mutability | C4, C4.2a/b/c, C4.3, C5.3b, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md` |
 | S10 operators | C6, C6.2–C6.4, C10; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Path.md` |
 | S11 types | C7, C8.5c; TE-1–TE-18 | ibid.; `Lambda_Design_Type_Enforcement.md` |
-| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |
+| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19 | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |

@@ -1,0 +1,5 @@
+{
+  as_pattern: [true, true, true, true, true, false, true],
+  annotations: [1, 1, 1, 1, 1, 1],
+  params: [1, 1, 1]
+}

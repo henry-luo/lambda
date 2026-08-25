@@ -14,7 +14,7 @@
 > | TS-5 | Dead-code half **FIXED** — the `if (false && …)` guard is gone |
 > | TS-6 | **Open**, structurally unchanged → ledger §14 |
 > | TS-7 | **FIXED** — `bool[]` and `string[]` work |
-> | TS-8 | **Open** → ledger §14 |
+> | TS-8 | **Not a defect** — ruled intended (S12.3.6, C19) |
 > | TS-9 | **RESOLVED** by C16, and the implementation has since landed |
 >
 > Retained as the evidence and code-site record behind those findings.
@@ -241,11 +241,15 @@ semantic type limit. `bool[]`, `string[]`, and other valid element types should 
 generic-array storage; the current runtime rejection incorrectly exposes a backend optimization
 constraint as a language restriction. See `Lambda_Design_Type_Enforcement.md` TE-7/P4.
 
-### TS-8 — No arity overloading for user definitions — **still OPEN (re-verified 2026-08-25)**
+### TS-8 — No arity overloading for user definitions — **RESOLVED 2026-08-25 (not a defect)**
 
-> Re-tested: `pn f(a)` plus `pn f(a, b)` in one scope still gives
-> `error[E209]: duplicate definition of 'f' in the same scope`. The asymmetry
-> against the arity-keyed builtin registry stands.
+> Ruled intended: `Lambda_Formal_Semantics.md` **S12.3.6** (v15.2.0), decision
+> record **C19**. A name binds to exactly one function, following ECMAScript per
+> S1.11. The asymmetry this entry reported is not real — the builtin registry's
+> `(name, arity)` key is a **dispatch optimization**, not a language rule, so
+> builtins are not overloadable in source either. And nothing is lost:
+> `pn f(a)` and `pn f(a, b)` are one `pn f(a, b?)`, verified to accept both
+> arities and reject anything past its declared slots.
 
 
 `pn f(a)` and `pn f(a, b)` in the same scope is `duplicate definition of 'f' in the same scope`,

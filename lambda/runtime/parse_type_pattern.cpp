@@ -1039,10 +1039,13 @@ AstNode* parse_intersect(Lexer* lx) {
         lx->p++;
         AstNode* right = parse_unary(lx);
         if (!right) { return NULL; }
-        // build_binary_type maps a type-level `&` to OPERATOR_OR, not
-        // OPERATOR_INTERSECT. Odd, but it is the operator the rest of the
-        // runtime sees today, so reproduce it rather than diverge (IS3).
-        left = make_binary_node(lx, left, right, OPERATOR_OR, "&", 1);
+        // A type-level `&` is OPERATOR_INTERSECT, matching expression space
+        // (build_ast.cpp) and line ~460 in this file. It used to be lowered to
+        // OPERATOR_OR here, which is why an `int & string` annotation was
+        // rejected while `x is (int & string)` worked (LR02-9): the boundary
+        // checker keys on the set operators, and OPERATOR_OR is not one.
+        // Consumers that still recognise the old spelling accept both.
+        left = make_binary_node(lx, left, right, OPERATOR_INTERSECT, "&", 1);
     }
     return left;
 }
@@ -1110,7 +1113,7 @@ AstNode* parse_return_type_pattern(Lexer* lx) {
         AstNode* right = parse_return_pattern_atom(lx);
         if (!right) { return NULL; }
         Operator op = *op_text == '|' ? OPERATOR_UNION :
-            (*op_text == '&' ? OPERATOR_OR : OPERATOR_EXCLUDE);
+            (*op_text == '&' ? OPERATOR_INTERSECT : OPERATOR_EXCLUDE);
         left = (AstNode*)build_registered_binary_type_from_span(lx->tp, lx->origin,
             left, right, left->type, right->type, op, {op_text, 1});
     }

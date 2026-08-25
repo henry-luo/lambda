@@ -625,8 +625,9 @@ grammar, or the diagnostic should identify the required line break explicitly.
 > The mis-location is gone. The parser now reports `error[E100]: expected let
 > clause` **at `entry`** — the generator that actually conflicts — instead of
 > `Unexpected syntax` at the first `value in values`. The restriction itself
-> remains: a generator may not follow a `let` clause. Whether that ordering is
-> intended is still undecided; if it is, the diagnostic could say so outright.
+> remains: a generator may not follow a `let` clause, and it is **unruled** —
+> S14.1 covers group-by and joins, not clause ordering. Tracked in the central
+> ledger as `i8-genafterlet`.
 
 The Structurizr semantic adapter needed to compute a parent key and then flatten
 the entries produced from that key. This natural ordering is rejected:

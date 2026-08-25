@@ -2174,3 +2174,38 @@ matching a sibling Lambda operation beats matching the reference.
 
 Recorded in spec §1 (S1.11) and §17 (S17.1.1); implementation and coverage in
 `test/lambda/split_pattern.ls`; ledger entry LR09-R2.
+
+---
+
+### C19. Arity overloading for user definitions — considered and REJECTED (2026-08-25)
+
+Raised from the TS-8 issue entry, which had framed the current behaviour as a defect.
+
+**The observation.** `pn f(a)` and `pn f(a, b)` in one scope is
+`error[E209]: duplicate definition of 'f' in the same scope`, while the *builtin*
+registry is keyed on name **and** arity. TS-8 read that as an unexplained asymmetry
+between user and builtin name resolution.
+
+**Resolved: keep it, and the asymmetry is not real.** Two points settle it.
+
+The builtin registry's `(name, arity)` key is a **dispatch optimization**, not a
+language rule. It lets an intrinsic select a specialized row without a runtime arity
+branch. Builtins are not overloadable in the source language either, so there is no
+semantic difference between the two worlds — only an implementation detail visible
+from the wrong angle. Reading a performance key as a semantic capability is the trap
+here, and it is worth naming because the registry is the kind of table a reader
+naturally treats as the definition of what the language permits.
+
+And nothing is lost, because **optional parameters already express the intent**.
+`pn f(a)` and `pn f(a, b)` are one `pn f(a, b?)`. Verified: it accepts `f(1)` and
+`f(1, 2)`, and rejects arity beyond its declared slots. Overloading would add a
+second spelling for something already sayable, and would import an arity-directed
+resolution rule that has to interact coherently with optional parameters, rest
+collectors, and dynamic calls — a real cost against no new capability.
+
+This is also a clean application of **S1.11**: the case was under-determined by
+Lambda's own principles, ECMAScript is the first reference, and ECMAScript has no
+arity overloading. The reference agreed with the reasoning rather than substituting
+for it.
+
+Recorded in spec §12 (S12.3.6, v15.2.0); ledger entry TS-8 closed as *not a defect*.

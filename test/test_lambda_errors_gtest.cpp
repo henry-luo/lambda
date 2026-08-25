@@ -1121,6 +1121,21 @@ TEST_F(NegativeScriptTest, StaticArityMismatchIsRejected) {
         "function expects 2 arguments, got 1");
 }
 
+// S12.3.6 makes optional parameters the sanctioned alternative to overloading,
+// so the accepted arity is a range whenever one exists. Reporting only the
+// required count understated it in both directions.
+// LR02-9: a `&`/`!` contract must be rejected on a non-conforming value AND
+// named in the diagnostic — it used to print the bare word "type".
+TEST_F(NegativeScriptTest, TypeSetOperatorContractIsNamed) {
+    ExpectErrorMessage("test/std/negative/type_set_operator_mismatch.ls",
+        "cannot initialize 'a' of type int & string with int");
+}
+
+TEST_F(NegativeScriptTest, OptionalParamArityReportsARange) {
+    ExpectErrorMessage("test/std/negative/wrong_arg_count_optional.ls",
+        "function expects 1 to 2 arguments, got 3");
+}
+
 TEST_F(NegativeScriptTest, ImportParseErrorBlocksExecution) {
     ScriptResult result = run_lambda_script("test/lambda/negative/import_parse_error_driver.ls");
 
