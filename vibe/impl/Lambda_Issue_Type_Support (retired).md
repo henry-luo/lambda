@@ -1,12 +1,33 @@
-# Lambda — Type Support Issues
+# Lambda — Type Support Issues  ·  RETIRED 2026-08-25
+
+> **Retired. Do not add to it.** Reviewed in full on 2026-08-25; every item was
+> re-tested except the two performance claims, and the live residue moved to
+> `vibe/Lambda_Issue_Ledger.md` §14 (IDs unchanged — `TS-3`, `TS-4`, `TS-6`,
+> `TS-8`).
+>
+> | Item | Outcome |
+> |---|---|
+> | TS-1 | **FIXED** — `var s: int = "abc"` now raises `E201` at the declaration |
+> | TS-2 | **FIXED** — `LMD_TYPE_STRING` admitted to the native scalar return set |
+> | TS-3 | Open, **needs re-measurement** — the cited cause is gone from the source, the benchmark was not re-run → ledger §14 |
+> | TS-4 | Open, **not re-verified** (perf + a correctness half) → ledger §14 |
+> | TS-5 | Dead-code half **FIXED** — the `if (false && …)` guard is gone |
+> | TS-6 | **Open**, structurally unchanged → ledger §14 |
+> | TS-7 | **FIXED** — `bool[]` and `string[]` work |
+> | TS-8 | **Not a defect** — ruled intended (S12.3.6, C19) |
+> | TS-9 | **RESOLVED** by C16, and the implementation has since landed |
+>
+> Retained as the evidence and code-site record behind those findings.
 
 **Status:** open ledger. Items are TS-1…TS-9; each records what is wrong, the evidence, and the
 code site. Nothing here is fixed unless marked.
-**Date:** 2026-07-29
+**Date:** 2026-07-29 · **verification pass 2026-08-25** — TS-1, TS-2 and TS-7 re-tested and found
+**FIXED**; TS-8 re-tested and still open; TS-9's C16 implementation has since landed. TS-3…TS-6
+are performance claims and were **not** re-measured in that pass.
 **Scope:** the Lambda type surface — declared types on bindings, parameters, and returns — and how
 the MIR-Direct emitter treats them. Guest-language type mapping is out of scope
-(`vibe/Lambda_Semantics_Number_Model.md` owns the numeric tower; `Lambda_Issues_Outstanding.md`
-OI-5 owns the broader MIR value-representation contract, of which several items here are
+(`vibe/Lambda_Semantics_Number_Model.md` owns the numeric tower; `Lambda_Issue_Ledger.md`
+§15 OI-5 owns the broader MIR value-representation contract, of which several items here are
 instances).
 **Line references** were re-checked against the tree on 2026-07-29 and will drift.
 
@@ -30,7 +51,14 @@ that the class is live rather than theoretical.
 
 ## 1. Checking gaps
 
-### TS-1 — A declaration's initializer is never type-checked *(user-reported)*
+### TS-1 — A declaration's initializer is never type-checked *(user-reported)* — **FIXED (verified 2026-08-25)**
+
+> **Fixed.** The declaration boundary now checks. `var s: int = "abc"` and
+> `var m: int = {a: 1}` both raise `error[E201]: type check at declared assignment
+> binding failed: expected int, got string 'abc'` — the same diagnostic the
+> re-assignment path emits — while `var n: int = 5` still compiles. The
+> declaration/re-assignment asymmetry described below is gone.
+
 
 `var x: int = "abc"` is not rejected at the declaration. `build_var_stam`
 (`lambda/runtime/build_ast.cpp:7830`) records `has_type_annotation` and builds the assignment, but
@@ -53,7 +81,16 @@ ANY/NULL escape hatches. Decide deliberately whether a narrowing initializer (`i
 an error or an implicit coercion — today it is an implicit coercion, and that is defensible, but
 it should be stated rather than emergent.
 
-### TS-2 — Declared return type and native-return classification disagree
+### TS-2 — Declared return type and native-return classification disagree — **FIXED (verified 2026-08-25)**
+
+> **Fixed by the first of the two suggested shapes**: the native-return set was
+> widened rather than the recorded type narrowed. `mir_is_native_scalar_value_type`
+> (`transpile-mir.cpp:2524`) now admits `LMD_TYPE_STRING`, `LMD_TYPE_SYMBOL` and
+> `LMD_TYPE_BINARY`, with the comment stating the rule: "String is a pointer-lane
+> scalar; zero remains its nullable lane". `pn f() string` consumed by `len`,
+> `ord` and `starts_with` returns `5 104 true` — type and ABI now agree, so a new
+> consumer no longer inherits the mismatch.
+
 
 `infer_return_type` accepts a declared return type only if
 `mir_is_native_scalar_value_type` (`transpile-mir.cpp:1485`) admits it — INT/INT64/UINT64/FLOAT/BOOL.
@@ -77,7 +114,15 @@ The second is cheaper and matches what `get_effective_type` already does for box
 These are the counter-intuitive ones: writing a *more precise* type produces *worse* code. All
 three were measured on release builds.
 
-### TS-3 — `int[]` / `float[]` on a **local** is a 3–5x regression *(user-reported)*
+### TS-3 — `int[]` / `float[]` on a **local** is a 3–5x regression *(user-reported)* — **needs re-measurement**
+
+> Partial signal (2026-08-25): the cited cause has moved — the
+> `var_tid = LMD_TYPE_ANY` assignment and its *"result is a pointer (stored as
+> I64), treat as ANY"* comment are no longer in `transpile-mir.cpp`. Whether the
+> 3–5x local-annotation regression itself survives was **not** re-measured; that
+> needs a release build and the typed benchmark column, so the entry stays open
+> pending measurement rather than being marked either way.
+
 
 On a `pn` **parameter** a typed-array annotation is a large win — `larceny/quicksort` went
 21.9 ms → 4.3 ms, and dropping just that annotation costs 18 ms. On a **local** it is a heavy loss:
@@ -119,7 +164,14 @@ blanket strip of map-typed locals across ten benchmark files made `richards2` **
 and broke `cd2` outright. Whatever the mechanism is, it helps in some shapes and is catastrophic
 in others.
 
-### TS-5 — Named map types currently buy nothing
+### TS-5 — Named map types currently buy nothing — **the dead-code half is FIXED (verified 2026-08-25)**
+
+> The `if (false && …)` guard is gone; the direct byte-offset field read is live
+> (`transpile-mir.cpp:14611`, condition now `(ast_obj_tid == LMD_TYPE_MAP ||
+> ast_obj_tid == LMD_TYPE_OBJECT) && …`). Whether typed map *parameters* still
+> register as `LMD_TYPE_ANY` — the second half of this entry — was not
+> re-measured.
+
 
 The Phase 3 direct byte-offset field read is **dead code**:
 
@@ -137,7 +189,14 @@ direct byte-offset field access" are stale and misleading.
 *Decide:* re-enable the path (and find out why it was disabled), or remove it and correct the
 documentation so nobody adds map annotations expecting a speedup.
 
-### TS-6 — Binding a map literal to a local kills region allocation
+### TS-6 — Binding a map literal to a local kills region allocation — **still OPEN (re-verified 2026-08-25)**
+
+> Structurally unchanged, only relocated: `mir_region_producer_candidate` is now
+> `transpile-mir.cpp:888` and delegates to `mir_region_producer_node`, whose
+> switch still handles only CONTENT/LIST/BLOCK, IF_EXPR, RETURN_STAM and MAP —
+> there is no `AST_NODE_VAR`/`AST_NODE_LET` case, so a `var`/`let` in the body
+> still falls to `default:` and disqualifies the function.
+
 
 A `pn` that builds a map and self-recurses receives a caller-passed `_region` and allocates via
 `map_with_region_tl` (bump-allocation into the caller's region). `mir_region_producer_candidate`
@@ -163,7 +222,14 @@ It is purely the region-producer gate.
 
 ## 3. Type-surface gaps
 
-### TS-7 — Only int/float/int64/uint64 have typed arrays
+### TS-7 — Only int/float/int64/uint64 have typed arrays — **FIXED (verified 2026-08-25)**
+
+> **Fixed as the entry recommends** — valid element types without an `ArrayNum`
+> lane now use checked generic-array storage instead of being rejected.
+> `pn f(v: bool[])` called with `[true, false]` and `pn f(v: string[])` called
+> with `["a", "b"]` both return 2; the `cannot coerce array to bool[]` runtime
+> rejection is gone.
+
 
 `ensure_typed_array` (`lambda/runtime/lambda-data-runtime.cpp:3125`) supports exactly
 `LMD_TYPE_INT`, `LMD_TYPE_FLOAT`, `LMD_TYPE_INT64`, `LMD_TYPE_UINT64` (plus an `any[]` widening
@@ -175,7 +241,16 @@ semantic type limit. `bool[]`, `string[]`, and other valid element types should 
 generic-array storage; the current runtime rejection incorrectly exposes a backend optimization
 constraint as a language restriction. See `Lambda_Design_Type_Enforcement.md` TE-7/P4.
 
-### TS-8 — No arity overloading for user definitions
+### TS-8 — No arity overloading for user definitions — **RESOLVED 2026-08-25 (not a defect)**
+
+> Ruled intended: `Lambda_Formal_Semantics.md` **S12.3.6** (v15.2.0), decision
+> record **C19**. A name binds to exactly one function, following ECMAScript per
+> S1.11. The asymmetry this entry reported is not real — the builtin registry's
+> `(name, arity)` key is a **dispatch optimization**, not a language rule, so
+> builtins are not overloadable in source either. And nothing is lost:
+> `pn f(a)` and `pn f(a, b)` are one `pn f(a, b?)`, verified to accept both
+> arities and reject anything past its declared slots.
+
 
 `pn f(a)` and `pn f(a, b)` in the same scope is `duplicate definition of 'f' in the same scope`,
 while the *builtin* registry is keyed on name **and** arity. The asymmetry is what made the
@@ -202,7 +277,11 @@ this stays the intended behaviour as the numeric tower settles.
 rewritten): flex `int` is redefined as the float64-representable integers — a distinct runtime
 type, closed and total under `+ - * div %` with `int.inf`/`int.nan`, no overflow promotion.
 The silent int→float flip ceases to exist semantically; `LAMBDA_NUM_OVERFLOW_INT_TO_FLOAT` and
-the flexint dual-lane lowering become implementation back-work (not yet started).
+the flexint dual-lane lowering become implementation back-work.
+
+**Implementation has since landed** (verified 2026-08-25):
+`9007199254740991 + 9007199254740991` now evaluates to `inf` with `type() == int`
+— saturation stays in the int lane, with no promotion to float.
 
 ---
 
@@ -210,8 +289,9 @@ the flexint dual-lane lowering become implementation back-work (not yet started)
 
 1. **TS-3** — one-line-ish change, measurable across the whole typed benchmark column, and it also
    un-handicaps existing `*2.ls` files.
-2. **TS-1** — closes a silent-miscompile door the emitter is currently expected to guard.
-3. **TS-5 / TS-4** — decide the map-annotation story: they are the same question (does a named map
+2. **TS-5 / TS-4** — decide the map-annotation story: they are the same question (does a named map
    type mean anything?) and today the honest answer is "cost without benefit".
-4. **TS-6** — narrow but a 1.66x swing where it applies, and invisible to anyone reading the source.
-5. TS-2, TS-7, TS-8, TS-9 — smaller, mostly "make the diagnostic match the rule".
+3. **TS-6** — narrow but a 1.66x swing where it applies, and invisible to anyone reading the source.
+4. **TS-8** — the only remaining correctness/consistency item; "make the diagnostic match the rule".
+
+*(TS-1, TS-2, TS-7 fixed; TS-9 resolved by C16 and implemented — all verified 2026-08-25.)*

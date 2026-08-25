@@ -5,6 +5,26 @@
 **Scope**: `./lambda/` (all `.cpp`, `.c`, `.h`, `.hpp` files including subdirectories)
 **Raw output**: `./temp/cppcheck_lambda.txt` · `./temp/clang_tidy_lambda.txt`
 
+> **Verification pass 2026-08-25** (cppcheck 2.17.1; clang-tidy not installed, so
+> the clang-tidy-sourced sections were checked by inspection only):
+>
+> - **E1 still stands, but the tool no longer catches it.** The allocations moved
+>   from `malloc` to `mem_alloc(..., MEM_CAT_AST)`, which stopped cppcheck
+>   reporting `nullPointerArithmeticOutOfMemory` — while leaving the unchecked
+>   dereference exactly as it was. `mem_alloc` *can* return NULL (zero size,
+>   injected fault via `memtrack_fault_should_fail`, or a failed `malloc`), so
+>   the hazard is unchanged and is now invisible to static analysis. Current
+>   anchors: `build_ast.cpp:3080` (`hex_str`) and `:970`, `:3445`, `:3531`
+>   (`num_str`).
+> - **W3 (alloca) is fixed where it was reported.** `transpile_js_mir.cpp` has
+>   zero `alloca` calls, down from 13. Five remain elsewhere in `lambda/js/`
+>   (`js_util.cpp` 3, `js_dom_events.cpp` 1, `js_fs.cpp` 1).
+> - A fresh cppcheck run over `build_ast.cpp` reports exactly one `nullPointer`
+>   error, at `lambda.h:1529` — the `*((volatile int*)0) = 0` fallback inside a
+>   deliberate trap helper. False positive.
+> - Counts in the sections below are from 2026-03-08 and have drifted; treat them
+>   as historical unless re-run.
+
 ---
 
 ## Setup & Reproducing This Report

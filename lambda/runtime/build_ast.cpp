@@ -1418,6 +1418,32 @@ static StaticBoundaryResult static_boundary_relation(Type* source, Type* target)
             return left == STATIC_BOUNDARY_DEFERRED || right == STATIC_BOUNDARY_DEFERRED ?
                 STATIC_BOUNDARY_DEFERRED : STATIC_BOUNDARY_REJECTED;
         }
+        // `A & B` admits a source only if BOTH arms admit it. Without these two
+        // arms an intersection or exclusion target fell through to the generic
+        // tail and was rejected outright, so `let a: int & string` failed while
+        // `x is (int & string)` worked (LR02-9). `OPERATOR_OR` is accepted as
+        // the historical spelling of a type-level `&`.
+        if (target_binary->op == OPERATOR_INTERSECT || target_binary->op == OPERATOR_OR) {
+            StaticBoundaryResult left = static_boundary_relation(source, target_binary->left);
+            StaticBoundaryResult right = static_boundary_relation(source, target_binary->right);
+            if (left == STATIC_BOUNDARY_REJECTED || right == STATIC_BOUNDARY_REJECTED) {
+                return STATIC_BOUNDARY_REJECTED;
+            }
+            return left == STATIC_BOUNDARY_PROVEN && right == STATIC_BOUNDARY_PROVEN ?
+                STATIC_BOUNDARY_PROVEN : STATIC_BOUNDARY_DEFERRED;
+        }
+        // `A ! B` admits a source that fits A and is not B. Only the positive
+        // arm is a static question; non-membership is decided on the value
+        // unless the excluded arm is provably disjoint from the source.
+        if (target_binary->op == OPERATOR_EXCLUDE) {
+            StaticBoundaryResult keep = static_boundary_relation(source, target_binary->left);
+            if (keep == STATIC_BOUNDARY_REJECTED) return STATIC_BOUNDARY_REJECTED;
+            StaticBoundaryResult drop = static_boundary_relation(source, target_binary->right);
+            if (keep == STATIC_BOUNDARY_PROVEN && drop == STATIC_BOUNDARY_REJECTED) {
+                return STATIC_BOUNDARY_PROVEN;
+            }
+            return STATIC_BOUNDARY_DEFERRED;
+        }
     }
     // A parameter/member can carry an occurrence or optional wrapper as its
     // effective AST type. Its structural relation is not represented by the
@@ -2557,12 +2583,26 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     if (ast_called_function_signature_ready(call->function) &&
             (arg_count < func_type->required_param_count ||
              (!func_type->is_variadic && arg_count > func_type->param_count))) {
+        // Describe the accepted arity as a RANGE when optional parameters make
+        // it one. Reporting only `required_param_count` said "expects 1
+        // argument" for `fn g(a, b?)`, which is wrong in both directions — it
+        // understates what the function takes and, since S12.3.6 makes optional
+        // parameters the sanctioned answer to overloading, it is the shape
+        // callers now hit most.
+        char expected[64];
+        int min_args = func_type->required_param_count;
+        int max_args = func_type->param_count;
+        if (func_type->is_variadic) {
+            snprintf(expected, sizeof(expected), "%d or more arguments", min_args);
+        } else if (min_args >= max_args) {
+            snprintf(expected, sizeof(expected), "%d argument%s", min_args,
+                min_args == 1 ? "" : "s");
+        } else {
+            snprintf(expected, sizeof(expected), "%d to %d arguments",
+                min_args, max_args);
+        }
         record_type_error_code(tp, line, ERR_ARGUMENT_COUNT_MISMATCH,
-            "function expects %d%s argument%s, got %d",
-            func_type->required_param_count,
-            func_type->is_variadic ? " or more" : "",
-            func_type->required_param_count == 1 && !func_type->is_variadic ? "" : "s",
-            arg_count);
+            "function expects %s, got %d", expected, arg_count);
         if (!should_continue_transpiling(tp)) {
             call->type = &TYPE_ERROR;
             return false;
@@ -3930,8 +3970,14 @@ static bool ast_is_explicit_type_value(AstNode* node) {
     }
 }
 
+// `|`, `&` and `!` are all type-set operators when both operands are types.
+static bool ast_binary_is_type_set_op(Operator op) {
+    return op == OPERATOR_UNION || op == OPERATOR_INTERSECT ||
+        op == OPERATOR_EXCLUDE;
+}
+
 static bool promote_type_union_expr(Transpiler* tp, AstBinaryNode* ast_node) {
-    if (!ast_node || ast_node->op != OPERATOR_UNION ||
+    if (!ast_node || !ast_binary_is_type_set_op(ast_node->op) ||
         !ast_is_explicit_type_value(ast_node->left) ||
         !ast_is_explicit_type_value(ast_node->right)) {
         return false;
@@ -3939,13 +3985,16 @@ static bool promote_type_union_expr(Transpiler* tp, AstBinaryNode* ast_node) {
 
     // Phase 6 makes `|` union in expression position too; type-valued operands
     // must build a first-class binary type instead of falling into runtime ops.
+    // `&`/`!` reach here on the same footing: without the promotion an
+    // annotation received a LMD_TYPE_TYPE-tagged *value* rather than a type,
+    // which surfaced as "cannot initialize 'a' of type type with int" (LR02-9).
     ast_node->node_type = AST_NODE_BINARY_TYPE;
     TypeType* node_type = (TypeType*)alloc_type(tp->pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeBinary* type = (TypeBinary*)alloc_type_kind(tp->pool, TYPE_KIND_BINARY, sizeof(TypeBinary));
     node_type->type = (Type*)type;
     type->left = ((TypeType*)ast_node->left->type)->type;
     type->right = ((TypeType*)ast_node->right->type)->type;
-    type->op = OPERATOR_UNION;
+    type->op = ast_node->op;
     ast_node->type = (Type*)node_type;
     arraylist_append(tp->type_list, ast_node->type);
     type->type_index = tp->type_list->length - 1;
@@ -3990,8 +4039,15 @@ bool has_current_item_ref(AstNode* node) {
     case AST_NODE_MATCH_EXPR: {
         AstMatchNode* match_node = (AstMatchNode*)node;
         if (has_current_item_ref(match_node->scrutinee)) return true;
+        // The arm BODY can consume a current item supplied by an enclosing
+        // pipe; the pattern cannot — `case int that (~ > 0)` rebinds `~` to the
+        // match subject, the same shadowing the handler case above models. This
+        // loop used to inspect nothing and fall through to `false`, so
+        // `xs |> match (1) { case int: (~) * 10 }` evaluated to `error`: the
+        // pipe never bound `~` because nothing reported the arm needed it.
         AstMatchArm* arm = match_node->first_arm;
         while (arm) {
+            if (has_current_item_ref(arm->body)) return true;
             arm = (AstMatchArm*)arm->next;
         }
         return false;
@@ -7440,7 +7496,7 @@ AstNode* build_binary_node_from_parts(Transpiler* tp, SourceSpan span,
             node->right = right = promoted;
         }
     }
-    if (node->op == OPERATOR_UNION && promote_type_union_expr(tp, node)) {
+    if (ast_binary_is_type_set_op(node->op) && promote_type_union_expr(tp, node)) {
         return (AstNode*)node;
     }
     if (node->op == OPERATOR_OR && ast_is_explicit_type_value(left) &&

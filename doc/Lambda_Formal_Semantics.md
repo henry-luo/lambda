@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 15.1.0 (2026-08-25)
+**Spec version:** 15.2.0 (2026-08-25)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1261,6 +1261,22 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   arity check that S12.3.1 relies on, and silently divert calls to the
   dynamic ABI, all for a case `call` already covers generally.
 
+- **S12.3.6** **No arity overloading for user definitions.** Two definitions
+  sharing a name in one scope are a duplicate-definition error regardless of
+  parameter count; a name binds to exactly one function. This follows
+  ECMAScript (S1.11) and costs nothing, because Lambda already expresses the
+  same intent with **optional parameters**: `pn f(a)` and `pn f(a, b)` are one
+  `pn f(a, b?)`, which accepts either arity and rejects anything beyond its
+  declared slots. Overloading would buy only a second spelling for that, at the
+  price of an arity-directed resolution rule interacting with optionals, rest
+  collectors, and dynamic calls.
+
+  The **builtin registry is keyed on `(name, arity)`, but that is a dispatch
+  optimization, not a language rule** — it lets an intrinsic select a
+  specialized row without a runtime arity branch. It does not make builtins
+  overloadable in the source language, and the asymmetry with user definitions
+  is therefore only apparent. [S1.11, TS-8]
+
 ### S12.4 Resources
 
 *Auto-close is `with` without the `with`. Close is not just release — it is
@@ -1720,7 +1736,7 @@ below by its section.
 - **S16.9.5** **`a?: T` marks an optional field** — the whole field may be
   absent — which is distinct from `a: T?`, where the field is present and
   its value nullable. The marker applies in every type-field position:
-  object-type fields, pattern position, and map-type items.
+  object-type fields, pattern position, and map-type items.*
   [Design_Syntax §7.22]
 
 ---
@@ -1803,7 +1819,8 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S16.4.2 | **Conformant as of 2026-08-22.** `control_body_brace_is_map` breaks the empty-brace tie in `if`/`for` bodies from `procedural_depth`; that depth now tracks the enclosing function's *effect kind* rather than a nesting count, so a `fn` inside a `pn` is fn context, and an arrow body is forced to fn context so `() => {}` mid-procedure is still the empty map. Verified across value, content, `if`, `for` (both spellings), arrow, and `pn` positions, plus fn-in-pn and arrow-in-pn nesting. |
 | S16.6.6, S16.6.7 | **Conformant in both front ends as of 2026-08-24** (ratified and implemented together). The C parser rejects every unbraced control-statement body with a repair-naming diagnostic, and `parse_function_declaration` rejects `pn ... =>` outright — closing a §4.4 divergence where the C parser was the outlier (1 doc site migrated, 0 test/std uses). The Tree-sitter reference grammar enforces the same bar via a zero-width `_expr_body_start` scanner guard withheld before `return`/`break`/`continue`, scoped to the four unbraced body positions rather than to every identifier; without it the word-rule fallback lexed those keywords as identifiers, so `if (c) return -1` misparsed as a subtraction rather than being rejected. A misfiring `runner.cpp` heuristic that rewrote arrow-body errors into the element-ambiguity diagnosis (the `>` of `=>` matched its relation walk-back) was guarded. Verified: C 140/140, Tree-sitter 135/135 on identical case sets; full 700-file `.ls` corpus cross-check shows zero movement (76 pre-existing failures before and after). |
 | S16.6.8, S16.6.9 | **Conformant as of 2026-08-24** (ratified and implemented same day). Enforced in `build_ast` semantic analysis per S16.6.5, reported as `E312`: `reject_procedural_block_operand` guards tuple/list/array elements, call arguments, binary operands and `=>` arrow bodies; `validate_match_branch_homogeneity` and `validate_if_branch_homogeneity` enforce S16.6.9. Classification is the shared `ast_branch_kind`, which is **three-way and recursive** — a first cut that scanned only a block's immediate top level for pn-only statements over-rejected two real shapes: a branch whose sole top-level item is a nested control `if` (`if (c) { if (d) { r = 3 } else { r = 2 } } else { r = 1 }`), and an EMPTY branch (`} else if (c) { } else {`), which commits to neither side and is therefore NEUTRAL, pairing with both. Migration cost was as predicted: 1 doc example (`doc/Lambda_Expr_Stam.md` — its `default: null` value arm beside control arms became the do-nothing control arm `default { }`), 0 test/corpus changes. Verified: C harness 152/152 (12 new cases; detection extended to E312 since these are semantic, not parse, rejections), Tree-sitter 135/135, `make test-lambda-baseline` 3868/3868. C-suite only by design — the reference grammar is a parser and has no semantic tier. |
-| S16.8.4, S16.8.8, S16.9.2, S16.9.4 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3, S16.9.5 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
+| S16.8.4, S16.8.8, S16.9.2, S16.9.4 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
+| S16.9.5 | **Parsing conformant as of 2026-08-25; the field/value distinction is not yet represented.** The 2026-08-22 spot-check that first cleared this ruling was wrong: `a?: T` parsed only on parameters, and both a map-type field (`type R = {a?: int}`) and an element attribute (`type E = <e a?: int>`) were rejected with `error[E103]`. Both now parse (`parse_type_pattern.cpp`, one shared marker helper used by the map-field and element-attribute sites), the validator honours the marker, and `test/validator_test_data/maps.ls` no longer errors against itself. Covered by `test/lambda/optional_field_marker.ls`. **Residue:** the marker is carried by wrapping the field type in `OPERATOR_OPTIONAL`, the same representation `a: T?` produces, so the two spellings this ruling calls *distinct* are currently indistinguishable downstream — separating them needs a field-level flag on `ShapeEntry`. Independently, the declaration binding checker treats an optional field as required (`let v: Rec = {name: "a"}` → `error[E205]`) for **both** spellings; that is pre-existing and not specific to this marker. |
 | int v5 (S4.1) | Substantially landed (lane, encoding, saturation, printing, goldens). Residue: `INT64_ERROR` collides with `INT_LANE_INF` (pre-cutover gate unsatisfied); ELEM_INT SIMD kernels partly gated; nullable lane (`INT_LANE_NULL`) partial; `IntLane`/ValueRep typing of the four i64 meanings pending (known silent bug class). |
 
 ## Appendix B — Open Design Issues
@@ -1811,7 +1828,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 Numbered `SO#` (semantics-open) for stable reference; each links to its
 record. (The prefix is the spec's own — distinct from the historic review
 findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
-`vibe/Lambda_Issues_Outstanding.md`.)
+`vibe/Lambda_Issue_Ledger.md` §15.)
 
 **Numerics**
 - **SO1** Sized-lane `div`/`%`: [Number_Model §3.3.2](../vibe/Lambda_Semantics_Number_Model.md) says sized×sized `div` stays in the machine lane; this spec (S4.5.3, per Int_Type §2.2) says it leaves the lane — `3i8 div 0i8` needs an explicit call, and Number_Model needs a supersession note.
@@ -1880,7 +1897,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S9 mutability | C4, C4.2a/b/c, C4.3, C5.3b, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md` |
 | S10 operators | C6, C6.2–C6.4, C10; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Path.md` |
 | S11 types | C7, C8.5c; TE-1–TE-18 | ibid.; `Lambda_Design_Type_Enforcement.md` |
-| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |
+| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19 | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |

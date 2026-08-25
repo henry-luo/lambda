@@ -1,11 +1,19 @@
 # Proposal: Structured Test Enhancement — Phase 3
 
 **Date**: March 3, 2026
-**Status**: Proposal
+**Status**: Proposal — **substantially IMPLEMENTED** (verified 2026-08-25)
 **Prerequisite**: Phase 1 & 2 complete (see `Lambda_Testing_Structured.md`)
 **Scope**: Lambda engine — new language features since Phase 2, structural coverage gaps
 
 ---
+
+> **Verification 2026-08-25.** The gap this proposal was written to close is
+> closed. It reported `test/std/core/` entirely missing and only 19 tests in
+> `test/std/`; today `test/std/` holds **157** `.ls` files, of which **104** are
+> under `test/std/core/`, across all four proposed subdirectories
+> (`datatypes`, `operators`, `functions`, `statements`) — against a proposed
+> target of 57. The document is retained as the design record for that work; it
+> is not an open-defect list.
 
 ## 1. Executive Summary
 
