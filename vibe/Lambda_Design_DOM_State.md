@@ -470,6 +470,8 @@ A behavior template with a non-empty body rendering the control's UA chrome as r
 
 ## 8. Testing and migration safety
 
+> **Baseline note (2026-08-25).** The 32 UI-automation failures that stood on the pre-change tree throughout this work are now **fixed**: the suite reports 303 passed / 0 failed, and the radiant baseline is 8151 total / 7794 passed / **1 failed** (only the long-standing render regression). The cause has not been isolated; the likeliest candidate is the EO5v2 evaluator-switch work — `free_document` and `execute_document_scripts` now switch the bound `EvalContext` rather than returning early on a mismatch — since the failing set was dominated by `.ls` pages (`todo_*`, `rte_*`, `editable_*`) where document teardown and script bootstrap exercise that path. Any comparison against the old 32-failure snapshot is obsolete; the expected failing set is now empty.
+
 1. **State-dump equivalence harness (the migration oracle).** The Mark-tree cascade dump (`radiant_state_dump_emit_cascade`, diffable by design) is recorded for a scripted event sequence with the native path, then with the package claim flipped; the dumps must match modulo a whitelist. This turns each F-phase flip into a diff review rather than a leap of faith.
 2. **Baselines**: `make test-radiant-baseline` and the UI-automation suite at 100% of current pass rate per phase; event-sim `assert_state_store` / snapshot assertions extended to the migrated families.
 3. **Package unit tests**: `test/lambda/dom/*.ls` + expected `*.txt` per the standard convention, exercising templates headlessly against constructed elements (validation table-driven: the full HTML constraint-validation matrix as data).

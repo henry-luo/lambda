@@ -2859,22 +2859,6 @@ uint32_t state_store_prune_after_reflow(DocState* state) {
         removed++;
     }
 
-    // An open dropdown keeps its DocState pointer across a relayout, but the
-    // FormControlProp backing the control is view-pool-owned and recreated, so
-    // the overlay can outlive the control it belongs to. Left alone the two
-    // halves disagree and the dropdown invariant fires. Close it here, where
-    // every other stale owner is already reconciled (ESO28).
-    if (state->open_dropdown) {
-        View* owner = state->open_dropdown;
-        DomElement* elem = owner->is_element() ? lam::dom_require_element(owner) : nullptr;
-        if (!view_tree_contains_view(root, owner) || !elem || !elem->form) {
-            log_debug("state_store_prune_after_reflow: closing dropdown whose control "
-                      "did not survive reflow");
-            doc_state_close_dropdown(state, owner);
-            removed++;
-        }
-    }
-
     if (removed > 0) {
         state->is_dirty = true;
         state->needs_repaint = true;
