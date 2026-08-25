@@ -13545,6 +13545,43 @@ static Type* mir_nonnull_contract_base(Type* type) {
     return type;
 }
 
+// Must this crossing run even though the value is already semantically a map?
+//
+// A named map contract is not just a predicate: admission REIFIES the value
+// into the contract's packed layout, and that layout is what the direct field
+// reads index by byte offset. Skipping the crossing on semantic compatibility
+// alone leaves a literal-shaped map (whose `T?` field is a 9-byte TypedItem)
+// behind a contract-shaped reader (which loads a bare 8-byte Container*), so
+// the reader returns the tag byte plus seven pointer bytes as an Item.
+//
+// The contract arm is taken through mir_nonnull_contract_base because `N?` is
+// a TypeUnary whose OWN type_id is LMD_TYPE_TYPE, not LMD_TYPE_MAP. Reading
+// the wrapper's type_id hid the map arm at every one of these sites -- and a
+// self-referential record is necessarily optional, since its recursion has to
+// terminate on null, so `type N = {val: int, next: N?}` skipped reification on
+// every return and every argument (D3.2.4).
+static bool mir_map_contract_needs_reification(Type* contract,
+        AstNode* source_node, TypeId val_tid) {
+    if (val_tid != LMD_TYPE_MAP || !contract || !source_node) return false;
+    Type* arm = mir_nonnull_contract_base(contract);
+    // The open `map` implies no packed layout, so admission against it is the
+    // identity for any map value. Reifying there is pure cost -- it is what
+    // made every `map?`-annotated linked-list hop pay a boundary it cannot use.
+    if (!arm || arm->type_id != LMD_TYPE_MAP || arm == &TYPE_MAP) return false;
+    // Compare the NON-NULL ARMS, not the wrappers. `Node?` spelled on a field,
+    // on a parameter and on a return are three distinct occurrence objects
+    // around ONE shared TypeMap, so testing wrapper identity would re-admit a
+    // value already in the contract's layout at every hop of an adopted
+    // recursive structure -- which is the whole cost adoption removes.
+    //
+    // Carrying the arm is the proof: a value acquires that static type only by
+    // adopting the contract at construction or by crossing a boundary that
+    // reified it, and this predicate is what keeps every such crossing intact.
+    Type* source_arm = source_node->type
+        ? mir_nonnull_contract_base(source_node->type) : NULL;
+    return source_arm != arm;
+}
+
 static bool mir_trusted_map_field_matches(AstNode* source, Type* expected) {
     if (!expected) return false;
     Type* field_contract = mir_trusted_map_member_contract(source);
@@ -17668,9 +17705,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                                 (val_tid == LMD_TYPE_ANY ||
                                  (mir_expr_may_be_null(mt, resolved_args[i]) &&
                                   !lambda_type_accepts_null(parameter_contract)) ||
-                                 (parameter_contract->type_id == LMD_TYPE_MAP &&
-                                  val_tid == LMD_TYPE_MAP &&
-                                  resolved_args[i]->type != parameter_contract))) {
+                                 mir_map_contract_needs_reification(
+                                     parameter_contract, resolved_args[i], val_tid))) {
                             char boundary[192];
                             snprintf(boundary, sizeof(boundary), "argument %d of %s",
                                 i + 1, fn_mangled);
@@ -17770,9 +17806,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                                 (val_tid == LMD_TYPE_ANY ||
                                  (mir_expr_may_be_null(mt, resolved_args[i]) &&
                                   !lambda_type_accepts_null(parameter_contract)) ||
-                                 (parameter_contract->type_id == LMD_TYPE_MAP &&
-                                  val_tid == LMD_TYPE_MAP &&
-                                  resolved_args[i]->type != parameter_contract))) {
+                                 mir_map_contract_needs_reification(
+                                     parameter_contract, resolved_args[i], val_tid))) {
                             char boundary[192];
                             snprintf(boundary, sizeof(boundary), "argument %d of %s",
                                 i + 1, fn_mangled);
@@ -18921,9 +18956,8 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
                  (mir_expr_may_be_null(mt, ret_node->value) &&
                   !lambda_type_accepts_null(mir_unwrap_decl_type(
                       mt->current_return_type))) ||
-                 (mir_decl_type_id(mt->current_return_type) == LMD_TYPE_MAP &&
-                  val_tid == LMD_TYPE_MAP && ret_node->value->type !=
-                      mt->current_return_type))) {
+                 mir_map_contract_needs_reification(mt->current_return_type,
+                     ret_node->value, val_tid))) {
             MIR_reg_t checked = emit_checked_boundary(mt, val, val_tid,
                 mir_unwrap_decl_type(mt->current_return_type), "function return");
             emit_return_if_item_error(mt, checked);
@@ -19097,8 +19131,7 @@ static MIR_reg_t transpile_assign_stam(MirTranspiler* mt, AstAssignStamNode* ass
               contract->kind == TYPE_KIND_BINARY) ||
              (mir_expr_may_be_null(mt, assign->value) &&
               !lambda_type_accepts_null(contract)) ||
-             (contract->type_id == LMD_TYPE_MAP && val_tid == LMD_TYPE_MAP &&
-              assign->value->type != contract));
+             mir_map_contract_needs_reification(contract, assign->value, val_tid));
         // T19-A: a REBINDING of a declared scalar had no equivalent of the
         // declaration site's native fast boundary, so `k = perm[0]` boxed the
         // int lane and called lambda_type_check once per iteration purely to
@@ -19568,12 +19601,27 @@ static MIR_reg_t transpile_box_item(MirTranspiler* mt, AstNode* node) {
         char name[128];
         snprintf(name, sizeof(name), "%.*s", (int)ident->name->len, ident->name->chars);
         MirVarEntry* var = find_var(mt, name);
-        if (var && var->full_type) {
+        // The binding's own contract is authoritative, but an UNANNOTATED local
+        // has none -- so fall back to the node's static type, which is exactly
+        // what mir_expr_may_be_null just used to decide the value may be absent.
+        //
+        // Without that fallback the two sides disagreed about the carrier: the
+        // inline null test compares against ItemNull, while boxing left a raw
+        // pointer lane untouched. So `var walk = node` off a `Node?` parameter
+        // held lane null as 0, `walk != null` compared 0 to ItemNull and
+        // answered true, and every idiomatic `while (n != null) { n = n.next }`
+        // walk ran one step past the end (D2.2.2, D2.5.1, S7.1).
+        //
+        // Kept to the boxing decision alone. Publishing the same fact as the
+        // binding's `full_type` would also reroute the redundancy, direct-read
+        // and null-guard gates that read it -- which cost list2 3.6x.
+        Type* box_contract = var && var->full_type ? var->full_type : node->type;
+        if (var && box_contract) {
             // A nullable raw local is not an ordinary int/bool/float value.
             // Box through its full contract so a lane null becomes ItemNull
             // instead of leaking its sentinel into generic arrays or maps.
             MIR_reg_t value = transpile_expr(mt, node);
-            return emit_box_contract_lane(mt, value, var->type_id, var->full_type);
+            return emit_box_contract_lane(mt, value, var->type_id, box_contract);
         }
     }
 

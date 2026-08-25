@@ -253,17 +253,31 @@ static void expect_no_unresolved_type_warning(const FixtureRun& run, const char*
         << "--- stderr ---\n" << run.std_err;
 }
 
-// JIT tier: an admitted recursive contract is proven statically at every
-// declared boundary — the runtime admission path is never entered. The v34
-// ANY-degradation signature for this fixture was calls=20, reifications=20.
+// JIT tier: every crossing of an admitted recursive contract must be free —
+// the relation classifier answers EXACT_TRUSTED off shape identity, so nothing
+// reifies and nothing is copied. The v34 ANY-degradation signature for this
+// fixture was calls=20, reifications=20; what separates health from that is the
+// reification/copy counters, not the call count.
+//
+// The call count is NOT zero and must not be asserted to be. A `Node?` contract
+// only reaches the classifier at all because runtime_type_admit_value now takes
+// the named contract through its non-null arm. Before that it fell through to
+// the lambda_type_matches shortcut — invisible to these counters, and the exact
+// bypass that let an unreified literal shape sit behind a contract-shaped
+// direct field read and segfault the JIT.
 TEST(LambdaOptAdmission, RecursiveContractJitFullyStatic) {
     FixtureRun run = run_fixture("recursive_link", "jit", kRecursiveLinkSource, true);
     ASSERT_TRUE(run.ok);
     EXPECT_EQ(run.std_out, "20\n");
     expect_no_unresolved_type_warning(run, "recursive_link");
-    EXPECT_EQ(run.profile.get("map_admit_calls"), 0u);
+    // every crossing that happens is classified trusted
+    EXPECT_EQ(run.profile.get("map_admit_exact_shape_hits") +
+              run.profile.get("map_admit_storage_compatible_hits"),
+              run.profile.get("map_admit_calls"));
+    EXPECT_EQ(run.profile.get("map_admit_exact_shape_hits"), 20u);
     EXPECT_EQ(run.profile.get("map_admit_reifications"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_deep_clone_calls"), 0u);
+    EXPECT_EQ(run.profile.get("map_admit_fields_visited"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_bytes_copied"), 0u);
 }
 
@@ -274,9 +288,9 @@ TEST(LambdaOptAdmission, RecursiveContractInterpAdmitsWithoutCopy) {
     FixtureRun run = run_fixture("recursive_link", "interp", kRecursiveLinkSource, true);
     ASSERT_TRUE(run.ok);
     EXPECT_EQ(run.std_out, "20\n");
-    EXPECT_EQ(run.profile.get("map_admit_calls"), 20u);
+    EXPECT_EQ(run.profile.get("map_admit_calls"), 60u);
     EXPECT_EQ(run.profile.get("map_admit_exact_shape_hits") +
-              run.profile.get("map_admit_storage_compatible_hits"), 20u);
+              run.profile.get("map_admit_storage_compatible_hits"), 60u);
     EXPECT_EQ(run.profile.get("map_admit_reifications"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_deep_clone_calls"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_fields_visited"), 0u);
@@ -327,6 +341,71 @@ TEST(LambdaOptAdmission, AnyBearingContractRefusedInterp) {
     // storage-compatible; only the let-boundary reifies
     EXPECT_EQ(run.profile.get("map_admit_storage_compatible_hits"), 5u);
     EXPECT_EQ(run.profile.get("map_admit_calls"), 10u);
+}
+
+// The reification guard, and the tier-pinned regression for the JIT segfault.
+//
+// Nothing here is annotated with the contract: `let e = {...}` gives the
+// literal NO contract hint, so it keeps its own inferred shape — in which the
+// `Node?` field is a 9-byte TypedItem — and only the declared `Node?` RETURN
+// carries the contract. The direct field read on the consumer side indexes by
+// the contract's byte offsets, so that return crossing is not a check, it is
+// the reification that makes the two agree.
+//
+// While the crossing was skipped, `sum_chain` read the tag byte plus seven
+// pointer bytes as an Item and the next lambda_type_check faulted on it
+// (SIGSEGV on release, ASan BUS on debug).
+//
+// `walk_len` guards the second half: an unannotated local off a `Node?`
+// parameter must inherit the initializer's nullable POINTER-lane contract, or
+// its lane null (0) boxes as a raw 0 instead of ItemNull and `walk != null`
+// answers true — every idiomatic linked-list walk then runs one step long.
+//
+// Pinned to the JIT tier deliberately: the interpreter answers both correctly,
+// so an auto-tier run of the same source proves nothing.
+static const char* kUnadoptedRecursiveSource =
+    "type Node = {val: int, next: Node?}\n"
+    "\n"
+    "pn make_chain(n: int) Node? {\n"
+    "    if (n == 0) { return null }\n"
+    "    let e = {val: n, next: make_chain(n - 1)}\n"
+    "    return e\n"
+    "}\n"
+    "\n"
+    "pn sum_chain(node: Node?) int {\n"
+    "    if (node == null) { return 0 }\n"
+    "    return node.val + sum_chain(node.next)\n"
+    "}\n"
+    "\n"
+    "pn walk_len(node: Node?) int {\n"
+    "    var walk = node\n"
+    "    var n: int = 0\n"
+    "    while (walk != null) { n = n + 1; walk = walk.next }\n"
+    "    return n\n"
+    "}\n"
+    "\n"
+    "pn main() {\n"
+    "    let c = make_chain(100)\n"
+    "    print(sum_chain(c) ++ \" \" ++ walk_len(c) ++ \" \" ++ walk_len(null))\n"
+    "}\n";
+
+TEST(LambdaOptAdmission, UnadoptedRecursiveLiteralReifiesOnJit) {
+    FixtureRun run = run_fixture("unadopted_recursive", "jit",
+        kUnadoptedRecursiveSource, true);
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "5050 100 0\n");
+    expect_no_unresolved_type_warning(run, "unadopted_recursive");
+    // the literal's inferred shape is NOT the contract's, so the return
+    // firewall must actually convert it — a zero here means the crossing was
+    // elided again and the direct field reads are back to misaddressing
+    EXPECT_GT(run.profile.get("map_admit_reifications"), 0u);
+}
+
+TEST(LambdaOptAdmission, UnadoptedRecursiveLiteralMatchesInterp) {
+    FixtureRun run = run_fixture("unadopted_recursive", "interp",
+        kUnadoptedRecursiveSource, true);
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "5050 100 0\n");
 }
 
 // The profile must stay strictly env-gated: with COW_EXEC_PROFILE unset/0 the

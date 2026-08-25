@@ -1,8 +1,10 @@
 // AWFY Benchmark: List (Typed version)
-// Expected result: 10
-// Typed: map? on nullable linked-list node params, int return types
 
-pn make_list(length: int) map? {
+type ListElem = {val: int, next: ListElem?}
+// Expected result: 10
+// Typed: recursive record node type (self-referential), int return types
+
+pn make_list(length: int) ListElem? {
     if (length == 0) {
         return null
     }
@@ -10,14 +12,14 @@ pn make_list(length: int) map? {
     return e
 }
 
-pn list_length(node: map?) int {
+pn list_length(node: ListElem?) int {
     if (node == null) {
         return 0
     }
     return 1 + list_length(node.next)
 }
 
-pn is_shorter_than(x: map?, y: map?) int {
+pn is_shorter_than(x: ListElem?, y: ListElem?) int {
     var x_tail = x
     var y_tail = y
     while (y_tail != null) {
@@ -30,7 +32,7 @@ pn is_shorter_than(x: map?, y: map?) int {
     return 0
 }
 
-pn tail(x: map?, y: map?, z: map?) map? {
+pn tail(x: ListElem?, y: ListElem?, z: ListElem?) ListElem? {
     if (is_shorter_than(y, x) == 1) {
         return tail(
             tail(x.next, y, z),
