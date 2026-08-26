@@ -21,6 +21,7 @@ extern int64_t g_text_layout_count;
 
 static void clear_slice_inline_start_edge(LayoutContext* lycon, DomNode* text_node);
 static void record_inline_box_decoration_fragment(LayoutContext* lycon, DomNode* text_node);
+static CssEnum inline_box_decoration_break_value(DomElement* parent);
 
 // CSS layout comparisons use subpixel coordinates; keep a run on the line
 // when its measured edge differs only by the 1/64px layout-unit quantization.
@@ -2926,8 +2927,13 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     }
     lycon->line.last_text_rect = rect;  // track for trailing whitespace trimming
     lycon->line.last_text_view = text;  // ViewText owner for bounds update after trimming
-    // CSS 2.1 §8.3: Inline content has been placed on this line, so any pending
-    lycon->line.inline_start_edge_pending = 0;
+    // css fragmentation: clone decorations reapply their inline-start edge on
+    // every line fragment; sliced decorations consume it after the first line.
+    bool clone_inline_start_edge = text->parent && text->parent->is_element() &&
+        inline_box_decoration_break_value(text->parent->as_element()) == CSS_VALUE_CLONE;
+    if (!clone_inline_start_edge) {
+        lycon->line.inline_start_edge_pending = 0;
+    }
 
     if (is_initial_letter && !lycon->block.initial_letter_origin_offset_applied) {
         if (is_raised_initial_letter) {
