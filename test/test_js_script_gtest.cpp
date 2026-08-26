@@ -729,3 +729,23 @@ TEST(JsInterpreter, PreservesObjectMethodSuperHomeAcrossTheSharedCallKernel) {
 
     runtime_cleanup(&runtime);
 }
+
+TEST(JsInterpreter, RetainsArgumentsAcrossNestedCallsAndEscapedArrows) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function collect(first) { let read = () => arguments[0] + arguments.length; "
+        "first = 40; arguments[0] = 41; return (arguments.callee === collect ? 0 : 100) + "
+        "read() + first; } "
+        "function defaults(value = arguments.length + 2) { return value; } "
+        "function strictValue(value) { 'use strict'; value = 40; return arguments[0]; } "
+        "collect(20) + defaults() + strictValue(20);";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "arguments.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(105.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}

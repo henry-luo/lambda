@@ -1481,6 +1481,7 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
     case GC_TYPE_JS_INTERP_ENV: {
         JsInterpEnv* env = (JsInterpEnv*)obj;
         if (env->outer) gc_mark_object_ptr(gc, env->outer);
+        gc_mark_item(gc, env->arguments_object);
         for (uint32_t i = 0; i < env->slot_count; i++) {
             gc_mark_item(gc, env->slots[i]);
         }

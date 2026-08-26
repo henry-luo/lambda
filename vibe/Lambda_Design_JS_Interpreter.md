@@ -10,7 +10,7 @@ T0/T1 environment cells, suspension, and AUTO promotion remain planned.
 
 **Scope:** LambdaJS only. This document specializes the interpreter direction established by **AI21** and the shared-AST rules **D8.2.1–D8.2.5**. It does not change the Lambda-language T0 semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
-**Formal authority:** **D1.1–D1.7**, **D5.1.1**, **D5.3.2–D5.3.4**, **D5.4.1**, **D6.2.1–D6.2.4**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v5**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
+**Formal authority:** **D1.1–D1.7**, **D5.1.1**, **D5.3.2–D5.3.4**, **D5.4.1**, **D6.2.1–D6.2.4**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v6**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
 
 **Related designs:** [`Lambda_Design_Ast_Interpreter.md`](Lambda_Design_Ast_Interpreter.md) (AI1–AI22), [`Lambda_Design_Unified_AST.md`](Lambda_Design_Unified_AST.md) (U1–U36), [`Lambda_Design_Runtime_Error_Handling.md`](Lambda_Design_Runtime_Error_Handling.md), [`Lambda_Design_Stack_Frame_JS.md`](Lambda_Design_Stack_Frame_JS.md), [`doc/dev/js/JS_01_Compilation_Pipeline.md`](../doc/dev/js/JS_01_Compilation_Pipeline.md), [`JS_04_MIR_Lowering.md`](../doc/dev/js/JS_04_MIR_Lowering.md), [`JS_05_Functions_Closures.md`](../doc/dev/js/JS_05_Functions_Closures.md), [`JS_08_Iterators_Generators.md`](../doc/dev/js/JS_08_Iterators_Generators.md), and [`JS_09_Async_Modules.md`](../doc/dev/js/JS_09_Async_Modules.md).
 
@@ -321,7 +321,8 @@ Before executing a body, the walker performs the same planned instantiation the 
 - enforce global lexical/var declaration conflicts;
 - apply Annex B block-function rules in sloppy scripts;
 - create parameter bindings and evaluate defaults left-to-right;
-- build the correct mapped or unmapped `arguments` object lazily;
+- materialize the correct mapped or unmapped `arguments` object before
+  parameter defaults and retain it in the function environment;
 - establish module import/export bindings and namespace identity.
 
 The planner records the order and target cells. The walker executes it; MIR emits it from the same plan.
@@ -395,7 +396,8 @@ This staged bridge avoids duplicating OrdinaryCallBindThis or constructor setup 
 
 The call boundary remains dynamically sized `Item* + argc` under **D6.2.2v2**. The caller roots the span; the callee initializes parameter cells and retains any rest/arguments object it creates.
 
-The frame stores enough metadata to lazily construct:
+The function environment stores the materialized runtime object and the
+metadata required to preserve:
 
 - a mapped arguments object for sloppy functions with a simple parameter list;
 - an unmapped object for strict or non-simple parameter lists;
@@ -565,7 +567,7 @@ Subsequent interpreted reads and writes consult that journal. At script global
 scope, dynamic eval uses the realm-global path and the walker synchronizes the
 realm lexical table back to the script module slab. This retains one runtime,
 one EvalContext, one global object, and one module registry as required by
-**D8.1.3v5** and **D5.4.1**.
+**D8.1.3v6** and **D5.4.1**.
 
 ### 7.11 Classes
 
@@ -885,7 +887,7 @@ rest/spread, optional chaining, object methods/accessors, generators, async,
 and top-level await are rejected before declaration instantiation. A forced
 AST request returns the JavaScript rejection error rather than silently
 replaying in MIR; with no selector, existing MIR remains the policy. This is
-the explicit-backend contract of **D8.1.3v5**, preserving **D8.4.3v2** error
+the explicit-backend contract of **D8.1.3v6**, preserving **D8.4.3v2** error
 transport and **D1.3** guest semantics.
 
 **Gate:** focused ownership, module-state, call/construct, native-callback,
@@ -917,6 +919,9 @@ Implemented:
 - public `super`: explicit derived constructors, `this` TDZ-to-bound
   transition, post-super public fields, property reads/writes/calls, static
   methods, and arrows/object methods retaining their lexical home object.
+- `arguments`: runtime-object materialization before defaults, mapped sloppy
+  simple parameters, unmapped strict/non-simple parameters, `callee`, and
+  escaped arrow lookup through the captured function environment.
 
 Still excluded: private names, CommonJS/ES modules,
 generators, async, and top-level await. These forms fail before observable
@@ -1146,7 +1151,7 @@ These questions do not reopen the decisions above:
 ## 18. Adoption Requirements
 
 This proposal's P2 implementation authority is now recorded by
-**D6.2.3v2**, **D8.1.3v5**, and
+**D6.2.3v2**, **D8.1.3v6**, and
 [`vibe/impl/Lambda_Impl_JS_Interpreter.md`](impl/Lambda_Impl_JS_Interpreter.md).
 The following requirements remain for later phases:
 

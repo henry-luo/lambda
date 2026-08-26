@@ -8,7 +8,7 @@ phases remain open.
 
 **Design authority:** `doc/Lambda_Formal_Design.md` **D1.3**, **D1.5**,
 **D1.7**, **D5.3.2–D5.3.3**, **D6.2.2v2**, **D6.2.3v2**,
-**D8.1.3v5**, **D8.2.4**, **D8.4.1v2**, and **D8.4.3v2**. The working
+**D8.1.3v6**, **D8.2.4**, **D8.4.1v2**, and **D8.4.3v2**. The working
 design is `vibe/Lambda_Design_JS_Interpreter.md` P2.
 
 ## Delivered boundary
@@ -19,7 +19,7 @@ same `Runtime` that owns Lambda scripts. The interpreter obtains the
 runtime's canonical `EvalContext`, allocates in its heap, and prepares the
 script's own module-state slab. It therefore shares runtime, context, module
 registry, event-loop owner, and GC heap with Lambda without importing Lambda
-language semantics (**D1.3**, **D1.7**, **D8.1.3v5**).
+language semantics (**D1.3**, **D1.7**, **D8.1.3v6**).
 
 AST functions are `JsFunction` objects with an explicit AST body kind. Their
 normal calls and construction enter the established `fn->invoke` and
@@ -55,7 +55,7 @@ Implicit and explicit derived construction reuse the established class
 construct capability. `super()` uses its derived-`this` and live-superclass
 helpers, then initializes the derived public fields; `super` property
 references use the same lexical-home-class property helpers for class/object
-methods, accessors, statics, and arrows. This is all within **D8.1.3v5**; it
+methods, accessors, statics, and arrows. This is all within **D8.1.3v6**; it
 does not create a second JS
 object, class, iterator, or call model.
 
@@ -70,7 +70,7 @@ closure escapes and then calls it again.
 Admission occurs after realm setup but before declarations or user code. The
 forced AST backend rejects unsupported forms with a normal JavaScript error;
 it never silently executes a second MIR copy after observable work
-(**D8.1.3v5**, **D8.4.3v2**). The unset backend deliberately remains the
+(**D8.1.3v6**, **D8.4.3v2**). The unset backend deliberately remains the
 existing whole-script MIR policy.
 
 ## Validation
@@ -88,6 +88,9 @@ existing whole-script MIR policy.
 - ordinary and arrow-lexical `new.target` through the common construct state.
 - explicit derived constructors and public `super` calls/references, including
   fields after `super()`, accessors, statics, arrows, and object-method homes.
+- materialized runtime `arguments` objects, mapped sloppy parameter aliases,
+  strict/non-simple unmapped objects, and escaped arrow lookup after nested
+  calls.
 
 The expanded focused suite additionally covers patterns, iterator loops,
 labels, `with` and escaped `with` closures, templates/tagged templates,

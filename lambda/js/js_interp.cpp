@@ -47,6 +47,7 @@ struct JsInterpFrame {
 
 struct JsInterpReference {
     NameEntry* entry;
+    JsInterpEnv* arguments_env;
     // Assignment/update callers provide these exact root slots. A property
     // reference must keep both operands live while evaluating its RHS.
     uint64_t* object_home;
@@ -170,6 +171,9 @@ static JsInterpEnv* js_interp_env_clone(JsInterpEnv* source) {
     if (!source) return NULL;
     JsInterpEnv* copy = js_interp_env_create(source->scope, source->outer);
     if (!copy || copy->slot_count != source->slot_count) return NULL;
+    copy->arguments_object = source->arguments_object;
+    copy->function_node = source->function_node;
+    copy->arguments_are_mapped = source->arguments_are_mapped;
     if (copy->slot_count) {
         memcpy(copy->slots, source->slots, (size_t)copy->slot_count * sizeof(uint64_t));
     }
@@ -181,6 +185,63 @@ static JsInterpEnv* js_interp_find_env(JsInterpEnv* env, NameScope* scope) {
         if (scan->scope == scope) return scan;
     }
     return NULL;
+}
+
+static JsInterpEnv* js_interp_find_arguments_env(JsInterpEnv* env) {
+    for (JsInterpEnv* scan = env; scan; scan = scan->outer) {
+        if (scan->arguments_object != 0) return scan;
+    }
+    return NULL;
+}
+
+static bool js_interp_function_has_simple_params(const JsFunctionNode* function) {
+    for (const JsAstNode* param = function ? (const JsAstNode*)function->params : NULL;
+            param; param = (const JsAstNode*)param->next) {
+        if (param->node_type != AST_NODE_IDENT) return false;
+    }
+    return true;
+}
+
+static int js_interp_arguments_param_index(const JsInterpEnv* env,
+        const NameEntry* entry) {
+    if (!env || !env->arguments_are_mapped || !env->function_node || !entry ||
+            entry->scope != env->scope || !entry->name) return -1;
+    JsFunctionNode* function = (JsFunctionNode*)env->function_node;
+    int result = -1;
+    int index = 0;
+    for (JsAstNode* param = (JsAstNode*)function->params; param;
+            param = (JsAstNode*)param->next, index++) {
+        if (param->node_type != AST_NODE_IDENT) continue;
+        JsIdentifierNode* identifier = (JsIdentifierNode*)param;
+        if (identifier->entry == entry || (identifier->name &&
+                identifier->name->len == entry->name->len &&
+                memcmp(identifier->name->chars, entry->name->chars,
+                    entry->name->len) == 0)) {
+            result = index;
+        }
+    }
+    return result;
+}
+
+static Item js_interp_arguments_value(JsInterpFrame* frame) {
+    JsInterpEnv* env = js_interp_find_arguments_env(frame ? frame->env : NULL);
+    return env ? (Item){.item = env->arguments_object} : ItemError;
+}
+
+static Item js_interp_read_arguments_param(JsInterpFrame* frame, NameEntry* entry,
+        Item fallback) {
+    JsInterpEnv* env = js_interp_find_arguments_env(frame ? frame->env : NULL);
+    int index = js_interp_arguments_param_index(env, entry);
+    return index >= 0 ? js_arguments_mapped_get((Item){.item = env->arguments_object},
+        index, fallback) : fallback;
+}
+
+static Item js_interp_write_arguments_param(JsInterpFrame* frame, NameEntry* entry,
+        Item value) {
+    JsInterpEnv* env = js_interp_find_arguments_env(frame ? frame->env : NULL);
+    int index = js_interp_arguments_param_index(env, entry);
+    return index >= 0 ? js_arguments_mapped_param_writeback(
+        (Item){.item = env->arguments_object}, index, value) : value;
 }
 
 static Item js_interp_tdz_error(String* name) {
@@ -209,6 +270,10 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
             return js_get_with_binding_or_fallback(key, make_js_undefined());
         }
     }
+    if (unresolved_name && !entry && js_interp_name_equals(unresolved_name, "arguments")) {
+        Item arguments = js_interp_arguments_value(frame);
+        if (!item_is_error(arguments)) return arguments;
+    }
     if (unresolved_name) {
         // A direct eval may introduce a function-scoped var which was absent
         // from this script's static NameScope. The shared eval journal is the
@@ -234,7 +299,8 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         }
         value.item = env->slots[entry->slot];
     }
-    return value.item == ITEM_JS_TDZ ? js_interp_tdz_error(entry->name) : value;
+    if (value.item == ITEM_JS_TDZ) return js_interp_tdz_error(entry->name);
+    return js_interp_read_arguments_param(frame, entry, value);
 }
 
 static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
@@ -287,7 +353,8 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
             entry->name ? (int)entry->name->len : 0);
     }
     env->slots[entry->slot] = value.item;
-    return value;
+    Item written = js_interp_write_arguments_param(frame, entry, value);
+    return item_is_error(written) ? written : value;
 }
 
 static int js_interp_function_param_count(const JsFunctionNode* function) {
@@ -598,6 +665,10 @@ static JsInterpCompletion js_interp_eval_reference(JsInterpFrame* frame,
             if (item_is_error(captured)) return js_interp_throw(captured);
             out_reference->with_binding = js_is_truthy(captured);
         }
+        if (!out_reference->with_binding && !out_reference->entry &&
+                js_interp_name_equals(identifier->name, "arguments")) {
+            out_reference->arguments_env = js_interp_find_arguments_env(frame->env);
+        }
         return js_interp_normal(ItemNull);
     }
     if (node && (node->node_type == AST_NODE_MEMBER_EXPR ||
@@ -634,6 +705,9 @@ static Item js_interp_reference_read(JsInterpFrame* frame,
         return js_get_with_binding_or_fallback(js_interp_reference_key(reference),
             make_js_undefined());
     }
+    if (reference->arguments_env) {
+        return (Item){.item = reference->arguments_env->arguments_object};
+    }
     if (!reference->property) {
         return js_interp_read_binding(frame, reference->entry,
             reference->entry ? reference->entry->name
@@ -655,6 +729,11 @@ static Item js_interp_reference_write(JsInterpFrame* frame,
             js_interp_reference_key(reference), value, frame->strict ? 1 : 0);
         if (item_is_error(written)) return written;
         if (js_is_truthy(written)) return value;
+    }
+    if (reference->arguments_env) {
+        reference->arguments_env->arguments_object = value.item;
+        reference->arguments_env->arguments_are_mapped = false;
+        return value;
     }
     if (!reference->property) {
         return js_interp_write_binding(frame, reference->entry,
@@ -1323,10 +1402,13 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         if (unary->op == OPERATOR_JS_TYPEOF && unary->operand &&
                 unary->operand->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* identifier = (JsIdentifierNode*)unary->operand;
+            bool has_arguments_binding = !identifier->entry &&
+                js_interp_name_equals(identifier->name, "arguments") &&
+                js_interp_find_arguments_env(frame->env) != NULL;
             // ECMAScript's `typeof` is the one identifier consumer that does
             // not throw for an unresolvable reference. A lexical TDZ still
             // has an entry and therefore follows the regular error path.
-            if (!identifier->entry && !js_global_binding_exists(
+            if (!has_arguments_binding && !identifier->entry && !js_global_binding_exists(
                     js_interp_name_key(identifier->name)) &&
                     !js_eval_local_has_var_binding(
                         js_interp_name_key(identifier->name))) {
@@ -2274,10 +2356,9 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
         break;
     }
     case AST_NODE_IDENT:
-        // P2 does not yet materialize the function `arguments` environment.
-        // `super` is a lexical reference carried by the common call kernel.
-        if (js_interp_identifier_is(node, "arguments") ||
-                js_interp_identifier_is(node, "import.meta")) state->supported = false;
+        // `arguments` and `super` are activation bindings carried by the
+        // shared function/call kernels. Module metadata remains unavailable.
+        if (js_interp_identifier_is(node, "import.meta")) state->supported = false;
         break;
     case AST_NODE_VARIABLE_DECLARATOR:
         if (!((JsVariableDeclaratorNode*)node)->id ||
@@ -2337,16 +2418,31 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     (void)result_home;
     if (!function || function->body_kind != JS_FUNCTION_BODY_AST ||
             !function->ast_function || !function->ast_script) return ItemError;
-    RootFrame roots(3);
+    RootFrame roots(4);
     Rooted<Item> this_root(roots, (function->flags & JS_FUNC_FLAG_ARROW)
         ? function->ast_lexical_this : js_get_this());
     Rooted<Item> new_target_root(roots, (function->flags & JS_FUNC_FLAG_ARROW)
         ? function->ast_lexical_new_target : js_get_new_target());
     Rooted<Item> home_class_root(roots, function->home_class);
+    Rooted<Item> arguments_root(roots, ItemNull);
     JsInterpEnv* env = js_interp_env_create(function->ast_function->vars,
         function->interp_env);
     JsInterpEnvRoot env_root(env);
     if (!env || !env_root.registered) return ItemError;
+    if (!(function->flags & JS_FUNC_FLAG_ARROW)) {
+        bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
+        bool mapped = !strict && js_interp_function_has_simple_params(
+            function->ast_function);
+        // Materialize before parameter defaults and keep it in the traced
+        // activation record. Later nested calls therefore cannot replace an
+        // AST function's lexical arguments binding through ambient state.
+        js_set_arguments_info(mapped ? 0 : 1);
+        arguments_root.set(js_build_arguments_object());
+        if (item_is_error(arguments_root.get())) return arguments_root.get();
+        env->arguments_object = arguments_root.get().item;
+        env->function_node = (AstNode*)function->ast_function;
+        env->arguments_are_mapped = mapped ? 1 : 0;
+    }
     // Direct eval's function-scoped `var` declarations live in the shared
     // EvalContext journal for this activation, including names absent from the
     // static AST scope.

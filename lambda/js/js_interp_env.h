@@ -10,7 +10,12 @@ struct NameScope;
 typedef struct JsInterpEnv {
     struct JsInterpEnv* outer;
     struct NameScope* scope;
+    // The function activation owns its materialized exotic arguments object.
+    // Arrows leave this empty and resolve the nearest outer function record.
+    uint64_t arguments_object;
+    struct AstNode* function_node;
     uint32_t slot_count;
-    uint32_t reserved;
+    uint8_t arguments_are_mapped;
+    uint8_t reserved[3];
     uint64_t slots[1];
 } JsInterpEnv;
