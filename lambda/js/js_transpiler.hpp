@@ -37,6 +37,9 @@ struct JsScript : Script {
     JsScope* global_scope;          // JS global/module lexical scope root
     struct hashmap* scope_lookup_cache; // post-build (scope,name) binding facts
     bool strict_mode;               // JS script/function strictness default
+    // Module top levels use a private module slab. CJS remains non-strict,
+    // while ES modules set both this bit and strict_mode.
+    bool is_module;
     bool strict_js;                 // true = reject TS syntax (pure JS mode)
     bool emit_runtime_checks;       // TS development-mode assertion emission
     struct hashmap* type_registry; // TS name → Type* facts for this JS/TS unit

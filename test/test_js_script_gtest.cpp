@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/module_registry.h"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
 
@@ -110,6 +111,38 @@ TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     EXPECT_EQ(result.item, flt2it(42.0).item);
     ASSERT_EQ(runtime.scripts->length, 1);
     EXPECT_EQ(((Script*)runtime.scripts->data[0])->profile, &js_profile);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, UsesSharedCommonJsResolverAndModuleRegistry) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+
+    const char source[] =
+        "var first = require('./main.cjs'); "
+        "var second = require('./main.cjs'); "
+        "[first.answer, second.answer, globalThis.__interp_cjs_main_loads, "
+        "globalThis.__interp_cjs_dep_loads, first === second, typeof module];";
+    Item result = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_cjs/entry.js", NULL);
+
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, flt2it(42.0).item);
+    EXPECT_EQ(js_elements_get_int(result, 1).item, flt2it(42.0).item);
+    EXPECT_EQ(js_elements_get_int(result, 2).item, flt2it(1.0).item);
+    EXPECT_EQ(js_elements_get_int(result, 3).item, flt2it(1.0).item);
+    EXPECT_EQ(js_elements_get_int(result, 4).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 5),
+        js_make_string("undefined")).item, b2it(true));
+    ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_cjs/main.cjs"),
+        nullptr);
+    ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_cjs/dep.cjs"),
+        nullptr);
+    EXPECT_EQ(runtime.eval_context->active_module_state->module_id,
+        ((Script*)runtime.scripts->data[0])->module_state_id);
 
     runtime_cleanup(&runtime);
 }

@@ -2027,7 +2027,8 @@ static void js_cjs_note_child(Item child_filename, Item child_exports) {
     js_array_push(children, child);
 }
 
-char* js_wrap_cjs_source(const char* source, const char* filename) {
+static char* js_wrap_cjs_source_with_suffix(const char* source,
+        const char* filename, const char* suffix) {
     char filename_buf[2048];
     snprintf(filename_buf, sizeof(filename_buf), "%s", filename);
     js_normalize_path_separators(filename_buf);
@@ -2042,7 +2043,7 @@ char* js_wrap_cjs_source(const char* source, const char* filename) {
     //        var module = __cjs_module__;
     //        var __filename = "..."; var __dirname = "...";
     //        <original source>
-    //        export default __cjs_module__.exports;
+    //        <caller-provided module completion>
     const char* prefix_fmt =
         "var __cjs_module__ = {exports: {}};\n"
         "var exports = __cjs_module__.exports;\n"
@@ -2050,11 +2051,6 @@ char* js_wrap_cjs_source(const char* source, const char* filename) {
         "var __filename = \"%s\";\n"
         "var __dirname = \"%.*s\";\n"
         "__lambda_cjs_enter(__cjs_module__, __filename);\n";
-    const char* suffix =
-        "\n__lambda_cjs_complete(__cjs_module__);\n"
-        "__lambda_cjs_leave(__cjs_module__);\n"
-        "export default __cjs_module__.exports;\n";
-
     size_t src_len = strlen(source);
     size_t prefix_size = strlen(prefix_fmt) + strlen(filename_buf) + dir_len + 64;
     size_t total = prefix_size + src_len + strlen(suffix) + 1;
@@ -2065,6 +2061,22 @@ char* js_wrap_cjs_source(const char* source, const char* filename) {
     offset += (int)src_len;
     snprintf(wrapped + offset, total - (size_t)offset, "%s", suffix);
     return wrapped;
+}
+
+char* js_wrap_cjs_source(const char* source, const char* filename) {
+    return js_wrap_cjs_source_with_suffix(source, filename,
+        "\n__lambda_cjs_complete(__cjs_module__);\n"
+        "__lambda_cjs_leave(__cjs_module__);\n"
+        "export default __cjs_module__.exports;\n");
+}
+
+static char* js_wrap_cjs_source_for_ast(const char* source, const char* filename) {
+    // The AST backend returns the completed exports expression directly; it
+    // must not inject ESM syntax merely to project CommonJS's default value.
+    return js_wrap_cjs_source_with_suffix(source, filename,
+        "\n__lambda_cjs_complete(__cjs_module__);\n"
+        "__lambda_cjs_leave(__cjs_module__);\n"
+        "__cjs_module__.exports;\n");
 }
 
 extern "C" Item js_require(Item specifier) {
@@ -2135,11 +2147,16 @@ extern "C" Item js_require(Item specifier) {
     Item ns;
     if (js_is_cjs_file(path_buf)) {
         // Wrap CJS source with module/exports globals
-        char* wrapped = js_wrap_cjs_source(source, path_buf);
+        char* wrapped = js_ast_interpreter_requested()
+            ? js_wrap_cjs_source_for_ast(source, path_buf)
+            : js_wrap_cjs_source(source, path_buf);
         jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
         jm_track_active_js_transpile(NULL, NULL, wrapped);
-        ns = transpile_js_module_to_mir(runtime, wrapped, path_buf);
+        ns = js_ast_interpreter_requested()
+            ? js_interp_execute_module_source(runtime, wrapped, strlen(wrapped),
+                path_buf, false, NULL)
+            : transpile_js_module_to_mir(runtime, wrapped, path_buf);
         if (item_is_error(ns)) {
             // A synthetic JS try block changes a CJS file's top-level lexical
             // bindings into block bindings; close metadata here on abrupt exit
@@ -2148,6 +2165,10 @@ extern "C" Item js_require(Item specifier) {
         }
         jm_clear_active_js_transpile(NULL, NULL, wrapped);
         mem_free(wrapped);
+        if (!item_is_error(ns)) {
+            Item module = js_cjs_find_module(resolved_spec);
+            js_cjs_update_cached_default(resolved_spec, module);
+        }
     } else {
         // ESM — transpile as-is
         ns = transpile_js_module_to_mir(runtime, source, path_buf);

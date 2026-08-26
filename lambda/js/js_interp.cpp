@@ -13,6 +13,8 @@
 extern __thread EvalContext* context;
 extern Item js_make_number(double value);
 extern "C" Item bigint_from_string(const char* value, int length);
+void jm_resolve_module_path(const char* base_file, const char* specifier,
+    int spec_len, char* output, int output_size);
 
 enum JsInterpCompletionKind : uint8_t {
     JS_INTERP_NORMAL,
@@ -110,6 +112,31 @@ static Item js_interp_frame_home_class(const JsInterpFrame* frame) {
     return frame && frame->home_class_home
         ? (Item){.item = *frame->home_class_home} : ItemNull;
 }
+
+struct JsInterpCurrentFileScope {
+    const char* previous;
+
+    explicit JsInterpCurrentFileScope(const char* filename)
+        : previous(context ? context->current_file : NULL) {
+        if (context) context->current_file = filename;
+    }
+    ~JsInterpCurrentFileScope() {
+        if (context) context->current_file = previous;
+    }
+    JsInterpCurrentFileScope(const JsInterpCurrentFileScope&) = delete;
+    JsInterpCurrentFileScope& operator=(const JsInterpCurrentFileScope&) = delete;
+};
+
+struct JsInterpModuleStateScope {
+    uint32_t previous;
+
+    JsInterpModuleStateScope() : previous(js_get_active_module_state_id()) {}
+    ~JsInterpModuleStateScope() {
+        if (previous != UINT32_MAX) js_set_active_module_state_id(previous);
+    }
+    JsInterpModuleStateScope(const JsInterpModuleStateScope&) = delete;
+    JsInterpModuleStateScope& operator=(const JsInterpModuleStateScope&) = delete;
+};
 
 static Item js_interp_super_this(JsInterpFrame* frame) {
     Item value = js_interp_frame_this(frame);
@@ -394,12 +421,18 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
         }
         js_set_module_var(entry->slot, value);
         if (!entry->is_lexical) {
-            js_define_global_var_property(key, value);
+            // Module declarations, including the synthetic CJS wrapper,
+            // must never publish their cells as realm-global properties.
+            if (!frame->script->is_module) js_define_global_var_property(key, value);
         } else if (initialize) {
-            js_global_lexical_declare(key, value, entry->is_const ? 1 : 0);
+            if (!frame->script->is_module) {
+                js_global_lexical_declare(key, value, entry->is_const ? 1 : 0);
+            }
         } else {
-            Item set_result = js_global_lexical_set_if_exists(key, value);
-            if (item_is_error(set_result)) return set_result;
+            if (!frame->script->is_module) {
+                Item set_result = js_global_lexical_set_if_exists(key, value);
+                if (item_is_error(set_result)) return set_result;
+            }
         }
         return value;
     }
@@ -1196,6 +1229,11 @@ static JsInterpCompletion js_interp_eval_call(JsInterpFrame* frame, JsCallNode* 
     if (item_is_error(arguments_root.get())) return js_interp_throw(arguments_root.get());
     bool super_call = !construct && js_interp_identifier_is(
         (JsAstNode*)call->function, "super");
+    bool intrinsic_require = !construct && call->function &&
+        call->function->node_type == AST_NODE_IDENT &&
+        js_interp_identifier_is((JsAstNode*)call->function, "require") &&
+        ((JsIdentifierNode*)call->function)->entry == NULL &&
+        !js_with_depth_active();
     if (super_call) {
         // The generic dispatcher installed this constructor's home class,
         // deferred derived `this` binding, and active new.target. Resolve the
@@ -1222,7 +1260,7 @@ static JsInterpCompletion js_interp_eval_call(JsInterpFrame* frame, JsCallNode* 
         callee_root.set(js_interp_member_uses_super(member)
             ? js_super_property_get(this_root.get(), key_root.get())
             : js_get_key_default(this_root.get(), key_root.get()));
-    } else {
+    } else if (!intrinsic_require) {
         JsInterpCompletion callee = js_interp_eval(frame, (JsAstNode*)call->function);
         if (callee.kind != JS_INTERP_NORMAL) return callee;
         callee_root.set(callee.value);
@@ -1272,6 +1310,24 @@ static JsInterpCompletion js_interp_eval_call(JsInterpFrame* frame, JsCallNode* 
             Item result = js_interp_direct_eval(frame, value_root.get());
             return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
         }
+    }
+    if (intrinsic_require &&
+            js_array_length(arguments_root.get()) == 1) {
+        // MIR resolves literal require targets against its compilation unit.
+        // Preserve that exact rule for AST bodies before entering the shared
+        // CJS resolver, whose cache and registry are the single authority.
+        value_root.set(js_elements_get_int(arguments_root.get(), 0));
+        if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+        if (get_type_id(value_root.get()) == LMD_TYPE_STRING && frame->script &&
+                frame->script->reference) {
+            String* requested = it2s(value_root.get());
+            char resolved[512];
+            jm_resolve_module_path(frame->script->reference, requested->chars,
+                (int)requested->len, resolved, (int)sizeof(resolved));
+            value_root.set(js_make_string(resolved));
+        }
+        Item result = js_require(value_root.get());
+        return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
     }
     if (super_call) {
         // SuperCall invokes the parent's [[Construct]] with the active
@@ -2673,6 +2729,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     bool reusing_context = false;
     if (!js_prepare_eval_context(runtime, true, &eval, &reusing_context)) return ItemError;
     (void)eval;
+    JsInterpCurrentFileScope current_file(script->reference);
     Input* input = Input::create(context->pool);
     js_runtime_set_input(input);
     // Rejection happens before declaration instantiation or a user-visible
@@ -2682,6 +2739,9 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
         return js_throw_syntax_error(js_make_string("unsupported AST interpreter script"));
     }
     int global_slots = js_interp_scope_slot_count(script->global_scope);
+    // CJS/ES module evaluation can re-enter this executor through require or
+    // import. The caller's slab is the dynamic state seen after that call.
+    JsInterpModuleStateScope module_state;
     if (!lambda_module_state_prepare(script->module_state_id,
             (uint32_t)(global_slots > 0 ? global_slots : 1)) ||
             !js_set_active_module_state_id(script->module_state_id)) {
@@ -2701,8 +2761,9 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
         ? result.value : result.value;
 }
 
-Item js_interp_execute_source(Runtime* runtime, const char* source,
-        size_t source_length, const char* filename, uint64_t* result_home) {
+static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
+        size_t source_length, const char* filename, bool is_module, bool strict,
+        uint64_t* result_home) {
     if (!runtime || !source) return ItemError;
     JsTranspiler* transpiler = js_transpiler_create(runtime);
     if (!transpiler || !js_transpiler_parse(transpiler, source, source_length)) {
@@ -2717,5 +2778,20 @@ Item js_interp_execute_source(Runtime* runtime, const char* source,
     JsScript* script = js_script_adopt_transpiler(transpiler, runtime,
         filename ? filename : "<inline-js>");
     if (!script) return ItemError;
+    script->is_module = is_module;
+    if (strict) script->strict_mode = true;
     return js_interp_execute_script(runtime, script, result_home);
+}
+
+Item js_interp_execute_source(Runtime* runtime, const char* source,
+        size_t source_length, const char* filename, uint64_t* result_home) {
+    return js_interp_execute_source_mode(runtime, source, source_length, filename,
+        false, false, result_home);
+}
+
+Item js_interp_execute_module_source(Runtime* runtime, const char* source,
+        size_t source_length, const char* filename, bool strict,
+        uint64_t* result_home) {
+    return js_interp_execute_source_mode(runtime, source, source_length, filename,
+        true, strict, result_home);
 }

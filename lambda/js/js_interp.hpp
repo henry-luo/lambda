@@ -10,6 +10,11 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
 Item js_interp_execute_source(Runtime* runtime, const char* source,
                               size_t source_length, const char* filename,
                               uint64_t* result_home);
+// Execute source in a module-private slab. `strict` distinguishes the
+// CommonJS wrapper (sloppy) from an ES module (always strict).
+Item js_interp_execute_module_source(Runtime* runtime, const char* source,
+                                     size_t source_length, const char* filename,
+                                     bool strict, uint64_t* result_home);
 Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
                              uint64_t* result_home);
 bool js_interp_script_is_supported(JsScript* script);
