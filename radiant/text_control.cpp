@@ -102,7 +102,6 @@ void form_control_prop_release(FormControlProp* f) {
     if (f->current_value) { mem_free(f->current_value); f->current_value = nullptr; }
     if (f->custom_validity_msg) { mem_free(f->custom_validity_msg); f->custom_validity_msg = nullptr; }
     if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
-    if (f->history) { te_history_free((EditHistory*)f->history); f->history = nullptr; }
     if (f->preedit_utf8) { mem_free(f->preedit_utf8); f->preedit_utf8 = nullptr; }
 }
 

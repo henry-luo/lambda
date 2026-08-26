@@ -1397,6 +1397,123 @@ RADIANT_C_API Item fn_radiant_text_control(Item node_item) {
     return (Item){.item = b2it(tc_is_text_control(elem) ? 1 : 0)};
 }
 
+// ---- F5: the editing waist -------------------------------------------------
+//
+// Three unit systems meet here and the conversions live only in this block:
+// the buffer is UTF-8 *bytes*, the selection IDL is *UTF-16* code units (that
+// is what selectionStart means), and everything Lambda sees is *codepoints* —
+// `len`, `slice` and `ord` are all codepoint-indexed, so a template computing
+// `slice(value, 0, start)` can only be handed codepoint offsets (ES9).
+
+// Resolve the control's live buffer for offset conversion.
+static const char* radiant_tc_buffer(DomElement* elem, uint32_t* out_len) {
+    *out_len = 0;
+    FormControlProp* f = elem ? elem->form_control() : nullptr;
+    if (!f) return nullptr;
+    if (f->current_value) { *out_len = f->current_value_len; return f->current_value; }
+    if (f->value) { *out_len = (uint32_t)strlen(f->value); return f->value; }
+    return "";
+}
+
+static uint32_t radiant_cp_to_u16(const char* buf, uint32_t len, uint32_t cp) {
+    size_t byte_off = str_utf8_char_to_byte(buf, len, cp);
+    if (byte_off == STR_NPOS || byte_off > len) byte_off = len;
+    return tc_utf8_to_utf16_length(buf, (uint32_t)byte_off);
+}
+
+static uint32_t radiant_u16_to_cp(const char* buf, uint32_t len, uint32_t u16) {
+    uint32_t byte_off = tc_utf16_to_utf8_offset(buf, len, u16);
+    return (uint32_t)str_utf8_byte_to_char(buf, len, byte_off);
+}
+
+// Caret/selection reads, in codepoints.
+static Item radiant_selection_edge(Item node_item, const char* op, bool want_end) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, op, &elem);
+    if (!state || !elem) return ItemNull;
+    uint32_t s = 0, e = 0; uint8_t dir = 0;
+    form_control_get_selection(state, (View*)elem, &s, &e, &dir);
+    uint32_t len = 0;
+    const char* buf = radiant_tc_buffer(elem, &len);
+    if (!buf) return ItemNull;
+    return radiant_int_item((int64_t)radiant_u16_to_cp(buf, len, want_end ? e : s));
+}
+
+RADIANT_C_API Item fn_radiant_selection_start(Item node_item) {
+    return radiant_selection_edge(node_item, "SELECTION_START", false);
+}
+
+RADIANT_C_API Item fn_radiant_selection_end(Item node_item) {
+    return radiant_selection_edge(node_item, "SELECTION_END", true);
+}
+
+RADIANT_C_API Item fn_radiant_set_selection(Item node_item, Item start_item, Item end_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_SELECTION", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    uint32_t len = 0;
+    const char* buf = radiant_tc_buffer(elem, &len);
+    if (!buf) return (Item){.item = b2it(0)};
+    int64_t s = it2l(start_item), e = it2l(end_item);
+    if (s < 0) s = 0;
+    if (e < s) e = s;
+    form_control_set_selection(state, (View*)elem,
+                               radiant_cp_to_u16(buf, len, (uint32_t)s),
+                               radiant_cp_to_u16(buf, len, (uint32_t)e), 0);
+    return (Item){.item = b2it(1)};
+}
+
+// Counts splices this waist has performed. The engine samples it either side of
+// a beforeinput dispatch so it can tell "the applier edited" from "the applier
+// claimed the intent but changed nothing" — a maxlength-blocked keystroke is
+// the second, and it must not produce an `input` event.
+static uint64_t g_radiant_splice_epoch = 0;
+
+extern "C" uint64_t radiant_splice_epoch(void) { return g_radiant_splice_epoch; }
+
+// The splice itself stays native (ES9): the template decides *what* range is
+// replaced with *what* text, the engine owns the buffer, the mirrors and the
+// caret. Events are deliberately not fired here — this runs inside beforeinput,
+// and the engine dispatches `input` after the applier returns, exactly as it
+// does for its own splice.
+RADIANT_C_API Item fn_radiant_replace_range(Item node_item, Item start_item,
+                                            Item end_item, Item text_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "REPLACE_RANGE", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    if (!tc_is_text_control(elem)) {
+        log_error("JUBE_RADIANT_REPLACE_RANGE: <%s> is not a text control",
+                  elem->tag_name ? elem->tag_name : "?");
+        return (Item){.item = b2it(0)};
+    }
+    uint32_t len = 0;
+    const char* buf = radiant_tc_buffer(elem, &len);
+    if (!buf) return (Item){.item = b2it(0)};
+
+    int64_t cp_start = it2l(start_item), cp_end = it2l(end_item);
+    if (cp_start < 0) cp_start = 0;
+    if (cp_end < cp_start) cp_end = cp_start;
+    size_t b_start = str_utf8_char_to_byte(buf, len, (size_t)cp_start);
+    size_t b_end = str_utf8_char_to_byte(buf, len, (size_t)cp_end);
+    // A codepoint index past the end clamps to the end rather than failing:
+    // a template computing `len(value)` as an end offset is asking for exactly
+    // that, and STR_NPOS would otherwise splice at a garbage offset.
+    if (b_start == STR_NPOS || b_start > len) b_start = len;
+    if (b_end == STR_NPOS || b_end > len) b_end = len;
+
+    const char* repl = fn_to_cstr(text_item);
+    if (!repl) repl = "";
+    uint32_t repl_len = (uint32_t)strlen(repl);
+    // A collapsed range with nothing to insert changes no bytes; treating it as
+    // a splice would raise the epoch and manufacture an `input` event.
+    if (b_start == b_end && repl_len == 0) return (Item){.item = b2it(1)};
+    bool ok = te_replace_byte_range_no_events(
+        elem, state, (View*)elem, (uint32_t)b_start, (uint32_t)b_end,
+        repl, repl_len);
+    if (ok) g_radiant_splice_epoch++;
+    return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
 RADIANT_C_API Item fn_radiant_free(Item node_item) {
     DomNode* node = radiant_dom_node_from_item(node_item, "FREE");
     if (!node) return ItemNull;
@@ -1795,6 +1912,15 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_custom_validity(Item node)", (fn_ptr)fn_radiant_custom_validity},
     {"text_control", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_text_control, JUBE_FN_NONE,
      "Item fn_radiant_text_control(Item node)", (fn_ptr)fn_radiant_text_control},
+    // F5 editing waist — all offsets in codepoints
+    {"selection_start", "fn(node: dom_node) -> int", (fn_ptr)fn_radiant_selection_start, JUBE_FN_NONE,
+     "Item fn_radiant_selection_start(Item node)", (fn_ptr)fn_radiant_selection_start},
+    {"selection_end", "fn(node: dom_node) -> int", (fn_ptr)fn_radiant_selection_end, JUBE_FN_NONE,
+     "Item fn_radiant_selection_end(Item node)", (fn_ptr)fn_radiant_selection_end},
+    {"set_selection", "fn(node: dom_node, start: int, end: int) -> bool", (fn_ptr)fn_radiant_set_selection, JUBE_FN_NONE,
+     "Item fn_radiant_set_selection(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_selection},
+    {"replace_range", "fn(node: dom_node, start: int, end: int, text: string) -> bool", (fn_ptr)fn_radiant_replace_range, JUBE_FN_NONE,
+     "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
     {"free", "fn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
     {"layout", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,

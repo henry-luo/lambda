@@ -2628,7 +2628,7 @@ struct FormControlProp {
     // ------------------------------------------------------------------
     char*    value_at_focus;
     uint32_t value_at_focus_len;
-    void*    history;   // EditHistory*; lazy
+    // (the undo ring moved to the form ViewState in DocState — ESO43)
 
     // ------------------------------------------------------------------
     // F4 (Radiant_Design_Form_Input.md §3.1, §3.8):
