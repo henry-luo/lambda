@@ -115,6 +115,19 @@ JS_FORWARD_EXPRESSION(int, js_microtask_pending_count, (void),
         runtime_async_deque_size(&microtask_deque)))
 JS_FORWARD_EXPRESSION(bool, js_microtask_is_running, (void), (js_active_runtime_state && microtask_running))
 
+struct JsEventLoopCallbackScope {
+    bool previous;
+
+    JsEventLoopCallbackScope() : previous(js_runtime_state.event_loop.callback_running) {
+        js_runtime_state.event_loop.callback_running = true;
+    }
+    ~JsEventLoopCallbackScope() {
+        js_runtime_state.event_loop.callback_running = previous;
+    }
+    JsEventLoopCallbackScope(const JsEventLoopCallbackScope&) = delete;
+    JsEventLoopCallbackScope& operator=(const JsEventLoopCallbackScope&) = delete;
+};
+
 static Item js_run_queued_callback(Item cb, Item resource, Item als_context, Item domain) {
     RootFrame roots(6);
     // Queue pop clears the persistent slots before context setup can allocate;
@@ -129,6 +142,7 @@ static Item js_run_queued_callback(Item cb, Item resource, Item als_context, Ite
 
     previous_resource_root.set(js_async_hooks_enter_resource(resource_root.get()));
     previous_domain_root.set(js_domain_set_stack(domain_root.get()));
+    JsEventLoopCallbackScope callback_scope;
     Item result = js_als_context_call(als_root.get(), callback_root.get(), ItemNull, ItemNull, 0);
     js_domain_restore_stack(previous_domain_root.get());
     js_async_hooks_restore_resource(previous_resource_root.get());
@@ -140,9 +154,10 @@ extern "C" void js_microtask_flush(void) {
 }
 
 static void js_drain_async_queue(RuntimeAsyncDeque* queue,
-        Rooted<Item>& first_error_root, int& safety) {
+        Rooted<Item>& first_error_root, int& safety, int limit) {
+    int drained = 0;
     while (runtime_async_deque_size(queue) > 0 &&
-            safety < TASK_FLUSH_WORK_BUDGET) {
+            safety < TASK_FLUSH_WORK_BUDGET && drained < limit) {
         Item record[4] = {};
         if (!runtime_async_deque_pop(queue, record)) break;
         bool previous_running = microtask_running;
@@ -153,6 +168,7 @@ static void js_drain_async_queue(RuntimeAsyncDeque* queue,
             first_error_root.set(result);
         }
         safety++;
+        drained++;
     }
 }
 
@@ -163,12 +179,29 @@ extern "C" Item js_microtask_flush_result(void) {
     while ((runtime_async_deque_size(&next_tick_deque) > 0 ||
             runtime_async_deque_size(&microtask_deque) > 0) &&
            safety < TASK_FLUSH_WORK_BUDGET) {
-        js_drain_async_queue(&next_tick_deque, first_error_root, safety);
-        js_drain_async_queue(&microtask_deque, first_error_root, safety);
+        js_drain_async_queue(&next_tick_deque, first_error_root, safety,
+            TASK_FLUSH_WORK_BUDGET);
+        js_drain_async_queue(&microtask_deque, first_error_root, safety,
+            TASK_FLUSH_WORK_BUDGET);
     }
     if (runtime_async_deque_size(&next_tick_deque) == 0 &&
             runtime_async_deque_size(&microtask_deque) == 0) {
         js_promise_flush_unhandled_checks();
+    }
+    return first_error_root.get();
+}
+
+// Advance exactly one queued job.  Resumable language runtimes use this to
+// wait for their own promise without consuming unrelated jobs from the shared
+// page turn.
+extern "C" Item js_microtask_step(void) {
+    RootFrame roots(1);
+    Rooted<Item> first_error_root(roots, ItemNull);
+    int safety = 0;
+    if (runtime_async_deque_size(&next_tick_deque) > 0) {
+        js_drain_async_queue(&next_tick_deque, first_error_root, safety, 1);
+    } else if (runtime_async_deque_size(&microtask_deque) > 0) {
+        js_drain_async_queue(&microtask_deque, first_error_root, safety, 1);
     }
     return first_error_root.get();
 }
@@ -268,6 +301,7 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
         callback_root.set(raf_pop(&id));
         (void)id;
         if (js_is_callable(callback_root.get())) {
+            JsEventLoopCallbackScope callback_scope;
             Item timestamp = timestamp_root.get();
             js_call_function(callback_root.get(), ItemNull, &timestamp, 1);
             called++;
@@ -544,6 +578,7 @@ static void timer_fire_cb(uv_timer_t *handle) {
         previous_domain_root, ItemNull);
     JsTimerRuntimeScope scope;
     if (timer_runtime_enter(th, &scope)) {
+        JsEventLoopCallbackScope callback_scope;
         previous_resource_root.set(js_async_hooks_enter_resource(th->async_resource));
         previous_domain_root.set(js_domain_set_stack(th->domain));
         if (js_is_callable(th->callback)) {
@@ -1340,7 +1375,7 @@ JS_FORWARD_VOID( js_event_loop_abandon_all_timers, (void), timer_abandon_all_wit
 // Event Loop Lifecycle
 // =============================================================================
 
-extern "C" void js_event_loop_init(void) {
+extern "C" void js_event_loop_attach_lambda_scheduler(void) {
     lambda_concurrency_js_init();
     Runtime* runtime = context ? context->runtime : NULL;
     if (context && !context->scheduler && runtime && runtime->js_runtime_used) {
@@ -1354,6 +1389,10 @@ extern "C" void js_event_loop_init(void) {
             runtime->scheduler = context->scheduler;
         }
     }
+}
+
+extern "C" void js_event_loop_init(void) {
+    js_event_loop_attach_lambda_scheduler();
     if (timer_handle_count > 0) {
         // Host-driven sessions (Radiant `view`) share ONE event loop across all
         // of a page's script executions, matching the browser. A later page

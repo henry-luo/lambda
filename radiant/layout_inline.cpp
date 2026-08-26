@@ -284,6 +284,42 @@ static bool ruby_annotation_node(DomNode* node) {
     return node && node->is_element() && node->tag() == MARKUP_NAME_RT;
 }
 
+static bool ruby_has_visible_base_content(ViewSpan* ruby) {
+    for (View* child = ruby ? ruby->first_child : nullptr; child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child)) {
+            continue;
+        }
+        if (child->view_type == RDT_VIEW_INLINE && child->tag() == MARKUP_NAME_RT) {
+            continue;
+        }
+        if (child->view_type == RDT_VIEW_TEXT &&
+            view_is_collapsed_whitespace_text(child, ruby)) {
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
+static bool ruby_ends_with_annotation_space(DomNode* first_child, ViewSpan* ruby) {
+    DomNode* last = nullptr;
+    for (DomNode* child = first_child; child; child = child->next_sibling) {
+        last = child;
+    }
+    if (!last || !last->is_text() || !text_is_all_collapsible_space(
+            lam::dom_as<DOM_NODE_TEXT>(last), ruby)) {
+        return false;
+    }
+    for (DomNode* child = last->prev_sibling; child; child = child->prev_sibling) {
+        if (child->is_text() && text_is_all_collapsible_space(
+                lam::dom_as<DOM_NODE_TEXT>(child), ruby)) {
+            continue;
+        }
+        return ruby_annotation_node(child);
+    }
+    return false;
+}
+
 static bool ruby_has_text_box_trim_ancestor(const ViewSpan* ruby, uint8_t trim) {
     for (const DomNode* node = ruby ? static_cast<const DomNode*>(ruby) : nullptr;
          node; node = node->parent) {
@@ -359,10 +395,14 @@ static bool layout_prepare_simple_ruby_column(ViewSpan* ruby,
 }
 
 void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby) {
-    if (!ruby || ruby->tag() != MARKUP_NAME_RUBY || !ruby->ext ||
-        !ruby->ext->has_simple_ruby_column_geometry) {
+    if (!ruby || ruby->tag() != MARKUP_NAME_RUBY || !ruby->ext) {
         return;
     }
+    if (ruby->ext->has_empty_ruby_base) {
+        ruby->width = ruby->ext->ruby_empty_inline_advance;
+        return;
+    }
+    if (!ruby->ext->has_simple_ruby_column_geometry) return;
     View* annotation_view = ruby->first_placed_child();
     if (!annotation_view || annotation_view->view_type != RDT_VIEW_TEXT) return;
     annotation_view = annotation_view->next();
@@ -421,6 +461,11 @@ static void contribute_over_ruby_annotation_line_metrics(Linebox* base_line,
         float base_ascender = max(
             base_line_before_annotation->max_ascender,
             base_line_before_annotation->max_atomic_inline_height);
+        if (base_ascender <= 0.0f) {
+            // css-ruby: an annotation-first ruby has an anonymous empty base
+            // whose inline box still contributes the parent strut metrics.
+            base_ascender = base_block->init_ascender;
+        }
         base_line_extent = max(
             base_line_extent,
             base_block->line_height);
@@ -895,6 +940,7 @@ static void compute_span_from_collapsed_line_fragment(ViewSpan* span) {
 static void compute_empty_span_bounding_box(ViewSpan* span, FontHandle* fallback_fh) {
     if (span->has_collapsed_line_fragment_union()) {
         compute_span_from_collapsed_line_fragment(span);
+        layout_apply_simple_ruby_column_geometry(span);
         return;
     }
     // CSS 2.1 section 9.4.2: only inline-axis decorations keep an empty span present.
@@ -915,6 +961,7 @@ static void compute_empty_span_bounding_box(ViewSpan* span, FontHandle* fallback
         span->width = 0.0f;
         span->height = 0.0f;
     }
+    layout_apply_simple_ruby_column_geometry(span);
 }
 
 void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh) {
@@ -2049,10 +2096,16 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     float inline_fragment_start_x = lycon->line.advance_x;
     float inline_fragment_start_y = lycon->block.advance_y;
     bool is_ruby_container = display.inner == CSS_VALUE_RUBY;
+    bool empty_ruby_base = false;
+    float empty_ruby_inline_advance = 0.0f;
     if (is_ruby_container) {
         // annotation must not affect a later base-sized ruby.
         DomElementExt* ruby_ext = span->ensure_ext();
-        if (ruby_ext) ruby_ext->has_simple_ruby_column_geometry = false;
+        if (ruby_ext) {
+            ruby_ext->has_simple_ruby_column_geometry = false;
+            ruby_ext->has_empty_ruby_base = false;
+            ruby_ext->ruby_empty_inline_advance = 0.0f;
+        }
         float available_ruby_start_overhang = lycon->line.has_space
             ? layout_measure_space_advance(lycon, font_box_handle(&lycon->font),
                                            lycon->font.style)
@@ -2063,6 +2116,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (!ruby_annotation_node(base_child)) {
                 layout_flow_node(lycon, base_child);
             }
+        }
+
+        empty_ruby_base = !ruby_has_visible_base_content(span);
+        if (empty_ruby_base && ruby_ext) {
+            ruby_ext->has_empty_ruby_base = true;
         }
 
         float base_start_x = span->x + inline_left_edge;
@@ -2092,6 +2150,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     annotation_span, column_width);
                 float annotation_x = base_start_x +
                     (column_width - annotation_span->width) / 2.0f;
+                if (empty_ruby_base) {
+                    annotation_x = base_start_x + empty_ruby_inline_advance;
+                    empty_ruby_inline_advance += annotation_span->width;
+                }
                 layout_prepare_simple_ruby_column(
                     span, has_simple_ruby_pair, base_start_x, column_width,
                     annotation_span->width, available_ruby_start_overhang, &annotation_x,
@@ -2125,6 +2187,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         annotation_span, &annotation_line);
                 }
             }
+        }
+        if (empty_ruby_base && ruby_ends_with_annotation_space(child, span)) {
+            empty_ruby_inline_advance += layout_measure_space_advance(
+                lycon, font_box_handle(&lycon->font), lycon->font.style);
+        }
+        if (empty_ruby_base && empty_ruby_inline_advance > 0.0f) {
+            if (ruby_ext) ruby_ext->ruby_empty_inline_advance = empty_ruby_inline_advance;
+            lycon->line.advance_x += empty_ruby_inline_advance;
         }
     } else if (child) {
         do {

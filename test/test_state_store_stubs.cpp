@@ -218,6 +218,12 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     (void)new_len;
 }
 
+void te_history_free(EditHistory* history) {
+    (void)history;
+    // this standalone target never creates editing history; teardown still
+    // needs the production-owned symbol for form-state destruction.
+}
+
 void tc_set_selection_range(DomElement* elem, uint32_t start, uint32_t end,
                             uint8_t dir) {
     (void)elem;

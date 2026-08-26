@@ -21,6 +21,8 @@ void* heap_data_calloc(size_t size);
 void heap_retag_container(Container* object, TypeId expected, TypeId replacement);
 void heap_register_gc_root(uint64_t* slot);
 void heap_unregister_gc_root(uint64_t* slot);
+bool heap_try_register_gc_object_root(void* object);
+void heap_unregister_gc_object_root(void* object);
 bool heap_try_register_gc_root_range(uint64_t* base, int count);
 void heap_register_gc_root_range(uint64_t* base, int count);
 void heap_unregister_gc_root_range(uint64_t* base);

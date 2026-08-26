@@ -28,7 +28,7 @@ extern "C" {
 
 static JsAstNode* alloc_ts_ast_node(JsTranspiler* tp, int node_type,
         SourceSpan span, size_t size) {
-    JsAstNode* ast_node = (JsAstNode*)pool_alloc(tp->ast_pool, size);
+    JsAstNode* ast_node = (JsAstNode*)pool_alloc(tp->pool, size);
     memset(ast_node, 0, size);
     ast_node->node_type = (JsAstNodeType)node_type;
     ast_node->source_span = span;

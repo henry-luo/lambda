@@ -468,6 +468,16 @@ extern "C" void heap_register_gc_root(uint64_t* slot) {
     (void)heap_try_register_gc_root(slot);
 }
 
+extern "C" bool heap_try_register_gc_object_root(void* object) {
+    if (!context || !context->heap || !context->heap->gc || !object) return false;
+    return gc_try_register_object_root(context->heap->gc, object) != 0;
+}
+
+extern "C" void heap_unregister_gc_object_root(void* object) {
+    if (!context || !context->heap || !context->heap->gc || !object) return;
+    gc_unregister_object_root(context->heap->gc, object);
+}
+
 extern "C" bool heap_register_gc_root_for(Context* runtime, uint64_t* slot) {
     EvalContext* owner = (EvalContext*)runtime;
     if (!owner || !owner->heap || !owner->heap->gc || !slot) return false;

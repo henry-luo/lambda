@@ -342,8 +342,8 @@ extern "C" void lambda_module_state_release(uint32_t module_id) {
     if (state->vars && state->vars_registered) {
         heap_unregister_gc_root_range((uint64_t*)state->vars);
     }
-    if (owner->active_js_module_state == state) {
-        owner->active_js_module_state = NULL;
+    if (owner->active_module_state == state) {
+        owner->active_module_state = NULL;
     }
     mem_free(state->vars);
     mem_free(state->var_payloads);
@@ -428,10 +428,10 @@ extern "C" bool lambda_module_state_reserve(uint32_t var_count,
     return true;
 }
 
-extern "C" bool lambda_active_js_module_state_ensure_vars(
+extern "C" bool lambda_active_module_state_ensure_vars(
         uint32_t required_var_count) {
     EvalContext* owner = context;
-    LambdaModuleState* state = owner ? owner->active_js_module_state : NULL;
+    LambdaModuleState* state = owner ? owner->active_module_state : NULL;
     if (!state || required_var_count <= state->var_count) return state != NULL;
 
     Item* vars = (Item*)mem_calloc(required_var_count, sizeof(Item), MEM_CAT_EVAL);
@@ -464,6 +464,13 @@ extern "C" bool lambda_active_js_module_state_ensure_vars(
     state->var_capacity = required_var_count;
     state->vars_registered = true;
     return true;
+}
+
+extern "C" bool lambda_active_js_module_state_ensure_vars(
+        uint32_t required_var_count) {
+    // Preserve the imported symbol for cached JS MIR built before the shared
+    // EvalContext selector was named generically.
+    return lambda_active_module_state_ensure_vars(required_var_count);
 }
 
 extern "C" bool lambda_module_state_bind_static(uint32_t module_id,
@@ -577,7 +584,7 @@ extern "C" void lambda_module_state_reset(void) {
 extern "C" void lambda_module_state_destroy(void) {
     EvalContext* owner = context;
     if (!owner || !owner->module_states) return;
-    owner->active_js_module_state = NULL;
+    owner->active_module_state = NULL;
     for (uint32_t i = 0; i < owner->module_state_capacity; i++) {
         LambdaModuleState* state = owner->module_states[i];
         if (!state) continue;

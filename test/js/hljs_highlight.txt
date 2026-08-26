@@ -18,13 +18,13 @@ true
 JavaScript
 Python
 javascript
-false
+true
 python
-false
+true
 css
-false
+true
 json
-false
+true
 auto-error
 auto-error
 true

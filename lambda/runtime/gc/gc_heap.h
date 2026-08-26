@@ -45,6 +45,9 @@ extern "C" {
 // Internal GC-only allocation tag. It is deliberately outside the public
 // TypeId/Item tag space because a JS environment is addressed as a raw Item[].
 #define GC_TYPE_JS_ENV   0x100
+// Interpreter lexical records need a raw-pointer outer edge and therefore
+// cannot use the Item-array layout above.
+#define GC_TYPE_JS_INTERP_ENV 0x101
 
 /**
  * GCHeader - 16 bytes prepended to every GC-managed allocation.
@@ -124,6 +127,11 @@ int  gc_native_seen_seen_or_add(gc_native_seen_t* seen, void* ptr);
 // Default data zone usage threshold (75% of block size) to trigger GC
 #define GC_DATA_ZONE_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 3 / 4)
 
+// Object structs live outside the data zone. Keep their allocation pressure
+// visible to the same collector so short-lived lexical environments do not
+// grow the object zone without reaching a data-zone allocation safepoint.
+#define GC_OBJECT_HEAP_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 4)
+
 // Initial registered root slot capacity; grows dynamically as needed.
 #define GC_ROOT_SLOTS_INITIAL 256
 
@@ -133,6 +141,11 @@ typedef struct gc_root_range {
     uint64_t* base;
     int count;
 } gc_root_range_t;
+
+typedef struct gc_object_root {
+    void* object;
+    int ref_count;
+} gc_object_root_t;
 
 typedef struct gc_weak_slot {
     uint64_t* slot;
@@ -233,6 +246,11 @@ typedef struct gc_heap {
     int root_slot_count;
     int root_slot_capacity;
 
+    // Exact roots for raw GC-managed runtime records.
+    gc_object_root_t* object_roots;
+    int object_root_count;
+    int object_root_capacity;
+
     // Weak slots participate in identity caches without marking their Item.
     // Dead referents are cleared after tracing and before object sweep.
     gc_weak_slot_t* weak_slots;
@@ -248,6 +266,7 @@ typedef struct gc_heap {
 
     // Collection trigger
     size_t gc_threshold;            // data zone bytes that trigger auto-collection
+    size_t object_threshold;        // live object bytes that trigger auto-collection
     int collecting;                 // re-entrancy guard (1 = GC in progress)
     gc_collect_callback_t collect_callback;  // called when threshold exceeded
 
@@ -434,6 +453,8 @@ int gc_try_register_root(gc_heap_t* gc, uint64_t* slot);
  * @param slot pointer previously registered with gc_register_root
  */
 void gc_unregister_root(gc_heap_t* gc, uint64_t* slot);
+int gc_try_register_object_root(gc_heap_t* gc, void* object);
+void gc_unregister_object_root(gc_heap_t* gc, void* object);
 
 void gc_no_gc_scope_begin(gc_heap_t* gc);
 void gc_no_gc_scope_end(gc_heap_t* gc);

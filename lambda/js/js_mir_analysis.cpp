@@ -259,7 +259,8 @@ static int jm_count_suspensions(JsAstNode* node, JsSuspensionKind kind) {
         }
         return count;
     }
-    case JS_AST_NODE_CLASS_DECLARATION: {
+    case JS_AST_NODE_CLASS_DECLARATION:
+    case JS_AST_NODE_CLASS_EXPRESSION: {
         // Count yields in computed property names of class members (they're in outer generator scope)
         JsClassNode* cls = (JsClassNode*)node;
         int count = JM_COUNT(cls->superclass);
@@ -283,7 +284,6 @@ static int jm_count_suspensions(JsAstNode* node, JsSuspensionKind kind) {
     case JS_AST_NODE_FUNCTION_DECLARATION:
     case JS_AST_NODE_FUNCTION_EXPRESSION:
     case JS_AST_NODE_ARROW_FUNCTION:
-    case JS_AST_NODE_CLASS_EXPRESSION:
     case JS_AST_NODE_STATIC_BLOCK:
     case JS_AST_NODE_REST_PROPERTY:
     case JS_AST_NODE_PROGRAM:

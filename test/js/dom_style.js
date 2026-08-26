@@ -33,6 +33,7 @@ console.log(csColor !== ""); // true
 // computed style should include inline values
 var csBg = cs.backgroundColor;
 console.log(csBg !== ""); // true
+console.log(cs.paddingTop); // 5px
 
 // --- getComputedStyle on element with set styles ---
 var cs2 = getComputedStyle(plain);
