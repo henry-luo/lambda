@@ -321,6 +321,24 @@ TEST(LambdaRdParserPoc, ParsesForClausesAndProceduralWhile) {
         NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
 }
 
+TEST(LambdaRdParserPoc, CentralizesExpectedTokenDiagnostics) {
+    const char* source = "for item in items group item";
+    LambdaParseError error = {};
+    EXPECT_EQ(lambda_rd_parse_source(source, strlen(source), NULL, NULL,
+        NULL, &error), LAMBDA_PARSE_ERROR);
+    EXPECT_STREQ(error.message, "expected 'by'");
+    EXPECT_EQ(error.actual_kind, LAMBDA_TOK_IDENTIFIER);
+}
+
+TEST(LambdaRdParserPoc, CentralizesStatementSeparatorDiagnostics) {
+    const char* source = "1;;2";
+    LambdaParseError error = {};
+    EXPECT_EQ(lambda_rd_parse_source(source, strlen(source), NULL, NULL,
+        NULL, &error), LAMBDA_PARSE_ERROR);
+    EXPECT_STREQ(error.message, "empty statement between ';' separators");
+    EXPECT_EQ(error.actual_kind, LAMBDA_TOK_SEMICOLON);
+}
+
 TEST(LambdaRdParserPoc, ParsesExpressionAndBlockMatchArms) {
     const char* source =
         "match value {\n"
@@ -480,6 +498,16 @@ TEST(LambdaRdParserPoc, RejectsKnownStatementScopeAmbiguities) {
         NULL, NULL, NULL, &error), LAMBDA_PARSE_OK);
     EXPECT_EQ(lambda_rd_parse_source("(\"a\" < \"b\")", strlen("(\"a\" < \"b\")"),
         NULL, NULL, NULL, &error), LAMBDA_PARSE_OK);
+}
+
+TEST(LambdaRdParserPoc, RecoversSyntaxDiagnosticsAfterTopLevelSeparator) {
+    const char* source = "let = 1; let ok = 2";
+    LambdaParseReport report = {};
+    EXPECT_EQ(lambda_rd_parse_recovering(source, strlen(source), &report),
+        LAMBDA_PARSE_ERROR);
+    ASSERT_GE(report.error_count, 1u);
+    EXPECT_EQ(report.errors[0].actual_kind, LAMBDA_TOK_EQ);
+    EXPECT_TRUE(report.recovered);
 }
 
 TEST(LambdaRdParserPoc, ParsesMultilineTypesJoinsAndAdjacentContentForms) {

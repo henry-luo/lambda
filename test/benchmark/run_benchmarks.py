@@ -456,12 +456,44 @@ def record_status(results, suite, name, engine, status, detail=None):
         row.setdefault("_status_detail", {})[engine] = detail
 
 
-def record_time_result(results, row, suite, name, engine, wall_ms, exec_ms, ok, status, detail=None):
+# Two measurement sets share one process launch wherever they can.
+#
+# SET 1 ("exec") is the historical series: the engine's own __TIMING__ figure,
+# which excludes its startup and compilation. Comparable back to Result18.
+#
+# SET 2 ("e2e") answers a different question -- how long does it take to RUN
+# this script -- so it is wall-clock from invocation to exit, and every engine
+# pays its own startup and compilation inside that number. That is the only
+# fair way to time Lambda's auto tier, which JITs during the measured region;
+# charging that to exec time while Node.js reports post-warmup work would
+# compare two different things.
+#
+# time_run_once returns wall AND exec from the SAME run, so for the reference
+# engines both sets come from one launch. Only the MIR columns need a second
+# pass, because set 1 pins LAMBDA_TIER=jit while set 2 must use the shipped
+# auto tier.
+def record_time_result(results, row, suite, name, engine, wall_ms, exec_ms, ok, status,
+                       detail=None, e2e_engine=None):
     val = exec_ms if ok and exec_ms is not None else (wall_ms if ok else None)
     results[suite][name][engine] = val
     row[engine] = val
     record_status(results, suite, name, engine, status, detail)
+    if e2e_engine:
+        e2e_val = wall_ms if ok else None
+        results[suite][name][e2e_engine] = e2e_val
+        row[e2e_engine] = e2e_val
+        record_status(results, suite, name, e2e_engine, status, detail)
     return val
+
+
+# Set 1 pins the JIT explicitly rather than inheriting LAMBDA_TIER from the
+# caller's environment. The shipped default became interpreter-first, so an
+# unpinned run silently measured a different execution path and produced
+# numbers that looked like a catastrophic regression against the published
+# series.
+def lambda_run_cmd(script_path, tier):
+    prefix = f"LAMBDA_TIER={tier} " if tier else ""
+    return f"{prefix}{LAMBDA_EXE} run {script_path}"
 
 
 def make_qjs_wrapper(js_path):
@@ -577,7 +609,7 @@ def make_jetstream_qjs_wrapper(bench_name, js_path):
 # Build the unified benchmark list
 # ============================================================
 
-def build_benchmark_list(suite_filters, bench_filters, include_text=False):
+def build_benchmark_list(suite_filters, bench_filters, include_text=True):
     """
     Build flat list of benchmarks to run based on suite/bench filters.
     Returns list of dicts with keys:
@@ -605,8 +637,12 @@ def build_benchmark_list(suite_filters, bench_filters, include_text=False):
                 "ref_js": None,
             })
 
-    # Text library benchmarks are intentionally opt-in: they are standalone
-    # LambdaJS workloads without corresponding Lambda or Python implementations.
+    # Text library benchmarks are part of the standard population. They were
+    # opt-in while they lacked Lambda ports; they now have `.ls` implementations
+    # like every other suite, and leaving them out silently produced a 56-row
+    # report that could not be compared against the published 59-row series
+    # (Result35 was generated that way before this was fixed). A suite filter
+    # still selects them normally; only the default changed.
     if include_text or (suite_filters and match_filter("text", suite_filters)):
         for entry in TEXT:
             bench_name, category, ls_path, js_path, py_path = entry
@@ -684,6 +720,15 @@ def time_run_once(cmd, timeout_s):
         wall_ms = (end - start) / 1_000_000
         if proc.returncode != 0:
             return (wall_ms, None, False, f"exit_{proc.returncode}")
+        # Exit code 0 does not mean the benchmark computed the right answer.
+        # These workloads verify themselves and print a FAIL marker when they
+        # do not, but the runner used to record any zero-exit process as "ok" --
+        # which is how a wrong result on the auto tier (awfy/json returning a
+        # number instead of the parsed object) was recorded as a 0.058ms cell
+        # and read as a 40x speedup rather than a bug. Timing a failure path is
+        # worse than having no timing, so it is reported, not measured.
+        if re.search(r"\bFAIL\b", stdout):
+            return (wall_ms, None, False, "wrong_output")
         exec_ms = parse_timing(stdout)
         status = "ok" if exec_ms is not None else "wall_fallback"
         return (wall_ms, exec_ms, True, status)
@@ -819,7 +864,10 @@ def run_native_engine(engine, suite, name, num_runs, timeout_s, results, row):
         print(f" --- ({status})")
         return
     w, e, ok, status, detail = time_run_benchmark(cmd, num_runs, timeout_s)
-    record_time_result(results, row, suite, name, engine, w, e, ok, status, detail)
+    # A native port pays its own process startup inside the wall figure, which
+    # is exactly what set 2 compares against Lambda's auto tier.
+    record_time_result(results, row, suite, name, engine, w, e, ok, status, detail,
+                       e2e_engine=f"{engine}_e2e")
     print(f" {fmt_ms(e if e is not None else w)}")
 
 
@@ -879,9 +927,17 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                                None, None, False, "wrong_output", wrong)
             print(" wrong_output (excluded)")
         else:
-            w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} run {mir_path}", num_runs, timeout_s)
+            w, e, ok, status, detail = time_run_benchmark(
+                lambda_run_cmd(mir_path, "jit"), num_runs, timeout_s)
             record_time_result(results, row, suite, name, "mir", w, e, ok, status, detail)
             print(f" {fmt_ms(e if e is not None else w)}")
+            # Set 2: the same source on the shipped auto tier, timed end to end.
+            print(f"  MIR auto ", end="", flush=True)
+            aw, ae, aok, astatus, adetail = time_run_benchmark(
+                lambda_run_cmd(mir_path, None), num_runs, timeout_s)
+            record_time_result(results, row, suite, name, "mir_auto_e2e",
+                               aw, None, aok, astatus, adetail)
+            print(f" {fmt_ms(aw)}")
 
         if include_typed:
             if typed_path is None:
@@ -891,6 +947,11 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                 row["mir_typed"] = value
                 record_status(results, suite, name, "mir_typed", "untyped_fallback",
                               {"source": untyped_path})
+                auto_value = results[suite][name].get("mir_auto_e2e")
+                results[suite][name]["mir_typed_auto_e2e"] = auto_value
+                row["mir_typed_auto_e2e"] = auto_value
+                record_status(results, suite, name, "mir_typed_auto_e2e",
+                              "untyped_fallback", {"source": untyped_path})
                 print("  MIR typed  * untyped fallback")
             else:
                 print(f"  MIR typed ", end="", flush=True)
@@ -901,10 +962,16 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                     print(" wrong_output (excluded)")
                 else:
                     w, e, ok, status, detail = time_run_benchmark(
-                        f"{LAMBDA_EXE} run {typed_path}", num_runs, timeout_s)
+                        lambda_run_cmd(typed_path, "jit"), num_runs, timeout_s)
                     record_time_result(results, row, suite, name, "mir_typed",
                                        w, e, ok, status, detail)
                     print(f" {fmt_ms(e if e is not None else w)}")
+                    print(f"  MIR typed auto ", end="", flush=True)
+                    aw, ae, aok, astatus, adetail = time_run_benchmark(
+                        lambda_run_cmd(typed_path, None), num_runs, timeout_s)
+                    record_time_result(results, row, suite, name, "mir_typed_auto_e2e",
+                                       aw, None, aok, astatus, adetail)
+                    print(f" {fmt_ms(aw)}")
 
     # --- Native reference ports (statically typed ceiling) ---
     # `lambda.exe run --c2mir` was removed from the CLI, so the C2MIR column now
@@ -922,7 +989,8 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
             if standalone_js and os.path.exists(standalone_js):
                 print(f"  LambdaJS ", end="", flush=True)
                 w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} js {standalone_js}", num_runs, timeout_s)
-                record_time_result(results, row, suite, name, "lambdajs", w, e, ok, status, detail)
+                record_time_result(results, row, suite, name, "lambdajs", w, e, ok, status, detail,
+                                   e2e_engine="lambdajs_e2e")
                 print(f" {fmt_ms(e if e is not None else w)}")
             else:
                 results[suite][name]["lambdajs"] = None
@@ -936,7 +1004,8 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                 print(f"  QuickJS  ", end="", flush=True)
                 wrapper = make_qjs_wrapper(standalone_js)
                 w, e, ok, status, detail = time_run_benchmark(f"{QJS_EXE} --std -m {wrapper}", num_runs, timeout_s)
-                record_time_result(results, row, suite, name, "quickjs", w, e, ok, status, detail)
+                record_time_result(results, row, suite, name, "quickjs", w, e, ok, status, detail,
+                                   e2e_engine="quickjs_e2e")
                 print(f" {fmt_ms(e if e is not None else w)}")
             else:
                 results[suite][name]["quickjs"] = None
@@ -949,7 +1018,8 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
             if js_path and os.path.exists(js_path):
                 print(f"  Node.js  ", end="", flush=True)
                 w, e, ok, status, detail = time_run_benchmark(f"{NODE_EXE} {js_path}", num_runs, timeout_s)
-                record_time_result(results, row, suite, name, "nodejs", w, e, ok, status, detail)
+                record_time_result(results, row, suite, name, "nodejs", w, e, ok, status, detail,
+                                   e2e_engine="nodejs_e2e")
                 print(f" {fmt_ms(e if e is not None else w)}")
             else:
                 results[suite][name]["nodejs"] = None
@@ -983,7 +1053,8 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                 if wrapper:
                     print(f"  LambdaJS ", end="", flush=True)
                     w, e, ok, status, detail = time_run_benchmark(f"{LAMBDA_EXE} js {wrapper}", num_runs, timeout_s)
-                    record_time_result(results, row, suite, name, "lambdajs", w, e, ok, status, detail)
+                    record_time_result(results, row, suite, name, "lambdajs", w, e, ok, status, detail,
+                                   e2e_engine="lambdajs_e2e")
                     print(f" {fmt_ms(e if e is not None else w)}")
                 else:
                     results[suite][name]["lambdajs"] = None
@@ -1003,7 +1074,8 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                 if wrapper:
                     print(f"  QuickJS  ", end="", flush=True)
                     w, e, ok, status, detail = time_run_benchmark(f"{QJS_EXE} --std -m {wrapper}", num_runs, timeout_s)
-                    record_time_result(results, row, suite, name, "quickjs", w, e, ok, status, detail)
+                    record_time_result(results, row, suite, name, "quickjs", w, e, ok, status, detail,
+                                   e2e_engine="quickjs_e2e")
                     print(f" {fmt_ms(e if e is not None else w)}")
                 else:
                     results[suite][name]["quickjs"] = None
@@ -1022,7 +1094,8 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                 if wrapper:
                     print(f"  Node.js  ", end="", flush=True)
                     w, e, ok, status, detail = time_run_benchmark(f"{NODE_EXE} {wrapper}", num_runs, timeout_s)
-                    record_time_result(results, row, suite, name, "nodejs", w, e, ok, status, detail)
+                    record_time_result(results, row, suite, name, "nodejs", w, e, ok, status, detail,
+                                   e2e_engine="nodejs_e2e")
                     print(f" {fmt_ms(e if e is not None else w)}")
                 else:
                     results[suite][name]["nodejs"] = None

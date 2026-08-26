@@ -30,6 +30,22 @@ SUITE_LABELS = {
 ENGINE_LABELS = {
     "mir": "MIR (untyped)",
     "mir_typed": "MIR (typed)",
+    # Auto-tier columns. The MIR columns above pin LAMBDA_TIER=jit so the
+    # series stays comparable back through Result18; these two report what a
+    # user actually gets from `lambda.exe run` with no tier override, which
+    # since the interpreter-first default is a different execution path.
+    "mir_auto": "MIR (untyped, auto)",
+    "mir_typed_auto": "MIR (typed, auto)",
+    # Set 2 (end-to-end wall clock). Same workloads, different question: how long
+    # does it take to RUN the script, with each engine paying its own startup and
+    # compilation inside the measured region.
+    "mir_auto_e2e": "MIR (untyped, auto)",
+    "mir_typed_auto_e2e": "MIR (typed, auto)",
+    "c2mir_e2e": "C2MIR",
+    "go_e2e": "Go",
+    "lambdajs_e2e": "LambdaJS",
+    "quickjs_e2e": "QuickJS",
+    "nodejs_e2e": "Node.js",
     "c2mir": "C2MIR",
     "go": "Go",
     "lambdajs": "LambdaJS",
@@ -106,18 +122,35 @@ def report_engines(data, requested):
         for suite in SUITE_ORDER
         for bench_data in data.get(suite, {}).values()
     )
+    has_auto_mir = any(
+        "mir_auto" in bench_data
+        for suite in SUITE_ORDER
+        for bench_data in data.get(suite, {}).values()
+    )
+    has_typed_auto_mir = any(
+        "mir_typed_auto" in bench_data
+        for suite in SUITE_ORDER
+        for bench_data in data.get(suite, {}).values()
+    )
     expanded = []
     for engine in requested:
         expanded.append(engine)
         if engine == "mir" and has_typed_mir:
             expanded.append("mir_typed")
+        # Auto columns ride alongside the pinned-JIT pair rather than replacing
+        # it: the comparison that matters is jit-vs-auto on the SAME row.
+        if engine == "mir" and has_auto_mir:
+            expanded.append("mir_auto")
+        if engine == "mir" and has_typed_auto_mir:
+            expanded.append("mir_typed_auto")
     return expanded
 
 
 def display_ms(bench_data, engine):
     """Format a timing and mark typed cells that reuse an untyped result."""
     value = fmt_ms(value_of(bench_data.get(engine)))
-    if engine == "mir_typed" and status_of(bench_data, engine) == "untyped_fallback":
+    if engine in ("mir_typed", "mir_typed_auto") and \
+            status_of(bench_data, engine) == "untyped_fallback":
         return value + "*" if value != "---" else value
     return value
 
@@ -297,6 +330,89 @@ def write_historical_comparisons(w, metadata):
             w()
 
 
+# Set 2's engine list, in the order the report shows it. Built from what the
+# JSON actually carries so an older snapshot without e2e columns simply reports
+# part 1 alone.
+E2E_ENGINES = ["mir_auto_e2e", "mir_typed_auto_e2e", "c2mir_e2e",
+               "lambdajs_e2e", "quickjs_e2e", "nodejs_e2e"]
+
+
+def available_e2e_engines(data):
+    present = []
+    for engine in E2E_ENGINES:
+        if any(engine in bench_data
+               for suite in SUITE_ORDER
+               for bench_data in data.get(suite, {}).values()):
+            present.append(engine)
+    # A part-2 table without its Node baseline has nothing to normalize against.
+    return present if "nodejs_e2e" in present else []
+
+
+def emit_summary_table(w, data, engines, node_engine, canonicalized):
+    """Suite/overall counts and geomeans for one measurement set."""
+    ratio_engines = [e for e in engines if e != node_engine]
+    columns = ["Suite", "Total"]
+    columns.extend(f"Timed {ENGINE_LABELS.get(e, e)}" for e in engines)
+    columns.extend(f"{ENGINE_LABELS.get(e, e)}/Node geo" for e in ratio_engines)
+    w("| " + " | ".join(columns) + " |")
+    w("|---|---:" + "|---:" * (len(columns) - 2) + "|")
+
+    overall_ratios = {e: [] for e in ratio_engines}
+    overall_counts = {e: 0 for e in engines}
+    total_rows = 0
+    for suite in SUITE_ORDER:
+        if suite not in data:
+            continue
+        benches = data[suite]
+        total_rows += len(benches)
+        suite_counts = {e: 0 for e in engines}
+        suite_ratios = {e: [] for e in ratio_engines}
+        for bench_data in benches.values():
+            node = value_of(bench_data.get(node_engine))
+            for engine in engines:
+                value = value_of(bench_data.get(engine))
+                if value is not None and value > 0:
+                    suite_counts[engine] += 1
+                    overall_counts[engine] += 1
+                if engine != node_engine:
+                    r = ratio(value, node)
+                    if r is not None:
+                        suite_ratios[engine].append(r)
+                        overall_ratios[engine].append(r)
+        cells = [SUITE_LABELS.get(suite, suite), str(len(benches))]
+        cells.extend(str(suite_counts.get(e, 0)) for e in engines)
+        cells.extend(fmt_ratio(geo_mean(suite_ratios.get(e, []))) for e in ratio_engines)
+        w("| " + " | ".join(cells) + " |")
+
+    overall_cells = ["**Overall**", str(total_rows)]
+    overall_cells.extend(str(overall_counts.get(e, 0)) for e in engines)
+    overall_cells.extend(fmt_ratio(geo_mean(overall_ratios.get(e, []))) for e in ratio_engines)
+    w("| " + " | ".join(overall_cells) + " |")
+    return total_rows
+
+
+def emit_suite_tables(w, data, engines, node_engine):
+    ratio_engines = [e for e in engines if e != node_engine]
+    for suite in SUITE_ORDER:
+        if suite not in data:
+            continue
+        w()
+        w(f"### {SUITE_LABELS.get(suite, suite)}")
+        w()
+        header = "| Benchmark | Category |" + "".join(f" {ENGINE_LABELS.get(e, e)} (ms) |" for e in engines)
+        header += "".join(f" {ENGINE_LABELS.get(e, e)}/Node |" for e in ratio_engines)
+        w(header)
+        w("|---|---|" + "---:|" * (len(engines) + len(ratio_engines)))
+        for bench_name, bench_data in data[suite].items():
+            row = f"| {bench_name} | {bench_data.get('category', '')} |"
+            for engine in engines:
+                row += f" {display_ms(bench_data, engine)} |"
+            node = value_of(bench_data.get(node_engine))
+            for engine in ratio_engines:
+                row += f" {fmt_ratio(ratio(bench_data.get(engine), node))} |"
+            w(row)
+
+
 def write_report(args, data):
     requested_engines = [e.strip() for e in args.engines.split(",") if e.strip()]
     engines = report_engines(data, requested_engines)
@@ -409,69 +525,27 @@ def write_report(args, data):
     w()
     w("---")
     w()
-    w("## Summary")
-    w()
-    ratio_engines = [e for e in engines if e != NODE_ENGINE]
-    summary_columns = ["Suite", "Total"]
-    summary_columns.extend(f"Timed {ENGINE_LABELS.get(e, e)}" for e in engines)
-    summary_columns.extend(f"{ENGINE_LABELS.get(e, e)}/Node geo" for e in ratio_engines)
-    w("| " + " | ".join(summary_columns) + " |")
-    w("|---|---:" + "|---:" * (len(summary_columns) - 2) + "|")
-
-    overall_ratios = {e: [] for e in engines if e != NODE_ENGINE}
-    overall_counts = {e: 0 for e in engines}
-    total_rows = 0
-
-    for suite in SUITE_ORDER:
-        if suite not in data:
-            continue
-        benches = data[suite]
-        total_rows += len(benches)
-        suite_counts = {e: 0 for e in engines}
-        suite_ratios = {e: [] for e in engines if e != NODE_ENGINE}
-        for bench_data in benches.values():
-            node = bench_data.get(NODE_ENGINE)
-            for engine in engines:
-                value = value_of(bench_data.get(engine))
-                if value is not None and value > 0:
-                    suite_counts[engine] += 1
-                    overall_counts[engine] += 1
-                if engine != NODE_ENGINE:
-                    r = ratio(value, node)
-                    if r is not None:
-                        suite_ratios[engine].append(r)
-                        overall_ratios[engine].append(r)
-
-        cells = [SUITE_LABELS.get(suite, suite), str(len(benches))]
-        cells.extend(str(suite_counts.get(engine, 0)) for engine in engines)
-        cells.extend(fmt_ratio(geo_mean(suite_ratios.get(engine, []))) for engine in ratio_engines)
-        w("| " + " | ".join(cells) + " |")
-
-    # New runner snapshots already contain one canonical row per duplicate workload;
-    # retain the legacy best-value pass only for historical JSON files without policy metadata.
+    e2e_engines = available_e2e_engines(data)
     canonicalized = bool(metadata.get("canonical_duplicate_suites"))
+
+    if e2e_engines:
+        w("## Part 1 — Execution time (self-reported)")
+        w()
+        w("Each engine's own `__TIMING__` figure: the timed workload only, with "
+          "startup and compilation outside the measured region. This is the "
+          "historical series, comparable back through Result18, and the MIR "
+          "columns pin `LAMBDA_TIER=jit`.")
+        w()
+
+    w("## Summary" if not e2e_engines else "### Summary")
+    w()
+    total_rows = emit_summary_table(w, data, engines, NODE_ENGINE, canonicalized)
+    w()
     if canonicalized:
         dedup = {"duplicates": []}
-        overall_cells = ["**Overall**", str(total_rows)]
-        overall_cells.extend(str(overall_counts.get(engine, 0)) for engine in engines)
-        overall_cells.extend(fmt_ratio(geo_mean(overall_ratios.get(engine, []))) for engine in ratio_engines)
-        w("| " + " | ".join(overall_cells) + " |")
-        w()
         w("> The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.")
     else:
         dedup = compute_dedup_summary(data, engines)
-        dedup_counts = dedup["counts"]
-        dedup_ratios = dedup["ratios"]
-        dedup_cells = ["**Overall dedup**", f"**{dedup['total']}**"]
-        dedup_cells.extend(f"**{dedup_counts.get(engine, 0)}**" for engine in engines)
-        dedup_cells.extend(f"**{fmt_ratio(geo_mean(dedup_ratios.get(engine, [])))}**" for engine in ratio_engines)
-        w("| " + " | ".join(dedup_cells) + " |")
-        raw_cells = ["Overall raw", str(total_rows)]
-        raw_cells.extend(str(overall_counts.get(engine, 0)) for engine in engines)
-        raw_cells.extend(fmt_ratio(geo_mean(overall_ratios.get(engine, []))) for engine in ratio_engines)
-        w("| " + " | ".join(raw_cells) + " |")
-        w()
-        w("> **Overall dedup** is the default headline metric: duplicate benchmark names across suites are counted once, using the best timed value per engine. **Overall raw** keeps the row-weighted value for auditability.")
     w("> Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.")
     w()
     write_historical_comparisons(w, metadata)
@@ -479,59 +553,71 @@ def write_report(args, data):
     missing, ljs_ratios, ljs_wins = collect_notables(data, engines)
     w("---")
     w()
-    w("## Notable Results")
+    w("## Notable Results" if not e2e_engines else "### Notable Results")
     w()
+    w(f"- Missing timings: **{len(missing)}** cells")
     if missing:
-        w(f"- Missing timings: **{len(missing)}** cells")
         by_engine = {}
-        for suite, bench_name, engine, status in missing:
-            by_engine.setdefault(engine, []).append(f"{suite}/{bench_name} ({status})")
+        for suite, bench, engine, status in missing:
+            by_engine.setdefault(engine, []).append(f"{suite}/{bench} ({status})")
         for engine, entries in by_engine.items():
-            shown = ", ".join(entries[:8])
-            suffix = f", +{len(entries) - 8} more" if len(entries) > 8 else ""
-            w(f"- {ENGINE_LABELS.get(engine, engine)} missing: {shown}{suffix}")
-    else:
-        w("- Missing timings: none")
-    if dedup["duplicates"]:
-        duplicate_text = ", ".join(f"{name} ({'/'.join(suites)})" for name, suites in dedup["duplicates"])
-        w(f"- Deduplicated benchmark names: {duplicate_text}")
+            w(f"- {ENGINE_LABELS.get(engine, engine)} missing: " + ", ".join(entries))
     if ljs_ratios:
         w()
-        w("### Largest LambdaJS / Node.js Ratios")
+        w("### Largest LambdaJS / Node.js Ratios" if not e2e_engines
+          else "#### Largest LambdaJS / Node.js Ratios")
         w()
         w("| Benchmark | LambdaJS | Node.js | Ratio |")
         w("|---|---:|---:|---:|")
-        for r, suite, bench_name, ljs, node in ljs_ratios[:8]:
-            w(f"| {suite}/{bench_name} | {fmt_ms(ljs)} | {fmt_ms(node)} | {fmt_ratio(r)} |")
+        for r, suite, bench, ljs, node in ljs_ratios[:8]:
+            w(f"| {suite}/{bench} | {fmt_ms(ljs)} | {fmt_ms(node)} | {fmt_ratio(r)} |")
     if ljs_wins:
         w()
-        w("### LambdaJS Faster Than Node.js")
+        w("### LambdaJS Faster Than Node.js" if not e2e_engines
+          else "#### LambdaJS Faster Than Node.js")
         w()
         w("| Benchmark | LambdaJS | Node.js | Ratio |")
         w("|---|---:|---:|---:|")
-        for r, suite, bench_name, ljs, node in ljs_wins[:8]:
-            w(f"| {suite}/{bench_name} | {fmt_ms(ljs)} | {fmt_ms(node)} | {fmt_ratio(r)} |")
-    w()
-    w("---")
+        for r, suite, bench, ljs, node in ljs_wins[:8]:
+            w(f"| {suite}/{bench} | {fmt_ms(ljs)} | {fmt_ms(node)} | {fmt_ratio(r)} |")
 
-    for suite in SUITE_ORDER:
-        if suite not in data:
-            continue
+    emit_suite_tables(w, data, engines, NODE_ENGINE)
+
+    if e2e_engines:
         w()
-        w(f"## {SUITE_LABELS.get(suite, suite)}")
+        w("---")
         w()
-        header = "| Benchmark | Category |" + "".join(f" {ENGINE_LABELS.get(e, e)} (ms) |" for e in engines)
-        ratio_header = "".join(f" {ENGINE_LABELS.get(e, e)}/Node |" for e in ratio_engines)
-        w(header + ratio_header)
-        w("|---|---|" + "---:|" * (len(engines) + len(ratio_engines)))
-        for bench_name, bench_data in data[suite].items():
-            row = f"| {bench_name} | {bench_data.get('category', '')} |"
-            for engine in engines:
-                row += f" {display_ms(bench_data, engine)} |"
-            node = value_of(bench_data.get(NODE_ENGINE))
-            for engine in ratio_engines:
-                row += f" {fmt_ratio(ratio(bench_data.get(engine), node))} |"
-            w(row)
+        w("## Part 2 — End-to-end time (wall clock, auto tier)")
+        w()
+        w("Wall clock from process invocation to exit, so **every engine pays its "
+          "own startup and compilation inside the number**. The MIR columns use "
+          "the shipped auto tier -- no `LAMBDA_TIER` override -- which is what "
+          "`lambda.exe run script.ls` actually does.")
+        w()
+        w("This set exists because the two questions are different. Part 1 asks "
+          "how fast the compiled workload runs; part 2 asks how long it takes to "
+          "run the script. Timing the auto tier under part 1's rules would charge "
+          "Lambda for JIT compilation performed *inside* the measured region while "
+          "crediting Node.js with a post-warmup figure -- comparing two different "
+          "things. Here the accounting is the same for everyone.")
+        w()
+        w("Same processes, where possible: the reference engines report their wall "
+          "and `__TIMING__` figures from the *same* run, so parts 1 and 2 are two "
+          "readings of one launch. Only the MIR columns are re-run, because part 1 "
+          "pins the JIT and part 2 must use the auto tier.")
+        w()
+        w("⚠ Short workloads are dominated by fixed process startup here, so a row "
+          "whose part-1 time is a fraction of a millisecond says more about "
+          "executable launch cost than about the language. Read part 2 by the "
+          "longer rows.")
+        w()
+        w("### Summary")
+        w()
+        emit_summary_table(w, data, e2e_engines, "nodejs_e2e", canonicalized)
+        w()
+        w("> Ratio < 1.0 means the engine finished the whole run faster than Node.js.")
+        emit_suite_tables(w, data, e2e_engines, "nodejs_e2e")
+        w()
 
     with open(args.output, "w") as f:
         f.write("\n".join(lines) + "\n")

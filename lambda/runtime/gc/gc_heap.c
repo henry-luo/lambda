@@ -1483,6 +1483,73 @@ static void gc_trace_data_words(gc_heap_t* gc, void* data_ptr, int64_t byte_size
     }
 }
 
+// One shaped map/element/object field edge. Map attributes and element
+// attributes share the identical ShapeEntry walk, so they share this.
+//
+// D3.4.1 makes the packed layout an ABI: every reader must decode the same
+// bytes the store path wrote, and D3.4.6/D2.6.1 put the one shared descriptor
+// resolver in charge of which lane that is. So the lane is classified through
+// lambda_shape_field_storage_type_id, NOT through ShapeEntry::type->type_id: a
+// non-simple `type` contract (`T?`, a union, a constrained or occurrence type)
+// has type_id LMD_TYPE_TYPE yet set_field_value stores it in the TypedItem
+// `any` lane. Reading that lane as an eight-byte container pointer marked
+// nothing, and the conservative gc_trace_data_words sweep could not cover it
+// either: a TypedItem payload starts at byte_offset + 1 and so never lands on
+// an eight-byte stride. A container reachable only through such a field was
+// collected while still live.
+static void gc_trace_shape_field(gc_heap_t* gc, void* field_type,
+                                 int64_t byte_offset, void* data_ptr,
+                                 int64_t byte_size) {
+    if (!field_type) return;
+    uint8_t lane = (uint8_t)lambda_shape_field_storage_type_id(field_type);
+    // only trace Item-typed lanes (containers, strings, etc.); inline values
+    // (bool, int, undefined) hold no GC pointer
+    if (lane < LMD_TYPE_INT64_ || lane == LMD_TYPE_BOOL_ ||
+        lane == LMD_TYPE_UNDEFINED_) return;
+    if (byte_offset < 0 || byte_offset >= byte_size) return;
+    uint8_t* field_ptr = (uint8_t*)data_ptr + byte_offset;
+
+    if (lane == LMD_TYPE_ANY_) {
+        // TypedItem layout: byte 0 is the runtime TypeId, bytes 1-8 the value.
+        uint8_t stored_type = *field_ptr;
+        if (stored_type < LMD_TYPE_INT64_ || stored_type == LMD_TYPE_BOOL_ ||
+            byte_offset + 1 + 8 > byte_size) return;
+        uint64_t val = *(uint64_t*)(field_ptr + 1);
+        if (!val) return;
+        if (stored_type >= LMD_TYPE_RANGE_) gc_mark_item(gc, val);
+        else gc_mark_object_ptr(gc, (void*)(uintptr_t)val);
+        return;
+    }
+
+    uint64_t val = *(uint64_t*)field_ptr;
+    if (!val) return;
+    if (lane >= LMD_TYPE_RANGE_) {
+        // container pointer stored directly
+        gc_mark_item(gc, val);
+    } else if (lane == LMD_TYPE_STRING_ || lane == LMD_TYPE_SYMBOL_ ||
+               lane == LMD_TYPE_DECIMAL_ || lane == LMD_TYPE_INT64_ ||
+               lane == LMD_TYPE_FLOAT_ || lane == LMD_TYPE_DTIME_ ||
+               lane == LMD_TYPE_COMPLEX_) {
+        // these are stored as raw pointers in the data buffer
+        gc_mark_object_ptr(gc, (void*)(uintptr_t)val);
+    }
+}
+
+// Walk a TypeMap/TypeElmt shape list and trace every field edge.
+// TypeMap layout: { Type(2+6pad=8), length(8@8), byte_size(8@16),
+//   type_index(4@24), pad(4), shape*(8@32), last*(8@40) }
+// ShapeEntry:     { name*(8), type*(8), byte_offset(8), next*(8), ns*(8),
+//   default_value*(8) }
+static void gc_trace_shape_fields(gc_heap_t* gc, void* type_ptr, void* data_ptr,
+                                  int64_t byte_size) {
+    uint8_t* shape = (uint8_t*)*(void**)((uint8_t*)type_ptr + 32);
+    while (shape) {
+        gc_trace_shape_field(gc, *(void**)(shape + 8), *(int64_t*)(shape + 16),
+            data_ptr, byte_size);
+        shape = (uint8_t*)*(void**)(shape + 24);
+    }
+}
+
 static int64_t gc_packed_data_allocation_size(void* type_ptr, int data_cap) {
     if (data_cap > 0) return (int64_t)data_cap;
     return type_ptr ? *(int64_t*)((uint8_t*)type_ptr + 16) : 0;
@@ -1638,89 +1705,11 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         }
         if (!type_ptr || !data_ptr) break;
 
-        // Walk shape entries to find Item fields
-        // TypeMap layout: { Type(2+6pad=8), length(8@8), byte_size(8@16),
-        //   type_index(4@24), pad(4), shape*(8@32), last*(8@40) }
-        uint8_t* tp = (uint8_t*)type_ptr;
         // D4.3.1: the object owns one fixup for its complete data allocation.
         // Dynamic JS shapes may reserve pointer-width slots beyond byte_size;
         // bounding tracing by the packed logical size skipped those live slots.
         int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
-        void* shape_ptr = *(void**)(tp + 32);          // TypeMap.shape (ShapeEntry*)
-
-        // Walk ShapeEntry linked list
-        // ShapeEntry: { name*(8), type*(8), byte_offset(8), next*(8), ns*(8), default_value*(8) }
-        uint8_t* shape = (uint8_t*)shape_ptr;
-        while (shape) {
-            void* field_type = *(void**)(shape + 8);   // ShapeEntry.type (Type*)
-            int64_t byte_offset = *(int64_t*)(shape + 16);  // ShapeEntry.byte_offset
-            void* next_shape = *(void**)(shape + 24);  // ShapeEntry.next
-
-            if (field_type) {
-                uint8_t field_type_id = *(uint8_t*)field_type;  // Type.type_id
-                // only trace Item-typed fields (containers, strings, etc.)
-                // Skip inline values (bool, int) which don't hold GC pointers
-                if (field_type_id >= LMD_TYPE_INT64_ && field_type_id != LMD_TYPE_BOOL_
-                    && field_type_id != LMD_TYPE_UNDEFINED_) {
-                    if (byte_offset >= 0 && byte_offset < byte_size) {
-                        void* field_ptr = (uint8_t*)data_ptr + byte_offset;
-
-                        // LMD_TYPE_ANY fields use 9-byte TypedItem layout:
-                        //   byte 0: runtime TypeId (1 byte)
-                        //   bytes 1-8: value (8 bytes, packed)
-                        // Must read the embedded type tag and value separately.
-                        if (field_type_id == LMD_TYPE_ANY_) {
-                            uint8_t stored_type = *(uint8_t*)field_ptr;
-                            if (stored_type >= LMD_TYPE_INT64_ && stored_type != LMD_TYPE_BOOL_ &&
-                                byte_offset + 1 + 8 <= byte_size) {
-                                uint64_t val = *(uint64_t*)((uint8_t*)field_ptr + 1);
-                                if (val != 0) {
-                                    if (stored_type >= LMD_TYPE_RANGE_) {
-                                        gc_mark_item(gc, val);
-                                    } else {
-                                        void* embedded_ptr = (void*)(uintptr_t)val;
-                                        if (is_gc_object(gc, embedded_ptr)) {
-                                            gc_header_t* h = gc_get_header(embedded_ptr);
-                                            if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
-                                                h->marked = 1;
-                                                mark_stack_push(gc, h);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                        // read as pointer-sized value (Item or pointer depending on type)
-                        uint64_t val = *(uint64_t*)field_ptr;
-                        if (val != 0) {
-                            if (field_type_id >= LMD_TYPE_RANGE_) {
-                                // container pointer stored directly
-                                gc_mark_item(gc, val);
-                            } else if (field_type_id == LMD_TYPE_STRING_ ||
-                                       field_type_id == LMD_TYPE_SYMBOL_ ||
-                                       field_type_id == LMD_TYPE_DECIMAL_ ||
-                                       field_type_id == LMD_TYPE_INT64_ ||
-                                       field_type_id == LMD_TYPE_FLOAT_ ||
-                                       field_type_id == LMD_TYPE_DTIME_ ||
-                                       field_type_id == LMD_TYPE_COMPLEX_) {
-                                // these are stored as raw pointers in the data buffer
-                                // they need to be marked if they're GC-managed
-                                void* embedded_ptr = (void*)(uintptr_t)val;
-                                if (is_gc_object(gc, embedded_ptr)) {
-                                    gc_header_t* h = gc_get_header(embedded_ptr);
-                                    if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
-                                        h->marked = 1;
-                                        mark_stack_push(gc, h);
-                                    }
-                                }
-                            }
-                        }
-                        } // end non-ANY
-                    }
-                }
-            }
-            shape = (uint8_t*)next_shape;
-        }
+        gc_trace_shape_fields(gc, type_ptr, data_ptr, byte_size);
         gc_trace_data_words(gc, data_ptr, byte_size);
         break;
     }
@@ -1747,61 +1736,8 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
 
         // trace attributes (same shape-walk as Map)
         if (type_ptr && data_ptr) {
-            uint8_t* tp = (uint8_t*)type_ptr;
             int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
-            void* shape_ptr = *(void**)(tp + 32);
-            uint8_t* shape = (uint8_t*)shape_ptr;
-            while (shape) {
-                void* field_type = *(void**)(shape + 8);
-                int64_t byte_offset = *(int64_t*)(shape + 16);
-                void* next_shape = *(void**)(shape + 24);
-                if (field_type) {
-                    uint8_t ftid = *(uint8_t*)field_type;
-                    if (ftid >= LMD_TYPE_INT64_ && ftid != LMD_TYPE_BOOL_ &&
-                        byte_offset >= 0 && byte_offset < byte_size) {
-                        // Handle LMD_TYPE_ANY fields: 9-byte TypedItem layout
-                        if (ftid == LMD_TYPE_ANY_) {
-                            uint8_t* fptr = (uint8_t*)data_ptr + byte_offset;
-                            uint8_t stored_type = *fptr;
-                            if (stored_type >= LMD_TYPE_INT64_ && stored_type != LMD_TYPE_BOOL_ &&
-                                byte_offset + 1 + 8 <= byte_size) {
-                                uint64_t val = *(uint64_t*)(fptr + 1);
-                                if (val != 0) {
-                                    if (stored_type >= LMD_TYPE_RANGE_) {
-                                        gc_mark_item(gc, val);
-                                    } else {
-                                        void* ep = (void*)(uintptr_t)val;
-                                        if (is_gc_object(gc, ep)) {
-                                            gc_header_t* h = gc_get_header(ep);
-                                            if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
-                                                h->marked = 1;
-                                                mark_stack_push(gc, h);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                        uint64_t val = *(uint64_t*)((uint8_t*)data_ptr + byte_offset);
-                        if (val != 0) {
-                            if (ftid >= LMD_TYPE_RANGE_) {
-                                gc_mark_item(gc, val);
-                            } else {
-                                void* embedded_ptr = (void*)(uintptr_t)val;
-                                if (is_gc_object(gc, embedded_ptr)) {
-                                    gc_header_t* h = gc_get_header(embedded_ptr);
-                                    if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
-                                        h->marked = 1;
-                                        mark_stack_push(gc, h);
-                                    }
-                                }
-                            }
-                        }
-                        } // end non-ANY
-                    }
-                }
-                shape = (uint8_t*)next_shape;
-            }
+            gc_trace_shape_fields(gc, type_ptr, data_ptr, byte_size);
             gc_trace_data_words(gc, data_ptr, byte_size);
         }
         break;

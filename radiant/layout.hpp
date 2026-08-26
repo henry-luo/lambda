@@ -1519,8 +1519,11 @@ typedef struct MulticolFlowItem {
     float inline_offset;
     bool can_fragment;
     bool spans_all;
+    bool parallel_flow;
     bool break_before_column;
     bool break_after_column;
+    bool break_before_avoid;
+    bool break_after_avoid;
     // the tail after a forced break in a parallel float, including its margins
     float parallel_balance_tail;
 } MulticolFlowItem;

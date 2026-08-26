@@ -181,7 +181,9 @@ def main():
         f.write(f"V2\t{len(results)}\n")
         for path, flags, neg_phase, neg_type, includes, features, native in results:
             # path\tflags\tneg_phase\tneg_type\tincludes\tfeatures\tnative
-            f.write(f"{path}\t{flags}\t{neg_phase}\t{neg_type}\t{includes}\t{features}\t{native}\n")
+            # runner cache keys use POSIX separators on every host, including Windows.
+            cache_path = path.replace(os.sep, "/")
+            f.write(f"{cache_path}\t{flags}\t{neg_phase}\t{neg_type}\t{includes}\t{features}\t{native}\n")
 
     file_size = os.path.getsize(OUTPUT_FILE)
     print(

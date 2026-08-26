@@ -1,11 +1,12 @@
 # Lambda Grammar Parser: Hybrid Recursive-Descent + Pratt Design
 
 - **Date:** 2026-08-20
+- **Last updated:** 2026-08-26
 - **Status:** **PRODUCTION CUTOVER COMPLETE FOR NORMAL LAMBDA FILES/MODULES.** P2.1 source spans, P2.2 shared construction seams, P2.3 direct AST reduction, and the normal-runner P2.4 selector are landed. With `LAMBDA_PARSER` unset (or `c`), the first-party C hybrid recursive-descent + Pratt parser builds the existing typed AST directly. `LAMBDA_PARSER=tree`/`tree-sitter` is an explicit reference/rollback mode; `compare` runs Tree-sitter syntax acceptance after the C AST is built. The REPL and a few legacy inspection paths still retain Tree-sitter fragment trees because their append-only source/span transaction is separate from the file cutover.
-- **Formal authority:** **D8.1.1v3** (first-party C parser → shared typed AST pipeline), **D8.1.2v2** (Tree-sitter grammar as regenerated reference/editor artifact), **D8.2.1–D8.2.5** (one core AST, no tree rewriting, indexed compilation unit, typed pass schedule), and **D4.1.1v2** (AST/const-pool ownership). The accepted language and S2.4.3v2/S7.6.3v2 syntax rulings are unchanged.
+- **Formal authority:** **D8.1.1v5** (first-party C parser → shared typed AST pipeline), **D8.1.2v2** (Tree-sitter grammar as regenerated reference/editor artifact), **D8.2.1–D8.2.5** (one core AST, no tree rewriting, indexed compilation unit, typed pass schedule), and **D4.1.1v2** (AST/const-pool ownership). The accepted language and S2.4.3v2/S7.6.3v2 syntax rulings are unchanged.
 - **Surface-syntax authority:** `lambda/tree-sitter-lambda/grammar-lambda.js` remains the complete structural reference grammar; `grammar-common.js` plus the production replacement layer in `grammar.js` describes the currently shipped parser seams. S2.4.3v2 governs greedy namespace-qualified names, and S7.6.3v2 governs query at the postfix/member tier.
 - **Related:** `vibe/Lambda_Grammar_Reduce5.md` (grammar seams and Tree-sitter reference size), `doc/dev/lambda/LR_02_Parsing_AST.md` (C parser and reference builder), `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/build_ast.cpp`, `lambda/runtime/ast-core.hpp`, `lambda/runtime/parse_type_pattern.cpp`, and `lambda/runtime/parse_path_expr.cpp`.
-- **Proposal IDs:** CGP1–CGP17.
+- **Proposal IDs:** CGP1–CGP21.
 
 ## 1. Proposal
 
@@ -57,7 +58,7 @@ The remaining size is therefore architectural rather than a missed compiler or g
 ### 3.2 Non-goals
 
 - No Lambda syntax or semantic change is part of this migration.
-- The normal file/module switch is landed under D8.1.1v3; remaining Tree-sitter
+- The normal file/module switch is landed under D8.1.1v5; remaining Tree-sitter
   use is explicit reference/rollback or a separate REPL/inspection consumer.
 - The POC does not replace Tree-sitter for JavaScript, TypeScript, Python, Ruby, Bash, LaTeX, or other guest/input grammars.
 - The runtime parser does not need Tree-sitter's incremental-edit API. Tree-sitter may remain the editor-facing grammar.
@@ -413,9 +414,9 @@ consumer-migration task, not a prerequisite for the normal C parser default.
 
 ### P2.0 — revise the formal pipeline ruling (landed)
 
-`doc/Lambda_Formal_Design.md` now records D8.1.1v3 and D8.1.2v2, with the
-semver bump to 1.26.3. S15.3 remains unchanged: `input(f, 'lambda')` still
-produces the canonical `lm.` AST.
+The initial cutover recorded D8.1.1v3 and D8.1.2v2. The governing formal
+ruling is now **D8.1.1v5** / **D8.1.2v2** in spec version 1.28.0; S15.3 remains
+unchanged: `input(f, 'lambda')` still produces the canonical `lm.` AST.
 
 ### P2.1 — make retained AST source locations parser-neutral
 
@@ -540,7 +541,7 @@ modules is now performed by the direct AST/import reductions; REPL fragment
 parsing remains a retained Tree-sitter transaction until its source-offset
 contract is migrated.
 
-This design is implemented under D8.1.1v3 and preserves D8.2.1/D8.2.2's one
+This design is implemented under D8.1.1v5 and preserves D8.2.1/D8.2.2's one
 core AST/no-rewriting rules.
 
 #### P2.3 reduction-contract design (2026-08-20)
@@ -653,7 +654,270 @@ The cutover gate used for the normal runner is:
 
 The full canonical AST serializer, release timing ratchet, and removal of the
 Tree-sitter archive remain follow-up gates for deleting the reference path. They
-are not prerequisites for the production-default cutover recorded by D8.1.1v3.
+are not prerequisites for the production-default cutover recorded by D8.1.1v5.
+
+### P2.7 — parser-neutral source, cursor, and diagnostic substrate
+
+**Phase II extension (2026-08-26).** The direct Lambda parser and the Input
+format parsers currently have separate diagnostic pipelines. The C RD/Pratt
+path publishes one `LambdaParseError` and `runner.cpp` converts it to a
+`LambdaError`; Input parsers use `InputContext`/`ParseErrorList`, then flatten
+their diagnostics into `Input::parse_error_message`. This must converge below
+the AST and Mark construction layers, not by making the Lambda parser depend on
+`Input` or `MarkBuilder`.
+
+That split follows the formal ownership boundary: the C parser reduces directly
+to the shared typed AST under **D8.1.1v5**, whereas `MarkBuilder` remains an IO
+API that owns values through its `Input*` under **D7.1.5**. Parsed document
+values remain Input-arena owned and outside GC rooting under **D4.1.2** and
+**D4.1.3**.
+
+Introduce a C-compatible syntax substrate with these responsibilities:
+
+```text
+ParseSource + ParseCursor + ParseReport
+               │                 │
+               │                 ├─ Input diagnostic formatter
+               │                 └─ LambdaError diagnostic formatter
+               │
+       ┌───────┴────────┐
+       │                │
+InputParseSession   Lambda RD/Pratt parser
+  + MarkBuilder        + direct AST sink
+```
+
+- `ParseSource` is a borrowed `(bytes, length, source-name)` view valid for the
+  synchronous parse. It owns no copy of the input text.
+- `ParseCursor` is the only advancing cursor for a parser. It carries byte
+  offset, line, column, bounded lookahead, and checked progress. A parser must
+  not advance a raw `const char*` independently of its diagnostic cursor.
+- `ParseDiagnostic` carries a `SourceSpan`, severity, stable parse code,
+  message, optional hint, and expected-token set. `ParseReport` holds a bounded
+  `ArrayList` of these diagnostics.
+- A lazy, dynamically sized line index converts spans to display locations.
+  It replaces `SourceTracker`'s fixed 100,000-entry on-stack line array and
+  avoids copying a complete source merely to format a diagnostic.
+- Adapters format the same report either into `Input::parse_error_message` or
+  the existing structured `LambdaError` list. Formatting and logging are
+  separate from recording, so a parser can decide its final recovery policy at
+  one explicit completion point.
+
+**P2.7 implementation checkpoint (2026-08-26):** `SourceTracker::seek()` and
+`InputContext::syncTo()` now provide the compatibility bridge for pointer-style
+Input parsers. Mark diagnostics synchronize the shared tracker before reporting,
+so leading trivia and nested raw-pointer scans no longer produce stale line and
+column locations. The fixed line index and owned source copy remain in place
+until the remaining Input parsers move to the session contract; this checkpoint
+does not yet claim the final zero-copy substrate.
+
+`InputContext` becomes an `InputParseSession` built on this substrate. Its
+`finish(root, outcome)` operation is the only place that publishes `root`,
+sets `Input::parse_failed`, and stores the formatted report. A diagnostic no
+longer irreversibly sets `parse_failed` at the instant it is found: a format
+whose diagnostics have been deliberately represented in its returned document
+may explicitly finish as recovered, while ordinary `parse()`/`input()` results
+remain fail-closed.
+
+The direct parser receives the same report through a C callback; its AST sink
+does not receive `Input`, `MarkBuilder`, or format-specific recovery state.
+This preserves the no-replacement-tree rule of **D8.1.1v5** and prevents an IO
+builder from becoming a compiler dependency.
+
+### P2.8 — unify Input parsing; migrate Mark first
+
+Migrate pointer-style input parsers to `InputParseSession` incrementally. Mark
+is first because it exposes the sharpest status and position failures:
+
+- `parse_mark()` accepts a root value without requiring trivia followed by EOF;
+- map/array/list helpers can return a null or partial container without
+  recording a syntax error, conflating parse failure with the valid `null`
+  value; and
+- Mark and XML advance raw pointers without consistently advancing
+  `InputContext::tracker`, producing diagnostics at stale locations.
+
+The Mark implementation must use a result type whose success is independent of
+the `Item` payload, for example `{ Item value; bool ok; bool recovered; }`.
+Every delimiter and scalar helper reports through the shared session:
+
+- `expect()` diagnoses a missing colon, comma, or closer at the current span;
+- quoted strings, binary values, and elements retain the opener span and
+  diagnose an unclosed form at EOF;
+- successful root parsing consumes trailing trivia and requires EOF; and
+- nested map/array/list recovery synchronizes at a comma or its matching
+  closer, quote-aware and nesting-aware, with guaranteed forward progress.
+
+The default Mark `parse()` result is strict: any error reports
+`Input::parse_failed` and is non-admissive to the runtime. A future explicit
+tolerant mode may return a partial Mark tree with diagnostics reified in the
+document; it must call `finish(..., recovered)` deliberately rather than clear
+an error flag as an incidental parser side effect.
+
+Mark element content must also choose one append semantic. The present mixture
+of `MarkBuilder` and direct `list_push()` has the known normalization ambiguity
+recorded in **D2.6.5**. The migration decides this at the append site and uses
+the corresponding builder helper consistently; it does not recreate an ambient
+"disable string merging" flag.
+
+After Mark, migrate JSON, TOML, XML, CSV, and YAML one at a time. Existing
+format-specific recovery (such as JSON's comma-or-closer scan) becomes a small
+adapter over the common cursor and synchronization helpers, not a second
+diagnostic convention. This staged migration retains each format's accepted
+data semantics while making error positions, limits, and final failure state
+consistent.
+
+**P2.8 implementation checkpoint (2026-08-26):** Mark now rejects missing
+colons, separators, closers, unterminated quoted/binary/datetime literals,
+invalid element closure, and non-trivia trailing input. Null container returns
+are converted to `ItemError`, and a strict root consumes trailing comments then
+requires EOF. Mark's historical list/content form remains whitespace-separated
+(including `:name value` attributes); array and map separators are strict.
+JSON/TOML/XML/CSV/YAML remain on their existing adapters pending the shared
+cursor migration.
+
+### P2.9 — share lexical utilities at the type/path seams
+
+The C lexer, `parse_type_pattern.cpp`, and `parse_path_expr.cpp` currently
+duplicate identifier recognition, whitespace/comment skipping, quoted text,
+numeric scanning, and token spelling. Preserve distinct type/path *grammars*
+and AST construction, but share lexing.
+
+1. Publish a bounded `LambdaTokenCursor` over a `ParseSource` range. It is
+   initialized from the C parser's committed `SourceSpan`; it is not a CST and
+   retains no tokens after parsing.
+2. Move token spelling and context-independent classification into one metadata
+   table: identifier-like, key, literal, type-start, expression-start, closer,
+   and operator binding properties.
+3. Port the type-pattern and static-path mini lexers to that cursor. Their
+   callers continue to pass only the committed span; the existing span-native
+   AST/type/path helpers remain the semantic owner.
+4. Delete redundant raw-source scans only after the shared-cursor and
+   differential tests prove identical acceptance and literal payloads.
+
+This keeps the direct parser's current design—outer placement in C, specialised
+type/path interpretation in their existing modules—while removing lexical
+drift. It also makes line handling explicit: `parser_next_significant()`
+already folds `NEWLINE` into `nl_before`, so no-op `parser_skip_newlines()`
+calls can be removed once every call site is audited. The recovery and
+continuation rules must retain **S16.1.1** (line breaks have no independent
+meaning) and **S16.2.3v2** (a dual-role line-start token is rejected rather
+than guessed).
+
+**P2.9 implementation checkpoint (2026-08-26):**
+`lambda/runtime/parse_lex.hpp` now owns identifier, digit, word, whitespace,
+comment, and word-spelling primitives used by both
+`parse_type_pattern.cpp` and `parse_path_expr.cpp`. Their specialised grammars
+and AST/type/path ownership are unchanged; the duplicated raw lexical helpers
+were removed.
+
+### P2.10 — recover source diagnostics without publishing a partial AST
+
+The current C parser is fail-fast. `parser_set_error()` records only the first
+error, changes the status away from `LAMBDA_PARSE_OK`, and `parser_advance()`
+then stops; the element-content probe is bounded speculative lookahead, not
+error recovery. `LAMBDA_PARSE_INCOMPLETE` is an EOF classification for the
+REPL, not a recovered program.
+
+Keep the executable compiler path fail-closed, but add a diagnostic-only
+recovery pass for an invalid source:
+
+1. The ordinary AST pass remains the one-pass direct reduction for valid
+   source. On syntax failure, discard its AST owner and do not publish a root.
+2. Re-run the C parser with a null syntax sink and a bounded `ParseReport`.
+   This pass performs panic recovery and emits multiple diagnostics but never
+   calls scope, declaration, type, or AST construction callbacks.
+3. At statement/content depth, synchronize at `;`, a context-owned closer, or
+   EOF. At collection depth, synchronize at comma or the matching closer. An
+   invalid lexer token is consumed once before synchronizing, which establishes
+   progress even on malformed bytes.
+4. A newline is not a generic recovery boundary: **S16.1.1** and the strict
+   separator rule **S16.1.2** forbid treating it as one. Braces, element
+   delimiters, `case`/`default`, and declaration-specific introducers are only
+   used when their active parser context proves they are safe boundaries.
+5. EOF with an open delimiter remains `INCOMPLETE` only when no earlier
+   committed syntax error exists; otherwise the report is `ERROR` and includes
+   the opener-related diagnostic.
+
+This two-pass-on-error design is intentional. The direct AST sink has committed
+scope and forward-binding side effects, so continuing after a bad production
+would otherwise require transactional rollback for every sink callback. A
+syntax-only recovery pass gives editor/CLI users useful multi-error diagnostics
+without making a partial typed AST executable or adding a replacement syntax
+tree, as required by **D8.1.1v5**.
+
+Tree-sitter remains available for editor incremental trees under **D8.1.2v2**;
+the C parser need not replicate Tree-sitter `ERROR`/`MISSING` nodes to provide
+compiler diagnostics.
+
+**P2.10 implementation checkpoint (2026-08-26):**
+`lambda_rd_parse_recovering()` performs the diagnostic-only second pass. It
+reuses the lexer to synchronize at strict top-level semicolons, records up to
+16 ordered `LambdaParseError` values, and never invokes the AST sink. The normal
+direct pass remains fail-fast and the runner publishes no AST after an error;
+independent top-level syntax errors are nevertheless reported together. Nested
+collection-specific panic synchronization and context-owned closer recovery
+remain follow-up work.
+
+### P2.11 — Phase II validation and migration gates
+
+Before each migration, add a narrow golden suite that records both acceptance
+and diagnostics. In particular:
+
+- Mark rejects missing map colons, missing array commas, unmatched delimiters,
+  unterminated strings/binaries, invalid element closure, and non-trivia
+  trailing input; list/content whitespace and `:name value` attributes remain
+  accepted. Each case asserts byte span and line/column.
+- Valid Mark fixtures preserve exact container/element contents, ownership, and
+  the selected append normalization policy.
+- JSON/TOML/XML/YAML migration cases preserve their existing accepted inputs
+  while asserting error limit, recovery progress, and no stale line/column.
+- Direct-parser recovery cases contain multiple independent errors, nested
+  delimiter failures, lexer failures, and incomplete REPL fragments. They
+  assert diagnostic order, stable code, expected tokens, and that no AST root
+  is published after an error.
+- Differential and fuzz tests prove that the shared type/path lexer accepts the
+  same corpus as the prior seam parsers and cannot stall on malformed UTF-8 or
+  comments.
+
+New Lambda integration scripts must retain their matching expected `.txt`
+results. The required gates are the focused parser GTests, the Lambda baseline,
+the C/Tree-sitter differential harness, relevant input-parser robustness tests,
+and `git diff --check`. A release build is required for any performance result;
+correctness migration itself does not need a benchmark.
+
+The implementation order is: shared source/report primitives; Mark strict
+parsing and its tests; one recovered Input parser at a time; shared type/path
+token cursor; then C-parser diagnostic recovery. This order fixes silent Mark
+successes first while avoiding a risky all-parser rewrite.
+
+**P2.11 implementation checkpoint (2026-08-26):** the focused C parser suite
+now covers separator-based recovery, and the full 32-test lexer/parser suite
+passes after the shared lexical extraction. Mark smoke checks cover strict
+trailing-input and stale-location cases; the broader Input golden matrix is
+still a required migration gate.
+
+**P2.12 implementation checkpoint (2026-08-26):** the C parser consolidation
+pass reduced `lambda/runtime/parser/lambda_parser.c` from 2,886 to 2,383
+physical lines (-503, measured against the pre-pass Phase II worktree). The
+reduction centralises probe setup, parser failure returns, qualified names,
+balanced delimiters, comma-delimited expression items, parameter parsing,
+content blocks, and list reductions; it also removes the parser-local newline
+skip layer because `parser_next_significant()` already folds NEWLINE into
+`nl_before`. The direct parser POC remains green (32/32), and the full baseline
+gate is green (3,900/3,900: 2,104 input plus 1,796 Lambda runtime tests).
+This preserves the fail-fast direct-AST and syntax-only recovery split required
+by **D8.1.1v5**. A Mark compatibility correction retained semicolon separators
+immediately before an element close, preserving existing graph fixture syntax.
+
+**P2.13 implementation checkpoint (2026-08-26):** a second C-parser
+consolidation pass reduced `lambda/runtime/parser/lambda_parser.c` from 2,383
+to 1,852 physical lines (-531). It reuses parameter parsing for arrow probes,
+shares return-type tails, braced bodies, content-child/separator handling,
+for-clause reductions, import-module paths, and single-child reductions; the
+Pratt precedence and type-delimiter dispatch are now table-driven. The focused
+parser suite remains green (32/32), parser robustness is green (84/84), and
+the complete baseline gate is green (3,900/3,900). The physical LOC metric
+includes mechanical continuation compaction after these semantic
+consolidations; behavior remains governed by **D8.1.1v5**.
 
 ## 8. Performance and size interpretation
 
@@ -690,7 +954,7 @@ The 818,048-byte archive is the fair current **Lambda grammar** baseline. Do not
 The normal production switch is now landed. The formal and working records were
 updated together:
 
-1. `doc/Lambda_Formal_Design.md`: D8.1.1v3, D8.1.2v2, semver, implementation status.
+1. `doc/Lambda_Formal_Design.md`: D8.1.1v5, D8.1.2v2, semver, implementation status.
 2. `doc/dev/lambda/LR_01_Compilation_Pipeline.md`: production source→AST pipeline and explicit reference selector.
 3. `doc/dev/lambda/LR_02_Parsing_AST.md`: C lexer/Pratt/RD parser and direct AST sink, with the reference CST adapter retained.
 4. `vibe/Lambda_Grammar_Reduce5.md`: grammar seams remain the Tree-sitter oracle; the C parser is the normal runtime front end.
@@ -717,19 +981,24 @@ Language-reference documents do not need a syntax rewrite because the accepted l
 | **CGP12** | Phase 2 requires canonical AST, diagnostic, execution, baseline, size, and end-to-end timing parity. | follow-up for reference-path removal |
 | **CGP13** | Tree-sitter may remain for editor/reference tooling and other languages, but leaves the production Lambda parse path after the switch gate. | normal path switched; archive retained for REPL/tools |
 | **CGP14** | REPL completeness becomes an explicit parser result, not a recovered-tree inspection. | follow-up |
-| **CGP15** | The formal D8.1 rulings are revised only with the successful Phase 2 production switch. | landed: D8.1.1v3/D8.1.2v2 |
+| **CGP15** | The formal D8.1 rulings are revised only with the successful Phase 2 production switch. | landed: D8.1.1v5/D8.1.2v2 |
 | **CGP16** | A failed size, correctness, or performance gate stops the migration without weakening the language or hard-coding corpus cases. | landed |
 | **CGP17** | Phase 2 adapts existing type/path parsers from `TSNode` diagnostics to parser-neutral spans; synthetic `TSNode` and a copied C type/path grammar are forbidden. | landed |
+| **CGP18** | Source access, cursor movement, and diagnostics are parser-neutral infrastructure; `InputParseSession` and the direct AST parser consume it without crossing the D7.1.5 IO boundary. | compatibility bridge landed; final zero-copy session pending |
+| **CGP19** | Mark is migrated first to strict full-source parsing with an explicit result status, then other Input parsers adopt the same session/finalization contract. | Mark strict slice landed; other formats pending |
+| **CGP20** | Type/path parsers retain their specialised grammar and AST ownership but consume the shared bounded lexer cursor rather than duplicating lexical rules. | shared lexical primitives landed; cursor/table completion pending |
+| **CGP21** | Invalid Lambda source receives a syntax-only recovering diagnostic pass after the fail-fast AST pass; no partial typed AST is published or executed. | landed for top-level separator recovery; nested-context recovery pending |
 
 ## 12. Immediate next action
 
-The C lexer, RD/Pratt parser, direct AST sink, parser-neutral spans, and shared
-type/path seams are checked in under `lambda/runtime/parser/`,
-`lambda/runtime/build_ast.cpp`, and `lambda/runtime/ast_build.hpp`. The normal
-runner now defaults to the C parser and has explicit Tree-sitter rollback and
-syntax-compare modes. Focused POC and direct-vs-reference execution probes are
-green, including the mutable/index assignment and VMap method regressions that
-closed the final cutover gaps. Remaining work is deliberately outside this
-cutover: migrate the REPL append-only fragment transaction and legacy AST/Jube
-inspection tools, then measure canonical AST and release timing parity before
-removing the reference Lambda Tree-sitter archive.
+The C lexer, RD/Pratt parser, direct AST sink, parser-neutral spans, shared
+type/path seams, strict Mark slice, and syntax-only recovery pass are checked in
+under `lambda/runtime/parser/`, `lambda/input/`, and the runtime diagnostic
+adapter. The normal runner defaults to the C parser and has explicit Tree-sitter
+rollback and syntax-compare modes. Focused POC and direct-vs-reference execution
+probes are green, including the mutable/index assignment and VMap method
+regressions that closed the final cutover gaps. Remaining work is the final
+zero-copy `InputParseSession`, migration of JSON/TOML/XML/CSV/YAML, nested
+context recovery, and the REPL append-only fragment transaction; canonical AST
+and release timing parity remain required before removing the reference Lambda
+Tree-sitter archive.

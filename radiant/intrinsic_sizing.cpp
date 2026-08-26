@@ -4544,6 +4544,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     float vertical_block_axis_sum = 0.0f;
     bool has_inline_content = false;
     bool has_in_flow_block_child = false;
+    bool is_multicol = is_multicol_container(view_block);
+    IntrinsicSizes multicol_spanner_sizes = {};
     bool intrinsic_list_item_scope = false;
     if (lycon->counter_context &&
         view_block->display.outer == CSS_VALUE_LIST_ITEM &&
@@ -5124,6 +5126,20 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 continue;
             }
 
+            if (is_multicol) {
+                IntrinsicMulticolChild child_info = {};
+                if (intrinsic_multicol_child_info(child, &child_info) &&
+                    child_info.spans_all) {
+                    // css multicol: spanners are not column content, so their
+                    // intrinsic width must not be multiplied by column-count.
+                    multicol_spanner_sizes.min_content = max(
+                        multicol_spanner_sizes.min_content, child_sizes.min_content);
+                    multicol_spanner_sizes.max_content = max(
+                        multicol_spanner_sizes.max_content, child_sizes.max_content);
+                    continue;
+                }
+            }
+
             // CSS 2.1 §17.2.1 wraps table-cell boxes in anonymous table boxes;
             // inside an inline parent those wrappers participate as inline-table.
             // Floats are blockified, so whitespace between them must not enter
@@ -5702,6 +5718,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             sizes.min_content = column_min * intrinsic_column_count + total_gap;
             sizes.max_content = column_max * intrinsic_column_count + total_gap;
         }
+    }
+
+    if (is_multicol) {
+        sizes.min_content = max(sizes.min_content, multicol_spanner_sizes.min_content);
+        sizes.max_content = max(sizes.max_content, multicol_spanner_sizes.max_content);
     }
 
     IntrinsicHorizontalBoxEdges edges =

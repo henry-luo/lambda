@@ -1076,7 +1076,16 @@ RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item valu
     DomElement* elem = radiant_dom_element_from_item(node_item, "SET_ATTR");
     const char* name = fn_to_cstr(name_item);
     const char* value = fn_to_cstr(value_item);
-    if (!elem || !name || !name[0] || !value) return ItemNull;
+    if (!elem || !name || !name[0]) return ItemNull;
+    // A null value removes the attribute. ARIA needs both halves of that: some
+    // mirrors are present-or-absent (aria-disabled), while aria-invalid is
+    // deliberately written "false" rather than removed, because assistive tech
+    // reads an explicit false as "validation ran and this control is OK" (F7).
+    if (!value) {
+        Item args1[1] = {name_item};
+        radiant_dom_element_operation(node_item, JUBE_DOM_REMOVE_ATTRIBUTE, args1, 1);
+        return node_item;
+    }
     // Attribute writes from Lambda must share JS DOM side effects such as
     // event-attribute compilation, selection refresh, and mutation notices.
     Item args[2] = {name_item, value_item};
@@ -1240,13 +1249,6 @@ RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item val
     // the canonical bit is written; CSS only sees it once the pseudo-class
     // cascade re-runs, which the native writers schedule at each call site
     if (changed && pseudo_flag) radiant_sync_pseudo_state((View*)elem, pseudo_flag, want);
-    // ESO37: aria-invalid mirrors the validity verdict, and the verdict is
-    // produced here now — te_aria_reflect's other call sites are the native
-    // value-mutation points, which run before the package has validated.
-    if (changed && (strcmp(interned, STATE_VALID) == 0 ||
-                    strcmp(interned, STATE_INVALID) == 0)) {
-        te_aria_reflect(elem);
-    }
     // Report what actually happened, not merely that a writer was called: a
     // form-state write is a no-op until layout has built the control's
     // FormControlProp, and a silent false success would hide that.
@@ -1395,6 +1397,208 @@ RADIANT_C_API Item fn_radiant_text_control(Item node_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "TEXT_CONTROL");
     if (!elem) return (Item){.item = b2it(0)};
     return (Item){.item = b2it(tc_is_text_control(elem) ? 1 : 0)};
+}
+
+// ---- F5: the editing waist -------------------------------------------------
+//
+// Three unit systems meet here and the conversions live only in this block:
+// the buffer is UTF-8 *bytes*, the selection IDL is *UTF-16* code units (that
+// is what selectionStart means), and everything Lambda sees is *codepoints* —
+// `len`, `slice` and `ord` are all codepoint-indexed, so a template computing
+// `slice(value, 0, start)` can only be handed codepoint offsets (ES9).
+
+// Resolve the control's live buffer for offset conversion.
+static const char* radiant_tc_buffer(DomElement* elem, uint32_t* out_len) {
+    *out_len = 0;
+    FormControlProp* f = elem ? elem->form_control() : nullptr;
+    if (!f) return nullptr;
+    if (f->current_value) { *out_len = f->current_value_len; return f->current_value; }
+    if (f->value) { *out_len = (uint32_t)strlen(f->value); return f->value; }
+    return "";
+}
+
+static uint32_t radiant_cp_to_u16(const char* buf, uint32_t len, uint32_t cp) {
+    size_t byte_off = str_utf8_char_to_byte(buf, len, cp);
+    if (byte_off == STR_NPOS || byte_off > len) byte_off = len;
+    return tc_utf8_to_utf16_length(buf, (uint32_t)byte_off);
+}
+
+static uint32_t radiant_u16_to_cp(const char* buf, uint32_t len, uint32_t u16) {
+    uint32_t byte_off = tc_utf16_to_utf8_offset(buf, len, u16);
+    return (uint32_t)str_utf8_byte_to_char(buf, len, byte_off);
+}
+
+// Caret/selection reads, in codepoints.
+static Item radiant_selection_edge(Item node_item, const char* op, bool want_end) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, op, &elem);
+    if (!state || !elem) return ItemNull;
+    uint32_t s = 0, e = 0; uint8_t dir = 0;
+    form_control_get_selection(state, (View*)elem, &s, &e, &dir);
+    uint32_t len = 0;
+    const char* buf = radiant_tc_buffer(elem, &len);
+    if (!buf) return ItemNull;
+    return radiant_int_item((int64_t)radiant_u16_to_cp(buf, len, want_end ? e : s));
+}
+
+RADIANT_C_API Item fn_radiant_selection_start(Item node_item) {
+    return radiant_selection_edge(node_item, "SELECTION_START", false);
+}
+
+RADIANT_C_API Item fn_radiant_selection_end(Item node_item) {
+    return radiant_selection_edge(node_item, "SELECTION_END", true);
+}
+
+RADIANT_C_API Item fn_radiant_set_selection(Item node_item, Item start_item, Item end_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_SELECTION", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    uint32_t len = 0;
+    const char* buf = radiant_tc_buffer(elem, &len);
+    if (!buf) return (Item){.item = b2it(0)};
+    int64_t s = it2l(start_item), e = it2l(end_item);
+    if (s < 0) s = 0;
+    if (e < s) e = s;
+    form_control_set_selection(state, (View*)elem,
+                               radiant_cp_to_u16(buf, len, (uint32_t)s),
+                               radiant_cp_to_u16(buf, len, (uint32_t)e), 0);
+    return (Item){.item = b2it(1)};
+}
+
+// Counts splices this waist has performed. The engine samples it either side of
+// a beforeinput dispatch so it can tell "the applier edited" from "the applier
+// claimed the intent but changed nothing" — a maxlength-blocked keystroke is
+// the second, and it must not produce an `input` event.
+static uint64_t g_radiant_splice_epoch = 0;
+
+extern "C" uint64_t radiant_splice_epoch(void) { return g_radiant_splice_epoch; }
+
+// The splice itself stays native (ES9): the template decides *what* range is
+// replaced with *what* text, the engine owns the buffer, the mirrors and the
+// caret. Events are deliberately not fired here — this runs inside beforeinput,
+// and the engine dispatches `input` after the applier returns, exactly as it
+// does for its own splice.
+RADIANT_C_API Item fn_radiant_replace_range(Item node_item, Item start_item,
+                                            Item end_item, Item text_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "REPLACE_RANGE", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    if (!tc_is_text_control(elem)) {
+        log_error("JUBE_RADIANT_REPLACE_RANGE: <%s> is not a text control",
+                  elem->tag_name ? elem->tag_name : "?");
+        return (Item){.item = b2it(0)};
+    }
+    uint32_t len = 0;
+    const char* buf = radiant_tc_buffer(elem, &len);
+    if (!buf) return (Item){.item = b2it(0)};
+
+    int64_t cp_start = it2l(start_item), cp_end = it2l(end_item);
+    if (cp_start < 0) cp_start = 0;
+    if (cp_end < cp_start) cp_end = cp_start;
+    size_t b_start = str_utf8_char_to_byte(buf, len, (size_t)cp_start);
+    size_t b_end = str_utf8_char_to_byte(buf, len, (size_t)cp_end);
+    // A codepoint index past the end clamps to the end rather than failing:
+    // a template computing `len(value)` as an end offset is asking for exactly
+    // that, and STR_NPOS would otherwise splice at a garbage offset.
+    if (b_start == STR_NPOS || b_start > len) b_start = len;
+    if (b_end == STR_NPOS || b_end > len) b_end = len;
+
+    const char* repl = fn_to_cstr(text_item);
+    if (!repl) repl = "";
+    uint32_t repl_len = (uint32_t)strlen(repl);
+    // A collapsed range with nothing to insert changes no bytes; treating it as
+    // a splice would raise the epoch and manufacture an `input` event.
+    if (b_start == b_end && repl_len == 0) return (Item){.item = b2it(1)};
+    bool ok = te_replace_byte_range_no_events(
+        elem, state, (View*)elem, (uint32_t)b_start, (uint32_t)b_end,
+        repl, repl_len);
+    if (ok) g_radiant_splice_epoch++;
+    return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
+// ---- change-on-blur (ESO42) ------------------------------------------------
+//
+// The value as it stood when the control gained focus. The snapshot itself is
+// engine mechanism (te_focus_capture_value); what a template does with it —
+// deciding whether the value was committed — is the policy.
+RADIANT_C_API Item fn_radiant_value_at_focus(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "VALUE_AT_FOCUS");
+    FormControlProp* f = elem ? elem->form_control() : nullptr;
+    if (!f || !f->value_at_focus) return ItemNull;
+    return radiant_string_item(f->value_at_focus);
+}
+
+// Counts change requests. The engine samples it across the commit hook so the
+// template can answer "the value was committed" without dispatching the event
+// itself — native still fires `change`, which is what keeps it ahead of `blur`
+// and keeps the state machine's DISPATCH_CHANGE observation intact.
+static uint64_t g_radiant_change_request_epoch = 0;
+
+extern "C" uint64_t radiant_change_request_epoch(void) {
+    return g_radiant_change_request_epoch;
+}
+
+RADIANT_C_API Item fn_radiant_request_change(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "REQUEST_CHANGE");
+    if (!elem) return (Item){.item = b2it(0)};
+    g_radiant_change_request_epoch++;
+    return (Item){.item = b2it(1)};
+}
+
+// Range geometry for the ARIA value mirrors (F7). `value` is the *computed*
+// value, not the normalized 0..1 the engine stores, because that is what
+// aria-valuenow reports. All three return null on a control that is not a
+// range, which is how the template tells the two cases apart.
+static Item radiant_range_field(Item node_item, const char* op, int which) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, op, &elem);
+    FormControlProp* f = elem ? elem->form_control() : nullptr;
+    if (!state || !f || f->control_type != FORM_CONTROL_RANGE) return ItemNull;
+    if (which == 1) return radiant_float_item((double)f->range_min);
+    if (which == 2) return radiant_float_item((double)f->range_max);
+    float normalized = form_control_get_range_value(state, (View*)elem);
+    return radiant_float_item(
+        (double)(f->range_min + (f->range_max - f->range_min) * normalized));
+}
+
+RADIANT_C_API Item fn_radiant_range_value(Item n) { return radiant_range_field(n, "RANGE_VALUE", 0); }
+RADIANT_C_API Item fn_radiant_range_min(Item n) { return radiant_range_field(n, "RANGE_MIN", 1); }
+RADIANT_C_API Item fn_radiant_range_max(Item n) { return radiant_range_field(n, "RANGE_MAX", 2); }
+
+// ---- IME session (ES18/F7) -------------------------------------------------
+//
+// The preedit is document-scoped, so these take any node purely to find the
+// document — the body, in practice, since that is where the session template
+// matches. Writing it is what suppresses nothing else: the placeholder rule and
+// the orphan cleanup are the template's policy, expressed through these.
+RADIANT_C_API Item fn_radiant_ime_preedit(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "IME_PREEDIT", &elem);
+    if (!state || !elem) return ItemNull;
+    const char* p = editing_composition_preedit(state, (View*)elem, nullptr, nullptr);
+    return p ? radiant_string_item(p) : ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_set_ime_preedit(Item node_item, Item text_item,
+                                              Item caret_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_IME_PREEDIT", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    const char* text = fn_to_cstr(text_item);
+    int64_t caret = it2l(caret_item);
+    if (caret < 0) caret = 0;
+    editing_composition_set_preedit(state, (View*)elem, text,
+                                    text ? (uint32_t)strlen(text) : 0,
+                                    (uint32_t)caret);
+    return (Item){.item = b2it(1)};
+}
+
+RADIANT_C_API Item fn_radiant_clear_ime_preedit(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "CLEAR_IME_PREEDIT", &elem);
+    if (!state) return (Item){.item = b2it(0)};
+    editing_composition_clear_preedit(state);
+    return (Item){.item = b2it(1)};
 }
 
 RADIANT_C_API Item fn_radiant_free(Item node_item) {
@@ -1795,6 +1999,31 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_custom_validity(Item node)", (fn_ptr)fn_radiant_custom_validity},
     {"text_control", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_text_control, JUBE_FN_NONE,
      "Item fn_radiant_text_control(Item node)", (fn_ptr)fn_radiant_text_control},
+    // F5 editing waist — all offsets in codepoints
+    {"selection_start", "fn(node: dom_node) -> int", (fn_ptr)fn_radiant_selection_start, JUBE_FN_NONE,
+     "Item fn_radiant_selection_start(Item node)", (fn_ptr)fn_radiant_selection_start},
+    {"selection_end", "fn(node: dom_node) -> int", (fn_ptr)fn_radiant_selection_end, JUBE_FN_NONE,
+     "Item fn_radiant_selection_end(Item node)", (fn_ptr)fn_radiant_selection_end},
+    {"set_selection", "fn(node: dom_node, start: int, end: int) -> bool", (fn_ptr)fn_radiant_set_selection, JUBE_FN_NONE,
+     "Item fn_radiant_set_selection(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_selection},
+    {"replace_range", "fn(node: dom_node, start: int, end: int, text: string) -> bool", (fn_ptr)fn_radiant_replace_range, JUBE_FN_NONE,
+     "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
+    {"ime_preedit", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_ime_preedit, JUBE_FN_NONE,
+     "Item fn_radiant_ime_preedit(Item node)", (fn_ptr)fn_radiant_ime_preedit},
+    {"set_ime_preedit", "fn(node: dom_node, text: any, caret: int) -> bool", (fn_ptr)fn_radiant_set_ime_preedit, JUBE_FN_NONE,
+     "Item fn_radiant_set_ime_preedit(Item node, Item text, Item caret)", (fn_ptr)fn_radiant_set_ime_preedit},
+    {"clear_ime_preedit", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_clear_ime_preedit, JUBE_FN_NONE,
+     "Item fn_radiant_clear_ime_preedit(Item node)", (fn_ptr)fn_radiant_clear_ime_preedit},
+    {"range_value", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_range_value, JUBE_FN_NONE,
+     "Item fn_radiant_range_value(Item node)", (fn_ptr)fn_radiant_range_value},
+    {"range_min", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_range_min, JUBE_FN_NONE,
+     "Item fn_radiant_range_min(Item node)", (fn_ptr)fn_radiant_range_min},
+    {"range_max", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_range_max, JUBE_FN_NONE,
+     "Item fn_radiant_range_max(Item node)", (fn_ptr)fn_radiant_range_max},
+    {"value_at_focus", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_value_at_focus, JUBE_FN_NONE,
+     "Item fn_radiant_value_at_focus(Item node)", (fn_ptr)fn_radiant_value_at_focus},
+    {"request_change", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_request_change, JUBE_FN_NONE,
+     "Item fn_radiant_request_change(Item node)", (fn_ptr)fn_radiant_request_change},
     {"free", "fn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
     {"layout", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,

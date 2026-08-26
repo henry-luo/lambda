@@ -2,8 +2,19 @@
 #include "../../lib/log.h"
 #include <cstdarg>
 #include <cstdio>
+#include <cstdint>
 
 namespace lambda {
+
+bool InputContext::syncTo(const char* source_pos) {
+    if (!source_pos || !source_begin_) return false;
+    uintptr_t begin = (uintptr_t)source_begin_;
+    uintptr_t current = (uintptr_t)source_pos;
+    if (current < begin || current - begin > owned_source_len_) {
+        return false;
+    }
+    return tracker.seek((size_t)(current - begin));
+}
 
 void InputContext::addError(const SourceLocation& loc, const char* fmt, ...) {
     markParseError();

@@ -102,8 +102,6 @@ void form_control_prop_release(FormControlProp* f) {
     if (f->current_value) { mem_free(f->current_value); f->current_value = nullptr; }
     if (f->custom_validity_msg) { mem_free(f->custom_validity_msg); f->custom_validity_msg = nullptr; }
     if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
-    if (f->history) { te_history_free((EditHistory*)f->history); f->history = nullptr; }
-    if (f->preedit_utf8) { mem_free(f->preedit_utf8); f->preedit_utf8 = nullptr; }
 }
 
 FormControlProp* tc_get_or_create_form(DomElement* elem) {
@@ -240,9 +238,6 @@ void tc_ensure_init(DomElement* elem) {
     // queued and drained after render (ESO33). Nothing seeds :required or
     // :read-only here any more: they are derived at match time (F3b/ES16).
     radiant_dispatch_behavior_attach((View*)elem);
-    // F8: ARIA reflection — push disabled/readonly/required/invalid bits
-    // onto matching aria-* attributes for AT consumers.
-    te_aria_reflect(elem);
 }
 
 // F4 (Radiant_Design_Form_Input.md §3.8): refresh :placeholder-shown bit.
@@ -311,10 +306,17 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     f->selection_direction = 0;
     f->tc_initialized = 1;
     f->value = buf;
-    form_control_sync_text_control_state(state, (View*)elem);
+    // One publish, not two. state_store_set_text_control_selection is the
+    // single fan-out: it writes the prop's selection, pushes value+selection
+    // into the ViewState (via form_control_sync_text_control_state) and writes
+    // DocState::sel — all three together, so they cannot diverge (ESO22). The
+    // direct sync call that used to stand here ran that same push a second
+    // time and was what let the two projections drift apart in the first place.
     if (state) {
         state_store_set_text_control_selection(state, elem,
             f->selection_start, f->selection_end, f->selection_direction);
+    } else {
+        form_control_sync_text_control_state(state, (View*)elem);
     }
     form_control_sync_text_control_focus_state(state, (View*)elem);
     // Notify if value-setter caused the selection to move (e.g. previous
@@ -336,8 +338,6 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     // F4: refresh :placeholder-shown after value changes (incl. clear).
     tc_refresh_placeholder_shown(elem, f);
 
-    // F8: keep aria-invalid in sync with the new validity state.
-    te_aria_reflect(elem);
 }
 
 void tc_set_selection_range(DomElement* elem,
@@ -356,10 +356,12 @@ void tc_set_selection_range(DomElement* elem,
     f->selection_start = start;
     f->selection_end = end;
     f->selection_direction = dir;
-    form_control_sync_text_control_state(state, (View*)elem);
+    // single publish — see tc_set_value (ESO22)
     if (state) {
         state_store_set_text_control_selection(state, elem,
             f->selection_start, f->selection_end, f->selection_direction);
+    } else {
+        form_control_sync_text_control_state(state, (View*)elem);
     }
     form_control_sync_text_control_focus_state(state, (View*)elem);
     if (start != old_start || end != old_end || dir != old_dir) {
