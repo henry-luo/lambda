@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "T20-2: fn_string survives for the int operand while the string operand decodes inline. Pins the discrimination, not merely the absence.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": [
+        "call\tfn_strcat_p, fn_strcat",
+        "call\tfn_string_p, fn_string"
+      ],
+      "forbid": ["call\tfn_join_p, fn_join"]
+    }
+  ]
+}
