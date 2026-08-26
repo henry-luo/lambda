@@ -9,6 +9,7 @@
  * Data zone buffers of surviving objects are compacted to tenured data zone.
  */
 #include "gc_heap.h"
+#include "../../js/js_interp_env.h"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
 #include "../../../lib/mem_factory.h"
@@ -465,6 +466,10 @@ gc_heap_t* gc_heap_create(void) {
         gc->root_slot_capacity = 0;
     }
 
+    gc->object_roots = NULL;
+    gc->object_root_count = 0;
+    gc->object_root_capacity = 0;
+
     gc->weak_slots = NULL;
     gc->weak_slot_count = 0;
     gc->weak_slot_capacity = 0;
@@ -551,6 +556,11 @@ void gc_heap_destroy(gc_heap_t* gc) {
     if (gc->root_ranges) {
         mem_free(gc->root_ranges);
         gc->root_ranges = NULL;
+    }
+
+    if (gc->object_roots) {
+        mem_free(gc->object_roots);
+        gc->object_roots = NULL;
     }
 
 
@@ -927,6 +937,49 @@ void gc_unregister_root(gc_heap_t* gc, uint64_t* slot) {
             log_debug("gc_unregister_root: removed slot %p (total: %d)", (void*)slot, gc->root_slot_count);
             return;
         }
+    }
+}
+
+int gc_try_register_object_root(gc_heap_t* gc, void* object) {
+    if (!gc || !object) return 0;
+    for (int i = 0; i < gc->object_root_count; i++) {
+        if (gc->object_roots[i].object == object) {
+            gc->object_roots[i].ref_count++;
+            return 1;
+        }
+    }
+    if (gc->object_root_count >= gc->object_root_capacity) {
+        int new_cap = gc->object_root_capacity ? gc->object_root_capacity * 2
+            : GC_ROOT_SLOTS_INITIAL;
+        gc_object_root_t* roots = (gc_object_root_t*)mem_realloc(
+            gc->object_roots, (size_t)new_cap * sizeof(gc_object_root_t),
+            MEM_CAT_CONTAINER);
+        if (!roots) {
+            log_error("gc-object-root: realloc failed for %d roots", new_cap);
+            return 0;
+        }
+        gc->object_roots = roots;
+        gc->object_root_capacity = new_cap;
+    }
+    gc->object_roots[gc->object_root_count].object = object;
+    gc->object_roots[gc->object_root_count].ref_count = 1;
+    gc->object_root_count++;
+    return 1;
+}
+
+void gc_unregister_object_root(gc_heap_t* gc, void* object) {
+    if (!gc || !object) return;
+    for (int i = 0; i < gc->object_root_count; i++) {
+        if (gc->object_roots[i].object != object) continue;
+        if (gc->object_roots[i].ref_count > 1) {
+            gc->object_roots[i].ref_count--;
+            return;
+        }
+        for (int j = i; j < gc->object_root_count - 1; j++) {
+            gc->object_roots[j] = gc->object_roots[j + 1];
+        }
+        gc->object_root_count--;
+        return;
     }
 }
 
@@ -1423,6 +1476,14 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // Item slots; tracing it as Items would retain arbitrary bit patterns.
         size_t count = header->alloc_size / (2 * sizeof(uint64_t));
         for (size_t i = 0; i < count; i++) gc_mark_item(gc, items[i]);
+        break;
+    }
+    case GC_TYPE_JS_INTERP_ENV: {
+        JsInterpEnv* env = (JsInterpEnv*)obj;
+        if (env->outer) gc_mark_object_ptr(gc, env->outer);
+        for (uint32_t i = 0; i < env->slot_count; i++) {
+            gc_mark_item(gc, env->slots[i]);
+        }
         break;
     }
     // types with no outgoing Item pointers — nothing to trace
@@ -2247,6 +2308,12 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     for (int i = 0; i < gc->root_slot_count; i++) {
         if (gc->root_slots[i]) {
             gc_mark_item(gc, *gc->root_slots[i]);
+        }
+    }
+
+    for (int i = 0; i < gc->object_root_count; i++) {
+        if (gc->object_roots[i].object) {
+            gc_mark_object_ptr(gc, gc->object_roots[i].object);
         }
     }
 

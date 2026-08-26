@@ -2,7 +2,11 @@
 
 **Date:** 2026-08-25
 
-**Status:** PROPOSED — architecture and staged implementation plan; no implementation is claimed by this document.
+**Status:** PARTIALLY IMPLEMENTED — the explicit synchronous AST backend
+landed on 2026-08-26 and now covers the implemented P2 core plus the P3
+surface listed in §13. The default remains whole-script MIR; direct eval/
+modules, private/super, mixed T0/T1 environment cells, suspension, and AUTO
+promotion remain planned.
 
 **Scope:** LambdaJS only. This document specializes the interpreter direction established by **AI21** and the shared-AST rules **D8.2.1–D8.2.5**. It does not change the Lambda-language T0 semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
@@ -834,7 +838,7 @@ Vendor sources, C2MIR, generated `parser.c`, generated Lua, and `log.conf` remai
 
 **Gate:** eager MIR and MIR-interp baselines remain identical; `fn->analysis` and every source/name pointer remain valid through event-loop drain and batch reuse; **D8.6.4v2** timing/LOC diagnostics are recorded.
 
-### P2 — Restricted synchronous vertical slice
+### P2 — Restricted synchronous vertical slice — implemented 2026-08-26
 
 Add the explicit `AST` function body kind, AST-target factories, and common call/construct body dispatch required to execute interpreted ordinary functions. Promotion remains disabled in this phase.
 
@@ -852,21 +856,43 @@ Implement a full vertical path for classic scripts containing:
 
 Reject classes, modules, `with`, direct eval, generators, async, top-level await, and any unplanned extension before execution.
 
-**Gate:** admitted fixtures match eager MIR exactly; forced `interp` executes them with zero MIR contexts and zero fallbacks; forced GC/ASan lifecycle probes pass.
+**Implemented boundary:** `JS_EXECUTION_BACKEND=ast` selects the retained
+`JsScript` path. It supports the listed P2 forms with simple identifier
+bindings/parameters, ordinary functions/arrows/constructors, native
+callbacks, structured completions, and precisely traced mutable lexical
+environments. Classes, modules, direct eval, `with`, destructuring/default/
+rest/spread, optional chaining, object methods/accessors, generators, async,
+and top-level await are rejected before declaration instantiation. A forced
+AST request returns the JavaScript rejection error rather than silently
+replaying in MIR; with no selector, existing MIR remains the policy. This is
+the explicit-backend contract of **D8.1.3v2**, preserving **D8.4.3v2** error
+transport and **D1.3** guest semantics.
 
-### P3 — Synchronous breadth
+**Gate:** focused ownership, module-state, call/construct, native-callback,
+completion, closure/per-iteration, forced-GC, and pre-execution-rejection
+tests pass. Broader eager-MIR differential and sanitizer corpus gates remain
+P3/P4 work.
 
-Add:
+### P3 — Synchronous breadth — partially implemented 2026-08-26
 
-- destructuring/default/rest/spread;
-- for-in/for-of and IteratorClose;
-- switch and labels;
-- optional chaining and logical assignment;
-- regex, templates, tagged templates;
-- `with` and richer global semantics;
-- classes/private/super/static blocks;
-- CommonJS and ES modules without suspension;
-- direct eval after the materialization bridge.
+Implemented:
+
+- destructuring/default/rest/spread, including parameters, catch, assignment,
+  and iteration heads;
+- synchronous `for-in`/`for-of`, per-iteration lexical cells, and
+  `IteratorClose` on abrupt completions;
+- switch and labeled break/continue completions;
+- optional chaining, logical assignment, and delete references;
+- regex, templates, and tagged templates through the common call runtime;
+- `with` through the existing object-environment stack, including escaped AST
+  closures;
+- public classes: methods/accessors, public instance/static fields, static
+  blocks, and implicit derived construction, all through the existing class
+  function/property kernels.
+
+Still excluded: private names, `super`, direct eval, CommonJS/ES modules,
+generators, async, and top-level await. These forms fail before observable
+execution under the forced AST selector.
 
 **Gate:** the committed `test_js_gtest` corpus partition is complete—every discovered row is an exact T0 match or an explicit pre-execution exclusion, with no unclassified or silent fallback rows.
 
@@ -1064,17 +1090,17 @@ These questions do not reopen the decisions above:
 
 | ID | Decision | Status |
 |---|---|---|
-| **JSI1** | JavaScript gets a separate semantic walker over the shared AST/runtime substrate | proposed |
-| **JSI2** | `JsScript` is the retained AST/source/fact/T1-artifact owner | proposed |
+| **JSI1** | JavaScript gets a separate semantic walker over the shared AST/runtime substrate | implemented for P2 |
+| **JSI2** | `JsScript` is the retained AST/source/fact/T1-artifact owner | implemented for the AST owner; MIR-fact migration pending |
 | **JSI3** | Binding/strict/TDZ/capture/class/module facts are computed once before backend selection | proposed |
-| **JSI4** | T0 is boxed-only | proposed |
-| **JSI5** | Frames use existing precise root/number side stacks only | proposed |
-| **JSI6** | ECMAScript references are explicit interpreter records | proposed |
-| **JSI7** | JavaScript uses structured NORMAL/RETURN/THROW/BREAK/CONTINUE completions | proposed |
-| **JSI8** | ERROR-tagged helper returns become explicit THROW completions in the immediate frame | proposed |
-| **JSI9** | `fn->invoke`/`fn->construct` remain the sole call/construct authorities | proposed |
+| **JSI4** | T0 is boxed-only | implemented for P2 |
+| **JSI5** | Frames use existing precise root/number side stacks only | implemented for P2 |
+| **JSI6** | ECMAScript references are explicit interpreter records | implemented for identifier/member, update, delete, optional, and `with` P3 forms |
+| **JSI7** | JavaScript uses structured NORMAL/RETURN/THROW/BREAK/CONTINUE completions | implemented for P2 plus labels/IteratorClose in P3 |
+| **JSI8** | ERROR-tagged helper returns become explicit THROW completions in the immediate frame | implemented for P2 |
+| **JSI9** | `fn->invoke`/`fn->construct` remain the sole call/construct authorities | implemented for P2 |
 | **JSI10** | No JavaScript AST/property inline caches | confirmed by D8.4.1v2 |
-| **JSI11** | Unsupported scripts fall back only before execution and are counted | proposed |
+| **JSI11** | Unsupported scripts fall back only before execution and are counted | implemented as forced-backend rejection; AUTO fallback pending |
 | **JSI12** | T0 and T1 capturable bindings share environment cells | proposed |
 | **JSI13** | Suspension remains compiled until heapified interpreter continuations land | proposed |
 | **JSI14** | `func_ptr == NULL` never selects AST semantics; function body kind is explicit | proposed |
@@ -1091,12 +1117,16 @@ These questions do not reopen the decisions above:
 
 ## 18. Adoption Requirements
 
-This proposal becomes implementation authority only when the following documentation changes land together:
+This proposal's P2 implementation authority is now recorded by
+**D6.2.3v2**, **D8.1.3v2**, and
+[`vibe/impl/Lambda_Impl_JS_Interpreter.md`](impl/Lambda_Impl_JS_Interpreter.md).
+The following requirements remain for later phases:
 
-1. add the JavaScript T0/T1 ruling to `doc/Lambda_Formal_Design.md`, recommended as **D8.1.3**;
-2. revise D6.2.3 in place to explicitly distinguish Lambda snapshot captures from guest-profile closure semantics;
-3. revise `Lambda_Design_Ast_Interpreter.md` §9 to point here and remove its stale `EvalSignal`/inline-cache claims;
-4. update `JS_01`, `JS_04`, `JS_05`, `JS_08`, `JS_09`, and `JS_16` as each implementation phase actually lands;
-5. create an implementation status record under `vibe/impl/` before code work claims a completed phase.
+1. migrate authoritative MIR-session binding/property/function facts to `JsScript` before T0/T1 mixing;
+2. revise `Lambda_Design_Ast_Interpreter.md` §9 to point here and remove its stale `EvalSignal`/inline-cache claims;
+3. update `JS_01`, `JS_04`, `JS_05`, `JS_08`, `JS_09`, and `JS_16` as each implementation phase actually lands;
+4. complete the P3–P6 gates before changing the unset backend policy.
 
-Until then, the shipped JavaScript pipeline remains parse → shared AST → whole-module MIR → MIR JIT/interpreter, and this document is a proposal rather than a statement of current behavior.
+Until those later gates land, the default JavaScript pipeline remains parse →
+shared AST → whole-module MIR → MIR JIT/interpreter. The explicit AST backend
+is a shipped restricted synchronous tier, not a full-coverage replacement.

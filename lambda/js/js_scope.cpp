@@ -136,6 +136,20 @@ static NameEntry* js_scope_find_entry(JsScope* scope, String* name) {
     return NULL;
 }
 
+static bool js_scope_entry_matches_node(const NameEntry* entry,
+        const JsAstNode* node) {
+    if (!entry || !entry->node || !node) return false;
+    if (entry->node->source_span.start_byte == node->source_span.start_byte &&
+            entry->node->source_span.end_byte == node->source_span.end_byte) {
+        return true;
+    }
+    // A predeclared destructuring name is represented by one placeholder for
+    // its declarator; the real binding identifier lives inside that span.
+    return entry->node->node_type == AST_NODE_IDENT &&
+        entry->node->source_span.start_byte <= node->source_span.start_byte &&
+        entry->node->source_span.end_byte >= node->source_span.end_byte;
+}
+
 NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
     JsScope* scope = tp->current_scope;
 
@@ -232,12 +246,19 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
     // Function-scoped var declarations are one hoisted binding even when the
     // source contains several declarations or a declaration is pre-scanned.
     if (existing && kind == JS_VAR_VAR && !existing->is_lexical) {
+        if (js_scope_entry_matches_node(existing, node)) {
+            existing->node = (AstNode*)node;
+        }
         return existing;
     }
 
     // Check for redeclaration in strict mode or with let/const
     if (target_scope->strict || kind != JS_VAR_VAR) {
         if (existing) {
+            if (js_scope_entry_matches_node(existing, node)) {
+                existing->node = (AstNode*)node;
+                return existing;
+            }
             log_error("Identifier '%.*s' has already been declared",
                      (int)name->len, name->chars);
             return existing;
@@ -329,6 +350,9 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     tp->in_expression = false;
     tp->has_errors = false;
     tp->strict_js = true;  // default: pure JS mode (reject TS syntax)
+    // The shared indexer owns core edges. Install JavaScript's extension-only
+    // adapter before any parse can publish an AstIndex for this profile.
+    js_profile.visit_ext_children = js_ast_visit_extension_children;
     tp->profile = &js_profile;
     tp->destroy_extension = js_script_destroy_extension;
     tp->runtime = runtime;

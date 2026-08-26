@@ -170,7 +170,8 @@ void js_function_finalize_capabilities(JsFunction* fn) {
         fn->construct = js_construct_entry_native;
     } else if (inherited_construct) {
         fn->construct = inherited_construct;
-    } else if (!fn->native_call && fn->func_ptr) {
+    } else if (!fn->native_call && (fn->func_ptr ||
+            fn->body_kind == JS_FUNCTION_BODY_AST)) {
         fn->construct = js_construct_entry_ordinary;
     }
     js_function_ensure_metadata_properties(fn);
@@ -225,6 +226,8 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     gc_mark_item(gc, fn->class_constructor.item);
     gc_mark_item(gc, fn->class_instance_prototype.item);
     gc_mark_item(gc, fn->class_superclass.item);
+    gc_mark_item(gc, fn->ast_lexical_this.item);
+    if (fn->interp_env) gc_mark_object_ptr(gc, fn->interp_env);
     return 1;
 }
 
@@ -421,6 +424,34 @@ static Item js_new_function_impl(void* func_ptr, int param_count,
     js_function_finalize_capabilities(fn);
     if (!has_with_env && !suppress_cache) js_func_cache_insert(cache_key, fn);
     return (Item){.function = (Function*)fn};
+}
+
+extern "C" Item js_new_interpreted_function(AstFuncNode* function,
+        JsScript* script, JsInterpEnv* environment, int param_count,
+        uint32_t flags) {
+    if (!function || param_count < 0) return ItemError;
+    RootFrame roots(1);
+    Rooted<Item> function_root(roots, ItemNull);
+    JsFunction* fn = js_alloc_function_storage(true);
+    if (!fn) return ItemError;
+    function_root.set((Item){.function = (Function*)fn});
+    js_function_init_common(fn, param_count);
+    fn->ast_function = function;
+    fn->ast_script = script;
+    fn->interp_env = environment;
+    fn->body_kind = JS_FUNCTION_BODY_AST;
+    fn->flags = flags;
+    fn->module_state_id = js_get_active_module_state_id();
+    fn->home_global = js_get_global_this();
+    fn->ast_lexical_this = (flags & JS_FUNC_FLAG_ARROW)
+        ? js_get_this() : ItemNull;
+    fn->name = function->name;
+    fn->formal_length = (int16_t)param_count;
+    // AST closures created inside `with` use the same captured object
+    // environment stack as compiled and native JS functions.
+    js_function_capture_with_env(fn);
+    js_function_finalize_capabilities(fn);
+    return function_root.get();
 }
 
 #define JS_DEFINE_NATIVE_CALL_ADAPTER(arity, member, params, call_args) \

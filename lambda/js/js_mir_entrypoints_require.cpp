@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "js_interp.hpp"
 #include "js_runtime_state.hpp"
 #include "../jube/jube_registry.h"
 #include "../module/node_core/node_runtime_state.hpp"
@@ -360,7 +361,7 @@ Item js_mir_compile_unit_fail(MIR_context_t ctx,
     return (Item){.item = ITEM_ERROR};
 }
 
-static bool js_mir_prepare_eval_context(Runtime* runtime,
+extern "C" bool js_prepare_eval_context(Runtime* runtime,
         bool initialize_thread, EvalContext** out_context,
         bool* out_reusing_context) {
     if (!out_context || !out_reusing_context) return false;
@@ -408,7 +409,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     // to another owner after this call.
     EvalContext* js_context = NULL;
     bool reusing_context = false;
-    if (!js_mir_prepare_eval_context(runtime, true, &js_context, &reusing_context)) {
+    if (!js_prepare_eval_context(runtime, true, &js_context, &reusing_context)) {
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -650,6 +651,12 @@ static size_t js_commonjs_injection_offset(const char* source, size_t source_len
     return i;
 }
 
+static bool js_ast_interpreter_requested(void) {
+    const char* backend = getenv("JS_EXECUTION_BACKEND");
+    return backend && (strcmp(backend, "ast") == 0 ||
+        strcmp(backend, "interpreter") == 0);
+}
+
 static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* js_source,
                                                  size_t js_source_len, const char* filename,
                                                  uint64_t* result_home,
@@ -797,11 +804,30 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
     g_last_js_mir_phase_timing.early_us = js_mir_phase_now_us() - phase_start;
 
+    if (js_ast_interpreter_requested()) {
+        // The AST tier owns the retained JsScript, but uses the same source
+        // parse, early-error pass, Runtime catalog, and EvalContext setup as
+        // the MIR tier. Unsupported syntax is a deterministic admission
+        // error; this explicit selector never silently falls back to MIR.
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        JsScript* script = js_script_adopt_transpiler(tp, runtime, filename);
+        if (!script) {
+            jm_clear_active_js_transpile(NULL, NULL, owned_source);
+            mem_free(owned_source);
+            return ItemError;
+        }
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
+        mem_free(owned_source);
+        Item result = js_interp_execute_script(runtime, script, result_home);
+        js_mir_finish_script_turn(runtime, result);
+        return result;
+    }
+
     // Set up the canonical evaluation context early so module objects and
     // deferred callbacks share one lifetime owner.
     EvalContext* js_context = NULL;
     bool reusing_context = false;
-    if (!js_mir_prepare_eval_context(runtime, false, &js_context, &reusing_context)) {
+    if (!js_prepare_eval_context(runtime, false, &js_context, &reusing_context)) {
         log_error("js-mir: Runtime context differs from eval-thread owner");
         return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
             runtime, NULL, true);

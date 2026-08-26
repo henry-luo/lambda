@@ -9768,6 +9768,11 @@ Item js_intrinsic_global_print_body(Item callee, Item this_value, Item* args,
 static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         uint64_t* scalar_result_home) {
 
+    if (fn->body_kind == JS_FUNCTION_BODY_AST) {
+        extern Item js_interp_call_function(JsFunction*, Item*, int, uint64_t*);
+        return js_interp_call_function(fn, args, arg_count, scalar_result_home);
+    }
+
     if (fn->native_call && fn->native_policy == JS_NATIVE_CALL_BODY) {
         return fn->native_call((Item){.function = (Function*)fn},
             js_current_this, args, arg_count, scalar_result_home);
@@ -14085,7 +14090,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         uses_local_result_home = true;
     }
 
-    if (!fn || (!fn->func_ptr && !fn->native_call)) {
+    if (!fn || (!fn->func_ptr && !fn->native_call &&
+            fn->body_kind != JS_FUNCTION_BODY_AST)) {
         log_error("js_call_function: null function pointer");
         return ItemNull;
     }

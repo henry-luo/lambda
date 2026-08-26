@@ -45,6 +45,9 @@ extern "C" {
 // Internal GC-only allocation tag. It is deliberately outside the public
 // TypeId/Item tag space because a JS environment is addressed as a raw Item[].
 #define GC_TYPE_JS_ENV   0x100
+// Interpreter lexical records need a raw-pointer outer edge and therefore
+// cannot use the Item-array layout above.
+#define GC_TYPE_JS_INTERP_ENV 0x101
 
 /**
  * GCHeader - 16 bytes prepended to every GC-managed allocation.
@@ -133,6 +136,11 @@ typedef struct gc_root_range {
     uint64_t* base;
     int count;
 } gc_root_range_t;
+
+typedef struct gc_object_root {
+    void* object;
+    int ref_count;
+} gc_object_root_t;
 
 typedef struct gc_weak_slot {
     uint64_t* slot;
@@ -232,6 +240,11 @@ typedef struct gc_heap {
     uint64_t** root_slots;
     int root_slot_count;
     int root_slot_capacity;
+
+    // Exact roots for raw GC-managed runtime records.
+    gc_object_root_t* object_roots;
+    int object_root_count;
+    int object_root_capacity;
 
     // Weak slots participate in identity caches without marking their Item.
     // Dead referents are cleared after tracing and before object sweep.
@@ -434,6 +447,8 @@ int gc_try_register_root(gc_heap_t* gc, uint64_t* slot);
  * @param slot pointer previously registered with gc_register_root
  */
 void gc_unregister_root(gc_heap_t* gc, uint64_t* slot);
+int gc_try_register_object_root(gc_heap_t* gc, void* object);
+void gc_unregister_object_root(gc_heap_t* gc, void* object);
 
 void gc_no_gc_scope_begin(gc_heap_t* gc);
 void gc_no_gc_scope_end(gc_heap_t* gc);

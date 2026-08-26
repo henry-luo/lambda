@@ -14,6 +14,9 @@ extern "C" {
 #include "../core/name_identity.h"
 #include <string.h>
 
+typedef struct Runtime Runtime;
+typedef struct EvalContext EvalContext;
+
 typedef Item (*JsNativeP0)(void);
 typedef Item (*JsNativeP1)(Item);
 typedef Item (*JsNativeP2)(Item, Item);
@@ -111,6 +114,7 @@ Item js_to_number(Item value);
 Item js_to_string(Item value);
 Item js_to_boolean(Item value);
 Item js_to_object(Item value);
+Item js_to_property_key(Item value);
 
 /**
  * Check if a value is truthy according to JavaScript rules.
@@ -316,6 +320,13 @@ Item js_new_function_mir(void* func_ptr, int param_count);
 Item js_new_distinct_function_mir(void* func_ptr, int param_count);
 Item js_new_method_function_mir(void* func_ptr, int param_count);
 Item js_new_closure_mir(void* func_ptr, int param_count, Item* env, int env_size);
+struct AstFuncNode;
+struct JsScript;
+struct JsInterpEnv;
+Item js_new_interpreted_function(struct AstFuncNode* function,
+                                 struct JsScript* script,
+                                 struct JsInterpEnv* environment,
+                                 int param_count, uint32_t flags);
 void js_set_formal_length(Item fn_item, int length);
 void js_func_cache_suppress_push(void);
 void js_func_cache_suppress_pop(void);
@@ -742,6 +753,11 @@ Item js_throw_const_assign(NameId name_id, int name_len);
  * Called during JS execution setup. Takes void* for C compatibility (actually Input*).
  */
 void js_runtime_set_input(void* input);
+// Binds JavaScript work to the Runtime's canonical EvalContext. MIR and the
+// AST interpreter share this owner-selection boundary.
+bool js_prepare_eval_context(Runtime* runtime, bool initialize_thread,
+                             EvalContext** out_context,
+                             bool* out_reusing_context);
 
 // =============================================================================
 // Module Variable Table

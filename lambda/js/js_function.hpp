@@ -7,6 +7,14 @@
 #include "../lambda-data.hpp"
 
 struct JsFunction;
+struct AstFuncNode;
+struct JsScript;
+struct JsInterpEnv;
+
+enum JsFunctionBodyKind : uint8_t {
+    JS_FUNCTION_BODY_CODE = 0,
+    JS_FUNCTION_BODY_AST = 1,
+};
 
 // Per-callee call entry. Choosing the calling protocol once, at function
 // finalization, lets each entry contain only the steps its callee's shape
@@ -93,6 +101,13 @@ struct JsFunction {
     Item class_instance_prototype;
     Item class_superclass;
     Context* runtime_context;
+    // AST bodies retain source-level semantics while using the ordinary JS
+    // call kernel. The lexical environment is a precise GC edge.
+    AstFuncNode* ast_function;
+    JsScript* ast_script;
+    JsInterpEnv* interp_env;
+    Item ast_lexical_this;
+    uint8_t body_kind;
 };
 
 #define JS_FUNCTION_LAYOUT_MAGIC 0x4A53464Eu

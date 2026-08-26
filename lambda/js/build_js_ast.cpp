@@ -74,8 +74,8 @@ static bool js_ts_is_nested_var_scope(const char* node_type) {
         strcmp(node_type, "class") == 0;
 }
 
-static void js_predeclare_var_pattern(JsTranspiler* tp, TSNode pattern,
-        TSNode declarator_node) {
+static void js_predeclare_pattern(JsTranspiler* tp, TSNode pattern,
+        TSNode declarator_node, JsVarKind kind) {
     if (ts_node_is_null(pattern)) return;
     const char* pattern_type = ts_node_type(pattern);
     if (!pattern_type) return;
@@ -92,23 +92,23 @@ static void js_predeclare_var_pattern(JsTranspiler* tp, TSNode pattern,
             ts_node_end_byte(declarator_node)};
         placeholder->type = js_set_type_any(tp, ANY_ERROR_RECOVERY);
         placeholder->name = name;
-        js_scope_define(tp, name, (JsAstNode*)placeholder, JS_VAR_VAR);
+        js_scope_define(tp, name, (JsAstNode*)placeholder, kind);
         return;
     }
     if (strcmp(pattern_type, "pair_pattern") == 0 ||
         strcmp(pattern_type, "pair") == 0) {
         TSNode value = ts_node_child_by_field_name(pattern, "value", 5);
-        if (!ts_node_is_null(value)) js_predeclare_var_pattern(tp, value, declarator_node);
+        if (!ts_node_is_null(value)) js_predeclare_pattern(tp, value, declarator_node, kind);
         return;
     }
     if (strcmp(pattern_type, "assignment_pattern") == 0) {
         TSNode left = ts_node_child_by_field_name(pattern, "left", 4);
         if (ts_node_is_null(left)) left = ts_node_named_child(pattern, 0);
-        js_predeclare_var_pattern(tp, left, declarator_node);
+        js_predeclare_pattern(tp, left, declarator_node, kind);
         return;
     }
     if (strcmp(pattern_type, "rest_pattern") == 0) {
-        js_predeclare_var_pattern(tp, ts_node_named_child(pattern, 0), declarator_node);
+        js_predeclare_pattern(tp, ts_node_named_child(pattern, 0), declarator_node, kind);
         return;
     }
     if (strcmp(pattern_type, "array_pattern") != 0 &&
@@ -117,7 +117,7 @@ static void js_predeclare_var_pattern(JsTranspiler* tp, TSNode pattern,
     }
     uint32_t child_count = ts_node_named_child_count(pattern);
     for (uint32_t i = 0; i < child_count; i++) {
-        js_predeclare_var_pattern(tp, ts_node_named_child(pattern, i), declarator_node);
+        js_predeclare_pattern(tp, ts_node_named_child(pattern, i), declarator_node, kind);
     }
 }
 
@@ -149,13 +149,70 @@ static void js_predeclare_function_vars(JsTranspiler* tp, TSNode node) {
             if (strcmp(ts_node_type(declarator), "variable_declarator") != 0) continue;
             TSNode pattern = ts_node_child_by_field_name(declarator, "name", 4);
             if (ts_node_is_null(pattern)) pattern = ts_node_child(declarator, 0);
-            js_predeclare_var_pattern(tp, pattern, declarator);
+            js_predeclare_pattern(tp, pattern, declarator, JS_VAR_VAR);
         }
         return;
     }
     uint32_t child_count = ts_node_named_child_count(node);
     for (uint32_t i = 0; i < child_count; i++) {
         js_predeclare_function_vars(tp, ts_node_named_child(node, i));
+    }
+}
+
+static JsVarKind js_ts_lexical_declaration_kind(JsTranspiler* tp,
+        TSNode declaration) {
+    uint32_t child_count = ts_node_child_count(declaration);
+    for (uint32_t i = 0; i < child_count; i++) {
+        StrView source = js_predeclare_node_source(tp, ts_node_child(declaration, i));
+        if ((source.length == 5 && memcmp(source.str, "const", 5) == 0) ||
+            (source.length == 5 && memcmp(source.str, "using", 5) == 0)) {
+            return JS_VAR_CONST;
+        }
+    }
+    return JS_VAR_LET;
+}
+
+// Establish direct lexical and function bindings before any sibling initializer
+// can resolve them, giving the interpreter the correct TDZ cells and identity.
+static void js_predeclare_scope_bindings(JsTranspiler* tp, TSNode scope_node) {
+    uint32_t child_count = ts_node_named_child_count(scope_node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_named_child(scope_node, i);
+        const char* child_type = ts_node_type(child);
+        if (!child_type) continue;
+        if ((strcmp(child_type, "variable_declaration") == 0 ||
+             strcmp(child_type, "lexical_declaration") == 0) &&
+            !js_ts_declaration_uses_var(tp, child)) {
+            JsVarKind kind = js_ts_lexical_declaration_kind(tp, child);
+            uint32_t declarator_count = ts_node_named_child_count(child);
+            for (uint32_t j = 0; j < declarator_count; j++) {
+                TSNode declarator = ts_node_named_child(child, j);
+                if (strcmp(ts_node_type(declarator), "variable_declarator") != 0) continue;
+                TSNode pattern = ts_node_child_by_field_name(declarator, "name", 4);
+                if (ts_node_is_null(pattern)) pattern = ts_node_named_child(declarator, 0);
+                js_predeclare_pattern(tp, pattern, declarator, kind);
+            }
+            continue;
+        }
+        if (strcmp(child_type, "function_declaration") != 0 &&
+                strcmp(child_type, "class_declaration") != 0) continue;
+        TSNode name_node = ts_node_child_by_field_name(child, "name", 4);
+        if (ts_node_is_null(name_node)) continue;
+        StrView source = js_predeclare_node_source(tp, name_node);
+        String* name = js_decode_identifier_name(tp, source.str, (int)source.length);
+        if (!name) continue;
+        JsIdentifierNode* placeholder = (JsIdentifierNode*)pool_alloc(
+            tp->pool, sizeof(JsIdentifierNode));
+        memset(placeholder, 0, sizeof(JsIdentifierNode));
+        placeholder->node_type = JS_AST_NODE_IDENTIFIER;
+        placeholder->source_span = (SourceSpan){ts_node_start_byte(child),
+            ts_node_end_byte(child)};
+        placeholder->type = &TYPE_FUNC;
+        placeholder->name = name;
+        // Class declarations are lexical and remain TDZ-bound until their
+        // heritage and body have been evaluated.
+        js_scope_define(tp, name, (JsAstNode*)placeholder,
+            strcmp(child_type, "class_declaration") == 0 ? JS_VAR_LET : JS_VAR_VAR);
     }
 }
 
@@ -1703,8 +1760,10 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
 // unbraced `if (...) function f(){}` directly as the branch statement, but it
 // still has Annex B's block function binding; without this scope the builder
 // incorrectly hoists `f` as a top-level declaration before the branch runs.
-static JsAstNode* build_js_branch_statement(JsTranspiler* tp, TSNode branch_node) {
+static JsAstNode* build_js_branch_statement(JsTranspiler* tp, TSNode branch_node,
+        JsScope** branch_scope_out) {
     JsScope* branch_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    if (branch_scope_out) *branch_scope_out = branch_scope;
     js_scope_push(tp, branch_scope);
     JsAstNode* branch = build_js_statement(tp, branch_node);
     js_scope_pop(tp);
@@ -1724,13 +1783,15 @@ JsAstNode* build_js_if_statement(JsTranspiler* tp, TSNode if_node) {
     // Get consequent (then branch)
     TSNode consequent_node = ts_node_child_by_field_name(if_node, "consequence", strlen("consequence"));
     if (!ts_node_is_null(consequent_node)) {
-        if_stmt->consequent = build_js_branch_statement(tp, consequent_node);
+        if_stmt->consequent = build_js_branch_statement(tp, consequent_node,
+            &if_stmt->consequent_vars);
     }
 
     // Get alternate (else branch) - optional
     TSNode alternate_node = ts_node_child_by_field_name(if_node, "alternative", strlen("alternative"));
     if (!ts_node_is_null(alternate_node)) {
-        if_stmt->alternate = build_js_branch_statement(tp, alternate_node);
+        if_stmt->alternate = build_js_branch_statement(tp, alternate_node,
+            &if_stmt->alternate_vars);
     }
 
     if_stmt->type = &TYPE_NULL; // if statements don't have a value
@@ -1765,6 +1826,7 @@ JsAstNode* build_js_for_statement(JsTranspiler* tp, TSNode for_node) {
 
     // Push a block scope for the for-loop header (let/const in init are scoped to this loop)
     JsScope* for_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    for_stmt->vars = for_scope;
     js_scope_push(tp, for_scope);
 
     // Get init (optional) - field name is "initializer" in tree-sitter-javascript
@@ -1824,6 +1886,7 @@ JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node, JsScope
     JsScope* block_scope = js_scope_create(tp, scope_type, tp->current_scope);
     block->vars = block_scope;
     js_scope_push(tp, block_scope);
+    js_predeclare_scope_bindings(tp, block_node);
 
     uint32_t stmt_count = ts_node_named_child_count(block_node);
     JsAstNode* prev_stmt = NULL;
@@ -2929,6 +2992,7 @@ JsAstNode* build_js_export_statement(JsTranspiler* tp, TSNode export_node) {
 JsAstNode* build_js_program(JsTranspiler* tp, TSNode program_node) {
     JsProgramNode* program = (JsProgramNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROGRAM, program_node, sizeof(JsProgramNode));
     program->has_use_strict_directive = js_ts_body_has_use_strict_directive(tp, program_node);
+    js_predeclare_scope_bindings(tp, program_node);
 
     uint32_t child_count = ts_node_named_child_count(program_node);
     JsAstNode* prev_stmt = NULL;
@@ -3251,6 +3315,7 @@ JsAstNode* build_js_switch_statement(JsTranspiler* tp, TSNode switch_node) {
     // Annex B function declarations in that scope so they cannot be mistaken
     // for direct program/function-body declarations and hoisted as functions.
     JsScope* switch_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    sw->vars = switch_scope;
     js_scope_push(tp, switch_scope);
 
     JsAstNode* prev_case = NULL;
@@ -3260,6 +3325,9 @@ JsAstNode* build_js_switch_statement(JsTranspiler* tp, TSNode switch_node) {
         const char* child_type = ts_node_type(child);
 
         if (strcmp(child_type, "switch_case") == 0 || strcmp(child_type, "switch_default") == 0) {
+            // Case consequents share the switch lexical scope, so install all
+            // direct bindings before any initializer can observe a sibling.
+            js_predeclare_scope_bindings(tp, child);
             JsSwitchCaseNode* case_node = (JsSwitchCaseNode*)alloc_js_ast_node(
                 tp, JS_AST_NODE_SWITCH_CASE, child, sizeof(JsSwitchCaseNode));
 
@@ -3349,6 +3417,7 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
     // the loop head and body share a block scope; without it, a lexical head
     // is unresolved while its closure is built and loses per-iteration identity.
     JsScope* for_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    for_of->vars = for_scope;
     js_scope_push(tp, for_scope);
 
     // Determine whether the head declares a binding before building its AST.
@@ -3496,6 +3565,7 @@ JsAstNode* build_js_try_statement(JsTranspiler* tp, TSNode try_node) {
     if (!ts_node_is_null(handler_node)) {
         JsCatchNode* catch_clause = (JsCatchNode*)alloc_js_ast_node(tp, JS_AST_NODE_CATCH_CLAUSE, handler_node, sizeof(JsCatchNode));
         JsScope* catch_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+        catch_clause->vars = catch_scope;
         js_scope_push(tp, catch_scope);
 
         // Get catch parameter (optional in modern JS)
@@ -3604,9 +3674,11 @@ JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node) {
 
     class_decl->type = &TYPE_FUNC; // Classes are constructor functions
 
-    // Add class to scope
+    // A class declaration owns a lexical TDZ binding, unlike a hoisted
+    // function declaration. The predeclaration pass installs the same entry
+    // before sibling initializers are built.
     if (class_decl->name) {
-        js_scope_define(tp, class_decl->name, (JsAstNode*)class_decl, JS_VAR_VAR);
+        js_scope_define(tp, class_decl->name, (JsAstNode*)class_decl, JS_VAR_LET);
     }
 
     return (JsAstNode*)class_decl;
@@ -3869,7 +3941,16 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
     // so we pass the method node itself to build_js_function
     js_method_adopt_function_payload(method, build_js_function(tp, method_node));
 
-    // TODO: Parse method modifiers (constructor, getter, setter, static)
+    // `constructor` is a method kind, not an ordinary property. Preserve it
+    // on the shared AstMethodNode prefix so every execution tier agrees on
+    // the class construction body.
+    if (!method->static_method && method->kind == JsMethodDefinitionNode::JS_METHOD_METHOD &&
+            method->key && method->key->node_type == AST_NODE_IDENT) {
+        String* name = ((JsIdentifierNode*)method->key)->name;
+        if (name && name->len == 11 && memcmp(name->chars, "constructor", 11) == 0) {
+            method->kind = JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR;
+        }
+    }
 
     method->type = &TYPE_FUNC;
     return (JsAstNode*)method;
