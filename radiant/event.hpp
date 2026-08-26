@@ -1774,8 +1774,6 @@ void te_focus_capture_value(DomElement* elem);
 
 // Compare current_value against value_at_focus; returns true if they differ
 // (i.e. the caller should dispatch a `change` event before clearing focus).
-// Always clears the snapshot afterwards.
-bool te_blur_should_dispatch_change(DomElement* elem);
 
 // Clear the transient password "last inserted character" reveal state.
 // Returns true when state changed.
@@ -1834,8 +1832,6 @@ void te_history_input_type_restore(DocState* state, const char* previous);
 
 // Move cursor backward/forward through the ring; restores value + selection.
 // Returns false if no further undo/redo is available.
-bool te_history_undo(DomElement* elem);
-bool te_history_redo(DomElement* elem);
 
 // ---------- F5: events + constraint validation -------------------------
 
@@ -1856,8 +1852,6 @@ void te_dispatch_input      (DomElement* elem);
 // Internally invokes te_replace_byte_range, which fires the legacy `input`
 // hook and pushes an undo entry. Live editing paste should use the unified
 // dispatcher path so cancellable beforeinput is available.
-uint32_t te_paste(DomElement* elem, DocState* state, void* target,
-                  const char* text, uint32_t len);
 
 // Resolve the buffer range a paste replaces — the current selection, in bytes,
 // plus the readonly/disabled gate. Sanitization and maxlength are NOT applied:
@@ -1902,8 +1896,6 @@ bool te_ime_is_composing(DomElement* elem);
 //   <input type=range> → aria-valuenow / aria-valuemin / aria-valuemax
 //
 // Idempotent. Call from tc_ensure_init, tc_set_value, and any setter that
-// flips disabled/readonly/required.
-void te_aria_reflect(DomElement* elem);
 
 
 // ===== clipboard =====
@@ -2380,6 +2372,12 @@ typedef struct EditingCompositionState {
     EditingSurface surface;
     View* anchor_view;
     int anchor_offset;
+    // The preedit text itself (owned, UTF-8). It used to sit on
+    // FormControlProp alongside a duplicate of the length and caret already
+    // held here, which made the composition session a two-copy mirror on a
+    // transient owner — the ESO22/ESO28/ESO43 shape. A document has at most one
+    // composition, so this is its natural home (ES18/F7).
+    char* preedit_text;
     uint32_t preedit_len;
     uint32_t dom_preedit_len;
     uint32_t commit_len;
@@ -3290,6 +3288,17 @@ void form_control_set_disabled(DocState* state, View* view, bool disabled);
  * Check if a text control is readonly.
  */
 bool form_control_is_readonly(DocState* state, View* view);
+
+// Document-scoped IME preedit (ES18/F7). The reads answer "what is the preedit
+// for THIS control", which is null unless the control is the composing surface.
+const char* editing_composition_preedit(DocState* state, View* view,
+                                        uint32_t* out_len, uint32_t* out_caret);
+bool editing_composition_is_composing(DocState* state, View* view);
+void editing_composition_set_preedit(DocState* state, View* view,
+                                     const char* text, uint32_t len,
+                                     uint32_t caret_cp);
+void editing_composition_clear_preedit(DocState* state);
+
 // "Not user-alterable" — the readonly attribute OR disabled. This is what CSS
 // `:read-only`/`:read-write` mean; form_control_is_readonly above stays the
 // content-attribute mirror that `input.readOnly` and `aria-readonly` reflect.
@@ -4265,6 +4274,10 @@ typedef struct EventContext {
 
     // paste text (set before dispatching "paste" event)
     const char* paste_text;
+    // Caret offset inside the current preedit, so the composition dispatch can
+    // hand it to the session template (ES18/F7). Set by the IME entrypoints
+    // around their compositionupdate dispatch.
+    uint32_t composition_caret_hint;
 
     // caret position override for synthetic/default-action event payloads.
     // the cut default action reports the selection start without collapsing

@@ -1,0 +1,16 @@
+{
+  "name": "F7: ARIA reflection is the package's, and mirrors the verdict just computed",
+  "html": "test/ui/test_form_input.html",
+  "viewport": { "width": 800, "height": 600 },
+  "events": [
+    { "type": "log", "message": "=== present-or-absent mirrors come from engine state ===" },
+    { "type": "assert_attribute", "target": { "selector": "#readonly-fld" }, "attribute": "aria-readonly", "equals": "true" },
+    { "type": "assert_attribute", "target": { "selector": "#disabled-fld" }, "attribute": "aria-disabled", "equals": "true" },
+    { "type": "log", "message": "aria-invalid is written false, not removed — AT reads that as 'validated and OK'" },
+    { "type": "assert_attribute", "target": { "selector": "#name" }, "attribute": "aria-invalid", "equals": "false" },
+    { "type": "log", "message": "=== and it tracks the verdict, not the keystroke (ESO37) ===" },
+    { "type": "click", "target": { "selector": "#name" } },
+    { "type": "type", "target": { "selector": "#name" }, "text": "hi" },
+    { "type": "assert_attribute", "target": { "selector": "#name" }, "attribute": "aria-invalid", "equals": "false" }
+  ]
+}

@@ -1076,7 +1076,16 @@ RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item valu
     DomElement* elem = radiant_dom_element_from_item(node_item, "SET_ATTR");
     const char* name = fn_to_cstr(name_item);
     const char* value = fn_to_cstr(value_item);
-    if (!elem || !name || !name[0] || !value) return ItemNull;
+    if (!elem || !name || !name[0]) return ItemNull;
+    // A null value removes the attribute. ARIA needs both halves of that: some
+    // mirrors are present-or-absent (aria-disabled), while aria-invalid is
+    // deliberately written "false" rather than removed, because assistive tech
+    // reads an explicit false as "validation ran and this control is OK" (F7).
+    if (!value) {
+        Item args1[1] = {name_item};
+        radiant_dom_element_operation(node_item, JUBE_DOM_REMOVE_ATTRIBUTE, args1, 1);
+        return node_item;
+    }
     // Attribute writes from Lambda must share JS DOM side effects such as
     // event-attribute compilation, selection refresh, and mutation notices.
     Item args[2] = {name_item, value_item};
@@ -1240,13 +1249,6 @@ RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item val
     // the canonical bit is written; CSS only sees it once the pseudo-class
     // cascade re-runs, which the native writers schedule at each call site
     if (changed && pseudo_flag) radiant_sync_pseudo_state((View*)elem, pseudo_flag, want);
-    // ESO37: aria-invalid mirrors the validity verdict, and the verdict is
-    // produced here now — te_aria_reflect's other call sites are the native
-    // value-mutation points, which run before the package has validated.
-    if (changed && (strcmp(interned, STATE_VALID) == 0 ||
-                    strcmp(interned, STATE_INVALID) == 0)) {
-        te_aria_reflect(elem);
-    }
     // Report what actually happened, not merely that a writer was called: a
     // form-state write is a no-op until layout has built the control's
     // FormControlProp, and a silent false success would hide that.
@@ -1540,6 +1542,62 @@ RADIANT_C_API Item fn_radiant_request_change(Item node_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "REQUEST_CHANGE");
     if (!elem) return (Item){.item = b2it(0)};
     g_radiant_change_request_epoch++;
+    return (Item){.item = b2it(1)};
+}
+
+// Range geometry for the ARIA value mirrors (F7). `value` is the *computed*
+// value, not the normalized 0..1 the engine stores, because that is what
+// aria-valuenow reports. All three return null on a control that is not a
+// range, which is how the template tells the two cases apart.
+static Item radiant_range_field(Item node_item, const char* op, int which) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, op, &elem);
+    FormControlProp* f = elem ? elem->form_control() : nullptr;
+    if (!state || !f || f->control_type != FORM_CONTROL_RANGE) return ItemNull;
+    if (which == 1) return radiant_float_item((double)f->range_min);
+    if (which == 2) return radiant_float_item((double)f->range_max);
+    float normalized = form_control_get_range_value(state, (View*)elem);
+    return radiant_float_item(
+        (double)(f->range_min + (f->range_max - f->range_min) * normalized));
+}
+
+RADIANT_C_API Item fn_radiant_range_value(Item n) { return radiant_range_field(n, "RANGE_VALUE", 0); }
+RADIANT_C_API Item fn_radiant_range_min(Item n) { return radiant_range_field(n, "RANGE_MIN", 1); }
+RADIANT_C_API Item fn_radiant_range_max(Item n) { return radiant_range_field(n, "RANGE_MAX", 2); }
+
+// ---- IME session (ES18/F7) -------------------------------------------------
+//
+// The preedit is document-scoped, so these take any node purely to find the
+// document — the body, in practice, since that is where the session template
+// matches. Writing it is what suppresses nothing else: the placeholder rule and
+// the orphan cleanup are the template's policy, expressed through these.
+RADIANT_C_API Item fn_radiant_ime_preedit(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "IME_PREEDIT", &elem);
+    if (!state || !elem) return ItemNull;
+    const char* p = editing_composition_preedit(state, (View*)elem, nullptr, nullptr);
+    return p ? radiant_string_item(p) : ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_set_ime_preedit(Item node_item, Item text_item,
+                                              Item caret_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_IME_PREEDIT", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    const char* text = fn_to_cstr(text_item);
+    int64_t caret = it2l(caret_item);
+    if (caret < 0) caret = 0;
+    editing_composition_set_preedit(state, (View*)elem, text,
+                                    text ? (uint32_t)strlen(text) : 0,
+                                    (uint32_t)caret);
+    return (Item){.item = b2it(1)};
+}
+
+RADIANT_C_API Item fn_radiant_clear_ime_preedit(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "CLEAR_IME_PREEDIT", &elem);
+    if (!state) return (Item){.item = b2it(0)};
+    editing_composition_clear_preedit(state);
     return (Item){.item = b2it(1)};
 }
 
@@ -1950,6 +2008,18 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_set_selection(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_selection},
     {"replace_range", "fn(node: dom_node, start: int, end: int, text: string) -> bool", (fn_ptr)fn_radiant_replace_range, JUBE_FN_NONE,
      "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
+    {"ime_preedit", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_ime_preedit, JUBE_FN_NONE,
+     "Item fn_radiant_ime_preedit(Item node)", (fn_ptr)fn_radiant_ime_preedit},
+    {"set_ime_preedit", "fn(node: dom_node, text: any, caret: int) -> bool", (fn_ptr)fn_radiant_set_ime_preedit, JUBE_FN_NONE,
+     "Item fn_radiant_set_ime_preedit(Item node, Item text, Item caret)", (fn_ptr)fn_radiant_set_ime_preedit},
+    {"clear_ime_preedit", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_clear_ime_preedit, JUBE_FN_NONE,
+     "Item fn_radiant_clear_ime_preedit(Item node)", (fn_ptr)fn_radiant_clear_ime_preedit},
+    {"range_value", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_range_value, JUBE_FN_NONE,
+     "Item fn_radiant_range_value(Item node)", (fn_ptr)fn_radiant_range_value},
+    {"range_min", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_range_min, JUBE_FN_NONE,
+     "Item fn_radiant_range_min(Item node)", (fn_ptr)fn_radiant_range_min},
+    {"range_max", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_range_max, JUBE_FN_NONE,
+     "Item fn_radiant_range_max(Item node)", (fn_ptr)fn_radiant_range_max},
     {"value_at_focus", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_value_at_focus, JUBE_FN_NONE,
      "Item fn_radiant_value_at_focus(Item node)", (fn_ptr)fn_radiant_value_at_focus},
     {"request_change", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_request_change, JUBE_FN_NONE,

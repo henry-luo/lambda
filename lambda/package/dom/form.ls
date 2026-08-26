@@ -5,10 +5,13 @@
 import radiant
 import validate: lambda.package.dom.validate
 import editing: lambda.package.dom.editing
+import aria: lambda.package.dom.aria
+import ime: lambda.package.dom.ime
 
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
 view <input type:'checkbox'> state checked, indeterminate {}
+on init(evt) { aria.reflect(~) }
 on click(evt) {
     // decline rather than claim: a disabled control has no activation
     // behavior, so the event falls through as unhandled
@@ -25,6 +28,7 @@ on click(evt) {
 // selected peer in the same group, so this template owns the exclusivity walk
 // too. Claiming activation without it would silently drop the deselection half.
 view <input type:'radio'> state checked {}
+on init(evt) { aria.reflect(~) }
 on click(evt) {
     if (radiant.get_state(~, "disabled")) { return 'pass' }
     if (radiant.get_state(~, "checked")) { return 'pass' }
@@ -48,6 +52,7 @@ on click(evt) {
 // closes a dropdown owning the prop being released, the single point that both
 // release paths share (ESO28).
 view <select> state dropdown_open {}
+on init(evt) { aria.reflect(~) }
 on click(evt) {
     if (radiant.get_state(~, "disabled")) { return 'pass' }
     radiant.set_dropdown_open(~, not radiant.dropdown_open(~))
@@ -75,15 +80,29 @@ on click(evt) {
 // behavior templates: it fires before the value exists, and claiming it would
 // suppress the engine's own insert.
 view <input> state valid, invalid {}
-on init(evt)  { validate.revalidate(~) }
-on input(evt) { validate.revalidate(~) }
-on blur(evt)  { validate.revalidate(~) }
+on init(evt)  { validate.revalidate(~) aria.reflect(~) }
+on input(evt) { validate.revalidate(~) aria.reflect(~) }
+on blur(evt)  { validate.revalidate(~) aria.reflect(~) }
 on commit(evt) { editing.commit(~) }
 on beforeinput(evt) { editing.apply(~, evt, false) }
 
 view <textarea> state valid, invalid {}
-on init(evt)  { validate.revalidate(~) }
-on input(evt) { validate.revalidate(~) }
-on blur(evt)  { validate.revalidate(~) }
+on init(evt)  { validate.revalidate(~) aria.reflect(~) }
+on input(evt) { validate.revalidate(~) aria.reflect(~) }
+on blur(evt)  { validate.revalidate(~) aria.reflect(~) }
 on commit(evt) { editing.commit(~) }
 on beforeinput(evt) { editing.apply(~, evt, true) }
+
+// <input type=range> has no activation template yet; it is here for the ARIA
+// value mirrors, which are the last thing native's reflection still owned.
+view <input type:'range'> state valid, invalid {}
+on init(evt)  { aria.reflect_range(~) }
+on input(evt) { aria.reflect_range(~) }
+
+// The composition session, bound to the page rather than to a control (ES18).
+// Composition events bubble from the focused control, so the ancestor walk
+// reaches <body> and this template claims them there.
+view <body> state ime_composing {}
+on compositionstart(evt)  { ime.begin(~) }
+on compositionupdate(evt) { ime.update(~, evt, null) }
+on compositionend(evt)    { ime.end(~) }

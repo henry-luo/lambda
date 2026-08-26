@@ -1917,12 +1917,67 @@ void radiant_state_destroy(DocState* state) {
     state->destroy();
 }
 
+// --- document-scoped IME preedit (ES18/F7) ---------------------------------
+
+// True when `view` is the control currently being composed into.
+bool editing_composition_is_composing(DocState* state, View* view) {
+    if (!state || !view || !state->editing.composition.active) return false;
+    return state->editing.composition.surface.view == view ||
+           (View*)state->editing.composition.surface.owner == view;
+}
+
+const char* editing_composition_preedit(DocState* state, View* view,
+                                        uint32_t* out_len, uint32_t* out_caret) {
+    if (out_len) *out_len = 0;
+    if (out_caret) *out_caret = 0;
+    // A preedit belongs to exactly one control at a time, so asking on behalf
+    // of any other one correctly answers "none" — which is what the old
+    // per-control buffer expressed by simply being null there.
+    if (!editing_composition_is_composing(state, view)) return NULL;
+    const EditingCompositionState* c = &state->editing.composition;
+    if (!c->preedit_text || c->preedit_len == 0) return NULL;
+    if (out_len) *out_len = c->preedit_len;
+    if (out_caret) *out_caret = c->caret;
+    return c->preedit_text;
+}
+
+void editing_composition_set_preedit(DocState* state, View* view,
+                                     const char* text, uint32_t len,
+                                     uint32_t caret_cp) {
+    if (!state) return;
+    EditingCompositionState* c = &state->editing.composition;
+    if (c->preedit_text) { mem_free(c->preedit_text); c->preedit_text = NULL; }
+    c->preedit_len = 0;
+    if (text && len) {
+        char* buf = (char*)mem_alloc((size_t)len + 1, MEM_CAT_DOM);
+        if (!buf) return;
+        memcpy(buf, text, len);
+        buf[len] = '\0';
+        c->preedit_text = buf;
+        c->preedit_len = len;
+    }
+    c->caret = caret_cp;
+    if (view && !c->surface.view) c->surface.view = view;
+}
+
+void editing_composition_clear_preedit(DocState* state) {
+    if (!state) return;
+    EditingCompositionState* c = &state->editing.composition;
+    if (c->preedit_text) { mem_free(c->preedit_text); c->preedit_text = NULL; }
+    c->preedit_len = 0;
+    c->caret = 0;
+}
+
 static void editing_composition_reset(EditingCompositionState* composition) {
     if (!composition) return;
     composition->active = false;
     editing_surface_clear(&composition->surface);
     composition->anchor_view = NULL;
     composition->anchor_offset = 0;
+    if (composition->preedit_text) {
+        mem_free(composition->preedit_text);
+        composition->preedit_text = NULL;
+    }
     composition->preedit_len = 0;
     composition->dom_preedit_len = 0;
     composition->commit_len = 0;
@@ -2083,6 +2138,10 @@ static void editing_interaction_end_composition_raw(DocState* state,
     state->editing.composing = false;
     state->editing.composition.active = false;
     state->editing.composition.commit_len = commit_len;
+    if (state->editing.composition.preedit_text) {
+        mem_free(state->editing.composition.preedit_text);
+        state->editing.composition.preedit_text = NULL;
+    }
     state->editing.composition.preedit_len = 0;
     state->editing.composition.dom_preedit_len = 0;
     state->editing.composition.caret = 0;
@@ -7489,7 +7548,9 @@ static void focus_write_editing_surface_ref(JsonWriter* w,
 static bool focus_editing_ime_active(View* view) {
     if (!view || !view->is_element()) return false;
     DomElement* elem = lam::dom_require_element(view);
-    return tc_is_text_control(elem) && te_ime_is_composing(elem);
+    DocState* doc_state = elem && elem->doc ? (DocState*)elem->doc->state : NULL;
+    return tc_is_text_control(elem) &&
+           editing_composition_preedit(doc_state, view, NULL, NULL) != NULL;
 }
 
 static void focus_log_transition(DocState* state, const char* transition,

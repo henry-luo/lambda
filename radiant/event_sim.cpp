@@ -4676,8 +4676,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             tc_ensure_init(dom_elem);
-            const char* actual = dom_elem->form && dom_elem->form->preedit_utf8
-                ? dom_elem->form->preedit_utf8 : "";
+            DocState* pre_state = dom_elem->doc ? (DocState*)dom_elem->doc->state : nullptr;
+            const char* pre = editing_composition_preedit(
+                pre_state, static_cast<View*>(dom_elem), nullptr, nullptr);
+            const char* actual = pre ? pre : "";
             bool passed = true;
             if (ev->assert_equals && strcmp(actual, ev->assert_equals) != 0) {
                 log_error("event_sim: assert_preedit FAIL - expected '%s', got '%s'",
