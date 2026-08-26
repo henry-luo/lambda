@@ -71,6 +71,23 @@ static Item render_map_find_tree_parent(RenderMapEntry saved, int* out_child_ind
 static bool render_map_replace_tree_result(RenderMapEntry saved, Item tree_parent,
                                            int tree_child_index, Item new_result);
 
+static Item render_map_invoke_template(TemplateEntry* tmpl, Item source_item) {
+    if (!tmpl || !context) return ItemError;
+
+    // T0 templates have no MIR body pointer; use their registered activation
+    // so reactive updates keep the same execution tier without coupling this
+    // reusable archive to the interpreter object file.
+    if (tmpl->interp_view && tmpl->interp_body_func) {
+        return tmpl->interp_body_func((Context*)context, tmpl->interp_module,
+                                      tmpl->interp_view, source_item);
+    }
+
+    if (!tmpl->body_func) return ItemError;
+    typedef Item (*template_body_fn)(Context*, Item);
+    template_body_fn fn = (template_body_fn)tmpl->body_func;
+    return fn((Context*)context, source_item);
+}
+
 static Item render_map_read_field(ShapeEntry* field, void* map_data) {
     if (!field || !field->type || !map_data) return ItemNull;
     return map_shape_field_to_item(map_data, field);
@@ -334,7 +351,8 @@ int render_map_retransform(void) {
             }
         }
 
-        if (!tmpl || !tmpl->body_func) {
+        if (!tmpl || (!tmpl->body_func &&
+                      !(tmpl->interp_view && tmpl->interp_body_func))) {
             log_error("render_map_retransform: no template found for ref=%s",
                       saved.key.template_ref ? saved.key.template_ref : "(null)");
             entry->dirty = false;
@@ -346,16 +364,14 @@ int render_map_retransform(void) {
         Item tree_parent = render_map_find_tree_parent(saved, &tree_child_index);
 
         // re-execute template body with the source item
-        // NOTE: fn() may call apply() which modifies this hashmap — after this
+        // NOTE: invocation may call apply() which modifies this hashmap — after this
         // call, 'entry' may be dangling. Use 'saved' for old values.
-        typedef Item (*template_body_fn)(Context*, Item);
-        template_body_fn fn = (template_body_fn)tmpl->body_func;
         if (!context) {
             log_error("render_map_retransform: no bound EvalContext");
             entry->dirty = false;
             continue;
         }
-        Item new_result = fn((Context*)context, saved.key.source_item);
+        Item new_result = render_map_invoke_template(tmpl, saved.key.source_item);
 
         // update reverse map
         if (s_reverse_map && new_result.item) {
@@ -409,7 +425,8 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
             }
         }
 
-        if (!tmpl || !tmpl->body_func) {
+        if (!tmpl || (!tmpl->body_func &&
+                      !(tmpl->interp_view && tmpl->interp_body_func))) {
             log_error("render_map_retransform_with_results: no template found for ref=%s",
                       saved.key.template_ref ? saved.key.template_ref : "(null)");
             entry->dirty = false;
@@ -421,16 +438,14 @@ int render_map_retransform_with_results(RetransformResult* out_results, int max_
         Item tree_parent = render_map_find_tree_parent(saved, &tree_child_index);
 
         // re-execute template body with the source item
-        // NOTE: fn() may call apply() which modifies this hashmap — after this
+        // NOTE: invocation may call apply() which modifies this hashmap — after this
         // call, 'entry' may be dangling. Use 'saved' for old values.
-        typedef Item (*template_body_fn)(Context*, Item);
-        template_body_fn fn = (template_body_fn)tmpl->body_func;
         if (!context) {
             log_error("render_map_retransform_with_results: no bound EvalContext");
             entry->dirty = false;
             continue;
         }
-        Item new_result = fn((Context*)context, saved.key.source_item);
+        Item new_result = render_map_invoke_template(tmpl, saved.key.source_item);
 
         // record result before updating entry
         if (out_results && count < max_results) {

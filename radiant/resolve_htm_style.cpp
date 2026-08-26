@@ -738,7 +738,11 @@ static bool apply_html_inline_text_default(LayoutContext* lycon, ViewSpan* span,
             decoration = CSS_VALUE_LINE_THROUGH; break;
         case MARKUP_NAME_SMALL: size_scale = 0.83f; break;
         case MARKUP_NAME_BIG: size_scale = 1.17f; break;
-        case MARKUP_NAME_RT: size_scale = 0.5f; break;
+        case MARKUP_NAME_RT:
+            // css ruby: an HTML rt element generates a ruby-text box.
+            span->display = {CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT};
+            size_scale = 0.5f;
+            break;
         case MARKUP_NAME_SUB: size_scale = 0.83f; vertical_align = CSS_VALUE_SUB; break;
         case MARKUP_NAME_SUP: size_scale = 0.83f; vertical_align = CSS_VALUE_SUPER; break;
         case MARKUP_NAME_RUBY:

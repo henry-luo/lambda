@@ -1284,9 +1284,11 @@ typedef struct MultiColumnProp {
     // Column sizing
     int column_count;            // Number of columns (0 = auto)
     float column_width;          // Ideal column width (0 = auto)
-    float column_height;         // Fragmentainer height (0 = auto)
+    float column_height;         // Fragmentainer height
+    bool column_height_is_specified; // Distinguishes an explicit 0 from auto
     float column_gap;            // Gap between columns (default: 1em)
     bool column_gap_is_normal;   // Use normal (1em) gap
+    bool column_gap_is_percent;  // Gap is a percentage of the content box
 
     // Column rule (divider between columns)
     float rule_width;            // Rule width in pixels
@@ -1302,6 +1304,7 @@ typedef struct MultiColumnProp {
     int computed_column_count;   // Actual number of columns after layout
     int computed_used_column_count; // Columns that received content in layout
     float computed_column_width; // Actual column width after layout
+    float computed_column_gap;   // Used column gap after percentage resolution
     float computed_block_axis_extent; // Used block-axis span in vertical layout
 } MultiColumnProp;
 
@@ -1504,6 +1507,7 @@ typedef struct BlockProp {
     bool text_autospace_is_set;
     CssEnum break_before;  // CSS Fragmentation: auto, column, page, always
     CssEnum break_after;   // CSS Fragmentation: auto, column, page, always
+    CssEnum break_inside;  // css fragmentation: auto, avoid
     int orphans;           // CSS Fragmentation: minimum lines before a break
     int widows;            // CSS Fragmentation: minimum lines after a break
     int tab_size;           // CSS tab-size (number of spaces, default 8)
@@ -2624,7 +2628,7 @@ struct FormControlProp {
     // ------------------------------------------------------------------
     char*    value_at_focus;
     uint32_t value_at_focus_len;
-    void*    history;   // EditHistory*; lazy
+    // (the undo ring moved to the form ViewState in DocState — ESO43)
 
     // ------------------------------------------------------------------
     // F4 (Radiant_Design_Form_Input.md §3.1, §3.8):
@@ -2647,18 +2651,6 @@ struct FormControlProp {
     uint32_t password_reveal_end;
     double   password_reveal_elapsed;
 
-    // ------------------------------------------------------------------
-    // F7 (Radiant_Design_Form_Input.md §3.7): IME / composition preedit.
-    // The preedit string is the partially-entered text shown by the OS
-    // input method between `compositionstart` and `compositionend`. It is
-    // NOT part of `current_value` until commit. The renderer overlays it
-    // at the caret with an underline so the user can see what they're
-    // composing. `preedit_caret` is the codepoint offset inside preedit
-    // (where the IME's own caret sits).
-    // ------------------------------------------------------------------
-    char*    preedit_utf8;
-    uint32_t preedit_len;
-    uint32_t preedit_caret;
 
     // FormControlProp is a POD (no C++ ctor/dtor) per the C+ convention; use
     // form_control_prop_init / form_control_prop_release for lifecycle.
@@ -2678,7 +2670,7 @@ inline float form_select_dropdown_row_height(const FormControlProp* form) {
 void form_control_prop_init(FormControlProp* f);
 
 // Release owned heap pointers (current_value, custom_validity_msg,
-// value_at_focus, history, preedit_utf8). Does NOT free `f` itself.
+// value_at_focus). Does NOT free `f` itself.
 void form_control_prop_release(FormControlProp* f);
 
 // Release a form-control property attached to a DOM element. This is used by

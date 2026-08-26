@@ -13,7 +13,7 @@
   }
   <html index: 1, flags: ['hover', 'focus-within']
     <body index: 2, flags: ['hover', 'focus-within']
-      <input index: 1, id: "name", flags: ['hover', 'focus', 'focus-within', 'valid', 'optional'], form: {
+      <input index: 1, id: "name", flags: ['hover', 'focus', 'focus-within', 'valid'], form: {
           value: "abcdY",
           sel: [5, 5]
         }>>>>

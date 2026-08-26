@@ -163,12 +163,13 @@ static void ctx_menu_exec_paste(DomElement* elem, DocState* state,
                                 const ContextMenuEditHooks* hooks) {
     const char* clip = clipboard_get_text();
     if (!clip || !*clip) return;
-    if (hooks && hooks->paste_text &&
-        hooks->paste_text(hooks->user, elem, state, clip,
-                          (uint32_t)strlen(clip))) {
-        return;
+    // Paste policy (newline sanitization, maxlength) lives in the dom package
+    // and is reached through this hook, which routes to the live editing path.
+    // Without the hook there is no applier and therefore no paste — pasting raw
+    // clipboard text here would bypass the policy rather than fall back to it.
+    if (hooks && hooks->paste_text) {
+        hooks->paste_text(hooks->user, elem, state, clip, (uint32_t)strlen(clip));
     }
-    te_paste(elem, state, static_cast<View*>(elem), clip, (uint32_t)strlen(clip));
 }
 
 static void ctx_menu_exec_select_all(DomElement* elem, DocState* state,

@@ -160,6 +160,17 @@ typedef struct LambdaParseError {
     const char* message;
 } LambdaParseError;
 
+// A bounded diagnostic report for syntax-only editor/REPL checks. The direct
+// AST entry point remains fail-fast; this report lets a caller recover at
+// top-level separators without ever publishing partial reductions.
+enum { LAMBDA_PARSE_MAX_DIAGNOSTICS = 16 };
+typedef struct LambdaParseReport {
+    LambdaParseStatus status;
+    uint32_t error_count;
+    bool recovered;
+    LambdaParseError errors[LAMBDA_PARSE_MAX_DIAGNOSTICS];
+} LambdaParseReport;
+
 typedef struct LambdaParseMetrics {
     uint32_t token_count;
     uint32_t reduction_count;
@@ -325,6 +336,12 @@ const char* lambda_token_kind_name(LambdaTokenKind kind);
 LambdaParseStatus lambda_rd_parse_source(const char* source, size_t length,
     const LambdaParseSink* sink, void* sink_context, LambdaParseMetrics* metrics,
     LambdaParseError* error);
+
+// Syntax-only entry point with separator-based recovery. It records the first
+// error and then retries after top-level ';' boundaries. No sink is
+// invoked, so recovered diagnostics cannot expose a partial AST.
+LambdaParseStatus lambda_rd_parse_recovering(const char* source, size_t length,
+    LambdaParseReport* report);
 
 #ifdef __cplusplus
 }

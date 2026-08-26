@@ -2249,6 +2249,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         bool recompute_split_inline_bounds =
             preserve_inline_list_marker_fragment && has_block_fragment_child &&
             span_is_multi_line && inline_span_has_direct_visible_text_child(span);
+        bool is_ruby_container = span->tag() == MARKUP_NAME_RUBY &&
+            span->display.inner == CSS_VALUE_RUBY;
         if (!has_block_fragment_child || recompute_split_inline_bounds) {
             // CSS 2.1 §9.2.1.1: direct text after a block child is aligned on a
             // later line; refresh the split inline union after that line moves.
@@ -2259,6 +2261,35 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 // preserve the line-wide fragment extent while refreshing the vertical union.
                 span->x = finalized_inline_x;
                 span->width = finalized_inline_width;
+            }
+            if (is_ruby_container && span_fh) {
+                float ruby_ascender = span->font ? span->fontp()->ascender :
+                    (lycon->font.style ? lycon->font.style->ascender : 0.0f);
+                float ruby_descender = span->font ? span->fontp()->descender :
+                    (lycon->font.style ? lycon->font.style->descender : 0.0f);
+                float ruby_content_height = font_get_cell_height(span_fh);
+                if (ruby_content_height <= 0.0f) {
+                    ruby_content_height = ruby_ascender + ruby_descender;
+                }
+                if (ruby_content_height > 0.0f) {
+                    float border_top = 0.0f, border_bottom = 0.0f;
+                    float padding_top = 0.0f, padding_bottom = 0.0f;
+                    if (span->bound) {
+                        if (span->boundary()->border) {
+                            border_top = span->boundary()->border->width.top;
+                            border_bottom = span->boundary()->border->width.bottom;
+                        }
+                        padding_top = max(span->boundary()->padding.top, 0.0f);
+                        padding_bottom = max(span->boundary()->padding.bottom, 0.0f);
+                    }
+                    float baseline_pos = line_baseline_position(lycon, nullptr);
+                    span->y = layout_inline_font_box_y(
+                        lycon, span, span->content_height,
+                        ruby_ascender, ruby_descender, baseline_pos,
+                        border_top, padding_top);
+                    span->height = ruby_content_height + border_top + border_bottom +
+                        padding_top + padding_bottom;
+                }
             }
         }
         // CSS 2.1 §10.8.1: Empty/collapsed inline spans (no visible children)
@@ -2336,12 +2367,26 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
         if (span->tag() == MARKUP_NAME_RUBY &&
             span->inl()->ruby_position != CSS_VALUE_UNDER) {
+            float base_top_y = span->y;
+            bool has_base_box = false;
+            for (View* child = span->first_child; child; child = child->next()) {
+                if (child->view_type == RDT_VIEW_INLINE &&
+                    child->tag() == MARKUP_NAME_RT) {
+                    continue;
+                }
+                if (child->view_type == RDT_VIEW_NONE ||
+                    layout_view_is_out_of_flow(child)) {
+                    continue;
+                }
+                base_top_y = has_base_box ? min(base_top_y, child->y) : child->y;
+                has_base_box = true;
+            }
             for (View* child = span->first_child; child; child = child->next()) {
                 if (child->view_type != RDT_VIEW_INLINE || child->tag() != MARKUP_NAME_RT) {
                     continue;
                 }
                 ViewSpan* annotation = lam::view_require<RDT_VIEW_INLINE>(child);
-                float target_y = span->y - annotation->height;
+                float target_y = base_top_y - annotation->height;
                 layout_shift_view_tree(child, 0.0f, target_y - annotation->y);
             }
         }

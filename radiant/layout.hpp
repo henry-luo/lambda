@@ -1521,6 +1521,8 @@ typedef struct MulticolFlowItem {
     bool spans_all;
     bool break_before_column;
     bool break_after_column;
+    // the tail after a forced break in a parallel float, including its margins
+    float parallel_balance_tail;
 } MulticolFlowItem;
 // tier-3: layout-transient, valid within one multicol pass
 typedef struct ColumnState {
@@ -1655,6 +1657,7 @@ float multicol_intrinsic_vertical_block_extent(LayoutContext* lycon,
                                                DomElement* element);
 bool multicol_spanner_can_escape_child(ViewBlock* child);
 float multicol_normal_gap_size(ViewBlock* block);
+float multicol_column_gap(ViewBlock* block);
 float multicol_empty_intrinsic_inline_size(ViewBlock* block);
 void calculate_multicol_dimensions(
     MultiColumnProp* multicol,
@@ -3329,6 +3332,8 @@ bool block_context_establishes_bfc(ViewBlock* block);
  * Add a positioned float to the BlockContext
  */
 void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem);
+void block_context_refresh_descendant_float_geometry(BlockContext* ctx,
+                                                     ViewElement* ancestor);
 // recompute the cached lowest edge after existing float boxes are translated.
 void block_context_recompute_lowest_float_bottom(BlockContext* ctx);
 

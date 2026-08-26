@@ -4965,21 +4965,9 @@ static CssSelectorGroup* parse_css_selector_group(const char* sel_text, Pool* po
     if (!sel_text || !pool) return nullptr;
     size_t sel_len = strlen(sel_text);
     if (sel_len == 0) return nullptr;
-
-    size_t token_count = 0;
-    CssToken* tokens = css_tokenize(sel_text, sel_len, pool, &token_count);
-    if (!tokens || token_count == 0) return nullptr;
-
-    int pos = 0;
-    // DOM selector APIs take selector lists; parsing only one selector drops comma-separated
+    // DOM selector APIs take selector lists; the shared parser preserves comma-separated
     // alternatives used by editor hit-testing such as closest("td, th").
-    CssSelectorGroup* group = css_parse_selector_group_from_tokens(
-        tokens, &pos, (int)token_count, pool);
-    if (!group || group->selector_count == 0 ||
-        !css_selector_group_parse_consumed_all(tokens, pos, (int)token_count)) {
-        return nullptr;
-    }
-    return group;
+    return css_parse_selector_group_text(sel_text, sel_len, pool);
 }
 
 static DomElement* js_dom_selector_group_find_first(SelectorMatcher* matcher,

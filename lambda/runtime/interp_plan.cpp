@@ -1549,6 +1549,29 @@ static uint32_t plan_need(AstNode* node) {
 }
 
 static void plan_walk(AstNode* node, void* ctx);
+static void plan_finish(PlanCtx* pc);
+
+static void plan_handler(PlanCtx* outer, AstEventHandler* handler) {
+    if (!outer || !handler || handler->interp_planned) return;
+
+    PlanCtx pc = {};
+    pc.script = outer->script;
+    pc.plan = &handler->interp_plan;
+    pc.storage = BINDING_STORAGE_REGISTER;
+    // The event parameter is overlaid by the view activation; its slot is
+    // harmless but keeps all handler-scope names consistently addressable.
+    plan_assign_scope(&pc, handler->vars);
+    plan_walk(handler->body, &pc);
+
+    uint32_t body_need = plan_need(handler->body);
+    if (body_need > pc.max_scratch) pc.max_scratch = body_need;
+    plan_finish(&pc);
+    if (pc.failed) {
+        outer->failed = true;
+        return;
+    }
+    handler->interp_planned = true;
+}
 
 // Marks self-recursive calls that sit in tail position, so the walker can turn
 // them into a loop. Tail position propagates exactly where lowering's
@@ -1701,6 +1724,9 @@ static void plan_walk(AstNode* node, void* ctx) {
         // A definition's own name binds in the enclosing scope; its body opens
         // a separate activation, so it never consumes enclosing slots.
         plan_function(pc, (AstFuncNode*)node);
+        return;
+    case AST_NODE_EVENT_HANDLER:
+        plan_handler(pc, (AstEventHandler*)node);
         return;
     case AST_NODE_ASSIGN:
     case AST_NODE_PARAM:

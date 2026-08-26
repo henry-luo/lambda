@@ -51,6 +51,18 @@ struct DomNode;
 // Re-apply selector-dependent style and schedule layout after a live pseudo
 // state changes outside the native pointer dispatcher (for example JS .checked).
 void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set);
+
+// True when a dom-package behavior template owns the default action for this
+// event on this target. Native default actions consult it and stand down
+// (ES5, fallback-until-registered). `evcon` may be null for callers outside
+// event dispatch; the document is then taken from the target element.
+struct EventContext;
+bool radiant_behavior_claims_event(struct EventContext* evcon, View* target,
+                                   const char* event_name);
+
+// Drop queued behavior attaches belonging to a document being freed; call
+// while its views are still alive (top of free_document).
+void radiant_behavior_attach_purge_doc(struct DomDocument* doc);
 #endif
 
 typedef enum  {
@@ -432,6 +444,11 @@ typedef struct InputIntent {
     int mods;
     bool is_composing;
     uint32_t composition_caret;
+    // ES17 undo/redo payload: the value and selection the template is being
+    // asked to install. Null/zero for every other intent.
+    const char* history_value;
+    uint32_t history_sel_start;   // codepoints, like every Lambda-facing offset
+    uint32_t history_sel_end;
 } InputIntent;
 
 typedef InputIntent EditingIntent;
@@ -1334,11 +1351,28 @@ void editing_dispatch_log_intent(EventContext* evcon,
                                  const EditingSurface* surface,
                                  const EditingIntent* intent);
 
+// Splices performed by the dom package's editing waist (radiant.replace_range).
+// Sampled either side of a beforeinput dispatch to tell an applier that edited
+// from one that claimed the intent and changed nothing (a maxlength-blocked
+// keystroke), which must not produce an `input` event.
+extern "C" uint64_t radiant_splice_epoch(void);
+// Change requests made by a behavior template's `commit` handler (ESO42),
+// sampled across the commit dispatch to read its answer.
+extern "C" uint64_t radiant_change_request_epoch(void);
+
 bool editing_dispatch_form_beforeinput(EventContext* evcon,
                                        const EditingSurface* surface,
                                        const EditingIntent* intent,
                                        const EditingFormNotificationHooks* hooks,
-                                       bool* out_prevented);
+                                       bool* out_prevented,
+                                       // Set when a UA behavior template applied
+                                       // the edit itself (F5). Prevention then
+                                       // means "already done", not "cancelled",
+                                       // so the caller must skip its splice but
+                                       // must NOT restore the pre-edit selection
+                                       // — the applier has already moved the
+                                       // caret past the text it inserted.
+                                       bool* out_applied = nullptr);
 
 void editing_dispatch_form_input(EventContext* evcon,
                                  const EditingSurface* surface,
@@ -1740,8 +1774,6 @@ void te_focus_capture_value(DomElement* elem);
 
 // Compare current_value against value_at_focus; returns true if they differ
 // (i.e. the caller should dispatch a `change` event before clearing focus).
-// Always clears the snapshot afterwards.
-bool te_blur_should_dispatch_change(DomElement* elem);
 
 // Clear the transient password "last inserted character" reveal state.
 // Returns true when state changed.
@@ -1768,6 +1800,23 @@ struct EditHistory {
     void destroy();
 };
 
+// Report the entry undo/redo would restore, without moving the cursor (ES17).
+bool te_history_peek(DomElement* elem, bool redo, const char** out_value,
+                     uint32_t* out_len, uint32_t* out_sel_start_u16,
+                     uint32_t* out_sel_end_u16);
+// Move the cursor onto that entry without touching the value, for when a
+// behavior template installed it itself.
+bool te_history_step(DomElement* elem, bool redo);
+
+// Suppress history pushes for the duration of a restore, so installing an
+// entry does not record itself as a new one.
+extern "C" void tc_history_guard_enter(DocState* state);
+extern "C" void tc_history_guard_exit(DocState* state);
+
+// The undo ring, stored on the form ViewState in the State Store (ESO43).
+void* form_control_history_get(DocState* state, View* view);
+void form_control_history_set(DocState* state, View* view, void* history);
+
 EditHistory* te_history_new(uint16_t cap);
 void         te_history_free(EditHistory* h);
 
@@ -1783,8 +1832,6 @@ void te_history_input_type_restore(DocState* state, const char* previous);
 
 // Move cursor backward/forward through the ring; restores value + selection.
 // Returns false if no further undo/redo is available.
-bool te_history_undo(DomElement* elem);
-bool te_history_redo(DomElement* elem);
 
 // ---------- F5: events + constraint validation -------------------------
 
@@ -1792,15 +1839,6 @@ bool te_history_redo(DomElement* elem);
 // the JS DOM bridge overrides it with weak linkage.
 void te_dispatch_input      (DomElement* elem);
 
-// Re-evaluate constraint validation for `elem` and refresh the cached
-// pseudo-state bits (:valid, :invalid, :required, :optional, :read-only,
-// :read-write). Cheap; called from tc_ensure_init, tc_set_value and on
-// blur. Implements the v1 minimum from §3.11:
-//   - required   ⇒ invalid when value is empty
-//   - maxlength  ⇒ already enforced by tc_set_value, also reflected here
-//   - type=number / email / url / pattern attribute checked when non-empty
-//   - custom_validity_msg non-empty ⇒ invalid
-void te_validate(DomElement* elem);
 
 // ---------- F6: paste sanitization (Radiant_Design_Form_Input.md §3.6) -
 
@@ -1814,15 +1852,13 @@ void te_validate(DomElement* elem);
 // Internally invokes te_replace_byte_range, which fires the legacy `input`
 // hook and pushes an undo entry. Live editing paste should use the unified
 // dispatcher path so cancellable beforeinput is available.
-uint32_t te_paste(DomElement* elem, DocState* state, void* target,
-                  const char* text, uint32_t len);
 
-// Build the sanitized replacement that te_paste() would apply. The returned
-// `out_text` is allocated with mem_alloc(MEM_CAT_TEMP); caller owns mem_free().
-bool te_prepare_paste_replacement(DomElement* elem, DocState* state,
-                                  const char* text, uint32_t len,
-                                  char** out_text, uint32_t* out_len,
-                                  uint32_t* out_start, uint32_t* out_end);
+// Resolve the buffer range a paste replaces — the current selection, in bytes,
+// plus the readonly/disabled gate. Sanitization and maxlength are NOT applied:
+// those are policy and live in the dom package's applier (F6), which receives
+// the raw clipboard text.
+bool te_prepare_paste_range(DomElement* elem, DocState* state,
+                            uint32_t* out_start, uint32_t* out_end);
 
 // ---------- F7: IME composition (Radiant_Design_Form_Input.md §3.7) ----
 //
@@ -1859,9 +1895,7 @@ bool te_ime_is_composing(DomElement* elem);
 //   :invalid bit set → aria-invalid="true"
 //   <input type=range> → aria-valuenow / aria-valuemin / aria-valuemax
 //
-// Idempotent. Call from tc_ensure_init, tc_set_value, te_validate, and
-// any setter that flips disabled/readonly/required.
-void te_aria_reflect(DomElement* elem);
+// Idempotent. Call from tc_ensure_init, tc_set_value, and any setter that
 
 
 // ===== clipboard =====
@@ -2253,6 +2287,11 @@ typedef struct ViewState {
             char* current_value;
             uint32_t current_value_len;
             uint32_t current_value_u16_len;
+            // EditHistory*, owned here. The undo ring lives with the rest of
+            // the canonical form state rather than on FormControlProp, which is
+            // released and rebuilt as views churn — history has to outlive that
+            // (ESO43). Released by view_state_release_form_payload.
+            void* history;
         } form;
     } data;
 } ViewState;
@@ -2333,6 +2372,12 @@ typedef struct EditingCompositionState {
     EditingSurface surface;
     View* anchor_view;
     int anchor_offset;
+    // The preedit text itself (owned, UTF-8). It used to sit on
+    // FormControlProp alongside a duplicate of the length and caret already
+    // held here, which made the composition session a two-copy mirror on a
+    // transient owner — the ESO22/ESO28/ESO43 shape. A document has at most one
+    // composition, so this is its natural home (ES18/F7).
+    char* preedit_text;
     uint32_t preedit_len;
     uint32_t dom_preedit_len;
     uint32_t commit_len;
@@ -3243,6 +3288,21 @@ void form_control_set_disabled(DocState* state, View* view, bool disabled);
  * Check if a text control is readonly.
  */
 bool form_control_is_readonly(DocState* state, View* view);
+
+// Document-scoped IME preedit (ES18/F7). The reads answer "what is the preedit
+// for THIS control", which is null unless the control is the composing surface.
+const char* editing_composition_preedit(DocState* state, View* view,
+                                        uint32_t* out_len, uint32_t* out_caret);
+bool editing_composition_is_composing(DocState* state, View* view);
+void editing_composition_set_preedit(DocState* state, View* view,
+                                     const char* text, uint32_t len,
+                                     uint32_t caret_cp);
+void editing_composition_clear_preedit(DocState* state);
+
+// "Not user-alterable" — the readonly attribute OR disabled. This is what CSS
+// `:read-only`/`:read-write` mean; form_control_is_readonly above stays the
+// content-attribute mirror that `input.readOnly` and `aria-readonly` reflect.
+bool form_control_is_user_readonly(DocState* state, View* view);
 
 /**
  * Set the readonly state for a text control through the state store.
@@ -4214,6 +4274,10 @@ typedef struct EventContext {
 
     // paste text (set before dispatching "paste" event)
     const char* paste_text;
+    // Caret offset inside the current preedit, so the composition dispatch can
+    // hand it to the session template (ES18/F7). Set by the IME entrypoints
+    // around their compositionupdate dispatch.
+    uint32_t composition_caret_hint;
 
     // caret position override for synthetic/default-action event payloads.
     // the cut default action reports the selection start without collapsing

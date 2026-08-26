@@ -30,7 +30,15 @@ run_pass() {
     # $1 = RADIANT_DOM_PKG value, $2 = output name
     rm -f temp/state/*.mark
     RADIANT_DOM_PKG="$1" ./lambda.exe view "$PAGE" --event-file "$EVENTS" \
-        --state-dump >"$OUT/$2.log" 2>&1 || true
+        --state-dump >"$OUT/$2.log" 2>&1
+    rc=$?
+    # A crashed pass must never be reported as parity: it may still have
+    # flushed a dump, and comparing those would call a crash "equivalent".
+    if [ "$rc" -ne 0 ]; then
+        echo "FAIL: pass '$2' exited $rc (see $OUT/$2.log)" >&2
+        grep -iE "assertion failed|abort|Assertion" "$OUT/$2.log" | tail -3 >&2
+        exit 1
+    fi
     if ! ls temp/state/*.mark >/dev/null 2>&1; then
         echo "FAIL: pass '$2' produced no state dump (see $OUT/$2.log)" >&2
         exit 1

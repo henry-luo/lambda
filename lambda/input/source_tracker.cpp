@@ -160,4 +160,10 @@ void SourceTracker::reset() {
     line_index_built_ = false;
 }
 
+bool SourceTracker::seek(size_t offset) {
+    if (offset > source_len_) return false;
+    reset();
+    return advance(offset);
+}
+
 } // namespace lambda

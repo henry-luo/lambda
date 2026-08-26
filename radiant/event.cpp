@@ -1714,6 +1714,13 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         else mb.putNull("data");
         if (intent->data_mime) mb.put("mime", intent->data_mime);
         else mb.putNull("mime");
+        // ES17: an undo/redo hands the template the entry to install — the
+        // value plus where the selection sat when that state was recorded.
+        if (intent->history_value) {
+            mb.put("history_value", intent->history_value);
+            mb.put("history_sel_start", (int64_t)intent->history_sel_start);
+            mb.put("history_sel_end", (int64_t)intent->history_sel_end);
+        }
         if (intent->html_data) {
             char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
             if (sanitized) mb.put("html", sanitized);
@@ -2214,7 +2221,13 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     // Retained handlers borrow the document Runtime's canonical
     // context; no heap-only stack context may outlive dispatch.
     EvalContext* handler_ctx = nullptr;
-    DomDocument* doc = event_context_target_document(evcon);
+    // An attach-time dispatch has no EventContext; the document then comes from
+    // the element the template governs.
+    DomDocument* doc = evcon ? event_context_target_document(evcon) : nullptr;
+    if (!doc && target && target->is_element()) {
+        DomElement* te = target->as_element();
+        doc = te ? te->doc : nullptr;
+    }
     // the document's one shared script runtime: a behavior template governs
     // plain HTML pages too, where the Lambda runtime is the JS realm's.
     Runtime* rt = dom_document_script_runtime(doc);
@@ -2307,7 +2320,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
 
         if (any_changed) {
             // incremental DOM rebuild (falls back to full if map not ready)
-            rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
+            if (evcon) rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
             if (out_model_reconciled) *out_model_reconciled = true;
         }
         auto t_rebuild = high_resolution_clock::now();
@@ -2326,7 +2339,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     }
 
     if (emit_ctx.has_pending_selection) {
-        if (apply_source_selection_to_doc(evcon->ui_context, doc, emit_ctx.pending_selection)) {
+        if (evcon && apply_source_selection_to_doc(evcon->ui_context, doc, emit_ctx.pending_selection)) {
             log_debug("dispatch_lambda_handler: applied pending source selection");
             evcon->need_repaint = true;
         } else {
@@ -2354,10 +2367,13 @@ extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     if (!doc) return false;
     if (dom_document_script_runtime(doc)) return true;   // EO3: already owns one
 
+    // On by default: constraint validation now lives wholly in the dom package,
+    // so a script-less HTML page needs an evaluator to validate at all. Set
+    // RADIANT_DOM_PKG_CREATE_RUNTIME=0 to opt a session out.
     static int s_enabled = -1;
     if (s_enabled < 0) {
         const char* env = getenv("RADIANT_DOM_PKG_CREATE_RUNTIME");
-        s_enabled = (env && env[0] == '1') ? 1 : 0;
+        s_enabled = (env && env[0] == '0') ? 0 : 1;
     }
     if (!s_enabled) return false;
     if (doc->js_has_dom_realm) return false;             // EO6 owns that case
@@ -2413,77 +2429,30 @@ static bool radiant_dom_package_ensure(DomDocument* doc) {
     }
     if (!s_enabled) { doc->dom_package_loaded = true; return false; }
 
-    // A document with a live JS DOM realm is deferred: loading the package into
-    // that realm's runtime mid-session disturbs JS state (an iframe page
-    // crashed in js_observer_runtime_state). ES10 wants both realms coexisting,
-    // but sharing one runtime that way needs its own design pass (ESO27), so
-    // for now such pages keep their native default actions.
-    if (doc->js_has_dom_realm) {
-        log_debug("dom-package: deferring load on a document with a JS DOM realm");
-        doc->dom_package_loaded = true;
-        return false;
-    }
-
-    // Only ever load into a runtime this document *owns*. `js.runtime` may be
-    // borrowed — an iframe subdocument shares its parent's — and running a
-    // Lambda package inside a borrowed JS runtime corrupts the owner's state.
+    // A document with a live JS DOM realm is deferred (ESO27). ES10/ES12 want
+    // the package sharing that realm's one runtime, and doing so no longer
+    // crashes — EO5v2's boundary switching fixed that — but it still fails, for
+    // a reason now identified: module state ids are handed out from a *Runtime*
+    // counter (lambda_module_state_reserve) while the state slabs they index
+    // live on the *EvalContext*, and a compiled module carries the id it was
+    // assigned at transpile time. Loading the package into a runtime whose JS
+    // modules have already sealed those slots trips "sealed layout changed for
+    // module 0" and the package registers no templates at all.
+    //
+    // That is a core-runtime ownership bug (D8), not a Radiant one, so the
+    // deferral stands until it is fixed. Consequence, now that no native
+    // validator backs it up: a JS page gets no :valid/:invalid.
+    // The document's one script runtime, whichever realm established it (ES12).
+    //
     // EO4: dispatch never creates. The evaluator, if this document is to have
     // one, was created and bound at document setup by
-    // radiant_document_ensure_evaluator().
-    Runtime* rt = doc->lambda_runtime;
+    // radiant_document_ensure_evaluator() — which runs after the loader has
+    // executed the page's scripts, so js_has_dom_realm is already settled.
+    Runtime* rt = dom_document_script_runtime(doc);
     if (!rt) {
         log_debug("dom-package: document owns no evaluator; keeping native behavior");
         doc->dom_package_loaded = true;
         return false;
-    }
-    if (false) {
-        // A script-less HTML page owns no runtime at all, so UA behavior has to
-        // create one. It is created here, on the first event, rather than at
-        // document setup: static layout and render runs dispatch no events and
-        // must not pay for a runtime they never use. The document owns this one
-        // and releases it in free_document (ESO25).
-        // Never conjure an evaluator when one is already bound to this thread,
-        // and never for a document that owns a JS DOM realm: that realm's
-        // runtime is authoritative, and binding a second context here strands
-        // its js_state (an iframe page crashed in js_observer_runtime_state
-        // before this guard existed).
-        // Do not conjure an evaluator when anything else is live on this
-        // thread. `context` covers a bound Lambda evaluator, but JS state
-        // outlives the binding: an iframe subdocument of a JS page has neither
-        // a realm flag of its own nor a bound context between events, and
-        // creating a runtime for it stranded the parent's js_active_runtime_state.
-        // Creating an evaluator for a document that owns none is OFF by default
-        // (opt in with RADIANT_DOM_PKG_CREATE_RUNTIME=1).
-        //
-        // The guards below are necessary but demonstrably not sufficient: an
-        // HTML page can have no runtime, no bound context and no live JS at
-        // first-event time and still start JS afterwards, at which point the
-        // evaluator we bound strands js_active_runtime_state and the page
-        // crashes in js_observer_runtime_state. Deciding safely needs a real
-        // thread/realm ownership contract, not a point-in-time probe (ESO27).
-        static int s_create_ok = -1;
-        if (s_create_ok < 0) {
-            const char* env = getenv("RADIANT_DOM_PKG_CREATE_RUNTIME");
-            s_create_ok = (env && env[0] == '1') ? 1 : 0;
-        }
-        if (!s_create_ok || context || doc->js_has_dom_realm || js_active_runtime_state) {
-            log_debug("dom-package: not creating a runtime for this document");
-            doc->dom_package_loaded = true;
-            return false;
-        }
-        rt = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
-        if (!rt) { doc->dom_package_loaded = true; return false; }
-        runtime_init(rt);
-        if (!runtime_get_eval_context(rt)) {
-            log_error("dom-package: failed to create a document script runtime");
-            runtime_cleanup(rt);
-            mem_free(rt);
-            doc->dom_package_loaded = true;
-            return false;
-        }
-        doc->lambda_runtime = rt;
-        doc->owns_script_runtime = true;
-        log_info("dom-package: created a script runtime for a script-less document");
     }
     // No heap check here: a freshly created runtime gets its heap when the first
     // script runs, so requiring one up front would block the very load that
@@ -2528,6 +2497,38 @@ static bool radiant_dom_package_ensure(DomDocument* doc) {
     return ok;
 }
 
+static void select_open_dropdown(DocState* state, View* select_view, float scale);
+
+// Dropdown open/close for the dom package's `<select>` behavior template. The
+// policy of *when* to open belongs to the template; the overlay geometry,
+// painting and outside-click capture stay native (F2).
+extern "C" bool radiant_select_dropdown_is_open(void* dom_node) {
+    EmitHandlerContext* ctx = g_emit_handler_ctx;
+    if (!ctx || !ctx->evcon || !dom_node) return false;
+    DocState* state = event_context_target_state(ctx->evcon);
+    return state && state->open_dropdown == static_cast<View*>(static_cast<DomNode*>(dom_node));
+}
+
+extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open) {
+    EmitHandlerContext* ctx = g_emit_handler_ctx;
+    if (!ctx || !ctx->evcon || !dom_node) return false;
+    DocState* state = event_context_target_state(ctx->evcon);
+    if (!state) return false;
+    View* view = static_cast<View*>(static_cast<DomNode*>(dom_node));
+    if (!open) {
+        if (state->open_dropdown == view) doc_state_close_dropdown(state, view);
+        return true;
+    }
+    // one dropdown at a time, matching the native activation path
+    if (state->open_dropdown && state->open_dropdown != view) {
+        doc_state_close_dropdown(state, state->open_dropdown);
+    }
+    float scale = ctx->evcon->ui_context && ctx->evcon->ui_context->pixel_ratio > 0
+        ? ctx->evcon->ui_context->pixel_ratio : 1.0f;
+    select_open_dropdown(state, view, scale);
+    return true;
+}
+
 // Fire a synthetic DOM event from a behavior handler. Exposed as the dom
 // package's `dispatch()` primitive (ES6). The event enters the normal pipeline
 // as a fresh event, so anything it triggers is dispatched in a quiescent state
@@ -2551,24 +2552,44 @@ extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* e
 // target? The engine keeps its native default action as the fallback until the
 // package registers a replacement (ES5), so each native activation path asks
 // this before running, and exactly one of the two acts.
-bool radiant_behavior_claims_event(EventContext* evcon, View* target,
-                                   const char* event_name) {
-    if (!target || !event_name) return false;
-    if (event_is_hot_path(event_name)) return false;
-    // ensure() binds (and if needed creates) the document's evaluator, so a
-    // script-less page must not be rejected for having no context yet
-    if (!radiant_dom_package_ensure(event_context_target_document(evcon))) return false;
+// Nearest non-synthetic element ancestor governed by a behavior template that
+// declares `event_name`. Third user of this walk (claim check, passive probe,
+// dispatch), so the shape lives in one place. `out_elem` receives the matched
+// element so dispatch can bind `~` and continue past a declined match.
+static TemplateEntry* behavior_match_walk(View* target, const char* event_name,
+                                          DomElement** out_elem, Item* out_item) {
     for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
         if (node->node_type != DOM_NODE_ELEMENT) continue;
         DomElement* dom_elem = lam::dom_require_element(node);
         if (dom_elem->is_synthetic()) continue;
         Item elem_item;
         elem_item.element = dom_element_render_source(dom_elem);
-        if (template_registry_match_behavior(g_template_registry, elem_item, event_name)) {
-            return true;
+        TemplateEntry* tmpl = template_registry_match_behavior(
+            g_template_registry, elem_item, event_name);
+        if (tmpl) {
+            if (out_elem) *out_elem = dom_elem;
+            if (out_item) *out_item = elem_item;
+            return tmpl;
         }
     }
-    return false;
+    return nullptr;
+}
+
+bool radiant_behavior_claims_event(EventContext* evcon, View* target,
+                                   const char* event_name) {
+    if (!target || !event_name) return false;
+    if (event_is_hot_path(event_name)) return false;
+    // Callers outside dispatch (native validation, for one) have no
+    // EventContext; fall back to the element's own document.
+    DomDocument* doc = evcon ? event_context_target_document(evcon) : nullptr;
+    if (!doc && target->is_element()) {
+        DomElement* te = target->as_element();
+        doc = te ? te->doc : nullptr;
+    }
+    // ensure() binds (and if needed creates) the document's evaluator, so a
+    // script-less page must not be rejected for having no context yet
+    if (!radiant_dom_package_ensure(doc)) return false;
+    return behavior_match_walk(target, event_name, nullptr, nullptr) != nullptr;
 }
 
 // UA default behavior: after no author template claimed the event, find the
@@ -2582,7 +2603,13 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
                                       bool* out_model_reconciled) {
     // an author handler that returned 'prevent-default' suppresses UA behavior
     if (evcon && evcon->default_prevented) return false;
-    DomDocument* doc = event_context_target_document(evcon);
+    // Attach-time dispatch carries no EventContext; fall back to the element's
+    // own document, as the claim check and the handler invoke both do.
+    DomDocument* doc = evcon ? event_context_target_document(evcon) : nullptr;
+    if (!doc && target && target->is_element()) {
+        DomElement* te = target->as_element();
+        doc = te ? te->doc : nullptr;
+    }
     if (event_is_hot_path(event_name)) {
         // a continuous event may only reach an already-loaded package, and even
         // then only a template that explicitly declares it (checked by the match)
@@ -2593,45 +2620,155 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
         return false;
     }
 
-    DomNode* node = static_cast<DomNode*>(target);
-    while (node) {
-        if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* dom_elem = lam::dom_require_element(node);
-            if (!dom_elem->is_synthetic()) {
-                Item elem_item;
-                elem_item.element = dom_element_render_source(dom_elem);
-                TemplateEntry* tmpl = template_registry_match_behavior(
-                    g_template_registry, elem_item, event_name);
-                if (tmpl) {
-                    TemplateHandlerEntry* h = template_entry_find_handler(tmpl, event_name);
-                    if (h) {
-                        log_debug("dispatch_behavior_handler: '%s' -> behavior tmpl=%s",
-                                  event_name, tmpl->template_ref ? tmpl->template_ref : "(anon)");
-                        // The element is its own model. Bind `~` to the module's
-                        // dom_node wrapper, not the raw Mark element: handlers
-                        // reach engine state through the radiant primitives, and
-                        // those speak wrappers. Matching above still runs on the
-                        // Mark element, where tag and attributes live.
-                        Item model = radiant_dom_wrap_node(dom_elem);
-                        if (get_type_id(model) == LMD_TYPE_NULL) model = elem_item;
-                        if (invoke_template_handler(evcon, target, event_name, intent,
-                                tmpl, h, model, tmpl->template_ref, out_model_reconciled)) {
-                            return true;
-                        }
-                        // behavior declined with 'pass': the native default
-                        // action for this class stays in charge
-                    }
-                }
+    View* cursor = target;
+    while (cursor) {
+        DomElement* dom_elem = nullptr;
+        Item elem_item = ItemNull;
+        TemplateEntry* tmpl = behavior_match_walk(cursor, event_name,
+                                                  &dom_elem, &elem_item);
+        if (!tmpl) break;
+        TemplateHandlerEntry* h = template_entry_find_handler(tmpl, event_name);
+        if (h) {
+            log_debug("dispatch_behavior_handler: '%s' -> behavior tmpl=%s",
+                      event_name, tmpl->template_ref ? tmpl->template_ref : "(anon)");
+            // The element is its own model. Bind `~` to the module's dom_node
+            // wrapper, not the raw Mark element: handlers reach engine state
+            // through the radiant primitives, and those speak wrappers.
+            // Matching still runs on the Mark element, where attributes live.
+            Item model = radiant_dom_wrap_node(dom_elem);
+            if (get_type_id(model) == LMD_TYPE_NULL) model = elem_item;
+            if (invoke_template_handler(evcon, target, event_name, intent,
+                    tmpl, h, model, tmpl->template_ref, out_model_reconciled)) {
+                return true;
             }
+            // declined with 'pass': keep looking above the matched element,
+            // and if nothing else claims it the native default stays in charge
         }
-        node = node->parent;
+        cursor = static_cast<View*>(static_cast<DomNode*>(dom_elem)->parent);
     }
     return false;
 }
 
+// Attach-time dispatch: a control has become live, so let the behavior template
+// governing it run its `init` handler. This is the moment native validation used
+// (tc_ensure_init) — without it a required-empty field would only become
+// :invalid once the user touched it (ESO31). There is no EventContext here; the
+// handler path derives the document from the element.
+// Controls initialize during layout (tc_ensure_init), and a handler must not
+// run there: ES5 requires handlers to see a quiescent state, and writing state
+// mid-layout leaves a reflow pending inside the pass that is still running.
+// So attach is queued here and drained at the next quiescent point.
+#define RADIANT_ATTACH_QUEUE_CAP 64
+static __thread View* s_attach_queue[RADIANT_ATTACH_QUEUE_CAP];
+static __thread int s_attach_queue_len = 0;
+
+extern "C" bool radiant_dispatch_behavior_attach(View* target) {
+    if (!target) return false;
+    for (int i = 0; i < s_attach_queue_len; i++) {
+        if (s_attach_queue[i] == target) return false;   // already queued
+    }
+    if (s_attach_queue_len >= RADIANT_ATTACH_QUEUE_CAP) {
+        // Dropping is safe rather than silent: the control keeps whatever the
+        // native fallback seeded, and the next event revalidates it anyway.
+        log_debug("behavior-attach: queue full, dropping one control");
+        return false;
+    }
+    s_attach_queue[s_attach_queue_len++] = target;
+    return true;
+}
+
+// Drain the attach queue. Called at the start of event handling, where layout
+// has finished and nothing is mid-pass.
+// A queued attach must never outlive its document: the queue holds raw View*
+// and drains lazily, so a view session that frees one document and loads
+// another would deref freed views at the next drain. Purged here while the
+// views are still alive. (Batch layout/render never drains — no events, no
+// window render path — which is why it needs no purge, and why putting a drain
+// inside that loop was the ESO33 breakage.)
+void radiant_behavior_attach_purge_doc(DomDocument* doc) {
+    if (!doc || s_attach_queue_len <= 0) return;
+    int kept = 0;
+    for (int i = 0; i < s_attach_queue_len; i++) {
+        View* v = s_attach_queue[i];
+        DomElement* e = (v && v->is_element()) ? v->as_element() : nullptr;
+        if (e && e->doc == doc) continue;   // dying document: drop the entry
+        s_attach_queue[kept++] = v;
+    }
+    s_attach_queue_len = kept;
+}
+
+extern "C" void radiant_drain_behavior_attach(void) {
+    if (s_attach_queue_len <= 0) return;
+    int count = s_attach_queue_len;
+    s_attach_queue_len = 0;              // clear first: a handler may attach more
+    for (int i = 0; i < count; i++) {
+        View* v = s_attach_queue[i];
+        // Give the document its evaluator here rather than at load, so only a
+        // document that actually owns a control the package governs pays for
+        // one. A thread holds a single Runtime, so a document that creates one
+        // it does not need denies it to a Lambda-script subdocument — which is
+        // how a PDF and a Lambda report rendered into an iframe stopped loading
+        // ("eval thread already owns a Runtime"). Nothing queues here unless a
+        // control initialized, and this runs after the loader executed the
+        // page's scripts, so js_has_dom_realm is settled exactly as it is at
+        // setup time (EO4's requirement, narrower trigger).
+        DomElement* e = (v && v->is_element()) ? v->as_element() : nullptr;
+        if (e && e->doc) radiant_document_ensure_evaluator(e->doc);
+        dispatch_behavior_handler(nullptr, v, "init", nullptr, nullptr);
+    }
+}
+
+// Post-mutation `input` for UA behavior templates. The pre-mutation `input`
+// belongs to app templates that own their text; validation and anything else
+// that must observe the committed value hooks here instead (F3).
+// ESO42: the commit hook. `change` must fire before `blur`, but the decision
+// that gates it is made before either — so a template's `on blur` runs too late
+// to make it. This dispatches a behavior-only `commit` at the decision point.
+//
+// Behavior-only is what makes it legal: no DOM event has fired yet, so there
+// are no JS listeners to preempt and ES5's after-JS ordering is not in play.
+// The template only *decides*; native still dispatches `change` itself, which
+// keeps it ahead of `blur` for templates and JS alike and preserves the state
+// machine's DISPATCH_CHANGE observation.
+//
+// Returns whether a template answered at all. When none did, the caller falls
+// back to the native comparison (ES5), so a page with no package behaves as it
+// always has.
+extern "C" bool radiant_dispatch_behavior_commit(EventContext* evcon, View* target) {
+    return dispatch_behavior_handler(evcon, target, "commit", nullptr, nullptr);
+}
+
+extern "C" bool radiant_dispatch_behavior_input(EventContext* evcon, View* target) {
+    return dispatch_behavior_handler(evcon, target, "input", nullptr, nullptr);
+}
+
+// F5: the applier seam. A behavior template that handles this `beforeinput`
+// applies the edit itself (through replace_range) and returns 'prevent-default',
+// which is the signal for the native splice to stand down — the same protocol a
+// JS listener uses. A template that returns 'pass', or declares no handler for
+// the intent it was given, leaves the native applier in charge, so the flip can
+// land one input type at a time.
+//
+// The intent is passed through so the handler can read `input_type` and `data`
+// off the event map rather than re-deriving them from the key.
+extern "C" bool radiant_dispatch_behavior_beforeinput(EventContext* evcon,
+                                                      View* target,
+                                                      const InputIntent* intent) {
+    if (!evcon) return false;
+    bool prevented_before = evcon->default_prevented;
+    dispatch_behavior_handler(evcon, target, "beforeinput", intent, nullptr);
+    bool prevented = evcon->default_prevented && !prevented_before;
+    // Confine the verdict to this dispatch: `default_prevented` is the whole
+    // event's flag, and letting an applied edit set it would also suppress
+    // unrelated default actions later in the same event.
+    if (prevented) evcon->default_prevented = prevented_before;
+    return prevented;
+}
+
 static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name,
                                     const InputIntent* intent = nullptr,
-                                    bool* out_model_reconciled = nullptr) {
+                                    bool* out_model_reconciled = nullptr,
+                                    bool allow_behavior = true) {
     if (out_model_reconciled) *out_model_reconciled = false;
     // Plain HTML documents have no Lambda template Runtime.  Native input must
     // skip template dispatch instead of reading the context-local registry with
@@ -2639,8 +2776,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
     if (!context || !g_template_registry || g_template_registry->count == 0) {
         // No author templates on this document (a plain HTML page has none),
         // but UA behavior may still govern the target.
-        return dispatch_behavior_handler(evcon, target, event_name, intent,
-                                         out_model_reconciled);
+        return allow_behavior && dispatch_behavior_handler(evcon, target, event_name,
+                                                           intent, out_model_reconciled);
     }
 
     log_debug("dispatch_lambda_handler: searching for '%s' handler, registry has %d templates",
@@ -2689,8 +2826,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
     }
 
     log_debug("dispatch_lambda_handler: no handler found after walking %d levels", depth);
-    return dispatch_behavior_handler(evcon, target, event_name, intent,
-                                     out_model_reconciled);
+    return allow_behavior && dispatch_behavior_handler(evcon, target, event_name, intent,
+                                                       out_model_reconciled);
 }
 
 bool editing_template_invoke_handler(EventContext* evcon, View* target,
@@ -2958,8 +3095,29 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
                                &saved_selection_direction);
 
     bool prevented = false;
+    bool applied_by_template = false;
+    uint64_t splice_epoch_before = radiant_splice_epoch();
     editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
-                                      &prevented);
+                                      &prevented, &applied_by_template);
+    if (applied_by_template) {
+        // F5: a behavior template already performed the splice and left the
+        // caret after the text it inserted. Restoring the pre-edit selection
+        // here would drag the caret back to where the edit started, so every
+        // further keystroke would land at the same offset — typing "hello"
+        // produced "olleh" before this branch existed.
+        // An applier that claimed the intent but spliced nothing made no edit —
+        // a keystroke refused by `maxlength` is exactly that — and an edit that
+        // did not happen must not produce an `input` event.
+        bool mutated = radiant_splice_epoch() != splice_epoch_before;
+        log_debug("dispatch_form_text_replace: applied by behavior template "
+                  "inputType=%s mutated=%d",
+                  input_intent_type_name(input_type), mutated ? 1 : 0);
+        if (mutated) {
+            editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
+            doc_state_request_repaint(state);
+        }
+        return true;
+    }
     if (prevented) {
         if (input_type == INPUT_INTENT_INSERT_TEXT &&
             saved_selection_start != saved_selection_end) {
@@ -3051,11 +3209,8 @@ static uint32_t dispatch_form_text_paste(EventContext* evcon, DomElement* elem,
                                          DocState* state, View* target,
                                          const char* text, uint32_t len) {
     if (!evcon || !elem || !state || !target || !text || len == 0) return 0;
-    char* sanitized = nullptr;
-    uint32_t sanitized_len = 0;
     uint32_t start = 0, end = 0;
-    if (!te_prepare_paste_replacement(elem, state, text, len, &sanitized,
-                                      &sanitized_len, &start, &end)) {
+    if (!te_prepare_paste_range(elem, state, &start, &end)) {
         return 0;
     }
 
@@ -3067,12 +3222,15 @@ static uint32_t dispatch_form_text_paste(EventContext* evcon, DomElement* elem,
     }
     event_log_editing_clipboard(state, surface_ptr, "paste", len, 0);
 
+    // The raw clipboard text goes through as the intent data: the applier owns
+    // newline normalization and maxlength, so handing it a pre-sanitized copy
+    // would leave the policy here after all. The count returned is what was
+    // offered, not what the applier chose to keep.
     bool ok = dispatch_form_text_replace(evcon, elem, state, target,
                                          start, end,
-                                         sanitized, sanitized_len,
+                                         text, len,
                                          INPUT_INTENT_INSERT_FROM_PASTE);
-    mem_free(sanitized);
-    return ok ? sanitized_len : 0;
+    return ok ? len : 0;
 }
 
 static bool dispatch_context_menu_cut(void* user, DomElement* elem,
@@ -3182,8 +3340,7 @@ static bool dispatch_form_copy_selection(EventContext* evcon, DomElement* elem,
 static bool dispatch_form_cut_selection(EventContext* evcon, DomElement* elem,
                                         DocState* state, View* target) {
     if (!evcon || !elem || !state || !target) return false;
-    bool editable = !form_control_is_readonly(state, static_cast<View*>(elem)) &&
-        !form_control_is_disabled(state, static_cast<View*>(elem));
+    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
     if (!editable) return false;
 
     uint32_t start = 0;
@@ -3301,22 +3458,25 @@ static void dispatch_form_modified_delete(EventContext* evcon, DomElement* elem,
                                           const char* value, int value_len,
                                           int caret, bool backward,
                                           bool line_backward) {
-    uint32_t start = (uint32_t)caret;
-    uint32_t end = start;
-    InputIntentType intent = INPUT_INTENT_DELETE_WORD_FORWARD;
+    // The boundary is the applier's to compute, not this function's: it owns
+    // deleteWord*/deleteSoftLine* and derives the span from its own scanners,
+    // so any range resolved here would be recomputed and discarded. Dispatch
+    // the collapsed caret and let the intent carry the meaning.
+    //
+    // Note this must dispatch even though the range is empty — the old
+    // `end > start` guard would suppress beforeinput entirely and the applier
+    // would never get the chance to decide.
+    (void)value; (void)value_len;
+    uint32_t caret_off = (uint32_t)caret;
+    InputIntentType intent;
     if (backward) {
-        start = line_backward
-            ? te_line_start(value, (uint32_t)value_len, (uint32_t)caret)
-            : te_prev_word_byte(value, (uint32_t)value_len, (uint32_t)caret);
         intent = line_backward ? INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD
                                : INPUT_INTENT_DELETE_WORD_BACKWARD;
     } else {
-        end = te_next_word_byte(value, (uint32_t)value_len, (uint32_t)caret);
+        intent = INPUT_INTENT_DELETE_WORD_FORWARD;
     }
-    if (end > start) {
-        dispatch_form_text_replace(evcon, elem, state, target, start, end,
-                                   nullptr, 0, intent);
-    }
+    dispatch_form_text_replace(evcon, elem, state, target, caret_off, caret_off,
+                               nullptr, 0, intent);
     evcon->need_repaint = true;
 }
 
@@ -3353,8 +3513,7 @@ static void dispatch_form_delete_key(EventContext* evcon, DomElement* elem,
                                      bool had_keydown_caret,
                                      int keydown_caret_offset,
                                      bool collapse_lambda_selection) {
-    bool editable = !form_control_is_readonly(state, static_cast<View*>(elem)) &&
-        !form_control_is_disabled(state, static_cast<View*>(elem));
+    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
     if (backward && had_lambda_keydown) {
         int base = had_keydown_caret ? keydown_caret_offset : caret;
         const char* operation = "lambdaDeleteBackward";
@@ -3579,39 +3738,68 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
     EditingSurface surface;
     if (!editing_surface_from_target(target, &surface) ||
         !editing_surface_is_text_control(&surface)) {
-        return input_type == INPUT_INTENT_HISTORY_UNDO
-            ? te_history_undo(elem)
-            : te_history_redo(elem);
+        // No editing surface means no beforeinput and therefore no applier.
+        // The ring is still native, but installing an entry is the template's
+        // job now, so there is nothing to do here.
+        return false;
     }
 
     InputIntent intent;
     intent.type = input_type;
     intent.data = "";
 
+    // ES17: peek the entry this would restore and put it on the event, so a
+    // behavior template can install it. The cursor does NOT move here — it
+    // moves only once the entry is consumed, below.
+    bool redo = input_type == INPUT_INTENT_HISTORY_REDO;
+    const char* hist_value = nullptr;
+    uint32_t hist_len = 0, hist_start_u16 = 0, hist_end_u16 = 0;
+    if (te_history_peek(elem, redo, &hist_value, &hist_len,
+                        &hist_start_u16, &hist_end_u16)) {
+        intent.history_value = hist_value;
+        // The entry's selection is UTF-16 against its own snapshot; Lambda
+        // speaks codepoints, so convert against that snapshot, not the value
+        // currently in the control.
+        uint32_t sb = tc_utf16_to_utf8_offset(hist_value, hist_len, hist_start_u16);
+        uint32_t eb = tc_utf16_to_utf8_offset(hist_value, hist_len, hist_end_u16);
+        intent.history_sel_start = (uint32_t)str_utf8_byte_to_char(hist_value, hist_len, sb);
+        intent.history_sel_end = (uint32_t)str_utf8_byte_to_char(hist_value, hist_len, eb);
+    }
+
     EditingFormNotificationHooks hooks = form_editing_notification_hooks();
 
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT,
                                SM_EV_FORM_HISTORY, target);
     bool prevented = false;
+    bool applied_by_template = false;
+    // A restore must not re-push. The waist's write path records history on
+    // every mutation, so bracket whatever the template does with the same
+    // guard the ring's own restore used to use.
+    tc_history_guard_enter(state);
     editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
-                                      &prevented);
+                                      &prevented, &applied_by_template);
+    tc_history_guard_exit(state);
     sm_observe_action(state, SM_ACT_DISPATCH_BEFOREINPUT);
-    if (prevented) {
+    if (prevented && !applied_by_template) {
+        // Cancelled by JS: no restore and no cursor movement, so the same undo
+        // is still available next time.
         log_debug("dispatch_form_history: beforeinput prevented inputType=%s",
                   input_intent_type_name(input_type));
         return true;
     }
 
     uint32_t old_len = event_log_text_len(elem->form ? elem->form->value : nullptr);
-    bool did = input_type == INPUT_INTENT_HISTORY_UNDO
-        ? te_history_undo(elem)
-        : te_history_redo(elem);
+    // The template installs the entry; native only moves the cursor onto it.
+    // There is no native apply behind this — a control no template governs does
+    // not undo, the same way it does not validate (ES17 with no fallback).
+    bool did = applied_by_template && te_history_step(elem, redo);
     if (did) {
         FormControlProp* form = elem->form;
         uint32_t new_len = event_log_text_len(form ? form->value : nullptr);
         uint32_t selection_start = form ? form->selection_start : 0;
         uint32_t selection_end = form ? form->selection_end : 0;
-        EditHistory* history = form ? (EditHistory*)form->history : nullptr;
+        EditHistory* history =
+            (EditHistory*)form_control_history_get(state, static_cast<View*>(elem));
         uint32_t depth = history ? history->count : 0;
         uint32_t cursor = history ? history->cursor : 0;
         event_log_editing_history(state, &surface, &intent,
@@ -4001,7 +4189,6 @@ extern "C" bool radiant_dispatch_form_text_ime_begin(UiContext* uicon,
     intent.data = "";
     intent.is_composing = true;
 
-    te_ime_begin(elem);
     editing_interaction_set_composing(context.state, context.surface_ptr, true);
     radiant_dispatch_composition_event(&context.event, context.target,
                                        "compositionstart", "");
@@ -4028,9 +4215,11 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
 
     EditingFormNotificationHooks hooks = form_editing_notification_hooks();
 
+    context.event.composition_caret_hint = caret_cp;
     radiant_dispatch_composition_event(&context.event, context.target,
                                        "compositionupdate",
                                        preedit ? preedit : "");
+    context.event.composition_caret_hint = 0;
     bool prevented = false;
     editing_dispatch_form_beforeinput(&context.event, &context.surface, &intent, &hooks,
                                       &prevented);
@@ -4040,7 +4229,6 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
                                       "update", len, 0, caret_cp);
         return true;
     }
-    te_ime_update(elem, preedit, len, caret_cp);
     editing_interaction_set_composing(context.state, context.surface_ptr, true);
     editing_dispatch_form_input(&context.event, &context.surface, &intent, &hooks);
     event_log_editing_composition(context.state, context.surface_ptr, &intent,
@@ -4075,7 +4263,6 @@ extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
                                        committed ? committed : "");
 
     if (should_mutate) {
-        te_ime_commit_finish(elem, committed, len);
         dispatch_form_text_replace(&context.event, elem, context.state, context.target,
                                    start, end, committed, len,
                                    INPUT_INTENT_INSERT_FROM_COMPOSITION);
@@ -4087,7 +4274,6 @@ extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
             editing_dispatch_form_beforeinput(&context.event, context.surface_ptr, &intent,
                                               &hooks, &prevented);
         }
-        te_ime_commit_finish(elem, committed, len);
         if (!prevented && intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT &&
             context.surface_ptr) {
             editing_dispatch_form_input(&context.event, context.surface_ptr, &intent, &hooks);
@@ -5702,6 +5888,20 @@ static void radiant_dispatch_composition_event(EventContext* evcon,
     CompositionEventBuildArgs args = {type, data};
     radiant_dispatch_built_event(evcon, target, build_composition_event_item,
         &args, false);
+    // ESO45: composition events reached JS only. A behavior template owns the
+    // session now (ES18/F7), and the ancestor walk from the focused control
+    // reaches <body>, which is where that template matches. After the JS
+    // dispatch, as ES5 requires.
+    //
+    // The payload rides an InputIntent because that is what the behavior event
+    // map already knows how to expose — `data` and `composition_caret` — and
+    // the JS-side event object is not a Mark map a template can read.
+    InputIntent comp_intent;
+    comp_intent.type = INPUT_INTENT_INSERT_COMPOSITION_TEXT;
+    comp_intent.data = data ? data : "";
+    comp_intent.is_composing = true;
+    comp_intent.composition_caret = evcon->composition_caret_hint;
+    dispatch_behavior_handler(evcon, target, type, &comp_intent, nullptr);
 }
 
 /**
@@ -6512,6 +6712,26 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, fl
 /**
  * Handle click on select to toggle dropdown
  */
+// Opening a dropdown is mechanism: overlay placement and sizing come from
+// layout geometry. Both the native activation path and the dom package's
+// `open_dropdown` primitive go through here so the geometry is computed once.
+static void select_open_dropdown(DocState* state, View* select_view, float scale) {
+    if (!state || !select_view) return;
+    ViewBlock* select = lam::view_require_block(select_view);
+    if (!select || !select->form) return;
+    log_debug("select_open_dropdown: opening with %d options", select->form->option_count);
+    doc_state_open_dropdown(state, select_view);
+
+    float abs_x = 0.0f, abs_y = 0.0f;
+    view_to_absolute_position(select_view, select->x,
+                              select->y + form_select_dropdown_row_height(select->form),
+                              0.0f, 0.0f, &abs_x, &abs_y);
+
+    doc_state_set_dropdown_geometry(state, abs_x * scale, abs_y * scale,
+        state->dropdown_width, state->dropdown_height);
+    calculate_dropdown_dimensions(select, state, scale);
+}
+
 static bool handle_select_click(EventContext* evcon, View* target) {
     log_debug("handle_select_click: target=%p, target_tag=%d", (void*)target,
         (target && target->is_element()) ? (lam::view_require_element(target))->tag() : -1);
@@ -6544,17 +6764,7 @@ static bool handle_select_click(EventContext* evcon, View* target) {
     }
 
     // Open this dropdown
-    log_debug("handle_select_click: opening dropdown with %d options", select->form->option_count);
-    doc_state_open_dropdown(state, static_cast<View*>(select));
-
-    float abs_x = 0.0f, abs_y = 0.0f;
-    view_to_absolute_position(select_view, select->x,
-                              select->y + form_select_dropdown_row_height(select->form),
-                              0.0f, 0.0f, &abs_x, &abs_y);
-
-    doc_state_set_dropdown_geometry(state, abs_x * scale, abs_y * scale,
-        state->dropdown_width, state->dropdown_height);
-    calculate_dropdown_dimensions(select, state, scale);
+    select_open_dropdown(state, select_view, scale);
     return true;
 }
 
@@ -6849,7 +7059,18 @@ static bool prepare_previous_focus_blur(EventContext* evcon,
         doc_state_request_repaint(state);
         evcon->need_repaint = true;
     }
-    return te_blur_should_dispatch_change(prev_elem);
+    // ESO42: give a behavior template the commit decision, here — before
+    // `change` and `blur` are dispatched below, which is the only point where
+    // answering it can still preserve their order. A template that answers
+    // requests the event through radiant.request_change; one that decides the
+    // value was not committed simply requests nothing.
+    // The commit decision is the package's, with no native fallback behind it:
+    // a control no template governs commits nothing, exactly as a control no
+    // template validates has no :valid/:invalid.
+    (void)prev_elem;
+    uint64_t change_epoch_before = radiant_change_request_epoch();
+    radiant_dispatch_behavior_commit(evcon, prev_focus);
+    return radiant_change_request_epoch() != change_epoch_before;
 }
 
 static void dispatch_focus_change_observed(EventContext* evcon, View* target) {
@@ -7680,6 +7901,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         log_error("No document to handle event");
         return;
     }
+    // Controls that initialized during the last layout get their `init` turn
+    // here, before this event is processed: layout has finished, so the state
+    // they write lands in a quiescent pass rather than inside one.
+    radiant_drain_behavior_attach();
     if (!doc->html_root && !doc->view_tree) {
         log_error("No document content to handle event");
         return;
@@ -8626,6 +8851,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (event->type == RDT_EVENT_MOUSE_UP) {
+            // Snapshot before any handler runs: a behavior template may open a
+            // dropdown during dispatch, and the overlay block below must only
+            // act on one that was already open when the click arrived.
+            View* dropdown_open_at_press = state ? state->open_dropdown : nullptr;
             if (evcon.target) {
                 bool pointer_up_prevented = radiant_dispatch_pointer_event(
                     &evcon, evcon.target, "pointerup",
@@ -8778,7 +9007,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Handle select dropdown click FIRST (before other click handling)
             // If a dropdown is open, handle clicks on it before anything else
             bool dropdown_handled = false;
-            if (state && state->open_dropdown) {
+            // Only a dropdown that was already open when this click arrived can
+            // receive it. A click that *opens* one — which a behavior template
+            // does during dispatch, earlier in this handler than the native
+            // path did — must not then be treated as a click into it.
+            if (state && state->open_dropdown &&
+                state->open_dropdown == dropdown_open_at_press) {
                 // Check if clicking on dropdown option
                 if (handle_dropdown_option_click(&evcon, (float)mouse_x, (float)mouse_y)) {
                     // Option was selected, done - skip other click handlers
@@ -8850,7 +9084,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
 
                 // Handle click on select element to toggle dropdown
-                if (evcon.target && !evcon.default_prevented) {
+                if (evcon.target && !evcon.default_prevented &&
+                    !radiant_behavior_claims_event(&evcon, evcon.target, "click")) {
+                    // a behavior template owning this click also owns opening
                     handle_select_click(&evcon, evcon.target);
                 }
 
@@ -8956,9 +9192,26 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                 }
 
-                // Dispatch to Lambda template event handlers
+                // Dispatch to Lambda template event handlers. Author templates
+                // always see the click; the behavior half is the UA default
+                // action, so it stands down on exactly the condition the native
+                // activation above uses — when the JS realm already ran the
+                // activation for this click, a behavior template running too
+                // would toggle the control a second time and land on the
+                // original value. ES10 makes JS and Lambda peers over one
+                // canonical state, which means only one of them may perform the
+                // default action for a given event.
                 if (evcon.target) {
-                    if (dispatch_lambda_handler(&evcon, evcon.target, "click")) {
+                    // Narrowly: the JS realm ran *this* click's checkbox/radio
+                    // activation. Only then must the behavior template stand
+                    // down — a select's dropdown is a native UA affordance that
+                    // JS never performs, so its template still runs here.
+                    bool js_did_activation = js_click_dispatched &&
+                        click_check_radio && click_check_radio_changed;
+                    bool behavior_may_activate = !js_did_activation;
+                    if (dispatch_lambda_handler(&evcon, evcon.target, "click",
+                                                nullptr, nullptr,
+                                                behavior_may_activate)) {
                         evcon.need_repaint = true;
                     }
                 }
@@ -9602,11 +9855,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     break;
                 }
 
-                // F6: Cmd+V paste into single-line input. te_paste sanitizes
-                // newlines (CR/LF -> space) and clamps to maxlength before
-                // delegating to te_replace_byte_range, which fires
-                // beforeinput/input and pushes an undo entry. Caret is
-                // positioned by te_replace_byte_range.
+                // Cmd+V paste. The newline and maxlength policy is the dom
+                // package's now (F6) and is applied by the beforeinput applier;
+                // this path only resolves the replaced range and dispatches.
+                // Caret is positioned by the splice.
                 if ((cmd || ctrl) && key_event->key == RDT_KEY_V) {
                     // Ctrl+V and Cmd+V are the same primary paste action; limiting
                     // text controls to Cmd bypassed paste on non-macOS testdrivers.
@@ -9812,7 +10064,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
 
                 // Cmd+V: paste clipboard text into textarea. F6 routes
-                // through te_paste so newline normalization (\r\n → \n) and
+                // through the applier so newline normalization (\r\n → \n) and
                 // maxlength clamping happen in one place; caret + undo are
                 // handled by te_replace_byte_range.
                 if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
@@ -10033,8 +10285,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         keydown_sel_end_capture, had_keydown_caret,
                         keydown_caret_offset, true);
                 } else if (key_event->key == RDT_KEY_ENTER) {
-                    bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
-                        !form_control_is_disabled(state, static_cast<View*>(focus_elem));
+                    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(focus_elem));
                     if (had_lambda_keydown) {
                         // Lambda handler processed the enter; adjust caret
                         if (had_keydown_selection) {
@@ -10272,8 +10523,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 (elem->form->control_type == FORM_CONTROL_TEXT ||
                  elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
                 is_form_input = true;
-                bool editable = !form_control_is_readonly(state, static_cast<View*>(elem)) &&
-                    !form_control_is_disabled(state, static_cast<View*>(elem));
+                bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
                 int caret_offset = 0;
                 if (editable && caret_get_offset(state, &caret_offset)) {
                     uint32_t a, b;
@@ -10286,7 +10536,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     char utf8_buf[5];
                     size_t utf8_len = utf8_encode_z(text_event->codepoint, utf8_buf);
                     if (utf8_len > 0) {
-                        if (dispatch_lambda_handler(&evcon, focused, "input")) {
+                        // Pre-mutation `input`: the Reactive_UI contract where an
+                        // app template owns the text and splices it itself, so
+                        // claiming it skips the engine's own insert below. UA
+                        // behavior must NOT see this one — it fires before the
+                        // value exists, and claiming it would stop typing.
+                        if (dispatch_lambda_handler(&evcon, focused, "input", nullptr,
+                                                    nullptr, /*allow_behavior=*/false)) {
                             evcon.need_repaint = true;
                             View* live_focus = focus_get(state);
                             if (live_focus && live_focus->is_element()) {

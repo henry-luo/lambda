@@ -176,7 +176,11 @@ extern "C" bool lambda_module_state_prepare(uint32_t module_id,
     LambdaModuleState* state = owner->module_states[module_id];
     if (state) {
         if (state->var_count != var_count) {
-            log_error("module-state: sealed layout changed for module %u", module_id);
+            // Report both layouts: this fires when two different modules end up
+            // sharing one id, and the pair of var_counts is what identifies them.
+            log_error("module-state: sealed layout changed for module %u "
+                      "(sealed var_count=%u, requested var_count=%u)",
+                      module_id, state->var_count, var_count);
             return false;
         }
         if (state->vars && !state->vars_registered) {

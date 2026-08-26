@@ -447,8 +447,13 @@ static void validate_text_control_form_state(DocState* state, DomElement* elem,
     if (selection_direction > 2) {
         report_fail(report, "text-control selection direction is invalid");
     }
-    if (form->preedit_len > 0 && form->preedit_caret > form->preedit_len) {
-        report_fail(report, "text-control preedit caret exceeds preedit length");
+    // The preedit is document-scoped now (ES18/F7); the invariant belongs with
+    // the composition state rather than with each control.
+    {
+        const EditingCompositionState* c = &state->editing.composition;
+        if (c->preedit_len > 0 && c->caret > c->preedit_len) {
+            report_fail(report, "composition caret exceeds preedit length");
+        }
     }
 }
 

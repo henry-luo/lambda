@@ -1,0 +1,74 @@
+{
+  "name": "ESO42: the commit hook decides change-on-blur, before blur",
+  "html": "test/lambda/ui/dom_pkg_commit.ls",
+  "viewport": {
+    "width": 500,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "=== a changed value commits on blur ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".a"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": ".a"
+      },
+      "text": "hi"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".b"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".count"
+      },
+      "equals": "1"
+    },
+    {
+      "type": "log",
+      "message": "ordering: change must precede blur \u2014 12, never 21"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".seq"
+      },
+      "equals": "12"
+    },
+    {
+      "type": "log",
+      "message": "=== focusing and leaving without editing does not ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".a"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".b"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".count"
+      },
+      "equals": "1"
+    }
+  ]
+}

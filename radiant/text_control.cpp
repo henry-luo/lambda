@@ -44,6 +44,8 @@ static void tc_collect_text(DomNode* n, StrBuf* sb) {
 
 // ---- public: identification --------------------------------------------
 
+extern "C" bool radiant_dispatch_behavior_attach(View* target);
+
 bool tc_is_text_control(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
     if (elem->form_control()) {
@@ -84,11 +86,22 @@ void form_control_prop_init(FormControlProp* f) {
 
 void form_control_prop_release(FormControlProp* f) {
     if (!f) return;
+    // Both release paths funnel through here. The state store may still name
+    // this control as the open dropdown owner: its DocState pointer survives
+    // the release while this prop does not, leaving the overlay pointing at a
+    // control that no longer exists and tripping the dropdown invariant on the
+    // next validation. Close it at the one moment the control really goes away
+    // (ESO28).
+    if (f->state_ref && f->state_ref->open_dropdown) {
+        View* owner = f->state_ref->open_dropdown;
+        DomElement* owner_elem = owner->is_element() ? owner->as_element() : nullptr;
+        if (owner_elem && owner_elem->form == f) {
+            doc_state_close_dropdown(f->state_ref, owner);
+        }
+    }
     if (f->current_value) { mem_free(f->current_value); f->current_value = nullptr; }
     if (f->custom_validity_msg) { mem_free(f->custom_validity_msg); f->custom_validity_msg = nullptr; }
     if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
-    if (f->history) { te_history_free((EditHistory*)f->history); f->history = nullptr; }
-    if (f->preedit_utf8) { mem_free(f->preedit_utf8); f->preedit_utf8 = nullptr; }
 }
 
 FormControlProp* tc_get_or_create_form(DomElement* elem) {
@@ -220,12 +233,11 @@ void tc_ensure_init(DomElement* elem) {
     // F4: seed :placeholder-shown after initial value load.
     tc_refresh_placeholder_shown(elem, f);
 
-    // F5: seed :valid / :invalid / :required / :read-only on first init so
-    // CSS selectors match before any user interaction.
-    te_validate(elem);
-    // F8: ARIA reflection — push disabled/readonly/required/invalid bits
-    // onto matching aria-* attributes for AT consumers.
-    te_aria_reflect(elem);
+    // Give the behavior template governing this control its `init` turn — that
+    // is what computes :valid/:invalid, which is no longer native. The attach is
+    // queued and drained after render (ESO33). Nothing seeds :required or
+    // :read-only here any more: they are derived at match time (F3b/ES16).
+    radiant_dispatch_behavior_attach((View*)elem);
 }
 
 // F4 (Radiant_Design_Form_Input.md §3.8): refresh :placeholder-shown bit.
@@ -294,10 +306,17 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     f->selection_direction = 0;
     f->tc_initialized = 1;
     f->value = buf;
-    form_control_sync_text_control_state(state, (View*)elem);
+    // One publish, not two. state_store_set_text_control_selection is the
+    // single fan-out: it writes the prop's selection, pushes value+selection
+    // into the ViewState (via form_control_sync_text_control_state) and writes
+    // DocState::sel — all three together, so they cannot diverge (ESO22). The
+    // direct sync call that used to stand here ran that same push a second
+    // time and was what let the two projections drift apart in the first place.
     if (state) {
         state_store_set_text_control_selection(state, elem,
             f->selection_start, f->selection_end, f->selection_direction);
+    } else {
+        form_control_sync_text_control_state(state, (View*)elem);
     }
     form_control_sync_text_control_focus_state(state, (View*)elem);
     // Notify if value-setter caused the selection to move (e.g. previous
@@ -319,10 +338,6 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     // F4: refresh :placeholder-shown after value changes (incl. clear).
     tc_refresh_placeholder_shown(elem, f);
 
-    // F5: re-evaluate :valid / :invalid (and friends) after every mutation.
-    te_validate(elem);
-    // F8: keep aria-invalid in sync with the new validity state.
-    te_aria_reflect(elem);
 }
 
 void tc_set_selection_range(DomElement* elem,
@@ -341,10 +356,12 @@ void tc_set_selection_range(DomElement* elem,
     f->selection_start = start;
     f->selection_end = end;
     f->selection_direction = dir;
-    form_control_sync_text_control_state(state, (View*)elem);
+    // single publish — see tc_set_value (ESO22)
     if (state) {
         state_store_set_text_control_selection(state, elem,
             f->selection_start, f->selection_end, f->selection_direction);
+    } else {
+        form_control_sync_text_control_state(state, (View*)elem);
     }
     form_control_sync_text_control_focus_state(state, (View*)elem);
     if (start != old_start || end != old_end || dir != old_dir) {

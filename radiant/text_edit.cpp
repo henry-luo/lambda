@@ -324,35 +324,6 @@ void te_focus_capture_value(DomElement* elem) {
     te_history_push(elem);
 }
 
-bool te_blur_should_dispatch_change(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return false;
-    FormControlProp* f = elem->form;
-    if (!f) return false;
-
-    uint32_t cur_len = 0;
-    const char* cur = tc_buffer(f, &cur_len);
-
-    bool changed = false;
-    if (f->value_at_focus) {
-        if (cur_len != f->value_at_focus_len) {
-            changed = true;
-        } else if (cur_len > 0) {
-            changed = (memcmp(cur, f->value_at_focus, cur_len) != 0);
-        }
-    } else {
-        // No snapshot — first blur after init. Treat as no-change so we
-        // don't spuriously fire `change` on every focus transition.
-        changed = false;
-    }
-
-    // Always clear the snapshot; the next focus will re-capture.
-    if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
-    f->value_at_focus_len = 0;
-
-    log_debug("text_edit: blur_should_dispatch_change elem=%p changed=%d",
-              elem, (int)changed);
-    return changed;
-}
 
 // ---------- undo/redo ring (skeleton) ----------------------------------
 
@@ -394,10 +365,28 @@ void EditHistory::destroy() {
     cursor = 0;
 }
 
-static EditHistory* tc_get_or_create_history(FormControlProp* f) {
-    if (!f) return nullptr;
-    if (!f->history) f->history = te_history_new(TE_HISTORY_DEFAULT_CAP);
-    return (EditHistory*)f->history;
+static DocState* te_history_state(DomElement* elem);
+
+// The ring lives on the form ViewState in the State Store, not on
+// FormControlProp: the prop is released and rebuilt as views churn, which used
+// to take undo history with it (ESO43). The ViewState is keyed by the element
+// and already holds the rest of the canonical form state.
+static EditHistory* te_history_of(DomElement* elem) {
+    DocState* state = te_history_state(elem);
+    if (!state) return nullptr;
+    return (EditHistory*)form_control_history_get(state, (View*)elem);
+}
+
+static EditHistory* tc_get_or_create_history(DomElement* elem) {
+    DocState* state = te_history_state(elem);
+    if (!state) return nullptr;
+    EditHistory* h = (EditHistory*)form_control_history_get(state, (View*)elem);
+    if (!h) {
+        h = te_history_new(TE_HISTORY_DEFAULT_CAP);
+        if (!h) return nullptr;
+        form_control_history_set(state, (View*)elem, h);
+    }
+    return h;
 }
 
 static DocState* te_history_state(DomElement* elem) {
@@ -421,7 +410,7 @@ void te_history_push(DomElement* elem) {
     if (!elem || !tc_is_text_control(elem)) return;
     FormControlProp* f = elem->form;
     if (!f) return;
-    EditHistory* h = tc_get_or_create_history(f);
+    EditHistory* h = tc_get_or_create_history(elem);
     if (!h || !h->ring || h->cap == 0) return;
 
     uint32_t blen = 0;
@@ -466,43 +455,60 @@ void te_history_push(DomElement* elem) {
                                      h->count, h->cursor);
 }
 
-static bool te_history_apply_current(DomElement* elem, EditHistory* history) {
-    uint16_t index = (uint16_t)((history->head + history->cap - 1 - history->cursor) % history->cap);
-    EditHistoryEntry* entry = &history->ring[index];
-    if (!entry->snapshot) return false;
 
-    DocState* state = te_history_state(elem);
-    tc_history_guard_enter(state);
-    tc_set_value(elem, entry->snapshot, entry->length);
-    tc_history_guard_exit(state);
-    tc_set_selection_range(elem, entry->sel_start_u16, entry->sel_end_u16, entry->sel_dir);
+// ES17 option 2: hand the entry to whoever will install it, without moving the
+// cursor. The cursor advances only once the entry is actually consumed, which
+// may be the template (which applies it and prevents) or the native path below
+// — a beforeinput cancelled by JS must leave both the value and the cursor
+// exactly where they were.
+bool te_history_peek(DomElement* elem, bool redo, const char** out_value,
+                     uint32_t* out_len, uint32_t* out_sel_start_u16,
+                     uint32_t* out_sel_end_u16) {
+    if (out_value) *out_value = nullptr;
+    if (out_len) *out_len = 0;
+    if (out_sel_start_u16) *out_sel_start_u16 = 0;
+    if (out_sel_end_u16) *out_sel_end_u16 = 0;
+    if (!elem || !tc_is_text_control(elem)) return false;
+    EditHistory* h = te_history_of(elem);
+    if (!h) return false;
+
+    // Mirror the bounds te_history_undo/redo enforce, one step ahead of the
+    // cursor rather than moving it.
+    uint16_t cursor;
+    if (redo) {
+        if (h->cursor == 0) return false;
+        cursor = (uint16_t)(h->cursor - 1);
+    } else {
+        if ((uint16_t)(h->cursor + 1) >= h->count) return false;
+        cursor = (uint16_t)(h->cursor + 1);
+    }
+    uint16_t index = (uint16_t)((h->head + h->cap - 1 - cursor) % h->cap);
+    EditHistoryEntry* entry = &h->ring[index];
+    if (!entry->snapshot) return false;
+    if (out_value) *out_value = entry->snapshot;
+    if (out_len) *out_len = entry->length;
+    if (out_sel_start_u16) *out_sel_start_u16 = entry->sel_start_u16;
+    if (out_sel_end_u16) *out_sel_end_u16 = entry->sel_end_u16;
     return true;
 }
 
-bool te_history_undo(DomElement* elem) {
+// Move the cursor onto the entry te_history_peek reported, without touching the
+// value: used when a template installed that entry itself.
+bool te_history_step(DomElement* elem, bool redo) {
     if (!elem || !tc_is_text_control(elem)) return false;
-    FormControlProp* f = elem->form;
-    if (!f || !f->history) return false;
-    EditHistory* h = (EditHistory*)f->history;
-
-    // Need at least one older entry beyond the current state. The newest
-    // entry typically represents the current state; cursor++ moves to the
-    // one before it.
-    if ((uint16_t)(h->cursor + 1) >= h->count) return false;
-    h->cursor++;
-    return te_history_apply_current(elem, h);
+    EditHistory* h = te_history_of(elem);
+    if (!h) return false;
+    if (redo) {
+        if (h->cursor == 0) return false;
+        h->cursor--;
+    } else {
+        if ((uint16_t)(h->cursor + 1) >= h->count) return false;
+        h->cursor++;
+    }
+    return true;
 }
 
-bool te_history_redo(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return false;
-    FormControlProp* f = elem->form;
-    if (!f || !f->history) return false;
-    EditHistory* h = (EditHistory*)f->history;
 
-    if (h->cursor == 0) return false;
-    h->cursor--;
-    return te_history_apply_current(elem, h);
-}
 
 // ---------- F5: events + constraint validation -------------------------
 
@@ -516,158 +522,26 @@ void te_dispatch_input(DomElement* elem) {
     js_dom_queue_textcontrol_input(elem);
 }
 
-// ---- minimal validators (no allocation; ASCII fast paths) -------------
+// ---------- paste: range only ------------------------------------------
 
-static bool te_value_is_number(const char* s, uint32_t len) {
-    if (!s || len == 0) return false;
-    uint32_t i = 0;
-    if (s[i] == '+' || s[i] == '-') i++;
-    bool has_digit = false;
-    while (i < len && s[i] >= '0' && s[i] <= '9') { i++; has_digit = true; }
-    if (i < len && s[i] == '.') {
-        i++;
-        while (i < len && s[i] >= '0' && s[i] <= '9') { i++; has_digit = true; }
-    }
-    if (!has_digit) return false;
-    if (i < len && (s[i] == 'e' || s[i] == 'E')) {
-        i++;
-        if (i < len && (s[i] == '+' || s[i] == '-')) i++;
-        bool exp_digit = false;
-        while (i < len && s[i] >= '0' && s[i] <= '9') { i++; exp_digit = true; }
-        if (!exp_digit) return false;
-    }
-    return i == len;
-}
-
-// Loose RFC 5322-ish: <local>@<domain> with at least one dot in the domain
-// and no spaces or controls anywhere. Mirrors the spec's "valid email
-// address" production used by browsers (HTML §4.10.5.1.5).
-static bool te_value_is_email(const char* s, uint32_t len) {
-    if (!s || len < 3) return false;
-    int at = -1;
-    for (uint32_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)s[i];
-        if (c <= 0x20 || c == 0x7F) return false;
-        if (c == '@') { if (at >= 0) return false; at = (int)i; }
-    }
-    if (at <= 0 || at >= (int)len - 1) return false;
-    bool has_dot = false;
-    for (int i = at + 1; i < (int)len; i++) {
-        if (s[i] == '.') {
-            // dot must not be first/last char of domain
-            if (i == at + 1 || i == (int)len - 1) return false;
-            has_dot = true;
-        }
-    }
-    return has_dot;
-}
-
-// Minimal URL check — must start with a scheme (alpha+ followed by ':')
-// and contain no whitespace/control bytes.
-static bool te_value_is_url(const char* s, uint32_t len) {
-    if (!s || len < 4) return false;
-    uint32_t i = 0;
-    if (!((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z'))) return false;
-    while (i < len && ((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z')
-                       || (s[i] >= '0' && s[i] <= '9') || s[i] == '+'
-                       || s[i] == '-' || s[i] == '.')) i++;
-    if (i == 0 || i >= len || s[i] != ':') return false;
-    for (uint32_t j = 0; j < len; j++) {
-        unsigned char c = (unsigned char)s[j];
-        if (c <= 0x20 || c == 0x7F) return false;
-    }
-    return true;
-}
-
-void te_validate(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return;
-    FormControlProp* f = elem->form;
-    if (!f) return;
-    DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);
-    bool required = form_control_is_required(state, (View*)elem);
-    bool readonly = form_control_is_readonly(state, (View*)elem);
-    bool disabled = form_control_is_disabled(state, (View*)elem);
-
-    state_set_bool(state, elem, STATE_REQUIRED, required);
-    state_set_bool(state, elem, STATE_OPTIONAL, !required);
-    state_set_bool(state, elem, STATE_READONLY, readonly || disabled);
-
-    // Resolve current value bytes for content-based checks.
-    const char* val = f->current_value
-        ? f->current_value : (f->value ? f->value : "");
-    uint32_t vlen = f->current_value
-        ? f->current_value_len : (uint32_t)strlen(val);
-
-    bool valid = true;
-
-    // Custom validity overrides everything.
-    if (f->custom_validity_msg && f->custom_validity_msg[0] != '\0') {
-        valid = false;
-    }
-    // Required: empty value fails.
-    else if (required && vlen == 0) {
-        valid = false;
-    }
-    // Type-driven content checks (only when non-empty).
-    else if (vlen > 0 && f->input_type) {
-        if (strcasecmp(f->input_type, "number") == 0) {
-            valid = te_value_is_number(val, vlen);
-        } else if (strcasecmp(f->input_type, "email") == 0) {
-            valid = te_value_is_email(val, vlen);
-        } else if (strcasecmp(f->input_type, "url") == 0) {
-            valid = te_value_is_url(val, vlen);
-        }
-    }
-    // TODO(F5): pattern="..." — needs lazy-compiled regex.
-
-    state_set_bool(state, elem, STATE_VALID, valid);
-    state_set_bool(state, elem, STATE_INVALID, !valid);
-}
-
-// ---------- F6: paste sanitization (Radiant_Design_Form_Input.md §3.6) -
-
-bool te_prepare_paste_replacement(DomElement* elem, DocState* state,
-                                  const char* text, uint32_t len,
-                                  char** out_text, uint32_t* out_len,
-                                  uint32_t* out_start, uint32_t* out_end) {
-    if (out_text) *out_text = nullptr;
-    if (out_len) *out_len = 0;
+// Resolve the buffer range a paste replaces — the current selection, in bytes.
+//
+// Sanitization and the maxlength clamp used to live here. Both are policy, and
+// policy now sits in the dom package's applier (F6), which is handed the raw
+// clipboard text and decides what actually goes in — including the textarea
+// CR/CRLF normalization this used to own. What remains is mechanism: the
+// permission gate and the range.
+bool te_prepare_paste_range(DomElement* elem, DocState* state,
+                            uint32_t* out_start, uint32_t* out_end) {
     if (out_start) *out_start = 0;
     if (out_end) *out_end = 0;
-    if (!elem || !state || !text || len == 0 || !out_text || !out_len ||
-        !out_start || !out_end) {
-        return false;
-    }
+    if (!elem || !state || !out_start || !out_end) return false;
     if (!tc_is_text_control(elem)) return false;
     FormControlProp* f = elem->form;
-    if (!f || form_control_is_readonly(state, (View*)elem) || form_control_is_disabled(state, (View*)elem)) return false;
+    // one predicate for "the user may not alter this control" — the readonly
+    // attribute or disabled, which HTML treats alike for editing (F6)
+    if (!f || form_control_is_user_readonly(state, (View*)elem)) return false;
 
-    bool is_single_line = (f->control_type == FORM_CONTROL_TEXT);
-
-    // Step 1: build a sanitized copy. For <input> single-line controls we
-    // collapse CRLF/CR/LF into a single U+0020. For <textarea> we drop
-    // bare CR and \r\n -> \n (HTML normalization). Worst case the buffer
-    // size equals `len`.
-    char* sanitized = (char*)mem_alloc((size_t)len + 1, MEM_CAT_TEMP);
-    if (!sanitized) return false;
-    uint32_t s_len = 0;
-    for (uint32_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)text[i];
-        if (c == '\r') {
-            // Skip a following \n so CRLF becomes a single newline/space.
-            if (i + 1 < len && text[i+1] == '\n') i++;
-            sanitized[s_len++] = is_single_line ? ' ' : '\n';
-        } else if (c == '\n') {
-            sanitized[s_len++] = is_single_line ? ' ' : '\n';
-        } else {
-            sanitized[s_len++] = (char)c;
-        }
-    }
-    sanitized[s_len] = '\0';
-
-    // Step 2: enforce maxlength. The selection range will be replaced, so
-    // the post-paste length budget is current_len - selection_byte_len +
-    // s_len. Convert that to codepoint budget vs `maxlength`.
     uint32_t cur_len = 0;
     const char* cur_buf = tc_buffer(f, &cur_len);
     uint32_t sel_a = tc_utf16_to_utf8_offset(cur_buf, cur_len, f->selection_start);
@@ -675,113 +549,17 @@ bool te_prepare_paste_replacement(DomElement* elem, DocState* state,
     if (sel_a > sel_b) { uint32_t t = sel_a; sel_a = sel_b; sel_b = t; }
     if (sel_b > cur_len) sel_b = cur_len;
     if (sel_a > cur_len) sel_a = cur_len;
-
-    if (f->maxlength >= 0) {
-        uint32_t cur_cp = tc_utf8_to_utf16_length(cur_buf, cur_len);
-        uint32_t sel_cp = tc_utf8_to_utf16_length(cur_buf + sel_a, sel_b - sel_a);
-        // Codepoint budget for the paste (post-deletion of selection).
-        uint32_t post_cp = (cur_cp >= sel_cp) ? (cur_cp - sel_cp) : 0;
-        if (post_cp >= (uint32_t)f->maxlength) {
-            // No room left.
-            mem_free(sanitized);
-            return false;
-        }
-        uint32_t budget = (uint32_t)f->maxlength - post_cp;
-        // Walk sanitized as UTF-8 and stop at `budget` codepoints.
-        uint32_t cp_count = 0, byte_at = 0;
-        while (byte_at < s_len && cp_count < budget) {
-            unsigned char b = (unsigned char)sanitized[byte_at];
-            uint32_t step = (b < 0x80) ? 1 : (b < 0xC0) ? 1
-                            : (b < 0xE0) ? 2 : (b < 0xF0) ? 3 : 4;
-            if (byte_at + step > s_len) break;
-            byte_at += step;
-            cp_count++;
-        }
-        if (byte_at < s_len) {
-            log_debug("te_paste: maxlength=%d clamped %u -> %u bytes",
-                      f->maxlength, s_len, byte_at);
-            s_len = byte_at;
-            sanitized[s_len] = '\0';
-        }
-    }
-
-    if (s_len == 0) { mem_free(sanitized); return false; }
-
-    *out_text = sanitized;
-    *out_len = s_len;
     *out_start = sel_a;
     *out_end = sel_b;
     return true;
 }
 
-uint32_t te_paste(DomElement* elem, DocState* state, void* target,
-                  const char* text, uint32_t len) {
-    if (!target) return 0;
-    char* sanitized = nullptr;
-    uint32_t s_len = 0;
-    uint32_t sel_a = 0, sel_b = 0;
-    if (!te_prepare_paste_replacement(elem, state, text, len, &sanitized,
-                                      &s_len, &sel_a, &sel_b)) {
-        return 0;
-    }
-
-    // Step 3: replace [sel_a, sel_b) with sanitized. Unified live editing
-    // callers use dispatch_form_text_paste(); this fallback only emits the
-    // legacy post-mutation input hook.
-    bool ok = te_replace_byte_range(elem, state, target,
-                                    sel_a, sel_b, sanitized, s_len);
-    mem_free(sanitized);
-    return ok ? s_len : 0;
-}
 
 // ---------- F7: IME composition (Radiant_Design_Form_Input.md §3.7) ----
 
-static void te_clear_preedit(FormControlProp* f) {
-    if (!f) return;
-    if (f->preedit_utf8) { mem_free(f->preedit_utf8); f->preedit_utf8 = nullptr; }
-    f->preedit_len = 0;
-    f->preedit_caret = 0;
-}
 
-bool te_ime_is_composing(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return false;
-    return elem->form && elem->form->preedit_utf8 != nullptr;
-}
 
-void te_ime_begin(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return;
-    FormControlProp* f = elem->form;
-    if (!f) return;
-    // Begin from a clean slate; if a previous composition was orphaned,
-    // drop it.
-    te_clear_preedit(f);
-    log_debug("te_ime_begin: starting composition");
-}
 
-void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
-                   uint32_t caret_cp) {
-    if (!elem || !tc_is_text_control(elem)) return;
-    FormControlProp* f = elem->form;
-    if (!f) return;
-
-    // Hide the placeholder while composing (even if value is still empty).
-    state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
-        elem, STATE_PLACEHOLDER, false);
-
-    if (len == 0 || !preedit) {
-        te_clear_preedit(f);
-    } else {
-        char* buf = (char*)mem_alloc((size_t)len + 1, MEM_CAT_DOM);
-        if (!buf) return;
-        memcpy(buf, preedit, len);
-        buf[len] = '\0';
-        if (f->preedit_utf8) mem_free(f->preedit_utf8);
-        f->preedit_utf8 = buf;
-        f->preedit_len = len;
-        f->preedit_caret = caret_cp;
-    }
-    log_debug("te_ime_update: %u bytes preedit, caret=%u", len, caret_cp);
-}
 
 bool te_ime_commit_prepare(DomElement* elem, DocState* state,
                            const char* committed, uint32_t len,
@@ -794,14 +572,14 @@ bool te_ime_commit_prepare(DomElement* elem, DocState* state,
     FormControlProp* f = elem->form;
     if (!f || !out_start || !out_end || !out_should_mutate) return false;
 
-    // Drop preedit BEFORE inserting so the renderer doesn't briefly show
-    // both the preedit and the committed text.
-    te_clear_preedit(f);
+    // The preedit is dropped by the session template on compositionend; this
+    // function keeps only the mechanism halves — the readonly/disabled gate and
+    // the replaced range (F7).
 
     // Read-only / disabled fields accept the IME session (preedit was
     // shown above and is now cleared) but reject the actual commit so
     // the underlying value is never mutated.
-    if (form_control_is_readonly(state, (View*)elem) || form_control_is_disabled(state, (View*)elem)) {
+    if (form_control_is_user_readonly(state, (View*)elem)) {
         log_debug("te_ime_commit: rejected on readonly/disabled control");
         return true;
     }
@@ -824,63 +602,8 @@ bool te_ime_commit_prepare(DomElement* elem, DocState* state,
     return true;
 }
 
-void te_ime_commit_finish(DomElement* elem, const char* committed,
-                          uint32_t len) {
-    if (!elem || !tc_is_text_control(elem)) return;
-    log_debug("te_ime_commit: committed %u bytes", len);
-}
 
-void te_ime_cancel(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return;
-    FormControlProp* f = elem->form;
-    if (!f) return;
-    te_clear_preedit(f);
-    tc_refresh_placeholder_shown(elem, f);
-    log_debug("te_ime_cancel: composition aborted");
-}
 
 // ---------- F8: ARIA reflection (Radiant_Design_Form_Input.md §4) -----
 
-static void te_aria_set_or_clear(DomElement* elem, const char* name, bool on,
-                                 const char* value) {
-    if (on) {
-        elem->set_attribute(name, value);
-    } else {
-        // Only clear if currently set; avoids churning the attribute table.
-        if (elem->get_attribute(name)) {
-            elem->remove_attribute(name);
-        }
-    }
-}
 
-void te_aria_reflect(DomElement* elem) {
-    if (!elem || elem->role_kind() != DomElement::ROLE_FORM) return;
-    FormControlProp* f = elem->form;
-    if (!f) return;
-
-    DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);
-
-    // Disabled / readonly / required map directly.
-    te_aria_set_or_clear(elem, "aria-disabled", form_control_is_disabled(state, (View*)elem), "true");
-    te_aria_set_or_clear(elem, "aria-readonly", form_control_is_readonly(state, (View*)elem), "true");
-    te_aria_set_or_clear(elem, "aria-required", form_control_is_required(state, (View*)elem), "true");
-
-    // aria-invalid mirrors :invalid pseudo-state. Use "true"/"false"
-    // rather than removing — assistive tech treats the explicit "false"
-    // value as "validation has run and the control is currently OK".
-    bool invalid = state_get_pseudo_state(state, (View*)elem, PSEUDO_STATE_INVALID);
-    elem->set_attribute("aria-invalid", invalid ? "true" : "false");
-
-    // aria-valuenow / valuemin / valuemax for <input type="range">.
-    if (f->control_type == FORM_CONTROL_RANGE) {
-        char buf[32];
-        float range_value = form_control_get_range_value(state, (View*)elem);
-        float val = f->range_min + (f->range_max - f->range_min) * range_value;
-        snprintf(buf, sizeof(buf), "%g", val);
-        elem->set_attribute("aria-valuenow", buf);
-        snprintf(buf, sizeof(buf), "%g", f->range_min);
-        elem->set_attribute("aria-valuemin", buf);
-        snprintf(buf, sizeof(buf), "%g", f->range_max);
-        elem->set_attribute("aria-valuemax", buf);
-    }
-}

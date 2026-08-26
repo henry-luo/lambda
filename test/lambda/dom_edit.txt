@@ -1,0 +1,23 @@
+{
+  back: {
+    mid_word: 6,
+    after_spaces: 0,
+    at_zero: 0,
+    across_punct: 2
+  },
+  fwd: {
+    from_zero: 5,
+    skip_leading: 5,
+    at_end: 3,
+    astral: 3
+  },
+  sanitize: {
+    single_lf: "a b",
+    single_crlf: "a b",
+    single_cr: "a b",
+    multi_kept: "a
+b",
+    multi_crlf: [97, 10, 98],
+    multi_cr: [97, 10, 98]
+  }
+}

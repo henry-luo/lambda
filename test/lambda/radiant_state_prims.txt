@@ -10,7 +10,7 @@
   checked_end: false,
   hover_read: false,
   hover_write: false,
-  unknown_read: false,
+  unknown_read: null,
   unknown_write: false,
   free: null
 }

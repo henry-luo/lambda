@@ -17,7 +17,10 @@ InputIntent::InputIntent()
       key(0),
       mods(0),
       is_composing(false),
-      composition_caret(0) {}
+      composition_caret(0),
+      history_value(nullptr),
+      history_sel_start(0),
+      history_sel_end(0) {}
 
 InputIntent::~InputIntent() {
     // paste/drop intents may own payload copies; scope cleanup keeps every

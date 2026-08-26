@@ -1,6 +1,7 @@
 #include "parse_path_expr.hpp"
 #include "type_build.hpp"
 #include "transpiler.hpp"
+#include "parse_lex.hpp"
 
 #include <limits.h>
 #include <string.h>
@@ -17,18 +18,8 @@ struct PathLexer {
     ArrayList* segments;
 };
 
-bool is_path_ident_start(char c) {
-    return c == '_' || c == '$' ||
-        (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-        (unsigned char)c >= 0x80;
-}
-
-bool is_path_ident_continue(char c) {
-    return is_path_ident_start(c) || (c >= '0' && c <= '9');
-}
-
 bool is_path_digit(char c) {
-    return c >= '0' && c <= '9';
+    return lambda_lex_digit(c);
 }
 
 void path_fail(PathLexer* lx, const char* detail) {
@@ -41,42 +32,15 @@ void path_fail(PathLexer* lx, const char* detail) {
 }
 
 void skip_path_space(PathLexer* lx) {
-    for (;;) {
-        while (lx->p < lx->end && (*lx->p == ' ' || *lx->p == '\t' ||
-                *lx->p == '\r' || *lx->p == '\n' || *lx->p == '\f' ||
-                *lx->p == '\v')) {
-            lx->p++;
-        }
-        if (lx->p + 1 < lx->end && lx->p[0] == '/' && lx->p[1] == '/') {
-            lx->p += 2;
-            while (lx->p < lx->end && *lx->p != '\n') { lx->p++; }
-            continue;
-        }
-        if (lx->p + 1 < lx->end && lx->p[0] == '/' && lx->p[1] == '*') {
-            lx->p += 2;
-            while (lx->p + 1 < lx->end && !(lx->p[0] == '*' && lx->p[1] == '/')) {
-                lx->p++;
-            }
-            if (lx->p + 1 < lx->end) { lx->p += 2; }
-            else { lx->p = lx->end; }
-            continue;
-        }
-        return;
-    }
+    lambda_lex_skip_space(&lx->p, lx->end);
 }
 
 bool path_word_is(StrView word, const char* text) {
-    size_t length = strlen(text);
-    return word.length == length && memcmp(word.str, text, length) == 0;
+    return lambda_lex_word_is(word, text);
 }
 
 StrView take_path_word(PathLexer* lx) {
-    skip_path_space(lx);
-    StrView word = {lx->p, 0};
-    if (lx->p >= lx->end || !is_path_ident_start(*lx->p)) { return word; }
-    while (lx->p < lx->end && is_path_ident_continue(*lx->p)) { lx->p++; }
-    word.length = (size_t)(lx->p - word.str);
-    return word;
+    return lambda_lex_take_word(&lx->p, lx->end);
 }
 
 bool parse_path_scheme(PathLexer* lx, PathScheme* out) {
