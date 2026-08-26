@@ -107,6 +107,7 @@ struct JsFunction {
     JsScript* ast_script;
     JsInterpEnv* interp_env;
     Item ast_lexical_this;
+    Item ast_lexical_new_target;
     uint8_t body_kind;
 };
 

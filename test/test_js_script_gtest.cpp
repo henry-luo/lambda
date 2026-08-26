@@ -668,3 +668,20 @@ TEST(JsInterpreter, DirectEvalSharesInterpretedFunctionEnvironment) {
 
     runtime_cleanup(&runtime);
 }
+
+TEST(JsInterpreter, ReadsNewTargetThroughTheSharedConstructCallKernel) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function Base() { let lexical = () => new.target; "
+        "this.answer = (new.target === Base ? 40 : 0) + "
+        "(lexical() === Base ? 2 : 0); } new Base().answer;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "new-target.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}

@@ -35,6 +35,7 @@ struct JsInterpFrame {
     // `this` survives arbitrary nested evaluation; keep its canonical Item in
     // the side-root window rather than a native-stack copy.
     uint64_t* this_home;
+    uint64_t* new_target_home;
     bool strict;
     const char* active_label;
     int active_label_len;
@@ -90,6 +91,13 @@ static bool js_interp_completion_targets_active_label(
 static Item js_interp_frame_this(const JsInterpFrame* frame) {
     return frame && frame->this_home ? (Item){.item = *frame->this_home}
         : make_js_undefined();
+}
+
+static Item js_interp_frame_new_target(const JsInterpFrame* frame) {
+    if (!frame || !frame->new_target_home || *frame->new_target_home == 0) {
+        return make_js_undefined();
+    }
+    return (Item){.item = *frame->new_target_home};
 }
 
 static Item js_interp_reference_object(const JsInterpReference* reference) {
@@ -163,6 +171,10 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
     if (!frame) return ItemError;
     if (unresolved_name && js_interp_name_equals(unresolved_name, "this")) {
         return js_interp_frame_this(frame);
+    }
+    if (unresolved_name && !entry &&
+            js_interp_name_equals(unresolved_name, "new.target")) {
+        return js_interp_frame_new_target(frame);
     }
     // Object Environment Records sit in front of lexical bindings. Probe
     // before reading the static NameEntry so an outer TDZ does not mask a
@@ -2157,11 +2169,10 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
         break;
     }
     case AST_NODE_IDENT:
-        // P2 does not yet materialize function `arguments`/`new.target` or
-        // class `super` environments. Reject before instantiation instead of
+        // P2 does not yet materialize function `arguments` or class `super`
+        // environments. Reject before instantiation instead of
         // exposing a misleading global binding.
         if (js_interp_identifier_is(node, "arguments") ||
-                js_interp_identifier_is(node, "new.target") ||
                 js_interp_identifier_is(node, "super") ||
                 js_interp_identifier_is(node, "import.meta")) state->supported = false;
         break;
@@ -2223,9 +2234,11 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     (void)result_home;
     if (!function || function->body_kind != JS_FUNCTION_BODY_AST ||
             !function->ast_function || !function->ast_script) return ItemError;
-    RootFrame roots(1);
+    RootFrame roots(2);
     Rooted<Item> this_root(roots, (function->flags & JS_FUNC_FLAG_ARROW)
         ? function->ast_lexical_this : js_get_this());
+    Rooted<Item> new_target_root(roots, (function->flags & JS_FUNC_FLAG_ARROW)
+        ? function->ast_lexical_new_target : js_get_new_target());
     JsInterpEnv* env = js_interp_env_create(function->ast_function->vars,
         function->interp_env);
     JsInterpEnvRoot env_root(env);
@@ -2236,7 +2249,7 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     JsInterpEvalLocalFrame eval_local(env);
     if (!eval_local.pushed) return ItemError;
     JsInterpFrame frame = {function->ast_script, env, this_root.home(),
-        (function->flags & JS_FUNC_FLAG_STRICT) != 0, NULL, 0};
+        new_target_root.home(), (function->flags & JS_FUNC_FLAG_STRICT) != 0, NULL, 0};
     JsInterpCompletion initialized = js_interp_initialize_scope(&frame,
         function->ast_function->vars);
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
@@ -2278,9 +2291,11 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
             !js_set_active_module_state_id(script->module_state_id)) {
         return ItemError;
     }
-    RootFrame roots(1);
+    RootFrame roots(2);
     Rooted<Item> this_root(roots, js_get_global_this());
-    JsInterpFrame frame = {script, NULL, this_root.home(), script->strict_mode, NULL, 0};
+    Rooted<Item> new_target_root(roots, js_get_new_target());
+    JsInterpFrame frame = {script, NULL, this_root.home(), new_target_root.home(),
+        script->strict_mode, NULL, 0};
     JsInterpCompletion initialized = js_interp_initialize_scope(&frame, script->global_scope);
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
     JsInterpCompletion result = js_interp_exec(&frame, (JsAstNode*)script->ast_root);

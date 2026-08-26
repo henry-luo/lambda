@@ -227,6 +227,7 @@ extern "C" int js_function_gc_trace(void* data, gc_heap_t* gc) {
     gc_mark_item(gc, fn->class_instance_prototype.item);
     gc_mark_item(gc, fn->class_superclass.item);
     gc_mark_item(gc, fn->ast_lexical_this.item);
+    gc_mark_item(gc, fn->ast_lexical_new_target.item);
     if (fn->interp_env) gc_mark_object_ptr(gc, fn->interp_env);
     return 1;
 }
@@ -445,6 +446,8 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     fn->home_global = js_get_global_this();
     fn->ast_lexical_this = (flags & JS_FUNC_FLAG_ARROW)
         ? js_get_this() : ItemNull;
+    fn->ast_lexical_new_target = (flags & JS_FUNC_FLAG_ARROW)
+        ? js_get_new_target() : ItemNull;
     fn->name = function->name;
     fn->formal_length = (int16_t)param_count;
     // AST closures created inside `with` use the same captured object
