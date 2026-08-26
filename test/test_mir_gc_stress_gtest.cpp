@@ -48,6 +48,9 @@ static const char* kExtraJsScripts[] = {
 static const char* kExtraLambdaScripts[] = {
     // COW spine detachment allocates between every retained owner write.
     "test/lambda/proc/cow_alias.ls",
+    // A map field carried in the packed `any` lane is the only reference to
+    // its container; the shape walk must decode that lane to reach it.
+    "test/lambda/gc_shape_any_lane.ls",
 };
 
 struct StressScript {
@@ -96,7 +99,7 @@ std::vector<StressScript> collect_scripts() {
         StressScript entry;
         entry.path = kExtraLambdaScripts[i];
         entry.language = mir_check::LANG_LAMBDA;
-        entry.procedural = true;
+        entry.procedural = mir_check::script_is_procedural(entry.path);
         entry.name = "regression_" + mir_check::gtest_safe_name(mir_check::basename_of(entry.path));
         scripts.push_back(entry);
     }

@@ -2082,6 +2082,19 @@ Map* map_fill(Map* map, ...);
 // Same fill from a caller-rooted Item span; the T0 walker has no varargs.
 Map* map_fill_items(Map* map, const Item* values, int value_count);
 
+// A shaped field is stored in the lane set_field_value chose for it, which is
+// NOT always ShapeEntry::type->type_id: a non-simple `type` contract (`T?`, a
+// union, a constrained or occurrence type) carries type_id LMD_TYPE_TYPE yet
+// lands in the 9-byte TypedItem `any` lane or a container-pointer lane. C
+// consumers that decode packed field storage — the GC's shape walk above all —
+// must classify through this so they read the lane that was written: the packed
+// layout is an ABI (D3.4.1) and its lane comes from one shared descriptor
+// resolver (D3.4.6 / D2.6.1).
+#ifdef __cplusplus
+extern "C"
+#endif
+TypeId lambda_shape_field_storage_type_id(const void* field_type);
+
 typedef struct Element Element;
 Element* elmt_fill(Element *elmt, ...);
 // Same fill from a caller-rooted Item span; the T0 walker has no varargs.
