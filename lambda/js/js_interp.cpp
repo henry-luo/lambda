@@ -1,6 +1,7 @@
 #include "js_interp.hpp"
 
 #include "js_interp_env.h"
+#include "js_builtin_catalog.hpp"
 #include "js_property_attrs.h"
 #include "../runtime/gc/gc_heap.h"
 #include "../runtime/heap_api.h"
@@ -174,6 +175,15 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
             return js_get_with_binding_or_fallback(key, make_js_undefined());
         }
     }
+    if (unresolved_name) {
+        // A direct eval may introduce a function-scoped var which was absent
+        // from this script's static NameScope. The shared eval journal is the
+        // authoritative extension of that function environment.
+        Item key = js_interp_name_key(unresolved_name);
+        if (js_eval_local_has_var_binding(key)) {
+            return js_eval_local_get_binding_or_fallback(key, ItemError);
+        }
+    }
     if (!entry) {
         if (js_interp_name_equals(unresolved_name, "undefined")) return make_js_undefined();
         Item key = js_interp_name_key(unresolved_name);
@@ -196,9 +206,18 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
 static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
         String* unresolved_name, Item value, bool initialize) {
     if (!frame) return ItemError;
+    String* name = entry ? entry->name : unresolved_name;
+    Item key = js_interp_name_key(name);
+    // `var`/parameter bindings may have been supplied by a previous direct
+    // eval. Keep subsequent interpreted writes in the shared function journal
+    // instead of accidentally materializing a realm-global property.
+    if (!initialize && (!entry || !entry->is_const) &&
+            js_eval_local_has_var_binding(key)) {
+        js_eval_local_export_var(key, value);
+        return value;
+    }
     if (!entry) {
-        return js_set_global_property(js_interp_name_key(unresolved_name), value,
-            frame->strict ? 1 : 0);
+        return js_set_global_property(key, value, frame->strict ? 1 : 0);
     }
     Item current = ItemNull;
     if (entry->scope == frame->script->global_scope) {
@@ -211,7 +230,6 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
                 entry->name ? (int)entry->name->len : 0);
         }
         js_set_module_var(entry->slot, value);
-        Item key = js_interp_name_key(entry->name);
         if (!entry->is_lexical) {
             js_define_global_var_property(key, value);
         } else if (initialize) {
@@ -565,7 +583,8 @@ static Item js_interp_reference_read(JsInterpFrame* frame,
     }
     if (!reference->property) {
         return js_interp_read_binding(frame, reference->entry,
-            reference->entry ? NULL : it2s(js_interp_reference_key(reference)));
+            reference->entry ? reference->entry->name
+                : it2s(js_interp_reference_key(reference)));
     }
     return js_get_key_default(js_interp_reference_object(reference),
         js_interp_reference_key(reference));
@@ -653,6 +672,206 @@ static bool js_interp_logical_assignment_keeps_old(Operator op, Item old_value) 
     return op == OPERATOR_JS_NULLISH_ASSIGN && !js_interp_is_nullish(old_value);
 }
 
+static bool js_interp_scope_has_name(NameScope* scope, String* name) {
+    if (!scope || !name) return false;
+    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
+        if (entry->name && entry->name->len == name->len &&
+                memcmp(entry->name->chars, name->chars, name->len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static Item js_interp_binding_raw_value(JsInterpFrame* frame, NameEntry* entry) {
+    if (!frame || !entry) return ItemError;
+    if (entry->scope == frame->script->global_scope) {
+        return js_get_module_var(entry->slot);
+    }
+    JsInterpEnv* env = js_interp_find_env(frame->env, entry->scope);
+    if (!env || entry->slot < 0 || (uint32_t)entry->slot >= env->slot_count) {
+        return ItemError;
+    }
+    return (Item){.item = env->slots[entry->slot]};
+}
+
+static Item js_interp_sync_global_bindings(JsInterpFrame* frame) {
+    if (!frame || !frame->script || !frame->script->global_scope) return ItemError;
+    for (NameEntry* entry = frame->script->global_scope->first; entry;
+            entry = entry->next) {
+        if (!entry->name) continue;
+        Item key = js_interp_name_key(entry->name);
+        Item fallback = js_get_module_var(entry->slot);
+        Item value = entry->is_lexical
+            ? js_global_lexical_get_or_fallback(key, fallback)
+            : js_get_global_property(key);
+        if (item_is_error(value)) return value;
+        js_set_module_var(entry->slot, value);
+    }
+    return js_status_ok();
+}
+
+static void js_interp_eval_bind_scope(JsInterpFrame* frame, NameScope* scope,
+        bool global_lexical) {
+    if (!frame || !scope) return;
+    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
+        if (!entry->name) continue;
+        Item key = js_interp_name_key(entry->name);
+        Item value = js_interp_binding_raw_value(frame, entry);
+        if (global_lexical) {
+            js_eval_global_lexical_bind(key, value);
+        } else {
+            js_eval_env_bind(key, value);
+        }
+    }
+}
+
+static void js_interp_eval_bind_envs(JsInterpFrame* frame, JsInterpEnv* env,
+        bool global_lexical) {
+    if (!env) return;
+    js_interp_eval_bind_envs(frame, env->outer, global_lexical);
+    js_interp_eval_bind_scope(frame, env->scope, global_lexical);
+}
+
+static bool js_interp_env_name_shadowed_before(JsInterpEnv* inner,
+        JsInterpEnv* target, String* name) {
+    for (JsInterpEnv* env = inner; env && env != target; env = env->outer) {
+        if (js_interp_scope_has_name(env->scope, name)) return true;
+    }
+    return false;
+}
+
+static Item js_interp_eval_writeback_scope(JsInterpFrame* frame,
+        NameScope* scope, JsInterpEnv* scope_env) {
+    if (!frame || !scope) return ItemError;
+    for (NameEntry* entry = scope->first; entry; entry = entry->next) {
+        if (!entry->name || entry->is_const ||
+                (scope_env && js_interp_env_name_shadowed_before(frame->env,
+                    scope_env, entry->name))) {
+            continue;
+        }
+        Item key = js_interp_name_key(entry->name);
+        RootFrame roots(1);
+        Rooted<Item> value_root(roots, js_get_global_property(key));
+        if (item_is_error(value_root.get())) return value_root.get();
+        Item written = js_interp_write_binding(frame, entry, entry->name,
+            value_root.get(), false);
+        if (item_is_error(written)) return written;
+    }
+    return js_status_ok();
+}
+
+static Item js_interp_eval_writeback_envs(JsInterpFrame* frame) {
+    if (!frame) return ItemError;
+    for (JsInterpEnv* env = frame->env; env; env = env->outer) {
+        Item status = js_interp_eval_writeback_scope(frame, env->scope, env);
+        if (item_is_error(status)) return status;
+    }
+    return js_status_ok();
+}
+
+static bool js_interp_frame_has_function_scope(const JsInterpFrame* frame) {
+    for (JsInterpEnv* env = frame ? frame->env : NULL; env; env = env->outer) {
+        if (env->scope && env->scope->kind == SCOPE_KIND_FUNCTION) return true;
+    }
+    return false;
+}
+
+static void js_interp_eval_note_lexicals(JsInterpEnv* env) {
+    if (!env) return;
+    js_interp_eval_note_lexicals(env->outer);
+    for (NameEntry* entry = env->scope ? env->scope->first : NULL;
+            entry; entry = entry->next) {
+        if (!entry->name || !entry->is_lexical) continue;
+        Item key = js_interp_name_key(entry->name);
+        js_eval_local_note_lexical_binding(key);
+        if (entry->is_const) js_eval_local_note_immutable_binding(key);
+    }
+}
+
+struct JsInterpEvalBridge {
+    JsInterpFrame* frame;
+    bool global_lexical;
+    bool active;
+
+    explicit JsInterpEvalBridge(JsInterpFrame* value)
+        : frame(value), global_lexical(!js_interp_frame_has_function_scope(value)),
+          active(false) {
+        if (!frame) return;
+        if (global_lexical) {
+            js_eval_global_lexical_push_frame();
+            js_interp_eval_bind_scope(frame, frame->script->global_scope, true);
+            js_interp_eval_bind_envs(frame, frame->env, true);
+        } else {
+            js_eval_env_push_frame();
+            js_interp_eval_bind_envs(frame, frame->env, false);
+            // Preserve vars created by a prior direct eval in this activation.
+            js_eval_env_bridge_journal_vars();
+        }
+        active = true;
+    }
+
+    Item writeback() {
+        if (!active) return ItemError;
+        // A global direct eval shares the caller module slab. Its source can
+        // update global lexical slots directly, while the temporary property
+        // bridge still carries block-scoped bindings; writing the global scope
+        // back from that property would overwrite the authoritative slab.
+        return js_interp_eval_writeback_envs(frame);
+    }
+
+    void close() {
+        if (!active) return;
+        if (global_lexical) js_eval_global_lexical_pop_frame();
+        else js_eval_env_pop_frame();
+        active = false;
+    }
+
+    ~JsInterpEvalBridge() { close(); }
+
+    JsInterpEvalBridge(const JsInterpEvalBridge&) = delete;
+    JsInterpEvalBridge& operator=(const JsInterpEvalBridge&) = delete;
+};
+
+static Item js_interp_direct_eval(JsInterpFrame* frame, Item code) {
+    if (frame && !frame->env) {
+        // Script-level direct eval already has the realm's lexical and var
+        // environments. Reuse that global path rather than projecting its
+        // module slab through temporary object properties.
+        RootFrame roots(1);
+        Rooted<Item> result_root(roots, js_builtin_eval(code,
+            1 | (frame->strict ? 4 : 0)));
+        Item synced = js_interp_sync_global_bindings(frame);
+        if (item_is_error(result_root.get())) return result_root.get();
+        return item_is_error(synced) ? synced : result_root.get();
+    }
+    JsInterpEvalBridge bridge(frame);
+    if (!bridge.active) return ItemError;
+    RootFrame roots(1);
+    Rooted<Item> result_root(roots, js_builtin_eval(code,
+        3 | (frame && frame->strict ? 4 : 0)));
+    Item writeback = bridge.writeback();
+    bridge.close();
+    if (item_is_error(result_root.get())) return result_root.get();
+    return item_is_error(writeback) ? writeback : result_root.get();
+}
+
+struct JsInterpEvalLocalFrame {
+    bool pushed;
+
+    explicit JsInterpEvalLocalFrame(JsInterpEnv* env)
+        : pushed(js_eval_local_push_frame() != 0) {
+        if (pushed) js_interp_eval_note_lexicals(env);
+    }
+    ~JsInterpEvalLocalFrame() {
+        if (pushed) js_eval_local_pop_frame();
+    }
+    JsInterpEvalLocalFrame(const JsInterpEvalLocalFrame&) = delete;
+    JsInterpEvalLocalFrame& operator=(const JsInterpEvalLocalFrame&) = delete;
+};
+
+static bool js_interp_identifier_is(JsAstNode* node, const char* name);
+
 static JsInterpCompletion js_interp_eval_call(JsInterpFrame* frame, JsCallNode* call,
         bool construct) {
     if (!call) return js_interp_throw(ItemError);
@@ -715,6 +934,17 @@ static JsInterpCompletion js_interp_eval_call(JsInterpFrame* frame, JsCallNode* 
         value_root.set(value.value);
         Item pushed = js_array_push(arguments_root.get(), value_root.get());
         if (item_is_error(pushed)) return js_interp_throw(pushed);
+    }
+    if (!construct && call->function && call->function->node_type == AST_NODE_IDENT &&
+            js_interp_identifier_is((JsAstNode*)call->function, "eval")) {
+        Item intrinsic = js_get_global_builtin_fn_by_id(
+            (Item){.item = i2it(JS_BUILTIN_GLOBAL_FN_EVAL)});
+        if (js_strict_equal(callee_root.get(), intrinsic).item == b2it(true)) {
+            value_root.set(js_elements_get_int(arguments_root.get(), 0));
+            if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+            Item result = js_interp_direct_eval(frame, value_root.get());
+            return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
+        }
     }
     Item result = construct
         ? js_construct_array_like(callee_root.get(), arguments_root.get(), callee_root.get())
@@ -991,7 +1221,9 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
             // not throw for an unresolvable reference. A lexical TDZ still
             // has an entry and therefore follows the regular error path.
             if (!identifier->entry && !js_global_binding_exists(
-                    js_interp_name_key(identifier->name))) {
+                    js_interp_name_key(identifier->name)) &&
+                    !js_eval_local_has_var_binding(
+                        js_interp_name_key(identifier->name))) {
                 return js_interp_normal(js_make_string("undefined"));
             }
         }
@@ -1941,8 +2173,7 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
         break;
     case AST_NODE_CALL_EXPR: {
         JsCallNode* call = (JsCallNode*)node;
-        if (js_interp_identifier_is((JsAstNode*)call->function, "eval") ||
-                js_interp_identifier_is((JsAstNode*)call->function, "import")) {
+        if (js_interp_identifier_is((JsAstNode*)call->function, "import")) {
             state->supported = false;
         }
         break;
@@ -1999,6 +2230,11 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         function->interp_env);
     JsInterpEnvRoot env_root(env);
     if (!env || !env_root.registered) return ItemError;
+    // Direct eval's function-scoped `var` declarations live in the shared
+    // EvalContext journal for this activation, including names absent from the
+    // static AST scope.
+    JsInterpEvalLocalFrame eval_local(env);
+    if (!eval_local.pushed) return ItemError;
     JsInterpFrame frame = {function->ast_script, env, this_root.home(),
         (function->flags & JS_FUNC_FLAG_STRICT) != 0, NULL, 0};
     JsInterpCompletion initialized = js_interp_initialize_scope(&frame,

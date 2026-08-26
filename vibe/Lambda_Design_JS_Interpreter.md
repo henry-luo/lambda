@@ -4,13 +4,13 @@
 
 **Status:** PARTIALLY IMPLEMENTED — the explicit synchronous AST backend
 landed on 2026-08-26 and now covers the implemented P2 core plus the P3
-surface listed in §13. The default remains whole-script MIR; direct eval/
-modules, private/super, mixed T0/T1 environment cells, suspension, and AUTO
-promotion remain planned.
+surface listed in §13, including dynamic `eval` through the shared runtime
+bridge. The default remains whole-script MIR; modules, private/super, mixed
+T0/T1 environment cells, suspension, and AUTO promotion remain planned.
 
 **Scope:** LambdaJS only. This document specializes the interpreter direction established by **AI21** and the shared-AST rules **D8.2.1–D8.2.5**. It does not change the Lambda-language T0 semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
-**Formal authority:** **D1.1–D1.7**, **D5.1.1**, **D5.3.2–D5.3.4**, **D5.4.1**, **D6.2.1–D6.2.4**, **D7.2.1**, **D8.1.1v5**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
+**Formal authority:** **D1.1–D1.7**, **D5.1.1**, **D5.3.2–D5.3.4**, **D5.4.1**, **D6.2.1–D6.2.4**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v3**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
 
 **Related designs:** [`Lambda_Design_Ast_Interpreter.md`](Lambda_Design_Ast_Interpreter.md) (AI1–AI22), [`Lambda_Design_Unified_AST.md`](Lambda_Design_Unified_AST.md) (U1–U36), [`Lambda_Design_Runtime_Error_Handling.md`](Lambda_Design_Runtime_Error_Handling.md), [`Lambda_Design_Stack_Frame_JS.md`](Lambda_Design_Stack_Frame_JS.md), [`doc/dev/js/JS_01_Compilation_Pipeline.md`](../doc/dev/js/JS_01_Compilation_Pipeline.md), [`JS_04_MIR_Lowering.md`](../doc/dev/js/JS_04_MIR_Lowering.md), [`JS_05_Functions_Closures.md`](../doc/dev/js/JS_05_Functions_Closures.md), [`JS_08_Iterators_Generators.md`](../doc/dev/js/JS_08_Iterators_Generators.md), and [`JS_09_Async_Modules.md`](../doc/dev/js/JS_09_Async_Modules.md).
 
@@ -550,6 +550,23 @@ Iterator/environment cleanups nested inside these constructs execute in their ow
 
 The current captured `with_env` array remains only as a transition aid for compiled functions. The shared mixed-tier endpoint is an environment record retained by closures.
 
+### 7.10.1 Direct and indirect `eval`
+
+An AST call is direct only when its identifier reference resolves to the
+intrinsic `eval` function; an alias/property call follows ordinary indirect
+eval. The direct call first evaluates the callee and all arguments exactly
+once, then uses the existing dynamic-code compiler as the narrow source
+boundary. It does not rerun or fall back from the enclosing AST script.
+
+For an interpreted function, the caller projects its visible cells through
+the canonical `EvalContext` bridge, invokes dynamic eval, writes mutable cells
+back, and retains eval-created `var` names in that activation's shared journal.
+Subsequent interpreted reads and writes consult that journal. At script global
+scope, dynamic eval uses the realm-global path and the walker synchronizes the
+realm lexical table back to the script module slab. This retains one runtime,
+one EvalContext, one global object, and one module registry as required by
+**D8.1.3v3** and **D5.4.1**.
+
 ### 7.11 Classes
 
 Classes require persistent `JsClassPlan` facts before T0 admission:
@@ -865,7 +882,7 @@ rest/spread, optional chaining, object methods/accessors, generators, async,
 and top-level await are rejected before declaration instantiation. A forced
 AST request returns the JavaScript rejection error rather than silently
 replaying in MIR; with no selector, existing MIR remains the policy. This is
-the explicit-backend contract of **D8.1.3v2**, preserving **D8.4.3v2** error
+the explicit-backend contract of **D8.1.3v3**, preserving **D8.4.3v2** error
 transport and **D1.3** guest semantics.
 
 **Gate:** focused ownership, module-state, call/construct, native-callback,
@@ -889,8 +906,11 @@ Implemented:
 - public classes: methods/accessors, public instance/static fields, static
   blocks, and implicit derived construction, all through the existing class
   function/property kernels.
+- direct/indirect `eval`: direct calls bridge interpreted function cells and
+  eval-local vars through the shared EvalContext; global lexical mutations
+  synchronize back to the retained script slab.
 
-Still excluded: private names, `super`, direct eval, CommonJS/ES modules,
+Still excluded: private names, `super`, CommonJS/ES modules,
 generators, async, and top-level await. These forms fail before observable
 execution under the forced AST selector.
 
@@ -1118,7 +1138,7 @@ These questions do not reopen the decisions above:
 ## 18. Adoption Requirements
 
 This proposal's P2 implementation authority is now recorded by
-**D6.2.3v2**, **D8.1.3v2**, and
+**D6.2.3v2**, **D8.1.3v3**, and
 [`vibe/impl/Lambda_Impl_JS_Interpreter.md`](impl/Lambda_Impl_JS_Interpreter.md).
 The following requirements remain for later phases:
 

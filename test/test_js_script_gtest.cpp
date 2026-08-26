@@ -616,15 +616,55 @@ TEST(JsInterpreter, RejectsUnsupportedFormsBeforeExecution) {
     Runtime runtime = {};
     runtime_init(&runtime);
 
-    const char source[] = "let sideEffect = 0; eval('sideEffect = 1'); sideEffect;";
+    const char source[] = "let sideEffect = 0; async function work() { return sideEffect; } sideEffect;";
     Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
-        "unsupported-eval.js", NULL);
+        "unsupported-async.js", NULL);
 
     EXPECT_TRUE(item_is_error(result));
     ASSERT_NE(runtime.scripts, nullptr);
     EXPECT_EQ(runtime.scripts->length, 1);
     EXPECT_NE(runtime.eval_context, nullptr);
     EXPECT_EQ(js_global_binding_exists(js_make_string("sideEffect")), 0);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, DirectEvalSharesInterpretedFunctionEnvironment) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function mutate() { let value = 40; eval('value += 2'); return value; } mutate();";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "direct-eval.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
+
+    const char introduced_source[] =
+        "function introduce() { eval('var value = 20'); value += 2; return value; } introduce();";
+    Item introduced = js_interp_execute_source(&runtime, introduced_source,
+        sizeof(introduced_source) - 1, "direct-eval-var.js", NULL);
+
+    ASSERT_FALSE(item_is_error(introduced));
+    EXPECT_EQ(js_strict_equal(introduced, flt2it(22.0)).item, b2it(true));
+
+    const char global_source[] = "let value = 40; eval('value += 2'); value;";
+    Item global = js_interp_execute_source(&runtime, global_source,
+        sizeof(global_source) - 1, "direct-eval-global.js", NULL);
+
+    ASSERT_FALSE(item_is_error(global));
+    EXPECT_EQ(js_strict_equal(global, flt2it(42.0)).item, b2it(true));
+
+    const char indirect_source[] =
+        "function indirect() { let local = 40; let saved = eval; return saved('typeof local'); } "
+        "indirect();";
+    Item indirect = js_interp_execute_source(&runtime, indirect_source,
+        sizeof(indirect_source) - 1, "indirect-eval.js", NULL);
+
+    ASSERT_FALSE(item_is_error(indirect));
+    ASSERT_EQ(get_type_id(indirect), LMD_TYPE_STRING);
+    EXPECT_STREQ(it2s(indirect)->chars, "undefined");
 
     runtime_cleanup(&runtime);
 }
