@@ -2259,6 +2259,21 @@ static float flex_item_direct_text_baseline(ViewElement* item, float fallback_as
                                                 false, fallback_ascender);
 }
 
+static float flex_multicol_first_baseline(ViewBlock* item_block) {
+    if (!item_block || !is_multicol_container(item_block)) return -1.0f;
+
+    if (item_block->blk && item_block->block()->first_line_baseline > 0.0f) {
+        return layout_axis_decoration_start(
+            item_block->bound, LAYOUT_AXIS_Y) +
+            item_block->block()->first_line_baseline;
+    }
+
+    // css-align §9.1: a multicol exports the first baseline from its
+    // block-start-most column or spanner, including flex-owned containers.
+    return radiant::compute_view_first_text_baseline(
+        nullptr, static_cast<View*>(item_block), 0.0f, false, true, nullptr);
+}
+
 static bool flex_alignment_is_baseline(int alignment) {
     return alignment == ALIGN_BASELINE || alignment == CSS_VALUE_BASELINE;
 }
@@ -2351,8 +2366,7 @@ static bool flex_line_has_empty_multicol_baseline(ViewElement* item) {
         if (!sibling->is_element() || sibling == static_cast<DomNode*>(item)) continue;
         ViewBlock* sibling_block = lam::view_as_block(sibling);
         if (!sibling_block || !is_multicol_container(sibling_block)) continue;
-        if (!sibling_block->blk ||
-            sibling_block->block()->first_line_baseline <= 0.0f) {
+        if (flex_multicol_first_baseline(sibling_block) <= 0.0f) {
             return true;
         }
     }
@@ -2372,14 +2386,10 @@ float calculate_item_baseline(ViewElement* item) {
 
     ViewBlock* item_block = lam::view_as_block(item);
     if (item_block && is_multicol_container(item_block)) {
-        // css-align baseline export: multicol has only a first baseline set;
-        // an empty first column/spanner falls back to the border-box end edge.
-        if (item_block->blk && item_block->block()->first_line_baseline > 0.0f) {
-            float parent_offset_y = layout_axis_decoration_start(
-                item ? item->bound : nullptr, LAYOUT_AXIS_Y);
-            return margin_top + parent_offset_y +
-                item_block->block()->first_line_baseline;
-        }
+        float first_baseline = flex_multicol_first_baseline(item_block);
+        if (first_baseline > 0.0f) return margin_top + first_baseline;
+        // css-align §9.1: a multicol without a baseline set synthesizes one
+        // from its border-box end edge in the flex alignment context.
         return margin_top + item->height;
     }
     if (flex_line_has_empty_multicol_baseline(item)) {
@@ -2553,6 +2563,10 @@ void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container) 
             }
         }
     }
+
+    // anonymous text fragments were positioned before this late baseline pass;
+    // move them with their generated flex items after alignment resolves.
+    apply_anonymous_flex_text_geometry(flex_layout);
 
     {
         bool has_explicit_height = !layout_block_has_automatic_height(flex_container);

@@ -2,6 +2,7 @@
 #include "type_build.hpp"
 #include "transpiler.hpp"
 #include "lambda-error.h"
+#include "parse_lex.hpp"
 #include "../../lib/log.h"
 
 #include <string.h>
@@ -34,12 +35,11 @@ struct Lexer {
 };
 
 bool is_ident_start(char c) {
-    return c == '_' || c == '$' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-        (unsigned char)c >= 0x80;
+    return lambda_lex_ident_start(c);
 }
 
-bool is_ident_continue(char c) { return is_ident_start(c) || (c >= '0' && c <= '9'); }
-bool is_digit(char c) { return c >= '0' && c <= '9'; }
+bool is_ident_continue(char c) { return lambda_lex_ident_continue(c); }
+bool is_digit(char c) { return lambda_lex_digit(c); }
 
 void fail(Lexer* lx, const char* what) {
     if (lx->failed) { return; }  // keep the first diagnostic, which is the useful one
@@ -51,23 +51,7 @@ void fail(Lexer* lx, const char* what) {
 }
 
 void skip_space(Lexer* lx) {
-    for (;;) {
-        while (lx->p < lx->end && (*lx->p == ' ' || *lx->p == '\t' || *lx->p == '\r' ||
-                                   *lx->p == '\n' || *lx->p == '\f' || *lx->p == '\v')) {
-            lx->p++;
-        }
-        if (lx->p + 1 < lx->end && lx->p[0] == '/' && lx->p[1] == '/') {
-            while (lx->p < lx->end && *lx->p != '\n') { lx->p++; }
-            continue;
-        }
-        if (lx->p + 1 < lx->end && lx->p[0] == '/' && lx->p[1] == '*') {
-            lx->p += 2;
-            while (lx->p + 1 < lx->end && !(lx->p[0] == '*' && lx->p[1] == '/')) { lx->p++; }
-            lx->p = (lx->p + 2 < lx->end) ? lx->p + 2 : lx->end;
-            continue;
-        }
-        return;
-    }
+    lambda_lex_skip_space(&lx->p, lx->end);
 }
 
 bool at(Lexer* lx, char c) { skip_space(lx); return lx->p < lx->end && *lx->p == c; }
@@ -80,19 +64,11 @@ bool eat(Lexer* lx, char c) {
 
 // Read an identifier/keyword without consuming it on failure.
 StrView peek_word(Lexer* lx) {
-    skip_space(lx);
-    StrView w = {lx->p, 0};
-    const char* q = lx->p;
-    if (q >= lx->end || !is_ident_start(*q)) { return w; }
-    while (q < lx->end && is_ident_continue(*q)) { q++; }
-    w.length = (size_t)(q - lx->p);
-    return w;
+    return lambda_lex_peek_word(&lx->p, lx->end);
 }
 
 StrView take_word(Lexer* lx) {
-    StrView w = peek_word(lx);
-    lx->p += w.length;
-    return w;
+    return lambda_lex_take_word(&lx->p, lx->end);
 }
 
 // Namespace-qualified element tags are dotted (`<soap.Fault>`; the `html:div`
@@ -136,8 +112,7 @@ static StrView take_qualified_tag(Lexer* lx) {
 }
 
 bool word_is(StrView w, const char* s) {
-    size_t n = strlen(s);
-    return w.length == n && memcmp(w.str, s, n) == 0;
+    return lambda_lex_word_is(w, s);
 }
 
 AstNode* parse_union(Lexer* lx);

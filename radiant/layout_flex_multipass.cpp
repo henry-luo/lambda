@@ -838,8 +838,9 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     float content_height = content.height;
     float content_x_offset = content.offset_x;
     float content_y_offset = content.offset_y;
-    bool use_multicol_flex_path = is_multicol_container(flex_item) &&
-        flex_item->blk && flex_item->block()->given_width >= 0.0f;
+    // css flex: an auto-sized multicol flex item still establishes its own
+    // multicol formatting context after flex sizing resolves its content box.
+    bool use_multicol_flex_path = is_multicol_container(flex_item);
 
     WritingMode flex_item_writing_mode = layout_block_writing_mode(flex_item);
     bool flex_item_vertical = flex_item_writing_mode == WM_VERTICAL_LR ||

@@ -18,6 +18,25 @@ static Element* parse_element(InputContext& ctx, const char **mark, int depth = 
 static Item parse_value(InputContext& ctx, const char **mark, int depth = 0);
 static Item parse_content(InputContext& ctx, const char **mark, int depth = 0);
 
+// keep legacy pointer cursors on the shared source/diagnostic coordinate system
+static void mark_sync(InputContext& ctx, const char** mark) {
+    if (mark) ctx.syncTo(*mark);
+}
+
+static void mark_error(InputContext& ctx, const char** mark, const char* message) {
+    mark_sync(ctx, mark);
+    ctx.addError(message);
+}
+
+static void mark_require_closed(InputContext& ctx, const char** mark,
+                                bool closed, const char* message) {
+    if (!closed) mark_error(ctx, mark, message);
+}
+
+static Item mark_item_from_pointer(const void* pointer) {
+    return pointer ? (Item){.item = (uint64_t)pointer} : ItemError;
+}
+
 static void skip_comments(const char **mark) {
     skip_whitespace_and_comment_markers(mark, "//", nullptr, true);
 }
@@ -43,12 +62,14 @@ static bool mark_n_literal_is_integer(const char* str, size_t len) {
 static Item parse_mark_suffixed_number(InputContext& ctx, const char* start, size_t len,
                                        char suffix) {
     if (suffix == 'N') {
-        ctx.addError(ctx.tracker.location(),
+        ctx.syncTo(start);
+        ctx.addError(
             "decimal literal suffix 'N' has been retired; use 'm' for decimal or 'n' for integer");
         return {.item = ITEM_ERROR};
     }
     if (suffix == 'n' && !mark_n_literal_is_integer(start, len)) {
-        ctx.addError(ctx.tracker.location(),
+        ctx.syncTo(start);
+        ctx.addError(
             "'n' literal must be integer-valued; use the 'm' suffix for decimal");
         return {.item = ITEM_ERROR};
     }
@@ -134,6 +155,10 @@ static String* parse_mark_quoted_string(InputContext& ctx, const char **mark, ch
     while (**mark && **mark != quote && (!stop_at_newline || **mark != '\n')) {
         if (**mark == '\\') {
             (*mark)++;
+            if (!**mark) {
+                mark_error(ctx, mark, "unterminated escape in quoted literal");
+                return NULL;
+            }
             if (escape_policy == MARK_QUOTED_ESCAPE_STRING) {
                 append_mark_string_escape(sb, mark);
             } else {
@@ -147,6 +172,11 @@ static String* parse_mark_quoted_string(InputContext& ctx, const char **mark, ch
 
     if (**mark == quote) {
         (*mark)++; // skip closing quote
+    } else {
+        mark_error(ctx, mark, quote == '\''
+            ? "unterminated symbol literal"
+            : "unterminated string literal");
+        return NULL;
     }
     return builder.createString(sb->str->chars, sb->length);
 }
@@ -164,17 +194,18 @@ static String* parse_unquoted_identifier(InputContext& ctx, const char **mark) {
     StringBuf* sb = ctx.sb;
     stringbuf_reset(sb);  // Reset buffer before use
 
-    // First character must be alpha or underscore
+    // First character must be ASCII alpha, underscore, or a UTF-8 byte.
     if (!(**mark >= 'a' && **mark <= 'z') &&
         !(**mark >= 'A' && **mark <= 'Z') &&
-        **mark != '_') {
+        **mark != '_' && (unsigned char)**mark < 0x80) {
         return NULL;
     }
 
     while (**mark && ((**mark >= 'a' && **mark <= 'z') ||
                       (**mark >= 'A' && **mark <= 'Z') ||
                       (**mark >= '0' && **mark <= '9') ||
-                      **mark == '_' || **mark == '-')) {
+                      **mark == '_' || **mark == '-' ||
+                      (unsigned char)**mark >= 0x80)) {
         stringbuf_append_char(sb, **mark);
         (*mark)++;
     }
@@ -189,7 +220,7 @@ static Item parse_binary(InputContext& ctx, const char **mark) {
     const char* close = content;
     while (*close && *close != '\'') close++;
     if (*close != '\'') {
-        ctx.addError(ctx.tracker.location(), "unterminated binary literal");
+        mark_error(ctx, mark, "unterminated binary literal");
         *mark = close;
         return {.item = ITEM_ERROR};
     }
@@ -202,8 +233,8 @@ static Item parse_binary(InputContext& ctx, const char **mark) {
     if (decoded_len < 0) {
         // Mark input must share the compiler's byte invariant; accepting encoded
         // text here previously produced a string-tagged lookalike value.
-        ctx.addError(ctx.tracker.location(),
-            "invalid binary literal payload at byte %d", err_off);
+        mark_sync(ctx, mark);
+        ctx.addError("invalid binary literal payload at byte %d", err_off);
         if (decoded) strbuf_free(decoded);
         return {.item = ITEM_ERROR};
     }
@@ -233,6 +264,9 @@ static Item parse_datetime(InputContext& ctx, const char **mark) {
 
     if (**mark == '\'') {
         (*mark)++; // skip closing quote
+    } else {
+        mark_error(ctx, mark, "unterminated datetime literal");
+        return {.item = ITEM_ERROR};
     }
 
     // parse the content as a datetime value
@@ -272,7 +306,8 @@ static Array* parse_array(InputContext& ctx, const char **mark, int depth = 0) {
     Input* input = ctx.input();
     if (**mark != '[') return NULL;
     if (depth >= MARK_MAX_DEPTH) {
-        ctx.addError(ctx.tracker.location(), "Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
+        mark_sync(ctx, mark);
+        ctx.addError("Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
         return NULL;
     }
     Array* arr = array_pooled(input->pool);
@@ -286,6 +321,7 @@ static Array* parse_array(InputContext& ctx, const char **mark, int depth = 0) {
         return arr;
     }
 
+    bool closed = false;
     while (**mark) {
         Item item = parse_value(ctx, mark, depth + 1);
         array_append(arr, item, input->pool);
@@ -293,14 +329,17 @@ static Array* parse_array(InputContext& ctx, const char **mark, int depth = 0) {
         skip_comments(mark);
         if (**mark == ']') {
             (*mark)++;
+            closed = true;
             break;
         }
         if (**mark != ',') {
-            return NULL; // invalid format
+            mark_error(ctx, mark, "expected ',' or ']' after array item");
+            return NULL;
         }
         (*mark)++;
         skip_comments(mark);
     }
+    mark_require_closed(ctx, mark, closed, "expected ']' after array items");
     return arr;
 }
 
@@ -308,7 +347,8 @@ static Array* parse_list(InputContext& ctx, const char **mark, int depth = 0) {
     Input* input = ctx.input();
     if (**mark != '(') return NULL;
     if (depth >= MARK_MAX_DEPTH) {
-        ctx.addError(ctx.tracker.location(), "Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
+        mark_sync(ctx, mark);
+        ctx.addError("Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
         return NULL;
     }
     Array* arr = array_pooled(input->pool);
@@ -322,21 +362,33 @@ static Array* parse_list(InputContext& ctx, const char **mark, int depth = 0) {
         return arr;
     }
 
+    bool closed = false;
     while (**mark) {
+        const char* item_start = *mark;
         Item item = parse_value(ctx, mark, depth + 1);
+        if (item.item == ITEM_ERROR && *mark == item_start) {
+            if (!ctx.hasErrors()) mark_error(ctx, mark, "expected a list item");
+            return NULL;
+        }
         array_append(arr, item, input->pool);
 
         skip_comments(mark);
         if (**mark == ')') {
             (*mark)++;
+            closed = true;
             break;
         }
-        if (**mark != ',') {
-            return NULL; // invalid format
+        if (**mark == ',') {
+            (*mark)++;
+            skip_comments(mark);
+        } else if (**mark == ':') {
+            // Mark lists also carry the legacy `:name value` attribute
+            // spelling, so whitespace (and this marker) separates items.
+            (*mark)++;
+            skip_comments(mark);
         }
-        (*mark)++;
-        skip_comments(mark);
     }
+    mark_require_closed(ctx, mark, closed, "expected ')' after list items");
     return arr;
 }
 
@@ -344,7 +396,8 @@ static Map* parse_map(InputContext& ctx, const char **mark, int depth = 0) {
     Input* input = ctx.input();
     if (**mark != '{') return NULL;
     if (depth >= MARK_MAX_DEPTH) {
-        ctx.addError(ctx.tracker.location(), "Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
+        mark_sync(ctx, mark);
+        ctx.addError("Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
         return NULL;
     }
     Map* mp = map_pooled(input->pool);
@@ -358,6 +411,7 @@ static Map* parse_map(InputContext& ctx, const char **mark, int depth = 0) {
         return mp;
     }
 
+    bool closed = false;
     while (**mark) {
         String* key = NULL;
 
@@ -370,10 +424,16 @@ static Map* parse_map(InputContext& ctx, const char **mark, int depth = 0) {
             key = parse_unquoted_identifier(ctx, mark);
         }
 
-        if (!key) return mp;
+        if (!key) {
+            mark_error(ctx, mark, "expected map key");
+            return NULL;
+        }
 
         skip_comments(mark);
-        if (**mark != ':') return mp;
+        if (**mark != ':') {
+            mark_error(ctx, mark, "expected ':' after map key");
+            return NULL;
+        }
         (*mark)++;
         skip_comments(mark);
 
@@ -383,12 +443,17 @@ static Map* parse_map(InputContext& ctx, const char **mark, int depth = 0) {
         skip_comments(mark);
         if (**mark == '}') {
             (*mark)++;
+            closed = true;
             break;
         }
-        if (**mark != ',') return mp;
+        if (**mark != ',') {
+            mark_error(ctx, mark, "expected ',' or '}' after map item");
+            return NULL;
+        }
         (*mark)++;
         skip_comments(mark);
     }
+    mark_require_closed(ctx, mark, closed, "expected '}' after map items");
     return mp;
 }
 
@@ -396,7 +461,8 @@ static Element* parse_element(InputContext& ctx, const char **mark, int depth) {
     Input* input = ctx.input();
     if (**mark != '<') return NULL;
     if (depth >= MARK_MAX_DEPTH) {
-        ctx.addError(ctx.tracker.location(), "Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
+        mark_sync(ctx, mark);
+        ctx.addError("Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
         return NULL;
     }
 
@@ -485,7 +551,17 @@ static Element* parse_element(InputContext& ctx, const char **mark, int depth) {
 
     // Parse content - content can be separated by semicolons, newlines, or just whitespace
     while (**mark && **mark != '>') {
+        if (**mark == ';') {
+            (*mark)++;
+            skip_comments(mark);
+            continue;
+        }
+        const char* content_start = *mark;
         Item content_item = parse_content(ctx, mark, depth + 1);
+        if (content_item.item == ITEM_ERROR && *mark == content_start) {
+            if (!ctx.hasErrors()) mark_error(ctx, mark, "expected element content");
+            return NULL;
+        }
         if (content_item .item != ITEM_ERROR && content_item .item != ITEM_NULL) {
             // Add content to element
             list_push((List*)element, content_item);
@@ -502,6 +578,9 @@ static Element* parse_element(InputContext& ctx, const char **mark, int depth) {
 
     if (**mark == '>') {
         (*mark)++; // skip closing '>'
+    } else {
+        mark_error(ctx, mark, "expected '>' after element content");
+        return NULL;
     }
 
     return element;
@@ -521,19 +600,20 @@ static Item parse_value(InputContext& ctx, const char **mark, int depth) {
     skip_comments(mark);
 
     if (depth >= MARK_MAX_DEPTH) {
-        ctx.addError(ctx.tracker.location(), "Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
+        mark_sync(ctx, mark);
+        ctx.addError("Maximum nesting depth (%d) exceeded", MARK_MAX_DEPTH);
         return {.item = ITEM_ERROR};
     }
 
     switch (**mark) {
         case '{':
-            return {.item = (uint64_t)parse_map(ctx, mark, depth + 1)};
+            return mark_item_from_pointer(parse_map(ctx, mark, depth + 1));
         case '[':
-            return {.item = (uint64_t)parse_array(ctx, mark, depth + 1)};
+            return mark_item_from_pointer(parse_array(ctx, mark, depth + 1));
         case '(':
-            return {.item = (uint64_t)parse_list(ctx, mark, depth + 1)};
+            return mark_item_from_pointer(parse_list(ctx, mark, depth + 1));
         case '<':
-            return {.item = (uint64_t)parse_element(ctx, mark, depth + 1)};
+            return mark_item_from_pointer(parse_element(ctx, mark, depth + 1));
         case '"':
             return {.item = s2it(parse_string(ctx, mark))};
         case '\'':
@@ -599,6 +679,9 @@ static Item parse_value(InputContext& ctx, const char **mark, int depth) {
                 Symbol* sym = ctx.builder.createSymbol(id->chars, id->len);
                 return sym ? (Item){.item = y2it(sym)} : (Item){.item = ITEM_ERROR};
             }
+            else if ((unsigned char)**mark >= 0x80) {
+                goto UNQUOTED_IDENTIFIER;
+            }
             return {.item = ITEM_ERROR};
     }
 }
@@ -614,10 +697,24 @@ void parse_mark(Input* input, const char* mark_string) {
     const char* mark = mark_string;
     skip_comments(&mark);
 
+    if (!*mark) {
+        input->root = ItemNull;
+        return;
+    }
+
     // Parse the root content - could be a single value or element
     input->root = parse_content(ctx, &mark, 0);
 
+    skip_comments(&mark);
+    if (*mark && !ctx.hasErrors()) {
+        mark_error(ctx, &mark, "unexpected trailing input after Mark value");
+        input->root = ItemError;
+    }
+
     if (ctx.hasErrors()) {
+        // Keep malformed Mark values out of the runtime even when a nested
+        // helper managed to assemble a partial container before failing.
+        input->root = ItemError;
         ctx.logErrors();
     }
 }
