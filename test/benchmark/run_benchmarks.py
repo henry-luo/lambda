@@ -577,7 +577,7 @@ def make_jetstream_qjs_wrapper(bench_name, js_path):
 # Build the unified benchmark list
 # ============================================================
 
-def build_benchmark_list(suite_filters, bench_filters, include_text=False):
+def build_benchmark_list(suite_filters, bench_filters, include_text=True):
     """
     Build flat list of benchmarks to run based on suite/bench filters.
     Returns list of dicts with keys:
@@ -605,8 +605,12 @@ def build_benchmark_list(suite_filters, bench_filters, include_text=False):
                 "ref_js": None,
             })
 
-    # Text library benchmarks are intentionally opt-in: they are standalone
-    # LambdaJS workloads without corresponding Lambda or Python implementations.
+    # Text library benchmarks are part of the standard population. They were
+    # opt-in while they lacked Lambda ports; they now have `.ls` implementations
+    # like every other suite, and leaving them out silently produced a 56-row
+    # report that could not be compared against the published 59-row series
+    # (Result35 was generated that way before this was fixed). A suite filter
+    # still selects them normally; only the default changed.
     if include_text or (suite_filters and match_filter("text", suite_filters)):
         for entry in TEXT:
             bench_name, category, ls_path, js_path, py_path = entry

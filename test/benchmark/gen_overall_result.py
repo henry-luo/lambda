@@ -30,6 +30,12 @@ SUITE_LABELS = {
 ENGINE_LABELS = {
     "mir": "MIR (untyped)",
     "mir_typed": "MIR (typed)",
+    # Auto-tier columns. The MIR columns above pin LAMBDA_TIER=jit so the
+    # series stays comparable back through Result18; these two report what a
+    # user actually gets from `lambda.exe run` with no tier override, which
+    # since the interpreter-first default is a different execution path.
+    "mir_auto": "MIR (untyped, auto)",
+    "mir_typed_auto": "MIR (typed, auto)",
     "c2mir": "C2MIR",
     "go": "Go",
     "lambdajs": "LambdaJS",
@@ -106,18 +112,35 @@ def report_engines(data, requested):
         for suite in SUITE_ORDER
         for bench_data in data.get(suite, {}).values()
     )
+    has_auto_mir = any(
+        "mir_auto" in bench_data
+        for suite in SUITE_ORDER
+        for bench_data in data.get(suite, {}).values()
+    )
+    has_typed_auto_mir = any(
+        "mir_typed_auto" in bench_data
+        for suite in SUITE_ORDER
+        for bench_data in data.get(suite, {}).values()
+    )
     expanded = []
     for engine in requested:
         expanded.append(engine)
         if engine == "mir" and has_typed_mir:
             expanded.append("mir_typed")
+        # Auto columns ride alongside the pinned-JIT pair rather than replacing
+        # it: the comparison that matters is jit-vs-auto on the SAME row.
+        if engine == "mir" and has_auto_mir:
+            expanded.append("mir_auto")
+        if engine == "mir" and has_typed_auto_mir:
+            expanded.append("mir_typed_auto")
     return expanded
 
 
 def display_ms(bench_data, engine):
     """Format a timing and mark typed cells that reuse an untyped result."""
     value = fmt_ms(value_of(bench_data.get(engine)))
-    if engine == "mir_typed" and status_of(bench_data, engine) == "untyped_fallback":
+    if engine in ("mir_typed", "mir_typed_auto") and \
+            status_of(bench_data, engine) == "untyped_fallback":
         return value + "*" if value != "---" else value
     return value
 
