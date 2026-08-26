@@ -2196,8 +2196,14 @@ bool state_get_bool(DocState* state, void* node, const char* name) {
         if (strcmp(name, STATE_FOCUS) == 0) return view_state_get_focused(state, view);
         if (strcmp(name, STATE_CHECKED) == 0) return form_control_get_checked(state, view);
         if (strcmp(name, STATE_DISABLED) == 0) return form_control_is_disabled(state, view);
+        // `readonly` stays the content-attribute mirror, matching input.readOnly;
+        // the CSS "not user-alterable" sense lives in form_control_is_user_readonly
+        // and is reached through the pseudo-class, not this name (F3b).
         if (strcmp(name, STATE_READONLY) == 0) return form_control_is_readonly(state, view);
         if (strcmp(name, STATE_REQUIRED) == 0) return form_control_is_required(state, view);
+        // Derived, never stored: nothing writes :optional since the reflection
+        // pass retired, so the generic slot below would answer a flat false.
+        if (strcmp(name, STATE_OPTIONAL) == 0) return !form_control_is_required(state, view);
     }
 
     Item value = state_get(state, node, name);
@@ -2243,9 +2249,9 @@ bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state) 
         case PSEUDO_STATE_OPTIONAL:
             return !form_control_is_required(state, view);
         case PSEUDO_STATE_READ_ONLY:
-            return form_control_is_readonly(state, view);
+            return form_control_is_user_readonly(state, view);
         case PSEUDO_STATE_READ_WRITE:
-            return !form_control_is_readonly(state, view);
+            return !form_control_is_user_readonly(state, view);
         case PSEUDO_STATE_INDETERMINATE:
             return state_get_bool(state, view, STATE_INDETERMINATE);
         case PSEUDO_STATE_VALID:
@@ -2276,10 +2282,14 @@ static bool dom_element_default_pseudo_state(DomElement* element, uint32_t pseud
             return element->has_attribute("required");
         case PSEUDO_STATE_OPTIONAL:
             return !element->has_attribute("required");
+        // disabled implies read-only here too, so the stateless resolver agrees
+        // with the state-backed one above (F3b)
         case PSEUDO_STATE_READ_ONLY:
-            return element->has_attribute("readonly");
+            return element->has_attribute("readonly") ||
+                   element->has_attribute("disabled");
         case PSEUDO_STATE_READ_WRITE:
-            return !element->has_attribute("readonly");
+            return !(element->has_attribute("readonly") ||
+                     element->has_attribute("disabled"));
         case PSEUDO_STATE_SELECTED:
             return element->has_attribute("selected");
         default:
@@ -4537,6 +4547,22 @@ bool form_control_is_readonly(DocState* state, View* view) {
 
     if (!view) return false;
     return view_element_has_attr(view, "readonly");
+}
+
+// CSS `:read-only` asks whether the element is user-alterable, which is a
+// broader question than the readonly content attribute: a disabled control is
+// barred from user modification too (HTML §4.10.18.6). Derived on every read
+// rather than cached — it is a pure function of the markup, so nothing has to
+// write it and it is correct from the first cascade, in batch layout/render,
+// and before any control initializes (F3b/ES16).
+//
+// Deliberately separate from form_control_is_readonly, which stays the mirror
+// of the content attribute that `input.readOnly` and `aria-readonly` reflect.
+// Merging the two is what te_reflect_control_state used to do, and it made a
+// merely-disabled input report readOnly === true.
+bool form_control_is_user_readonly(DocState* state, View* view) {
+    return form_control_is_readonly(state, view) ||
+           form_control_is_disabled(state, view);
 }
 
 void form_control_set_readonly(DocState* state, View* view, bool readonly) {

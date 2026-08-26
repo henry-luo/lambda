@@ -516,53 +516,6 @@ void te_dispatch_input(DomElement* elem) {
     js_dom_queue_textcontrol_input(elem);
 }
 
-// Reflect a control's declared attributes into the pseudo-state it backs.
-//
-// This is state mechanism, not constraint validation: :required/:optional and
-// :read-only are reflected IDL attributes, which DOM_Pkg's forms table rules
-// native (N). Constraint validation — :valid/:invalid and every content check
-// behind it — has moved wholly to the dom package (lambda/package/dom), so
-// nothing here computes validity and there is no native fallback for it.
-//
-// The writes matter even though the selector matcher resolves :required and
-// :read-only through form_control_is_*: those accessors prefer a ViewState bit
-// once one exists, and the readonly||disabled write below is what makes
-// "disabled implies read-only" (HTML §4.10.18.6) true for a control that
-// carries no readonly attribute of its own.
-void te_reflect_control_state(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return;
-    FormControlProp* f = elem->form;
-    if (!f) return;
-    DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);
-    bool required = form_control_is_required(state, (View*)elem);
-    bool readonly = form_control_is_readonly(state, (View*)elem);
-    bool disabled = form_control_is_disabled(state, (View*)elem);
-
-    // Capture what the cascade currently believes, so the restyle below fires
-    // only on an actual flip: this pass runs on every value change, and
-    // sync_pseudo_state re-cascades the whole document (ESO32).
-    bool was_required = state_get_bool(state, elem, STATE_REQUIRED);
-    bool was_readonly = state_get_bool(state, elem, STATE_READONLY);
-    // A control that has never been reflected needs the re-cascade even when
-    // the answer equals the default: the load cascade resolved :read-only from
-    // the attribute alone, so it never saw disabled-implies-readonly (ESO32).
-    // STATE_OPTIONAL is the sentinel because it is written only here and is the
-    // one of the three that state_set_bool leaves in the generic map.
-    bool first_pass = state_get(state, elem, STATE_OPTIONAL).item == ItemNull.item;
-
-    state_set_bool(state, elem, STATE_REQUIRED, required);
-    state_set_bool(state, elem, STATE_OPTIONAL, !required);
-    state_set_bool(state, elem, STATE_READONLY, readonly || disabled);
-
-    // Without this the bits change but CSS never re-matches. One re-cascade
-    // covers every pseudo-class that moved — it is document-wide (ESO32).
-    if (first_pass || was_required != required ||
-            was_readonly != (readonly || disabled)) {
-        radiant_sync_pseudo_state((View*)elem, PSEUDO_STATE_READ_ONLY,
-                                  readonly || disabled);
-    }
-}
-
 // ---------- F6: paste sanitization (Radiant_Design_Form_Input.md §3.6) -
 
 bool te_prepare_paste_replacement(DomElement* elem, DocState* state,

@@ -98,10 +98,10 @@ pub fn is_valid(elem, text, input_type) {
 
 // Recompute and publish :valid/:invalid for one control.
 //
-// Only :valid/:invalid is written here. The reflection of required/readonly
-// into :required/:optional/:read-only stays native (te_reflect_control_state):
-// those are reflected attributes, and the writes route to form_control_set_*,
-// which mutates the control rather than caching a verdict about it.
+// Only :valid/:invalid is written here — a verdict has to be computed and
+// stored. :required/:optional/:read-only are not written by anyone: they are
+// pure functions of the markup, so the matcher derives them on every read
+// (F3b/ES16). Reading them here, as is_valid does, stays correct.
 pub pn revalidate(elem) {
     // Validation applies to controls holding editable text. The catch-all
     // `view <input>` template also matches checkbox and radio, whose `value`

@@ -235,12 +235,11 @@ void tc_ensure_init(DomElement* elem) {
     // F4: seed :placeholder-shown after initial value load.
     tc_refresh_placeholder_shown(elem, f);
 
-    // Seed :required / :read-only from the attributes so CSS matches before
-    // any interaction, and give the behavior template governing this control
-    // its `init` turn — that is what computes :valid/:invalid, which is no
-    // longer native. The attach is queued and drained after render (ESO33).
+    // Give the behavior template governing this control its `init` turn — that
+    // is what computes :valid/:invalid, which is no longer native. The attach is
+    // queued and drained after render (ESO33). Nothing seeds :required or
+    // :read-only here any more: they are derived at match time (F3b/ES16).
     radiant_dispatch_behavior_attach((View*)elem);
-    te_reflect_control_state(elem);
     // F8: ARIA reflection — push disabled/readonly/required/invalid bits
     // onto matching aria-* attributes for AT consumers.
     te_aria_reflect(elem);
@@ -337,9 +336,6 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     // F4: refresh :placeholder-shown after value changes (incl. clear).
     tc_refresh_placeholder_shown(elem, f);
 
-    // Keep the reflected flags current after a mutation; :valid/:invalid is
-    // recomputed by the dom package off the post-mutation `input` event.
-    te_reflect_control_state(elem);
     // F8: keep aria-invalid in sync with the new validity state.
     te_aria_reflect(elem);
 }

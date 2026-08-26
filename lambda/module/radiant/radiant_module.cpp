@@ -1104,6 +1104,12 @@ typedef enum RadiantStateKind { RSTATE_BOOL = 0, RSTATE_TEXT } RadiantStateKind;
 static const struct {
     const char* lambda_name;
     const char* state_name;
+    // Read-only covers two kinds of name: the hot ones a handler must never
+    // drive (hover/active/focus…), and the *derived* ones — required, optional,
+    // readonly — which are pure functions of the markup since the reflection
+    // pass retired (F3b/ES16). A write to a derived name is a category error:
+    // it would route to form_control_set_*, mutating the control instead of
+    // recording a verdict. Changing one means changing the attribute (ESO36).
     bool read_only;
     uint32_t pseudo_flag;   // 0 when the name drives no CSS pseudo-class
     RadiantStateKind kind;
@@ -1119,11 +1125,11 @@ static const struct {
     {"indeterminate",     STATE_INDETERMINATE,  false, PSEUDO_STATE_INDETERMINATE, RSTATE_BOOL},
     {"disabled",          STATE_DISABLED,       false, PSEUDO_STATE_DISABLED, RSTATE_BOOL},
     {"enabled",           STATE_ENABLED,        false, PSEUDO_STATE_ENABLED, RSTATE_BOOL},
-    {"readonly",          STATE_READONLY,       false, PSEUDO_STATE_READ_ONLY, RSTATE_BOOL},
+    {"readonly",          STATE_READONLY,       true,  PSEUDO_STATE_READ_ONLY, RSTATE_BOOL},
     {"valid",             STATE_VALID,          false, PSEUDO_STATE_VALID, RSTATE_BOOL},
     {"invalid",           STATE_INVALID,        false, PSEUDO_STATE_INVALID, RSTATE_BOOL},
-    {"required",          STATE_REQUIRED,       false, PSEUDO_STATE_REQUIRED, RSTATE_BOOL},
-    {"optional",          STATE_OPTIONAL,       false, PSEUDO_STATE_OPTIONAL, RSTATE_BOOL},
+    {"required",          STATE_REQUIRED,       true,  PSEUDO_STATE_REQUIRED, RSTATE_BOOL},
+    {"optional",          STATE_OPTIONAL,       true,  PSEUDO_STATE_OPTIONAL, RSTATE_BOOL},
     {"placeholder_shown", STATE_PLACEHOLDER,    false, 0, RSTATE_BOOL},
     {"selected",          STATE_SELECTED,       false, 0, RSTATE_BOOL},
     // text-valued: no interned pseudo name and no pseudo-class of its own
@@ -1234,6 +1240,13 @@ RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item val
     // the canonical bit is written; CSS only sees it once the pseudo-class
     // cascade re-runs, which the native writers schedule at each call site
     if (changed && pseudo_flag) radiant_sync_pseudo_state((View*)elem, pseudo_flag, want);
+    // ESO37: aria-invalid mirrors the validity verdict, and the verdict is
+    // produced here now — te_aria_reflect's other call sites are the native
+    // value-mutation points, which run before the package has validated.
+    if (changed && (strcmp(interned, STATE_VALID) == 0 ||
+                    strcmp(interned, STATE_INVALID) == 0)) {
+        te_aria_reflect(elem);
+    }
     // Report what actually happened, not merely that a writer was called: a
     // form-state write is a no-op until layout has built the control's
     // FormControlProp, and a silent false success would hide that.

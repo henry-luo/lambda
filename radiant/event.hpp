@@ -1804,16 +1804,6 @@ bool te_history_redo(DomElement* elem);
 // the JS DOM bridge overrides it with weak linkage.
 void te_dispatch_input      (DomElement* elem);
 
-// Reflect `elem`'s declared attributes into the pseudo-state they back
-// (:required, :optional, :read-only, :read-write), including HTML's
-// disabled-implies-read-only rule. Cheap; called from tc_ensure_init and
-// tc_set_value.
-//
-// This does NOT compute validity. Constraint validation (:valid/:invalid,
-// required/minlength/maxlength/min/max/step and the type-driven content
-// checks) lives wholly in the dom package — lambda/package/dom/validate.ls —
-// with no native fallback.
-void te_reflect_control_state(DomElement* elem);
 
 // ---------- F6: paste sanitization (Radiant_Design_Form_Input.md §3.6) -
 
@@ -3256,6 +3246,10 @@ void form_control_set_disabled(DocState* state, View* view, bool disabled);
  * Check if a text control is readonly.
  */
 bool form_control_is_readonly(DocState* state, View* view);
+// "Not user-alterable" — the readonly attribute OR disabled. This is what CSS
+// `:read-only`/`:read-write` mean; form_control_is_readonly above stays the
+// content-attribute mirror that `input.readOnly` and `aria-readonly` reflect.
+bool form_control_is_user_readonly(DocState* state, View* view);
 
 /**
  * Set the readonly state for a text control through the state store.
