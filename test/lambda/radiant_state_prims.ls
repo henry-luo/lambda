@@ -26,7 +26,8 @@ let cb = body.first_child
     hover_read:     radiant.get_state(cb, "hover"),
     hover_write:    radiant.set_state(cb, "hover", true),
 
-    // an unknown state name is rejected rather than silently stored
+    // an unknown state name reads null (not false, which would be
+    // indistinguishable from a legitimately-false state) and is rejected on write
     unknown_read:   radiant.get_state(cb, "not_a_state"),
     unknown_write:  radiant.set_state(cb, "not_a_state", true),
 

@@ -1,0 +1,10 @@
+{
+  seeded_default: "seeded",
+  empty_default: "",
+  write_ok: true,
+  seeded_live: "typed",
+  attr_unchanged: "seeded",
+  write_empty: true,
+  empty_live: "hello",
+  free: null
+}

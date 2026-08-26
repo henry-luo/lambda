@@ -581,6 +581,12 @@ static bool te_value_is_url(const char* s, uint32_t len) {
 
 void te_validate(DomElement* elem) {
     if (!elem || !tc_is_text_control(elem)) return;
+    // Retired when the dom package owns validation (ES5 fallback-until-
+    // registered). The package now covers every point this pass did — `init`
+    // via attach-time dispatch, the post-mutation `input`, and blur — so
+    // running both would mean two implementations writing the same bits from
+    // different rules. Absent the package this stays the implementation.
+    if (radiant_behavior_claims_event(nullptr, (View*)elem, "input")) return;
     FormControlProp* f = elem->form;
     if (!f) return;
     DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);

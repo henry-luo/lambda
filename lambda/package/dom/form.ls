@@ -3,6 +3,7 @@
 // transitions and default actions that used to live in radiant/event.cpp.
 // The engine owns the storage; every write goes through the waist primitives.
 import radiant
+import validate: lambda.package.dom.validate
 
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
@@ -33,3 +34,55 @@ on click(evt) {
     radiant.dispatch(~, "input")
     radiant.dispatch(~, "change")
 }
+
+// Select activation is NOT claimed yet (F2 blocked).
+//
+// Opening the dropdown from a behavior template is state-inconsistent with the
+// native dropdown+focus machinery: after the template opens it, a later
+// focus_transition trips the engine's own invariant — "open dropdown state
+// disagrees with form control" (state_machine.cpp). Immediately after the open
+// the two agree (verified: open_dropdown == view, form bit set), so something
+// between the open and that transition desyncs them.
+//
+// The likely root is ordering. Native opens the dropdown at the very end of
+// click handling, after the overlay block has run; behavior dispatch happens
+// much earlier in the same handler, so the dropdown exists during phases that
+// were written assuming it could not. Gating the overlay block on the
+// dropdown that was open when the click arrived was necessary but not
+// sufficient.
+//
+// The primitives this needs — dropdown_open, set_dropdown_open, option_count,
+// selected_index, set_selected_index — are implemented and tested; only the
+// template is withheld. Claiming activation while the state machine reports an
+// inconsistency would repeat the radio mistake from F1.
+view <select> state dropdown_open {}
+on click(evt) {
+    if (radiant.get_state(~, "disabled")) { return 'pass' }
+    radiant.set_dropdown_open(~, not radiant.dropdown_open(~))
+}
+
+// Text-control constraint validation (F3). This hooks the *post-mutation*
+// `input`, dispatched from editing_dispatch_form_input after the buffer commit,
+// so the handler reads the value the user actually typed. The pre-mutation
+// `input` — the Reactive_UI contract where an app template owns the text — is
+// deliberately not visible to behavior templates: it fires before the value
+// exists, and claiming it would suppress the engine's own insert.
+view <input type:'text'> state valid, invalid {}
+on init(evt)  { validate.revalidate(~) }
+on input(evt) { validate.revalidate(~) }
+on blur(evt)  { validate.revalidate(~) }
+
+view <input type:'email'> state valid, invalid {}
+on init(evt)  { validate.revalidate(~) }
+on input(evt) { validate.revalidate(~) }
+on blur(evt)  { validate.revalidate(~) }
+
+view <input type:'url'> state valid, invalid {}
+on init(evt)  { validate.revalidate(~) }
+on input(evt) { validate.revalidate(~) }
+on blur(evt)  { validate.revalidate(~) }
+
+view <input type:'number'> state valid, invalid {}
+on init(evt)  { validate.revalidate(~) }
+on input(evt) { validate.revalidate(~) }
+on blur(evt)  { validate.revalidate(~) }

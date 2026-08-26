@@ -44,6 +44,8 @@ static void tc_collect_text(DomNode* n, StrBuf* sb) {
 
 // ---- public: identification --------------------------------------------
 
+extern "C" bool radiant_dispatch_behavior_attach(View* target);
+
 bool tc_is_text_control(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
     if (elem->form_control()) {
@@ -84,6 +86,19 @@ void form_control_prop_init(FormControlProp* f) {
 
 void form_control_prop_release(FormControlProp* f) {
     if (!f) return;
+    // Both release paths funnel through here. The state store may still name
+    // this control as the open dropdown owner: its DocState pointer survives
+    // the release while this prop does not, leaving the overlay pointing at a
+    // control that no longer exists and tripping the dropdown invariant on the
+    // next validation. Close it at the one moment the control really goes away
+    // (ESO28).
+    if (f->state_ref && f->state_ref->open_dropdown) {
+        View* owner = f->state_ref->open_dropdown;
+        DomElement* owner_elem = owner->is_element() ? owner->as_element() : nullptr;
+        if (owner_elem && owner_elem->form == f) {
+            doc_state_close_dropdown(f->state_ref, owner);
+        }
+    }
     if (f->current_value) { mem_free(f->current_value); f->current_value = nullptr; }
     if (f->custom_validity_msg) { mem_free(f->custom_validity_msg); f->custom_validity_msg = nullptr; }
     if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
@@ -221,7 +236,10 @@ void tc_ensure_init(DomElement* elem) {
     tc_refresh_placeholder_shown(elem, f);
 
     // F5: seed :valid / :invalid / :required / :read-only on first init so
-    // CSS selectors match before any user interaction.
+    // CSS selectors match before any user interaction. The control has just
+    // become live, so give the behavior template governing it its `init` turn
+    // first; te_validate then stands down if the package claimed validation.
+    radiant_dispatch_behavior_attach((View*)elem);
     te_validate(elem);
     // F8: ARIA reflection — push disabled/readonly/required/invalid bits
     // onto matching aria-* attributes for AT consumers.
