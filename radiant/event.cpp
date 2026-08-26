@@ -2721,6 +2721,23 @@ extern "C" void radiant_drain_behavior_attach(void) {
 // Post-mutation `input` for UA behavior templates. The pre-mutation `input`
 // belongs to app templates that own their text; validation and anything else
 // that must observe the committed value hooks here instead (F3).
+// ESO42: the commit hook. `change` must fire before `blur`, but the decision
+// that gates it is made before either — so a template's `on blur` runs too late
+// to make it. This dispatches a behavior-only `commit` at the decision point.
+//
+// Behavior-only is what makes it legal: no DOM event has fired yet, so there
+// are no JS listeners to preempt and ES5's after-JS ordering is not in play.
+// The template only *decides*; native still dispatches `change` itself, which
+// keeps it ahead of `blur` for templates and JS alike and preserves the state
+// machine's DISPATCH_CHANGE observation.
+//
+// Returns whether a template answered at all. When none did, the caller falls
+// back to the native comparison (ES5), so a page with no package behaves as it
+// always has.
+extern "C" bool radiant_dispatch_behavior_commit(EventContext* evcon, View* target) {
+    return dispatch_behavior_handler(evcon, target, "commit", nullptr, nullptr);
+}
+
 extern "C" bool radiant_dispatch_behavior_input(EventContext* evcon, View* target) {
     return dispatch_behavior_handler(evcon, target, "input", nullptr, nullptr);
 }
@@ -7027,6 +7044,16 @@ static bool prepare_previous_focus_blur(EventContext* evcon,
         doc_state_request_repaint(state);
         evcon->need_repaint = true;
     }
+    // ESO42: give a behavior template the commit decision, here — before
+    // `change` and `blur` are dispatched below, which is the only point where
+    // answering it can still preserve their order. A template that answers
+    // requests the event through radiant.request_change; one that decides the
+    // value was not committed simply requests nothing.
+    uint64_t change_epoch_before = radiant_change_request_epoch();
+    if (radiant_dispatch_behavior_commit(evcon, prev_focus)) {
+        return radiant_change_request_epoch() != change_epoch_before;
+    }
+    // No template answered: the native comparison stands (ES5 fallback).
     return te_blur_should_dispatch_change(prev_elem);
 }
 

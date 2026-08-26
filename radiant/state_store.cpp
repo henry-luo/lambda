@@ -4236,18 +4236,15 @@ bool form_control_restore_text_control_state(DocState* state, View* view) {
         form->current_value_u16_len = tc_utf8_to_utf16_length(
             form->current_value, form->current_value_len);
     }
+    // The ViewState is the durable copy and no longer needs to be second-guessed
+    // against DocState::sel. Both are written by one publish
+    // (state_store_set_text_control_selection), so a caret newer than the cached
+    // ViewState is no longer reachable — the special case that used to prefer
+    // DocState::sel here existed only because the two were fanned out
+    // separately and could disagree (ESO22).
     uint32_t restore_start = view_state->data.form.selection_start;
     uint32_t restore_end = view_state->data.form.selection_end;
     uint8_t restore_direction = view_state->data.form.selection_direction;
-    if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
-        state->sel.control == elem) {
-        // fallback relayout can run while the replacement caret is newer than
-        // the cached ViewState; keep StateStore selection authoritative.
-        restore_start = state->sel.start_u16;
-        restore_end = state->sel.end_u16;
-        restore_direction = restore_start == restore_end ? 0 :
-            (state->sel.direction == DOM_SEL_DIR_BACKWARD ? 2 : 1);
-    }
     form->selection_start = restore_start;
     form->selection_end = restore_end;
     if (form->selection_start > form->current_value_u16_len) {

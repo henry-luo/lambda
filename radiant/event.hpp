@@ -1356,6 +1356,9 @@ void editing_dispatch_log_intent(EventContext* evcon,
 // from one that claimed the intent and changed nothing (a maxlength-blocked
 // keystroke), which must not produce an `input` event.
 extern "C" uint64_t radiant_splice_epoch(void);
+// Change requests made by a behavior template's `commit` handler (ESO42),
+// sampled across the commit dispatch to read its answer.
+extern "C" uint64_t radiant_change_request_epoch(void);
 
 bool editing_dispatch_form_beforeinput(EventContext* evcon,
                                        const EditingSurface* surface,

@@ -1514,6 +1514,35 @@ RADIANT_C_API Item fn_radiant_replace_range(Item node_item, Item start_item,
     return (Item){.item = b2it(ok ? 1 : 0)};
 }
 
+// ---- change-on-blur (ESO42) ------------------------------------------------
+//
+// The value as it stood when the control gained focus. The snapshot itself is
+// engine mechanism (te_focus_capture_value); what a template does with it —
+// deciding whether the value was committed — is the policy.
+RADIANT_C_API Item fn_radiant_value_at_focus(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "VALUE_AT_FOCUS");
+    FormControlProp* f = elem ? elem->form_control() : nullptr;
+    if (!f || !f->value_at_focus) return ItemNull;
+    return radiant_string_item(f->value_at_focus);
+}
+
+// Counts change requests. The engine samples it across the commit hook so the
+// template can answer "the value was committed" without dispatching the event
+// itself — native still fires `change`, which is what keeps it ahead of `blur`
+// and keeps the state machine's DISPATCH_CHANGE observation intact.
+static uint64_t g_radiant_change_request_epoch = 0;
+
+extern "C" uint64_t radiant_change_request_epoch(void) {
+    return g_radiant_change_request_epoch;
+}
+
+RADIANT_C_API Item fn_radiant_request_change(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "REQUEST_CHANGE");
+    if (!elem) return (Item){.item = b2it(0)};
+    g_radiant_change_request_epoch++;
+    return (Item){.item = b2it(1)};
+}
+
 RADIANT_C_API Item fn_radiant_free(Item node_item) {
     DomNode* node = radiant_dom_node_from_item(node_item, "FREE");
     if (!node) return ItemNull;
@@ -1921,6 +1950,10 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_set_selection(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_selection},
     {"replace_range", "fn(node: dom_node, start: int, end: int, text: string) -> bool", (fn_ptr)fn_radiant_replace_range, JUBE_FN_NONE,
      "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
+    {"value_at_focus", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_value_at_focus, JUBE_FN_NONE,
+     "Item fn_radiant_value_at_focus(Item node)", (fn_ptr)fn_radiant_value_at_focus},
+    {"request_change", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_request_change, JUBE_FN_NONE,
+     "Item fn_radiant_request_change(Item node)", (fn_ptr)fn_radiant_request_change},
     {"free", "fn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
     {"layout", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,
