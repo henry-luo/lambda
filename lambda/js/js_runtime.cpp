@@ -2479,6 +2479,17 @@ extern "C" void js_set_class_instance_field_metadata_key(
             index, &keys)) keys->items[index] = key;
 }
 
+extern "C" void js_set_class_instance_field_metadata_private_method(
+        Item class_item, int index) {
+    Array* kinds = NULL;
+    if (js_class_instance_field_metadata_array(class_item, "__if_kinds__", 12,
+            index, &kinds)) {
+        // A method has no value slot, but its declaration installs the class
+        // brand before every instance field initializer runs.
+        kinds->items[index] = (Item){.item = i2it(1)};
+    }
+}
+
 static Item js_init_class_instance_field(Item callee, Item object, Item field_key,
     bool value_found, Item field_value, bool brand_only) {
     RootFrame roots(5);

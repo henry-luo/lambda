@@ -895,6 +895,7 @@ void js_init_class_instance_field_metadata(Item class_item, int count);
 void js_set_class_instance_field_metadata_name_id_range(Item class_item,
     int index, uint32_t module_name_base, int count, uint64_t method_mask);
 void js_set_class_instance_field_metadata_key(Item class_item, int index, Item key);
+void js_set_class_instance_field_metadata_private_method(Item class_item, int index);
 void js_set_class_instance_field_metadata_value(Item class_item, int index, Item value);
 void js_set_class_instance_field_metadata_initializer(Item class_item, int index,
     Item initializer);

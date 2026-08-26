@@ -5,12 +5,12 @@
 **Status:** PARTIALLY IMPLEMENTED — the explicit synchronous AST backend
 landed on 2026-08-26 and now covers the implemented P2 core plus the P3
 surface listed in §13, including dynamic `eval` through the shared runtime
-bridge. The default remains whole-script MIR; modules, private names, mixed
+bridge. The default remains whole-script MIR; modules, mixed
 T0/T1 environment cells, suspension, and AUTO promotion remain planned.
 
 **Scope:** LambdaJS only. This document specializes the interpreter direction established by **AI21** and the shared-AST rules **D8.2.1–D8.2.5**. It does not change the Lambda-language T0 semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
-**Formal authority:** **D1.1–D1.7**, **D5.1.1**, **D5.3.2–D5.3.4**, **D5.4.1**, **D6.2.1–D6.2.4**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v6**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
+**Formal authority:** **D1.1–D1.7**, **D5.1.1**, **D5.3.2–D5.3.4**, **D5.4.1**, **D6.2.1–D6.2.4**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v7**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
 
 **Related designs:** [`Lambda_Design_Ast_Interpreter.md`](Lambda_Design_Ast_Interpreter.md) (AI1–AI22), [`Lambda_Design_Unified_AST.md`](Lambda_Design_Unified_AST.md) (U1–U36), [`Lambda_Design_Runtime_Error_Handling.md`](Lambda_Design_Runtime_Error_Handling.md), [`Lambda_Design_Stack_Frame_JS.md`](Lambda_Design_Stack_Frame_JS.md), [`doc/dev/js/JS_01_Compilation_Pipeline.md`](../doc/dev/js/JS_01_Compilation_Pipeline.md), [`JS_04_MIR_Lowering.md`](../doc/dev/js/JS_04_MIR_Lowering.md), [`JS_05_Functions_Closures.md`](../doc/dev/js/JS_05_Functions_Closures.md), [`JS_08_Iterators_Generators.md`](../doc/dev/js/JS_08_Iterators_Generators.md), and [`JS_09_Async_Modules.md`](../doc/dev/js/JS_09_Async_Modules.md).
 
@@ -342,6 +342,8 @@ Direct eval is admitted only after both tiers can materialize the same environme
 - T0 passes its active lexical/variable environments directly;
 - T1 functions with syntactic direct eval allocate/materialize every binding that eval may observe;
 - eval binding creation targets the proper variable/global environment under strict/sloppy rules;
+- a class-private environment contributes declared source-name/identity-key
+  pairs to the existing eval-private frame, from outer to inner class;
 - compiled and interpreted callees read the same cells after eval mutates them.
 
 Until this bridge is complete, a `JsScript` containing direct eval fails the T0 support scan. Indirect eval and `Function` construction may continue through a separate script compile/execute entry, subject to the same retained-owner rules.
@@ -567,7 +569,7 @@ Subsequent interpreted reads and writes consult that journal. At script global
 scope, dynamic eval uses the realm-global path and the walker synchronizes the
 realm lexical table back to the script module slab. This retains one runtime,
 one EvalContext, one global object, and one module registry as required by
-**D8.1.3v6** and **D5.4.1**.
+**D8.1.3v7** and **D5.4.1**.
 
 ### 7.11 Classes
 
@@ -585,10 +587,11 @@ Classes require persistent `JsClassPlan` facts before T0 admission:
 
 The walker calls the existing class/property/construct helpers. It does not reproduce prototype or private-brand algorithms in interpreter-only code.
 
-The admitted P3 public-class subset retains its AST owner and delegates class
-capabilities to the existing runtime metadata. Private-name planning remains
-outside that subset and is rejected before execution until `JsClassPlan` owns
-the required private environment facts.
+The admitted P3 class subset retains its AST owner and delegates public and
+private capabilities to the existing runtime metadata. Class evaluation owns a
+traced private-home environment; member closures and nested functions retain
+that exact class identity, while private fields/method brands and private
+accesses use the common runtime kernels.
 
 ### 7.12 Modules
 
@@ -887,7 +890,7 @@ rest/spread, optional chaining, object methods/accessors, generators, async,
 and top-level await are rejected before declaration instantiation. A forced
 AST request returns the JavaScript rejection error rather than silently
 replaying in MIR; with no selector, existing MIR remains the policy. This is
-the explicit-backend contract of **D8.1.3v6**, preserving **D8.4.3v2** error
+the explicit-backend contract of **D8.1.3v7**, preserving **D8.4.3v2** error
 transport and **D1.3** guest semantics.
 
 **Gate:** focused ownership, module-state, call/construct, native-callback,
@@ -908,9 +911,9 @@ Implemented:
 - regex, templates, and tagged templates through the common call runtime;
 - `with` through the existing object-environment stack, including escaped AST
   closures;
-- public classes: methods/accessors, public instance/static fields, static
-  blocks, and implicit derived construction, all through the existing class
-  function/property kernels.
+- classes: public/private methods and accessors, public/private
+  instance/static fields, private `in`, static blocks, and implicit derived
+  construction, all through the existing class function/property kernels.
 - direct/indirect `eval`: direct calls bridge interpreted function cells and
   eval-local vars through the shared EvalContext; global lexical mutations
   synchronize back to the retained script slab.
@@ -923,8 +926,8 @@ Implemented:
   simple parameters, unmapped strict/non-simple parameters, `callee`, and
   escaped arrow lookup through the captured function environment.
 
-Still excluded: private names, CommonJS/ES modules,
-generators, async, and top-level await. These forms fail before observable
+Still excluded: CommonJS/ES modules, generators, async, and top-level await.
+These forms fail before observable
 execution under the forced AST selector.
 
 **Gate:** the committed `test_js_gtest` corpus partition is complete—every discovered row is an exact T0 match or an explicit pre-execution exclusion, with no unclassified or silent fallback rows.
@@ -1151,7 +1154,7 @@ These questions do not reopen the decisions above:
 ## 18. Adoption Requirements
 
 This proposal's P2 implementation authority is now recorded by
-**D6.2.3v2**, **D8.1.3v6**, and
+**D6.2.3v2**, **D8.1.3v7**, and
 [`vibe/impl/Lambda_Impl_JS_Interpreter.md`](impl/Lambda_Impl_JS_Interpreter.md).
 The following requirements remain for later phases:
 

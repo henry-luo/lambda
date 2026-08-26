@@ -13,6 +13,11 @@ typedef struct JsInterpEnv {
     // The function activation owns its materialized exotic arguments object.
     // Arrows leave this empty and resolve the nearest outer function record.
     uint64_t arguments_object;
+    // Class evaluation publishes this lexical private-name owner for member
+    // bodies, field initializers, static blocks, and their nested closures.
+    uint64_t private_home_class;
+    // Flat [source name, identity key] pairs exported to a direct-eval bridge.
+    uint64_t private_bindings;
     struct AstNode* function_node;
     uint32_t slot_count;
     uint8_t arguments_are_mapped;

@@ -143,6 +143,17 @@ static Item js_interp_name_key(const String* name) {
     return name ? (Item){.item = s2it((String*)name)} : ItemNull;
 }
 
+static bool js_interp_private_source_name(Item key) {
+    String* name = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
+    return name && name->len > 1 && name->chars[0] == '#';
+}
+
+static bool js_interp_private_key(Item key) {
+    String* name = get_type_id(key) == LMD_TYPE_STRING ? it2s(key) : NULL;
+    return name && property_key_requires_identity(name) &&
+        property_key_kind(name) == NAME_KEY_PRIVATE;
+}
+
 static int js_interp_scope_slot_count(NameScope* scope) {
     if (!scope) return 0;
     int count = 0;
@@ -154,7 +165,7 @@ static int js_interp_scope_slot_count(NameScope* scope) {
 }
 
 static JsInterpEnv* js_interp_env_create(NameScope* scope, JsInterpEnv* outer) {
-    if (!context || !context->heap || !context->heap->gc || !scope) return NULL;
+    if (!context || !context->heap || !context->heap->gc) return NULL;
     int count = js_interp_scope_slot_count(scope);
     size_t size = sizeof(JsInterpEnv);
     if (count > 1) size += (size_t)(count - 1) * sizeof(uint64_t);
@@ -172,6 +183,8 @@ static JsInterpEnv* js_interp_env_clone(JsInterpEnv* source) {
     JsInterpEnv* copy = js_interp_env_create(source->scope, source->outer);
     if (!copy || copy->slot_count != source->slot_count) return NULL;
     copy->arguments_object = source->arguments_object;
+    copy->private_home_class = source->private_home_class;
+    copy->private_bindings = source->private_bindings;
     copy->function_node = source->function_node;
     copy->arguments_are_mapped = source->arguments_are_mapped;
     if (copy->slot_count) {
@@ -192,6 +205,56 @@ static JsInterpEnv* js_interp_find_arguments_env(JsInterpEnv* env) {
         if (scan->arguments_object != 0) return scan;
     }
     return NULL;
+}
+
+static Item js_interp_find_private_home(JsInterpFrame* frame) {
+    Item home = js_interp_frame_home_class(frame);
+    if (home.item != 0 && home.item != ItemNull.item &&
+            get_type_id(home) != LMD_TYPE_UNDEFINED) return home;
+    for (JsInterpEnv* env = frame ? frame->env : NULL; env; env = env->outer) {
+        if (env->private_home_class != 0 &&
+                env->private_home_class != ItemNull.item) {
+            return (Item){.item = env->private_home_class};
+        }
+    }
+    return ItemNull;
+}
+
+static Item js_interp_private_key_for_frame(JsInterpFrame* frame, Item source_key) {
+    if (!js_interp_private_source_name(source_key)) return source_key;
+    RootFrame roots(2);
+    Rooted<Item> source_root(roots, source_key);
+    Rooted<Item> home_root(roots, js_interp_find_private_home(frame));
+    if (!roots.valid() || home_root.get().item == ItemNull.item ||
+            home_root.get().item == 0) {
+        return js_throw_type_error("Private name used outside its declaring class");
+    }
+    return js_private_key_for_class(home_root.get(), source_root.get());
+}
+
+static Item js_interp_register_private_binding(JsInterpFrame* frame,
+        Item source_key, Item private_key) {
+    JsInterpEnv* env = frame ? frame->env : NULL;
+    while (env && env->private_home_class == 0) env = env->outer;
+    if (!env) return ItemError;
+    RootFrame roots(3);
+    String* source_name = get_type_id(source_key) == LMD_TYPE_STRING
+        ? it2s(source_key) : NULL;
+    Rooted<Item> source_root(roots, source_name
+        ? js_make_string_len(source_name->chars, (int)source_name->len) : ItemError);
+    Rooted<Item> key_root(roots, private_key);
+    Rooted<Item> bindings_root(roots, (Item){.item = env->private_bindings});
+    if (item_is_error(source_root.get())) return source_root.get();
+    if (bindings_root.get().item == 0 || bindings_root.get().item == ItemNull.item) {
+        bindings_root.set(js_array_new(0));
+        if (item_is_error(bindings_root.get())) return bindings_root.get();
+        env->private_bindings = bindings_root.get().item;
+    }
+    if (get_type_id(bindings_root.get()) != LMD_TYPE_ARRAY) return ItemError;
+    Item pushed = js_array_push(bindings_root.get(), source_root.get());
+    if (item_is_error(pushed)) return pushed;
+    pushed = js_array_push(bindings_root.get(), key_root.get());
+    return item_is_error(pushed) ? pushed : js_status_ok();
 }
 
 static bool js_interp_function_has_simple_params(const JsFunctionNode* function) {
@@ -456,16 +519,29 @@ static NameEntry* js_interp_find_binding(JsInterpFrame* frame, String* name) {
 }
 
 static JsInterpCompletion js_interp_class_key(JsInterpFrame* frame,
-        JsAstNode* key, bool computed) {
+        JsAstNode* key, bool computed, Item class_item) {
     if (!key) return js_interp_throw(js_throw_type_error("class member has no name"));
+    Item result = ItemNull;
     if (!computed && key->node_type == AST_NODE_IDENT) {
-        return js_interp_normal(js_interp_name_key(((JsIdentifierNode*)key)->name));
+        result = js_interp_name_key(((JsIdentifierNode*)key)->name);
+    } else {
+        JsInterpCompletion value = js_interp_eval(frame, key);
+        if (value.kind != JS_INTERP_NORMAL) return value;
+        result = js_to_property_key(value.value);
     }
-    JsInterpCompletion value = js_interp_eval(frame, key);
-    if (value.kind != JS_INTERP_NORMAL) return value;
-    Item property_key = js_to_property_key(value.value);
-    return item_is_error(property_key) ? js_interp_throw(property_key)
-        : js_interp_normal(property_key);
+    if (item_is_error(result)) return js_interp_throw(result);
+    if (!computed && js_interp_private_source_name(result)) {
+        RootFrame roots(2);
+        Rooted<Item> class_root(roots, class_item);
+        Rooted<Item> key_root(roots, result);
+        Item private_key = js_private_key_for_class(class_root.get(), key_root.get());
+        if (item_is_error(private_key)) return js_interp_throw(private_key);
+        Item registered = js_interp_register_private_binding(frame,
+            key_root.get(), private_key);
+        return item_is_error(registered) ? js_interp_throw(registered)
+            : js_interp_normal(private_key);
+    }
+    return js_interp_normal(result);
 }
 
 static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
@@ -534,28 +610,45 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
         if (item_is_error(stored)) return js_interp_throw(stored);
     }
 
+    JsInterpEnv* class_env = js_interp_env_create(NULL, frame->env);
+    JsInterpEnvRoot class_env_root(class_env);
+    if (!class_env || !class_env_root.registered) return js_interp_throw(ItemError);
+    // The class environment retains private-name identity for every member
+    // closure; nested ordinary functions must not depend on ambient call state.
+    class_env->private_home_class = class_root.get().item;
+
     int instance_field_count = 0;
     for (JsAstNode* member = cls->body ? (JsAstNode*)((JsBlockNode*)cls->body)->statements
             : NULL; member; member = (JsAstNode*)member->next) {
         if (member->node_type == JS_AST_NODE_FIELD_DEFINITION &&
-                !((JsFieldDefinitionNode*)member)->is_static) instance_field_count++;
+                !((JsFieldDefinitionNode*)member)->is_static) {
+            instance_field_count++;
+        } else if (member->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+            JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)member;
+            Item source_key = method->key && method->key->node_type == AST_NODE_IDENT
+                ? js_interp_name_key(((JsIdentifierNode*)method->key)->name) : ItemNull;
+            if (!method->static_method && js_interp_private_source_name(source_key)) {
+                instance_field_count++;
+            }
+        }
     }
     if (instance_field_count > 0) {
         js_init_class_instance_field_metadata(class_root.get(), instance_field_count);
     }
     int instance_field_index = 0;
     JsInterpFrame static_frame = *frame;
+    static_frame.env = class_env;
     static_frame.this_home = class_root.home();
     static_frame.home_class_home = class_root.home();
     for (JsAstNode* member = cls->body ? (JsAstNode*)((JsBlockNode*)cls->body)->statements
             : NULL; member; member = (JsAstNode*)member->next) {
         if (member->node_type == JS_AST_NODE_METHOD_DEFINITION) {
             JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)member;
-            JsInterpCompletion key = js_interp_class_key(frame, (JsAstNode*)method->key,
-                method->computed);
+            JsInterpCompletion key = js_interp_class_key(&static_frame,
+                (JsAstNode*)method->key, method->computed, class_root.get());
             if (key.kind != JS_INTERP_NORMAL) return key;
             key_root.set(key.value);
-            method_root.set(js_interp_make_method(frame, (JsFunctionNode*)method));
+            method_root.set(js_interp_make_method(&static_frame, (JsFunctionNode*)method));
             if (item_is_error(method_root.get())) return js_interp_throw(method_root.get());
             js_set_function_home_class(method_root.get(), class_root.get());
             if (method->kind == JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR) {
@@ -570,6 +663,7 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
                 continue;
             }
             target_root.set(method->static_method ? class_root.get() : prototype_root.get());
+            bool private_method = js_interp_private_key(key_root.get());
             Item installed = (method->kind == JsMethodDefinitionNode::JS_METHOD_GET ||
                     method->kind == JsMethodDefinitionNode::JS_METHOD_SET)
                 ? js_define_accessor_partial(target_root.get(), key_root.get(), method_root.get(),
@@ -577,6 +671,19 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
                     JSPD_NON_ENUMERABLE)
                 : js_create_data_property(target_root.get(), key_root.get(), method_root.get());
             if (item_is_error(installed)) return js_interp_throw(installed);
+            if (private_method) {
+                js_mark_private_method_non_writable(target_root.get(), key_root.get());
+                if (!method->static_method) {
+                    js_set_class_instance_field_metadata_key(class_root.get(),
+                        instance_field_index, key_root.get());
+                    js_set_class_instance_field_metadata_private_method(class_root.get(),
+                        instance_field_index++);
+                } else {
+                    Item branded = js_private_brand_add(class_root.get(), key_root.get(),
+                        class_root.get());
+                    if (item_is_error(branded)) return js_interp_throw(branded);
+                }
+            }
             if (method->kind != JsMethodDefinitionNode::JS_METHOD_GET &&
                     method->kind != JsMethodDefinitionNode::JS_METHOD_SET) {
                 js_mark_non_enumerable(target_root.get(), key_root.get());
@@ -585,17 +692,15 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
         }
         if (member->node_type == JS_AST_NODE_FIELD_DEFINITION) {
             JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)member;
-            if (field->is_private) return js_interp_throw(js_throw_type_error(
-                "unsupported interpreted private field"));
-            JsInterpCompletion key = js_interp_class_key(frame, (JsAstNode*)field->key,
-                field->computed);
+            JsInterpCompletion key = js_interp_class_key(&static_frame,
+                (JsAstNode*)field->key, field->computed, class_root.get());
             if (key.kind != JS_INTERP_NORMAL) return key;
             key_root.set(key.value);
             if (!field->is_static) {
                 js_set_class_instance_field_metadata_key(class_root.get(),
                     instance_field_index, key_root.get());
                 if (field->value) {
-                    method_root.set(js_interp_make_field_initializer(frame, field));
+                    method_root.set(js_interp_make_field_initializer(&static_frame, field));
                     if (item_is_error(method_root.get())) return js_interp_throw(method_root.get());
                     js_set_function_home_class(method_root.get(), class_root.get());
                     js_set_class_instance_field_metadata_initializer(class_root.get(),
@@ -618,6 +723,11 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
             Item installed = js_create_data_property(class_root.get(), key_root.get(),
                 value_root.get());
             if (item_is_error(installed)) return js_interp_throw(installed);
+            if (field->is_private) {
+                Item branded = js_private_brand_add(class_root.get(), key_root.get(),
+                    class_root.get());
+                if (item_is_error(branded)) return js_interp_throw(branded);
+            }
             continue;
         }
         if (member->node_type == JS_AST_NODE_STATIC_BLOCK) {
@@ -638,7 +748,8 @@ static Item js_interp_property_key(JsInterpFrame* frame, JsMemberNode* member) {
     if (!member) return ItemError;
     if (!member->computed && member->property &&
             member->property->node_type == AST_NODE_IDENT) {
-        return js_interp_name_key(((JsIdentifierNode*)member->property)->name);
+        return js_interp_private_key_for_frame(frame,
+            js_interp_name_key(((JsIdentifierNode*)member->property)->name));
     }
     RootFrame roots(1);
     Rooted<Item> key_root(roots, ItemNull);
@@ -738,6 +849,10 @@ static Item js_interp_reference_write(JsInterpFrame* frame,
     if (!reference->property) {
         return js_interp_write_binding(frame, reference->entry,
             reference->entry ? NULL : it2s(js_interp_reference_key(reference)), value, initialize);
+    }
+    if (js_interp_private_key(js_interp_reference_key(reference))) {
+        return js_private_property_set(js_interp_reference_object(reference),
+            js_interp_reference_key(reference), value, frame->strict ? 1 : 0);
     }
     if (reference->super_property) {
         return js_super_property_set(js_interp_reference_object(reference),
@@ -883,7 +998,10 @@ static bool js_interp_env_name_shadowed_before(JsInterpEnv* inner,
 
 static Item js_interp_eval_writeback_scope(JsInterpFrame* frame,
         NameScope* scope, JsInterpEnv* scope_env) {
-    if (!frame || !scope) return ItemError;
+    if (!frame) return ItemError;
+    // Class-private environments carry lexical identity only; direct eval
+    // must bridge their names without treating them as writable JS bindings.
+    if (!scope) return js_status_ok();
     for (NameEntry* entry = scope->first; entry; entry = entry->next) {
         if (!entry->name || entry->is_const ||
                 (scope_env && js_interp_env_name_shadowed_before(frame->env,
@@ -928,6 +1046,57 @@ static void js_interp_eval_note_lexicals(JsInterpEnv* env) {
         if (entry->is_const) js_eval_local_note_immutable_binding(key);
     }
 }
+
+static bool js_interp_env_has_private_bindings(JsInterpEnv* env) {
+    for (; env; env = env->outer) {
+        if (get_type_id((Item){.item = env->private_bindings}) == LMD_TYPE_ARRAY) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void js_interp_eval_bind_private_envs(JsInterpEnv* env) {
+    if (!env) return;
+    js_interp_eval_bind_private_envs(env->outer);
+    Item bindings = (Item){.item = env->private_bindings};
+    if (get_type_id(bindings) != LMD_TYPE_ARRAY) return;
+    RootFrame roots(3);
+    Rooted<Item> bindings_root(roots, bindings);
+    Rooted<Item> source_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    int64_t length = js_array_length(bindings_root.get());
+    for (int64_t index = 0; index + 1 < length; index += 2) {
+        source_root.set(js_elements_get_int(bindings_root.get(), index));
+        key_root.set(js_elements_get_int(bindings_root.get(), index + 1));
+        if (item_is_error(source_root.get()) || item_is_error(key_root.get())) return;
+        js_eval_private_bind(source_root.get(), key_root.get());
+    }
+}
+
+struct JsInterpPrivateEvalBridge {
+    bool active;
+
+    explicit JsInterpPrivateEvalBridge(JsInterpFrame* frame)
+        : active(js_interp_env_has_private_bindings(frame ? frame->env : NULL)) {
+        if (!active) return;
+        js_eval_private_push_frame();
+        // Bind outer classes first so a nested class's declaration shadows
+        // an equal spelling exactly as the lexical private environment does.
+        js_interp_eval_bind_private_envs(frame->env);
+    }
+
+    void close() {
+        if (!active) return;
+        js_eval_private_pop_frame();
+        active = false;
+    }
+
+    ~JsInterpPrivateEvalBridge() { close(); }
+
+    JsInterpPrivateEvalBridge(const JsInterpPrivateEvalBridge&) = delete;
+    JsInterpPrivateEvalBridge& operator=(const JsInterpPrivateEvalBridge&) = delete;
+};
 
 struct JsInterpEvalBridge {
     JsInterpFrame* frame;
@@ -987,10 +1156,12 @@ static Item js_interp_direct_eval(JsInterpFrame* frame, Item code) {
     }
     JsInterpEvalBridge bridge(frame);
     if (!bridge.active) return ItemError;
+    JsInterpPrivateEvalBridge private_bridge(frame);
     RootFrame roots(1);
     Rooted<Item> result_root(roots, js_builtin_eval(code,
         3 | (frame && frame->strict ? 4 : 0)));
     Item writeback = bridge.writeback();
+    private_bridge.close();
     bridge.close();
     if (item_is_error(result_root.get())) return result_root.get();
     return item_is_error(writeback) ? writeback : result_root.get();
@@ -1481,6 +1652,24 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
     }
     case AST_NODE_BINARY: {
         JsBinaryNode* binary = (JsBinaryNode*)node;
+        if (binary->op == OPERATOR_IN && binary->left &&
+                binary->left->node_type == AST_NODE_IDENT) {
+            Item source_key = js_interp_name_key(
+                ((JsIdentifierNode*)binary->left)->name);
+            if (js_interp_private_source_name(source_key)) {
+                RootFrame roots(2);
+                Rooted<Item> key_root(roots,
+                    js_interp_private_key_for_frame(frame, source_key));
+                if (item_is_error(key_root.get())) return js_interp_throw(key_root.get());
+                JsInterpCompletion right = js_interp_eval(frame,
+                    (JsAstNode*)binary->right);
+                if (right.kind != JS_INTERP_NORMAL) return right;
+                Rooted<Item> object_root(roots, right.value);
+                Item result = js_private_in(object_root.get(), key_root.get());
+                return item_is_error(result) ? js_interp_throw(result)
+                    : js_interp_normal(result);
+            }
+        }
         JsInterpCompletion left = js_interp_eval(frame, (JsAstNode*)binary->left);
         if (left.kind != JS_INTERP_NORMAL) return left;
         if (binary->op == OPERATOR_AND && !js_is_truthy(left.value)) return left;
@@ -2333,8 +2522,6 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
         break;
     }
     case JS_AST_NODE_FIELD_DEFINITION: {
-        JsFieldDefinitionNode* field = (JsFieldDefinitionNode*)node;
-        if (field->is_private) state->supported = false;
         break;
     }
     case JS_AST_NODE_STATIC_BLOCK:

@@ -749,3 +749,57 @@ TEST(JsInterpreter, RetainsArgumentsAcrossNestedCallsAndEscapedArrows) {
 
     runtime_cleanup(&runtime);
 }
+
+TEST(JsInterpreter, SharesPrivateClassElementsWithTheRuntimeKernel) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "class Vault { #value = 2; #increment() { this.#value++; return this.#value; } "
+        "get value() { return this.#increment(); } static #counter = 3; "
+        "static #read() { return this.#counter; } static run() { let later = () => this.#read(); "
+        "return later(); } probe(other) { return #value in other; } "
+        "nested() { function read(instance) { return instance.#value; } return read(this); } "
+        "evalRead() { return eval('this.#value'); } } "
+        "class PrivateAccess { #slot = 4; get #value() { return this.#slot; } "
+        "set #value(next) { this.#slot = next; } write() { this.#value = 8; return this.#value; } } "
+        "let vault = new Vault(); let access = new PrivateAccess(); vault.value + Vault.run() + "
+        "(vault.probe(vault) ? 10 : 0) + vault.nested() + vault.evalRead() + access.write();";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "private-class.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(30.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RetainsPrivateClassIdentityForEscapedClosuresAcrossGc) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function makeReader() { class Box { #value = 7; reader() { return () => this.#value; } } "
+        "return new Box().reader(); } var reader = makeReader(); reader;";
+    Item executed = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "private-closure.js", NULL);
+
+    ASSERT_FALSE(item_is_error(executed));
+    JsScript* script = (JsScript*)runtime.scripts->data[0];
+    NameEntry* reader_entry = nullptr;
+    for (NameEntry* entry = script->global_scope->first; entry; entry = entry->next) {
+        if (entry->name && entry->name->len == 6 &&
+                memcmp(entry->name->chars, "reader", 6) == 0) {
+            reader_entry = entry;
+            break;
+        }
+    }
+    ASSERT_NE(reader_entry, nullptr);
+    Item reader = js_get_module_var(reader_entry->slot);
+    heap_gc_collect();
+    Item result = js_call_function(reader, make_js_undefined(), NULL, 0);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(7.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
