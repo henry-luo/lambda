@@ -2,8 +2,8 @@
   "_metadata": {
     "schema_version": 2,
     "mode": "time",
-    "started_at": "2026-08-26T17:50:14",
-    "command": "test/benchmark/run_benchmarks.py -m time --typed -n 3 -t 180 --results-output test/benchmark/benchmark_results_v35.json",
+    "started_at": "2026-08-26T20:05:28",
+    "command": "test/benchmark/run_benchmarks.py -s jetstream -b hashmap --typed --results-output test/benchmark/benchmark_results_v35.json",
     "engines": [
       "mir",
       "c2mir",
@@ -14,12 +14,16 @@
       "python"
     ],
     "runs": 3,
-    "timeout_s": 180,
+    "timeout_s": 120,
     "suite_cooldown_seconds": 10,
     "results_output": "test/benchmark/benchmark_results_v35.json",
     "fresh": false,
-    "suite_filters": [],
-    "bench_filters": [],
+    "suite_filters": [
+      "jetstream"
+    ],
+    "bench_filters": [
+      "hashmap"
+    ],
     "canonical_duplicate_suites": {
       "mandelbrot": "awfy",
       "nbody": "awfy",
@@ -29,14 +33,14 @@
     },
     "platform": "Darwin arm64",
     "lambda_exe": "./lambda.exe",
-    "lambda_exe_size_bytes": 19817976,
-    "lambda_archive": "test/benchmark/exe/lambda-v35-fe6c8e14c1",
-    "lambda_archive_size_bytes": 19817976,
-    "lambda_archive_sha256": "fd78a0bfb68e7315733d6188a97c0fbd201cd9317694a8ecc3cc0fa5d8ab0687",
+    "lambda_exe_size_bytes": 19887272,
+    "lambda_archive": null,
+    "lambda_archive_size_bytes": null,
+    "lambda_archive_sha256": null,
     "test262_baseline": {
       "status": "not_run"
     },
-    "lambda_commit": "fe6c8e14c15a003ff4fc7000f6553b933b4f764b",
+    "lambda_commit": "357df0ae05b3385d04a832d5f147d6e720ed544b",
     "node_version": "v22.13.0",
     "python_version": "Python 3.14.6",
     "quickjs_version": "2025-09-13",
@@ -45,7 +49,7 @@
     "typed_variants": true,
     "legacy_variants": false,
     "mir_key_source": "untyped <bench>.ls",
-    "finished_at": "2026-08-26T18:35:38",
+    "finished_at": "2026-08-26T20:05:58",
     "measurement_sets": "Part 1 (exec): each engine's self-reported __TIMING__, startup and compilation OUTSIDE the measured region; MIR columns pin LAMBDA_TIER=jit. Comparable to Result18 onward. Part 2 (e2e, keys ending _e2e): wall clock from invocation to exit, every engine paying its own startup and compilation INSIDE the number, with the MIR columns on the shipped auto tier. Reference engines report both sets from the SAME run; only the MIR columns are launched twice."
   },
   "r7rs": {
@@ -6830,7 +6834,7 @@
     },
     "hashmap": {
       "category": "data",
-      "mir": 130.873,
+      "mir": 125.309,
       "_status": {
         "mir": "ok",
         "mir_typed": "ok",
@@ -6841,7 +6845,7 @@
         "nodejs": "ok",
         "python": "missing_file",
         "mir_auto_e2e": "ok",
-        "mir_typed_auto_e2e": "wrong_output",
+        "mir_typed_auto_e2e": "ok",
         "c2mir_e2e": "ok",
         "go_e2e": "ok",
         "lambdajs_e2e": "ok",
@@ -6891,7 +6895,7 @@
         },
         "mir_typed_auto_e2e": {
           "status_counts": {
-            "wrong_output": 3
+            "ok": 3
           }
         },
         "c2mir_e2e": {
@@ -6920,12 +6924,12 @@
           }
         }
       },
-      "mir_typed": 43.427,
-      "c2mir": 2.719971,
-      "go": 6.525167,
-      "lambdajs": 4968.242,
-      "quickjs": 315.134,
-      "nodejs": 15.35,
+      "mir_typed": 43.942,
+      "c2mir": 2.702881,
+      "go": 6.844208,
+      "lambdajs": 4998.5,
+      "quickjs": 315.964,
+      "nodejs": 15.254,
       "python": null,
       "_auto_status": {
         "mir": "ok",
@@ -6943,13 +6947,13 @@
           }
         }
       },
-      "mir_auto_e2e": 1538.348458,
-      "mir_typed_auto_e2e": null,
-      "c2mir_e2e": 51.545458,
-      "go_e2e": 21.741791,
-      "lambdajs_e2e": 5131.809209,
-      "quickjs_e2e": 325.53475,
-      "nodejs_e2e": 62.630958
+      "mir_auto_e2e": 1523.083083,
+      "mir_typed_auto_e2e": 1686.985,
+      "c2mir_e2e": 48.758958,
+      "go_e2e": 16.908416,
+      "lambdajs_e2e": 5157.102833,
+      "quickjs_e2e": 322.9095,
+      "nodejs_e2e": 59.144875
     },
     "crypto_sha1": {
       "category": "crypto",

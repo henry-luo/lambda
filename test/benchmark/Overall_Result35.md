@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-26
 - **Platform:** Darwin arm64
-- **Lambda commit:** `fe6c8e14c1`
+- **Lambda commit:** `fe6c8e14c1`, except the `jetstream/hashmap` row, re-measured in full at `357df0ae0` after the COW child-ownership tier fix (see part 2 notes)
 - **Lambda build:** archived release binary `test/benchmark/exe/lambda-v35-fe6c8e14c1` (19,817,976 bytes)
 - **Instrumentation check:** not_recorded
 - **Node.js:** v22.13.0
@@ -31,7 +31,7 @@ Each engine's own `__TIMING__` figure: the timed workload only, with startup and
 | BENG | 8 | 8 | 8 | 8 | 8 | 5 | 8 | 0.52x | 0.36x | 0.10x | 12.1x | 1.89x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 2.05x | 1.27x | 0.23x | 54.9x | 12.0x |
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 2.24x | 0.83x | 0.33x | 32.3x | 13.2x |
-| JetStream | 6 | 6 | 6 | 6 | 6 | 4 | 6 | 5.40x | 3.12x | 0.29x | 76.1x | 13.0x |
+| JetStream | 6 | 6 | 6 | 6 | 6 | 4 | 6 | 5.37x | 3.13x | 0.29x | 76.3x | 13.0x |
 | Text | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0.29x | 0.22x | 0.02x | 66.7x | 9.40x |
 | **Overall** | 59 | 59 | 59 | 59 | 59 | 53 | 59 | 1.26x | 0.73x | 0.16x | 30.8x | 7.37x |
 
@@ -58,7 +58,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | kostya/base64 | 11.4 | 0.558 | 20.5x |
 | awfy/towers | 0.464 | 0.027 | 17.1x |
 | beng/knucleotide | 4.76 | 0.289 | 16.5x |
-| jetstream/hashmap | 43.4 | 2.72 | 16.0x |
+| jetstream/hashmap | 43.9 | 2.70 | 16.3x |
 | awfy/queens | 0.314 | 0.022 | 14.3x |
 | kostya/json_gen | 21.7 | 1.53 | 14.2x |
 | awfy/nbody | 20.2 | 1.50 | 13.5x |
@@ -77,7 +77,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | awfy/havlak | 106.97s | 97.6 | 1096x |
 | kostya/primes | 3.84s | 4.40 | 872x |
 | awfy/cd | 28.11s | 36.0 | 780x |
-| jetstream/hashmap | 4.97s | 15.3 | 324x |
+| jetstream/hashmap | 5.00s | 15.3 | 328x |
 | larceny/quicksort | 402.6 | 1.64 | 245x |
 | awfy/nbody | 998.5 | 5.25 | 190x |
 | awfy/deltablue | 2.00s | 11.7 | 172x |
@@ -171,7 +171,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | cube3d | 3d | 11.0 | 11.4 | 0.516 | 763.6 | --- | 17.7 | 0.62x | 0.65x | 0.03x | 43.2x | --- |
 | navier_stokes | numeric | 142.5 | 117.3 | 47.0 | 1.04s | 98.6 | 14.0 | 10.1x | 8.35x | 3.35x | 74.1x | 7.02x |
 | splay | data | 134.6 | 144.3 | 18.9 | 1.12s | 146.5 | 19.0 | 7.07x | 7.58x | 0.99x | 59.1x | 7.70x |
-| hashmap | data | 130.9 | 43.4 | 2.72 | 4.97s | 315.1 | 15.3 | 8.53x | 2.83x | 0.18x | 324x | 20.5x |
+| hashmap | data | 125.3 | 43.9 | 2.70 | 5.00s | 316.0 | 15.3 | 8.21x | 2.88x | 0.18x | 328x | 20.7x |
 | crypto_sha1 | crypto | 47.9 | 26.8 | 2.66 | 627.2 | 219.2 | 8.59 | 5.57x | 3.12x | 0.31x | 73.0x | 25.5x |
 | raytrace3d | 3d | 215.9 | 46.6 | 2.20 | 800.2 | --- | 18.4 | 11.8x | 2.54x | 0.12x | 43.6x | --- |
 
@@ -195,13 +195,21 @@ Same processes, where possible: the reference engines report their wall and `__T
 
 ⚠ Short workloads are dominated by fixed process startup here, so a row whose part-1 time is a fraction of a millisecond says more about executable launch cost than about the language. Read part 2 by the longer rows.
 
-⚠ **Two part-2 cells are missing rather than timed**, both reported by the
+⚠ **One part-2 cell is missing rather than timed**, reported by the
 runner's self-verification check rather than assumed:
 
 | Row | cell | why |
 |---|---|---|
 | awfy/cd | `timeout` | exceeded the 180s per-run timeout on the auto tier |
-| jetstream/hashmap | `wrong_output` | typed hashmap2 prints `hash-map: FAIL result=-450000` on auto AND on explicit `LAMBDA_TIER=interp`, while the JIT passes and the untyped variant passes on auto — a typed-script tier mismatch, filed separately. Timing a failure path would have recorded it as a fast row. |
+
+The `jetstream/hashmap` typed part-2 cell was originally `wrong_output` — typed
+`hashmap2` computed `-450000` on the auto/interp tier while the JIT passed. That
+tier mismatch is now fixed (COW child-ownership, commit `f1da478f8`), and **the
+whole `jetstream/hashmap` row was re-measured** at merged commit `357df0ae0`;
+every other cell in the row reproduced within noise (Node 15.35→15.25 ms, C2MIR
+2.72→2.70 ms), so the row remains comparable with the rest of the table. Filling
+the cell in *raises* the part-2 typed geomean from 2.74x to **2.85x**: the row it
+had been silently excluding is a slow one.
 
 ### Summary
 
@@ -212,9 +220,9 @@ runner's self-verification check rather than assumed:
 | BENG | 8 | 8 | 8 | 8 | 8 | 5 | 8 | 1.04x | 0.95x | 1.01x | 1.91x | 0.75x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 11.8x | 8.79x | 0.75x | 9.20x | 2.44x |
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 7.52x | 2.96x | 1.01x | 6.18x | 2.00x |
-| JetStream | 6 | 6 | 5 | 6 | 6 | 4 | 6 | 24.1x | 26.5x | 0.91x | 21.9x | 3.88x |
+| JetStream | 6 | 6 | 6 | 6 | 6 | 4 | 6 | 24.3x | 26.8x | 0.91x | 22.2x | 3.93x |
 | Text | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 4.29x | 2.81x | 0.78x | 27.4x | 2.58x |
-| **Overall** | 59 | 59 | 57 | 59 | 59 | 53 | 59 | 4.50x | 2.74x | 0.94x | 5.74x | 1.16x |
+| **Overall** | 59 | 59 | 58 | 59 | 59 | 53 | 59 | 4.51x | 2.85x | 0.94x | 5.74x | 1.16x |
 
 > Ratio < 1.0 means the engine finished the whole run faster than Node.js.
 
@@ -300,7 +308,7 @@ runner's self-verification check rather than assumed:
 | cube3d | 3d | 344.0 | 367.1 | 52.8 | 884.1 | --- | 67.8 | 5.07x | 5.41x | 0.78x | 13.0x | --- |
 | navier_stokes | numeric | 9.42s | 10.25s | 98.0 | 1.35s | 112.7 | 63.1 | 149x | 162x | 1.55x | 21.3x | 1.78x |
 | splay | data | 1.01s | 1.23s | 69.4 | 2.72s | 564.0 | 95.4 | 10.6x | 12.9x | 0.73x | 28.5x | 5.91x |
-| hashmap | data | 1.54s | --- | 51.5 | 5.13s | 325.5 | 62.6 | 24.6x | --- | 0.82x | 81.9x | 5.20x |
+| hashmap | data | 1.52s | 1.69s | 48.8 | 5.16s | 322.9 | 59.1 | 25.8x | 28.5x | 0.82x | 87.2x | 5.46x |
 | crypto_sha1 | crypto | 2.04s | 2.32s | 52.1 | 686.2 | 229.4 | 55.6 | 36.6x | 41.7x | 0.94x | 12.4x | 4.13x |
 | raytrace3d | 3d | 1.77s | 1.81s | 55.6 | 913.1 | --- | 65.9 | 26.9x | 27.5x | 0.84x | 13.9x | --- |
 
