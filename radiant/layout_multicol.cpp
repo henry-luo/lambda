@@ -4380,10 +4380,15 @@ static void multicol_distribute_flow_group(
                 child, info.content_height, target_height, fragment_count,
                 cursor->block_offset);
             float fragmented_flow_height = flow_height;
+            // css-break: only descendant forced breaks create new flow beyond
+            // the caller's logical extent; trim-aware fragmentation owns its
+            // continuation height and must not be replaced by visible unions.
+            float* generated_flow_height = multicol_has_forced_break_descendant(child)
+                ? &fragmented_flow_height : nullptr;
             placed_height = multicol_fragmented_child_union(
                 lycon, container, child, info.content_height, target_height,
                 group->column_count, group->column_width, group->column_gap,
-                cursor->block_offset, &used_columns, &fragmented_flow_height);
+                cursor->block_offset, &used_columns, generated_flow_height);
             if (used_columns > group->fragment_count) {
                 group->fragment_count = used_columns;
             }
