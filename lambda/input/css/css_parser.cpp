@@ -19,6 +19,7 @@
 #include "../../../lib/recursion_guard.hpp"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 // Caps nested CSS function parsing (e.g. calc(calc(calc(...)))) so pathological input
 // reports a parse failure instead of recursing until the stack overflows.
@@ -102,6 +103,134 @@ static char* css_parser_unescape_url_component(const char* str, size_t len, Pool
     }
     result[out_pos] = '\0';
     return result;
+}
+
+static const char* css_unicode_skip_comment(const char* p, const char* end) {
+    if (!p || !end) return p;
+    while (p < end && p + 1 < end && p[0] == '/' && p[1] == '*') {
+        p += 2;
+        while (p < end && p + 1 < end && !(p[0] == '*' && p[1] == '/')) p++;
+        if (p + 1 < end) p += 2;
+    }
+    return p;
+}
+
+static bool css_unicode_is_hex(char c) {
+    return css_parser_is_hex_digit(c);
+}
+
+static uint32_t css_unicode_parse_hex(const char* chars, int count) {
+    uint32_t value = 0;
+    for (int i = 0; i < count; i++) {
+        value = (value << 4) | css_parser_hex_value(chars[i]);
+    }
+    return value;
+}
+
+static int css_unicode_format_codepoint(uint32_t codepoint, char* output, size_t output_size) {
+    if (!output || output_size < 2) return 0;
+    if (codepoint == 0) {
+        output[0] = '0';
+        output[1] = '\0';
+        return 1;
+    }
+
+    char reversed[8];
+    int length = 0;
+    while (codepoint > 0 && length < 6) {
+        int digit = (int)(codepoint & 0xF);
+        reversed[length++] = digit < 10 ? (char)('0' + digit) : (char)('A' + digit - 10);
+        codepoint >>= 4;
+    }
+    int output_length = length < (int)output_size - 1 ? length : (int)output_size - 1;
+    for (int i = 0; i < output_length; i++) output[i] = reversed[length - i - 1];
+    output[output_length] = '\0';
+    return output_length;
+}
+
+static const char* css_unicode_make_range(uint32_t start, uint32_t end, bool has_range, Pool* pool) {
+    if (!pool || start > 0x10FFFF || end > 0x10FFFF) return NULL;
+
+    char start_text[8];
+    char end_text[8];
+    char result[32];
+    css_unicode_format_codepoint(start, start_text, sizeof(start_text));
+    if (!has_range) {
+        snprintf(result, sizeof(result), "U+%s", start_text);
+    } else {
+        css_unicode_format_codepoint(end, end_text, sizeof(end_text));
+        snprintf(result, sizeof(result), "U+%s-%s", start_text, end_text);
+    }
+    return pool_strdup(pool, result);
+}
+
+/** parse one CSS <unicode-range> and return its CSSOM canonical spelling. */
+const char* css_parse_unicode_range_canonical(const char* input, size_t length, Pool* pool) {
+    if (!input || length == 0 || !pool) return NULL;
+
+    const char* p = input;
+    const char* end = input + length;
+    while (p < end && (p[0] == ' ' || p[0] == '\t')) p++;
+    if (p >= end || (p[0] != 'u' && p[0] != 'U')) return NULL;
+    p++;
+
+    p = css_unicode_skip_comment(p, end);
+    if (p >= end || p[0] != '+') return NULL;
+    p++;
+    p = css_unicode_skip_comment(p, end);
+
+    char start_chars[7];
+    int start_count = 0;
+    while (p < end && css_unicode_is_hex(p[0]) && start_count < 6) {
+        start_chars[start_count++] = p[0];
+        p++;
+    }
+
+    p = css_unicode_skip_comment(p, end);
+    int wildcard_count = 0;
+    while (p < end && p[0] == '?') {
+        wildcard_count++;
+        p++;
+    }
+    if (start_count + wildcard_count == 0 || start_count + wildcard_count > 6) return NULL;
+
+    p = css_unicode_skip_comment(p, end);
+    uint32_t start = css_unicode_parse_hex(start_chars, start_count);
+    if (wildcard_count > 0) {
+        // a wildcard range must end at the declaration/rule boundary.
+        const char* rest = p;
+        while (rest < end && (rest[0] == ' ' || rest[0] == '\t')) rest++;
+        if (rest < end && rest[0] != ';' && rest[0] != '}') return NULL;
+
+        for (int i = 0; i < wildcard_count; i++) start <<= 4;
+        uint32_t finish = css_unicode_parse_hex(start_chars, start_count);
+        for (int i = 0; i < wildcard_count; i++) finish = (finish << 4) | 0xF;
+        return css_unicode_make_range(start, finish, true, pool);
+    }
+
+    // more than six leading hex digits are not a valid unicode-range.
+    if (p < end && css_unicode_is_hex(p[0])) return NULL;
+
+    p = css_unicode_skip_comment(p, end);
+    bool has_range = p < end && p[0] == '-';
+    uint32_t finish = start;
+    if (has_range) {
+        p++;
+        p = css_unicode_skip_comment(p, end);
+        char end_chars[7];
+        int end_count = 0;
+        while (p < end && css_unicode_is_hex(p[0]) && end_count < 6) {
+            end_chars[end_count++] = p[0];
+            p++;
+        }
+        if (end_count == 0 || (p < end && css_unicode_is_hex(p[0]))) return NULL;
+        if (p < end && p[0] == '?') return NULL;
+        finish = css_unicode_parse_hex(end_chars, end_count);
+    }
+
+    while (p < end && (p[0] == ' ' || p[0] == '\t')) p++;
+    if (p < end && p[0] != ';' && p[0] != '}') return NULL;
+    return css_unicode_make_range(start, finish, has_range, pool);
 }
 
 // helper: map a functional pseudo-class name to its selector type
@@ -468,6 +597,35 @@ int css_skip_whitespace_tokens(const CssToken* tokens, int start, int token_coun
     while (pos < token_count &&
            (tokens[pos].type == CSS_TOKEN_WHITESPACE ||
             tokens[pos].type == CSS_TOKEN_COMMENT)) {
+        pos++;
+    }
+    return pos;
+}
+
+// skip an at-rule and its optional block while preserving the enclosing boundary
+static int css_skip_at_rule_tokens(const CssToken* tokens, int pos, int token_count) {
+    if (!tokens || pos < 0 || pos >= token_count ||
+        tokens[pos].type != CSS_TOKEN_AT_KEYWORD) {
+        return pos;
+    }
+
+    pos++;
+    while (pos < token_count && tokens[pos].type != CSS_TOKEN_EOF &&
+           tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
+        if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+            int brace_depth = 1;
+            pos++;
+            while (pos < token_count && brace_depth > 0) {
+                if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) brace_depth++;
+                else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) brace_depth--;
+                pos++;
+            }
+            break;
+        }
+        if (tokens[pos].type == CSS_TOKEN_SEMICOLON) {
+            pos++;
+            break;
+        }
         pos++;
     }
     return pos;
@@ -2798,25 +2956,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
 
         // Skip @-rules inside declaration blocks (e.g., @at {} or @at;)
         if (tokens[pos].type == CSS_TOKEN_AT_KEYWORD) {
-            pos++; // skip @keyword
-            // skip until block or semicolon
-            int brace_depth = 0;
-            while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
-                if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
-                    brace_depth = 1;
-                    pos++;
-                    while (pos < token_count && brace_depth > 0) {
-                        if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) brace_depth++;
-                        else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) brace_depth--;
-                        pos++;
-                    }
-                    break;
-                } else if (tokens[pos].type == CSS_TOKEN_SEMICOLON) {
-                    pos++;
-                    break;
-                }
-                pos++;
-            }
+            pos = css_skip_at_rule_tokens(tokens, pos, token_count);
             continue;
         }
 
@@ -3059,4 +3199,142 @@ CssRule* css_parse_rule_from_tokens(const CssToken* tokens, int token_count, Poo
     CssRule* rule = NULL;
     css_parse_rule_from_tokens_internal(tokens, token_count, pool, &rule);
     return rule;
+}
+
+static bool css_declaration_parse_consumed_all(const CssToken* tokens, int pos, int token_count) {
+    if (!tokens || pos < 0 || token_count <= 0) return false;
+    pos = css_skip_whitespace_tokens(tokens, pos, token_count);
+    if (pos < token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON) {
+        pos++;
+        pos = css_skip_whitespace_tokens(tokens, pos, token_count);
+    }
+    return pos < token_count && tokens[pos].type == CSS_TOKEN_EOF;
+}
+
+CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool) {
+    if (!text || length == 0 || !pool) return NULL;
+
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(text, length, pool, &token_count);
+    if (!tokens || token_count == 0) return NULL;
+
+    int start = css_skip_whitespace_tokens(tokens, 0, (int)token_count);
+    if (start >= (int)token_count) return NULL;
+
+    CssRule* rule = NULL;
+    int consumed = css_parse_rule_from_tokens_internal(
+        tokens + start, (int)token_count - start, pool, &rule);
+    if (consumed <= 0 || !rule) return NULL;
+
+    int end = start + consumed;
+    end = css_skip_whitespace_tokens(tokens, end, (int)token_count);
+    if (end >= (int)token_count || tokens[end].type != CSS_TOKEN_EOF) return NULL;
+    return rule;
+}
+
+CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length, Pool* pool) {
+    if (!text || length == 0 || !pool) return NULL;
+
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(text, length, pool, &token_count);
+    if (!tokens || token_count == 0) return NULL;
+
+    int pos = 0;
+    CssSelectorGroup* group = css_parse_selector_group_from_tokens(
+        tokens, &pos, (int)token_count, pool);
+    if (!group || group->selector_count == 0 ||
+        !css_selector_group_parse_consumed_all(tokens, pos, (int)token_count)) {
+        return NULL;
+    }
+    return group;
+}
+
+CssDeclaration* css_parse_declaration_text(const char* text, size_t length, Pool* pool) {
+    if (!text || length == 0 || !pool) return NULL;
+
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(text, length, pool, &token_count);
+    if (!tokens || token_count == 0) return NULL;
+
+    int pos = 0;
+    CssDeclaration* declaration = css_parse_declaration_from_tokens(
+        tokens, &pos, (int)token_count, pool);
+    if (!declaration || !css_declaration_parse_consumed_all(tokens, pos, (int)token_count)) {
+        return NULL;
+    }
+    return declaration;
+}
+
+CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length,
+                                                 Pool* pool, size_t* declaration_count) {
+    if (declaration_count) *declaration_count = 0;
+    if (!text || length == 0 || !pool || !declaration_count) return NULL;
+
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(text, length, pool, &token_count);
+    if (!tokens || token_count == 0) return NULL;
+
+    size_t capacity = 8;
+    CssDeclaration** declarations = (CssDeclaration**)pool_calloc(
+        pool, capacity * sizeof(CssDeclaration*));
+    if (!declarations) return NULL;
+
+    int pos = 0;
+    while (pos < (int)token_count) {
+        pos = css_skip_whitespace_tokens(tokens, pos, (int)token_count);
+        if (pos >= (int)token_count || tokens[pos].type == CSS_TOKEN_EOF ||
+            tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) break;
+
+        // descriptor blocks may contain nested at-rules. They are not
+        // declarations and must be skipped while preserving forward progress.
+        if (tokens[pos].type == CSS_TOKEN_AT_KEYWORD) {
+            pos = css_skip_at_rule_tokens(tokens, pos, (int)token_count);
+            continue;
+        }
+
+        if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+            pos++;
+            continue;
+        }
+
+        int before = pos;
+        CssDeclaration* declaration = css_parse_declaration_from_tokens(
+            tokens, &pos, (int)token_count, pool);
+        if (declaration) {
+            if (*declaration_count >= capacity) {
+                size_t new_capacity = capacity * 2;
+                CssDeclaration** expanded = (CssDeclaration**)pool_calloc(
+                    pool, new_capacity * sizeof(CssDeclaration*));
+                if (!expanded) return declarations;
+                memcpy(expanded, declarations, *declaration_count * sizeof(CssDeclaration*));
+                declarations = expanded;
+                capacity = new_capacity;
+            }
+            declarations[(*declaration_count)++] = declaration;
+        }
+
+        if (pos < (int)token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON) pos++;
+        if (pos == before) pos++;
+    }
+
+    if (*declaration_count == 0) return NULL;
+    return declarations;
+}
+
+CssDeclaration* css_parse_property_declaration(const char* property, size_t property_length,
+                                               const char* value, size_t value_length,
+                                               Pool* pool) {
+    if (!property || property_length == 0 || !value || !pool) return NULL;
+    const size_t max_size = (size_t)-1;
+    if (property_length > max_size - 3 || value_length > max_size - property_length - 3) return NULL;
+
+    size_t length = property_length + value_length + 3;
+    char* text = (char*)pool_alloc(pool, length);
+    if (!text) return NULL;
+    memcpy(text, property, property_length);
+    text[property_length] = ':';
+    text[property_length + 1] = ' ';
+    memcpy(text + property_length + 2, value, value_length);
+    text[length - 1] = '\0';
+    return css_parse_declaration_text(text, length - 1, pool);
 }

@@ -526,6 +526,18 @@ bool css_parse_custom_property_name(const char* input, size_t length);
 CssFunctionInfo* css_get_function_info(const char* function_name);
 bool css_is_valid_css_function(const char* name);
 
+// length-aware fragment parsing used by DOM/CSSOM bridges. These helpers own
+// tokenization, strict end-of-input validation, and pool-backed allocations.
+CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool);
+CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length, Pool* pool);
+CssDeclaration* css_parse_declaration_text(const char* text, size_t length, Pool* pool);
+CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length,
+                                                 Pool* pool, size_t* declaration_count);
+CssDeclaration* css_parse_property_declaration(const char* property, size_t property_length,
+                                               const char* value, size_t value_length,
+                                               Pool* pool);
+const char* css_parse_unicode_range_canonical(const char* input, size_t length, Pool* pool);
+
 // Color parsing
 CssColorType css_detect_color_type(const char* color_str);
 bool css_parse_color_rgba(const char* color_str, uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* a);
