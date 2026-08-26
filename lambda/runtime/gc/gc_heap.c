@@ -9,6 +9,7 @@
  * Data zone buffers of surviving objects are compacted to tenured data zone.
  */
 #include "gc_heap.h"
+#include "../../js/js_interp_env.h"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
 #include "../../../lib/mem_factory.h"
@@ -465,6 +466,10 @@ gc_heap_t* gc_heap_create(void) {
         gc->root_slot_capacity = 0;
     }
 
+    gc->object_roots = NULL;
+    gc->object_root_count = 0;
+    gc->object_root_capacity = 0;
+
     gc->weak_slots = NULL;
     gc->weak_slot_count = 0;
     gc->weak_slot_capacity = 0;
@@ -487,6 +492,7 @@ gc_heap_t* gc_heap_create(void) {
 
     // collection trigger
     gc->gc_threshold = GC_DATA_ZONE_THRESHOLD;
+    gc->object_threshold = GC_OBJECT_HEAP_THRESHOLD;
     gc->collecting = 0;
     gc->collect_callback = NULL;
 
@@ -514,7 +520,8 @@ gc_heap_t* gc_heap_create(void) {
         log_debug("gc_heap_create: initial bump block %zu bytes", first_block->size);
     }
 
-    log_debug("gc_heap_create: dual-zone GC heap created (threshold=%zu)", gc->gc_threshold);
+    log_debug("gc_heap_create: GC heap created (data_threshold=%zu object_threshold=%zu)",
+              gc->gc_threshold, gc->object_threshold);
     return gc;
 }
 
@@ -551,6 +558,11 @@ void gc_heap_destroy(gc_heap_t* gc) {
     if (gc->root_ranges) {
         mem_free(gc->root_ranges);
         gc->root_ranges = NULL;
+    }
+
+    if (gc->object_roots) {
+        mem_free(gc->object_roots);
+        gc->object_roots = NULL;
     }
 
 
@@ -623,6 +635,25 @@ void gc_heap_destroy(gc_heap_t* gc) {
 // Allocation
 // ============================================================================
 
+static void gc_heap_rebase_object_threshold(gc_heap_t* gc) {
+    if (!gc) return;
+    size_t live = gc->total_allocated;
+    size_t next = live > SIZE_MAX / 2 ? SIZE_MAX : live * 2;
+    gc->object_threshold = next > GC_OBJECT_HEAP_THRESHOLD
+        ? next : GC_OBJECT_HEAP_THRESHOLD;
+}
+
+static void gc_heap_maybe_collect_object_pressure(gc_heap_t* gc, const char* site) {
+    if (!gc || gc->collecting || gc->defer_collection_depth > 0 ||
+            !gc->collect_callback || gc->total_allocated < gc->object_threshold) {
+        return;
+    }
+    log_debug("gc-object-pressure: allocated=%zu threshold=%zu site=%s",
+              gc->total_allocated, gc->object_threshold, site ? site : "unknown");
+    gc->collect_callback();
+    gc_heap_rebase_object_threshold(gc);
+}
+
 int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {
     if (!gc || gc->collecting || gc->defer_collection_depth > 0 || !gc->collect_callback ||
             (gc->force_collect_interval == 0 &&
@@ -652,6 +683,7 @@ int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {
         (unsigned)gc->force_random_one_in,
         site ? site : "unknown");
     gc->collect_callback();
+    gc_heap_rebase_object_threshold(gc);
     return 1;
 }
 
@@ -663,7 +695,9 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_alloc");
     gc_assert_allocation_allowed(gc, "gc_heap_alloc");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_heap_maybe_force_collect(gc, "gc_heap_alloc");
+    if (!gc_heap_maybe_force_collect(gc, "gc_heap_alloc")) {
+        gc_heap_maybe_collect_object_pressure(gc, "gc_heap_alloc");
+    }
 
     // try object zone first (for objects up to GC_LARGE_OBJECT_THRESHOLD)
     void* ptr = gc_object_zone_alloc(gc->object_zone, size, type_tag, &gc->all_objects);
@@ -716,7 +750,9 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_calloc_class");
     gc_assert_allocation_allowed(gc, "gc_heap_calloc_class");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_heap_maybe_force_collect(gc, "gc_heap_calloc_class");
+    if (!gc_heap_maybe_force_collect(gc, "gc_heap_calloc_class")) {
+        gc_heap_maybe_collect_object_pressure(gc, "gc_heap_calloc_class");
+    }
     // Fast path: skip gc_heap_alloc → gc_object_zone_alloc class_index lookup.
     // The class index is pre-computed by the JIT at compile time.
     void* ptr = gc_object_zone_alloc_class(gc->object_zone, cls, size, type_tag,
@@ -736,7 +772,9 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_bump_alloc");
     gc_assert_allocation_allowed(gc, "gc_heap_bump_alloc");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_heap_maybe_force_collect(gc, "gc_heap_bump_alloc");
+    if (!gc_heap_maybe_force_collect(gc, "gc_heap_bump_alloc")) {
+        gc_heap_maybe_collect_object_pressure(gc, "gc_heap_bump_alloc");
+    }
     // ---- Fast path: try free list first (recycling after GC) ----
     gc_header_t* free_hdr = gc->object_zone->free_lists[cls];
     if (free_hdr) {
@@ -927,6 +965,49 @@ void gc_unregister_root(gc_heap_t* gc, uint64_t* slot) {
             log_debug("gc_unregister_root: removed slot %p (total: %d)", (void*)slot, gc->root_slot_count);
             return;
         }
+    }
+}
+
+int gc_try_register_object_root(gc_heap_t* gc, void* object) {
+    if (!gc || !object) return 0;
+    for (int i = 0; i < gc->object_root_count; i++) {
+        if (gc->object_roots[i].object == object) {
+            gc->object_roots[i].ref_count++;
+            return 1;
+        }
+    }
+    if (gc->object_root_count >= gc->object_root_capacity) {
+        int new_cap = gc->object_root_capacity ? gc->object_root_capacity * 2
+            : GC_ROOT_SLOTS_INITIAL;
+        gc_object_root_t* roots = (gc_object_root_t*)mem_realloc(
+            gc->object_roots, (size_t)new_cap * sizeof(gc_object_root_t),
+            MEM_CAT_CONTAINER);
+        if (!roots) {
+            log_error("gc-object-root: realloc failed for %d roots", new_cap);
+            return 0;
+        }
+        gc->object_roots = roots;
+        gc->object_root_capacity = new_cap;
+    }
+    gc->object_roots[gc->object_root_count].object = object;
+    gc->object_roots[gc->object_root_count].ref_count = 1;
+    gc->object_root_count++;
+    return 1;
+}
+
+void gc_unregister_object_root(gc_heap_t* gc, void* object) {
+    if (!gc || !object) return;
+    for (int i = 0; i < gc->object_root_count; i++) {
+        if (gc->object_roots[i].object != object) continue;
+        if (gc->object_roots[i].ref_count > 1) {
+            gc->object_roots[i].ref_count--;
+            return;
+        }
+        for (int j = i; j < gc->object_root_count - 1; j++) {
+            gc->object_roots[j] = gc->object_roots[j + 1];
+        }
+        gc->object_root_count--;
+        return;
     }
 }
 
@@ -1402,6 +1483,73 @@ static void gc_trace_data_words(gc_heap_t* gc, void* data_ptr, int64_t byte_size
     }
 }
 
+// One shaped map/element/object field edge. Map attributes and element
+// attributes share the identical ShapeEntry walk, so they share this.
+//
+// D3.4.1 makes the packed layout an ABI: every reader must decode the same
+// bytes the store path wrote, and D3.4.6/D2.6.1 put the one shared descriptor
+// resolver in charge of which lane that is. So the lane is classified through
+// lambda_shape_field_storage_type_id, NOT through ShapeEntry::type->type_id: a
+// non-simple `type` contract (`T?`, a union, a constrained or occurrence type)
+// has type_id LMD_TYPE_TYPE yet set_field_value stores it in the TypedItem
+// `any` lane. Reading that lane as an eight-byte container pointer marked
+// nothing, and the conservative gc_trace_data_words sweep could not cover it
+// either: a TypedItem payload starts at byte_offset + 1 and so never lands on
+// an eight-byte stride. A container reachable only through such a field was
+// collected while still live.
+static void gc_trace_shape_field(gc_heap_t* gc, void* field_type,
+                                 int64_t byte_offset, void* data_ptr,
+                                 int64_t byte_size) {
+    if (!field_type) return;
+    uint8_t lane = (uint8_t)lambda_shape_field_storage_type_id(field_type);
+    // only trace Item-typed lanes (containers, strings, etc.); inline values
+    // (bool, int, undefined) hold no GC pointer
+    if (lane < LMD_TYPE_INT64_ || lane == LMD_TYPE_BOOL_ ||
+        lane == LMD_TYPE_UNDEFINED_) return;
+    if (byte_offset < 0 || byte_offset >= byte_size) return;
+    uint8_t* field_ptr = (uint8_t*)data_ptr + byte_offset;
+
+    if (lane == LMD_TYPE_ANY_) {
+        // TypedItem layout: byte 0 is the runtime TypeId, bytes 1-8 the value.
+        uint8_t stored_type = *field_ptr;
+        if (stored_type < LMD_TYPE_INT64_ || stored_type == LMD_TYPE_BOOL_ ||
+            byte_offset + 1 + 8 > byte_size) return;
+        uint64_t val = *(uint64_t*)(field_ptr + 1);
+        if (!val) return;
+        if (stored_type >= LMD_TYPE_RANGE_) gc_mark_item(gc, val);
+        else gc_mark_object_ptr(gc, (void*)(uintptr_t)val);
+        return;
+    }
+
+    uint64_t val = *(uint64_t*)field_ptr;
+    if (!val) return;
+    if (lane >= LMD_TYPE_RANGE_) {
+        // container pointer stored directly
+        gc_mark_item(gc, val);
+    } else if (lane == LMD_TYPE_STRING_ || lane == LMD_TYPE_SYMBOL_ ||
+               lane == LMD_TYPE_DECIMAL_ || lane == LMD_TYPE_INT64_ ||
+               lane == LMD_TYPE_FLOAT_ || lane == LMD_TYPE_DTIME_ ||
+               lane == LMD_TYPE_COMPLEX_) {
+        // these are stored as raw pointers in the data buffer
+        gc_mark_object_ptr(gc, (void*)(uintptr_t)val);
+    }
+}
+
+// Walk a TypeMap/TypeElmt shape list and trace every field edge.
+// TypeMap layout: { Type(2+6pad=8), length(8@8), byte_size(8@16),
+//   type_index(4@24), pad(4), shape*(8@32), last*(8@40) }
+// ShapeEntry:     { name*(8), type*(8), byte_offset(8), next*(8), ns*(8),
+//   default_value*(8) }
+static void gc_trace_shape_fields(gc_heap_t* gc, void* type_ptr, void* data_ptr,
+                                  int64_t byte_size) {
+    uint8_t* shape = (uint8_t*)*(void**)((uint8_t*)type_ptr + 32);
+    while (shape) {
+        gc_trace_shape_field(gc, *(void**)(shape + 8), *(int64_t*)(shape + 16),
+            data_ptr, byte_size);
+        shape = (uint8_t*)*(void**)(shape + 24);
+    }
+}
+
 static int64_t gc_packed_data_allocation_size(void* type_ptr, int data_cap) {
     if (data_cap > 0) return (int64_t)data_cap;
     return type_ptr ? *(int64_t*)((uint8_t*)type_ptr + 16) : 0;
@@ -1423,6 +1571,17 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // Item slots; tracing it as Items would retain arbitrary bit patterns.
         size_t count = header->alloc_size / (2 * sizeof(uint64_t));
         for (size_t i = 0; i < count; i++) gc_mark_item(gc, items[i]);
+        break;
+    }
+    case GC_TYPE_JS_INTERP_ENV: {
+        JsInterpEnv* env = (JsInterpEnv*)obj;
+        if (env->outer) gc_mark_object_ptr(gc, env->outer);
+        gc_mark_item(gc, env->arguments_object);
+        gc_mark_item(gc, env->private_home_class);
+        gc_mark_item(gc, env->private_bindings);
+        for (uint32_t i = 0; i < env->slot_count; i++) {
+            gc_mark_item(gc, env->slots[i]);
+        }
         break;
     }
     // types with no outgoing Item pointers — nothing to trace
@@ -1546,89 +1705,11 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         }
         if (!type_ptr || !data_ptr) break;
 
-        // Walk shape entries to find Item fields
-        // TypeMap layout: { Type(2+6pad=8), length(8@8), byte_size(8@16),
-        //   type_index(4@24), pad(4), shape*(8@32), last*(8@40) }
-        uint8_t* tp = (uint8_t*)type_ptr;
         // D4.3.1: the object owns one fixup for its complete data allocation.
         // Dynamic JS shapes may reserve pointer-width slots beyond byte_size;
         // bounding tracing by the packed logical size skipped those live slots.
         int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
-        void* shape_ptr = *(void**)(tp + 32);          // TypeMap.shape (ShapeEntry*)
-
-        // Walk ShapeEntry linked list
-        // ShapeEntry: { name*(8), type*(8), byte_offset(8), next*(8), ns*(8), default_value*(8) }
-        uint8_t* shape = (uint8_t*)shape_ptr;
-        while (shape) {
-            void* field_type = *(void**)(shape + 8);   // ShapeEntry.type (Type*)
-            int64_t byte_offset = *(int64_t*)(shape + 16);  // ShapeEntry.byte_offset
-            void* next_shape = *(void**)(shape + 24);  // ShapeEntry.next
-
-            if (field_type) {
-                uint8_t field_type_id = *(uint8_t*)field_type;  // Type.type_id
-                // only trace Item-typed fields (containers, strings, etc.)
-                // Skip inline values (bool, int) which don't hold GC pointers
-                if (field_type_id >= LMD_TYPE_INT64_ && field_type_id != LMD_TYPE_BOOL_
-                    && field_type_id != LMD_TYPE_UNDEFINED_) {
-                    if (byte_offset >= 0 && byte_offset < byte_size) {
-                        void* field_ptr = (uint8_t*)data_ptr + byte_offset;
-
-                        // LMD_TYPE_ANY fields use 9-byte TypedItem layout:
-                        //   byte 0: runtime TypeId (1 byte)
-                        //   bytes 1-8: value (8 bytes, packed)
-                        // Must read the embedded type tag and value separately.
-                        if (field_type_id == LMD_TYPE_ANY_) {
-                            uint8_t stored_type = *(uint8_t*)field_ptr;
-                            if (stored_type >= LMD_TYPE_INT64_ && stored_type != LMD_TYPE_BOOL_ &&
-                                byte_offset + 1 + 8 <= byte_size) {
-                                uint64_t val = *(uint64_t*)((uint8_t*)field_ptr + 1);
-                                if (val != 0) {
-                                    if (stored_type >= LMD_TYPE_RANGE_) {
-                                        gc_mark_item(gc, val);
-                                    } else {
-                                        void* embedded_ptr = (void*)(uintptr_t)val;
-                                        if (is_gc_object(gc, embedded_ptr)) {
-                                            gc_header_t* h = gc_get_header(embedded_ptr);
-                                            if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
-                                                h->marked = 1;
-                                                mark_stack_push(gc, h);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                        // read as pointer-sized value (Item or pointer depending on type)
-                        uint64_t val = *(uint64_t*)field_ptr;
-                        if (val != 0) {
-                            if (field_type_id >= LMD_TYPE_RANGE_) {
-                                // container pointer stored directly
-                                gc_mark_item(gc, val);
-                            } else if (field_type_id == LMD_TYPE_STRING_ ||
-                                       field_type_id == LMD_TYPE_SYMBOL_ ||
-                                       field_type_id == LMD_TYPE_DECIMAL_ ||
-                                       field_type_id == LMD_TYPE_INT64_ ||
-                                       field_type_id == LMD_TYPE_FLOAT_ ||
-                                       field_type_id == LMD_TYPE_DTIME_ ||
-                                       field_type_id == LMD_TYPE_COMPLEX_) {
-                                // these are stored as raw pointers in the data buffer
-                                // they need to be marked if they're GC-managed
-                                void* embedded_ptr = (void*)(uintptr_t)val;
-                                if (is_gc_object(gc, embedded_ptr)) {
-                                    gc_header_t* h = gc_get_header(embedded_ptr);
-                                    if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
-                                        h->marked = 1;
-                                        mark_stack_push(gc, h);
-                                    }
-                                }
-                            }
-                        }
-                        } // end non-ANY
-                    }
-                }
-            }
-            shape = (uint8_t*)next_shape;
-        }
+        gc_trace_shape_fields(gc, type_ptr, data_ptr, byte_size);
         gc_trace_data_words(gc, data_ptr, byte_size);
         break;
     }
@@ -1655,61 +1736,8 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
 
         // trace attributes (same shape-walk as Map)
         if (type_ptr && data_ptr) {
-            uint8_t* tp = (uint8_t*)type_ptr;
             int64_t byte_size = gc_packed_data_allocation_size(type_ptr, data_cap);
-            void* shape_ptr = *(void**)(tp + 32);
-            uint8_t* shape = (uint8_t*)shape_ptr;
-            while (shape) {
-                void* field_type = *(void**)(shape + 8);
-                int64_t byte_offset = *(int64_t*)(shape + 16);
-                void* next_shape = *(void**)(shape + 24);
-                if (field_type) {
-                    uint8_t ftid = *(uint8_t*)field_type;
-                    if (ftid >= LMD_TYPE_INT64_ && ftid != LMD_TYPE_BOOL_ &&
-                        byte_offset >= 0 && byte_offset < byte_size) {
-                        // Handle LMD_TYPE_ANY fields: 9-byte TypedItem layout
-                        if (ftid == LMD_TYPE_ANY_) {
-                            uint8_t* fptr = (uint8_t*)data_ptr + byte_offset;
-                            uint8_t stored_type = *fptr;
-                            if (stored_type >= LMD_TYPE_INT64_ && stored_type != LMD_TYPE_BOOL_ &&
-                                byte_offset + 1 + 8 <= byte_size) {
-                                uint64_t val = *(uint64_t*)(fptr + 1);
-                                if (val != 0) {
-                                    if (stored_type >= LMD_TYPE_RANGE_) {
-                                        gc_mark_item(gc, val);
-                                    } else {
-                                        void* ep = (void*)(uintptr_t)val;
-                                        if (is_gc_object(gc, ep)) {
-                                            gc_header_t* h = gc_get_header(ep);
-                                            if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
-                                                h->marked = 1;
-                                                mark_stack_push(gc, h);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                        uint64_t val = *(uint64_t*)((uint8_t*)data_ptr + byte_offset);
-                        if (val != 0) {
-                            if (ftid >= LMD_TYPE_RANGE_) {
-                                gc_mark_item(gc, val);
-                            } else {
-                                void* embedded_ptr = (void*)(uintptr_t)val;
-                                if (is_gc_object(gc, embedded_ptr)) {
-                                    gc_header_t* h = gc_get_header(embedded_ptr);
-                                    if (h && !h->marked && !(h->gc_flags & GC_FLAG_FREED)) {
-                                        h->marked = 1;
-                                        mark_stack_push(gc, h);
-                                    }
-                                }
-                            }
-                        }
-                        } // end non-ANY
-                    }
-                }
-                shape = (uint8_t*)next_shape;
-            }
+            gc_trace_shape_fields(gc, type_ptr, data_ptr, byte_size);
             gc_trace_data_words(gc, data_ptr, byte_size);
         }
         break;
@@ -2247,6 +2275,12 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     for (int i = 0; i < gc->root_slot_count; i++) {
         if (gc->root_slots[i]) {
             gc_mark_item(gc, *gc->root_slots[i]);
+        }
+    }
+
+    for (int i = 0; i < gc->object_root_count; i++) {
+        if (gc->object_roots[i].object) {
+            gc_mark_object_ptr(gc, gc->object_roots[i].object);
         }
     }
 

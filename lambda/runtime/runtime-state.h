@@ -62,6 +62,11 @@ bool lambda_property_key_specs_prelink(const struct PropertyKeySpec* specs,
 bool lambda_module_state_append_property_keys(uint32_t module_id,
     const struct PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size);
 bool lambda_module_state_reserve(uint32_t var_count, uint32_t* out_module_id);
+// The active slab belongs to the EvalContext, not to a guest language. Lambda
+// and JS use this common growth path and therefore retain identical root-range
+// ownership when a dynamic module adds bindings.
+bool lambda_active_module_state_ensure_vars(uint32_t required_var_count);
+// Kept for pre-existing generated JS images. New code must use the generic API.
 bool lambda_active_js_module_state_ensure_vars(uint32_t required_var_count);
 bool lambda_module_state_bind_static(uint32_t module_id, void* consts,
                                      void* type_list);

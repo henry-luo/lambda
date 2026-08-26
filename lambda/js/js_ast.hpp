@@ -208,10 +208,21 @@ typedef AstPropertyNode JsPropertyNode;
 
 typedef AstVarDeclNode JsVariableDeclarationNode;
 typedef AstDeclaratorNode JsVariableDeclaratorNode;
-typedef AstIfNode JsIfNode;
+typedef struct JsIfNode : AstIfNode {
+    // Unbraced branches still own a lexical scope for Annex B block-function
+    // bindings. Keep those scopes on the JS extension so the AST executor can
+    // materialize the same environment that binding selected.
+    NameScope* consequent_vars;
+    NameScope* alternate_vars;
+} JsIfNode;
 typedef AstWhileNode JsWhileNode;
 
-typedef AstForStmtNode JsForNode;
+typedef struct JsForNode : AstForStmtNode {
+    // The loop header owns let/const bindings independently of the enclosing
+    // block. The AST interpreter needs this retained scope for its lexical
+    // environment; core traversal still sees the AstForStmtNode prefix.
+    NameScope* vars;
+} JsForNode;
 
 typedef AstReturnNode JsReturnNode;
 typedef AstBlockNode JsBlockNode;
@@ -240,7 +251,11 @@ typedef struct JsTaggedTemplateNode : JsAstNode {
 } JsTaggedTemplateNode;
 
 typedef AstSpreadNode JsSpreadElementNode;
-typedef AstClassNode JsClassNode;
+typedef struct JsClassNode : AstClassNode {
+    // A named class expression owns a private lexical self binding. Class
+    // declarations use their surrounding lexical declaration instead.
+    NameScope* expression_scope;
+} JsClassNode;
 
 typedef AstMethodNode JsMethodDefinitionNode;
 
@@ -252,17 +267,28 @@ typedef struct JsStaticBlockNode : JsAstNode {
 } JsStaticBlockNode;
 
 typedef AstTryNode JsTryNode;
-typedef AstCatchNode JsCatchNode;
+typedef struct JsCatchNode : AstCatchNode {
+    // Catch parameters live in a handler environment outside the body block.
+    NameScope* vars;
+} JsCatchNode;
 
 typedef AstRaiseNode JsThrowNode;
 
 typedef AstArrayNode JsArrayPatternNode;
 typedef AstMapNode JsObjectPatternNode;
 typedef AstAssignNode JsAssignmentPatternNode;
-typedef AstMatchNode JsSwitchNode;
+typedef struct JsSwitchNode : AstMatchNode {
+    // All cases share one lexical environment. The core prefix retains the
+    // discriminant/case edges; the JS executor retains the binding carrier.
+    NameScope* vars;
+} JsSwitchNode;
 typedef AstMatchArm JsSwitchCaseNode;
 typedef AstDoWhileNode JsDoWhileNode;
-typedef AstForOfNode JsForOfNode;
+typedef struct JsForOfNode : AstForOfNode {
+    // The loop head owns a lexical environment, including the fresh
+    // per-iteration binding cells required by let/const closures.
+    NameScope* vars;
+} JsForOfNode;
 
 // Reuse same struct for for...in
 typedef JsForOfNode JsForInNode;
@@ -315,6 +341,19 @@ bool js_ast_has_child_table(JsAstNode* node);
 void js_ast_visit_children(JsAstNode* node, JsAstChildVisit visit, void* ctx);
 // Short-circuiting variant: stops at the first child the predicate accepts.
 bool js_ast_any_child(JsAstNode* node, JsAstChildPredicate predicate, void* ctx);
+
+// Syntactic direct eval belongs to the immediately enclosing function. Both
+// compiler and AST executor use this one classification when installing the
+// shared EvalContext bridge.
+bool js_ast_has_direct_eval_call(JsAstNode* node);
+bool js_ast_is_proto_literal_key(JsAstNode* key);
+
+// Adapter for the shared AstIndex walker. Core-shaped JavaScript nodes are
+// already traversed by ast_visit_core_children(); this reports only the JS
+// extension range so an index has one complete child contract without visits
+// being duplicated.
+void js_ast_visit_extension_children(AstNode* node, AstChildVisitor visitor,
+                                     void* ctx);
 
 typedef AstExportDeclNode JsExportNode;
 

@@ -161,3 +161,19 @@ bool js_ast_any_child(JsAstNode* node, JsAstChildPredicate predicate, void* ctx)
     }
     return false;
 }
+
+void js_ast_visit_extension_children(AstNode* node, AstChildVisitor visitor,
+                                     void* ctx) {
+    if (!node || !visitor || node->node_type < JS_AST_NODE_TEMPLATE_LITERAL) {
+        return;
+    }
+    const ChildRow* row = row_for(node->node_type);
+    if (!row) return;
+    for (uint8_t i = 0; i < row->count; i++) {
+        JsAstNode* child = child_at((JsAstNode*)node, row->slots[i]);
+        // AstIndex's visitor descends through each child's `next` link. Pass
+        // only the list head here so the common walker stays the sole sibling
+        // traversal authority.
+        if (child) visitor((AstNode*)child, node, ctx);
+    }
+}

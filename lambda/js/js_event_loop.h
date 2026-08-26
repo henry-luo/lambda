@@ -21,6 +21,9 @@ extern "C" {
 // =============================================================================
 
 void js_event_loop_init(void);
+// Attach Lambda's scheduler after a JS import activates the shared membrane
+// without resetting queues or timers belonging to the current JS turn.
+void js_event_loop_attach_lambda_scheduler(void);
 int  js_event_loop_drain(void);
 // Complete one headless script turn, including the render checkpoint and rAFs.
 // Host-driven documents retain ownership of this cadence and only flush microtasks.
@@ -50,6 +53,8 @@ void js_microtask_enqueue(Item callback);
 void js_next_tick_enqueue(Item callback);
 void js_microtask_flush(void);
 Item js_microtask_flush_result(void);
+// Run one nextTick or microtask callback, preserving FIFO page-turn order.
+Item js_microtask_step(void);
 int  js_microtask_pending_count(void);
 bool js_microtask_is_running(void);
 // Js57 P2c: bounded loop drain — runs uv_run(UV_RUN_NOWAIT) + microtask flush in

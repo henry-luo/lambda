@@ -48,7 +48,11 @@ __thread volatile bool _lambda_stack_overflow_flag = false;
 static volatile bool _signal_handler_installed = false;
 
 #if defined(__APPLE__) || defined(__linux__)
-static void* _lambda_alt_stack_mem = NULL;
+// The signal-stack selection itself is per-thread. Preserve the host's prior
+// selection so a worker can return to ASan or an embedding host intact.
+static __thread void* _lambda_alt_stack_mem = NULL;
+static __thread stack_t _lambda_alt_stack_previous = {};
+static __thread bool _lambda_alt_stack_previous_valid = false;
 #endif
 
 // ============================================================================
@@ -212,26 +216,27 @@ static void stack_overflow_signal_handler(int sig, siginfo_t *info, void *ctx) {
 }
 
 static void install_signal_handler(void) {
+    if (!_lambda_alt_stack_mem) {
+        // The handler is process-wide, but every execution thread needs its
+        // own alternate stack before a SA_ONSTACK delivery can be safe.
+        void* alt_stack_mem = mem_alloc(LAMBDA_ALT_STACK_SIZE, MEM_CAT_SYSTEM);
+        if (!alt_stack_mem) {
+            log_error("stack init: failed to allocate alternate signal stack");
+            return;
+        }
+        stack_t ss;
+        ss.ss_sp = alt_stack_mem;
+        ss.ss_size = LAMBDA_ALT_STACK_SIZE;
+        ss.ss_flags = 0;
+        if (sigaltstack(&ss, &_lambda_alt_stack_previous) != 0) {
+            log_error("stack init: sigaltstack failed");
+            mem_free(alt_stack_mem);
+            return;
+        }
+        _lambda_alt_stack_previous_valid = true;
+        _lambda_alt_stack_mem = alt_stack_mem;
+    }
     if (_signal_handler_installed) return;
-
-    // 1. Allocate and register alternate signal stack
-    //    The handler runs on this stack (since the main stack is exhausted)
-    void* alt_stack_mem = mem_alloc(LAMBDA_ALT_STACK_SIZE, MEM_CAT_SYSTEM);
-    if (!alt_stack_mem) {
-        log_error("stack init: failed to allocate alternate signal stack");
-        return;
-    }
-
-    stack_t ss;
-    ss.ss_sp = alt_stack_mem;
-    ss.ss_size = LAMBDA_ALT_STACK_SIZE;
-    ss.ss_flags = 0;
-    if (sigaltstack(&ss, NULL) != 0) {
-        log_error("stack init: sigaltstack failed");
-        mem_free(alt_stack_mem);
-        return;
-    }
-    _lambda_alt_stack_mem = alt_stack_mem;
 
     // 2. Install SIGSEGV handler on the alternate stack
     struct sigaction sa;
@@ -241,12 +246,12 @@ static void install_signal_handler(void) {
     sigemptyset(&sa.sa_mask);
     if (sigaction(SIGSEGV, &sa, NULL) != 0) {
         log_error("stack init: sigaction(SIGSEGV) failed");
-        stack_t disabled;
-        memset(&disabled, 0, sizeof(disabled));
-        disabled.ss_flags = SS_DISABLE;
-        sigaltstack(&disabled, NULL);
+        if (_lambda_alt_stack_previous_valid) {
+            sigaltstack(&_lambda_alt_stack_previous, NULL);
+        }
         mem_free(_lambda_alt_stack_mem);
         _lambda_alt_stack_mem = NULL;
+        _lambda_alt_stack_previous_valid = false;
         return;
     }
 
@@ -340,18 +345,22 @@ void lambda_stack_cleanup(void) {
     sigaction(SIGBUS, &sa, NULL);
 #endif
 
-    stack_t disabled;
-    memset(&disabled, 0, sizeof(disabled));
-    disabled.ss_sp = _lambda_alt_stack_mem;
-    disabled.ss_size = LAMBDA_ALT_STACK_SIZE;
-    disabled.ss_flags = SS_DISABLE;
-    if (sigaltstack(&disabled, NULL) != 0) {
-        log_error("stack cleanup: sigaltstack disable failed");
-    }
-
     if (_lambda_alt_stack_mem) {
+        if (_lambda_alt_stack_previous_valid) {
+            if (sigaltstack(&_lambda_alt_stack_previous, NULL) != 0) {
+                log_error("stack cleanup: sigaltstack restore failed");
+            }
+        } else {
+            stack_t disabled;
+            memset(&disabled, 0, sizeof(disabled));
+            disabled.ss_flags = SS_DISABLE;
+            if (sigaltstack(&disabled, NULL) != 0) {
+                log_error("stack cleanup: sigaltstack disable failed");
+            }
+        }
         mem_free(_lambda_alt_stack_mem);
         _lambda_alt_stack_mem = NULL;
+        _lambda_alt_stack_previous_valid = false;
     }
     _signal_handler_installed = false;
     log_debug("stack cleanup: signal-based overflow handler released");

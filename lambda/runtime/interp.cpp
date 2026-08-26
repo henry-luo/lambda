@@ -4244,7 +4244,13 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // golden pins whichever tier happened to run. MIR Direct says
             // "element" here (transpile-mir.cpp), so T0 matches it.
             const char* boundary = "typed array element assignment";
-            replacement = root->is_var_param
+            // SI3v2 again, on the write side: MIR Direct selects the in-place
+            // setter for `is_var_param || is_proc_param`
+            // (emit_typed_array_store_fallback / writes_through_caller). T0 read
+            // only is_var_param, so a plain `pn` parameter's typed write was
+            // validated on a DETACHED candidate and republished to the callee's
+            // own slot -- visible inside the procedure, lost to the caller.
+            replacement = (root->is_var_param || root->is_proc_param)
                 ? lambda_array_set_checked_inplace_item(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary)
                 : lambda_array_set_checked_item(owner.get(), key_slot.get(),
@@ -4255,7 +4261,12 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // boundary, so their private root can use the in-place contract.
             const char* boundary = node->node_type == AST_NODE_MEMBER_ASSIGN_STAM
                 ? "typed map member assignment" : "typed map computed assignment";
-            replacement = root->is_var_param
+            // Same rule as the array arm above, and the one that made typed
+            // json2 parse to `{jt: 3, sv: ""}` on T0 while MIR returned the
+            // object: the parser threads its state through `p: Parser`, a plain
+            // pn parameter, so every `p.cur = ...` was published to a detached
+            // copy and the caller kept reading the initial value.
+            replacement = (root->is_var_param || root->is_proc_param)
                 ? lambda_map_set_checked_inplace(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary)
                 : lambda_map_set_checked(owner.get(), key_slot.get(),

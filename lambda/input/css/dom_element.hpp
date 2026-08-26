@@ -526,6 +526,8 @@ struct DomElementExt {
     float ruby_column_inline_advance;
     float ruby_column_start_overhang;
     bool has_simple_ruby_column_geometry;
+    float ruby_empty_inline_advance;
+    bool has_empty_ruby_base;
     bool popover_open;
     bool dialog_modal;
 };
@@ -922,6 +924,8 @@ struct DomElement : DomNode {
         ext->ruby_column_inline_advance = 0.0f;
         ext->ruby_column_start_overhang = 0.0f;
         ext->has_simple_ruby_column_geometry = false;
+        ext->ruby_empty_inline_advance = 0.0f;
+        ext->has_empty_ruby_base = false;
     }
 
 };

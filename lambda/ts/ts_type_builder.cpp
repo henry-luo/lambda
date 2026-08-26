@@ -43,7 +43,7 @@ static Type* make_base_type(Pool* pool, TypeId tid) {
 
 static Type* ts_resolve_type_list(TsTranspiler* tp, TsTypeNode** types, int type_count,
                                   Operator op) {
-    Pool* pool = tp->ast_pool;
+    Pool* pool = tp->pool;
     if (type_count == 0) return make_base_type(pool, LMD_TYPE_ANY);
     Type* result = ts_resolve_type(tp, types[0]);
     for (int i = 1; i < type_count; i++) {
@@ -59,10 +59,10 @@ static Type* ts_resolve_type_list(TsTranspiler* tp, TsTypeNode** types, int type
 }
 
 Type* ts_resolve_type(TsTranspiler* tp, TsTypeNode* node) {
-    if (!node) return make_base_type(tp->ast_pool, LMD_TYPE_ANY);
+    if (!node) return make_base_type(tp->pool, LMD_TYPE_ANY);
     if (node->resolved_type) return node->resolved_type;
 
-    Pool* pool = tp->ast_pool;
+    Pool* pool = tp->pool;
 
     switch ((TsAstNodeType)node->node_type) {
 

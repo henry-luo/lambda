@@ -4722,6 +4722,41 @@
             "icon": "🟨"
           },
           {
+            "source": "test/test_js_script_gtest.cpp",
+            "name": "JavaScript Script Ownership Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "binary": "test_js_script_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "icon": "🟨"
+          },
+          {
             "source": "test/test_js_opt_gtest.cpp",
             "name": "JavaScript Optimization Contract Tests",
             "category": "baseline",

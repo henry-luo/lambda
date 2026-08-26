@@ -5,7 +5,7 @@ static bool jm_function_inside_class_syntax(JsFunctionNode* fn) {
     return fn && fn->node_type == JS_AST_NODE_METHOD_DEFINITION;
 }
 
-static bool jm_node_has_direct_eval_call(JsAstNode* node) {
+bool js_ast_has_direct_eval_call(JsAstNode* node) {
     if (!node) return false;
     switch (node->node_type) {
     case JS_AST_NODE_CALL_EXPRESSION: {
@@ -20,7 +20,7 @@ static bool jm_node_has_direct_eval_call(JsAstNode* node) {
                     strncmp(id->name->chars, "eval", 4) == 0) return true;
         }
         for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
-            if (jm_node_has_direct_eval_call(arg)) return true;
+            if (js_ast_has_direct_eval_call(arg)) return true;
         }
         return false;
     }
@@ -33,63 +33,63 @@ static bool jm_node_has_direct_eval_call(JsAstNode* node) {
     case JS_AST_NODE_BLOCK_STATEMENT: {
         JsBlockNode* blk = (JsBlockNode*)node;
         for (JsAstNode* stmt = blk->statements; stmt; stmt = stmt->next) {
-            if (jm_node_has_direct_eval_call(stmt)) return true;
+            if (js_ast_has_direct_eval_call(stmt)) return true;
         }
         return false;
     }
     case JS_AST_NODE_EXPRESSION_STATEMENT:
-        return jm_node_has_direct_eval_call(((JsExpressionStatementNode*)node)->expression);
+        return js_ast_has_direct_eval_call(((JsExpressionStatementNode*)node)->expression);
     case JS_AST_NODE_VARIABLE_DECLARATION: {
         JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)node;
         for (JsAstNode* d = decl->declarations; d; d = d->next) {
-            if (jm_node_has_direct_eval_call(d)) return true;
+            if (js_ast_has_direct_eval_call(d)) return true;
         }
         return false;
     }
     case JS_AST_NODE_VARIABLE_DECLARATOR:
-        return jm_node_has_direct_eval_call(((JsVariableDeclaratorNode*)node)->init);
+        return js_ast_has_direct_eval_call(((JsVariableDeclaratorNode*)node)->init);
     case JS_AST_NODE_RETURN_STATEMENT:
-        return jm_node_has_direct_eval_call(((JsReturnNode*)node)->argument);
+        return js_ast_has_direct_eval_call(((JsReturnNode*)node)->argument);
     case JS_AST_NODE_IF_STATEMENT: {
         JsIfNode* n = (JsIfNode*)node;
-        return jm_node_has_direct_eval_call(n->test) || jm_node_has_direct_eval_call(n->consequent) ||
-            jm_node_has_direct_eval_call(n->alternate);
+        return js_ast_has_direct_eval_call(n->test) || js_ast_has_direct_eval_call(n->consequent) ||
+            js_ast_has_direct_eval_call(n->alternate);
     }
     case JS_AST_NODE_BINARY_EXPRESSION: {
         JsBinaryNode* n = (JsBinaryNode*)node;
-        return jm_node_has_direct_eval_call(n->left) || jm_node_has_direct_eval_call(n->right);
+        return js_ast_has_direct_eval_call(n->left) || js_ast_has_direct_eval_call(n->right);
     }
     case JS_AST_NODE_UNARY_EXPRESSION:
-        return jm_node_has_direct_eval_call(((JsUnaryNode*)node)->operand);
+        return js_ast_has_direct_eval_call(((JsUnaryNode*)node)->operand);
     case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
         JsAssignmentNode* n = (JsAssignmentNode*)node;
-        return jm_node_has_direct_eval_call(n->left) || jm_node_has_direct_eval_call(n->right);
+        return js_ast_has_direct_eval_call(n->left) || js_ast_has_direct_eval_call(n->right);
     }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
         JsMemberNode* n = (JsMemberNode*)node;
-        return jm_node_has_direct_eval_call(n->object) || (n->computed && jm_node_has_direct_eval_call(n->property));
+        return js_ast_has_direct_eval_call(n->object) || (n->computed && js_ast_has_direct_eval_call(n->property));
     }
     case JS_AST_NODE_NEW_EXPRESSION: {
         JsCallNode* call = (JsCallNode*)node;
         for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
-            if (jm_node_has_direct_eval_call(arg)) return true;
+            if (js_ast_has_direct_eval_call(arg)) return true;
         }
         return false;
     }
     case JS_AST_NODE_SEQUENCE_EXPRESSION: {
         JsSequenceNode* seq = (JsSequenceNode*)node;
         for (JsAstNode* expr = seq->expressions; expr; expr = expr->next) {
-            if (jm_node_has_direct_eval_call(expr)) return true;
+            if (js_ast_has_direct_eval_call(expr)) return true;
         }
         return false;
     }
     case JS_AST_NODE_SPREAD_ELEMENT:
     case JS_AST_NODE_REST_ELEMENT:
-        return jm_node_has_direct_eval_call(((JsSpreadElementNode*)node)->argument);
+        return js_ast_has_direct_eval_call(((JsSpreadElementNode*)node)->argument);
     case JS_AST_NODE_YIELD_EXPRESSION:
-        return jm_node_has_direct_eval_call(((JsYieldNode*)node)->argument);
+        return js_ast_has_direct_eval_call(((JsYieldNode*)node)->argument);
     case JS_AST_NODE_AWAIT_EXPRESSION:
-        return jm_node_has_direct_eval_call(((JsAwaitNode*)node)->argument);
+        return js_ast_has_direct_eval_call(((JsAwaitNode*)node)->argument);
     default:
         return false;
     }
@@ -388,11 +388,11 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
     }
 
     JsFunctionNode* function = (JsFunctionNode*)pool_calloc(
-        mt->tp->ast_pool, sizeof(JsFunctionNode));
+        mt->tp->pool, sizeof(JsFunctionNode));
     JsBlockNode* body = (JsBlockNode*)pool_calloc(
-        mt->tp->ast_pool, sizeof(JsBlockNode));
+        mt->tp->pool, sizeof(JsBlockNode));
     JsReturnNode* result = (JsReturnNode*)pool_calloc(
-        mt->tp->ast_pool, sizeof(JsReturnNode));
+        mt->tp->pool, sizeof(JsReturnNode));
     if (!function || !body || !result) {
         log_error("js-mir: failed to allocate class field initializer AST");
         mt->collection_failed = true;
@@ -421,7 +421,7 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
     collected->parent_index = -1;
     collected->is_strict = true;
     collected->is_class_field_initializer = true;
-    collected->has_direct_eval = jm_node_has_direct_eval_call(field->value);
+    collected->has_direct_eval = js_ast_has_direct_eval_call(field->value);
     mt->func_count++;
     for (int child_index = children_start; child_index < children_end;
             child_index++) {
@@ -475,7 +475,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             e->func_item = NULL; // set during creation
             e->parent_index = -1; // top-level until set by parent
             e->is_strict = jm_function_inside_class_syntax(fn);
-            e->has_direct_eval = jm_node_has_direct_eval_call(fn->body);
+            e->has_direct_eval = js_ast_has_direct_eval_call(fn->body);
             mt->func_count++;
             // Set parent_index for DIRECT children: functions collected during our body
             // recursion that don't already have a parent assigned by a deeper enclosing
@@ -503,7 +503,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         if (n->id) jm_collect_functions(mt, n->id);
         // For var X = class Y { ... } or var X = class { ... }
         if (!mt->collection_count_only &&
-            n->init && n->init->node_type == JS_AST_NODE_CLASS_DECLARATION &&
+            n->init && (n->init->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+                n->init->node_type == JS_AST_NODE_CLASS_EXPRESSION) &&
             n->id && n->id->node_type == JS_AST_NODE_IDENTIFIER) {
             JsClassNode* cls = (JsClassNode*)n->init;
             JsIdentifierNode* var_id = (JsIdentifierNode*)n->id;
@@ -564,7 +565,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         jm_collect_functions(mt, n->left);
         jm_collect_functions(mt, n->right);
         if (!mt->collection_count_only &&
-            n->right && n->right->node_type == JS_AST_NODE_CLASS_DECLARATION &&
+            n->right && (n->right->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+                n->right->node_type == JS_AST_NODE_CLASS_EXPRESSION) &&
             n->left && n->left->node_type == JS_AST_NODE_IDENTIFIER) {
             JsClassNode* cls = (JsClassNode*)n->right;
             JsIdentifierNode* lhs_id = (JsIdentifierNode*)n->left;
@@ -591,7 +593,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         if (tt->quasi) { JsAstNode* e = tt->quasi->expressions; while (e) { jm_collect_functions(mt, e); e = e->next; } }
         break;
     }
-    case JS_AST_NODE_CLASS_DECLARATION: {
+    case JS_AST_NODE_CLASS_DECLARATION:
+    case JS_AST_NODE_CLASS_EXPRESSION: {
         JsClassNode* cls = (JsClassNode*)node;
         if (cls->superclass) jm_collect_functions(mt, cls->superclass);
         if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT &&
@@ -667,13 +670,13 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             // Class metadata retains AST pointers, so give both the same
             // compile/runtime lifetime instead of a separate native owner.
             ce->methods = (JsClassMethodEntry*)pool_calloc(
-                mt->tp->ast_pool, (size_t)ce->method_capacity * sizeof(JsClassMethodEntry));
+                mt->tp->pool, (size_t)ce->method_capacity * sizeof(JsClassMethodEntry));
             ce->static_fields = (JsStaticFieldEntry*)pool_calloc(
-                mt->tp->ast_pool, (size_t)ce->static_field_capacity * sizeof(JsStaticFieldEntry));
+                mt->tp->pool, (size_t)ce->static_field_capacity * sizeof(JsStaticFieldEntry));
             ce->instance_fields = (JsInstanceFieldEntry*)pool_calloc(
-                mt->tp->ast_pool, (size_t)ce->instance_field_capacity * sizeof(JsInstanceFieldEntry));
+                mt->tp->pool, (size_t)ce->instance_field_capacity * sizeof(JsInstanceFieldEntry));
             ce->static_blocks = (JsAstNode**)pool_calloc(
-                mt->tp->ast_pool, (size_t)ce->static_block_capacity * sizeof(JsAstNode*));
+                mt->tp->pool, (size_t)ce->static_block_capacity * sizeof(JsAstNode*));
             if ((ce->method_capacity && !ce->methods) ||
                 (ce->static_field_capacity && !ce->static_fields) ||
                 (ce->instance_field_capacity && !ce->instance_fields) ||
@@ -800,7 +803,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             fc->func_item = NULL;
                             fc->capture_count = 0;
                             fc->is_strict = true;
-                            fc->has_direct_eval = jm_node_has_direct_eval_call(fn->body);
+                            fc->has_direct_eval = js_ast_has_direct_eval_call(fn->body);
                             mt->func_count++;
 
                             // Set parent_index for inner functions collected during method body

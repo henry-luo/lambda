@@ -7741,6 +7741,36 @@ Item cow_bind_var(Item value) {
     return cow_mark_shared(value);
 }
 
+// A one-level clone marks the source's children shared because two maps now
+// reference them. When the pre-image is UNIQUE, though, the caller is about to
+// replace it at its only binding, so it dies in the same step and no second
+// observer of those children ever exists -- the marks are an artifact of the
+// transaction, not a record of real sharing.
+//
+// Leaving them cost correctness, not just copies. Under CW3's monotonic 1-bit
+// flag a mark is never cleared, so the next element write through a child --
+// `var xs = h.xs; xs[i] = v`, which BOTH tiers otherwise alias (the C4.1
+// field-read behaviour) -- took the copy-on-write path in T0 and published to
+// the local instead of the map, while MIR Direct wrote in place. That is how
+// typed jetstream/hashmap2 lost every store on the interpreter tier and
+// returned the EMPTY sentinel for every lookup.
+//
+// Clearing is gated on the pre-image being unshared, which is exactly the
+// condition under which it is unreachable after the swap. If anything else
+// still observes the old root (`var snap = h` before the write), the root
+// carries COW_STATE_SHARED, the marks stay, and COW keeps its guarantee (S9.1.2).
+static void cow_unmark_shape_children(TypeMap* type, void* data) {
+    if (!type || !data) return;
+    for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
+        Item child = entry->name ? _map_read_field(entry, data)
+                                 : (Item){.map = map_shape_field_to_map(data, entry)};
+        Container* container = cow_item_container(child);
+        if (container && !container->is_static && !container->is_immortal) {
+            container->cow_state &= ~COW_STATE_SHARED;
+        }
+    }
+}
+
 static void cow_mark_shape_children(TypeMap* type, void* data) {
     if (!type || !data) return;
     for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
@@ -8059,6 +8089,13 @@ static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* 
     Rooted<Item> rooted_owner(roots, owner);
     Rooted<Item> rooted_key(roots, key);
     Rooted<Item> rooted_value(roots, checked_value);
+    // Whether the pre-image had another observer, sampled BEFORE the clone marks
+    // anything. A unique pre-image is dead the moment the caller publishes the
+    // candidate, so the marks its clone leaves on the shared children are an
+    // artifact of this transaction -- see cow_unmark_shape_children.
+    Container* owner_container = cow_item_container(rooted_owner.get());
+    bool owner_was_unique = owner_container &&
+        (owner_container->cow_state & COW_STATE_SHARED) == 0;
     Rooted<Item> rooted_candidate(roots, publish_in_place ? rooted_owner.get() :
         cow_clone_one_level(rooted_owner.get()));
     if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ERROR) return rooted_candidate.get();
@@ -8079,6 +8116,16 @@ static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* 
         ValidationResult* validation = NULL;
         (void)runtime_validate_value_against_type(rooted_candidate.get(), contract, &validation);
         return lambda_type_error_with_validation(rooted_candidate.get(), contract, boundary, validation);
+    }
+    // The candidate is about to replace a pre-image nothing else could observe,
+    // so hand it back owning its children outright rather than carrying the
+    // clone's transactional marks forward.
+    if (!publish_in_place && owner_was_unique &&
+            get_type_id(rooted_candidate.get()) == LMD_TYPE_MAP) {
+        Map* candidate_map = rooted_candidate.get().map;
+        if (candidate_map) {
+            cow_unmark_shape_children((TypeMap*)candidate_map->type, candidate_map->data);
+        }
     }
     return rooted_candidate.get();
 }

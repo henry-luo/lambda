@@ -37,6 +37,10 @@
 #define JS_DOM_PROMPT_QUEUE_CAP 32
 
 struct JsFunction;
+struct JsInterpEnv;
+struct JsInterpGeneratorLoopContinuation;
+struct JsInterpGeneratorListContinuation;
+struct AstNode;
 struct DomDocument;
 struct DomElement;
 struct UiContext;
@@ -71,6 +75,13 @@ struct JsEventLoopQueueState {
     int64_t next_raf_id = 1;
     bool auto_close_mode = false;
     bool shutting_down = false;
+    // Dynamic source compiled from a queued callback belongs to its parent turn.
+    bool callback_running = false;
+};
+
+struct JsAstInterpreterState {
+    // Nested eval, Function, require, and module execution share one turn.
+    int execution_depth = 0;
 };
 
 struct JsEventLoopTimerState {
@@ -669,6 +680,24 @@ struct JsGeneratorStateRecord {
     Item delegate = {};
     int64_t delegate_resume = -1;
     int delegate_idx = 0;
+    // AST generators retain the same GC-owned lexical records as ordinary
+    // interpreted functions; their yield count is a resumable program point.
+    Item ast_function = {};
+    Item ast_arguments = {};
+    Item ast_this = {};
+    JsInterpEnv* ast_function_env = NULL;
+    JsInterpEnv* ast_body_env = NULL;
+    int64_t ast_yield_skip = 0;
+    // Terminal-yield loop continuations keep AST generators resumable without
+    // replaying completed iterations on every next().
+    JsInterpGeneratorLoopContinuation* ast_loop_continuations = NULL;
+    JsInterpGeneratorListContinuation* ast_list_continuation = NULL;
+    bool ast_resumable_loop_active = false;
+    // Retain an injected throw/return while a finally block yields before it
+    // can finish propagating that abrupt completion.
+    int64_t ast_pending_resume_yield = 0;
+    Item ast_pending_resume_input = {};
+    bool ast_initialized = false;
 };
 
 struct JsAsyncContextStateRecord {
@@ -681,6 +710,16 @@ struct JsAsyncContextStateRecord {
     // resumed MIR property names must use the module image that compiled the body.
     uint32_t module_state_id = UINT32_MAX;
     Item this_val = {};
+    // AST continuations use the same context/promise table as MIR async
+    // functions, but retain interpreter-owned lexical environments.
+    Item ast_function = {};
+    Item ast_arguments = {};
+    JsInterpEnv* ast_function_env = NULL;
+    JsInterpEnv* ast_body_env = NULL;
+    AstNode* ast_resume_statement = NULL;
+    Item ast_await_values = {};
+    int64_t ast_await_skip = 0;
+    bool ast_initialized = false;
 };
 
 bool js_root_range_ensure_registered(JsRootRange* range);
@@ -866,6 +905,7 @@ struct JsRuntimeState {
     JsIntrinsicState intrinsics = {};
     JsEvalState eval = {};
     JsEventLoopQueueState event_loop = {};
+    JsAstInterpreterState ast_interpreter = {};
     JsEventLoopTimerState timers = {};
     JsWithScopeState with_scope = {};
     JsDeferredMirState deferred_mir = {};

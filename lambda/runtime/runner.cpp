@@ -1561,9 +1561,10 @@ void runner_setup_context(Runner* runner) {
     }
 }
 
-// Helper function to recursively resolve all sys:// paths in an Item tree
-// This must be called before deep_copy while the execution context is still valid
-// Only handles List/Array since those are the common containers for script results
+// Helper function to recursively resolve all sys:// paths in an Item tree.
+// This must be called while the execution context is still valid.  Map fields
+// use the same shape-aware reader as ordinary member access; reading their
+// packed bytes as raw Items was the cause of the old map-walk crash.
 extern "C" Item path_resolve_for_iteration(Path* path);
 
 // Module-state instantiation from mir.c. It runs before execution and owns
@@ -1571,23 +1572,48 @@ extern "C" Item path_resolve_for_iteration(Path* path);
 extern "C" bool prepare_context_module_state(void* mir_ctx, void* consts,
                                               void* type_list);
 
+void resolve_sys_paths_recursive(Item item);
+
+static void resolve_sys_paths_in_shape(TypeMap* map_type, void* map_data) {
+    if (!map_type || !map_data) return;
+    FOR_EACH_MAP_FIELD(map_type, field) {
+        resolve_sys_paths_recursive(map_shape_field_to_item(map_data, field));
+    }
+}
+
 void resolve_sys_paths_recursive(Item item) {
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_PATH) {
         Path* path = item.path;
         if (path && path_get_scheme(path) == PATH_SCHEME_SYS && path->result == 0) {
-            path_resolve_for_iteration(path);
+            Item resolved = path_resolve_for_iteration(path);
+            if (resolved.item != ItemNull.item && resolved.item != ItemError.item) {
+                resolve_sys_paths_recursive(resolved);
+            }
+        } else if (path && path->result != 0) {
+            resolve_sys_paths_recursive((Item){.item = path->result});
         }
     } else if (type_id == LMD_TYPE_ARRAY) {
         List* list = item.array;
+        if (!list || !list->items) return;
         for (int64_t i = 0; i < list->length; i++) {
             resolve_sys_paths_recursive(list->items[i]);
         }
+    } else if (type_id == LMD_TYPE_MAP) {
+        Map* map = item.map;
+        if (map) resolve_sys_paths_in_shape((TypeMap*)map->type, map->data);
+    } else if (type_id == LMD_TYPE_OBJECT) {
+        Object* object = item.object;
+        if (object) resolve_sys_paths_in_shape((TypeMap*)object->type, object->data);
+    } else if (type_id == LMD_TYPE_ELEMENT) {
+        Element* element = item.element;
+        if (!element) return;
+        resolve_sys_paths_in_shape((TypeMap*)element->type, element->data);
+        if (!element->items) return;
+        for (int64_t i = 0; i < element->length; i++) {
+            resolve_sys_paths_recursive(element->items[i]);
+        }
     }
-    // Note: Maps and Elements could also contain paths, but for script results
-    // we mainly need to handle List/Array which collect top-level expressions
-    // Map/Element traversal was causing segfaults in some edge cases (csv_test)
-    // TODO: Investigate why map->data access crashes for some maps
 }
 
 // Common helper function to execute a compiled script and wrap the result in an Input*
@@ -1784,6 +1810,12 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     if (!script) return;
     if (remove_index && script->reference) {
         runtime_script_index_delete_script(runtime, script);
+    }
+    // Hosted owners release their language-specific facts before the shared
+    // AST/Input storage disappears. The hook never owns common Script fields.
+    if (script->destroy_extension) {
+        script->destroy_extension(script);
+        script->destroy_extension = NULL;
     }
     if (script->reference) mem_free((void*)script->reference);
     if (script->repl_source) strbuf_free(script->repl_source);
