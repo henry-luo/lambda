@@ -183,6 +183,13 @@ const char* editing_mode_name(EditingMode mode) {
     return "none";
 }
 
+// ESO43 hoisted the undo/redo ring into ViewState, so state_store.cpp frees it
+// on detach/prune/destroy. text_edit.cpp is not part of this target, and the
+// ring is never populated here — nothing in these tests takes an edit.
+void te_history_free(EditHistory* h) {
+    (void)h;
+}
+
 bool tc_is_text_control(DomElement* elem) {
     (void)elem;
     return false;

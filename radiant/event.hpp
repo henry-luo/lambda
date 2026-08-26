@@ -60,9 +60,12 @@ struct EventContext;
 bool radiant_behavior_claims_event(struct EventContext* evcon, View* target,
                                    const char* event_name);
 
-// Drop queued behavior attaches belonging to a document being freed; call
-// while its views are still alive (top of free_document).
-void radiant_behavior_attach_purge_doc(struct DomDocument* doc);
+// F8/ES19: the behavior init phase. Runs between layout and rendering, and is
+// positioned rather than gated on paint — a headless run that never renders
+// still inits its controls, while `lambda.exe layout` stops before the phase
+// and so keeps batch output free of handler side effects. Self-gating on
+// DomDocument::behavior_init_pending, so calling it on a quiet document is free.
+void radiant_run_behavior_init(struct DomDocument* doc);
 #endif
 
 typedef enum  {
@@ -187,9 +190,6 @@ typedef union RdtEvent {
 #ifndef RADIANT_EVENT_CORE_ONLY
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 #endif
-
-void radiant_uncheck_radio_group(DomNode* root, const char* name, DomNode* exclude,
-                                 DocState* state, bool sync_pseudo);
 
 #ifndef RADIANT_EVENT_CORE_ONLY
 
@@ -1814,6 +1814,9 @@ extern "C" void tc_history_guard_enter(DocState* state);
 extern "C" void tc_history_guard_exit(DocState* state);
 
 // The undo ring, stored on the form ViewState in the State Store (ESO43).
+bool form_control_behavior_inited(DocState* state, View* view);
+void form_control_set_behavior_inited(DocState* state, View* view, bool inited);
+void form_control_invalidate_behavior_init(DocState* state, View* view);
 void* form_control_history_get(DocState* state, View* view);
 void form_control_history_set(DocState* state, View* view, void* history);
 
@@ -2249,7 +2252,13 @@ typedef struct ViewState {
         uint8_t hovered : 1;
         uint8_t active : 1;
         uint8_t focused : 1;
-        uint8_t reserved : 5;
+        // F8/ES19: this control has had its behavior `init` turn. Lives here
+        // rather than on FormControlProp because ViewState is keyed by the
+        // stable view id and survives both relayout and the prop release that
+        // `reset_retained` performs — a bit on the prop would re-arm every pass
+        // and re-fire init forever.
+        uint8_t behavior_inited : 1;
+        uint8_t reserved : 4;
     } flags;
     union {
         struct {

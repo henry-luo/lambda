@@ -7519,12 +7519,36 @@ extern "C" void js_array_exotic_before_property_set(Item object, Item key, Item 
     _select_set_selected_index(owner, _select_index_from_item(value));
 }
 
+// F8/ES19: an attribute write that feeds constraint validation or the ARIA
+// mirrors must re-derive them, and a programmatic write fires no `input` event
+// for the package to hang that on. Re-arming the control's init bit makes the
+// next init phase re-run the same `init` handler rather than adding a second
+// reflection route. Name-gated to the inputs of revalidate/reflect, so an
+// unrelated attribute never schedules work; the package's own `aria-*` writes
+// do not reach this hook at all.
+static void js_dom_reinit_behavior_if_constraint_attr(DomElement* elem,
+                                                      const char* attr_name) {
+    if (!elem || !attr_name || !elem->form_control() || !elem->doc) return;
+    static const char* kConstraintAttrs[] = {
+        "type", "required", "minlength", "maxlength", "pattern",
+        "min", "max", "disabled", "readonly", "value",
+    };
+    for (size_t i = 0; i < sizeof(kConstraintAttrs)/sizeof(kConstraintAttrs[0]); i++) {
+        if (strcasecmp(attr_name, kConstraintAttrs[i]) == 0) {
+            form_control_invalidate_behavior_init((DocState*)elem->doc->state,
+                                                  (View*)elem);
+            return;
+        }
+    }
+}
+
 extern "C" void js_dom_after_set_attribute(void* elem_ptr,
                                            const char* attr_name,
                                            const char* attr_value) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name || !attr_value) return;
     js_dom_compile_event_attr_to_expando(elem, attr_name, attr_value);
+    js_dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
         DomElement* sel = _nearest_select_for_node((DomNode*)elem);
         if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
@@ -7537,6 +7561,7 @@ extern "C" void js_dom_after_remove_attribute(void* elem_ptr,
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name) return;
     js_dom_clear_event_attr_expando(elem, attr_name);
+    js_dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
         _select_ask_for_reset(elem);
     }
@@ -14328,6 +14353,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         const char* old_value = elem->get_attribute(attr_name);
         elem->set_attribute(attr_name, attr_val);
         js_dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
+        js_dom_reinit_behavior_if_constraint_attr(elem, attr_name);
         if (_is_tag(elem, "option") && strcasecmp(attr_name, "selected") == 0) {
             DomElement* sel = _nearest_select_for_node((DomNode*)elem);
             if (sel && !sel->has_attribute("multiple")) _select_ask_for_reset(sel);
@@ -14433,6 +14459,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         const char* old_value = elem->get_attribute(attr_name);
         elem->remove_attribute(attr_name);
         js_dom_clear_event_attr_expando(elem, attr_name);
+        js_dom_reinit_behavior_if_constraint_attr(elem, attr_name);
         if (_is_tag(elem, "select") && strcasecmp(attr_name, "multiple") == 0) {
             _select_ask_for_reset(elem);
         }
