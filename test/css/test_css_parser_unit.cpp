@@ -570,6 +570,78 @@ TEST_F(CssParserUnitTest, Declaration_EmptyValue_Invalid) {
     // Implementation dependent - document actual behavior
 }
 
+TEST_F(CssParserUnitTest, FragmentParser_SelectorGroupRequiresCompleteInput) {
+    CssSelectorGroup* group = css_parse_selector_group_text(
+        "div, span", strlen("div, span"), pool.get());
+    ASSERT_NE(group, nullptr);
+    EXPECT_EQ(group->selector_count, 2u);
+
+    EXPECT_EQ(css_parse_selector_group_text(
+        "div {", strlen("div {"), pool.get()), nullptr);
+}
+
+TEST_F(CssParserUnitTest, FragmentParser_RuleRequiresCompleteInput) {
+    const char* rule_text = ".card { color: red; }";
+    CssRule* rule = css_parse_rule_text(rule_text, strlen(rule_text), pool.get());
+    ASSERT_NE(rule, nullptr);
+    EXPECT_EQ(rule->type, CSS_RULE_STYLE);
+    EXPECT_EQ(rule->data.style_rule.declaration_count, 1u);
+
+    const char* two_rules = ".a {} .b {}";
+    EXPECT_EQ(css_parse_rule_text(two_rules, strlen(two_rules), pool.get()), nullptr);
+}
+
+TEST_F(CssParserUnitTest, FragmentParser_DeclarationListParsesDescriptorBlock) {
+    const char* declarations = "{ font-family: Demo; src: url(demo.woff2); }";
+    size_t count = 0;
+    CssDeclaration** parsed = css_parse_declaration_list_text(
+        declarations, strlen(declarations), pool.get(), &count);
+    ASSERT_NE(parsed, nullptr);
+    ASSERT_EQ(count, 2u);
+    EXPECT_STREQ(parsed[0]->property_name, "font-family");
+    EXPECT_STREQ(parsed[1]->property_name, "src");
+}
+
+TEST_F(CssParserUnitTest, FragmentParser_PropertyDeclarationKeepsLongValues) {
+    char long_value[601];
+    memset(long_value, 'x', sizeof(long_value) - 1);
+    long_value[sizeof(long_value) - 1] = '\0';
+
+    CssDeclaration* declaration = css_parse_property_declaration(
+        "--long-value", strlen("--long-value"),
+        long_value, strlen(long_value), pool.get());
+    ASSERT_NE(declaration, nullptr);
+    EXPECT_EQ(declaration->value_text_len, strlen(long_value));
+}
+
+TEST_F(CssParserUnitTest, FragmentParser_UnicodeRangeCanonicalizes) {
+    const char* wildcard = "u+00a?";
+    const char* canonical = css_parse_unicode_range_canonical(
+        wildcard, strlen(wildcard), pool.get());
+    ASSERT_NE(canonical, nullptr);
+    EXPECT_STREQ(canonical, "U+A0-AF");
+
+    const char* single = "U+0000";
+    canonical = css_parse_unicode_range_canonical(single, strlen(single), pool.get());
+    ASSERT_NE(canonical, nullptr);
+    EXPECT_STREQ(canonical, "U+0");
+
+    const char* range = "u+0000-0000";
+    canonical = css_parse_unicode_range_canonical(range, strlen(range), pool.get());
+    ASSERT_NE(canonical, nullptr);
+    EXPECT_STREQ(canonical, "U+0-0");
+
+    const char* commented = "u/**/+00a?;";
+    canonical = css_parse_unicode_range_canonical(
+        commented, strlen(commented), pool.get());
+    ASSERT_NE(canonical, nullptr);
+    EXPECT_STREQ(canonical, "U+A0-AF");
+
+    const char* invalid = "u+1234567";
+    EXPECT_EQ(css_parse_unicode_range_canonical(
+        invalid, strlen(invalid), pool.get()), nullptr);
+}
+
 TEST_F(CssParserUnitTest, Declaration_NoColon_Invalid) {
     auto parser = CreateParser();
     auto decl = parser.ParseDeclaration("color red");

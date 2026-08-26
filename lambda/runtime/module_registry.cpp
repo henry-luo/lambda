@@ -496,7 +496,7 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
     }
 
     AstNode* tail = NULL;
-    int synthetic_offset = 1000000;  // use high offsets to avoid collisions
+    uint32_t synthetic_offset = 1000000U;  // use high offsets to avoid collisions
 
     ShapeEntry* shape = type_map->shape;
     while (shape) {

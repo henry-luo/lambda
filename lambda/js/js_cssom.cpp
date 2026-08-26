@@ -25,7 +25,6 @@
 #include "../input/css/css_formatter.hpp"
 
 #include <cstring>
-#include <cctype>
 
 extern String* heap_create_name(const char* name, size_t len);
 extern "C" Item vmap_new(void);
@@ -41,248 +40,6 @@ static void js_cssom_notify_stylesheet_mutation(void) {
     // stylesheet edits do not touch a DOM node, but they still require post-script cascade.
     style_epoch_mark_global_change((DomDocument*)js_dom_get_document());
     js_dom_notify_mutation(DOM_JS_MUTATION_STYLE, nullptr, nullptr);
-}
-
-// =============================================================================
-// Unicode-Range Parsing & Canonical Serialization
-// =============================================================================
-JS_FORWARD_STATIC_EXPRESSION(bool, is_hex_digit, (char c), ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
-
-static uint32_t hex_val(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return 0;
-}
-
-// format a code point as uppercase hex, stripping leading zeros
-// e.g., 0x00ABC → "ABC", 0 → "0"
-static int format_codepoint(uint32_t cp, char* buf, size_t buf_size) {
-    if (cp == 0) {
-        buf[0] = '0';
-        buf[1] = '\0';
-        return 1;
-    }
-    char tmp[8];
-    int len = 0;
-    uint32_t val = cp;
-    while (val > 0 && len < 6) {
-        int d = val & 0xF;
-        tmp[len++] = (d < 10) ? ('0' + d) : ('A' + d - 10);
-        val >>= 4;
-    }
-    // reverse
-    for (int i = 0; i < len && (size_t)i < buf_size - 1; i++) {
-        buf[i] = tmp[len - 1 - i];
-    }
-    buf[len] = '\0';
-    return len;
-}
-
-/**
- * Parse a CSS unicode-range value and return canonical form.
- * Returns pool-allocated string like "U+ABC" or "U+A0-AF", or NULL if invalid.
- *
- * Grammar (CSS Syntax spec §9.1):
- *   <urange> = u '+' <ident-token> '?'*
- *            | u <dimension-token> '?'*
- *            | u <number-token> '?'*
- *            | u <number-token> <dimension-token>
- *            | u <number-token> <number-token>
- *            | u '+' '?'+
- *
- * In practice, the tokenizer sees these as various token sequences because
- * `u+abc` tokenizes as IDENT(u) + DELIM(+) + ... or as DIMENSION, etc.
- * We handle this by working directly on the raw text.
- */
-static const char* css_parse_unicode_range_canonical(const char* input, Pool* pool) {
-    if (!input || !pool) return nullptr;
-
-    const char* p = input;
-    // skip leading whitespace
-    while (*p == ' ' || *p == '\t') p++;
-
-    // must start with 'u' or 'U' (case insensitive)
-    if (*p != 'u' && *p != 'U') return nullptr;
-    p++;
-
-    // skip CSS comments ONLY between 'u' and '+' (not whitespace — "u +abc" is invalid)
-    while (*p == '/' && *(p+1) == '*') {
-        p += 2;
-        while (*p && !(*p == '*' && *(p+1) == '/')) p++;
-        if (*p) p += 2;
-    }
-
-    // must have '+' next
-    if (*p != '+') return nullptr;
-    p++;
-
-    // skip CSS comments ONLY (not whitespace) between '+' and value
-    // per spec, spaces are not allowed: "u+ abc" is invalid
-    while (*p == '/' && *(p+1) == '*') {
-        p += 2;
-        while (*p && !(*p == '*' && *(p+1) == '/')) p++;
-        if (*p) p += 2;
-    }
-
-    // now parse the hex digits, '?' wildcards, and '-' range separator
-    char hex_chars[8]; // max 6 hex + null
-    int hex_count = 0;
-    int wild_count = 0;
-
-    // first, collect hex digits
-    // collect up to 6 hex digits (CSS unicode-range max)
-    while (is_hex_digit(*p) && hex_count < 6) {
-        hex_chars[hex_count++] = *p;
-        p++;
-    }
-
-    // skip CSS comments between hex chars and wildcards
-    while (*p == '/' && *(p+1) == '*') {
-        p += 2;
-        while (*p && !(*p == '*' && *(p+1) == '/')) p++;
-        if (*p) p += 2;
-    }
-
-    // then collect ? wildcards
-    while (*p == '?') {
-        wild_count++;
-        p++;
-    }
-
-    // total must be 1-6
-    int total = hex_count + wild_count;
-    if (total == 0 || total > 6) return nullptr;
-
-    // skip CSS comments after value
-    while (*p == '/' && *(p+1) == '*') {
-        p += 2;
-        while (*p && !(*p == '*' && *(p+1) == '/')) p++;
-        if (*p) p += 2;
-    }
-
-    // if we have wildcards, compute range and return
-    if (wild_count > 0) {
-        // no characters after '?' (except whitespace/end)
-        const char* rest = p;
-        while (*rest == ' ' || *rest == '\t') rest++;
-        if (*rest != '\0' && *rest != ';' && *rest != '}') {
-            // wildcards can't be followed by anything — reject "-", hex, alpha
-            return nullptr;
-        }
-
-        hex_chars[hex_count] = '\0';
-        // compute start and end of wildcard range
-        // "a?" → start=a0, end=af
-        // "a??" → start=a00, end=aff
-        uint32_t start_cp = 0;
-        for (int i = 0; i < hex_count; i++) {
-            start_cp = (start_cp << 4) | hex_val(hex_chars[i]);
-        }
-        for (int i = 0; i < wild_count; i++) {
-            start_cp = start_cp << 4;
-        }
-
-        uint32_t end_cp = 0;
-        for (int i = 0; i < hex_count; i++) {
-            end_cp = (end_cp << 4) | hex_val(hex_chars[i]);
-        }
-        for (int i = 0; i < wild_count; i++) {
-            end_cp = (end_cp << 4) | 0xF;
-        }
-
-        // validate range
-        if (start_cp > 0x10FFFF || end_cp > 0x10FFFF) return nullptr;
-
-        char result[32];
-        char start_str[8], end_str[8];
-        format_codepoint(start_cp, start_str, sizeof(start_str));
-        format_codepoint(end_cp, end_str, sizeof(end_str));
-        snprintf(result, sizeof(result), "U+%s-%s", start_str, end_str);
-        char* out = (char*)pool_alloc(pool, strlen(result) + 1);
-        strcpy(out, result); // UNSAFE_LIBC_OK: dst allocated with strlen(result)+1
-        return out;
-    }
-
-    // no wildcards: either a single value or a range with '-'
-    hex_chars[hex_count] = '\0';
-
-    // parse the first value
-    uint32_t start_cp = 0;
-    for (int i = 0; i < hex_count; i++) {
-        start_cp = (start_cp << 4) | hex_val(hex_chars[i]);
-    }
-
-    // check for range separator '-'
-    bool has_range = false;
-    uint32_t end_cp = 0;
-
-    // skip CSS comments
-    while (*p == '/' && *(p+1) == '*') {
-        p += 2;
-        while (*p && !(*p == '*' && *(p+1) == '/')) p++;
-        if (*p) p += 2;
-    }
-
-    if (*p == '-') {
-        p++;
-        has_range = true;
-
-        // skip CSS comments
-        while (*p == '/' && *(p+1) == '*') {
-            p += 2;
-            while (*p && !(*p == '*' && *(p+1) == '/')) p++;
-            if (*p) p += 2;
-        }
-
-        // parse end value hex digits
-        int end_hex_count = 0;
-        char end_hex[8];
-        while (is_hex_digit(*p) && end_hex_count < 6) {
-            end_hex[end_hex_count++] = *p;
-            p++;
-        }
-        if (end_hex_count == 0 || end_hex_count > 6) return nullptr;
-        end_hex[end_hex_count] = '\0';
-
-        // reject if more hex chars follow (>6 total)
-        if (is_hex_digit(*p)) return nullptr;
-
-        // no wildcards allowed in range end
-        if (*p == '?') return nullptr;
-
-        for (int i = 0; i < end_hex_count; i++) {
-            end_cp = (end_cp << 4) | hex_val(end_hex[i]);
-        }
-    }
-
-    // validate
-    if (start_cp > 0x10FFFF) return nullptr;
-    if (has_range && end_cp > 0x10FFFF) return nullptr;
-
-    // check for trailing garbage
-    while (*p == ' ' || *p == '\t') p++;
-    if (*p != '\0' && *p != ';' && *p != '}') {
-        // any trailing content makes the value invalid
-        return nullptr;
-    }
-
-    // format canonical output
-    char result[32];
-    char start_str[8];
-    format_codepoint(start_cp, start_str, sizeof(start_str));
-
-    if (has_range) {
-        char end_str[8];
-        format_codepoint(end_cp, end_str, sizeof(end_str));
-        snprintf(result, sizeof(result), "U+%s-%s", start_str, end_str);
-    } else {
-        snprintf(result, sizeof(result), "U+%s", start_str);
-    }
-
-    char* out = (char*)pool_alloc(pool, strlen(result) + 1);
-    strcpy(out, result); // UNSAFE_LIBC_OK: dst allocated with strlen(result)+1
-    return out;
 }
 
 // =============================================================================
@@ -372,114 +129,38 @@ static CssStylesheet* unwrap_stylesheet(Item item) {
 // Font-Face Declaration Parsing (lazy on .style access)
 // =============================================================================
 
-// Use the CssRule's legacy compatibility fields to cache parsed declarations
-// for font-face rules. property_count stores declaration count, property_names
-// is repurposed to store CssDeclaration** (cast).
+// use the CssRule's legacy compatibility fields to cache parsed declarations
+// for font-face rules. property_count stores declaration count, and the paired
+// legacy pointers hold the cached shadow CssRule.
 static CssRule* get_font_face_as_style_rule(CssRule* rule) {
     if (!rule || (rule->type != CSS_RULE_FONT_FACE && rule->type != CSS_RULE_PAGE)) return nullptr;
 
     Pool* pool = rule->pool ? rule->pool : get_document_pool();
     if (!pool) return nullptr;
 
-    // check if we already parsed declarations (cached in property_count)
+    // keep lazy parsing for descriptor rules, but let the shared CSS parser
+    // own declaration-list tokenization and error recovery.
     if (rule->property_count > 0 && rule->property_names) {
-        // already parsed - return a shadow style rule using cached data
-        // we store the shadow CssRule* in property_values[0]
         return (CssRule*)rule->property_values;
     }
 
-    // parse the content of the font-face rule
     const char* content = rule->data.generic_rule.content;
     if (!content) return nullptr;
 
-    // the content includes the braces, e.g.: { font-family: foo; src: url(...); }
-    // find the content between { and }
-    const char* start = strchr(content, '{');
-    const char* end = nullptr;
-    if (start) {
-        start++;
-        end = strrchr(content, '}');
-        if (!end) end = content + strlen(content);
-    } else {
-        // no braces — treat entire content as declarations
-        start = content;
-        end = content + strlen(content);
-    }
-
-    size_t decl_text_len = end - start;
-    char* decl_text = (char*)pool_alloc(pool, decl_text_len + 1);
-    if (!decl_text) return nullptr;
-    memcpy(decl_text, start, decl_text_len);
-    decl_text[decl_text_len] = '\0';
-
-    // tokenize and parse declarations
-    size_t token_count = 0;
-    CssToken* tokens = css_tokenize(decl_text, decl_text_len, pool, &token_count);
-    if (!tokens || token_count == 0) return nullptr;
-
-    // parse declarations from tokens
-    CssDeclaration* decls[64];
     size_t decl_count = 0;
-    int pos = 0;
-    while (pos < (int)token_count && decl_count < 64) {
-        // skip whitespace and semicolons
-        while (pos < (int)token_count &&
-               (tokens[pos].type == CSS_TOKEN_WHITESPACE ||
-                tokens[pos].type == CSS_TOKEN_SEMICOLON)) {
-            pos++;
-        }
-        if (pos >= (int)token_count || tokens[pos].type == CSS_TOKEN_EOF) break;
-
-        // skip @-rules inside declaration blocks (e.g., @at {} or @at;)
-        if (tokens[pos].type == CSS_TOKEN_AT_KEYWORD) {
-            pos++;
-            int bd = 0;
-            while (pos < (int)token_count && tokens[pos].type != CSS_TOKEN_EOF) {
-                if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
-                    bd = 1; pos++;
-                    while (pos < (int)token_count && bd > 0) {
-                        if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) bd++;
-                        else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) bd--;
-                        pos++;
-                    }
-                    break;
-                } else if (tokens[pos].type == CSS_TOKEN_SEMICOLON) {
-                    pos++; break;
-                }
-                pos++;
-            }
-            continue;
-        }
-
-        // skip stray RIGHT_BRACE tokens (from @-rule block parsing)
-        if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE ||
-            tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
-            pos++;
-            continue;
-        }
-
-        CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, (int)token_count, pool);
-        if (decl) {
-            decls[decl_count++] = decl;
-        }
-        // skip semicolons
-        if (pos < (int)token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON) pos++;
-    }
-
-    if (decl_count == 0) return nullptr;
+    CssDeclaration** decls = css_parse_declaration_list_text(
+        content, strlen(content), pool, &decl_count);
+    if (!decls || decl_count == 0) return nullptr;
 
     // create a shadow CssRule of type CSS_RULE_STYLE to hold the declarations
     CssRule* shadow = (CssRule*)pool_calloc(pool, sizeof(CssRule));
     if (!shadow) return nullptr;
     shadow->type = CSS_RULE_STYLE;
     shadow->pool = pool;
-    shadow->data.style_rule.declarations = (CssDeclaration**)pool_calloc(pool, sizeof(CssDeclaration*) * (decl_count + 8));
+    shadow->data.style_rule.declarations = decls;
     shadow->data.style_rule.declaration_count = decl_count;
     shadow->data.style_rule.selector = nullptr;
     shadow->data.style_rule.selector_group = nullptr;
-    for (size_t i = 0; i < decl_count; i++) {
-        shadow->data.style_rule.declarations[i] = decls[i];
-    }
 
     // cache the shadow rule in the original font-face rule's legacy fields
     rule->property_count = decl_count;
@@ -717,7 +398,9 @@ extern "C" Item js_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_
     (void)args; (void)argc;
     if (argc < 1) return ItemNull;
 
-    const char* rule_text = fn_to_cstr(args[0]);
+    String* rule_string = it2s(args[0]);
+    const char* rule_text = rule_string ? rule_string->chars : fn_to_cstr(args[0]);
+    size_t rule_length = rule_string ? rule_string->len : (rule_text ? strlen(rule_text) : 0);
     if (!rule_text) return ItemNull;
 
     int index = (argc >= 2) ? (int)it2i(args[1]) : (int)sheet->rule_count;
@@ -732,14 +415,7 @@ extern "C" Item js_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_
     Pool* pool = sheet->pool ? sheet->pool : get_document_pool();
     if (!pool) return ItemNull;
 
-    size_t token_count = 0;
-    CssToken* tokens = css_tokenize(rule_text, strlen(rule_text), pool, &token_count);
-    if (!tokens || token_count == 0) {
-        log_error("js_cssom_stylesheet_method insertRule: failed to tokenize rule '%s'", rule_text);
-        return ItemNull;
-    }
-
-    CssRule* new_rule = css_parse_rule_from_tokens(tokens, (int)token_count, pool);
+    CssRule* new_rule = css_parse_rule_text(rule_text, rule_length, pool);
     if (!new_rule) {
         log_error("js_cssom_stylesheet_method insertRule: failed to parse rule '%s'", rule_text);
         return ItemNull;
@@ -925,30 +601,10 @@ extern "C" Item js_cssom_rule_set_selector_text(Item rule_item, Item value) {
         Pool* pool = (rule && rule->pool) ? rule->pool : get_document_pool();
         if (!pool) return value;
 
-        // tokenize
-        size_t token_count = 0;
-        CssToken* tokens = css_tokenize(new_text, new_text_len, pool, &token_count);
-        if (!tokens || token_count == 0) {
-            log_debug("js_cssom_rule_set_property: failed to tokenize selectorText '%s'", new_text);
-            return value;  // per spec, silently ignore parse failures
-        }
-
-        // parse selector group
-        int pos = 0;
-        CssSelectorGroup* new_group = css_parse_selector_group_from_tokens(tokens, &pos, (int)token_count, pool);
+        CssSelectorGroup* new_group = css_parse_selector_group_text(new_text, new_text_len, pool);
         if (!new_group || new_group->selector_count == 0) {
             log_debug("js_cssom_rule_set_property: failed to parse selectorText '%s'", new_text);
             return value;  // silently ignore
-        }
-
-        // reject if there are unconsumed tokens (e.g. non-printable code points)
-        while (pos < (int)token_count && (tokens[pos].type == CSS_TOKEN_WHITESPACE ||
-               tokens[pos].type == CSS_TOKEN_EOF || tokens[pos].type == CSS_TOKEN_COMMENT)) {
-            pos++;
-        }
-        if (pos < (int)token_count) {
-            log_debug("js_cssom_rule_set_property: leftover tokens in selectorText '%s'", new_text);
-            return value;  // silently ignore - invalid selector
         }
 
         // replace the rule's selectors
@@ -1047,7 +703,9 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
     const char* prop = fn_to_cstr(prop_name);
     if (!prop) return value;
 
-    const char* val_str = fn_to_cstr(value);
+    String* value_string = it2s(value);
+    const char* val_str = value_string ? value_string->chars : fn_to_cstr(value);
+    size_t val_len = value_string ? value_string->len : (val_str ? strlen(val_str) : 0);
     if (!val_str) val_str = "";
 
     Pool* pool = rule->pool;
@@ -1060,7 +718,7 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
 
     // special handling for unicode-range descriptor (font-face)
     if (strcmp(css_prop, "unicode-range") == 0) {
-        const char* canonical = css_parse_unicode_range_canonical(val_str, pool);
+        const char* canonical = css_parse_unicode_range_canonical(val_str, val_len, pool);
         if (!canonical) {
             // invalid unicode-range — silently ignore (per CSSOM spec)
             log_debug("js_cssom_rule_decl_set_property: invalid unicode-range '%s'", val_str);
@@ -1103,16 +761,9 @@ extern "C" Item js_cssom_rule_decl_set_property(Item decl_item, Item prop_name, 
         return value;
     }
 
-    // parse the value as a CSS declaration: "property: value"
-    char decl_text[512];
-    snprintf(decl_text, sizeof(decl_text), "%s: %s", css_prop, val_str);
-
-    size_t token_count = 0;
-    CssToken* tokens = css_tokenize(decl_text, strlen(decl_text), pool, &token_count);
-    if (!tokens || token_count == 0) return value;
-
-    int pos = 0;
-    CssDeclaration* new_decl = css_parse_declaration_from_tokens(tokens, &pos, (int)token_count, pool);
+    // parse the property/value pair through the shared CSS fragment parser.
+    CssDeclaration* new_decl = css_parse_property_declaration(
+        css_prop, strlen(css_prop), val_str, val_len, pool);
     if (!new_decl) {
         // parse error — silently ignore (per CSSOM spec)
         log_debug("js_cssom_rule_decl_set_property: parse error for '%s: %s'", css_prop, val_str);
@@ -1401,9 +1052,14 @@ static Item js_css_supports(Item* args, int argc) {
             return (Item){.item = b2it(false)};
         }
 
-        // check if property is known (custom properties always pass)
-        char prop_buf[256];
-        size_t prop_len = prop_s->len < 255 ? prop_s->len : 255;
+        // check if property is known (custom properties always pass). Keep the
+        // complete JS string; CSS parsing is length-aware and must not truncate.
+        size_t prop_len = prop_s->len;
+        char* prop_buf = (char*)pool_alloc(pool, prop_len + 1);
+        if (!prop_buf) {
+            if (free_pool) mem_pool_destroy(pool);
+            return (Item){.item = b2it(false)};
+        }
         memcpy(prop_buf, prop_s->chars, prop_len);
         prop_buf[prop_len] = '\0';
 
@@ -1416,23 +1072,9 @@ static Item js_css_supports(Item* args, int argc) {
             }
         }
 
-        // try parsing "property: value" as a CSS declaration
-        char decl_text[1024];
-        int n = snprintf(decl_text, sizeof(decl_text), "%.*s: %.*s",
-                         (int)prop_len, prop_buf,
-                         (int)(val_s->len < 700 ? val_s->len : 700), val_s->chars);
-        if (n <= 0 || n >= (int)sizeof(decl_text)) {
-            if (free_pool) mem_pool_destroy(pool);
-            return (Item){.item = b2it(false)};
-        }
-
-        size_t token_count = 0;
-        CssToken* tokens = css_tokenize(decl_text, strlen(decl_text), pool, &token_count);
-        if (tokens && token_count > 0) {
-            int pos = 0;
-            CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, (int)token_count, pool);
-            result = (decl != NULL);
-        }
+        CssDeclaration* decl = css_parse_property_declaration(
+            prop_buf, prop_len, val_s->chars, val_s->len, pool);
+        result = decl != NULL;
     } else {
         // single-argument form: CSS.supports("(property: value)")
         // or CSS.supports("property: value")
@@ -1460,19 +1102,8 @@ static Item js_css_supports(Item* args, int argc) {
             len--;
         }
 
-        // try to parse as a declaration
-        char decl_buf[1024];
-        size_t copy_len = len < sizeof(decl_buf) - 1 ? len : sizeof(decl_buf) - 1;
-        memcpy(decl_buf, text, copy_len);
-        decl_buf[copy_len] = '\0';
-
-        size_t token_count = 0;
-        CssToken* tokens = css_tokenize(decl_buf, copy_len, pool, &token_count);
-        if (tokens && token_count > 0) {
-            int pos = 0;
-            CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, (int)token_count, pool);
-            result = (decl != NULL);
-        }
+        CssDeclaration* decl = css_parse_declaration_text(text, len, pool);
+        result = decl != NULL;
     }
 
     if (free_pool) mem_pool_destroy(pool);
