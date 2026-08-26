@@ -321,6 +321,24 @@ TEST(LambdaRdParserPoc, ParsesForClausesAndProceduralWhile) {
         NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
 }
 
+TEST(LambdaRdParserPoc, CentralizesExpectedTokenDiagnostics) {
+    const char* source = "for item in items group item";
+    LambdaParseError error = {};
+    EXPECT_EQ(lambda_rd_parse_source(source, strlen(source), NULL, NULL,
+        NULL, &error), LAMBDA_PARSE_ERROR);
+    EXPECT_STREQ(error.message, "expected 'by'");
+    EXPECT_EQ(error.actual_kind, LAMBDA_TOK_IDENTIFIER);
+}
+
+TEST(LambdaRdParserPoc, CentralizesStatementSeparatorDiagnostics) {
+    const char* source = "1;;2";
+    LambdaParseError error = {};
+    EXPECT_EQ(lambda_rd_parse_source(source, strlen(source), NULL, NULL,
+        NULL, &error), LAMBDA_PARSE_ERROR);
+    EXPECT_STREQ(error.message, "empty statement between ';' separators");
+    EXPECT_EQ(error.actual_kind, LAMBDA_TOK_SEMICOLON);
+}
+
 TEST(LambdaRdParserPoc, ParsesExpressionAndBlockMatchArms) {
     const char* source =
         "match value {\n"

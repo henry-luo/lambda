@@ -908,6 +908,17 @@ This preserves the fail-fast direct-AST and syntax-only recovery split required
 by **D8.1.1v5**. A Mark compatibility correction retained semicolon separators
 immediately before an element close, preserving existing graph fixture syntax.
 
+**P2.13 implementation checkpoint (2026-08-26):** a second C-parser
+consolidation pass reduced `lambda/runtime/parser/lambda_parser.c` from 2,383
+to 1,852 physical lines (-531). It reuses parameter parsing for arrow probes,
+shares return-type tails, braced bodies, content-child/separator handling,
+for-clause reductions, import-module paths, and single-child reductions; the
+Pratt precedence and type-delimiter dispatch are now table-driven. The focused
+parser suite remains green (32/32), parser robustness is green (84/84), and
+the complete baseline gate is green (3,900/3,900). The physical LOC metric
+includes mechanical continuation compaction after these semantic
+consolidations; behavior remains governed by **D8.1.1v5**.
+
 ## 8. Performance and size interpretation
 
 The two phases answer different performance questions:
