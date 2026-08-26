@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 // Forward declarations
+typedef struct JsScript JsScript;
 typedef struct JsTranspiler JsTranspiler;
 typedef NameScope JsScope;
 struct hashmap;
@@ -27,24 +28,27 @@ typedef enum JsScopeType {
     JS_SCOPE_MODULE
 } JsScopeType;
 
-// JavaScript transpiler context
-typedef struct JsTranspiler {
-    // Core transpiler components
-    Pool* ast_pool;                 // AST memory pool
-    NamePool* name_pool;            // String interning pool
-    const char* source;             // JavaScript source code
-    size_t source_length;           // Source code length
-    char* normalized_source;        // Owned parse buffer when source normalization is applied
-    LangProfile* profile;           // dormant Phase-1 language profile hook table
-    AstIndex ast_index;             // shared dense identity/index table for post-CST passes
-    struct hashmap* scope_lookup_cache; // immutable post-build (scope,name) binding cache
-    
-    // Scoping and symbol management
-    JsScope* current_scope;         // Current lexical scope
-    JsScope* global_scope;          // Global scope
-    
-    // Compilation state
-    bool strict_mode;               // Global strict mode
+// JsScript retains the JavaScript-specific semantic facts over the common
+// Script owner. The base owns source, Input allocation, profile, AST/index,
+// module identity, interpreter plan/slab, imports, debug state, and MIR
+// artifacts; do not mirror those fields here.
+struct JsScript : Script {
+    size_t source_length;           // source byte count; adopted Script owns source bytes
+    JsScope* global_scope;          // JS global/module lexical scope root
+    struct hashmap* scope_lookup_cache; // post-build (scope,name) binding facts
+    bool strict_mode;               // JS script/function strictness default
+    bool strict_js;                 // true = reject TS syntax (pure JS mode)
+    bool emit_runtime_checks;       // TS development-mode assertion emission
+    struct hashmap* type_registry; // TS name → Type* facts for this JS/TS unit
+};
+
+// JsTranspiler is an ephemeral builder extending the retained JsScript prefix.
+// Its tail contains only parser, diagnostics, and current-build state; adoption
+// moves the prefix into a runtime-owned JsScript before destroying this tail.
+struct JsTranspiler : JsScript {
+    char* normalized_source;        // owned parse buffer when normalization applies
+
+    // Current-build state
     int function_counter;           // Counter for anonymous functions
     int temp_var_counter;           // Counter for temporary variables
     int label_counter;              // Counter for labels
@@ -67,17 +71,10 @@ typedef struct JsTranspiler {
     // Tree-sitter integration
     TSParser* parser;               // Tree-sitter parser
     TSTree* tree;                   // Parse tree
-    
+
     // Runtime integration
-    Runtime* runtime;               // Lambda runtime context
-
-    // Unified JS/TS mode flags
-    bool strict_js;                 // true = reject TS syntax (pure JS mode), false = allow TS
-    bool emit_runtime_checks;       // emit ts_assert_type/ts_check_shape calls (TS dev mode)
-
-    // Type registry: name → Type* (TS interfaces, aliases, enums)
-    struct hashmap* type_registry;
-} JsTranspiler;
+    Runtime* runtime;               // builder's borrowed runtime
+};
 
 // JavaScript type mapping functions
 Type* js_type_to_lambda_type(JsTranspiler* tp, JsAstNode* node);
@@ -109,6 +106,9 @@ static inline int js_index_compiler_pass(void* opaque) {
 static inline JsAstNode* build_js_ast_indexed(JsTranspiler* tp, TSNode root) {
     JsAstNode* ast = build_js_ast(tp, root);
     if (!ast) return NULL;
+    // The shared Script owner is the AST lifetime authority after adoption.
+    // Publish the root before post-build passes attach indexed facts to it.
+    tp->ast_root = (AstNode*)ast;
     js_report_any_census(tp);
     js_scope_lookup_cache_enable(tp);
     JsAstIndexPassContext pass_context = {tp, ast};
@@ -161,6 +161,11 @@ bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length);
 int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
                                   int64_t* out_col, char* out_message,
                                   int64_t out_message_size);
+JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
+                                     const char* reference);
+static inline JsScript* js_script_from_script(Script* script) {
+    return script && script->profile == &js_profile ? (JsScript*)script : NULL;
+}
 #ifdef __cplusplus
 }
 #endif

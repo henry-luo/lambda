@@ -42,7 +42,7 @@ struct TsTypeParser {
     }
 
     String* make_string(const char* src, int slen) {
-        String* s = (String*)pool_alloc(tp->ast_pool, sizeof(String) + slen + 1);
+        String* s = (String*)pool_alloc(tp->pool, sizeof(String) + slen + 1);
         s->len = slen;
         s->flags = 0;
         s->is_ascii = 1;
@@ -207,14 +207,14 @@ struct TsTypeParser {
         if (is_union) {
             TsUnionTypeNode* un = (TsUnionTypeNode*)alloc_node(
                 TS_AST_NODE_UNION_TYPE, sizeof(TsUnionTypeNode));
-            un->types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * count);
+            un->types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * count);
             un->type_count = count;
             memcpy(un->types, members, sizeof(TsTypeNode*) * count);
             return (TsTypeNode*)un;
         }
         TsIntersectionTypeNode* in_node = (TsIntersectionTypeNode*)alloc_node(
             TS_AST_NODE_INTERSECTION_TYPE, sizeof(TsIntersectionTypeNode));
-        in_node->types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * count);
+        in_node->types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * count);
         in_node->type_count = count;
         memcpy(in_node->types, members, sizeof(TsTypeNode*) * count);
         return (TsTypeNode*)in_node;
@@ -316,7 +316,7 @@ struct TsTypeParser {
                 // store as indexed access using conditional node layout (reuse check+extends)
                 TsTypeReferenceNode* ia = (TsTypeReferenceNode*)alloc_node(
                     TS_AST_NODE_INDEXED_ACCESS_TYPE, sizeof(TsTypeReferenceNode));
-                ia->type_args = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * 2);
+                ia->type_args = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * 2);
                 ia->type_args[0] = base;
                 ia->type_args[1] = index;
                 ia->type_arg_count = 2;
@@ -437,7 +437,7 @@ struct TsTypeParser {
             TsFunctionTypeNode* fn = (TsFunctionTypeNode*)alloc_node(
                 TS_AST_NODE_FUNCTION_TYPE, sizeof(TsFunctionTypeNode));
             fn->param_count = 1;
-            fn->param_types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*));
+            fn->param_types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*));
             fn->param_types[0] = inner;
             fn->return_type = ret;
             return (TsTypeNode*)fn;
@@ -503,8 +503,8 @@ struct TsTypeParser {
             TS_AST_NODE_FUNCTION_TYPE, sizeof(TsFunctionTypeNode));
         fn->param_count = count;
         if (count > 0) {
-            fn->param_types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * count);
-            fn->param_names = (String**)pool_alloc(tp->ast_pool, sizeof(String*) * count);
+            fn->param_types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * count);
+            fn->param_names = (String**)pool_alloc(tp->pool, sizeof(String*) * count);
             memcpy(fn->param_types, types, sizeof(TsTypeNode*) * count);
             memcpy(fn->param_names, names, sizeof(String*) * count);
         }
@@ -569,7 +569,7 @@ struct TsTypeParser {
             TS_AST_NODE_TUPLE_TYPE, sizeof(TsTupleTypeNode));
         tn->element_count = count;
         if (count > 0) {
-            tn->element_types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * count);
+            tn->element_types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * count);
             memcpy(tn->element_types, elements, sizeof(TsTypeNode*) * count);
         }
         return (TsTypeNode*)tn;
@@ -640,10 +640,10 @@ struct TsTypeParser {
         TsObjectTypeNode* mn = (TsObjectTypeNode*)alloc_node(
             TS_AST_NODE_MAPPED_TYPE, sizeof(TsObjectTypeNode));
         mn->member_count = 1;
-        mn->member_names = (String**)pool_alloc(tp->ast_pool, sizeof(String*));
-        mn->member_types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*));
-        mn->member_optional = (bool*)pool_calloc(tp->ast_pool, sizeof(bool));
-        mn->member_readonly = (bool*)pool_calloc(tp->ast_pool, sizeof(bool));
+        mn->member_names = (String**)pool_alloc(tp->pool, sizeof(String*));
+        mn->member_types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*));
+        mn->member_optional = (bool*)pool_calloc(tp->pool, sizeof(bool));
+        mn->member_readonly = (bool*)pool_calloc(tp->pool, sizeof(bool));
         mn->member_names[0] = make_string(key_name, key_len);
         mn->member_types[0] = value_type;
         return (TsTypeNode*)mn;
@@ -770,10 +770,10 @@ struct TsTypeParser {
             TS_AST_NODE_OBJECT_TYPE, sizeof(TsObjectTypeNode));
         on->member_count = count;
         if (count > 0) {
-            on->member_types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * count);
-            on->member_names = (String**)pool_alloc(tp->ast_pool, sizeof(String*) * count);
-            on->member_optional = (bool*)pool_calloc(tp->ast_pool, sizeof(bool) * count);
-            on->member_readonly = (bool*)pool_calloc(tp->ast_pool, sizeof(bool) * count);
+            on->member_types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * count);
+            on->member_names = (String**)pool_alloc(tp->pool, sizeof(String*) * count);
+            on->member_optional = (bool*)pool_calloc(tp->pool, sizeof(bool) * count);
+            on->member_readonly = (bool*)pool_calloc(tp->pool, sizeof(bool) * count);
             memcpy(on->member_types, types, sizeof(TsTypeNode*) * count);
             memcpy(on->member_names, names, sizeof(String*) * count);
             memcpy(on->member_optional, optional, sizeof(bool) * count);
@@ -863,7 +863,7 @@ struct TsTypeParser {
             match_char('>');
 
             if (arg_count > 0) {
-                rn->type_args = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * arg_count);
+                rn->type_args = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * arg_count);
                 rn->type_arg_count = arg_count;
                 memcpy(rn->type_args, args, sizeof(TsTypeNode*) * arg_count);
             }
@@ -1136,10 +1136,10 @@ struct TsTypeParser {
             TS_AST_NODE_OBJECT_TYPE, sizeof(TsObjectTypeNode));
         on->member_count = count;
         if (count > 0) {
-            on->member_types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * count);
-            on->member_names = (String**)pool_alloc(tp->ast_pool, sizeof(String*) * count);
-            on->member_optional = (bool*)pool_calloc(tp->ast_pool, sizeof(bool) * count);
-            on->member_readonly = (bool*)pool_calloc(tp->ast_pool, sizeof(bool) * count);
+            on->member_types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * count);
+            on->member_names = (String**)pool_alloc(tp->pool, sizeof(String*) * count);
+            on->member_optional = (bool*)pool_calloc(tp->pool, sizeof(bool) * count);
+            on->member_readonly = (bool*)pool_calloc(tp->pool, sizeof(bool) * count);
             memcpy(on->member_types, types, sizeof(TsTypeNode*) * count);
             memcpy(on->member_names, names, sizeof(String*) * count);
             memcpy(on->member_optional, optional_arr, sizeof(bool) * count);

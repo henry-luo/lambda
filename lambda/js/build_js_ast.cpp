@@ -85,7 +85,7 @@ static void js_predeclare_var_pattern(JsTranspiler* tp, TSNode pattern,
         String* name = js_decode_identifier_name(tp, source.str, (int)source.length);
         if (!name) return;
         JsIdentifierNode* placeholder = (JsIdentifierNode*)pool_alloc(
-            tp->ast_pool, sizeof(JsIdentifierNode));
+            tp->pool, sizeof(JsIdentifierNode));
         memset(placeholder, 0, sizeof(JsIdentifierNode));
         placeholder->node_type = JS_AST_NODE_IDENTIFIER;
         placeholder->source_span = (SourceSpan){ts_node_start_byte(declarator_node),
@@ -287,7 +287,7 @@ static JsAstNode* build_ts_variable_decl_u(JsTranspiler* tp, TSNode var_node);
 
 // Allocate JavaScript AST node
 JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode node, size_t size) {
-    JsAstNode* ast_node = (JsAstNode*)pool_alloc(tp->ast_pool, size);
+    JsAstNode* ast_node = (JsAstNode*)pool_alloc(tp->pool, size);
     memset(ast_node, 0, size);
     ast_node->node_type = node_type;
     ast_node->source_span = (SourceSpan){ts_node_start_byte(node),
@@ -391,7 +391,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
             // For BigInt literals, store as string to preserve arbitrary precision
             if (literal->is_bigint) {
                 // allocate a String on the AST pool (heap_create_name may not be available yet)
-                String* s = (String*)pool_alloc(tp->ast_pool, sizeof(String) + j + 1);
+                String* s = (String*)pool_alloc(tp->pool, sizeof(String) + j + 1);
                 s->len = j;
                 s->flags = 0;
                 memcpy(s->chars, temp_str, j);
@@ -2054,7 +2054,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
             String* decoded = js_decode_identifier_name(tp, source.str + 1, (int)(source.length - 1));
             size_t decoded_len = decoded ? decoded->len : 0;
             size_t private_len = 1 + decoded_len;
-            char* private_name = (char*)pool_alloc(tp->ast_pool, private_len + 1);
+            char* private_name = (char*)pool_alloc(tp->pool, private_len + 1);
             // private identifiers may contain generated Unicode names larger than
             // the old fixed buffer; preserve the full decoded spelling before interning.
             private_name[0] = '#';
@@ -3890,7 +3890,7 @@ static const char* ts_node_text_util(JsTranspiler* tp, TSNode node, int* out_len
 
 // allocate a String* from the AST pool containing a copy of (src, len)
 static String* ts_pool_string_util(JsTranspiler* tp, const char* src, int len) {
-    String* s = (String*)pool_alloc(tp->ast_pool, sizeof(String) + len + 1);
+    String* s = (String*)pool_alloc(tp->pool, sizeof(String) + len + 1);
     s->len = len;
     s->flags = 0;
     s->is_ascii = 1;
@@ -3926,7 +3926,7 @@ static TsTypeNode* build_ts_type_reference_u(JsTranspiler* tp, TSNode node) {
             TSNode args_node = ts_node_named_child(node, 1);
             uint32_t arg_count = ts_node_named_child_count(args_node);
             if (arg_count > 0) {
-                rn->type_args = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * arg_count);
+                rn->type_args = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * arg_count);
                 rn->type_arg_count = (int)arg_count;
                 for (uint32_t i = 0; i < arg_count; i++) {
                     rn->type_args[i] = build_ts_type_expr_u(tp, ts_node_named_child(args_node, i));
@@ -3945,7 +3945,7 @@ static TsTypeNode* build_ts_union_type_u(JsTranspiler* tp, TSNode node) {
     TsUnionTypeNode* un = (TsUnionTypeNode*)alloc_js_ast_node(tp,
         (JsAstNodeType)TS_AST_NODE_UNION_TYPE, node, sizeof(TsUnionTypeNode));
     uint32_t child_count = ts_node_named_child_count(node);
-    un->types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * child_count);
+    un->types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * child_count);
     un->type_count = (int)child_count;
     for (uint32_t i = 0; i < child_count; i++) {
         un->types[i] = build_ts_type_expr_u(tp, ts_node_named_child(node, i));
@@ -3957,7 +3957,7 @@ static TsTypeNode* build_ts_intersection_type_u(JsTranspiler* tp, TSNode node) {
     TsIntersectionTypeNode* in_node = (TsIntersectionTypeNode*)alloc_js_ast_node(tp,
         (JsAstNodeType)TS_AST_NODE_INTERSECTION_TYPE, node, sizeof(TsIntersectionTypeNode));
     uint32_t child_count = ts_node_named_child_count(node);
-    in_node->types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * child_count);
+    in_node->types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * child_count);
     in_node->type_count = (int)child_count;
     for (uint32_t i = 0; i < child_count; i++) {
         in_node->types[i] = build_ts_type_expr_u(tp, ts_node_named_child(node, i));
@@ -3978,7 +3978,7 @@ static TsTypeNode* build_ts_tuple_type_u(JsTranspiler* tp, TSNode node) {
     TsTupleTypeNode* tn = (TsTupleTypeNode*)alloc_js_ast_node(tp,
         (JsAstNodeType)TS_AST_NODE_TUPLE_TYPE, node, sizeof(TsTupleTypeNode));
     uint32_t child_count = ts_node_named_child_count(node);
-    tn->element_types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * child_count);
+    tn->element_types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * child_count);
     tn->element_count = (int)child_count;
     for (uint32_t i = 0; i < child_count; i++) {
         tn->element_types[i] = build_ts_type_expr_u(tp, ts_node_named_child(node, i));
@@ -3996,8 +3996,8 @@ static TsTypeNode* build_ts_function_type_u(JsTranspiler* tp, TSNode node) {
             TSNode params_node = ts_node_named_child(node, 0);
             uint32_t param_count = ts_node_named_child_count(params_node);
             fn->param_count = (int)param_count;
-            fn->param_types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * param_count);
-            fn->param_names = (String**)pool_calloc(tp->ast_pool, sizeof(String*) * param_count);
+            fn->param_types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * param_count);
+            fn->param_names = (String**)pool_calloc(tp->pool, sizeof(String*) * param_count);
             for (uint32_t i = 0; i < param_count; i++) {
                 TSNode param = ts_node_named_child(params_node, i);
                 uint32_t pc = ts_node_named_child_count(param);
@@ -4031,10 +4031,10 @@ static TsTypeNode* build_ts_object_type_u(JsTranspiler* tp, TSNode node) {
         (JsAstNodeType)TS_AST_NODE_OBJECT_TYPE, node, sizeof(TsObjectTypeNode));
     uint32_t child_count = ts_node_named_child_count(node);
     on->member_count = (int)child_count;
-    on->member_types = (TsTypeNode**)pool_calloc(tp->ast_pool, sizeof(TsTypeNode*) * child_count);
-    on->member_names = (String**)pool_calloc(tp->ast_pool, sizeof(String*) * child_count);
-    on->member_optional = (bool*)pool_calloc(tp->ast_pool, sizeof(bool) * child_count);
-    on->member_readonly = (bool*)pool_calloc(tp->ast_pool, sizeof(bool) * child_count);
+    on->member_types = (TsTypeNode**)pool_calloc(tp->pool, sizeof(TsTypeNode*) * child_count);
+    on->member_names = (String**)pool_calloc(tp->pool, sizeof(String*) * child_count);
+    on->member_optional = (bool*)pool_calloc(tp->pool, sizeof(bool) * child_count);
+    on->member_readonly = (bool*)pool_calloc(tp->pool, sizeof(bool) * child_count);
 
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode member = ts_node_named_child(node, i);
@@ -4202,7 +4202,7 @@ static JsAstNode* build_ts_interface_decl_u(JsTranspiler* tp, TSNode node) {
         } else if (strcmp(child_type, "extends_type_clause") == 0 ||
                    strcmp(child_type, "extends_clause") == 0) {
             uint32_t ext_count = ts_node_named_child_count(child);
-            iface->extends_types = (TsTypeNode**)pool_alloc(tp->ast_pool, sizeof(TsTypeNode*) * ext_count);
+            iface->extends_types = (TsTypeNode**)pool_alloc(tp->pool, sizeof(TsTypeNode*) * ext_count);
             iface->extends_count = (int)ext_count;
             for (uint32_t j = 0; j < ext_count; j++) {
                 iface->extends_types[j] = build_ts_type_expr_u(tp, ts_node_named_child(child, j));
@@ -4276,7 +4276,7 @@ static JsAstNode* build_ts_enum_decl_u(JsTranspiler* tp, TSNode node) {
             enum_node->name = ts_pool_string_util(tp, text, len);
         } else if (strcmp(child_type, "enum_body") == 0) {
             uint32_t mc = ts_node_named_child_count(child);
-            enum_node->members = (JsAstNode**)pool_alloc(tp->ast_pool, sizeof(JsAstNode*) * mc);
+            enum_node->members = (JsAstNode**)pool_alloc(tp->pool, sizeof(JsAstNode*) * mc);
             enum_node->member_count = (int)mc;
             int auto_val = 0;
             bool auto_val_valid = true;
@@ -4354,7 +4354,7 @@ static JsAstNode* build_ts_namespace_decl_u(JsTranspiler* tp, TSNode node) {
     if (!ts_node_is_null(body_node)) {
         uint32_t child_count = ts_node_named_child_count(body_node);
         if (child_count > 0) {
-            ns->body = (JsAstNode**)pool_alloc(tp->ast_pool, sizeof(JsAstNode*) * child_count);
+            ns->body = (JsAstNode**)pool_alloc(tp->pool, sizeof(JsAstNode*) * child_count);
             ns->body_count = 0;
             for (uint32_t i = 0; i < child_count; i++) {
                 TSNode child = ts_node_named_child(body_node, i);
@@ -4542,7 +4542,7 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
     TSNode type_params_node = ts_node_child_by_field_name(func_node, "type_parameters", 15);
     if (!ts_node_is_null(type_params_node)) {
         uint32_t tp_count = ts_node_named_child_count(type_params_node);
-        ts_func->type_params = (TsTypeParamNode**)pool_alloc(tp->ast_pool,
+        ts_func->type_params = (TsTypeParamNode**)pool_alloc(tp->pool,
             sizeof(TsTypeParamNode*) * tp_count);
         ts_func->type_param_count = (int)tp_count;
         for (uint32_t i = 0; i < tp_count; i++) {

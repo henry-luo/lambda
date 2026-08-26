@@ -571,7 +571,7 @@ static void js_install_realm_global_preamble(JsMirTranspiler* mt,
             g_eval_preamble_entry_count <= 0) return;
     uint32_t harness_var_count = js_get_batch_preamble_var_count();
     JsModuleConstEntry* global_entries = (JsModuleConstEntry*)pool_calloc(
-        tp->ast_pool, sizeof(JsModuleConstEntry) * g_eval_preamble_entry_count);
+        tp->pool, sizeof(JsModuleConstEntry) * g_eval_preamble_entry_count);
     if (!global_entries) return;
     int global_entry_count = 0;
     for (int i = 0; i < g_eval_preamble_entry_count; i++) {

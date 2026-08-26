@@ -27,6 +27,8 @@ typedef struct JsScopeLookupCacheEntry {
     bool current_only;
 } JsScopeLookupCacheEntry;
 
+static void js_script_destroy_extension(Script* base_script);
+
 static uint64_t js_scope_lookup_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const JsScopeLookupCacheEntry* entry = (const JsScopeLookupCacheEntry*)item;
     uintptr_t scope = (uintptr_t)entry->scope >> 3;
@@ -97,7 +99,7 @@ static ScopeKind js_scope_type_to_scope_kind(JsScopeType scope_type) {
 }
 
 JsScope* js_scope_create(JsTranspiler* tp, JsScopeType scope_type, JsScope* parent) {
-    JsScope* scope = (JsScope*)pool_alloc(tp->ast_pool, sizeof(JsScope));
+    JsScope* scope = (JsScope*)pool_alloc(tp->pool, sizeof(JsScope));
     memset(scope, 0, sizeof(JsScope));
 
     scope->kind = js_scope_type_to_scope_kind(scope_type);
@@ -243,7 +245,7 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
     }
 
     // Create new name entry
-    NameEntry* entry = (NameEntry*)pool_alloc(tp->ast_pool, sizeof(NameEntry));
+    NameEntry* entry = (NameEntry*)pool_alloc(tp->pool, sizeof(NameEntry));
     memset(entry, 0, sizeof(NameEntry));
     entry->name = name;
     entry->node = (AstNode*)node;
@@ -305,8 +307,8 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     memset(tp, 0, sizeof(JsTranspiler));
 
     // Initialize memory pools
-    tp->ast_pool = mem_pool_create(NULL, MEM_ROLE_AST, "js.ast"); // Memory pool
-    tp->name_pool = name_pool_create(tp->ast_pool, NULL);
+    tp->pool = mem_pool_create(NULL, MEM_ROLE_AST, "js.ast"); // Memory pool
+    tp->name_pool = name_pool_create(tp->pool, NULL);
     tp->error_buf = NULL;
 
     // Initialize Tree-sitter parser
@@ -328,19 +330,15 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     tp->has_errors = false;
     tp->strict_js = true;  // default: pure JS mode (reject TS syntax)
     tp->profile = &js_profile;
+    tp->destroy_extension = js_script_destroy_extension;
     tp->runtime = runtime;
     js_scope_lookup_cache_enable(tp);
 
     return tp;
 }
 
-void js_transpiler_destroy(JsTranspiler* tp) {
+static void js_transpiler_destroy_tail(JsTranspiler* tp) {
     if (!tp) return;
-
-    // The shared AST index owns malloc-backed identity tables rather than the
-    // AST pool; release it before the pool so batch workers do not accumulate
-    // one full index per test module.
-    ast_index_destroy(&tp->ast_index);
 
     // Cleanup Tree-sitter
     if (tp->tree) {
@@ -350,26 +348,75 @@ void js_transpiler_destroy(JsTranspiler* tp) {
         ts_parser_delete(tp->parser);
     }
 
-    // Release name_pool BEFORE destroying ast_pool: name_pool was allocated
-    // from ast_pool, so pool_destroy would unmap its memory.
-    if (tp->name_pool) {
-        name_pool_release(tp->name_pool);
-    }
-    if (tp->ast_pool) {
-        pool_destroy(tp->ast_pool);
-    }
     if (tp->error_buf) {
         strbuf_free(tp->error_buf);
     }
-    if (tp->type_registry) {
-        hashmap_free(tp->type_registry);
-    }
-    if (tp->scope_lookup_cache) hashmap_free(tp->scope_lookup_cache);
     if (tp->normalized_source) {
         mem_free(tp->normalized_source);
     }
+}
 
-    mem_free(tp);
+static void js_script_destroy_extension(Script* base_script) {
+    JsScript* script = js_script_from_script(base_script);
+    if (!script) return;
+    if (script->scope_lookup_cache) {
+        hashmap_free(script->scope_lookup_cache);
+        script->scope_lookup_cache = NULL;
+    }
+    if (script->type_registry) {
+        hashmap_free(script->type_registry);
+        script->type_registry = NULL;
+    }
+    // NamePool owns hash tables outside the AST pool. Release it before base
+    // Script cleanup destroys the backing pool.
+    if (script->name_pool) {
+        name_pool_release(script->name_pool);
+        script->name_pool = NULL;
+    }
+}
+
+void js_transpiler_destroy(JsTranspiler* tp) {
+    if (!tp) return;
+
+    js_transpiler_destroy_tail(tp);
+
+    // The builder only borrows source bytes from its caller. The adopted
+    // JsScript path copies them before reaching runtime_free_script().
+    tp->source = NULL;
+    tp->reference = NULL;
+    tp->directory = NULL;
+    runtime_free_script(NULL, (Script*)tp, false);
+}
+
+JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
+                                     const char* reference) {
+    if (!tp || !tp->source) return NULL;
+
+    const char* script_reference = reference ? reference : "<inline-js>";
+    char* source_copy = (char*)mem_alloc(tp->source_length + 1, MEM_CAT_SYSTEM);
+    char* reference_copy = mem_strdup(script_reference, MEM_CAT_SYSTEM);
+    JsScript* script = (JsScript*)mem_calloc(1, sizeof(JsScript), MEM_CAT_SYSTEM);
+    if (!source_copy || !reference_copy || !script) {
+        if (source_copy) mem_free(source_copy);
+        if (reference_copy) mem_free(reference_copy);
+        if (script) mem_free(script);
+        return NULL;
+    }
+
+    memcpy(source_copy, tp->source, tp->source_length);
+    source_copy[tp->source_length] = '\0';
+    memcpy(script, tp, sizeof(JsScript));
+    script->source = source_copy;
+    script->reference = reference_copy;
+    script->destroy_extension = js_script_destroy_extension;
+
+    // Transfer the complete retained prefix. The parser/diagnostic tail stays
+    // in the builder and is released by js_transpiler_destroy().
+    memset((JsScript*)tp, 0, sizeof(JsScript));
+    js_transpiler_destroy(tp);
+
+    if (runtime) runtime_register_script(runtime, (Script*)script);
+    return script;
 }
 
 void js_scope_lookup_cache_enable(JsTranspiler* tp) {

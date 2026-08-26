@@ -1771,6 +1771,12 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     if (remove_index && script->reference) {
         runtime_script_index_delete_script(runtime, script);
     }
+    // Hosted owners release their language-specific facts before the shared
+    // AST/Input storage disappears. The hook never owns common Script fields.
+    if (script->destroy_extension) {
+        script->destroy_extension(script);
+        script->destroy_extension = NULL;
+    }
     if (script->reference) mem_free((void*)script->reference);
     if (script->repl_source) strbuf_free(script->repl_source);
     else if (script->source) mem_free((void*)script->source);

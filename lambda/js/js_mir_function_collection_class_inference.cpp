@@ -388,11 +388,11 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
     }
 
     JsFunctionNode* function = (JsFunctionNode*)pool_calloc(
-        mt->tp->ast_pool, sizeof(JsFunctionNode));
+        mt->tp->pool, sizeof(JsFunctionNode));
     JsBlockNode* body = (JsBlockNode*)pool_calloc(
-        mt->tp->ast_pool, sizeof(JsBlockNode));
+        mt->tp->pool, sizeof(JsBlockNode));
     JsReturnNode* result = (JsReturnNode*)pool_calloc(
-        mt->tp->ast_pool, sizeof(JsReturnNode));
+        mt->tp->pool, sizeof(JsReturnNode));
     if (!function || !body || !result) {
         log_error("js-mir: failed to allocate class field initializer AST");
         mt->collection_failed = true;
@@ -667,13 +667,13 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             // Class metadata retains AST pointers, so give both the same
             // compile/runtime lifetime instead of a separate native owner.
             ce->methods = (JsClassMethodEntry*)pool_calloc(
-                mt->tp->ast_pool, (size_t)ce->method_capacity * sizeof(JsClassMethodEntry));
+                mt->tp->pool, (size_t)ce->method_capacity * sizeof(JsClassMethodEntry));
             ce->static_fields = (JsStaticFieldEntry*)pool_calloc(
-                mt->tp->ast_pool, (size_t)ce->static_field_capacity * sizeof(JsStaticFieldEntry));
+                mt->tp->pool, (size_t)ce->static_field_capacity * sizeof(JsStaticFieldEntry));
             ce->instance_fields = (JsInstanceFieldEntry*)pool_calloc(
-                mt->tp->ast_pool, (size_t)ce->instance_field_capacity * sizeof(JsInstanceFieldEntry));
+                mt->tp->pool, (size_t)ce->instance_field_capacity * sizeof(JsInstanceFieldEntry));
             ce->static_blocks = (JsAstNode**)pool_calloc(
-                mt->tp->ast_pool, (size_t)ce->static_block_capacity * sizeof(JsAstNode*));
+                mt->tp->pool, (size_t)ce->static_block_capacity * sizeof(JsAstNode*));
             if ((ce->method_capacity && !ce->methods) ||
                 (ce->static_field_capacity && !ce->static_fields) ||
                 (ce->instance_field_capacity && !ce->instance_fields) ||
