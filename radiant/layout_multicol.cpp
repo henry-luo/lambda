@@ -5656,7 +5656,9 @@ static float multicol_balanced_target_search(
                 lower = max(lower, grid_minimum);
             }
         }
-        if (multicol_content_box_height_limit(block) < 0.0f) {
+        if (block->multicol_prop()->column_count > 0 &&
+            !multicol_has_vertical_inline_axis(block) &&
+            multicol_content_box_height_limit(block) < 0.0f) {
             int line_count = 0;
             float line_advance = 0.0f;
             if (multicol_inline_line_metrics(
