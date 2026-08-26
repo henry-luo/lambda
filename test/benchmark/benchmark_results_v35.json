@@ -47,7 +47,7 @@
     "mir_key_source": "untyped <bench>.ls",
     "finished_at": "2026-08-26T14:40:44",
     "auto_tier_note": "mir_auto / mir_typed_auto were measured with no LAMBDA_TIER override (the shipped interpreter-first auto tier); the mir / mir_typed columns pin LAMBDA_TIER=jit so the series stays comparable to Result18 onward.",
-    "auto_tier_validation": "Every typed benchmark was re-run on the auto tier and its output checked, because the runner records a process that exits 0 as \"ok\" without diffing output. Two cells failed that check and are reported as such rather than as timings: awfy/json (wrong result on auto/interp) and awfy/cd (timeout). All other auto cells produced correct output."
+    "auto_tier_validation": "Every typed benchmark was re-run on the auto tier and its output checked, because the runner records a process that exits 0 as \"ok\" without diffing output. That sweep caught awfy/json returning a WRONG RESULT on the interpreter tier (a real bug, since fixed: T0 published typed-container writes through plain pn parameters to a detached copy, while MIR wrote in place). awfy/cd remains a 180s timeout on the auto tier. All other auto cells produced correct output."
   },
   "r7rs": {
     "fib": {
@@ -1685,7 +1685,7 @@
         "quickjs": "ok",
         "nodejs": "ok",
         "python": "ok",
-        "mir_typed_auto": "wrong_result"
+        "mir_typed_auto": "ok"
       },
       "_status_detail": {
         "mir": {
@@ -1729,7 +1729,7 @@
           }
         },
         "mir_typed_auto": {
-          "note": "auto/interp tier prints \"FAIL: not object\" and exits 0; the 0.058ms the runner recorded was the early-exit failure path, not the workload. The runner does not diff output (known audit gap), so this cell was caught by a separate correctness sweep. JIT passes; untyped json.ls passes on auto too."
+          "note": "Re-measured after the T0 proc-param fix. The earlier 0.058ms was the early-exit failure path: the interpreter dropped typed-container writes through plain pn parameters, so the parser returned a number instead of the parsed object. Median of 3: 133.9/125.8/125.0 ms."
         }
       },
       "mir_typed": 2.492,
@@ -1755,7 +1755,8 @@
             "ok": 3
           }
         }
-      }
+      },
+      "mir_typed_auto": 125.795
     },
     "deltablue": {
       "category": "macro",

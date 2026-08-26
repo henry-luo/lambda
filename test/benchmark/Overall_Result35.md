@@ -39,27 +39,32 @@ keeping: larceny/diviter 249ms → 1.4ms, correct on both tiers.
 ⚠ **The runner does not diff benchmark output** — it records any process that
 exits 0 and prints a `__TIMING__` line as `ok`. Every typed benchmark was
 therefore re-run on the auto tier and its output checked by hand. Two cells
-failed that check and are reported as `---` rather than as timings:
+failed that check:
 
 | Row | auto-tier cell | why |
 |---|---|---|
-| awfy/json | `wrong_result` | prints `FAIL: not object` and exits 0 on auto AND on explicit `LAMBDA_TIER=interp`; the 0.058ms the runner recorded was the early-exit failure path. **The JIT passes, and the UNTYPED `json.ls` passes on auto** — so this is a typed-script tier mismatch, not a workload problem. |
+| awfy/json | ~~`wrong_result`~~ → **fixed, re-measured 125.8 ms** | It printed `FAIL: not object` and exited 0 on auto and on explicit `LAMBDA_TIER=interp`, so the 0.058 ms the runner first recorded was the early-exit failure path, not the workload. **This was a real interpreter bug, since fixed**: T0 published typed-container writes through plain `pn` parameters to a *detached* copy while MIR wrote in place, so the parser's `p.cur = …` never reached the caller and the parse returned a number instead of the object. The cell now carries a genuine median-of-3. |
 | awfy/cd | `timeout` | exceeded the 180s per-run timeout on the auto tier |
 
-All other auto cells produced correct output.
+All other auto cells produced correct output. The json case is the argument for
+this validation step existing: the bad cell did not look like a failure, it
+looked like a **40x speedup**.
+
+⚠ Regenerating this file with `gen_overall_result.py` drops this hand-written
+section; re-add it, or the tier caveat silently disappears from the report.
 
 ## Summary
 
 | Suite | Total | Timed MIR (untyped) | Timed MIR (typed) | Timed MIR (untyped, auto) | Timed MIR (typed, auto) | Timed C2MIR | Timed LambdaJS | Timed QuickJS | Timed Node.js | MIR (untyped)/Node geo | MIR (typed)/Node geo | MIR (untyped, auto)/Node geo | MIR (typed, auto)/Node geo | C2MIR/Node geo | LambdaJS/Node geo | QuickJS/Node geo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | R7RS | 10 | 10 | 10 | 10 | 10 | 10 | 10 | 9 | 10 | 0.48x | 0.38x | 46.9x | 10.5x | 0.19x | 11.9x | 6.44x |
-| AWFY | 14 | 14 | 14 | 14 | 12 | 14 | 14 | 14 | 14 | 1.53x | 0.81x | 22.6x | 30.3x | 0.10x | 43.3x | 5.24x |
+| AWFY | 14 | 14 | 14 | 14 | 13 | 14 | 14 | 14 | 14 | 1.53x | 0.81x | 22.6x | 31.4x | 0.10x | 43.3x | 5.24x |
 | BENG | 8 | 8 | 8 | 8 | 8 | 8 | 8 | 5 | 8 | 0.53x | 0.36x | 3.54x | 3.06x | 0.10x | 12.3x | 1.93x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 2.06x | 1.29x | 72.8x | 55.2x | 0.23x | 54.7x | 12.0x |
 | LARCENY | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 2.27x | 0.85x | 59.0x | 17.0x | 0.33x | 32.6x | 13.3x |
 | JetStream | 6 | 6 | 6 | 6 | 6 | 6 | 6 | 4 | 6 | 5.52x | 3.18x | 105x | 140x | 0.29x | 75.7x | 12.9x |
 | Text | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0.29x | 0.22x | 12.6x | 7.10x | 0.02x | 66.5x | 9.39x |
-| **Overall** | 59 | 59 | 59 | 59 | 57 | 59 | 59 | 53 | 59 | 1.27x | 0.73x | 31.0x | 19.1x | 0.16x | 30.9x | 7.40x |
+| **Overall** | 59 | 59 | 59 | 59 | 58 | 59 | 59 | 53 | 59 | 1.27x | 0.73x | 31.0x | 19.4x | 0.16x | 30.9x | 7.40x |
 
 > The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -93,9 +98,9 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 
 ## Notable Results
 
-- Missing timings: **8** cells
+- Missing timings: **7** cells
 - QuickJS missing: r7rs/ack (exit_1), beng/knucleotide (exit_1), beng/regexredux (exit_1), beng/revcomp (exit_1), jetstream/cube3d (exit_1), jetstream/raytrace3d (exit_1)
-- MIR (typed, auto) missing: awfy/json (wrong_result), awfy/cd (timeout)
+- MIR (typed, auto) missing: awfy/cd (timeout)
 
 ### Largest LambdaJS / Node.js Ratios
 
@@ -147,7 +152,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | mandelbrot | compute | 38.2 | 38.2 | 3.86s | 4.68s | 30.7 | 443.5 | 870.4 | 31.1 | 1.23x | 1.23x | 124x | 150x | 0.98x | 14.2x | 28.0x |
 | nbody | compute | 32.4 | 20.2 | 842.1 | 965.7 | 1.48 | 1.00s | 159.1 | 5.32 | 6.10x | 3.81x | 158x | 182x | 0.28x | 188x | 29.9x |
 | richards | macro | 2.06s | 207.5 | 28.49s | 2.91s | 29.5 | 1.84s | 190.5 | 46.8 | 44.0x | 4.43x | 608x | 62.1x | 0.63x | 39.3x | 4.07x |
-| json | macro | 6.71 | 2.49 | 73.4 | --- | 0.257 | 98.9 | 10.9 | 2.60 | 2.58x | 0.96x | 28.3x | --- | 0.10x | 38.1x | 4.18x |
+| json | macro | 6.71 | 2.49 | 73.4 | 125.8 | 0.257 | 98.9 | 10.9 | 2.60 | 2.58x | 0.96x | 28.3x | 48.4x | 0.10x | 38.1x | 4.18x |
 | deltablue | macro | 72.3 | 69.2 | 1.08s | 1.12s | 1.15 | 2.00s | 99.7 | 11.7 | 6.20x | 5.93x | 92.9x | 96.1x | 0.10x | 172x | 8.55x |
 | havlak | macro | 37.5 | 38.5 | 835.2 | 845.3 | 1.84 | 105.04s | 3.22s | 94.3 | 0.40x | 0.41x | 8.85x | 8.96x | 0.02x | 1114x | 34.1x |
 | cd | macro | 725.2 | 200.8 | 12.47s | --- | 14.9 | 27.54s | 955.3 | 35.3 | 20.5x | 5.69x | 353x | --- | 0.42x | 780x | 27.1x |

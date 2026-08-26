@@ -8423,6 +8423,10 @@ AstNamedNode* build_param_from_parts(Transpiler* tp, SourceSpan span,
         if (entry) {
             entry->is_mutable = true;
             entry->is_var_param = is_var;
+            // Record the pn-parameter fact itself rather than leaving consumers
+            // to infer it from is_mutable (which a plain `var` local also sets).
+            // Both tiers decide in-place-vs-detached container writes from it.
+            entry->is_proc_param = true;
         }
     }
     return param;
