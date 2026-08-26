@@ -102,7 +102,6 @@ void form_control_prop_release(FormControlProp* f) {
     if (f->current_value) { mem_free(f->current_value); f->current_value = nullptr; }
     if (f->custom_validity_msg) { mem_free(f->custom_validity_msg); f->custom_validity_msg = nullptr; }
     if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
-    if (f->preedit_utf8) { mem_free(f->preedit_utf8); f->preedit_utf8 = nullptr; }
 }
 
 FormControlProp* tc_get_or_create_form(DomElement* elem) {
@@ -239,9 +238,6 @@ void tc_ensure_init(DomElement* elem) {
     // queued and drained after render (ESO33). Nothing seeds :required or
     // :read-only here any more: they are derived at match time (F3b/ES16).
     radiant_dispatch_behavior_attach((View*)elem);
-    // F8: ARIA reflection — push disabled/readonly/required/invalid bits
-    // onto matching aria-* attributes for AT consumers.
-    te_aria_reflect(elem);
 }
 
 // F4 (Radiant_Design_Form_Input.md §3.8): refresh :placeholder-shown bit.
@@ -342,8 +338,6 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     // F4: refresh :placeholder-shown after value changes (incl. clear).
     tc_refresh_placeholder_shown(elem, f);
 
-    // F8: keep aria-invalid in sync with the new validity state.
-    te_aria_reflect(elem);
 }
 
 void tc_set_selection_range(DomElement* elem,

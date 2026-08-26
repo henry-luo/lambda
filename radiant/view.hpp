@@ -2651,18 +2651,6 @@ struct FormControlProp {
     uint32_t password_reveal_end;
     double   password_reveal_elapsed;
 
-    // ------------------------------------------------------------------
-    // F7 (Radiant_Design_Form_Input.md §3.7): IME / composition preedit.
-    // The preedit string is the partially-entered text shown by the OS
-    // input method between `compositionstart` and `compositionend`. It is
-    // NOT part of `current_value` until commit. The renderer overlays it
-    // at the caret with an underline so the user can see what they're
-    // composing. `preedit_caret` is the codepoint offset inside preedit
-    // (where the IME's own caret sits).
-    // ------------------------------------------------------------------
-    char*    preedit_utf8;
-    uint32_t preedit_len;
-    uint32_t preedit_caret;
 
     // FormControlProp is a POD (no C++ ctor/dtor) per the C+ convention; use
     // form_control_prop_init / form_control_prop_release for lifecycle.
@@ -2682,7 +2670,7 @@ inline float form_select_dropdown_row_height(const FormControlProp* form) {
 void form_control_prop_init(FormControlProp* f);
 
 // Release owned heap pointers (current_value, custom_validity_msg,
-// value_at_focus, history, preedit_utf8). Does NOT free `f` itself.
+// value_at_focus). Does NOT free `f` itself.
 void form_control_prop_release(FormControlProp* f);
 
 // Release a form-control property attached to a DOM element. This is used by

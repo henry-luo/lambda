@@ -1520,6 +1520,12 @@ TypeId type_field_storage_type_id(const Type* type) {
     return type->type_id;
 }
 
+// C-linkage view of the same classifier for consumers that cannot see Type*
+// (the collector's shape walk decodes packed field storage from raw offsets).
+extern "C" TypeId lambda_shape_field_storage_type_id(const void* field_type) {
+    return type_field_storage_type_id((const Type*)field_type);
+}
+
 bool shape_entry_uses_native_lane(const ShapeEntry* field,
         LaneStorageDesc* out) {
     if (!field || !field->type || !out) return false;

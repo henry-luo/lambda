@@ -40,6 +40,40 @@ fn scan_fwd(text, i, want) {
 pub fn word_start(text, pos) { scan_back(text, scan_back(text, pos, false), true) }
 pub fn word_end(text, pos) { scan_fwd(text, scan_fwd(text, pos, false), true) }
 
+// Line boundaries, for the cmd/ctrl line deletes. A textarea is the only
+// control that can hold a newline, so on a single-line input these land on 0
+// and len() — which is the whole value, exactly as they should.
+pub fn line_start(text, pos) {
+    if (pos <= 0) { 0 }
+    else if (slice(text, pos - 1, pos) == "\n") { pos }
+    else { line_start(text, pos - 1) }
+}
+
+pub fn line_end(text, pos) {
+    if (pos >= len(text)) { len(text) }
+    else if (slice(text, pos, pos + 1) == "\n") { pos }
+    else { line_end(text, pos + 1) }
+}
+
+// Every delete is the same shape once its boundary is known: a non-empty
+// selection is removed wholesale, otherwise the span between the caret and the
+// boundary goes. Writing that once beats six near-identical branches.
+pn delete_span(elem, s, e, target) {
+    if (s != e) {
+        radiant.replace_range(elem, s, e, "")
+        'prevent-default'
+    }
+    else if (target < s) {
+        radiant.replace_range(elem, target, s, "")
+        'prevent-default'
+    }
+    else if (target > s) {
+        radiant.replace_range(elem, s, target, "")
+        'prevent-default'
+    }
+    else { 'pass' }
+}
+
 // --- single-line newline policy --------------------------------------------
 
 // A single-line control cannot hold a newline. Native's paste path turns CR and
@@ -148,63 +182,27 @@ pub pn apply(elem, evt, multiline) {
     }
     else if (t == "deleteByCut") {
         // Cut removes the selection; the clipboard write itself is native.
-        if (s != e) {
-            radiant.replace_range(elem, s, e, "")
-            'prevent-default'
-        }
-        else { 'pass' }
+        delete_span(elem, s, e, s)
     }
     else if (t == "deleteContentBackward") {
-        if (s != e) {
-            radiant.replace_range(elem, s, e, "")
-            'prevent-default'
-        }
-        else if (s > 0) {
-            // one codepoint, not one byte and not one UTF-16 unit: backspace
-            // over an astral character removes the whole character
-            radiant.replace_range(elem, s - 1, s, "")
-            'prevent-default'
-        }
-        else { 'pass' }
+        // one codepoint, not one byte and not one UTF-16 unit: backspace over
+        // an astral character removes the whole character
+        delete_span(elem, s, e, if (s > 0) s - 1 else s)
     }
     else if (t == "deleteContentForward") {
-        if (s != e) {
-            radiant.replace_range(elem, s, e, "")
-            'prevent-default'
-        }
-        else if (s < len(text)) {
-            radiant.replace_range(elem, s, s + 1, "")
-            'prevent-default'
-        }
-        else { 'pass' }
+        delete_span(elem, s, e, if (s < len(text)) s + 1 else s)
     }
     else if (t == "deleteWordBackward") {
-        if (s != e) {
-            radiant.replace_range(elem, s, e, "")
-            'prevent-default'
-        }
-        else {
-            let w = word_start(text, s);
-            if (w < s) {
-                radiant.replace_range(elem, w, s, "")
-                'prevent-default'
-            }
-            else { 'pass' }
-        }
+        delete_span(elem, s, e, word_start(text, s))
     }
     else if (t == "deleteWordForward") {
-        if (s != e) {
-            radiant.replace_range(elem, s, e, "")
-            'prevent-default'
-        }
-        else {
-            let w = word_end(text, s);
-            if (w > s) {
-                radiant.replace_range(elem, s, w, "")
-                'prevent-default'
-            }
-            else { 'pass' }
-        }
+        delete_span(elem, s, e, word_end(text, s))
+    }
+    else if (t == "deleteSoftLineBackward" or t == "deleteHardLineBackward") {
+        delete_span(elem, s, e, line_start(text, s))
+    }
+    else if (t == "deleteSoftLineForward" or t == "deleteHardLineForward") {
+        delete_span(elem, s, e, line_end(text, s))
     }
     else if (t == "historyUndo" or t == "historyRedo") {
         // ES17: the engine owns the ring and the cursor and hands over the

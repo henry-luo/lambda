@@ -273,6 +273,14 @@ struct NameEntry {
     NameScope* scope;
     bool is_mutable;
     bool is_var_param;
+    // A plain (non-`var`) parameter of a `pn`. Under the current pn ABI such a
+    // parameter is locally mutable AND its typed-container writes stay visible
+    // to the caller, so a checked write must use the in-place setter rather
+    // than validating a detached candidate. MIR Direct carries the same fact on
+    // MirVarEntry::is_proc_param; T0 read only is_var_param and therefore
+    // detached, which silently dropped the write and made typed json2 parse to
+    // the wrong value on the interpreter tier while the JIT was correct.
+    bool is_proc_param;
     bool has_type_annotation;
     // The explicit source annotation, when present.  `node->type` is the
     // effective compiler type and historically lost this distinction during

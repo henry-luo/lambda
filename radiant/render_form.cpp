@@ -534,6 +534,8 @@ struct TextControlDisplayText {
 };
 
 static char* build_preedit_display_text(FormControlProp* form,
+                                        DocState* form_state,
+                                        View* owner,
                                         const char* value,
                                         uint32_t value_len,
                                         uint32_t selection_start,
@@ -541,7 +543,12 @@ static char* build_preedit_display_text(FormControlProp* form,
                                         uint32_t* out_preedit_start,
                                         uint32_t* out_preedit_end,
                                         uint32_t* out_caret_byte) {
-    if (!form || !form->preedit_utf8 || form->preedit_len == 0) return nullptr;
+    // The preedit is the document's, not the control's (ES18/F7): ask on behalf
+    // of this control and get null unless it is the one being composed into.
+    uint32_t pre_len = 0, pre_caret = 0;
+    const char* preedit = editing_composition_preedit(
+        form_state, static_cast<View*>(owner), &pre_len, &pre_caret);
+    if (!form || !preedit || pre_len == 0) return nullptr;
     if (!value) { value = ""; value_len = 0; }
 
     uint32_t start = tc_utf16_to_utf8_offset(value, value_len, selection_start);
@@ -551,20 +558,20 @@ static char* build_preedit_display_text(FormControlProp* form,
     if (end > value_len) end = value_len;
 
     uint32_t caret_in_preedit = utf8_byte_offset_for_codepoints(
-        form->preedit_utf8, form->preedit_len, form->preedit_caret);
-    uint32_t display_len = start + form->preedit_len + (value_len - end);
+        preedit, pre_len, pre_caret);
+    uint32_t display_len = start + pre_len + (value_len - end);
     char* display = (char*)mem_alloc((size_t)display_len + 1, MEM_CAT_RENDER);
     if (!display) return nullptr;
 
     if (start > 0) memcpy(display, value, start);
-    memcpy(display + start, form->preedit_utf8, form->preedit_len);
+    memcpy(display + start, preedit, pre_len);
     if (end < value_len) {
-        memcpy(display + start + form->preedit_len, value + end, value_len - end);
+        memcpy(display + start + pre_len, value + end, value_len - end);
     }
     display[display_len] = '\0';
 
     if (out_preedit_start) *out_preedit_start = start;
-    if (out_preedit_end) *out_preedit_end = start + form->preedit_len;
+    if (out_preedit_end) *out_preedit_end = start + pre_len;
     if (out_caret_byte) *out_caret_byte = start + caret_in_preedit;
     return display;
 }
@@ -583,9 +590,9 @@ static void resolve_text_control_display_text(FormControlProp* form,
 
     form_control_get_selection(state, view, &out->selection_start,
                                &out->selection_end, NULL);
-    out->has_preedit = form && form->preedit_utf8 && form->preedit_len > 0;
+    out->has_preedit = form && editing_composition_preedit(state, view, NULL, NULL) != NULL;
     if (out->has_preedit) {
-        out->preedit_display = build_preedit_display_text(form, value_text,
+        out->preedit_display = build_preedit_display_text(form, state, view, value_text,
             out->value_len, out->selection_start, out->selection_end,
             &out->preedit_start, &out->preedit_end,
             &out->preedit_caret_byte);

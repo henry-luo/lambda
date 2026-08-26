@@ -1,0 +1,22 @@
+{
+  "name": "F7/ES18: the composition session is owned by a page-scoped template",
+  "html": "test/ui/test_form_input.html",
+  "viewport": { "width": 800, "height": 600 },
+  "events": [
+    { "type": "log", "message": "=== preedit is document state, driven by view <body> ===" },
+    { "type": "click", "target": { "selector": "#name" } },
+    { "type": "ime_compose", "phase": "begin" },
+    { "type": "ime_compose", "phase": "update", "preedit": "にほ", "caret": 2 },
+    { "type": "assert_preedit", "target": { "selector": "#name" }, "equals": "にほ" },
+    { "type": "log", "message": "commit content still lands through the applier (F6), and ends the session" },
+    { "type": "ime_compose", "phase": "commit", "commit": "日本" },
+    { "type": "assert_value", "target": { "selector": "#name" }, "equals": "日本" },
+    { "type": "assert_preedit", "target": { "selector": "#name" }, "equals": "" },
+    { "type": "log", "message": "a cancelled session leaves the value alone" },
+    { "type": "ime_compose", "phase": "begin" },
+    { "type": "ime_compose", "phase": "update", "preedit": "か", "caret": 1 },
+    { "type": "ime_compose", "phase": "cancel" },
+    { "type": "assert_preedit", "target": { "selector": "#name" }, "equals": "" },
+    { "type": "assert_value", "target": { "selector": "#name" }, "equals": "日本" }
+  ]
+}

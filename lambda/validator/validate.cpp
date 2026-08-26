@@ -483,6 +483,38 @@ ValidationResult* validate_against_array_type(SchemaValidator* validator, ConstI
     //         AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, validator->get_current_path(), validator->get_pool()));
     // }
 
+    // T20-4. An ArrayNum IS its element representation: every slot is stored in
+    // the packed lane its `elem_type` names, so walking the elements to learn
+    // what the header already states cannot discover a disagreement. Without
+    // this, admitting a `float[]` at a boundary costs O(n) -- cube3d crosses
+    // `float[]` boundaries constantly and spent ~20% of its run inside this
+    // loop, re-deriving a fact its storage guarantees. Same argument as the
+    // map shape-identity short-circuit (Tune19 §7.13); fast mode only, because
+    // the reporting validator owes a per-element diagnosis rather than a
+    // verdict [D2.6.1, D3.2.1].
+    if (validator->is_fast_mode() && array_type->nested && length > 0 &&
+            item.type_id() == LMD_TYPE_ARRAY_NUM && item.array_num) {
+        Type* nested = unwrap_type(array_type->nested);
+        const ArrayNum* packed = item.array_num;
+        // ndim and view layouts index through a stride table and may alias a
+        // wider buffer, so only a plain packed array speaks for its elements.
+        bool plain_layout = !packed->is_ndim && !packed->is_view;
+        if (nested && nested->kind == TYPE_KIND_SIMPLE && plain_layout) {
+            TypeId lane = LMD_TYPE_ERROR;
+            switch (packed->get_elem_type()) {
+            case ELEM_INT:     lane = LMD_TYPE_INT; break;
+            case ELEM_FLOAT64: lane = LMD_TYPE_FLOAT; break;
+            case ELEM_INT64:   lane = LMD_TYPE_INT64; break;
+            default: break;  // compact sized lanes keep the element walk
+            }
+            if (lane != LMD_TYPE_ERROR && lane == nested->type_id) {
+                log_debug("[VALIDATOR] array elem lane %d matches contract; skipping walk", (int)lane);
+                result->valid = true;
+                return result;
+            }
+        }
+    }
+
     // Validate each array element against nested type using iterator
     if (array_type->nested && length > 0) {
         auto iter = array.items();

@@ -342,6 +342,8 @@ struct MirTranspiler {
     // M2 call-site evidence: AstFuncNode* -> CallSiteEntry. Populated by the
     // collect stage of prepass_forward_declare before any body is transpiled.
     struct hashmap* callsite_info;
+    // T20-1c candidate shapes: AST_NODE_PARAM* -> Type* (an untrusted TypeMap).
+    struct hashmap* shape_hints;
     bool prepass_collect_only;      // collect stage: gather call sites, emit nothing
     AstFuncNode* prepass_enclosing; // function whose body the collect walk is inside
     bool prepass_dispatched_fn;     // inside object methods / view handlers, which
@@ -417,6 +419,9 @@ HASHMAP_DEFINE_STRKEY(global_var, struct GlobalVarEntry, name)
 // as a value, no caller can supply anything else, so INT is a fact rather than
 // a guess. (Speculating INT from bare arithmetic is what truncated float args
 // in cd.ls; this evidence is exactly what that speculation lacked.)
+// How many candidate shape sources to keep per argument position / per return.
+#define MIR_SHAPE_SRC_SLOTS 4
+
 struct CallSiteEntry {
     AstFuncNode* fn;
     int param_count;
@@ -435,8 +440,30 @@ struct CallSiteEntry {
     bool has_call;
     TypeId resolved[LAMBDA_MAX_FUNCTION_ARGS];   // param types from the last resolution round
     TypeId resolved_elem_types[LAMBDA_MAX_FUNCTION_ARGS];
+    // T20-1c. Argument expressions seen at each position, and returned
+    // expressions, kept as the SOURCES a later fixpoint resolves into candidate
+    // map shapes. Not a join: the shape a member site receives from here is
+    // only a HINT -- the emitted guard compares the runtime header before using
+    // it -- so a source that disagrees costs guard misses, never correctness.
+    // A few per slot rather than one, because the FIRST is so often the wrong
+    // one: every recursive constructor opens with its `return null` base case,
+    // and every recursive walker calls itself with a member expression.
+    AstNode* arg_shape_src[LAMBDA_MAX_FUNCTION_ARGS][MIR_SHAPE_SRC_SLOTS];
+    uint8_t arg_shape_src_count[LAMBDA_MAX_FUNCTION_ARGS];
+    AstNode* return_shape_src[MIR_SHAPE_SRC_SLOTS];
+    uint8_t return_shape_src_count;
+    Type* param_shape[LAMBDA_MAX_FUNCTION_ARGS];  // resolved candidate, or NULL
+    Type* return_shape;                            // resolved candidate, or NULL
 };
 HASHMAP_DEFINE_PTRKEY(callsite_info, struct CallSiteEntry, fn)
+
+// T20-1c: candidate literal shape carried to a parameter declaration node, so a
+// member site inside the body can name a constant for its guard.
+struct ShapeHintEntry {
+    AstNode* node;   // the AST_NODE_PARAM declaration
+    Type* shape;     // an addressable, untrusted TypeMap
+};
+HASHMAP_DEFINE_PTRKEY(shape_hint, struct ShapeHintEntry, node)
 
 // ============================================================================
 // Helpers
@@ -1344,6 +1371,29 @@ struct LaneReg {    // an int lane value: a band integer, or a lane sentinel
 };
 
 static MIR_reg_t emit_box(MirTranspiler* mt, MIR_reg_t val_reg, TypeId type_id);
+// T20-1c: defined with the call-site analysis, used by the member emitter above it.
+static Type* mir_expr_candidate_shape(MirTranspiler* mt, AstNode* expr, int depth);
+static AstFuncNode* mir_ident_local_func(AstNode* node);
+static Type* mir_module_unique_shape_for_field(MirTranspiler* mt,
+    const char* name, size_t name_len);
+static bool mir_literal_int_value(MirTranspiler* mt, AstNode* node, int64_t* value);
+static Type* mir_trusted_map_member_contract(AstNode* source);
+
+// T20-3 #3. `shr`'s boxed result exists for two cold arms a LITERAL count
+// removes statically: the count cannot be negative (no error Item) and a RIGHT
+// shift cannot leave int53 (no overflow Item, unlike shl). With both arms dead
+// the result is a pure int lane. The classifier veto, the carrier oracle, and
+// the lowering all consult THIS predicate -- the one-oracle rule; disagreement
+// here is exactly how a raw lane reaches a boxed consumer. hashmap's
+// `bxor(h, shr(h, 16))` paid two boxed helpers per hash because the shr veto
+// also declassified the enclosing bxor.
+static bool mir_shr_native_literal_count(MirTranspiler* mt,
+        AstSysFuncNode* sys, AstNode* count_arg) {
+    if (!sys || !sys->fn_info || sys->fn_info->fn != SYSFUNC_SHR) return false;
+    int64_t count = -1;
+    if (!mir_literal_int_value(mt, count_arg, &count)) return false;
+    return count >= 0 && count < 64;
+}
 static MIR_reg_t emit_double_bits(MirTranspiler* mt, MIR_reg_t d_reg);
 static MIR_reg_t emit_machine_index(MirTranspiler* mt, MIR_reg_t value, TypeId tid);
 static LaneReg  emit_int_native_lane_typed(MirTranspiler* mt, MIR_reg_t reg, TypeId tid);
@@ -3997,6 +4047,34 @@ static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, T
         return true;
     }
     AstNode* primary = ast_unwrap_primary(source_node);
+    // T20-4/T20-3. A value that just crossed an IDENTICAL contract does not have
+    // to cross it again. A local function with an explicit return contract emits
+    // its own "function return" boundary on the way out, so re-admitting the
+    // result at the caller's declaration, assignment, argument or return site is
+    // duplicate work on a value the callee already proved. cube3d is nothing but
+    // this: `float[]` in, `float[]` out, several crossings per matrix op, each
+    // costing a box + lambda_type_check + lambda_type_matches + the validator's
+    // occurrence dispatch -- all to re-establish a fact one call frame away.
+    // Requires the SAME Type* (contract identity, not structural similarity) and
+    // an explicit contract, so an inferred return that later widens cannot
+    // silently take a caller's check away [D3.2.1, D3.3.1v2].
+    if (primary && primary->node_type == AST_NODE_CALL_EXPR) {
+        AstFuncNode* callee = mir_ident_local_func(((AstCallNode*)primary)->function);
+        AstNode* callee_as = callee ? (AstNode*)callee : NULL;
+        TypeFunc* callee_type = callee_as && callee_as->type &&
+            callee_as->type->type_id == LMD_TYPE_FUNC ? (TypeFunc*)callee_as->type : NULL;
+        if (callee_type && callee_type->has_explicit_return_contract &&
+                callee_type->return_contract && !callee_type->can_raise) {
+            Type* produced = mir_unwrap_decl_type(callee_type->return_contract);
+            Type* wanted = mir_unwrap_decl_type(target);
+            // Only container contracts are worth this: scalar lanes already have
+            // their own cheaper native boundary, and `any` proves nothing.
+            if (produced && wanted && produced == wanted &&
+                    wanted->type_id != LMD_TYPE_ANY) {
+                return true;
+            }
+        }
+    }
     if (primary && primary->node_type == AST_NODE_IDENT &&
             mir_unwrap_decl_type(target)->type_id == LMD_TYPE_MAP) {
         // An annotated binding is checked on every assignment before its
@@ -4029,6 +4107,21 @@ static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, T
         // inferred nested AST type. Keep the boundary elided only while the
         // binding still carries that witness; widened or borrowed roots stay
         // on the ordinary checked path.
+        // ⚠ T20-6 (2026-08-26): this is UNREACHABLE as written, for two
+        // independent reasons, and both must be fixed together before it can
+        // pay. (1) The enclosing block is gated on `target is LMD_TYPE_MAP`,
+        // but an `int[]` target unwraps to the occurrence TYPE, never MAP.
+        // (2) `declared == expected` is POINTER identity on the contract:
+        // named map contracts share one Type* through their alias, but two
+        // separately written `int[]` annotations are distinct objects, so even
+        // hoisted out of the MAP gate it still never matches. Making it fire
+        // needs a structural container-contract equality (same occurrence kind,
+        // same simple element TypeId) -- a widening of the proof from "the same
+        // contract" to "an equal contract", which is a ruling, not a tweak.
+        // Verified by probe: typed bounce re-admits `seed_arr` on every call to
+        // random_next while untyped bounce emits no boundary at all (its 1.27x
+        // annotation tax); and even an immutable `let a: int[]` passed to a
+        // same-spelled `int[]` parameter is not elided today.
         if (declared_element && expected_element && array_var &&
                 array_var->elem_type == expected_element->type_id &&
                 !entry->type_widened &&
@@ -5910,11 +6003,15 @@ static LambdaNumericKind mir_bitwise_kind_for_node(MirTranspiler* mt,
                     // their overflow/error arms share one ABI. Do not expose
                     // that result as a raw int to an enclosing bitwise call;
                     // only the packed u32 emitter keeps a reusable lane
-                    // carrier (S4.1, D2.4).
+                    // carrier (S4.1, D2.4). Exception: shr with a literal
+                    // in-range count has no cold arm at all -- see
+                    // mir_shr_native_literal_count, which the oracle and the
+                    // lowering consult identically.
                     if ((sys->fn_info->fn == SYSFUNC_SHL ||
                          sys->fn_info->fn == SYSFUNC_SHR ||
                          sys->fn_info->fn == SYSFUNC_USHR) &&
-                            decision.result == LAMBDA_NUM_INT) {
+                            decision.result == LAMBDA_NUM_INT &&
+                            !mir_shr_native_literal_count(mt, sys, second)) {
                         return LAMBDA_NUM_INVALID;
                     }
                     return decision.result;
@@ -6293,6 +6390,77 @@ static bool mir_is_exact_u32_value(MirTranspiler* mt, AstNode* node) {
     return mir_bitwise_kind_for_node(mt, node) == LAMBDA_NUM_U32;
 }
 
+// T20-3. Element witnesses for array receivers that no LOCAL lane proof covers.
+// Each case names a representation the program declared but the carrier lost:
+//   (a) a module-level `let xs: T[]` -- the slot publishes a generic ARRAY (or
+//       the annotation meta-type), measured at 5.4x on microdiff;
+//   (b) `rec.field[i]` where the trusted record declares `field: T[]`;
+//   (c) a local declared FROM such a member read (`var vs = hm.values`), whose
+//       elem witness was installed guarded at the declaration.
+// Every answer here is paired by the consumer with obj_elem_guarded: the
+// runtime kind/layout/elem guard re-checks the loaded container and bails to
+// the boxed arm on any drift, and emit_index_result_move converges that arm
+// back into the lane. That guard is why answering from a DECLARED contract
+// (not a runtime proof) is sound, and why the unguarded Levenshtein
+// reinterpretation hazard does not apply [D2.6.2, D3.2.1]. BOOL is excluded
+// throughout: its carrier is a boxed-items Array with no guarded ArrayNum path.
+static TypeId mir_guarded_elem_admits(Type* element) {
+    if (!element) return LMD_TYPE_ANY;
+    if (element->type_id == LMD_TYPE_INT || element->type_id == LMD_TYPE_INT64 ||
+            element->type_id == LMD_TYPE_FLOAT) {
+        return element->type_id;
+    }
+    return LMD_TYPE_ANY;
+}
+
+static TypeId mir_guarded_array_num_witness(MirTranspiler* mt, AstNode* object) {
+    AstNode* base = ast_unwrap_primary(object);
+    if (!base) return LMD_TYPE_ANY;
+    if (base->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)base;
+        // (c) local carrying a guarded member-read witness. The var table is
+        // consulted directly: mir_known_index_element_type's own IDENT arm
+        // deliberately ignores elem witnesses on non-array carriers because an
+        // UNGUARDED stale witness reinterprets boxed Items; a guarded one
+        // cannot.
+        if (ident->name) {
+            char vname[128];
+            snprintf(vname, sizeof(vname), "%.*s", (int)ident->name->len,
+                ident->name->chars);
+            MirVarEntry* var = find_var(mt, vname);
+            if (var && var->elem_type_guarded &&
+                    var->elem_type != LMD_TYPE_ANY &&
+                    (var->type_id == LMD_TYPE_ANY ||
+                     var->type_id == LMD_TYPE_ARRAY ||
+                     var->type_id == LMD_TYPE_ARRAY_NUM) &&
+                    (var->elem_type == LMD_TYPE_INT ||
+                     var->elem_type == LMD_TYPE_INT64 ||
+                     var->elem_type == LMD_TYPE_FLOAT)) {
+                return var->elem_type;
+            }
+        }
+        // (a) module binding with a declared (or inferred-final) contract.
+        AstNode* binding = ident->entry ? ident->entry->node : NULL;
+        if (binding && binding->node_type == AST_NODE_ASSIGN &&
+                ident->entry && !ident->entry->is_mutable &&
+                !ident->entry->type_widened &&
+                mir_argument_is_module_binding(mt, object)) {
+            Type* contract = mir_unwrap_decl_contract(ident->entry->declared_type);
+            if (!contract) contract = mir_named_contract((AstNamedNode*)binding);
+            return mir_guarded_elem_admits(mir_array_occurrence_element(contract));
+        }
+        return LMD_TYPE_ANY;
+    }
+    if (base->node_type == AST_NODE_MEMBER_EXPR) {
+        // (b) trusted record field declared `T[]`.
+        Type* contract = mir_trusted_map_member_contract(object);
+        if (!contract) return LMD_TYPE_ANY;
+        return mir_guarded_elem_admits(
+            mir_array_occurrence_element(mir_unwrap_decl_type(contract)));
+    }
+    return LMD_TYPE_ANY;
+}
+
 static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
     AstNode* unwrapped = ast_unwrap_primary(object);
     if (unwrapped && unwrapped->node_type == AST_NODE_IDENT) {
@@ -6346,6 +6514,13 @@ static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
                 return element->type_id;
             }
         }
+    }
+    {
+        // T20-3 #1/#4: guarded witnesses for receivers no local lane proof
+        // covers -- see mir_guarded_array_num_witness. Consulted here so the
+        // carrier oracle and transpile_index's gate answer identically.
+        TypeId guarded = mir_guarded_array_num_witness(mt, object);
+        if (guarded != LMD_TYPE_ANY) return guarded;
     }
     Type* object_type = object ? object->type : NULL;
     if (object_type && (object_type->type_id == LMD_TYPE_ARRAY_NUM ||
@@ -6524,9 +6699,16 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         if (native_int_path && call->function &&
                 call->function->node_type == AST_NODE_SYS_FUNC) {
             AstSysFuncNode* shift_sys = (AstSysFuncNode*)call->function;
+            AstNode* shift_first = call->argument;
+            AstNode* shift_count = shift_first ? shift_first->next : NULL;
             if (shift_sys->fn_info && (shift_sys->fn_info->fn == SYSFUNC_SHL ||
-                    shift_sys->fn_info->fn == SYSFUNC_SHR)) {
+                    shift_sys->fn_info->fn == SYSFUNC_SHR) &&
+                    !mir_shr_native_literal_count(mt, shift_sys, shift_count)) {
                 return LMD_TYPE_ANY;
+            }
+            if (shift_sys->fn_info && shift_sys->fn_info->fn == SYSFUNC_SHR) {
+                // literal-count shr: total, pure int lane (predicate above).
+                return LMD_TYPE_INT;
             }
             if (shift_sys->fn_info && (shift_sys->fn_info->fn == SYSFUNC_BAND ||
                     shift_sys->fn_info->fn == SYSFUNC_BOR ||
@@ -7231,9 +7413,24 @@ static MIR_reg_t mir_emit_string_concat_item(MirTranspiler* mt,
         return mir_emit_string_concat_item(mt, owner, after_left, join->right);
     }
     MIR_reg_t right_item = transpile_box_item(mt, right_expr);
-    MIR_reg_t right_ptr = emit_call_1(mt, "fn_string", MIR_T_P,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, right_item));
-    if (owner && owner->root_slot >= 0) {
+    // T20-2. `fn_string` is a CONVERSION; when the operand is already a string
+    // it only unwraps the Item -- and it is a call, so the emitter also had to
+    // assume it collected and reload the accumulator afterwards. base64's inner
+    // `TABLE[a] ++ TABLE[b] ++ ...` chain paid that per character
+    // (`fn_string` 68 leaf samples, `it2s` 37, both under fn_strcat). A
+    // statically-typed string operand decodes inline instead: same tag check
+    // fn_string would do first, no call, no safepoint (S1.6, D2.4).
+    MIR_reg_t right_ptr;
+    bool right_is_string = get_effective_type(mt, right_expr) == LMD_TYPE_STRING;
+    if (right_is_string) {
+        right_ptr = emit_text_pointer_lane(mt, right_item, LMD_TYPE_STRING);
+    } else {
+        right_ptr = emit_call_1(mt, "fn_string", MIR_T_P,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, right_item));
+    }
+    // The reload below is only needed after a converting call: an inline decode
+    // allocates nothing, so the accumulator's raw pointer cannot have moved.
+    if (!right_is_string && owner && owner->root_slot >= 0) {
         // fn_string may collect while converting a numeric RHS. Reload the
         // binding's published Item after that safepoint; the raw pointer
         // captured before the call may already refer to a moved String (D5.2).
@@ -12534,6 +12731,24 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         }
                     }
                 }
+                if (declared_var && declared_var->elem_type == LMD_TYPE_ANY &&
+                        (var_tid == LMD_TYPE_ARRAY_NUM ||
+                         var_tid == LMD_TYPE_ARRAY || var_tid == LMD_TYPE_ANY)) {
+                    // T20-3 #4: `var vs = hm.values` where the trusted record
+                    // declares `values: T[]`. The contract is a declaration,
+                    // not a runtime proof, so the witness is installed GUARDED:
+                    // every consumer re-checks the container and bails to the
+                    // boxed arm on drift. This is what lets hashmap's
+                    // field-to-local copies keep their element lane.
+                    AstNode* init = ast_unwrap_primary(asn->as);
+                    if (init && init->node_type == AST_NODE_MEMBER_EXPR) {
+                        TypeId member_elem = mir_guarded_array_num_witness(mt, asn->as);
+                        if (member_elem != LMD_TYPE_ANY) {
+                            declared_var->elem_type = member_elem;
+                            declared_var->elem_type_guarded = true;
+                        }
+                    }
+                }
                 if (declared_var && var_tid == LMD_TYPE_INT &&
                         mir_is_zero_int_literal(mt, asn->as)) {
                     declared_var->compact_int_known_zero = true;
@@ -14305,6 +14520,49 @@ static bool mir_direct_field_access_type(TypeId storage_type) {
         mir_is_container_field_type(storage_type);
 }
 
+// T20-1a. Which storage classes may be read through a SHAPE-GUARDED direct
+// load on an inferred (untrusted) literal shape?
+//
+// The guard proves the map's TypeMap identity -- so the field set, the
+// byte_offsets and the widths are the ones this site compiled against. It does
+// NOT prove the field's storage class: `fn_map_set` retags a slot IN PLACE, on
+// the same TypeMap, whenever the write keeps the width (NULL->T, and among the
+// pointer-like classes; see shape_entry_retag_is_safe). Only a width-changing
+// or otherwise incompatible write reaches map_rebuild_for_type_change, which
+// allocates a NEW TypeMap and therefore fails the guard.
+//
+// So admit exactly the classes an in-place retag cannot misrepresent:
+//   - INT family / FLOAT / STRING -- absent from that pointer-like set, so any
+//     type change rebuilds the shape and the guard catches it;
+//   - real containers -- a retag can only move them among pointer-like classes
+//     of the same width, and the container arm reads the slot as a raw
+//     Container* (0 => ItemNull), which stays correct for every one of them.
+// NULL is excluded because it is precisely what the in-place upgrade path
+// rewrites: a NULL slot retagged to INT would have this code read an int64 as
+// a pointer. BOOL is excluded because it shares that pointer-like set at a
+// different width. Both keep the generic accessor.
+static bool mir_guarded_field_storage_admits(TypeId storage_type) {
+    if (storage_type == LMD_TYPE_NULL || storage_type == LMD_TYPE_BOOL) return false;
+    return storage_type == LMD_TYPE_FLOAT || is_integer_type_id(storage_type) ||
+        storage_type == LMD_TYPE_STRING || mir_is_container_field_type(storage_type);
+}
+
+// The LAYOUT half of has_fixed_shape, without its `struct_name` requirement.
+// That name check is how a DECLARED contract is recognized, and it is right for
+// every caller that needs a contract; the shape-guarded read needs only that
+// the packed slots are addressable, which an inferred literal shape satisfies
+// just as well [D3.4.1].
+static bool mir_shape_layout_is_addressable(TypeMap* map_type) {
+    // Only the packed layout has to exist here. Whole-shape 8-alignment -- what
+    // has_fixed_shape demands -- is the wrong bar for an inferred literal: an
+    // untyped field is a 9-byte TypedItem, so `{val: n, next: f(n)}` puts its
+    // second field at offset 9 and every such shape would be refused outright.
+    // Addressability is a property of the field being READ, and the access site
+    // checks its own offset and storage class; a misaligned or ANY-carrying
+    // NEIGHBOUR cannot move the slot this site loads.
+    return map_type && map_type->shape && map_type->length > 0;
+}
+
 // Emit direct field READ from a packed map/object data struct.
 // Map/Object layout: [TypeId(1) flags(1) pad(6)] [void* type @8] [void* data @16] [int data_cap @24]
 // data points to packed struct where each field is 8-byte aligned.
@@ -14465,6 +14723,156 @@ static MIR_reg_t emit_mir_direct_field_read(MirTranspiler* mt, MIR_reg_t obj_box
 // Emit direct field WRITE to a packed map/object data struct.
 // Stores value at data + byte_offset. Value must be native type for scalars,
 // or tagged Item for containers.
+// T20-1d. Which packed lanes can a boxed value be tested against INLINE, so a
+// guarded store can admit a dynamically-typed value instead of demanding a
+// statically-typed one? The decode order in Item::type_id is: inline double
+// first, then the high tag byte, then the container's own header byte. Each
+// admitted lane below is one arm of that ladder, and anything else (a boxed
+// out-of-band float, a sized numeric, a decimal) simply fails the test and takes
+// the generic setter -- conservative in the safe direction.
+static bool mir_guarded_store_lane_is_testable(TypeId storage_type) {
+    return storage_type == LMD_TYPE_INT || storage_type == LMD_TYPE_FLOAT ||
+        storage_type == LMD_TYPE_STRING || mir_is_container_field_type(storage_type);
+}
+
+// Branch to `l_slow` unless `boxed` currently holds a value of `storage_type`.
+// This is the check that lets the store fast path exist at all: a raw write into
+// a packed slot performs none of `fn_map_set`'s retag bookkeeping, so the value
+// must already BE the slot's lane -- proven here at run time rather than demanded
+// of the static type, which untyped code never has [D3.4.5, D4.3].
+// When the slot's recorded lane is NULL -- which is what an untyped literal
+// writes for every link field (`{ link: null, … }`) -- the first real write is a
+// RETAG, and that is the write richards and deltablue actually do in their hot
+// loops. Admitting it means doing the bookkeeping `fn_map_set` would: publish the
+// new lane into the ShapeEntry so GC keeps tracing the slot as a pointer.
+//
+// Safe because the retag is an UPGRADE. `shape_entry_retag_is_safe` refuses only
+// the downgrade TO null (on a shape still flagged shared, that would make GC skip
+// live pointers held by sibling instances); every non-null target returns true
+// unconditionally. Null values are not admitted here at all -- they fail the lane
+// guard and take the generic setter -- so this path can only ever upgrade.
+// Widths are unchanged: `type_info[LMD_TYPE_NULL]` is deliberately pointer-sized
+// "for NULL<->container transitions", so the packed layout does not move.
+static bool mir_null_slot_container_upgrade_is_safe(void) {
+    return type_info[LMD_TYPE_NULL].byte_size == (int)sizeof(void*) &&
+        type_info[LMD_TYPE_MAP].byte_size == (int)sizeof(void*);
+}
+
+// Publish `kind`'s Type* into the ShapeEntry, skipping the store when it already
+// says that -- after the first execution this is a load and a compare, and it
+// keeps a shared cache line from being dirtied on every write.
+static void emit_shape_entry_retag(MirTranspiler* mt, ShapeEntry* field,
+        MIR_reg_t kind) {
+    MIR_reg_t ti_addr = new_reg(mt, "rtg_ti", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MUL, MIR_new_reg_op(mt->ctx, ti_addr),
+        MIR_new_reg_op(mt->ctx, kind), MIR_new_int_op(mt->ctx, (int64_t)sizeof(TypeInfo))));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD, MIR_new_reg_op(mt->ctx, ti_addr),
+        MIR_new_reg_op(mt->ctx, ti_addr),
+        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)&type_info[0])));
+    MIR_reg_t new_type = new_reg(mt, "rtg_type", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, new_type),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offsetof(TypeInfo, type), ti_addr, 0, 1)));
+    MIR_reg_t se_ptr = new_reg(mt, "rtg_se", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, se_ptr),
+        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)field)));
+    MIR_reg_t cur_type = new_reg(mt, "rtg_cur", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, cur_type),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offsetof(ShapeEntry, type), se_ptr, 0, 1)));
+    MIR_label_t l_done = new_label(mt);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ, MIR_new_label_op(mt->ctx, l_done),
+        MIR_new_reg_op(mt->ctx, cur_type), MIR_new_reg_op(mt->ctx, new_type)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, (int)offsetof(ShapeEntry, type), se_ptr, 0, 1),
+        MIR_new_reg_op(mt->ctx, new_type)));
+    emit_label(mt, l_done);
+}
+
+static void emit_item_runtime_lane_guard(MirTranspiler* mt, MIR_reg_t boxed,
+        TypeId storage_type, bool any_container, MIR_reg_t* out_kind,
+        MIR_label_t l_slow) {
+    MIR_reg_t dbl_bits = new_reg(mt, "vg_dbl", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+        MIR_new_reg_op(mt->ctx, dbl_bits), MIR_new_reg_op(mt->ctx, boxed),
+        MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
+    if (storage_type == LMD_TYPE_FLOAT) {
+        // Only the inline-double encoding is admitted. An out-of-band float
+        // carries a pointer tag instead and is left to the generic setter.
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
+            MIR_new_label_op(mt->ctx, l_slow), MIR_new_reg_op(mt->ctx, dbl_bits)));
+        return;
+    }
+    // Every remaining lane must NOT be an inline double before its tag means
+    // anything -- a double's high bits alias the tag space.
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+        MIR_new_label_op(mt->ctx, l_slow), MIR_new_reg_op(mt->ctx, dbl_bits)));
+    MIR_reg_t tag = new_reg(mt, "vg_tag", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_URSH,
+        MIR_new_reg_op(mt->ctx, tag), MIR_new_reg_op(mt->ctx, boxed),
+        MIR_new_int_op(mt->ctx, 56)));
+    if (any_container || mir_is_container_field_type(storage_type)) {
+        // Containers are raw pointers (tag 0) whose kind lives in byte 0.
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+            MIR_new_label_op(mt->ctx, l_slow), MIR_new_reg_op(mt->ctx, tag),
+            MIR_new_int_op(mt->ctx, 0)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+            MIR_new_label_op(mt->ctx, l_slow), MIR_new_reg_op(mt->ctx, boxed),
+            MIR_new_int_op(mt->ctx, 0)));
+        MIR_reg_t kind = new_reg(mt, "vg_kind", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, kind),
+            MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, boxed, 0, 1)));
+        if (any_container) {
+            // A retagging write does not know the kind statically. Admit the
+            // pointer-sized storable containers as one contiguous tag range
+            // (RANGE..OBJECT) and let the retag publish the exact one; TYPE and
+            // FUNC are excluded because they are not map field payloads here.
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BLT,
+                MIR_new_label_op(mt->ctx, l_slow), MIR_new_reg_op(mt->ctx, kind),
+                MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_RANGE)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BGT,
+                MIR_new_label_op(mt->ctx, l_slow), MIR_new_reg_op(mt->ctx, kind),
+                MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_OBJECT)));
+        } else {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                MIR_new_label_op(mt->ctx, l_slow), MIR_new_reg_op(mt->ctx, kind),
+                MIR_new_int_op(mt->ctx, (int64_t)storage_type)));
+        }
+        if (out_kind) *out_kind = kind;
+        return;
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+        MIR_new_label_op(mt->ctx, l_slow), MIR_new_reg_op(mt->ctx, tag),
+        MIR_new_int_op(mt->ctx, (int64_t)storage_type)));
+}
+
+// Store an already-lane-checked boxed value into the packed slot. The lane guard
+// above is this function's precondition: it decodes without re-checking.
+static void emit_raw_field_store_from_item(MirTranspiler* mt, MIR_reg_t map_ptr,
+        ShapeEntry* field, MIR_reg_t boxed, TypeId storage_type) {
+    MIR_reg_t data_ptr = new_reg(mt, "sgrd_data", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, data_ptr),
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, map_ptr, 0, 1)));
+    int offset = (int)field->byte_offset;
+    if (storage_type == LMD_TYPE_FLOAT) {
+        MIR_reg_t d = emit_unbox(mt, boxed, LMD_TYPE_FLOAT);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_D, offset, data_ptr, 0, 1),
+            MIR_new_reg_op(mt->ctx, d)));
+        return;
+    }
+    MIR_reg_t raw;
+    if (mir_is_container_field_type(storage_type)) {
+        // The slot holds a bare Container*, which the guard already proved this
+        // Item to be; stripping the (zero) tag is the identity here.
+        raw = emit_unbox_container(mt, boxed);
+    } else {
+        raw = emit_unbox(mt, boxed, storage_type);
+    }
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_mem_op(mt->ctx, MIR_T_I64, offset, data_ptr, 0, 1),
+        MIR_new_reg_op(mt->ctx, raw)));
+}
+
 static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
     ShapeEntry* field, AstNode* value, bool skip_null_guard) {
     // Keep direct writes on the same physical-lane contract as direct reads;
@@ -14691,6 +15099,152 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
         }
     }
 
+    // ==================================================================
+    // T20-1a: shape-guarded direct read for INFERRED (untrusted) shapes.
+    // ==================================================================
+    // Every map literal already carries a complete per-site TypeMap -- shape
+    // chain, precomputed byte_offsets, byte_size -- and transpile_map writes
+    // that TypeMap* into the object header as a compile-time constant. What an
+    // inferred shape lacks is the PROOF a declared contract gets from
+    // admission: nothing says the map arriving here was built at this site.
+    // Supply that proof at runtime instead of widening is_trusted_contract
+    // (which would be unsound): compare the header's type word against the
+    // constant, take the packed slot on a hit, and keep the generic accessor
+    // as the fallback arm. The compare is against an immediate and no code is
+    // ever rewritten, so this is not an inline cache [D8.4.1v2].
+    //
+    // The member expression's static type is untouched (the oracle still
+    // publishes ANY for an inferred shape), so BOTH arms yield a boxed Item
+    // and every consumer sees the representation it already saw [D2.4].
+    //
+    // T20-1c widens where the constant comes from. The static type only names a
+    // shape when a literal-initialized local is read in its own scope; in real
+    // code the object arrives through a parameter or a callee's return, both of
+    // which publish ANY. `mir_expr_candidate_shape` recovers a CANDIDATE along
+    // those edges. It is not a proof and does not need to be -- but the receiver
+    // is then no longer statically known to be a map, so the guard must also
+    // establish that before it dereferences anything.
+    MIR_reg_t guarded_result = 0;
+    MIR_label_t guarded_done = 0;
+    bool static_receiver_is_map =
+        (ast_obj_tid == LMD_TYPE_MAP || ast_obj_tid == LMD_TYPE_OBJECT) &&
+        ast_obj_type && ast_obj_type != &TYPE_MAP && ast_obj_type != &TYPE_OBJECT &&
+        !((TypeMap*)ast_obj_type)->is_trusted_contract &&
+        mir_shape_layout_is_addressable((TypeMap*)ast_obj_type);
+    Type* candidate_shape = static_receiver_is_map ? ast_obj_type
+        : mir_expr_candidate_shape(mt, field_node->object, 4);
+    if (!candidate_shape && field_node->field->node_type == AST_NODE_IDENT) {
+        // Nothing traced back to a construction site; fall back to the module's
+        // own literal shapes (T20-1b). Only a receiver that could still BE a map
+        // qualifies -- a statically scalar expression has no business here.
+        TypeId recv_tid = get_effective_type(mt, field_node->object);
+        if (recv_tid == LMD_TYPE_ANY || recv_tid == LMD_TYPE_MAP ||
+                recv_tid == LMD_TYPE_OBJECT) {
+            AstIdentNode* fname = (AstIdentNode*)field_node->field;
+            candidate_shape = mir_module_unique_shape_for_field(mt,
+                fname->name->chars, fname->name->len);
+        }
+    }
+    if (candidate_shape && field_node->field->node_type == AST_NODE_IDENT) {
+        TypeMap* shape_type = (TypeMap*)candidate_shape;
+        AstIdentNode* ident = (AstIdentNode*)field_node->field;
+        ShapeEntry* se = find_shape_field_by_name(shape_type,
+            ident->name->chars, ident->name->len);
+        TypeId storage_type = se ? shape_entry_storage_type_id(se) : LMD_TYPE_NULL;
+        LaneStorageDesc native_lane = {};
+        bool uses_native_lane = se && shape_entry_uses_native_lane(se, &native_lane);
+        bool field_is_container = mir_is_container_field_type(storage_type);
+        // A JS-style fixed-slot shape keeps its own in-place retag path that
+        // never rebuilds, so its slots are not covered by the guard's argument.
+        bool fixed_slot_shape = typemap_fixed_slot_prefix_count(shape_type) > 0;
+        // Both arms must publish the SAME representation. The slow arm unboxes
+        // to a native lane whenever the oracle proved one, so the guard may
+        // only run where it did not -- otherwise the fast arm's Item and the
+        // slow arm's native value would merge into one register [D2.4].
+        TypeId oracle_tid = get_effective_type(mt, (AstNode*)field_node);
+        bool slow_arm_is_boxed = !mir_is_native_scalar_value_type(oracle_tid) &&
+            oracle_tid != LMD_TYPE_STRING;
+        if (se && se->type && !fixed_slot_shape && slow_arm_is_boxed &&
+                mir_guarded_field_storage_admits(storage_type) &&
+                mir_direct_field_access_type(storage_type) &&
+                (!uses_native_lane || field_is_container) &&
+                se->byte_offset % (int64_t)sizeof(void*) == 0 &&
+                // The fallback arm needs the same module key the generic path
+                // resolves below; without it there is no slow arm to jump to.
+                module_property_key_index(mt, ident->name) != UINT32_MAX) {
+            log_debug("mir: guarded direct field read: %.*s (type=%d offset=%lld shape=%p)",
+                (int)ident->name->len, ident->name->chars, storage_type,
+                (long long)se->byte_offset, (void*)shape_type);
+
+            guarded_result = new_reg(mt, "grd_member", MIR_T_I64);
+            guarded_done = new_label(mt);
+            MIR_label_t l_slow = new_label(mt);
+
+            if (!static_receiver_is_map) {
+                // T20-1c. The candidate came from an inference edge, so nothing
+                // static says this Item is even a container. A scalar Item keeps
+                // its tag in the high byte while a container Item IS a raw
+                // pointer (tag 0, kind read from the struct's first byte), so
+                // unboxing a scalar here and loading its header would be a wild
+                // read. Establish "is a pointer" and "is the right container
+                // kind" BEFORE the header compare.
+                MIR_reg_t tag = new_reg(mt, "grd_tag", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_URSH,
+                    MIR_new_reg_op(mt->ctx, tag), MIR_new_reg_op(mt->ctx, boxed_obj),
+                    MIR_new_int_op(mt->ctx, 56)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                    MIR_new_label_op(mt->ctx, l_slow),
+                    MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, 0)));
+            }
+
+            MIR_reg_t map_ptr = emit_unbox_container(mt, boxed_obj);
+            // A null receiver has no header to test; `null.k` semantics stay
+            // with the generic accessor (S7.1).
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                MIR_new_label_op(mt->ctx, l_slow),
+                MIR_new_reg_op(mt->ctx, map_ptr), MIR_new_int_op(mt->ctx, 0)));
+            if (!static_receiver_is_map) {
+                MIR_reg_t kind = new_reg(mt, "grd_kind", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, kind),
+                    MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, map_ptr, 0, 1)));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                    MIR_new_label_op(mt->ctx, l_slow),
+                    MIR_new_reg_op(mt->ctx, kind),
+                    MIR_new_int_op(mt->ctx, (int64_t)shape_type->type_id)));
+            }
+            // Map/Object header: [TypeId(1) flags(1) pad(6)] [void* type @8] ...
+            MIR_reg_t hdr_type = new_reg(mt, "grd_shape", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, hdr_type),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, map_ptr, 0, 1)));
+            MIR_reg_t want_type = new_reg(mt, "grd_want", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, want_type),
+                MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)shape_type)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                MIR_new_label_op(mt->ctx, l_slow),
+                MIR_new_reg_op(mt->ctx, hdr_type), MIR_new_reg_op(mt->ctx, want_type)));
+
+            // Fast arm: the receiver was built at this site, so the packed slot
+            // is the one this offset was computed for. The null check above is
+            // the guard's own, so the read needs no second one.
+            MIR_reg_t raw = emit_mir_direct_field_read(mt, boxed_obj, se, true);
+            // Container slots already hold a valid Item (raw Container*, or
+            // ItemNull for 0); scalars carry their native lane and box here.
+            MIR_reg_t fast_item = field_is_container
+                ? raw : emit_box(mt, raw, storage_type);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, guarded_result),
+                MIR_new_reg_op(mt->ctx, fast_item)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                MIR_new_label_op(mt->ctx, guarded_done)));
+            emit_label(mt, l_slow);
+            // falls through into the generic accessor below, whose result is
+            // merged into guarded_result at the single return point
+        }
+    }
+
     // Field name for member access: static names stay as raw NameIds until the
     // runtime path genuinely needs spelling semantics (D4.6.1v2).
     AstNode* field = field_node->field;
@@ -14744,6 +15298,15 @@ static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     if (mir_is_native_scalar_value_type(mem_tid) || mem_tid == LMD_TYPE_STRING) {
         result = emit_unbox_contract_lane(mt, result, mem_tid,
             ((AstNode*)field_node)->type);
+    }
+    // T20-1a: join the guard's slow arm. The guard only activates where the
+    // oracle publishes no native lane, so `result` is the boxed Item the fast
+    // arm also produced -- the merge cannot mix representations.
+    if (guarded_result) {
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, guarded_result), MIR_new_reg_op(mt->ctx, result)));
+        emit_label(mt, guarded_done);
+        return guarded_result;
     }
     return result;
 }
@@ -15853,7 +16416,27 @@ static MIR_reg_t transpile_index(MirTranspiler* mt, AstFieldNode* field_node) {
     // Set when elem_type comes from a declaration rather than local narrowing:
     // the inline loads below must then re-check the runtime representation.
     bool obj_elem_guarded = false;
-    if (obj_tid == LMD_TYPE_ARRAY_NUM) {
+    // T20-3 #1/#4. Module `let T[]` bindings, trusted-record `T[]` fields and
+    // locals declared from such member reads all publish a generic/ANY carrier,
+    // so every typed-array fast path below -- all gated on ARRAY_NUM --
+    // rejected them and the read boxed (5.4x on microdiff; hashmap's whole
+    // probe loop). The witness comes from mir_guarded_array_num_witness: the
+    // SAME oracle mir_known_index_element_type consults, which is what makes
+    // the fast path's native-lane result and the consumers' planning agree --
+    // the first attempt derived the element here independently, the oracle
+    // kept answering ANY, and a raw int lane reached fn_numeric_binary as an
+    // Item (SIGSEGV at address 0x6). obj_elem_guarded selects the runtime elem
+    // guard + item_at slow arm, whose result emit_index_result_move converges
+    // back into the lane, covering any drifted representation [D2.6.2, D3.2.1].
+    if (obj_tid == LMD_TYPE_ARRAY || obj_tid == LMD_TYPE_ANY) {
+        TypeId witness_elem = mir_guarded_array_num_witness(mt, field_node->object);
+        if (witness_elem != LMD_TYPE_ANY) {
+            obj_tid = LMD_TYPE_ARRAY_NUM;
+            obj_elem_type = witness_elem;
+            obj_elem_guarded = true;
+        }
+    }
+    if (obj_tid == LMD_TYPE_ARRAY_NUM && obj_elem_type == LMD_TYPE_ANY) {
         obj_elem_type = mir_known_index_element_type(mt, field_node->object);
         AstNode* obj_unwrapped = field_node->object;
         while (obj_unwrapped && obj_unwrapped->node_type == AST_NODE_PRIMARY)
@@ -16316,6 +16899,61 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             // State variables and other boxed locals may retain a narrower AST
             // type; native len_* helpers require the actual MIR raw-pointer form.
             TypeId arg_tid = get_effective_type(mt, arg);
+            // T20-3 #1. A module `let xs: T[]` ident carries the ANNOTATION
+            // meta-type here (LMD_TYPE_TYPE), so none of the native arms below
+            // fired and every `len(xs)` took generic fn_len dispatch -- 35.7%
+            // of post-fix microdiff was this one call. The module witness
+            // proves the representation; emit an inline length load under the
+            // same kind/layout guard the index path uses. ndim/view arrays
+            // bail to the call because their `len` is shape[0], not `length`
+            // (array_num_iter_count); so does anything that is not the
+            // witnessed ArrayNum at run time.
+            {
+                TypeId module_elem = mir_guarded_array_num_witness(mt, arg);
+                if (module_elem == LMD_TYPE_INT || module_elem == LMD_TYPE_INT64 ||
+                        module_elem == LMD_TYPE_FLOAT) {
+                    MIR_reg_t boxed = transpile_box_item(mt, arg);
+                    MIR_reg_t raw = emit_unbox_container(mt, boxed);
+                    MIR_reg_t result = new_reg(mt, "mlen", MIR_T_I64);
+                    MIR_label_t l_slow = new_label(mt);
+                    MIR_label_t l_end = new_label(mt);
+                    MIR_reg_t kind = new_reg(mt, "mlen_kind", MIR_T_I64);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                        MIR_new_label_op(mt->ctx, l_slow),
+                        MIR_new_reg_op(mt->ctx, raw), MIR_new_int_op(mt->ctx, 0)));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, kind),
+                        MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, raw, 0, 1)));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                        MIR_new_label_op(mt->ctx, l_slow),
+                        MIR_new_reg_op(mt->ctx, kind),
+                        MIR_new_int_op(mt->ctx, (int64_t)LMD_TYPE_ARRAY_NUM)));
+                    MIR_reg_t layout = new_reg(mt, "mlen_layout", MIR_T_I64);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, layout),
+                        MIR_new_mem_op(mt->ctx, MIR_T_U8, 2, raw, 0, 1)));
+                    MIR_reg_t shaped = new_reg(mt, "mlen_shaped", MIR_T_I64);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
+                        MIR_new_reg_op(mt->ctx, shaped),
+                        MIR_new_reg_op(mt->ctx, layout), MIR_new_int_op(mt->ctx, 0x03)));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
+                        MIR_new_label_op(mt->ctx, l_slow),
+                        MIR_new_reg_op(mt->ctx, shaped)));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, result),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, 16, raw, 0, 1)));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, l_end)));
+                    emit_label(mt, l_slow);
+                    MIR_reg_t slow_len = emit_call_1(mt, "fn_len", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, result),
+                        MIR_new_reg_op(mt->ctx, slow_len)));
+                    emit_label(mt, l_end);
+                    return result;
+                }
+            }
             if (arg_tid == LMD_TYPE_ARRAY) {
                 MIR_reg_t a1 = emit_unbox_container(mt, transpile_expr(mt, arg));
                 return emit_call_1(mt, "fn_len_l", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, a1));
@@ -16558,6 +17196,21 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     // v5: a bitwise result already IS int\'s lane (both machine words).
                     return result;
                 }
+                return result;
+            }
+
+            // T20-3 #3: a literal in-range count kills both cold arms of shr
+            // statically (predicate shared with the classifier and the carrier
+            // oracle, which reports INT for exactly this shape) -- one RSH,
+            // raw int lane result.
+            if (info->fn == SYSFUNC_SHR &&
+                    mir_shr_native_literal_count(mt,
+                        (AstSysFuncNode*)call_node->function, arg)) {
+                MIR_reg_t result = new_reg(mt, "shr_lit", MIR_T_I64);
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH,
+                    MIR_new_reg_op(mt->ctx, result),
+                    MIR_new_reg_op(mt->ctx, a1),
+                    MIR_new_reg_op(mt->ctx, a2)));
                 return result;
             }
 
@@ -21349,6 +22002,128 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             return replacement;
         }
 
+        // ==================================================================
+        // T20-1d: shape-guarded direct field STORE for inferred shapes.
+        // ==================================================================
+        // The trusted-contract writer above is gated on the binding's declared
+        // `full_type`, and the rows this round cares about have none: richards
+        // builds `var pkt = { link: null, identity: 0, … }` and mutates it, so
+        // every store measured `full_type == NULL` -- while `cow_marked` was
+        // already false, i.e. the COW uniqueness proof the fast path needs was
+        // there all along and only the type was missing. Supply the shape the
+        // same way the read side does, and prove it the same way: a header
+        // compare, with the ordinary `fn_map_set` as the fallback arm.
+        //
+        // Stricter than the read on purpose. A store that changes a slot's
+        // storage class has to run `fn_map_set`'s retag bookkeeping so GC keeps
+        // tracing the right words; this path does not, so it admits only writes
+        // that CANNOT retag: the value's static type must already equal the
+        // slot's lane, and the lane must be one an in-place retag cannot reach
+        // anyway (mir_guarded_field_storage_admits) [D3.4.5, D4.3].
+        MIR_label_t store_guard_done = 0;
+        MIR_reg_t store_guard_value = 0;   // boxed RHS, shared with the slow arm
+        if (cow_root && !cow_root->full_type && !cow_root->cow_marked &&
+                cow_path.count == 0 && ca->key->node_type == AST_NODE_IDENT &&
+                ca->value && ca->value->type) {
+            AstNode* store_object = ast_unwrap_primary(ca->object);
+            Type* store_shape = (store_object && store_object->node_type == AST_NODE_IDENT)
+                ? mir_expr_candidate_shape(mt, ca->object, 4) : NULL;
+            if (!store_shape && store_object &&
+                    store_object->node_type == AST_NODE_IDENT) {
+                TypeId recv_tid = get_effective_type(mt, ca->object);
+                if (recv_tid == LMD_TYPE_ANY || recv_tid == LMD_TYPE_MAP ||
+                        recv_tid == LMD_TYPE_OBJECT) {
+                    AstIdentNode* kname = (AstIdentNode*)ca->key;
+                    store_shape = mir_module_unique_shape_for_field(mt,
+                        kname->name->chars, kname->name->len);
+                }
+            }
+            if (store_shape) {
+                TypeMap* shape_type = (TypeMap*)store_shape;
+                AstIdentNode* key_ident = (AstIdentNode*)ca->key;
+                ShapeEntry* field = find_shape_field_by_name(shape_type,
+                    key_ident->name->chars, key_ident->name->len);
+                TypeId storage_type = field ? shape_entry_storage_type_id(field) : LMD_TYPE_NULL;
+                LaneStorageDesc lane = {};
+                bool uses_native_lane = field && shape_entry_uses_native_lane(field, &lane);
+                // A NULL-lane slot is a link field an untyped literal opened
+                // with `null`; admitting it means retagging on the way in.
+                bool retag_upgrade = field && storage_type == LMD_TYPE_NULL &&
+                    mir_null_slot_container_upgrade_is_safe();
+                bool lane_ok = retag_upgrade ||
+                    (mir_guarded_field_storage_admits(storage_type) &&
+                     mir_guarded_store_lane_is_testable(storage_type) &&
+                     mir_direct_field_access_type(storage_type));
+                if (field && field->type && !uses_native_lane && lane_ok &&
+                        field->byte_offset % (int64_t)sizeof(void*) == 0 &&
+                        !mir_argument_may_return_item_error(mt, ca->value)) {
+                    log_debug("mir: guarded direct field store: %.*s (type=%d offset=%lld)",
+                        (int)key_ident->name->len, key_ident->name->chars,
+                        storage_type, (long long)field->byte_offset);
+                    store_guard_done = new_label(mt);
+                    MIR_label_t l_slow = new_label(mt);
+                    // Evaluate the RHS ONCE, before the receiver is loaded: the
+                    // slow arm reuses this register, and evaluating it twice
+                    // would run its side effects twice. Loading the receiver
+                    // afterwards is also what the existing direct writer does --
+                    // the RHS may allocate, and a pre-RHS raw pointer would be
+                    // stale after a compacting collection (D5.2).
+                    store_guard_value = transpile_box_item(mt, ca->value);
+                    int value_root = create_gc_root_slot(mt, store_guard_value);
+                    store_guard_value = load_gc_root_slot(mt, value_root, "sgrd_val");
+                    MIR_reg_t obj_item = transpile_box_item(mt, ca->object);
+                    // Same three-step establish-then-compare as the read: the
+                    // receiver is not statically known to be a container here.
+                    MIR_reg_t tag = new_reg(mt, "sgrd_tag", MIR_T_I64);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_URSH,
+                        MIR_new_reg_op(mt->ctx, tag), MIR_new_reg_op(mt->ctx, obj_item),
+                        MIR_new_int_op(mt->ctx, 56)));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                        MIR_new_label_op(mt->ctx, l_slow),
+                        MIR_new_reg_op(mt->ctx, tag), MIR_new_int_op(mt->ctx, 0)));
+                    MIR_reg_t map_ptr = emit_unbox_container(mt, obj_item);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+                        MIR_new_label_op(mt->ctx, l_slow),
+                        MIR_new_reg_op(mt->ctx, map_ptr), MIR_new_int_op(mt->ctx, 0)));
+                    MIR_reg_t kind = new_reg(mt, "sgrd_kind", MIR_T_I64);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, kind),
+                        MIR_new_mem_op(mt->ctx, MIR_T_U8, 0, map_ptr, 0, 1)));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                        MIR_new_label_op(mt->ctx, l_slow),
+                        MIR_new_reg_op(mt->ctx, kind),
+                        MIR_new_int_op(mt->ctx, (int64_t)shape_type->type_id)));
+                    MIR_reg_t hdr = new_reg(mt, "sgrd_shape", MIR_T_I64);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, hdr),
+                        MIR_new_mem_op(mt->ctx, MIR_T_I64, 8, map_ptr, 0, 1)));
+                    MIR_reg_t want = new_reg(mt, "sgrd_want", MIR_T_I64);
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                        MIR_new_reg_op(mt->ctx, want),
+                        MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)shape_type)));
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE,
+                        MIR_new_label_op(mt->ctx, l_slow),
+                        MIR_new_reg_op(mt->ctx, hdr), MIR_new_reg_op(mt->ctx, want)));
+                    // The receiver is the right shape; now prove the VALUE's
+                    // lane, because the raw write below does no conversion.
+                    MIR_reg_t value_kind = 0;
+                    emit_item_runtime_lane_guard(mt, store_guard_value, storage_type,
+                        retag_upgrade, &value_kind, l_slow);
+                    emit_raw_field_store_from_item(mt, map_ptr, field, store_guard_value,
+                        retag_upgrade ? LMD_TYPE_MAP : storage_type);
+                    if (retag_upgrade && value_kind) {
+                        // Publish the lane so GC traces this slot as a pointer.
+                        emit_shape_entry_retag(mt, field, value_kind);
+                    }
+                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
+                        MIR_new_label_op(mt->ctx, store_guard_done)));
+                    emit_label(mt, l_slow);
+                    // falls through into the generic setter below; both arms
+                    // yield ItemNull, so only control flow has to converge
+                }
+            }
+        }
+
         // Fallback: runtime fn_map_set
         MIR_reg_t obj = transpile_box_item(mt, ca->object);
         // Key: if it's an ident, emit as string constant; otherwise box it
@@ -21367,7 +22142,8 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         } else {
             key = transpile_box_item(mt, ca->key);
         }
-        MIR_reg_t val = transpile_box_item(mt, ca->value);
+        MIR_reg_t val = store_guard_value ? store_guard_value
+                                          : transpile_box_item(mt, ca->value);
         MIR_reg_t write_result = emit_call_3(mt, "fn_map_set", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, obj),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
@@ -21378,6 +22154,15 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
             MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        // T20-1d: the guarded store's fast arm lands here. A member assignment
+        // is a void statement, so both arms produce this same ItemNull -- but
+        // the fast arm skipped the MOV above, so repeat it under the label
+        // rather than assuming the register is live.
+        if (store_guard_done) {
+            emit_label(mt, store_guard_done);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
+                MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
+        }
         return r;
     }
     case AST_NODE_PIPE_FILE_STAM: {
@@ -25411,6 +26196,171 @@ static CallSiteEntry* mir_callsite_entry(MirTranspiler* mt, AstFuncNode* fn, boo
     return (CallSiteEntry*)hashmap_get(mt->callsite_info, &key);
 }
 
+// ---------------------------------------------------------------------------
+// T20-1c: carry a candidate literal shape to the member sites that read it.
+// ---------------------------------------------------------------------------
+// T20-1a lowers `.field` to a guarded packed load wherever the object
+// expression's static type names an addressable TypeMap. That covers a local
+// initialized by a literal in the same scope and nothing else: in real code the
+// object reaches the read through a parameter or out of a callee's return, and
+// both publish ANY. This pass recovers the shape along those two edges.
+//
+// It is explicitly an inference of a CANDIDATE, not a proof. The guard compares
+// the runtime header before using the offset, so a wrong candidate degrades to
+// a guard miss (the generic accessor) and never to a wrong read. That is what
+// lets "first call site wins" be an honest rule here, where the scalar
+// specialization join next door must be conservative [T19-4].
+static Type* mir_addressable_literal_shape(Type* type) {
+    if (!type) return NULL;
+    Type* unwrapped = mir_unwrap_decl_type(type);
+    if (!unwrapped) return NULL;
+    // A `T?` occurrence around a record is still one shape once the null arm is
+    // separated -- and a linked structure is a chain of exactly those.
+    Type* nonnull = mir_nonnull_contract_base(unwrapped);
+    if (nonnull) unwrapped = nonnull;
+    if (unwrapped->type_id != LMD_TYPE_MAP && unwrapped->type_id != LMD_TYPE_OBJECT) return NULL;
+    if (unwrapped == &TYPE_MAP || unwrapped == &TYPE_OBJECT) return NULL;
+    TypeMap* map_type = (TypeMap*)unwrapped;
+    // A declared contract already has the unguarded path; only inferred shapes
+    // need this.
+    if (map_type->is_trusted_contract) return NULL;
+    if (!mir_shape_layout_is_addressable(map_type)) return NULL;
+    if (typemap_fixed_slot_prefix_count(map_type) > 0) return NULL;
+    return (Type*)map_type;
+}
+
+// Resolve one expression to the map shape it will produce, following the two
+// edges the fixpoint cares about: a binding to its initializer, and a call to
+// its callee's resolved return shape. `depth` bounds the binding chain.
+static Type* mir_expr_candidate_shape(MirTranspiler* mt, AstNode* expr, int depth) {
+    if (!expr || depth <= 0) return NULL;
+    AstNode* node = ast_unwrap_primary(expr);
+    if (!node) return NULL;
+    Type* direct = mir_addressable_literal_shape(node->type);
+    if (direct) return direct;
+
+    if (node->node_type == AST_NODE_IDENT) {
+        AstIdentNode* ident = (AstIdentNode*)node;
+        NameEntry* entry = ident->entry;
+        if (!entry || !entry->node) return NULL;
+        AstNode* decl = (AstNode*)entry->node;
+        if (decl->node_type == AST_NODE_ASSIGN) {
+            AstNamedNode* named = (AstNamedNode*)decl;
+            // A `var` rebound elsewhere may hold another shape; that is a guard
+            // miss, not an error, so the initializer still names the candidate.
+            return mir_expr_candidate_shape(mt, named->as, depth - 1);
+        }
+        if (decl->node_type == AST_NODE_PARAM) {
+            ShapeHintEntry key;
+            memset(&key, 0, sizeof(key));
+            key.node = decl;
+            ShapeHintEntry* hint = mt->shape_hints
+                ? (ShapeHintEntry*)hashmap_get(mt->shape_hints, &key) : NULL;
+            return hint ? hint->shape : NULL;
+        }
+        return NULL;
+    }
+    if (node->node_type == AST_NODE_CALL_EXPR) {
+        AstFuncNode* callee = mir_ident_local_func(((AstCallNode*)node)->function);
+        if (!callee) return NULL;
+        CallSiteEntry* e = mir_callsite_entry(mt, callee, false);
+        return e ? e->return_shape : NULL;
+    }
+    return NULL;
+}
+
+// T20-1b. Propagation reaches a member site only when the receiver traces back
+// to a construction site through a binding or a return. In real untyped code it
+// often does not: deltablue reads `c.kind` off a constraint fetched out of an
+// array, havlak reads block fields off adjacency lists, and an untyped container
+// hands back ANY, so the chain dies there. Measured, that is the whole story --
+// deltablue had 17 guarded reads against 219 ANY member reads, an 8% coverage.
+//
+// But the guard makes correctness independent of where the candidate came from:
+// a wrong guess is a header compare that fails and falls into the generic
+// accessor. So a candidate does not have to be PROVEN to reach this site -- it
+// only has to be a good guess. The module's own literal shapes are exactly that
+// evidence: if precisely one literal shape in the unit declares this field name,
+// a read of that field is overwhelmingly likely to be reading that shape.
+//
+// Deliberately restricted to a UNIQUE match. Several shapes sharing a field name
+// would need a guard chain, which is a different design (and the measurement
+// says it is rare here: nearly every propagated position resolved to a single
+// distinct shape).
+static Type* mir_module_unique_shape_for_field(MirTranspiler* mt,
+        const char* name, size_t name_len) {
+    if (!mt->type_list || !name || name_len == 0) return NULL;
+    Type* found = NULL;
+    for (int64_t index = 0; index < mt->type_list->length; index++) {
+        Type* candidate = (Type*)mt->type_list->data[index];
+        Type* shape = mir_addressable_literal_shape(candidate);
+        if (!shape) continue;
+        if (!find_shape_field_by_name((TypeMap*)shape, name, name_len)) continue;
+        if (found && found != shape) return NULL;   // ambiguous: needs a chain
+        found = shape;
+    }
+    return found;
+}
+
+static void mir_shape_hint_set(MirTranspiler* mt, AstNode* node, Type* shape) {
+    if (!mt->shape_hints || !node || !shape) return;
+    ShapeHintEntry key;
+    memset(&key, 0, sizeof(key));
+    key.node = node;
+    key.shape = shape;
+    hashmap_set(mt->shape_hints, &key);
+}
+
+Type* mir_param_shape_hint(MirTranspiler* mt, AstNode* param_node) {
+    if (!mt || !mt->shape_hints || !param_node) return NULL;
+    ShapeHintEntry key;
+    memset(&key, 0, sizeof(key));
+    key.node = param_node;
+    ShapeHintEntry* hint = (ShapeHintEntry*)hashmap_get(mt->shape_hints, &key);
+    return hint ? hint->shape : NULL;
+}
+
+// Iterate return shapes into parameter shapes until nothing moves. A chain
+// `literal -> return -> local -> argument -> parameter` needs one round per
+// link, and the benchmark shapes are short; the bound just stops a cycle.
+#define MIR_SHAPE_FIXPOINT_ROUNDS 4
+
+static void mir_shape_resolve_entry(MirTranspiler* mt, CallSiteEntry* e) {
+    // Take the first source that actually names a shape, not the first source:
+    // `pn make_list(n) { if (n == 0) { return null } ... return e }` would
+    // otherwise be typed by its base case forever.
+    if (!e->return_shape) {
+        for (int s = 0; s < e->return_shape_src_count && !e->return_shape; s++) {
+            e->return_shape = mir_expr_candidate_shape(mt, e->return_shape_src[s], 4);
+        }
+    }
+    // A name reachable from outside the unit can be called with anything, so
+    // its parameters get no candidate -- the guard would simply never hit.
+    if (!e->escaped) {
+        for (int i = 0; i < e->param_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
+            if (e->param_shape[i] || e->arg_shape_src_count[i] == 0) continue;
+            for (int s = 0; s < e->arg_shape_src_count[i] && !e->param_shape[i]; s++) {
+                e->param_shape[i] = mir_expr_candidate_shape(mt, e->arg_shape_src[i][s], 4);
+            }
+            if (e->param_shape[i]) {
+                AstNamedNode* param = mir_param_at(e->fn, i);
+                if (param) mir_shape_hint_set(mt, (AstNode*)param, e->param_shape[i]);
+            }
+        }
+    }
+}
+
+static void mir_resolve_shape_hints(MirTranspiler* mt) {
+    if (!mt->callsite_info || !mt->shape_hints) return;
+    for (int round = 0; round < MIR_SHAPE_FIXPOINT_ROUNDS; round++) {
+        size_t iter = 0;
+        void* item = NULL;
+        while (hashmap_iter(mt->callsite_info, &iter, &item)) {
+            mir_shape_resolve_entry(mt, (CallSiteEntry*)item);
+        }
+    }
+}
+
 static TypeId mir_array_type_element_type(Type* array_type) {
     if (!array_type || array_type->type_id != LMD_TYPE_ARRAY) return LMD_TYPE_ANY;
     Type* nested = ((TypeArray*)array_type)->nested;
@@ -25612,6 +26562,13 @@ static bool mir_callsite_record(MirTranspiler* mt, AstCallNode* call) {
         mir_callsite_join_arg(e, pos, arg_type);
         mir_callsite_join_specialization_type(e, pos, arg_type);
         mir_callsite_join_elem(e, pos, mir_callsite_arg_elem_type(mt, a));
+        // T20-1c: keep the first argument expression per position as the shape
+        // source; the post-prepass fixpoint resolves it once callee return
+        // shapes are known.
+        if (pos < LAMBDA_MAX_FUNCTION_ARGS &&
+                e->arg_shape_src_count[pos] < MIR_SHAPE_SRC_SLOTS) {
+            e->arg_shape_src[pos][e->arg_shape_src_count[pos]++] = a;
+        }
     }
     return true;
 }
@@ -25930,6 +26887,15 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
         }
         case AST_NODE_RETURN_STAM: {
             AstReturnNode* ret = (AstReturnNode*)node;
+            // T20-1c: the first returned expression is this function's shape
+            // source. Later returns are ignored on purpose -- a disagreement
+            // costs guard misses at the call sites, never a wrong read.
+            if (mt->prepass_collect_only && ret->value && mt->prepass_enclosing) {
+                CallSiteEntry* e = mir_callsite_entry(mt, mt->prepass_enclosing, true);
+                if (e && e->return_shape_src_count < MIR_SHAPE_SRC_SLOTS) {
+                    e->return_shape_src[e->return_shape_src_count++] = ret->value;
+                }
+            }
             if (ret->value) prepass_forward_declare(mt, ret->value);
             break;
         }
@@ -26029,6 +26995,10 @@ static void prepass_collect_call_sites(MirTranspiler* mt, AstNode* script_child)
         mt->prepass_enclosing = NULL;
         prepass_forward_declare(mt, script_child);
         mt->prepass_collect_only = false;
+
+        // T20-1c: with every call site and return source recorded, push
+        // candidate shapes along the return and argument edges.
+        mir_resolve_shape_hints(mt);
 
         bool changed = false;
         iter = 0;
@@ -26825,6 +27795,7 @@ static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
     mt.local_funcs  = local_func_new(32);
     mt.global_vars  = global_var_new(32);
     mt.callsite_info = callsite_info_new(32);
+    mt.shape_hints   = shape_hint_new(32);
     if (out_property_keys) *out_property_keys = NULL;
 
     // Create module
@@ -27072,6 +28043,7 @@ static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
     hashmap_free(mt.local_funcs);
     hashmap_free(mt.global_vars);
     hashmap_free(mt.callsite_info);
+    hashmap_free(mt.shape_hints);
     if (out_artifacts) {
         out_artifacts->consts_bss = mt.consts_bss;
         out_artifacts->layout_bss = mt.module_layout_bss;

@@ -324,35 +324,6 @@ void te_focus_capture_value(DomElement* elem) {
     te_history_push(elem);
 }
 
-bool te_blur_should_dispatch_change(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return false;
-    FormControlProp* f = elem->form;
-    if (!f) return false;
-
-    uint32_t cur_len = 0;
-    const char* cur = tc_buffer(f, &cur_len);
-
-    bool changed = false;
-    if (f->value_at_focus) {
-        if (cur_len != f->value_at_focus_len) {
-            changed = true;
-        } else if (cur_len > 0) {
-            changed = (memcmp(cur, f->value_at_focus, cur_len) != 0);
-        }
-    } else {
-        // No snapshot — first blur after init. Treat as no-change so we
-        // don't spuriously fire `change` on every focus transition.
-        changed = false;
-    }
-
-    // Always clear the snapshot; the next focus will re-capture.
-    if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
-    f->value_at_focus_len = 0;
-
-    log_debug("text_edit: blur_should_dispatch_change elem=%p changed=%d",
-              elem, (int)changed);
-    return changed;
-}
 
 // ---------- undo/redo ring (skeleton) ----------------------------------
 
@@ -484,18 +455,6 @@ void te_history_push(DomElement* elem) {
                                      h->count, h->cursor);
 }
 
-static bool te_history_apply_current(DomElement* elem, EditHistory* history) {
-    uint16_t index = (uint16_t)((history->head + history->cap - 1 - history->cursor) % history->cap);
-    EditHistoryEntry* entry = &history->ring[index];
-    if (!entry->snapshot) return false;
-
-    DocState* state = te_history_state(elem);
-    tc_history_guard_enter(state);
-    tc_set_value(elem, entry->snapshot, entry->length);
-    tc_history_guard_exit(state);
-    tc_set_selection_range(elem, entry->sel_start_u16, entry->sel_end_u16, entry->sel_dir);
-    return true;
-}
 
 // ES17 option 2: hand the entry to whoever will install it, without moving the
 // cursor. The cursor advances only once the entry is actually consumed, which
@@ -549,28 +508,7 @@ bool te_history_step(DomElement* elem, bool redo) {
     return true;
 }
 
-bool te_history_undo(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return false;
-    EditHistory* h = te_history_of(elem);
-    if (!h) return false;
 
-    // Need at least one older entry beyond the current state. The newest
-    // entry typically represents the current state; cursor++ moves to the
-    // one before it.
-    if ((uint16_t)(h->cursor + 1) >= h->count) return false;
-    h->cursor++;
-    return te_history_apply_current(elem, h);
-}
-
-bool te_history_redo(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return false;
-    EditHistory* h = te_history_of(elem);
-    if (!h) return false;
-
-    if (h->cursor == 0) return false;
-    h->cursor--;
-    return te_history_apply_current(elem, h);
-}
 
 // ---------- F5: events + constraint validation -------------------------
 
@@ -616,69 +554,12 @@ bool te_prepare_paste_range(DomElement* elem, DocState* state,
     return true;
 }
 
-uint32_t te_paste(DomElement* elem, DocState* state, void* target,
-                  const char* text, uint32_t len) {
-    if (!target || !text || len == 0) return 0;
-    uint32_t sel_a = 0, sel_b = 0;
-    if (!te_prepare_paste_range(elem, state, &sel_a, &sel_b)) return 0;
-
-    // Fallback for callers with no event context: this path never reaches the
-    // applier (te_replace_byte_range emits only the legacy post-mutation input
-    // hook, no beforeinput), so the clipboard text goes in as-is. Live callers
-    // — including the context menu, which installs a hook routing to
-    // dispatch_form_text_paste — get the package's policy instead.
-    bool ok = te_replace_byte_range(elem, state, target, sel_a, sel_b, text, len);
-    return ok ? len : 0;
-}
 
 // ---------- F7: IME composition (Radiant_Design_Form_Input.md §3.7) ----
 
-static void te_clear_preedit(FormControlProp* f) {
-    if (!f) return;
-    if (f->preedit_utf8) { mem_free(f->preedit_utf8); f->preedit_utf8 = nullptr; }
-    f->preedit_len = 0;
-    f->preedit_caret = 0;
-}
 
-bool te_ime_is_composing(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return false;
-    return elem->form && elem->form->preedit_utf8 != nullptr;
-}
 
-void te_ime_begin(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return;
-    FormControlProp* f = elem->form;
-    if (!f) return;
-    // Begin from a clean slate; if a previous composition was orphaned,
-    // drop it.
-    te_clear_preedit(f);
-    log_debug("te_ime_begin: starting composition");
-}
 
-void te_ime_update(DomElement* elem, const char* preedit, uint32_t len,
-                   uint32_t caret_cp) {
-    if (!elem || !tc_is_text_control(elem)) return;
-    FormControlProp* f = elem->form;
-    if (!f) return;
-
-    // Hide the placeholder while composing (even if value is still empty).
-    state_set_bool(f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr),
-        elem, STATE_PLACEHOLDER, false);
-
-    if (len == 0 || !preedit) {
-        te_clear_preedit(f);
-    } else {
-        char* buf = (char*)mem_alloc((size_t)len + 1, MEM_CAT_DOM);
-        if (!buf) return;
-        memcpy(buf, preedit, len);
-        buf[len] = '\0';
-        if (f->preedit_utf8) mem_free(f->preedit_utf8);
-        f->preedit_utf8 = buf;
-        f->preedit_len = len;
-        f->preedit_caret = caret_cp;
-    }
-    log_debug("te_ime_update: %u bytes preedit, caret=%u", len, caret_cp);
-}
 
 bool te_ime_commit_prepare(DomElement* elem, DocState* state,
                            const char* committed, uint32_t len,
@@ -691,9 +572,9 @@ bool te_ime_commit_prepare(DomElement* elem, DocState* state,
     FormControlProp* f = elem->form;
     if (!f || !out_start || !out_end || !out_should_mutate) return false;
 
-    // Drop preedit BEFORE inserting so the renderer doesn't briefly show
-    // both the preedit and the committed text.
-    te_clear_preedit(f);
+    // The preedit is dropped by the session template on compositionend; this
+    // function keeps only the mechanism halves — the readonly/disabled gate and
+    // the replaced range (F7).
 
     // Read-only / disabled fields accept the IME session (preedit was
     // shown above and is now cleared) but reject the actual commit so
@@ -721,63 +602,8 @@ bool te_ime_commit_prepare(DomElement* elem, DocState* state,
     return true;
 }
 
-void te_ime_commit_finish(DomElement* elem, const char* committed,
-                          uint32_t len) {
-    if (!elem || !tc_is_text_control(elem)) return;
-    log_debug("te_ime_commit: committed %u bytes", len);
-}
 
-void te_ime_cancel(DomElement* elem) {
-    if (!elem || !tc_is_text_control(elem)) return;
-    FormControlProp* f = elem->form;
-    if (!f) return;
-    te_clear_preedit(f);
-    tc_refresh_placeholder_shown(elem, f);
-    log_debug("te_ime_cancel: composition aborted");
-}
 
 // ---------- F8: ARIA reflection (Radiant_Design_Form_Input.md §4) -----
 
-static void te_aria_set_or_clear(DomElement* elem, const char* name, bool on,
-                                 const char* value) {
-    if (on) {
-        elem->set_attribute(name, value);
-    } else {
-        // Only clear if currently set; avoids churning the attribute table.
-        if (elem->get_attribute(name)) {
-            elem->remove_attribute(name);
-        }
-    }
-}
 
-void te_aria_reflect(DomElement* elem) {
-    if (!elem || elem->role_kind() != DomElement::ROLE_FORM) return;
-    FormControlProp* f = elem->form;
-    if (!f) return;
-
-    DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);
-
-    // Disabled / readonly / required map directly.
-    te_aria_set_or_clear(elem, "aria-disabled", form_control_is_disabled(state, (View*)elem), "true");
-    te_aria_set_or_clear(elem, "aria-readonly", form_control_is_readonly(state, (View*)elem), "true");
-    te_aria_set_or_clear(elem, "aria-required", form_control_is_required(state, (View*)elem), "true");
-
-    // aria-invalid mirrors :invalid pseudo-state. Use "true"/"false"
-    // rather than removing — assistive tech treats the explicit "false"
-    // value as "validation has run and the control is currently OK".
-    bool invalid = state_get_pseudo_state(state, (View*)elem, PSEUDO_STATE_INVALID);
-    elem->set_attribute("aria-invalid", invalid ? "true" : "false");
-
-    // aria-valuenow / valuemin / valuemax for <input type="range">.
-    if (f->control_type == FORM_CONTROL_RANGE) {
-        char buf[32];
-        float range_value = form_control_get_range_value(state, (View*)elem);
-        float val = f->range_min + (f->range_max - f->range_min) * range_value;
-        snprintf(buf, sizeof(buf), "%g", val);
-        elem->set_attribute("aria-valuenow", buf);
-        snprintf(buf, sizeof(buf), "%g", f->range_min);
-        elem->set_attribute("aria-valuemin", buf);
-        snprintf(buf, sizeof(buf), "%g", f->range_max);
-        elem->set_attribute("aria-valuemax", buf);
-    }
-}

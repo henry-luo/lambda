@@ -1,0 +1,14 @@
+1 2
+1 10
+99
+7 str
+null 2
+3
+null
+42 2
+9 7
+text
+7 bee 2.5 2
+now a string 99 null
+4
+
