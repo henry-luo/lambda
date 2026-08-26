@@ -129,6 +129,20 @@ static void record_direct_parse_error(Transpiler* tp, const char* script_path,
     tp->error_count++;
 }
 
+static void record_direct_parse_diagnostics(Transpiler* tp,
+        const char* script_path, const LambdaParseError* fallback) {
+    if (!tp || !tp->source) return;
+    LambdaParseReport report = {};
+    lambda_rd_parse_recovering(tp->source, strlen(tp->source), &report);
+    if (report.error_count == 0) {
+        record_direct_parse_error(tp, script_path, fallback);
+        return;
+    }
+    for (uint32_t i = 0; i < report.error_count; i++) {
+        record_direct_parse_error(tp, script_path, &report.errors[i]);
+    }
+}
+
 static int lambda_index_compiler_pass(void* opaque) {
     Transpiler* tp = (Transpiler*)opaque;
     return tp && (!tp->ast_root || ast_index_build_profile(
@@ -819,7 +833,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                 &direct_root, &parse_error) != LAMBDA_PARSE_OK || !direct_root) {
         // A direct-parser failure must enter the structured diagnostic lane so
         // callers receive the same source-aware error contract as other inputs.
-        record_direct_parse_error(tp, script_path, &parse_error);
+        record_direct_parse_diagnostics(tp, script_path, &parse_error);
         log_error("C parser rejected %s: %s", script_path,
             parse_error.message ? parse_error.message : "direct AST reduction failed");
         return;
@@ -1309,7 +1323,7 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
     LambdaParseStatus parse_status = lambda_rd_build_ast(&tp, fragment_source,
         strlen(source), &parsed_root, &parse_error);
     if (parse_status != LAMBDA_PARSE_OK || !parsed_root) {
-        record_direct_parse_error(&tp, "<repl>", &parse_error);
+        record_direct_parse_diagnostics(&tp, "<repl>", &parse_error);
         repl_restore_scope(globals, saved_scope_first, saved_scope_last);
         if (script->const_list) script->const_list->length = saved_const_count;
         if (script->type_list) script->type_list->length = saved_type_count;

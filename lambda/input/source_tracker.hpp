@@ -80,6 +80,11 @@ public:
 
     // Reset to beginning
     void reset();
+
+    // Move to a byte offset, rebuilding line/column state as needed.
+    // This is intentionally an explicit seek so adapters that still expose
+    // pointer cursors can report diagnostics through the shared tracker.
+    bool seek(size_t offset);
 };
 
 } // namespace lambda

@@ -20,6 +20,7 @@ class InputContext {
 private:
     Input* input_;                   // The Input being parsed (not owned)
     ParseErrorList errors_;          // Error collection
+    const char* source_begin_;       // Borrowed source used by pointer-cursor adapters
     char* owned_source_;             // Owned copy of source (malloc'd)
     size_t owned_source_len_;        // Length of owned source
     StrBuf* msg_buf_;                // Buffer for formatting error messages
@@ -32,6 +33,7 @@ public:
     explicit InputContext(Input* input)
         : input_(input)
         , errors_(100)  // Default max 100 errors
+        , source_begin_("")
         , owned_source_(nullptr)
         , owned_source_len_(0)
         , msg_buf_(strbuf_new_cap(256))
@@ -44,6 +46,7 @@ public:
     InputContext(Input* input, const char* source, size_t len)
         : input_(input)
         , errors_(100)
+        , source_begin_(source)
         , owned_source_((char*)mem_alloc(len + 1, MEM_CAT_INPUT_OTHER))
         , owned_source_len_(len)
         , msg_buf_(strbuf_new_cap(256))
@@ -80,6 +83,10 @@ public:
     const char* source() const { return owned_source_; }
     const char* source_end() const { return owned_source_ + owned_source_len_; }
     size_t source_length() const { return owned_source_len_; }
+
+    // Synchronize the shared tracker with a legacy pointer cursor.
+    // Returns false when the pointer is not within the original source span.
+    bool syncTo(const char* source_pos);
 
 
     // Get current location

@@ -482,6 +482,16 @@ TEST(LambdaRdParserPoc, RejectsKnownStatementScopeAmbiguities) {
         NULL, NULL, NULL, &error), LAMBDA_PARSE_OK);
 }
 
+TEST(LambdaRdParserPoc, RecoversSyntaxDiagnosticsAfterTopLevelSeparator) {
+    const char* source = "let = 1; let ok = 2";
+    LambdaParseReport report = {};
+    EXPECT_EQ(lambda_rd_parse_recovering(source, strlen(source), &report),
+        LAMBDA_PARSE_ERROR);
+    ASSERT_GE(report.error_count, 1u);
+    EXPECT_EQ(report.errors[0].actual_kind, LAMBDA_TOK_EQ);
+    EXPECT_TRUE(report.recovered);
+}
+
 TEST(LambdaRdParserPoc, ParsesMultilineTypesJoinsAndAdjacentContentForms) {
     const char* source =
         "type Byte = 0 to 255\n"
