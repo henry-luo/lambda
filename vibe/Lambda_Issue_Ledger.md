@@ -32,7 +32,7 @@ Every issue below was re-checked against the tree at `c568f0f93`. Three outcomes
 
 | Doc | Result |
 |---|---|
-| `Lambda_Issues_Outstanding.md` | **Reviewed in full and RETIRED 2026-08-25** → archived as `vibe/impl/Lambda_Issues_Outstanding (retired).md`. Its §3 was verified subsumed by §1–§13; §2/§4 were pointer indexes into docs that still own them; its OI design gaps and hygiene themes moved to §15. One item was genuinely missing from this ledger — LR_12 #8, which still reproduces → [LR12-8](#lr12-8). |
+| `Lambda_Issues_Outstanding.md` | **Reviewed in full and RETIRED 2026-08-25** → archived as `vibe/impl/Lambda_Issues_Outstanding (retired).md`. Its §3 was verified subsumed by §1–§13; §2/§4 were pointer indexes into docs that still own them; its OI design gaps and hygiene themes moved to §15. One item was genuinely missing from this ledger — LR_12 #8, now resolved and moved to [LR12-R8](#lr12-r8). |
 | `impl/Lambda_Issue_Type_Support (retired).md` | TS-1, TS-2, TS-7 verified **FIXED**; TS-5's dead-code half fixed; TS-9's C16 implementation has landed. TS-6, TS-8 confirmed open; TS-3, TS-4 open pending measurement → §14. |
 | `Lambda_Issues8 (retired).md` | **All 28 entries triaged; 22 re-tested.** 17 fixed/closed, 9 open or partial (§14), 4 not re-tested (Radiant-retained, Structurizr fixtures, and an incremental-release build issue — each needs a fixture outside the core runtime). Earlier note: **Fixed:** unbraced scalar `if` in a block body; map literal after `if` (S16.4.1v2); multiline iterator + `where`; `list` as a for-binding (now a clear diagnostic); the double-quoted-key error cascade. **Ruled not a defect:** double-quoted map keys — the doc was wrong and is corrected. **Does not reproduce:** recursive params overwritten after descent. **Still open → §14:** dynamic map spread, element attribute spread, one-line Mark comprehensions, and the weak double-quoted-key diagnostic. |
 | `Lambda_Issues5 (retired).md` | 7 entries re-tested. **Fixed:** postfix `^` in `let` (#4), chained comparisons (#5), string slicing (#11), `if`-expression value in a `pn` (#15), and §23's inline-`if` attribute value. **By design, not defects:** element-wise list `+` (#1), `let` reassignment rejected in a `pn` (#10). **Still open:** §23's attribute spread → §14. |
@@ -41,26 +41,35 @@ Every issue below was re-checked against the tree at `c568f0f93`. Three outcomes
 | `vibe/impl/*(fixed).md` | Archives spot-checked. `Lambda_Issue_GC_Native_Rooting` genuinely resolved (its 107/244 figure is historical discovery data — a stale memory note quoting it as live was corrected). **`Lambda_Issues0 (fixed).md` is mislabelled**: #9 and #15 are Deferred and five more items have no resolution; #9 re-verified open → §14. |
 | `Lambda_Issues3 (retired).md` | A test-enhancement proposal, not a defect ledger — and **substantially implemented**: it reported `test/std/core/` missing with 19 tests in `test/std/`; there are now 157, of which 104 sit under `core/` across all four proposed subdirectories (target was 57). |
 
+### Direct implementation pass — 2026-08-26
+
+Seven reproduced implementation defects were fixed after root-cause review and
+confirmation against the formal rules: LR01-1 (`S2.4.1v2`, `D3.4.1`), LR01-3
+(`S1.8`), LR01-4 (`S2.4.2v4`), LR02-13 (`S12.1.4`, `S12.3.4`), LR05-4
+(`S10.1.2`), LR12-2 (`S7.10.6`), and LR12-8 (`S9.1.1`, `S9.1.6`). They are
+moved to Appendix A with the `-R` suffix. `make test-lambda-baseline` passes
+**3914/3914** after the changes.
+
 
 Counts:
 
 | Source doc | Area | Open | Partial | Resolved | Total |
 |---|---|---:|---:|---:|---:|
-| LR_01 | Compilation pipeline, CLI & REPL | 11 | 2 | 2 | 15 |
-| LR_02 | Parsing & AST construction | 4 | 4 | 12 | 20 |
+| LR_01 | Compilation pipeline, CLI & REPL | 8 | 2 | 5 | 15 |
+| LR_02 | Parsing & AST construction | 3 | 4 | 13 | 20 |
 | LR_03 | Value & type model | 6 | 1 | 2 | 9 |
 | LR_04 | Numbers, decimal & datetime | 8 | 0 | 0 | 8 |
-| LR_05 | Strings, symbols & vectors | 7 | 1 | 2 | 10 |
+| LR_05 | Strings, symbols & vectors | 6 | 1 | 3 | 10 |
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 9 | 9 |
 | LR_07 | MIR Direct transpiler & JIT | 13 | 1 | 2 | 16 |
 | LR_08 | Memory management & GC | 10 | 0 | 0 | 10 |
 | LR_09 | Runtime builtins | 7 | 0 | 3 | 10 |
 | LR_10 | Error handling | 5 | 1 | 2 | 8 |
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
-| LR_12 | Procedural runtime | 8 | 0 | 0 | 8 |
+| LR_12 | Procedural runtime | 6 | 0 | 2 | 8 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 9 | 1 | 5 | 15 |
-| **Total** | | **103** | **11** | **41** | **155** |
+| **Total** | | **96** | **11** | **48** | **155** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -90,29 +99,9 @@ This is consistent with CLAUDE.md rule 14.
 
 ## 1. Compilation pipeline, CLI & REPL (LR_01)
 
-<a id="lr01-1"></a>**LR01-1 · `sys://` paths in maps/elements are never resolved · OPEN**
-`resolve_sys_paths_recursive` (`lambda/runtime/runner.cpp:1530`) traverses only
-`LMD_TYPE_PATH` and array/list. Map and Element traversal is still skipped
-behind `// TODO: Investigate why map->data access crashes for some maps`
-(`runner.cpp:1546`) because walking map data segfaulted on a csv test. A real
-correctness gap, not just a cap.
-
 <a id="lr01-2"></a>**LR01-2 · `serve` is a stub · OPEN**
 The subcommand exists but does nothing: `// TODO: Phase 5 — instantiate Server,
 configure, and run` (`lambda/main.cpp:3818`).
-
-<a id="lr01-3"></a>**LR01-3 · Unescaped LaTeX bridge filename · OPEN**
-The inline LaTeX→HTML bridge `snprintf`s `input_file` directly into a Lambda
-string literal in a `char script_buf[4096]` with **no escaping**
-(`main.cpp:1448`–`1462`); a path containing `"` or `\` yields broken or
-injectable Lambda source. The PDF bridge escapes correctly via
-`lambda_string_literal_escape` (`main.cpp:1021`, used `:1057`) — the two paths
-are still inconsistent.
-
-<a id="lr01-4"></a>**LR01-4 · `target_equal` compares hash-only · OPEN**
-Now at `lambda/core/target_identity.cpp:4`–`8`: `return first->url_hash ==
-second->url_hash;` with no fallback string compare. A hash collision yields
-false-positive target equality.
 
 <a id="lr01-5"></a>**LR01-5 · Profiling has fixed caps · PARTIAL**
 `PROFILE_MAX_SCRIPTS` 64 (`runner.cpp:213`) and `PROFILE_PATH_MAX` 512 (`:214`)
@@ -295,17 +284,6 @@ annotation and parameter positions, both tiers) and
 half of **SO9** and the `&`/`!`-unimplemented warning in the string-pattern
 design record.
 
-<a id="lr02-13"></a>**LR02-13 · `call()`'s runtime colour check cannot see closures with a NULL `fn_type` · OPEN**
-*Found 2026-08-25 implementing S12.1.4.* The pn-from-fn check reads the target's
-colour from `Function.fn_type` → `TypeFunc.is_proc`, but `to_closure` and
-`to_closure_named` leave `fn_type` NULL; it is filled only by
-`lambda_function_set_type`. A **dynamically selected** pn target therefore slips
-through: `fn f() => call([p][0], [1])` runs the procedure instead of erroring.
-The static check in `build_ast` covers the ordinary case — a directly named
-target is rejected at compile time — so the gap is confined to a callee the
-static side cannot resolve, which is exactly where S12.1.4 expected the runtime
-check to carry the weight. Fix by populating `fn_type` at closure creation.
-
 ---
 
 ## 3. Value & type model (LR_03)
@@ -444,11 +422,6 @@ Unicode collation".
 **no callers**. Candidates for deletion, or for a future explicit collator API
 that governs equality *and* ordering together (SQL/XQuery model) — never a
 change to the core operators.
-
-<a id="lr05-4"></a>**LR05-4 · `index_to_item` truncates int64 → int · OPEN**
-`lambda/runtime/lambda-vector.cpp:1922`–`1924` does `i2it((int)index)`, casting
-the `int64_t` index to 32-bit before boxing. Pipe `map`/`where` iteration over
-collections longer than 2³¹ produces a wrapped `~#` index.
 
 <a id="lr05-5"></a>**LR05-5 · `fn_label` bypasses the GC with raw `malloc`/`free` · OPEN**
 The flood-fill stack is `malloc`'d at `lambda-vector.cpp:4549` and released with
@@ -833,14 +806,6 @@ only the response body as a String; status, headers, and metadata are dropped
 (`:510`, consumed `:663`). A proper `{status, headers, body}` map is pending
 type-system work.
 
-<a id="lr12-2"></a>**LR12-2 · Mutation builtins swallow type errors · OPEN**
-`pn_push` (`lambda/runtime/collection_runtime.cpp:211`–`219`) returns its input
-unchanged with only a `log_error` when handed a non-`LMD_TYPE_ARRAY` value;
-`pn_splice` (`:227`) does the same on a wrong-type array (`:230`) and on a
-non-integer `start`/`count` (`:237`). None propagate an error Item, so a
-mis-typed `push`/`splice` fails invisibly — the script sees an unmodified array
-with no signal.
-
 <a id="lr12-3"></a>**LR12-3 · Safety gate hard-coded, TCO disabled despite being implemented · OPEN**
 `function_needs_stack_check` returns a literal `true` and
 `function_is_tail_recursive` a literal `false`
@@ -875,42 +840,6 @@ IO procedures are a hand-curated set in one file with bespoke validation per
 procedure; there is no general effect/capability system, so adding a
 network-write or process-spawn procedure means another bespoke `pn_*` plus a
 registry row.
-
-<a id="lr12-8"></a>**LR12-8 · `push`/`splice` mutate a module-level `let` in place, falsifying `fn` purity · OPEN**
-*Recorded 2026-08-25 from the retired Outstanding rollup §3 (found 2026-07-31);
-re-verified today — still reproduces on both tiers.*
-RG14 says no mutable root exists at module scope: `var` is rejected there, and
-E211 rejects mutation *through* an immutable binding. E211 does catch the
-assignment forms — `arr[0] = 9` and `m.a = 9` on a module-level `let` both
-raise it, confirmed — but the mutating builtins are not subject to the same
-check:
-
-```lambda
-let arr = [1, "two"]
-fn  peek()   => len(arr)
-pn  helper() { push(arr, "x") }
-pn  main()   { print(peek())      // 2
-               helper() helper()
-               print(peek())      // 4   ← module-level state changed
-               print(arr) }       // [1, "two", "x", "x"]
-```
-
-`splice(arr, 0, 2)` likewise shortens it in place (verified: `len` 4 → 2, value
-`[3, 4]`). This is a **semantics** bug, not only hygiene: `peek()` takes no
-arguments and returns two different values, so a `fn` is observably impure.
-
-**Root cause.** The COW path (`transpile-mir.cpp:9955`–`9985`) fires only when
-`mir_direct_root_binding()` finds a local `MirVarEntry` with `cow_marked` set. A
-module-level binding referenced from inside a `pn` is not a local var entry in
-that function, so the lookup returns NULL and emission falls through to the raw
-in-place `pn_push`/`pn_splice` (`collection_runtime.cpp:179`/`195`).
-
-**Fix belongs with the E211 receiver check, not the COW selector.** A mutating
-builtin's owner argument should obey the same immutable-binding rule as an
-assignment target, so `push` on a `let` is a compile error. Doing it in the COW
-selector instead would silently copy where the program means to mutate — a
-different wrong answer. Related: [LR12-2](#lr12-2) (same two builtins,
-error-reporting gap) and `vibe/Lambda_Design_COW.md`.
 
 ---
 
@@ -1356,9 +1285,9 @@ One policy each, not per-site fixes.
 - **Layout-coupled raw offsets** — GC trace/compaction and `init_module_import`
   ([LR01-9](#lr01-9), [LR08-6](#lr08-6)); static-assert guards or generated
   offset tables.
-- **Two masked memory-safety bugs** — the event-loop SIGSEGV band-aid and the
-  `sys://` map-walk segfault workaround ([LR01-1](#lr01-1)). Both are
-  acknowledged *suppressed* root causes, not fixed ones.
+- **One masked memory-safety bug** — the event-loop SIGSEGV band-aid remains;
+  the `sys://` map-walk segfault workaround was replaced by the shape-aware
+  traversal in [LR01-R3](#lr01-r3).
 - **`SysFuncInfo` registry expressiveness** — data-driven argument/return
   conventions would delete inline special-casing ([LR09-1](#lr09-1),
   [LR09-2](#lr09-2)).
@@ -1381,8 +1310,8 @@ No new decisions needed; each has an owning design doc.
 # Appendix A — Resolved and obsolete issues
 
 Kept for provenance: each of these appeared in an `LR_*` "Known Issues" section
-and was verified fixed or removed on 2026-08-24. Do not re-open without
-re-verifying against current source.
+and was verified fixed or removed on the date recorded below. Do not re-open
+without re-verifying against current source.
 
 ## A.1 Compilation pipeline (LR_01)
 
@@ -1397,6 +1326,30 @@ longer exist. (Per-script profiling caps survive — see
 `precompile_imports` no longer exists anywhere in `lambda/`. The fragile contract
 between its slice reversal / index renumbering and `run_script_mir`'s
 reverse-order import init is gone with it.
+
+<a id="lr01-r3"></a>**LR01-R3 · `sys://` paths in maps/elements are never resolved · RESOLVED 2026-08-26**
+`resolve_sys_paths_recursive` (`lambda/runtime/runner.cpp`) now walks map and
+object fields through `map_shape_field_to_item`, and walks both element
+attributes and children. This preserves the packed-shape ABI described by
+`D3.4.1`; the old raw map-data walk was the source of the csv-related crash
+that had suppressed this traversal. Resolved paths and their nested results
+are recursively visited under the `S2.4.1v2` path contract. A nested map/element
+probe now returns resolved values, and `make test-lambda-baseline` passes
+3914/3914.
+
+<a id="lr01-r4"></a>**LR01-R4 · Unescaped LaTeX bridge filename · RESOLVED 2026-08-26**
+The LaTeX-to-HTML bridge now uses `lambda_string_literal_escape` and sizes its
+script buffer from the escaped input instead of interpolating into a fixed
+4096-byte array. This keeps source paths data rather than Lambda source, as
+required by `S1.8`, and matches the PDF bridge's ownership and sizing pattern.
+The normal smoke reaches the existing LaTeX package import-resolution failure;
+the bridge construction itself is now source-safe and dynamically sized.
+
+<a id="lr01-r5"></a>**LR01-R5 · `target_equal` compares hash-only · RESOLVED 2026-08-26**
+`target_equal` retains the hash as a fast rejection, then compares target type,
+scheme, and canonical URL/path content. Hashes are therefore not identity;
+this follows `S2.4.2v4`. `Target_HashCollisionIsNotEqual` forces equal hashes
+for two different URLs and passes in the namespace suite (38/38).
 
 ## A.2 Parsing & AST construction (LR_02)
 
@@ -1563,8 +1516,17 @@ implemented" spread note became the container-only ruling), `Lambda_Func.md`,
 and `Lambda_Sys_Func.md` (new Dynamic Application section).
 `test/std/core/functions/variadic_args.ls` — which never parsed, using a third
 spelling `values...` — is repaired and now covers the forwarding case.
-Regression test `test/lambda/call_dynamic_apply.ls` + `.txt`. Residue tracked as
-LR02-13.
+Regression test `test/lambda/call_dynamic_apply.ls` + `.txt`. Residue was tracked
+as LR02-13 and is now resolved in [LR02-R13](#lr02-r13).
+
+<a id="lr02-r13"></a>**LR02-R13 · `call()`'s runtime colour check selected the wrong registry row · RESOLVED 2026-08-26**
+The `call` registry contains both `SYSFUNC_CALL` and `SYSPROC_CALL` with the
+same name and arity. Lookup could return the procedure row even in a function
+scope, while the effect-row resolver only corrected the function row; a
+dynamically selected `pn` could then run from `fn`. The resolver now normalizes
+either row to the enclosing `fn`/`pn` colour. This implements `S12.1.4` and
+`S12.3.4` without changing closure construction. The tracked dynamic-procedure
+regression passes, as does the full baseline.
 
 ## A.3 Value & type model (LR_03)
 
@@ -1600,6 +1562,12 @@ tiebreak), and the sort-facing total order (`total_byte_cmp`). The utf8proc
 casefold comparators are used only by the markup parser for case-insensitive
 tag/attribute matching. The dead Item-level wrappers survive as
 [LR05-3](#lr05-3).
+
+<a id="lr05-r4"></a>**LR05-R4 · `index_to_item` truncates int64 → int · RESOLVED 2026-08-26**
+`index_to_item` now passes its `int64_t` index directly to the 64-bit `i2it`
+lane, so the `~#` value emitted by mapping pipes is not narrowed through a C
+`int`. This preserves the index carrier required by `S10.1.2`; the baseline
+passes 3914/3914.
 
 ## A.5 C transpiler — legacy C2MIR (LR_06)
 
@@ -1815,6 +1783,26 @@ LaTeX may hold consecutive strings, while the markup family (markdown, asciidoc,
 textile, wiki) calls `list_push` and merges them. `input-ics.cpp` and
 `input-mark.cpp` use both and so mix the two policies — worth reconciling, along
 with retiring the dead flag.
+
+## A.11 Procedural runtime (LR_12)
+
+<a id="lr12-r2"></a>**LR12-R2 · Mutation builtins swallow type errors · RESOLVED 2026-08-26**
+`pn_push` and `pn_splice` now return `ItemError` for invalid owners, indices,
+counts, views, and N-D arrays instead of returning the unchanged input. Their
+registry rows publish `may_return_error`, so `or` recovery can observe the
+failure. The successful owner-returning convention remains unchanged; only
+the unresolved choice between updated-owner and unit conventions in
+`S7.10.6` remains open. Targeted invalid-mutation probes and the full baseline
+pass.
+
+<a id="lr12-r8"></a>**LR12-R8 · `push`/`splice` mutate a module-level `let` in place, falsifying `fn` purity · RESOLVED 2026-08-26**
+The COW selector only found local `MirVarEntry` bindings, so a module-level
+binding fell through to the raw in-place mutator. The fix applies the existing
+E211 immutable-root validation to the builtin's owner argument during AST
+construction, rather than silently copying in the COW path. This enforces
+`S9.1.1` and `S9.1.6`: mutation through a module-level `let` is rejected, while
+the caller must use an allowed mutable owner. A targeted module-let probe now
+raises E211 and the full baseline passes 3914/3914.
 
 ---
 

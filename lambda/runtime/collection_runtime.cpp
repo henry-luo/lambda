@@ -211,7 +211,9 @@ Item pn_push(Item arr_item, Item value) {
     TypeId tid = get_type_id(arr_item);
     if (tid != LMD_TYPE_ARRAY) {
         log_error("push: expected a growable array, got %s", get_type_name(tid));
-        return arr_item;
+        // Invalid mutation is an error, never a successful unchanged owner
+        // (S7.10.6). Keep the owner-returning success convention intact.
+        return ItemError;
     }
     array_push(arr_item.array, value);
     return arr_item;
@@ -227,21 +229,21 @@ Item pn_splice(Item arr_item, Item start_item, Item count_item) {
     TypeId tid = get_type_id(arr_item);
     if (tid != LMD_TYPE_ARRAY && tid != LMD_TYPE_ARRAY_NUM) {
         log_error("splice: expected a growable array, got %s", get_type_name(tid));
-        return arr_item;
+        return ItemError;
     }
     int64_t start = 0;
     int64_t count = 0;
     if (!lambda_item_to_int64_exact(start_item, &start) ||
             !lambda_item_to_int64_exact(count_item, &count)) {
         log_error("splice: start and count must be integer-valued numbers");
-        return arr_item;
+        return ItemError;
     }
 
     if (tid == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* arr = arr_item.array_num;
         if (arr->is_view || arr->is_ndim) {
             log_error("splice: cannot splice a view or N-D array; copy()/ravel() first");
-            return arr_item;
+            return ItemError;
         }
         int64_t length = arr->length;
         if (start < 0) start += length;

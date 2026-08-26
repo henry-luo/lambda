@@ -7862,10 +7862,14 @@ AstNode* build_query_node_from_parts(Transpiler* tp, SourceSpan span,
 // raises), while the TARGET's colour is what S12.1.4 checks.
 static SysFuncInfo* resolve_effect_polymorphic_row(Transpiler* tp,
         SysFuncInfo* info) {
-    if (!info || info->fn != SYSFUNC_CALL) return info;
-    if (!tp->current_scope || !tp->current_scope->is_proc) return info;
+    if (!info || (info->fn != SYSFUNC_CALL && info->fn != SYSPROC_CALL)) return info;
+    bool enclosing_proc = tp->current_scope && tp->current_scope->is_proc;
+    bool already_selected = enclosing_proc
+        ? info->fn == SYSPROC_CALL : info->fn == SYSFUNC_CALL;
+    if (already_selected) return info;
+    SysFunc desired = enclosing_proc ? SYSPROC_CALL : SYSFUNC_CALL;
     for (int i = 0; i < sys_func_def_count; i++) {
-        if (sys_func_defs[i].fn == SYSPROC_CALL) return &sys_func_defs[i];
+        if (sys_func_defs[i].fn == desired) return &sys_func_defs[i];
     }
     return info;
 }
@@ -7883,6 +7887,9 @@ static AstNode* direct_sys_function(Transpiler* tp, SourceSpan span,
     node->type = info->return_type;
     return (AstNode*)node;
 }
+
+static void direct_validate_mutable_compound(Transpiler* tp,
+        SourceSpan span, AstNode* object);
 
 static AstNode* direct_start_node(Transpiler* tp, SourceSpan span,
         AstCallNode* source_call, int arg_count) {
@@ -8139,6 +8146,12 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
         // path (and the Tree builder) dispatch on AST_NODE_SYS_FUNC itself;
         // retaining the wrapper would fall back to generic fn_pipe_call.
         call->function = direct_sys_function(tp, function->source_span, info);
+        if (info->fn == SYSPROC_PUSH || info->fn == SYSPROC_SPLICE) {
+            // Mutation builtins write through their first argument just like
+            // compound assignment; apply the same immutable-root rule before
+            // lowering can select the raw in-place helper (S9.1.1, S9.1.6).
+            direct_validate_mutable_compound(tp, span, call->argument);
+        }
         call->can_raise = info->can_raise;
         call->pipe_inject = tp->pipe_inject_args > 0 && !method_call;
         call->type = sys_func_call_result_type(tp, info,

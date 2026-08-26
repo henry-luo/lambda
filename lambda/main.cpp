@@ -1087,6 +1087,51 @@ static char* build_pdf_to_html_bridge_script(const char* pdf_file, const char* o
     return script_buf;
 }
 
+static char* build_latex_to_html_bridge_script(const char* latex_file,
+                                               bool full_document,
+                                               const char* font_option,
+                                               const char* log_prefix) {
+    char* escaped_latex = lambda_string_literal_escape(latex_file);
+    if (!escaped_latex) {
+        log_error("[%s] LaTeX package: failed to escape input path", log_prefix);
+        return nullptr;
+    }
+
+    const char* standalone = full_document ? "true" : "false";
+    const char* font = font_option ? font_option : "default";
+    bool has_options = full_document || font_option;
+    const char* format = has_options ?
+        "import latex: .lambda.package.latex.latex\n"
+        "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
+        "latex.render_to_html(ast, {standalone: %s, font_option: \"%s\"})\n" :
+        "import latex: .lambda.package.latex.latex\n"
+        "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
+        "latex.render_to_html(ast, null)\n";
+    int needed = has_options
+        ? snprintf(nullptr, 0, format, escaped_latex, standalone, font)
+        : snprintf(nullptr, 0, format, escaped_latex);
+    if (needed <= 0) {
+        mem_free(escaped_latex);
+        log_error("[%s] LaTeX package: failed to size bridge script", log_prefix);
+        return nullptr;
+    }
+
+    char* script_buf = (char*)mem_alloc((size_t)needed + 1, MEM_CAT_TEMP);
+    if (!script_buf) {
+        mem_free(escaped_latex);
+        log_error("[%s] LaTeX package: failed to allocate bridge script", log_prefix);
+        return nullptr;
+    }
+    if (has_options) {
+        snprintf(script_buf, (size_t)needed + 1, format,
+            escaped_latex, standalone, font);
+    } else {
+        snprintf(script_buf, (size_t)needed + 1, format, escaped_latex);
+    }
+    mem_free(escaped_latex);
+    return script_buf;
+}
+
 static bool write_pdf_to_html_bridge_script(const char* pdf_file, const char* tmp_script_path,
                                             const char* opts_expr, const char* log_prefix) {
     char* script_buf = build_pdf_to_html_bridge_script(pdf_file, opts_expr, log_prefix);
@@ -1443,27 +1488,13 @@ int exec_convert(int argc, char* argv[]) {
                 }
             } else if (is_latex_input) {
                 printf("Using Lambda LaTeX package pipeline\n");
-
-                // Build a Lambda script that imports the LaTeX package
-                // and renders the file to HTML
-                char script_buf[4096];
-                const char* standalone_opt = ", null";
-                char options_buf[128];
-                if (full_document || font_option) {
-                    snprintf(options_buf, sizeof(options_buf),
-                             ", {standalone: %s, font_option: \"%s\"}",
-                             full_document ? "true" : "false",
-                             font_option ? font_option : "default");
-                    standalone_opt = options_buf;
+                char* script_buf = build_latex_to_html_bridge_script(
+                    input_file, full_document, font_option, "convert");
+                if (script_buf) {
+                    full_doc_output = exec_convert_lambda_html(
+                        script_buf, "convert_latex_bridge");
+                    mem_free(script_buf);
                 }
-                snprintf(script_buf, sizeof(script_buf),
-                    "import latex: .lambda.package.latex.latex\n"
-                    "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
-                    "latex.render_to_html(ast%s)\n",
-                    input_file, standalone_opt);
-
-                full_doc_output = exec_convert_lambda_html(
-                    script_buf, "convert_latex_bridge");
                 if (!full_doc_output) {
                     printf("Error: Lambda LaTeX package - HTML rendering failed\n");
                     LambdaError* last_error = get_persistent_last_error();

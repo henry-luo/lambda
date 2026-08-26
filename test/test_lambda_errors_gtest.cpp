@@ -1229,6 +1229,11 @@ TEST_F(NegativeScriptTest, SemanticError_EnforcingCallNeedsImmediateAcknowledgme
         "handle with 'risky(...) ^ { ... }'");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_DynamicProcedureCallFromFunction) {
+    ExpectErrorMessage("test/lambda/negative/semantic/dynamic_call_proc_in_fn.ls",
+        "call: cannot call a procedure (pn) from a function (fn)");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_ArityMismatch) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/arity_mismatch.ls");
 }

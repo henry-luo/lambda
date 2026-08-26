@@ -287,6 +287,25 @@ TEST_F(NamespaceTest, Target_NotEqualDifferentUrl) {
     target_free(t2);
 }
 
+// Equal hashes are only a fast-path candidate; normalized target content is
+// the identity and must reject a forced collision.
+TEST_F(NamespaceTest, Target_HashCollisionIsNotEqual) {
+    MarkBuilder builder(input);
+    Item str1 = builder.createStringItem("https://example.com/ns1");
+    Item str2 = builder.createStringItem("https://example.com/ns2");
+
+    Target* t1 = item_to_target(str1.item, nullptr);
+    Target* t2 = item_to_target(str2.item, nullptr);
+    ASSERT_NE(t1, nullptr);
+    ASSERT_NE(t2, nullptr);
+    t2->url_hash = t1->url_hash;
+
+    EXPECT_FALSE(target_equal(t1, t2));
+
+    target_free(t1);
+    target_free(t2);
+}
+
 // target_equal with NULL arguments
 TEST_F(NamespaceTest, Target_EqualNull) {
     // both null → equal (same pointer shortcut)

@@ -404,13 +404,15 @@ SysFuncInfo sys_func_defs[] = {
     // push(arr, val) — append to a growable generic array in place (amortized O(1)).
     // Procedural: mutates arr and returns it. Replaces chunked-vector + .sz workarounds.
     {SYSPROC_PUSH, "push", 2, &TYPE_ANY, true, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_push", FPTR(pn_push), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_push", FPTR(pn_push), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_ANY, /* may_error */ true},
 
     // splice(arr, start, count) — remove `count` elements at `start` from a growable
     // generic array, in place (shift the tail down, shrink length). Procedural: mutates
     // arr and returns it. Enables pop/dequeue/middle-removal without a chunked + .sz wrapper.
     {SYSPROC_SPLICE, "splice", 3, &TYPE_ANY, true, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_splice", FPTR(pn_splice), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_splice", FPTR(pn_splice), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_ANY, /* may_error */ true},
 
     // image stencil engine (windowed neighbourhood ops over ArrayNum)
     {SYSFUNC_CONVOLVE, "convolve", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
