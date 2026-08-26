@@ -1367,7 +1367,7 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
     return nullptr;
 }
 
-static bool is_border_radius_slash(const CssValue* value) {
+static bool css_value_is_slash(const CssValue* value) {
     return value && value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name &&
            strcmp(value->data.custom_property.name, "/") == 0;
 }
@@ -2472,7 +2472,7 @@ static bool apply_border_radius_shorthand(LayoutContext* lycon, int prop_id, Cor
         for (int i = 0; i < value->data.list.count; i++) {
             CssValue* item = value->data.list.values[i];
             if (!item) continue;
-            if (is_border_radius_slash(item)) {
+            if (css_value_is_slash(item)) {
                 if (seen_slash) return false;
                 seen_slash = true;
                 continue;
@@ -2515,7 +2515,7 @@ static bool apply_corner_radius_value(LayoutContext* lycon, int prop_id, Corner*
     if (value->type == CSS_VALUE_TYPE_LIST) {
         for (int i = 0; i < value->data.list.count; i++) {
             CssValue* item = value->data.list.values[i];
-            if (!item || is_border_radius_slash(item)) continue;
+            if (!item || css_value_is_slash(item)) continue;
             if (count >= 2) return false;
             values[count++] = item;
         }
@@ -2998,6 +2998,10 @@ static CssDisplayKeywordResult css_display_keyword_result(CssEnum keyword,
         {CSS_VALUE_TABLE, CSS_VALUE_BLOCK, CSS_VALUE_TABLE, false, false, false},
         {CSS_VALUE_INLINE_TABLE, CSS_VALUE_INLINE, CSS_VALUE_TABLE, true, false, false},
         {CSS_VALUE_RUBY, CSS_VALUE_INLINE, CSS_VALUE_RUBY, true, false, false},
+        {CSS_VALUE_RUBY_BASE, CSS_VALUE_INLINE, CSS_VALUE_RUBY_BASE, false, false, false},
+        {CSS_VALUE_RUBY_TEXT, CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT, false, false, false},
+        {CSS_VALUE_RUBY_BASE_CONTAINER, CSS_VALUE_INLINE, CSS_VALUE_RUBY_BASE_CONTAINER, false, false, false},
+        {CSS_VALUE_RUBY_TEXT_CONTAINER, CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT_CONTAINER, false, false, false},
         {CSS_VALUE_TABLE_ROW, CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW, true, false, false},
         {CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL, true, false, false},
         {CSS_VALUE_TABLE_ROW_GROUP, CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW_GROUP, true, false, false},
@@ -3142,6 +3146,7 @@ static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNod
     if (tag_id == MARKUP_NAME_BUTTON) return {CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW};
     if (tag_id == MARKUP_NAME_HR) return {CSS_VALUE_BLOCK, RDT_DISPLAY_REPLACED};
     if (tag_id == MARKUP_NAME_RUBY) return {CSS_VALUE_INLINE, CSS_VALUE_RUBY};
+    if (tag_id == MARKUP_NAME_RT) return {CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT};
     if (tag_id == MARKUP_NAME_SVG) return {CSS_VALUE_INLINE, RDT_DISPLAY_REPLACED};
     if (tag_id == MARKUP_NAME_TABLE) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE};
     if (tag_id == MARKUP_NAME_THEAD || tag_id == MARKUP_NAME_TBODY ||
@@ -5594,6 +5599,7 @@ static void resolve_gap_property(LayoutContext* lycon, ViewBlock* block,
         block->ensure_multicol(lycon);
         block->multicol_prop()->column_gap = gap;
         block->multicol_prop()->column_gap_is_normal = normal;
+        block->multicol_prop()->column_gap_is_percent = percent;
     }
 }
 
@@ -5639,11 +5645,13 @@ static void resolve_multicol_dimension(LayoutContext* lycon, ViewBlock* block,
     float* target = height ? &multicol->column_height : &multicol->column_width;
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
         *target = 0.0f;
+        if (height) multicol->column_height_is_specified = false;
     } else if (value->type == CSS_VALUE_TYPE_LENGTH ||
                (allow_number && value->type == CSS_VALUE_TYPE_NUMBER)) {
         float size = resolve_length_value(lycon, property, value);
-        if (size > 0.0f) {
+        if (size > 0.0f || (height && size == 0.0f)) {
             *target = size;
+            if (height) multicol->column_height_is_specified = true;
         }
     }
 }
@@ -5713,6 +5721,9 @@ static void resolve_flow_break_property(LayoutContext* lycon, ViewBlock* block,
         resolve_break_value(lycon, block, value, &block->blk->break_before);
     } else if (property == CSS_PROPERTY_BREAK_AFTER || property == CSS_PROPERTY_PAGE_BREAK_AFTER) {
         resolve_break_value(lycon, block, value, &block->blk->break_after);
+    } else if (property == CSS_PROPERTY_BREAK_INSIDE ||
+               property == CSS_PROPERTY_PAGE_BREAK_INSIDE) {
+        resolve_break_value(lycon, block, value, &block->blk->break_inside);
     } else if (property == CSS_PROPERTY_ORPHANS) {
         resolve_line_count_value(lycon, block, value, &block->blk->orphans);
     } else {
@@ -7259,34 +7270,61 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 break;
             }
             block->ensure_multicol(lycon);
-            block->multicol_prop()->column_count = 0;
-            block->multicol_prop()->column_width = 0;
-            int val_count = 1;
-            const CssValue* vals[2] = { value, nullptr };
-            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
-                val_count = value->data.list.count < 2 ? value->data.list.count : 2;
-                vals[0] = value->data.list.values[0];
-                if (val_count > 1) vals[1] = value->data.list.values[1];
+            MultiColumnProp* multicol = block->multicol_prop();
+            multicol->column_count = 0;
+            multicol->column_width = 0;
+            multicol->column_height = 0;
+            multicol->column_height_is_specified = false;
+            multicol->wrap = COLUMN_WRAP_AUTO;
+
+            const CssValue* values[8] = {};
+            int value_count = 1;
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                value_count = min(value->data.list.count, 8);
+                for (int vi = 0; vi < value_count; vi++) {
+                    values[vi] = value->data.list.values[vi];
+                }
+            } else {
+                values[0] = value;
             }
-            for (int vi = 0; vi < val_count; vi++) {
-                const CssValue* v = vals[vi];
-                if (!v) continue;
-                if (v->type == CSS_VALUE_TYPE_KEYWORD && v->data.keyword == CSS_VALUE_AUTO) {
+
+            int slash_index = -1;
+            for (int vi = 0; vi < value_count; vi++) {
+                if (css_value_is_slash(values[vi])) {
+                    slash_index = vi;
+                    break;
+                }
+            }
+            int inline_value_count = slash_index >= 0 ? slash_index : value_count;
+            if (inline_value_count > 2) inline_value_count = 2;
+            for (int vi = 0; vi < inline_value_count; vi++) {
+                const CssValue* v = values[vi];
+                if (!v || (v->type == CSS_VALUE_TYPE_KEYWORD &&
+                           v->data.keyword == CSS_VALUE_AUTO)) {
                     continue;
-                } else if (v->type == CSS_VALUE_TYPE_NUMBER && v->data.number.is_integer) {
-                    int count = (int)v->data.number.value;
-                    if (count > 0) {
-                        block->multicol_prop()->column_count = count;
+                }
+                if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                    int count = (int)v->data.number.value; // INT_CAST_OK: column count
+                    if (v->data.number.value == (double)count && count > 0) {
+                        multicol->column_count = count;
                     }
                 } else if (v->type == CSS_VALUE_TYPE_LENGTH) {
                     float width = resolve_length_value(lycon, prop_id, v);
-                    if (width > 0) {
-                        block->multicol_prop()->column_width = width;
-                    }
-                } else if (v->type == CSS_VALUE_TYPE_NUMBER && !v->data.number.is_integer) {
-                    int count = (int)v->data.number.value;
-                    if (v->data.number.value == (double)count && count > 0) {
-                        block->multicol_prop()->column_count = count;
+                    if (width > 0.0f) multicol->column_width = width;
+                }
+            }
+            if (slash_index >= 0 && slash_index + 1 < value_count) {
+                const CssValue* height = values[slash_index + 1];
+                if (height && height->type == CSS_VALUE_TYPE_KEYWORD &&
+                    height->data.keyword == CSS_VALUE_AUTO) {
+                    multicol->column_height_is_specified = false;
+                } else if (height && (height->type == CSS_VALUE_TYPE_LENGTH ||
+                                      (height->type == CSS_VALUE_TYPE_NUMBER &&
+                                       height->data.number.value == 0.0))) {
+                    float resolved_height = resolve_length_value(lycon, prop_id, height);
+                    if (resolved_height >= 0.0f) {
+                        multicol->column_height = resolved_height;
+                        multicol->column_height_is_specified = true;
                     }
                 }
             }
@@ -7330,6 +7368,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_PAGE_BREAK_BEFORE:
         case CSS_PROPERTY_BREAK_AFTER:
         case CSS_PROPERTY_PAGE_BREAK_AFTER:
+        case CSS_PROPERTY_BREAK_INSIDE:
+        case CSS_PROPERTY_PAGE_BREAK_INSIDE:
         case CSS_PROPERTY_ORPHANS:
         case CSS_PROPERTY_WIDOWS:
             resolve_flow_break_property(lycon, block, prop_id, value);
@@ -8191,13 +8231,13 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 for (int i = 0; i < value->data.list.count; i++) {
                     CssValue* item = value->data.list.values[i];
                     if (!item) continue;
-                    if (is_border_radius_slash(item) && i + 1 < value->data.list.count) {
+                    if (css_value_is_slash(item) && i + 1 < value->data.list.count) {
                         CssValue* size_values[2] = {};
                         int size_count = 0;
                         int j = i + 1;
                         while (j < value->data.list.count && size_count < 2) {
                             CssValue* size_item = value->data.list.values[j];
-                            if (!size_item || is_border_radius_slash(size_item)) break;
+                            if (!size_item || css_value_is_slash(size_item)) break;
                             if (size_item->type == CSS_VALUE_TYPE_LENGTH ||
                                 size_item->type == CSS_VALUE_TYPE_PERCENTAGE ||
                                 (size_item->type == CSS_VALUE_TYPE_KEYWORD &&

@@ -901,6 +901,27 @@ static float calculate_static_line_x(BlockContext* pa_block, Linebox* pa_line,
     TextDirection static_direction, bool was_inline) {
     float line_x = was_inline ? pa_line->advance_x : pa_line->left;
 
+    if (was_inline && pa_block && pa_line &&
+        line_x > pa_line->left + 0.01f) {
+        float used_width = line_x - pa_line->left;
+        float available_width = pa_line->right - pa_line->left;
+        float remaining_width = available_width - used_width;
+        if (remaining_width > 0.0f) {
+            CssEnum ta = pa_block->text_align;
+            bool align_to_end =
+                (ta == CSS_VALUE_RIGHT && static_direction == TD_LTR) ||
+                (ta == CSS_VALUE_LEFT && static_direction == TD_RTL) ||
+                ta == CSS_VALUE_END;
+            if (ta == CSS_VALUE_CENTER) {
+                // css position: an auto-inset inline box follows the aligned
+                // line cursor, not the pre-alignment cursor.
+                line_x += remaining_width * 0.5f;
+            } else if (align_to_end) {
+                line_x += remaining_width;
+            }
+        }
+    }
+
     if (was_inline && line_x <= pa_line->left + 0.01f) {
         float avail_left = 0.0f;
         float avail_right = 0.0f;

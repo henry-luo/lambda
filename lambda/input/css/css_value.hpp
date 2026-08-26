@@ -89,6 +89,7 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_STRETCH,
     CSS_VALUE_BASELINE,
     CSS_VALUE_AUTO,
+    CSS_VALUE_AVOID,  // css fragmentation break-inside
     CSS_VALUE_TEXT_BOTTOM,
     CSS_VALUE_ALPHABETIC,
     CSS_VALUE_IDEOGRAPHIC,

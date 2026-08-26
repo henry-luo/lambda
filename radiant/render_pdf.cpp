@@ -1668,7 +1668,7 @@ static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x
     }
 
     float column_width = mc->computed_column_width;
-    float gap = mc->column_gap_is_normal ? 16.0f : mc->column_gap;
+    float gap = multicol_column_gap(block);
     float block_x = abs_x;
     float block_y = abs_y;
     if (block->bound) {

@@ -5678,11 +5678,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             ? multicol->column_count : 1;
         float gap = multicol->column_gap_is_normal
             ? multicol_normal_gap_size(view_block)
-            : multicol->column_gap;
+            : multicol->column_gap_is_percent ? 0.0f : multicol->column_gap;
         if (gap < 0.0f) gap = 0.0f;
         float total_gap = gap * (intrinsic_column_count - 1);
         if (layout_block_inline_axis_is_vertical(view_block) &&
-            multicol->column_height <= 0.0f &&
+            !multicol->column_height_is_specified &&
             multicol->fill == COLUMN_FILL_BALANCE) {
             // In vertical writing, columns advance along the inline axis; the
             // physical width is the balanced block-axis extent of one column,
@@ -6479,7 +6479,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     bool is_balanced_multicol = view->multicol_prop() &&
         is_multicol_container(view) &&
         view->multicol_prop()->column_count > 1 &&
-        view->multicol_prop()->column_height <= 0.0f &&
+        !view->multicol_prop()->column_height_is_specified &&
         view->multicol_prop()->fill == COLUMN_FILL_BALANCE &&
         multicol_has_in_flow_non_spanner_content(element);
 

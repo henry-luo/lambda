@@ -17,6 +17,7 @@ static BlockProp make_block_prop_default() {
     value.text_autospace_is_set = false;
     value.break_before = CSS_VALUE_AUTO;
     value.break_after = CSS_VALUE_AUTO;
+    value.break_inside = CSS_VALUE_AUTO;
     value.orphans = 2;
     value.widows = 2;
     value.tab_size = 8;

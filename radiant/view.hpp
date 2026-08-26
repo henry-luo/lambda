@@ -1284,9 +1284,11 @@ typedef struct MultiColumnProp {
     // Column sizing
     int column_count;            // Number of columns (0 = auto)
     float column_width;          // Ideal column width (0 = auto)
-    float column_height;         // Fragmentainer height (0 = auto)
+    float column_height;         // Fragmentainer height
+    bool column_height_is_specified; // Distinguishes an explicit 0 from auto
     float column_gap;            // Gap between columns (default: 1em)
     bool column_gap_is_normal;   // Use normal (1em) gap
+    bool column_gap_is_percent;  // Gap is a percentage of the content box
 
     // Column rule (divider between columns)
     float rule_width;            // Rule width in pixels
@@ -1302,6 +1304,7 @@ typedef struct MultiColumnProp {
     int computed_column_count;   // Actual number of columns after layout
     int computed_used_column_count; // Columns that received content in layout
     float computed_column_width; // Actual column width after layout
+    float computed_column_gap;   // Used column gap after percentage resolution
     float computed_block_axis_extent; // Used block-axis span in vertical layout
 } MultiColumnProp;
 
@@ -1504,6 +1507,7 @@ typedef struct BlockProp {
     bool text_autospace_is_set;
     CssEnum break_before;  // CSS Fragmentation: auto, column, page, always
     CssEnum break_after;   // CSS Fragmentation: auto, column, page, always
+    CssEnum break_inside;  // css fragmentation: auto, avoid
     int orphans;           // CSS Fragmentation: minimum lines before a break
     int widows;            // CSS Fragmentation: minimum lines after a break
     int tab_size;           // CSS tab-size (number of spaces, default 8)
