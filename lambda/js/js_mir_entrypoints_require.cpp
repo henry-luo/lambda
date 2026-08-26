@@ -1,5 +1,8 @@
 #include "js_mir_internal.hpp"
 #include "js_runtime_state.hpp"
+#include "../jube/jube_registry.h"
+#include "../module/node_core/node_runtime_state.hpp"
+#include "../module/node_core/node_trace_events.hpp"
 #undef js_input
 #include "../runtime/lambda-error.h"
 #include "../runtime/recovery_frame.h"
@@ -21,7 +24,6 @@ int js_dynamic_import_suppress_module_drain = 0;
 extern "C" int js_batch_execution_mode = 0;
 extern "C" int js_process_current_exit_code(void);
 extern "C" void js_async_hooks_drain_destroy_queue(void);
-extern "C" void js_trace_flush(void);
 extern "C" Item js_module_get_builtin(Item specifier);
 
 static Item js_mir_finalize_result(Item result, bool reusing_context,
@@ -49,6 +51,65 @@ static Item js_require_module_not_found(const char* specifier) {
 static JsMirPhaseTiming g_last_js_mir_phase_timing;
 static JsMirPhaseTiming g_document_js_mir_phase_timing;
 static bool g_document_js_mir_phase_timing_active = false;
+
+static Item js_mir_execute_compiled_entry(void* entry_func) {
+    if (!entry_func || !context) return ItemError;
+
+    typedef Item (*JsMainFunc)(Context*);
+    JsMainFunc js_main = (JsMainFunc)entry_func;
+    LambdaRecoveryFrame* recovery_frame = lambda_recovery_frame_begin_for(
+        (Context*)context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
+    if (!recovery_frame) {
+        log_error("js-mir-exec: failed to allocate recovery frame");
+        return lambda_recovery_publish_fault_item(
+            (Context*)context, LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
+    }
+    if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
+        Item recovered = ItemError;
+        if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
+            log_error("js-mir-exec: recovery frame landing invariant failed");
+            recovered = lambda_recovery_publish_fault_item((Context*)context,
+                LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
+        } else {
+            recovered = lambda_recovery_frame_fault_item((Context*)context,
+                recovery_frame);
+        }
+        _lambda_stack_overflow_flag = false;
+        lambda_recovery_frame_end(recovery_frame);
+        return recovered;
+    }
+    if (!lambda_recovery_frame_arm(recovery_frame)) {
+        log_error("js-mir-exec: failed to arm recovery frame");
+        lambda_recovery_frame_end(recovery_frame);
+        return lambda_recovery_publish_fault_item((Context*)context,
+            LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
+    }
+
+    Item result = js_main((Context*)context);
+    lambda_recovery_frame_end(recovery_frame);
+    return result;
+}
+
+static void js_mir_finish_script_turn(Runtime* runtime, Item result) {
+    js_event_loop_drain_script_turn(
+        runtime && runtime->dom_doc != NULL,
+        js_dynamic_import_suppress_module_drain <= 0);
+    if (js_batch_execution_mode) return;
+
+    // Process lifecycle is a CLI boundary, not a per-test boundary; batch
+    // workers skip it while direct and cached non-batch entries share it.
+    int exit_code = item_is_error(result) ? 1 : js_process_current_exit_code();
+    js_async_hooks_drain_destroy_queue();
+    (void)js_process_emit_before_exit(exit_code);
+    if (js_event_loop_has_refed_handles()) {
+        js_event_loop_drain();
+    } else {
+        js_microtask_flush();
+    }
+    js_process_emit_exit(exit_code);
+    node_trace_events_flush();
+    js_process_current_exit_code();
+}
 
 bool js_activate_runtime_name_pool(void) {
     if (!context || !context->name_pool) return false;
@@ -246,7 +307,7 @@ extern "C" void js_mir_volume_counters_get(JsMirVolumeCounters* out) {
 static void js_mir_destroy_unowned_eval_context(Runtime* runtime,
         EvalContext* local_context, bool reusing_context) {
     if (!reusing_context && local_context) {
-        if (!eval_context_thread_matches(local_context)) {
+        if (!eval_context_matches(local_context)) {
             log_error("js-mir-cleanup: failed context is not current");
             return;
         }
@@ -316,8 +377,8 @@ static bool js_mir_prepare_eval_context(Runtime* runtime,
         js_context = runtime_get_eval_context(runtime);
         if (!js_context) return false;
         bool thread_ready = initialize_thread
-            ? eval_context_thread_initialize(js_context)
-            : eval_context_thread_matches(js_context);
+            ? eval_context_init(js_context)
+            : eval_context_matches(js_context);
         if (!thread_ready) return false;
         heap_init();
         context->pool = context->heap->pool;
@@ -332,7 +393,7 @@ static bool js_mir_prepare_eval_context(Runtime* runtime,
         }
     }
     context->runtime = runtime;
-    if (!js_runtime_state_thread_initialize(context)) return false;
+    if (!js_runtime_state_init(context)) return false;
     *out_context = js_context;
     *out_reusing_context = reusing_context;
     return true;
@@ -598,11 +659,11 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // live context.
     EvalContext* compile_context = context ? context :
         runtime_get_eval_context(runtime);
-    if (!eval_context_thread_initialize(compile_context)) {
+    if (!eval_context_init(compile_context)) {
         log_error("js-mir: cannot initialize compile recovery context");
         return ItemError;
     }
-    if (!js_runtime_state_thread_initialize(compile_context)) {
+    if (!js_runtime_state_init(compile_context)) {
         log_error("js-mir: cannot initialize compile recovery state");
         return ItemError;
     }
@@ -998,7 +1059,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
 
     // v14: initialize event loop before execution. Dynamic import runs inside
     // an active script, so preserve the caller's pending PromiseJobs.
-    if (js_dynamic_import_suppress_module_drain <= 0) {
+    if (!g_jm_preamble_compile_only && js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
 
@@ -1050,41 +1111,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
 
     // With-preamble mode: caller already called js_batch_reset_to() — harness vars preserved
     phase_start = js_mir_phase_now_us();
-    Item result = ItemNull;
-    if (!g_jm_preamble_compile_only) {
-    LambdaRecoveryFrame* recovery_frame = lambda_recovery_frame_begin_for(
-        (Context*)context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
-    if (!recovery_frame) {
-        log_error("js-mir: failed to allocate recovery frame");
-        result = lambda_recovery_publish_fault_item(
-            (Context*)context, LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
-    } else if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
-        Item recovered = ItemError;
-        if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
-            log_error("js-mir: recovery frame landing invariant failed");
-            recovered = lambda_recovery_publish_fault_item((Context*)context,
-                LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
-        } else {
-            recovered = lambda_recovery_frame_fault_item((Context*)context,
-                recovery_frame);
-        }
-        _lambda_stack_overflow_flag = false;
-        lambda_recovery_frame_end(recovery_frame);
-        result = recovered;
-        // the recovery result already carries the boundary error; a second
-        // throw would replace its identity with a generic stack-overflow value.
-    } else {
-        if (!lambda_recovery_frame_arm(recovery_frame)) {
-            log_error("js-mir: failed to arm recovery frame");
-            lambda_recovery_frame_end(recovery_frame);
-            result = lambda_recovery_publish_fault_item((Context*)context,
-                LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
-        } else {
-            result = js_main((Context*)context);
-            lambda_recovery_frame_end(recovery_frame);
-        }
-    }
-    }
+    Item result = g_jm_preamble_compile_only
+        ? ItemNull
+        : js_mir_execute_compiled_entry((void*)js_main);
     g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - phase_start;
     if (item_is_error(result)) {
         log_error("js-mir-execution: uncaught error lane");
@@ -1096,35 +1125,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Dynamic import loads modules from inside an already-running script; if the
     // nested module drains the global microtask queue, outer async-generator
     // Promise jobs can run with the imported module's temporary context active.
-    if (!g_jm_preamble_compile_only) {
-        js_event_loop_drain_script_turn(
-            runtime->dom_doc != NULL,
-            js_dynamic_import_suppress_module_drain <= 0);
-    }
+    if (!g_jm_preamble_compile_only) js_mir_finish_script_turn(runtime, result);
     log_debug("js-mir: event loop drained");
-
-    // Fire process lifecycle listeners for Node.js compatibility.  test262
-    // batch workers intentionally run many isolated ECMAScript tests in one
-    // process; process lifecycle events are a CLI/Node boundary, not a
-    // per-test boundary, and running them here pollutes hot-reload batches.
-    if (!g_jm_preamble_compile_only && !js_batch_execution_mode) {
-        int exit_code = item_is_error(result) ? 1 : js_process_current_exit_code();
-        // The script's result owns its ERROR Item; lifecycle callbacks receive
-        // no ambient exception state and cannot consume that failure.
-        js_async_hooks_drain_destroy_queue();
-        // beforeExit listener failures are intentionally consumed at this
-        // process-shutdown boundary; the listener result itself carries the
-        // failure, so no global state needs to be cleared.
-        (void)js_process_emit_before_exit(exit_code);
-        if (js_event_loop_has_refed_handles()) {
-            js_event_loop_drain();
-        } else {
-            js_microtask_flush();
-        }
-        js_process_emit_exit(exit_code);
-        js_trace_flush();
-        js_process_current_exit_code();
-    }
 
     // Preamble mode: snapshot module_consts so tests can inherit harness definitions
     if (g_jm_preamble_out && mt->module_consts) {
@@ -1340,7 +1342,8 @@ Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
 
 Item execute_compiled_js_in_current_realm(Runtime* runtime,
                                           const JsPreambleState* base_preamble,
-                                          const JsPreambleState* compiled_state) {
+                                          const JsPreambleState* compiled_state,
+                                          bool retain_unit_state) {
     if (!runtime || !runtime->heap || !base_preamble || !compiled_state ||
             !compiled_state->entry_func) {
         return ItemError;
@@ -1352,12 +1355,13 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
     runtime_context->name_pool = runtime->name_pool;
     runtime_context->type_list = runtime->type_list;
     runtime_context->pool = runtime->heap->pool;
-    if (!eval_context_thread_initialize(runtime_context) ||
-            !js_runtime_state_thread_initialize(runtime_context)) {
+    if (!eval_context_init(runtime_context) ||
+            !js_runtime_state_init(runtime_context)) {
         return ItemError;
     }
     if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
     if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
+    if (js_dynamic_import_suppress_module_drain <= 0) js_event_loop_init();
 
     uint32_t consumer_state_id = js_get_active_module_state_id();
     uint32_t unit_var_count = compiled_state->module_var_count >
@@ -1369,13 +1373,9 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
         return ItemError;
     }
     uint32_t unit_state_id = js_get_active_module_state_id();
-    // D3.4.4v2: immutable cached MIR keeps property indices encoded at the
-    // preamble boundary, so each cached unit receives its exact name prefix.
+    // D3.4.4v2: the retained image already contains the inherited prefix plus
+    // this unit's local names in the exact order encoded by immutable MIR.
     bool linked = lambda_module_state_link_property_keys(unit_state_id,
-            base_preamble->module_property_specs,
-            base_preamble->module_property_count,
-            base_preamble->module_property_bytes_size) &&
-        lambda_module_state_append_property_keys(unit_state_id,
             compiled_state->module_property_specs,
             compiled_state->module_property_count,
             compiled_state->module_property_bytes_size) &&
@@ -1386,14 +1386,17 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
         return ItemError;
     }
 
-    typedef Item (*js_main_func_t)(Context*);
-    js_main_func_t js_main = (js_main_func_t)compiled_state->entry_func;
     js_mir_reset_last_phase_timing();
     long execute_start = js_mir_phase_now_us();
-    Item result = js_main((Context*)context);
+    Item result = js_mir_execute_compiled_entry(compiled_state->entry_func);
     g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - execute_start;
     g_last_js_mir_phase_timing.total_us = g_last_js_mir_phase_timing.execute_us;
-    if (!js_set_active_module_state_id(consumer_state_id)) return ItemError;
+    js_mir_finish_script_turn(runtime, result);
+    // External classics extend one document-local declaration slab. Lifecycle
+    // units can instead restore their caller by passing retain_unit_state=false.
+    if (!retain_unit_state && !js_set_active_module_state_id(consumer_state_id)) {
+        return ItemError;
+    }
     return result;
 }
 
@@ -1470,12 +1473,12 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
         preamble_state_destroy(out_state);
         return ItemError;
     }
-    if (!eval_context_thread_initialize(js_context)) {
+    if (!eval_context_init(js_context)) {
         preamble_state_destroy(out_state);
         return ItemError;
     }
     context->runtime = runtime;
-    if (!js_runtime_state_thread_initialize(context)) {
+    if (!js_runtime_state_init(context)) {
         preamble_state_destroy(out_state);
         return ItemError;
     }
@@ -1539,27 +1542,45 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     return result;
 }
 
-bool preamble_state_update_from_eval_snapshot(JsPreambleState* state) {
-    if (!state || !g_eval_preamble_entries || g_eval_preamble_entry_count <= 0) {
-        return false;
-    }
-
-    int count = g_eval_preamble_entry_count;
+static bool preamble_state_replace_entries(JsPreambleState* state,
+                                           const JsModuleConstEntry* source,
+                                           int count, int module_var_count,
+                                           const char* source_name) {
+    if (!state || count < 0 || (count > 0 && !source)) return false;
     JsModuleConstEntry* entries = NULL;
-    if (!js_preamble_entries_copy(g_eval_preamble_entries, count, &entries)) {
-        log_error("js-mir: failed to copy refreshed preamble snapshot");
+    if (!js_preamble_entries_copy(source, count, &entries)) {
+        log_error("js-mir-preamble-refresh: failed to copy %s declaration snapshot",
+                  source_name ? source_name : "unknown");
         return false;
     }
 
     js_preamble_entries_free(state->entries, state->entry_count);
     state->entries = entries;
     state->entry_count = count;
-    state->module_var_count = g_eval_preamble_var_count >= state->module_var_count
-        ? g_eval_preamble_var_count
+    state->module_var_count = module_var_count >= state->module_var_count
+        ? module_var_count
         : state->module_var_count;
-    log_debug("js-mir: refreshed preamble snapshot: %d entries, %d module vars",
-        state->entry_count, state->module_var_count);
+    log_debug("js-mir-preamble-refresh: source=%s entries=%d module_vars=%d",
+        source_name ? source_name : "unknown", state->entry_count,
+        state->module_var_count);
     return true;
+}
+
+bool preamble_state_update_from_eval_snapshot(JsPreambleState* state) {
+    if (!g_eval_preamble_entries || g_eval_preamble_entry_count <= 0) return false;
+    return preamble_state_replace_entries(
+        state, g_eval_preamble_entries, g_eval_preamble_entry_count,
+        g_eval_preamble_var_count, "eval");
+}
+
+bool preamble_state_update_from_compiled(JsPreambleState* state,
+                                         const JsPreambleState* compiled_state) {
+    if (!compiled_state) return false;
+    // D1.7/D1.8: only immutable code is shared; declaration metadata is copied
+    // into the current document so later classic scripts see this unit's vars.
+    return preamble_state_replace_entries(
+        state, compiled_state->entries, compiled_state->entry_count,
+        compiled_state->module_var_count, "compiled");
 }
 
 void preamble_state_destroy(JsPreambleState* state) {
@@ -1609,7 +1630,7 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
             mem_free(source);
             return ItemNull;
         }
-        if (!eval_context_thread_initialize(js_context)) {
+        if (!eval_context_init(js_context)) {
             jm_clear_active_js_transpile(NULL, NULL, source);
             mem_free(source);
             return ItemNull;
@@ -1619,7 +1640,7 @@ Item load_js_module(Runtime* runtime, const char* js_path) {
         context->name_pool = name_pool_create_runtime(context->pool);
         context->type_list = arraylist_new(64);
         context->runtime = runtime;
-        if (!js_runtime_state_thread_initialize(context)) {
+        if (!js_runtime_state_init(context)) {
             jm_clear_active_js_transpile(NULL, NULL, source);
             mem_free(source);
             return ItemNull;
@@ -1797,12 +1818,19 @@ static Item js_cjs_key(const char* name, int len) {
     return js_name_item(name, len);
 }
 
-#define js_cjs_module_stack_state (js_runtime_state.cjs.module_stack)
+static JsCjsState* js_cjs_state_current(bool attach) {
+    if (attach) jube_modules_runtime_attach();
+    void* session = jube_node_runtime_current_session();
+    return session ? jube_node_cjs_state(session) : NULL;
+}
+
+#define js_cjs_module_stack_state (js_cjs_state_current(true)->module_stack)
 #define js_cjs_module_stack (js_cjs_module_stack_state.roots.slots)
 #define js_cjs_module_stack_count (js_cjs_module_stack_state.depth)
 
 extern "C" void js_cjs_metadata_reset(void) {
-    js_item_stack_clear(&js_cjs_module_stack_state);
+    JsCjsState* state = js_cjs_state_current(false);
+    if (state) js_item_stack_clear(&state->module_stack);
 }
 
 static Item js_cjs_current_module(void) {
@@ -1873,6 +1901,7 @@ static Item js_cjs_cached_value(Item specifier) {
 }
 
 extern "C" Item js_cjs_enter(Item module, Item filename) {
+    if (!js_cjs_state_current(true)) return (Item){.item = ITEM_JS_UNDEFINED};
     if (!js_root_range_ensure_registered(&js_cjs_module_stack_state.roots)) {
         return (Item){.item = ITEM_JS_UNDEFINED};
     }

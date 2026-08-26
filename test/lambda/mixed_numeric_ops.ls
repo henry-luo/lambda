@@ -1,4 +1,4 @@
-// Test mixed numeric type operations (int, int64, float)
+// Test mixed numeric type operations (int, i64, float)
 // This tests the fix for float × int multiplication
 
 "===== MIXED NUMERIC OPERATIONS TESTS ====="
@@ -16,22 +16,22 @@ let i = 4
 "6. 10 * 2.5:"; (10 * 2.5)
 
 // 3. Int64 × Float multiplication (using smaller values to avoid overflow)
-let i64v = 10000000  // int64 but small enough
+let i64v = 10000000  // i64 but small enough
 let f2 = 1.5
-"7. int64 * float:"; (i64v * f2)
-"8. float * int64:"; (f2 * i64v)
+"7. i64 * float:"; (i64v * f2)
+"8. float * i64:"; (f2 * i64v)
 
 // 4. Int × Int64 multiplication  
 let small = 100
-let large = 1000000  // int64 but manageable
-"9. int * int64:"; (small * large)
-"10. int64 * int:"; (large * small)
+let large = 1000000  // i64 but manageable
+"9. int * i64:"; (small * large)
+"10. i64 * int:"; (large * small)
 
 // 5. Mixed subtraction
 "11. float - int:"; (10.5 - 3)
 "12. int - float:"; (10 - 2.5)
-"13. int64 - float:"; (10000000 - 0.5)
-"14. float - int64:"; (1.5 - 1000000)
+"13. i64 - float:"; (10000000 - 0.5)
+"14. float - i64:"; (1.5 - 1000000)
 
 // 6. Mixed division
 "15. float / int:"; (10.0 / 4)

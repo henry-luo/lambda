@@ -5,20 +5,20 @@ let db = input('./test/input/test_rdb_full.db', 'sqlite')^
 
 // forward FK: product → category
 type(db.data.products[0].category)
-db.data.products[0].category.name
+db.data.products[0].category.name;
 
 // all products mapped to their category name
 [for (p in db.data.products) p.category.name]
 
 // reverse FK: category → products array
 type(db.data.categories[0].products)
-len(db.data.categories[0].products)
+len(db.data.categories[0].products);
 
 // electronics products by name (category id=1 has 3 products)
 [for (p in db.data.categories[0].products) p.name]
 
 // books products by name (category id=2 has 2 products)
-len(db.data.categories[1].products)
+len(db.data.categories[1].products);
 [for (p in db.data.categories[1].products) p.name]
 
 // empty category has no products

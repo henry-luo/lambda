@@ -23,12 +23,16 @@
 5 is u8
 1i16 is f16
 int is integer
-float is decimal
-[1i8] is [int]
+float is decimal;
+[1i8] is [int];
 [1.5] is [i8]
 
 "=== f64 type ==="
 type(1.0f64)
+
+"=== f64 annotation ==="
+let f64_alias: f64 = 1.0
+type(f64_alias)
 
 "=== mixed arithmetic ==="
 type(1.0f16 + 1.0f32)

@@ -5,7 +5,10 @@
 > Jube native module, giving Radiant an Obscura-class headless-browser API surface now and a
 > browser-grade DOM surface long-term.
 > **Companion docs**: `vibe/radiant/Radiant_vs_Obscura.md` (API gap analysis),
-> `vibe/Lambda_Design_Native_Module.md` (Jube modules, `radiant-dom` POC, VMap projections).
+> `vibe/Lambda_Design_Native_Module.md` (Jube modules, `radiant-dom` POC, VMap projections),
+> `vibe/Lambda_Design_DOM_State.md` (behavior templates — the concrete design executing the
+> decision-2 state-store / forms / default-action rows below; its **ES9** amends this doc's
+> text-editing rows, 2026-08-25).
 
 ---
 
@@ -244,8 +247,8 @@ normative catalog; a placement change is a design change and gets a ledger entry
 | Default actions / activation behavior (link follow, checkbox/radio toggle, submit-on-Enter, button/space activation, `details` toggle, label forwarding) | **L** | policy (user decision 2) |
 | Sequential focus navigation (Tab order, focus delegation, `autofocus` processing) | **L** | policy, per-keypress cold |
 | Focusability computation (needs style/layout: visibility, `disabled`, `tabindex`) | M | layout-coupled query the policy calls |
-| Key→editing-command mapping policy | **L** (later) | with the editor migration; text-insertion mechanics stay N |
-| IME/composition, caret mechanics | N | coupling test |
+| Key→editing-command mapping policy | **L** (later) | with the editor migration. *Amended 2026-08-25 (ES9, `Lambda_Design_DOM_State.md`)*: "text-insertion mechanics stay N" now holds only for contenteditable — for **form text controls** the whole edit policy is **L** (see the Forms row below); only the buffer/splice mechanism stays N |
+| IME/composition, caret mechanics | N | coupling test. *ES9 amendment*: preedit sessions and caret mechanics stay N, but the IME **commit content** on form controls is applied by the Lambda `beforeinput` applier |
 | Drag-and-drop protocol state machine | **L** (later) | policy; mechanism (drag images, hit tests) N |
 | Inline `on*` handler compilation | N | JS-engine internals |
 | Event loop, timers, microtasks, rAF callback list | N | engine-owned scheduling |
@@ -256,6 +259,7 @@ normative catalog; a placement change is a design change and gets a ledger entry
 | Surface | Place | Rationale |
 |---|---|---|
 | Control state flags (dirty value/checkedness), selection mirrors, reflected IDL attributes | N | frequency + incumbency; interwoven with focus/editing |
+| Text-control value-edit **policy**: input-type→edit mapping, word/line boundaries, paste sanitization, `maxlength`, undo/redo, change-on-blur, IME commit content | **L** (Phase 3; DOM_State F5/F6) | *added 2026-08-25 — user decision, ES9 in `Lambda_Design_DOM_State.md`*: the Lambda behavior template is the `beforeinput` applier driving a native `replace_range` splice primitive; supersedes the former "text-insertion mechanics stay N" for form controls. The UTF-8 buffer, splice, unit conversions, and caret/selection geometry stay N |
 | Constraint validation logic (validity computation, message selection) | **L** (Phase 3) | policy; earned migration — bug-prone spec logic |
 | Submission: form-data-set construction, urlencoded/multipart serialization | **L** (Phase 3) | shape test; per-submit cold |
 | Submission: navigation execution | N | network/lifecycle |
@@ -411,6 +415,7 @@ rough order:
 | Event default-action / activation policy in `event.cpp` | policy layer exists (§4.4); behaviors are spec-shaped and accreting | UI-automation baseline green per extracted behavior class |
 | Sequential focus navigation / tab-order logic | same policy layer; cold path | `is_focusable` M query |
 | Constraint validation logic | bug-prone spec logic; `ElementInternals` needs it Lambda-side anyway | form gtest coverage stays green |
+| Text-control value-edit policy in `text_edit.cpp` (applier, word/line scanners, history, paste, change-on-blur) | user decision 2026-08-25 (ES9, `Lambda_Design_DOM_State.md` F5/F6) | `replace_range` splice primitive; mirror collapse; typing-latency gate |
 | Submission data-set construction + serialization | pairs with validation; per-submit cold | FormData interop at the boundary |
 | State store (`Radiant_Design_State_Store_*`) | RS design is already Lambda-shaped | RS/RSO1 decisions land |
 | History/pushState bookkeeping | couples to RS session restore | after state store migrates |

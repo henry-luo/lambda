@@ -81,9 +81,9 @@ static bool js_doc_runtime_enter_if_needed(DomDocument* doc, JsDocRuntimeScope* 
     scope->runtime_ctx->name_pool = runtime->name_pool;
     scope->runtime_ctx->type_list = runtime->type_list;
     scope->runtime_ctx->pool = runtime->heap->pool;
-    if (!eval_context_thread_initialize(scope->runtime_ctx)) return false;
+    if (!eval_context_init(scope->runtime_ctx)) return false;
     if (scope->runtime_ctx->js_state &&
-            !js_runtime_state_thread_initialize(scope->runtime_ctx)) return false;
+            !js_runtime_state_init(scope->runtime_ctx)) return false;
     js_dom_set_document(doc);
     return true;
 }
@@ -97,7 +97,7 @@ static int item_to_int(Item v) {
     if (t == LMD_TYPE_INT) return (int)it2i(v);
     // JIT offsets can be inline floats or boxed wide numerics; the canonical
     // conversion respects both representations instead of forging a pointer.
-    if (t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT || t == LMD_TYPE_FLOAT64)
+    if (t == LMD_TYPE_INT64 || t == LMD_TYPE_FLOAT)
         return (int)it2d(v);
     return 0;
 }
@@ -1260,10 +1260,13 @@ static Item _wpt_selectionchange_fire(Item this_val, Item* args, int argc) {
     if (!state->selectionchange_pending) return ItemNull;
     state->selectionchange_pending = false;
     state->selection_event_seq = state->selection_mutation_seq;
-    Item ev = js_create_event("selectionchange", /*bubbles=*/false,
-                              /*cancelable=*/false);
-    Item doc_item = js_get_document_object_value();
-    js_dom_dispatch_event(doc_item, ev);
+    RootFrame roots(2);
+    Rooted<Item> event_root(roots, js_create_event("selectionchange",
+        /*bubbles=*/false, /*cancelable=*/false));
+    // The document wrapper allocates after Event construction; retain the
+    // queued selectionchange Event until dispatch takes its own exact roots.
+    Rooted<Item> document_root(roots, js_get_document_object_value());
+    js_dom_dispatch_event(document_root.get(), event_root.get());
     return ItemNull;
 }
 JS_FORWARD_STATIC_ITEM(js_dom_flush_selectionchange, (Item this_val, Item* args, int argc), _wpt_selectionchange_fire, (this_val, args, argc))

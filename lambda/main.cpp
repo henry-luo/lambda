@@ -36,7 +36,7 @@
 #include "runtime/transpiler.hpp"  // For Runtime struct definition
 #include "runtime/runtime-state.h"
 #include "runtime/ast.hpp"  // For print_root_item declaration
-#include "runtime/emit_sexpr.h"  // For --emit-sexpr command
+#include "runtime/emit_ast_dump.h"
 #include "runtime/interp.hpp"  // T0 tier selection + run summary
 
 // Error handling with stack traces
@@ -276,23 +276,23 @@ static void* js_cli_run_on_stack_thread(void* arg) {
     JsCliRunArgs* run_args = (JsCliRunArgs*)arg;
     lambda_stack_init();
     EvalContext* eval_context = runtime_get_eval_context(run_args->runtime);
-    if (!eval_context_thread_initialize(eval_context)) {
+    if (!eval_context_init(eval_context)) {
         run_args->result = ItemError;
         return NULL;
     }
     if (eval_context->js_state &&
-            !js_runtime_state_thread_initialize(eval_context)) {
-        eval_context_thread_shutdown(eval_context);
+            !js_runtime_state_init(eval_context)) {
+        eval_context_shutdown(eval_context);
         run_args->result = ItemError;
         return NULL;
     }
     run_args->result = transpile_js_to_mir_len(
         run_args->runtime, run_args->source, run_args->source_len, run_args->filename,
         run_args->result_home);
-    if (eval_context->js_state) js_runtime_state_thread_shutdown(eval_context);
+    if (eval_context->js_state) js_runtime_state_shutdown(eval_context);
     // The large-stack worker is an eval-thread lifetime boundary. Cleanup
     // starts only after join, when the caller acquires the same owner.
-    eval_context_thread_shutdown(eval_context);
+    eval_context_shutdown(eval_context);
     return NULL;
 }
 
@@ -337,7 +337,7 @@ static Item js_cli_transpile_with_execution_stack(
 
 static void js_test262_hot_context_create(Runtime* runtime, EvalContext* batch_context) {
     memset(batch_context, 0, sizeof(EvalContext));
-    if (!eval_context_thread_initialize(batch_context)) return;
+    if (!eval_context_init(batch_context)) return;
     heap_init();
     batch_context->pool = batch_context->heap->pool;
     batch_context->name_pool = name_pool_create_runtime(batch_context->pool);
@@ -352,15 +352,15 @@ static void js_test262_hot_context_create(Runtime* runtime, EvalContext* batch_c
 
 static void js_test262_hot_context_destroy(Runtime* runtime, EvalContext* batch_context) {
     if (!batch_context) return;
-    if (!eval_context_thread_matches(batch_context)) {
+    if (!eval_context_matches(batch_context)) {
         log_error("test262-hot-context: owner thread mismatch during destroy");
         return;
     }
-    if (batch_context->js_state) js_runtime_state_thread_shutdown(batch_context);
+    if (batch_context->js_state) js_runtime_state_shutdown(batch_context);
     // A signal can interrupt an allocator or a GC finalizer. Reclaim the bulk
     // heap generation without running those finalizers before replacing it.
     heap_discard_unfinalized();
-    eval_context_thread_shutdown(batch_context);
+    eval_context_shutdown(batch_context);
     memset(batch_context, 0, sizeof(EvalContext));
     runtime->heap = NULL;
     runtime->name_pool = NULL;
@@ -369,7 +369,7 @@ static void js_test262_hot_context_destroy(Runtime* runtime, EvalContext* batch_
 
 static bool js_test262_hot_context_recycle(Runtime* runtime,
         EvalContext* batch_context) {
-    if (!runtime || !batch_context || !eval_context_thread_matches(batch_context)) {
+    if (!runtime || !batch_context || !eval_context_matches(batch_context)) {
         log_error("test262-hot-context: owner mismatch during normal recycle");
         return false;
     }
@@ -478,7 +478,6 @@ extern "C" {
     char* read_text_file(const char *filename);
     void write_text_file(const char *filename, const char *content);
     int write_binary_file(const char* filename, const char* data, size_t len);
-    TSTree* lambda_parse_source(TSParser* parser, const char* source);
     void js_reset_template_registry(void);
 }
 
@@ -728,8 +727,8 @@ enum StatementStatus {
     STMT_INCOMPLETE,    // statement needs more input (missing closing braces, etc.)
     STMT_ERROR          // statement has a syntax error
 };
-StatementStatus check_statement_completeness(TSParser* parser, const char* source);
-void print_repl_syntax_error(TSParser* parser, const char* source);
+StatementStatus check_statement_completeness(const char* source);
+void print_repl_syntax_error(const char* source);
 
 // Linux-specific compatibility functions
 #ifdef NATIVE_LINUX_BUILD
@@ -788,6 +787,15 @@ void run_repl(Runtime *runtime) {
     StrBuf *last_output = strbuf_new_cap(256);    // last output for incremental display
     char *line;
     int exec_count = 0;
+    InterpReplSession interp_session = {};
+    // P4 is opt-in through the existing interpreter tiers. The shipped JIT
+    // REPL retains its historical whole-history behavior until P5 flips the
+    // default execution policy (D8.1.1v2).
+    bool persistent_interp = lambda_tier_selected() != LAMBDA_TIER_JIT &&
+        interp_repl_session_init(&interp_session, runtime);
+    if (lambda_tier_selected() != LAMBDA_TIER_JIT && !persistent_interp) {
+        log_error("interp-repl: falling back to historical REPL execution");
+    }
 
     while ((line = lambda_repl_readline(pending_input->length > 0 ? cont_prompt : main_prompt)) != NULL) {
         // Skip empty lines when not in multi-line mode
@@ -817,6 +825,13 @@ void run_repl(Runtime *runtime) {
             if (strcmp(line, "clear") == 0) {
                 strbuf_reset(repl_history);
                 strbuf_reset(last_output);
+                if (persistent_interp) {
+                    interp_repl_session_destroy(&interp_session);
+                    persistent_interp = interp_repl_session_init(&interp_session, runtime);
+                    if (!persistent_interp) {
+                        log_error("interp-repl: failed to reset persistent session");
+                    }
+                }
                 printf("REPL history cleared\n");
                 mem_free(line);
                 continue;
@@ -830,8 +845,8 @@ void run_repl(Runtime *runtime) {
         strbuf_append_str(pending_input, line);
         mem_free(line);
 
-        // Check if statement is complete using Tree-sitter
-        StatementStatus status = check_statement_completeness(runtime->parser, pending_input->str);
+        // Check whether the statement has balanced delimiters before parsing.
+        StatementStatus status = check_statement_completeness(pending_input->str);
 
         if (status == STMT_INCOMPLETE) {
             // Need more input - continue with continuation prompt
@@ -840,15 +855,50 @@ void run_repl(Runtime *runtime) {
 
         if (status == STMT_ERROR) {
             // Syntax error - discard the pending input and let user retry
-            print_repl_syntax_error(runtime->parser, pending_input->str);
+            print_repl_syntax_error(pending_input->str);
             printf("Input discarded.\n");
             strbuf_reset(pending_input);
+            continue;
+        }
+
+        if (persistent_interp) {
+            Item result = interp_repl_session_eval(&interp_session, pending_input->str);
+            strbuf_reset(pending_input);
+            if (get_type_id(result) == LMD_TYPE_ERROR && interp_session.last_input_rejected) {
+                // The session restores its slab and AST append transaction
+                // before returning an error, so the next input sees the last
+                // successful environment rather than a partially evaluated cell.
+                // Print the diagnosis first: the rollback notice alone told the
+                // user nothing about WHY, which silently dropped every parse and
+                // type diagnostic the REPL is supposed to teach with.
+                LambdaError* last_error = get_persistent_last_error();
+                if (last_error) err_print(last_error);
+                printf("Error during execution. Last input rolled back.\n");
+                continue;
+            }
+            StrBuf* output = strbuf_new_cap(256);
+            print_root_item(output, result);
+            if (output->length > 0) printf("%s", output->str);
+            strbuf_free(output);
             continue;
         }
 
         // Statement is complete - add to history and execute
         size_t saved_history_len = repl_history->length;
         if (repl_history->length > 0) {
+            // S16.2.3: each REPL entry is its own statement. Joining them with a
+            // bare newline let a dual-role lead (`[`, `(`, `-`, ...) read as a
+            // continuation of the previous entry, so `1 + 1` then `[1,2,3]`
+            // failed to parse instead of evaluating. `;` is the explicit
+            // separator that repair calls for; skip it when one is already
+            // there, since an empty statement slot is itself an error.
+            size_t tail = repl_history->length;
+            while (tail > 0 && (repl_history->str[tail - 1] == '\n' ||
+                    repl_history->str[tail - 1] == ' ' ||
+                    repl_history->str[tail - 1] == '\t')) { tail--; }
+            if (tail > 0 && repl_history->str[tail - 1] != ';') {
+                strbuf_append_str(repl_history, ";");
+            }
             strbuf_append_str(repl_history, "\n");
         }
         strbuf_append_str(repl_history, pending_input->str);
@@ -863,7 +913,9 @@ void run_repl(Runtime *runtime) {
 
         if (output_input) {
             if (output_input->root.type_id() == LMD_TYPE_ERROR) {
-                // Runtime error - rollback the last input
+                // Runtime error - rollback the last input, after reporting why.
+                LambdaError* last_error = get_persistent_last_error();
+                if (last_error) err_print(last_error);
                 printf("Error during execution. Last input rolled back.\n");
                 repl_history->str[saved_history_len] = '\0';
                 repl_history->length = saved_history_len;
@@ -900,16 +952,17 @@ void run_repl(Runtime *runtime) {
     // Cleanup command line editor
     lambda_repl_cleanup();
 
+    interp_repl_session_destroy(&interp_session);
     strbuf_free(repl_history);
     strbuf_free(pending_input);
     strbuf_free(last_output);
 }
 
 // Run a script file and return 0 on success, 1 on failure
-int run_script_file(Runtime *runtime, const char *script_path, bool transpile_only = false, bool run_main = false) {
+int run_script_file(Runtime *runtime, const char *script_path, bool run_main = false) {
     log_debug("run_script_file called: %s", script_path);
     Input* output_input = nullptr;
-    output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main, transpile_only);
+    output_input = run_script_mir(runtime, nullptr, (char*)script_path, run_main);
 
     log_debug("run_script_file: output_input = %p", output_input);
     if (!output_input) {
@@ -940,12 +993,6 @@ int run_script_file(Runtime *runtime, const char *script_path, bool transpile_on
         }
         // Do NOT delete output_input - it was allocated from the pool we just destroyed
         return 1;  // failure
-    }
-
-    // --transpile-only: compilation is the deliverable and nothing executed, so
-    // there is no result value to print. The MIR artifact was already written.
-    if (transpile_only) {
-        return 0;
     }
 
     StrBuf *output = strbuf_new_cap(256);
@@ -1817,8 +1864,8 @@ static int node_runner_run_file(const char* exe_path, const char* file,
 #endif
         EvalContext* js_result_context = runtime_get_eval_context(&runtime);
         if (js_result_context && js_result_context->js_state) {
-            if (!eval_context_thread_initialize(js_result_context) ||
-                    !js_runtime_state_thread_initialize(js_result_context)) {
+            if (!eval_context_init(js_result_context) ||
+                    !js_runtime_state_init(js_result_context)) {
                 log_error("js-cli-result: failed to acquire Runtime owner");
                 result = ItemError;
             }
@@ -1904,21 +1951,16 @@ static int node_runner_main(int argc, char** argv) {
     return lambda_main_finish(final_status);
 }
 
-// LAMBDA_TIER selects the execution tier (D8.1.1v2). Unset or `jit` keeps the
-// shipped eager whole-module pipeline bit-for-bit; `interp` runs T0. `auto`
-// (T0 + per-function promotion) needs the P2 promotion machinery, so it is
-// accepted and reported but still runs as `jit`.
+// LAMBDA_TIER selects the execution tier (D8.1.1v4). Unset selects the
+// shipped `auto` policy; `jit` explicitly requests eager whole-module
+// compilation, while `interp` runs T0 without promotion.
 static void apply_lambda_tier_env(void) {
     const char* text = getenv("LAMBDA_TIER");
     if (!text || !text[0]) return;
-    LambdaTier tier = LAMBDA_TIER_JIT;
+    LambdaTier tier = LAMBDA_TIER_AUTO;
     if (!lambda_tier_parse(text, &tier)) {
-        log_warn("interp: unrecognized LAMBDA_TIER='%s'; using jit", text);
+        log_warn("interp: unrecognized LAMBDA_TIER='%s'; using auto", text);
         return;
-    }
-    if (tier == LAMBDA_TIER_AUTO) {
-        log_notice("interp: LAMBDA_TIER=auto needs per-function promotion (P2); using jit");
-        tier = LAMBDA_TIER_JIT;
     }
     lambda_tier_set(tier);
 }
@@ -1930,12 +1972,11 @@ static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
         return true;
     }
     if (strncmp(arg, "--tier=", 7) == 0) {
-        LambdaTier tier = LAMBDA_TIER_JIT;
+        LambdaTier tier = LAMBDA_TIER_AUTO;
         if (lambda_tier_parse(arg + 7, &tier)) {
-            if (tier == LAMBDA_TIER_AUTO) tier = LAMBDA_TIER_JIT;
             lambda_tier_set(tier);
         } else {
-            log_warn("interp: unrecognized %s; using jit", arg);
+            log_warn("interp: unrecognized %s; using auto", arg);
         }
         return true;
     }
@@ -2470,8 +2511,8 @@ int main(int argc, char *argv[]) {
             // inspect exceptions, promises, or other JS semantic state.
             EvalContext* js_result_context = runtime_get_eval_context(&runtime);
             if (js_result_context && js_result_context->js_state) {
-                if (!eval_context_thread_initialize(js_result_context) ||
-                        !js_runtime_state_thread_initialize(js_result_context)) {
+                if (!eval_context_init(js_result_context) ||
+                        !js_runtime_state_init(js_result_context)) {
                     log_error("js-document-result: failed to acquire Runtime owner");
                     result = ItemError;
                 }
@@ -3945,6 +3986,13 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        // Each batch item is an isolated evaluation: the loop tears down its
+        // heap, name pool, module registry, and module slabs after every
+        // script. Retaining an imported MIR Script across that boundary leaves
+        // its cached Items and type images pointing into the retired heap, so
+        // disable L1 module retention for this command (D5.4.3).
+        runtime.mir_cache_disabled = true;
+
         char line[1024];
         while (fgets(line, sizeof(line), stdin)) {
             // trim trailing whitespace
@@ -3986,7 +4034,7 @@ int main(int argc, char *argv[]) {
                 batch_timeout_active = 1;
                 if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                     alarm(batch_timeout);
-                    result = run_script_file(&runtime, script_path, false, run_main);
+                    result = run_script_file(&runtime, script_path, run_main);
                     alarm(0);
                     batch_timeout_active = 0;
                 } else {
@@ -3996,10 +4044,10 @@ int main(int argc, char *argv[]) {
                 }
                 sigaction(SIGALRM, &old_sa, NULL);
             } else {
-                result = run_script_file(&runtime, script_path, false, run_main);
+                result = run_script_file(&runtime, script_path, run_main);
             }
 #else
-            result = run_script_file(&runtime, script_path, false, run_main);
+            result = run_script_file(&runtime, script_path, run_main);
 #endif
             fflush(stdout);
 
@@ -4564,7 +4612,7 @@ int main(int argc, char *argv[]) {
             if (hot_reload) {
                 // A recovery jump must preserve the eval-thread owner; a
                 // mismatch indicates a forbidden nested context switch.
-                if (!eval_context_thread_matches(batch_context)) {
+                if (!eval_context_matches(batch_context)) {
                     log_error("test262-hot-context: owner changed across recovery");
                     result = 1;
                 }
@@ -4741,14 +4789,6 @@ int main(int argc, char *argv[]) {
         return lambda_main_finish(0);
     }
 
-    // Handle --emit-sexpr command (Phase 4: Redex baseline verification bridge)
-    if (argc >= 3 && strcmp(argv[1], "--emit-sexpr") == 0) {
-        const char* sexpr_path = argv[2];
-        log_debug("Emitting s-expressions for '%s'", sexpr_path);
-        int result = emit_sexpr_file(sexpr_path);
-        return lambda_main_finish(result);
-    }
-
     // Handle canonical AST dump commands (Phase 1: unified AST renumber harness)
     if (argc >= 3 && strcmp(argv[1], "--emit-ast-dump") == 0) {
         const char* dump_path = argv[2];
@@ -4781,7 +4821,7 @@ int main(int argc, char *argv[]) {
             printf("  This means that if the script defines a main function, it will be\n");
             printf("  automatically executed during script execution.\n");
             printf("\nExamples:\n");
-            printf("  %s run script.ls                 # Run script with MIR Direct JIT (default)\n", argv[0]);
+            printf("  %s run script.ls                 # Run script with adaptive auto tier (default)\n", argv[0]);
             return lambda_main_finish(0);
         }
 
@@ -4820,13 +4860,12 @@ int main(int argc, char *argv[]) {
         log_debug("Running script '%s' with run_main=true", script_file);
 
         // Execute script with run_main enabled
-        int result = run_script_file(&runtime, script_file, false, true);  // true for run_main
+        int result = run_script_file(&runtime, script_file, true);  // true for run_main
 
         runtime_cleanup(&runtime);
         return lambda_main_finish(result);
     }
 
-    bool transpile_only = false;
     bool help_only = false;
     char* script_file = NULL;
     int max_errors = 0;  // 0 means use default (10)
@@ -4835,13 +4874,7 @@ int main(int argc, char *argv[]) {
     // Parse arguments
     int ret_code = 0;
     for (int i = 1; i < argc; i++) {
-        // Compile without executing. MIR Direct honors it so emission fixtures
-        // so emission fixtures can be compiled and their MIR artifact checked
-        // without running the script.
-        if (strcmp(argv[i], "--transpile-only") == 0) {
-            transpile_only = true;
-        }
-        else if (apply_common_mir_option(argv[i], &runtime)) {
+        if (apply_common_mir_option(argv[i], &runtime)) {
         }
         else if (strcmp(argv[i], "--help") == 0) {
             help_only = true;
@@ -4916,12 +4949,7 @@ int main(int argc, char *argv[]) {
         print_help();
     }
     else if (script_file) {
-        ret_code = run_script_file(&runtime, script_file, transpile_only, false);  // false for run_main in regular execution
-    }
-    else if (transpile_only) { // without a script file
-        printf("Error: --transpile-only requires a script file\n");
-        print_help();
-        ret_code = 1;
+        ret_code = run_script_file(&runtime, script_file, false);  // false for run_main in regular execution
     } else {
         // Start the MIR-Direct REPL by default.
         run_repl(&runtime);

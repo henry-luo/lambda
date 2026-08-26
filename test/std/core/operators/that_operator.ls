@@ -2,26 +2,26 @@
 // Layer: 2 | Category: operator | Covers: that as type constraint and pipe filter
 
 // ===== Type-level constraint =====
-type Positive = int that (~ > 0)
-(5 is Positive)
-(-1 is Positive)
-(0 is Positive)
+type Positive = int that (~ > 0);
+(5 is Positive);
+(-1 is Positive);
+(0 is Positive);
 (100 is Positive)
 
 // ===== Range constraint =====
-type Between5And10 = int that (5 < ~ < 10)
-(6 is Between5And10)
-(7 is Between5And10)
-(5 is Between5And10)
-(10 is Between5And10)
+type Between5And10 = int that (5 < ~ < 10);
+(6 is Between5And10);
+(7 is Between5And10);
+(5 is Between5And10);
+(10 is Between5And10);
 (3 is Between5And10)
 
 // ===== Combined constraint =====
-type InRange = int that (~ >= 1 and ~ <= 10)
-(1 is InRange)
-(5 is InRange)
-(10 is InRange)
-(0 is InRange)
+type InRange = int that (~ >= 1 and ~ <= 10);
+(1 is InRange);
+(5 is InRange);
+(10 is InRange);
+(0 is InRange);
 (11 is InRange)
 
 // ===== Constrained types in match =====
@@ -49,11 +49,11 @@ grade(95)
 grade(85)
 grade(75)
 grade(65)
-grade(55)
+grade(55);
 
 // ===== that as filter (same as where) =====
-[1, 2, 3, 4, 5] that (~ > 3)
-[1, 2, 3, 4, 5, 6] that (~ % 2 == 0)
+[1, 2, 3, 4, 5] that (~ > 3);
+[1, 2, 3, 4, 5, 6] that (~ % 2 == 0);
 
 // ===== Combined results =====
 [

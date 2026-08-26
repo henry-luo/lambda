@@ -19,6 +19,25 @@ static Type* js_set_type_any(JsTranspiler* tp, AnyReason reason) {
     return &TYPE_ANY;
 }
 
+// One report per compiled JS unit, matching the Lambda lane's line so both
+// lanes are measured against one vocabulary [Type_Infer TI3].
+void js_report_any_census(JsTranspiler* tp) {
+    if (!tp) return;
+    int any_total = 0;
+    for (int r = 0; r < ANY_REASON_COUNT; r++) any_total += tp->any_census[r];
+    if (!any_total) return;
+    StrBuf* census = strbuf_new();
+    if (!census) return;
+    strbuf_append_format(census, "any_census: total=%d", any_total);
+    for (int r = 0; r < ANY_REASON_COUNT; r++) {
+        if (!tp->any_census[r]) continue;
+        strbuf_append_format(census, " %s=%d",
+            any_reason_name((AnyReason)r), tp->any_census[r]);
+    }
+    log_notice("%s (js)", census->str);
+    strbuf_free(census);
+}
+
 // forward declarations
 static char js_decode_escape_char(char c);
 static String* js_decode_identifier_name(JsTranspiler* tp, const char* source,
@@ -69,7 +88,8 @@ static void js_predeclare_var_pattern(JsTranspiler* tp, TSNode pattern,
             tp->ast_pool, sizeof(JsIdentifierNode));
         memset(placeholder, 0, sizeof(JsIdentifierNode));
         placeholder->node_type = JS_AST_NODE_IDENTIFIER;
-        placeholder->node = declarator_node;
+        placeholder->source_span = (SourceSpan){ts_node_start_byte(declarator_node),
+            ts_node_end_byte(declarator_node)};
         placeholder->type = js_set_type_any(tp, ANY_ERROR_RECOVERY);
         placeholder->name = name;
         js_scope_define(tp, name, (JsAstNode*)placeholder, JS_VAR_VAR);
@@ -270,7 +290,8 @@ JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode n
     JsAstNode* ast_node = (JsAstNode*)pool_alloc(tp->ast_pool, size);
     memset(ast_node, 0, size);
     ast_node->node_type = node_type;
-    ast_node->node = node;
+    ast_node->source_span = (SourceSpan){ts_node_start_byte(node),
+        ts_node_end_byte(node)};
     return ast_node;
 }
 
@@ -679,6 +700,50 @@ static void js_bind_pattern_names(JsTranspiler* tp, JsAstNode* pattern, JsVarKin
     }
 }
 
+static void js_mark_for_in_head_bindings(JsAstNode* pattern) {
+    if (!pattern) return;
+    if (pattern->node_type == (int)TS_AST_NODE_PARAMETER) {
+        js_mark_for_in_head_bindings(((TsParameterNode*)pattern)->pattern);
+        return;
+    }
+    switch (pattern->node_type) {
+    case JS_AST_NODE_IDENTIFIER: {
+        JsIdentifierNode* id = (JsIdentifierNode*)pattern;
+        if (id->entry) id->entry->is_for_in_head = true;
+        break;
+    }
+    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+        JsAssignmentPatternNode* assignment = (JsAssignmentPatternNode*)pattern;
+        js_mark_for_in_head_bindings(assignment->left);
+        break;
+    }
+    case JS_AST_NODE_REST_ELEMENT: {
+        JsSpreadElementNode* rest = (JsSpreadElementNode*)pattern;
+        js_mark_for_in_head_bindings(rest->argument);
+        break;
+    }
+    case JS_AST_NODE_ARRAY_PATTERN:
+    case JS_AST_NODE_ARRAY_EXPRESSION: {
+        JsArrayNode* array = (JsArrayNode*)pattern;
+        for (JsAstNode* element = array->elements; element; element = element->next)
+            js_mark_for_in_head_bindings(element);
+        break;
+    }
+    case JS_AST_NODE_OBJECT_PATTERN: {
+        JsObjectPatternNode* object = (JsObjectPatternNode*)pattern;
+        for (JsAstNode* property = object->properties; property; property = property->next) {
+            if (property->node_type == JS_AST_NODE_PROPERTY)
+                js_mark_for_in_head_bindings(((JsPropertyNode*)property)->value);
+            else
+                js_mark_for_in_head_bindings(property);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 static JsAstNode* make_js_identifier_name(JsTranspiler* tp, TSNode node, const char* name, int len) {
     JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, node, sizeof(JsIdentifierNode));
     identifier->name = name_pool_create_len(tp->name_pool, name, len);
@@ -718,7 +783,7 @@ static JsAstNode* build_js_non_async_await_call(JsTranspiler* tp, TSNode await_n
     }
 
     call->optional = false;
-    call->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+    call->type = js_set_type_any(tp, ANY_JS_CALL);
     return (JsAstNode*)call;
 }
 
@@ -741,7 +806,60 @@ JsAstNode* build_js_binary_expression(JsTranspiler* tp, TSNode binary_node) {
         binary->op = JS_OP_ADD; // fallback
     }
 
-    binary->type = &TYPE_FLOAT;
+    // TIG13: publish the type the operator actually produces. Every binary
+    // expression used to be typed `float` — including `===`, `&&` and string
+    // `+` — which made the JS lane's static types unusable for anything.
+    //
+    // JS policy notes [TI2]: Number is binary64 so arithmetic is `float`, not
+    // `int`; bitwise operators run ToInt32/ToUint32 so their RESULT is an
+    // integral value but it is still a JS number, and the emitter carries it
+    // in the same lane as any other number — typing it `int` would claim a
+    // carrier the lowering does not produce (the IP5 lesson), so it stays
+    // `float`. `+` is overloaded on strings and `&&`/`||`/`??` yield one of
+    // their operands, so those need their operands' types rather than a
+    // fixed answer.
+    switch (binary->op) {
+    case JS_OP_EQ: case JS_OP_NE:
+    case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+    case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+    case JS_OP_INSTANCEOF: case JS_OP_IN:
+        // Relational, equality and membership tests are total predicates.
+        binary->type = &TYPE_BOOL;
+        break;
+    case JS_OP_ADD: {
+        // `+` is string concatenation when either side is a string, numeric
+        // addition otherwise. Only a proven pair answers; anything open stays
+        // open rather than guessing one of the two behaviors.
+        Type* lt = binary->left ? binary->left->type : NULL;
+        Type* rt = binary->right ? binary->right->type : NULL;
+        TypeId l = lt ? lt->type_id : LMD_TYPE_ANY;
+        TypeId r = rt ? rt->type_id : LMD_TYPE_ANY;
+        if (l == LMD_TYPE_STRING || r == LMD_TYPE_STRING) {
+            binary->type = &TYPE_STRING;
+        } else if (l == LMD_TYPE_FLOAT && r == LMD_TYPE_FLOAT) {
+            binary->type = &TYPE_FLOAT;
+        } else {
+            binary->type = js_set_type_any(tp, ANY_JS_BINARY);
+        }
+        break;
+    }
+    case JS_OP_AND: case JS_OP_OR: case JS_OP_NULLISH_COALESCE:
+        // These yield one OPERAND, never a coerced number. Both constituents
+        // reach the result, so the answer is their union when both are known.
+        if (binary->left && binary->right && binary->left->type &&
+                binary->right->type &&
+                binary->left->type->type_id == binary->right->type->type_id) {
+            binary->type = binary->left->type;
+        } else {
+            binary->type = js_set_type_any(tp, ANY_JS_BINARY);
+        }
+        break;
+    default:
+        // Arithmetic, exponentiation and the bitwise/shift family all produce
+        // a JS number.
+        binary->type = &TYPE_FLOAT;
+        break;
+    }
 
     return (JsAstNode*)binary;
 }
@@ -815,7 +933,7 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
                 tp, JS_AST_NODE_TAGGED_TEMPLATE, call_node, sizeof(JsTaggedTemplateNode));
             tagged->tag = build_js_expression(tp, callee_node);
             tagged->quasi = (JsTemplateLiteralNode*)build_js_template_literal(tp, args_node);
-            tagged->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+            tagged->type = js_set_type_any(tp, ANY_JS_CALL);
             return (JsAstNode*)tagged;
         }
     }
@@ -861,7 +979,7 @@ JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
     }
 
     // Function calls return ANY type by default
-    call->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+    call->type = js_set_type_any(tp, ANY_JS_CALL);
 
     // Detect optional chaining (obj?.method() or obj?.())
     TSNode opt_chain = ts_node_child_by_field_name(call_node, "optional_chain", strlen("optional_chain"));
@@ -928,8 +1046,40 @@ JsAstNode* build_js_member_expression(JsTranspiler* tp, TSNode member_node) {
     }
     member->property = build_js_expression(tp, property_node);
 
-    // Property access returns ANY type by default
-    member->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+    // TIG14b: resolve the property against the receiver's recorded shape when
+    // there is one. Only CONTAINER-valued fields are published: those are a
+    // boxed pointer on every lowering path, so the type cannot outrun the
+    // carrier — the numeric/string fields are the IP5 hazard class and stay
+    // open until the carrier sweep lands. A dynamic (`obj[expr]`) property has
+    // no static name, so it stays open by construction.
+    Type* resolved_member = NULL;
+    if (!member->computed && member->object && member->object->type &&
+            member->property &&
+            member->property->node_type == JS_AST_NODE_IDENTIFIER) {
+        Type* recv = member->object->type;
+        if ((recv->type_id == LMD_TYPE_MAP || recv->type_id == LMD_TYPE_OBJECT) &&
+                !is_global_simple_type(recv)) {
+            TypeMap* recv_map = (TypeMap*)recv;
+            JsIdentifierNode* prop = (JsIdentifierNode*)member->property;
+            if (recv_map->shape && prop->name) {
+                FOR_EACH_MAP_FIELD(recv_map, se) {
+                    if (se->name && (int)se->name->length == (int)prop->name->len &&
+                            strncmp(se->name->str, prop->name->chars,
+                                se->name->length) == 0) {
+                        Type* ft = unwrap_simple_type_type(se->type);
+                        if (ft && (ft->type_id == LMD_TYPE_MAP ||
+                                ft->type_id == LMD_TYPE_ELEMENT ||
+                                ft->type_id == LMD_TYPE_OBJECT)) {
+                            resolved_member = ft;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    member->type = resolved_member ? resolved_member
+        : js_set_type_any(tp, ANY_JS_MEMBER);
 
     return (JsAstNode*)member;
 }
@@ -1549,6 +1699,18 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     return (JsAstNode*)func;
 }
 
+// Build a statement branch under its own lexical scope.  Tree-sitter exposes an
+// unbraced `if (...) function f(){}` directly as the branch statement, but it
+// still has Annex B's block function binding; without this scope the builder
+// incorrectly hoists `f` as a top-level declaration before the branch runs.
+static JsAstNode* build_js_branch_statement(JsTranspiler* tp, TSNode branch_node) {
+    JsScope* branch_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    js_scope_push(tp, branch_scope);
+    JsAstNode* branch = build_js_statement(tp, branch_node);
+    js_scope_pop(tp);
+    return branch;
+}
+
 // Build JavaScript if statement node
 JsAstNode* build_js_if_statement(JsTranspiler* tp, TSNode if_node) {
     JsIfNode* if_stmt = (JsIfNode*)alloc_js_ast_node(tp, JS_AST_NODE_IF_STATEMENT, if_node, sizeof(JsIfNode));
@@ -1562,13 +1724,13 @@ JsAstNode* build_js_if_statement(JsTranspiler* tp, TSNode if_node) {
     // Get consequent (then branch)
     TSNode consequent_node = ts_node_child_by_field_name(if_node, "consequence", strlen("consequence"));
     if (!ts_node_is_null(consequent_node)) {
-        if_stmt->consequent = build_js_statement(tp, consequent_node);
+        if_stmt->consequent = build_js_branch_statement(tp, consequent_node);
     }
 
     // Get alternate (else branch) - optional
     TSNode alternate_node = ts_node_child_by_field_name(if_node, "alternative", strlen("alternative"));
     if (!ts_node_is_null(alternate_node)) {
-        if_stmt->alternate = build_js_statement(tp, alternate_node);
+        if_stmt->alternate = build_js_branch_statement(tp, alternate_node);
     }
 
     if_stmt->type = &TYPE_NULL; // if statements don't have a value
@@ -3064,7 +3226,7 @@ JsAstNode* build_js_new_expression(JsTranspiler* tp, TSNode new_node) {
         }
     }
 
-    call->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+    call->type = js_set_type_any(tp, ANY_JS_CALL);
     return (JsAstNode*)call;
 }
 
@@ -3084,6 +3246,12 @@ JsAstNode* build_js_switch_statement(JsTranspiler* tp, TSNode switch_node) {
         // Fallback: the body might be the second named child
         body_node = switch_node;
     }
+
+    // A switch body is one lexical environment shared by every case.  Keep
+    // Annex B function declarations in that scope so they cannot be mistaken
+    // for direct program/function-body declarations and hoisted as functions.
+    JsScope* switch_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
+    js_scope_push(tp, switch_scope);
 
     JsAstNode* prev_case = NULL;
     uint32_t child_count = ts_node_named_child_count(body_node);
@@ -3135,6 +3303,8 @@ JsAstNode* build_js_switch_statement(JsTranspiler* tp, TSNode switch_node) {
             prev_case = (JsAstNode*)case_node;
         }
     }
+
+    js_scope_pop(tp);
 
     sw->type = &TYPE_NULL;
     return (JsAstNode*)sw;
@@ -3285,6 +3455,8 @@ JsAstNode* build_js_for_in_statement(JsTranspiler* tp, TSNode for_node) {
         // synthetic `let [..]` recovery path reaches this shared bind point.
         js_bind_pattern_names(tp, for_of->left, (JsVarKind)for_of->kind);
     }
+    if (!is_for_of && for_of->declares_binding)
+        js_mark_for_in_head_bindings(for_of->left);
 
     TSNode init_node = ts_node_child_by_field_name(for_node, "value", strlen("value"));
     if (!ts_node_is_null(init_node)) {
@@ -4456,7 +4628,7 @@ static JsAstNode* make_this_assignment_u(JsTranspiler* tp, TSNode node, const ch
     member->property = make_ts_identifier_u(tp, node, name, len);
     member->computed = false;
     member->optional = false;
-    member->type = js_set_type_any(tp, ANY_JS_CALL_MEMBER);
+    member->type = js_set_type_any(tp, ANY_JS_MEMBER);
 
     JsAssignmentNode* assign = (JsAssignmentNode*)alloc_js_ast_node(tp,
         JS_AST_NODE_ASSIGNMENT_EXPRESSION, node, sizeof(JsAssignmentNode));

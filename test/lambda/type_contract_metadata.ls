@@ -7,6 +7,6 @@ fn explicit(value: any) any { value }
 fn precise() { 1 }
 pn procedural(value) { value }
 let captured = (value) => value
-let converted = int("3")
+let converted = int("3");
 
 [forward_value(1), captured(2), explicit(converted)]

@@ -65,7 +65,7 @@ fn render_sequence_base_scripts(node, context, render_fn) {
 
 fn render_sequence_script_prefix(base, n, context, render_fn) {
     let prefix_box = if (n == 2) render_fn(base[0], context)
-        else render_fn(<_seq;
+        else render_fn(<_seq
             for (i in 0 to (n - 2)) base[i]
         >, context)
     let tail_prefix_node = last_sequence_atom(base[n - 2])
@@ -193,35 +193,35 @@ fn render_integral_inline_scripts(base, node, context, render_fn) {
     // whole row again (otherwise `g_2(x)` over an integral is too high).
     let sup_top = util.ceil_em2(0.0 - pstrut - sup_shift)
     let sub_span = if (has_sub) [
-        <span style: "top:" ++ util.fmt_em(sub_top) ++ ";" ++ sub_margin_attr;
+        <span style: "top:" ++ util.fmt_em(sub_top) ++ ";" ++ sub_margin_attr,
             <span class: css.PSTRUT, style: "height:3em">
-            <span style: "height:" ++ util.fmt_em(sub_inner_h) ++ ";display:inline-block;font-size: 70%";
+            <span style: "height:" ++ util.fmt_em(sub_inner_h) ++ ";display:inline-block;font-size: 70%",
                 for (el in sub_elements) el
             >
         >
     ] else []
     let sup_span = if (has_sup) [
-        <span style: "top:" ++ util.fmt_em(sup_top);
+        <span style: "top:" ++ util.fmt_em(sup_top),
             <span class: css.PSTRUT, style: "height:3em">
-            <span style: "height:" ++ util.fmt_em(sup_inner_h) ++ ";display:inline-block;font-size: 70%";
+            <span style: "height:" ++ util.fmt_em(sup_inner_h) ++ ";display:inline-block;font-size: 70%",
                 for (el in sup_elements) el
             >
         >
     ] else []
 
     let int_symbol_style = "margin-right:" ++ util.fmt_em(util.ceil_em2(int_italic))
-    let el = <span class: css.OP_GROUP;
-        <span class: "lm_op-symbol lm_large-op", style: int_symbol_style; display_text>
-        <span class: css.MSUBSUP;
-            <span class: css.VLIST_T2;
-                <span class: css.VLIST_R;
-                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height);
+    let el = <span class: css.OP_GROUP,
+        <span class: "lm_op-symbol lm_large-op", style: int_symbol_style, display_text>
+        <span class: css.MSUBSUP,
+            <span class: css.VLIST_T2,
+                <span class: css.VLIST_R,
+                    <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height),
                         for (el in sub_span) el
                         for (el in sup_span) el
                     >
-                    <span class: css.VLIST_S; "​">
+                    <span class: css.VLIST_S, "​">
                 >
-                <span class: css.VLIST_R;
+                <span class: css.VLIST_R,
                     <span class: css.VLIST, style: "height:" ++ util.fmt_em(depth_holder)>
                 >
             >
@@ -240,28 +240,28 @@ fn render_inline_big_op_scripts(base, node, context, render_fn) {
     let sup_box = render_fn(node.sup, ctx.sup_context(context))
     let sub_elements = box.elements_of(sub_box)
     let sup_elements = box.elements_of(sup_box)
-    let el = <span class: css.OP_GROUP;
-        <span class: "lm_op-symbol lm_small-op"; display_text>
-        <span class: css.MSUBSUP;
-            <span class: css.VLIST_T2;
-                <span class: css.VLIST_R;
-                    <span class: css.VLIST, style: "height:0.94em";
-                        <span style: "top:-2.71em";
+    let el = <span class: css.OP_GROUP,
+        <span class: "lm_op-symbol lm_small-op", display_text>
+        <span class: css.MSUBSUP,
+            <span class: css.VLIST_T2,
+                <span class: css.VLIST_R,
+                    <span class: css.VLIST, style: "height:0.94em",
+                        <span style: "top:-2.71em",
                             <span class: css.PSTRUT, style: "height:3em">
-                            <span style: "height:0.31em;display:inline-block;font-size: 70%";
+                            <span style: "height:0.31em;display:inline-block;font-size: 70%",
                                 for (el in sub_elements) el
                             >
                         >
-                        <span style: "top:-3.47em";
+                        <span style: "top:-3.47em",
                             <span class: css.PSTRUT, style: "height:3em">
-                            <span style: "height:0.46em;display:inline-block;font-size: 70%";
+                            <span style: "height:0.46em;display:inline-block;font-size: 70%",
                                 for (el in sup_elements) el
                             >
                         >
                     >
-                    <span class: css.VLIST_S; "\u200B">
+                    <span class: css.VLIST_S, "\u200B">
                 >
-                <span class: css.VLIST_R;
+                <span class: css.VLIST_R,
                     <span class: css.VLIST, style: "height:0.29em">
                 >
             >
@@ -311,7 +311,7 @@ fn ls_walk(items, i, pstrut, cp, maxp, minp, centers) {
 // positions, NOT folded into height (which would break the pstrut).
 fn large_op_box_metric(text) {
     {
-        element: <span class: "lm_op-symbol lm_large-op"; text>,
+        element: <span class: "lm_op-symbol lm_large-op", text>,
         height: 1.05,
         depth: 0.55001,
         width: 1.44445,
@@ -370,22 +370,22 @@ fn make_limits_stack(op_box, sub_box, sup_box, is_centered) {
     let r = ls_walk(items, 0, pstrut, depth0, depth0, depth0, [])
     let pstrut_style = "height:" ++ util.fmt_em_ceil2(pstrut)
     let centers = (for (c in r.centers)
-        <span class: css.CENTER, style: "top:" ++ util.fmt_em_ceil2(c.top);
+        <span class: css.CENTER, style: "top:" ++ util.fmt_em_ceil2(c.top),
             <span class: css.PSTRUT, style: pstrut_style>
-            <span style: ls_child_style(c.hd, c.fs);
+            <span style: ls_child_style(c.hd, c.fs),
                 for (e in box.elements_of(c.b)) e
             >
         >
     )
-    let el = <span class: css.OP_GROUP;
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(r.maxp);
+    let el = <span class: css.OP_GROUP,
+        <span class: css.VLIST_T2,
+            <span class: css.VLIST_R,
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(r.maxp),
                     for (c in centers) c
                 >
-                <span class: css.VLIST_S; "​">
+                <span class: css.VLIST_S, "​">
             >
-            <span class: css.VLIST_R;
+            <span class: css.VLIST_R,
                 <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(0.0 - r.minp)>
             >
         >
@@ -453,7 +453,7 @@ fn large_op_symbol_box(text) {
     // than sum/prod, so the surrounding depth_holder formula needs to know.
     // h+d typically ~1.61em but split differs.
     let d = large_op_symbol_depth(text)
-    box.ml_box_full(<span class: "lm_op-symbol lm_large-op"; text>,
+    box.ml_box_full(<span class: "lm_op-symbol lm_large-op", text>,
         1.61, d, 0.6, "mop", 0.0, 0.0, 1.61)
 }
 
@@ -555,7 +555,7 @@ fn ml_op_group_script_pair(base_box, script_box) {
     // scripted operators lose their mop spacing (`\sin^2 x`) and differ
     // structurally from limit-operator output.
     mark_scripted_box(box.ml_box_full(
-        <span class: css.OP_GROUP;
+        <span class: css.OP_GROUP,
             for (child in children) child
         >,
         max(base_box.height, script_box.height),
@@ -646,25 +646,25 @@ fn render_both(base_box, sup_box, sub_box, init_sup, init_sub,
         ";display:inline-block" ++ script_font_suffix(sup_font_scale)
     let sub_elements = box.elements_of(sub_box)
     let sup_elements = box.elements_of(sup_box)
-    let el = <span class: css.VLIST_T2;
-        <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(max_pos);
-                <span style: "top:" ++ util.fmt_em_ceil2(0.0 - pstrut - depth0 - sub_d_s);
+    let el = <span class: css.VLIST_T2,
+        <span class: css.VLIST_R,
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(max_pos),
+                <span style: "top:" ++ util.fmt_em_ceil2(0.0 - pstrut - depth0 - sub_d_s),
                     <span class: css.PSTRUT, style: pstrut_style>
-                    <span style: sub_style;
+                    <span style: sub_style,
                         for (e in sub_elements) e
                     >
                 >
-                <span style: "top:" ++ util.fmt_em_ceil2(0.0 - pstrut - cp_sup - sup_d_s);
+                <span style: "top:" ++ util.fmt_em_ceil2(0.0 - pstrut - cp_sup - sup_d_s),
                     <span class: css.PSTRUT, style: pstrut_style>
-                    <span style: sup_style;
+                    <span style: sup_style,
                         for (e in sup_elements) e
                     >
                 >
             >
-            <span class: css.VLIST_S; "​">
+            <span class: css.VLIST_S, "​">
         >
-        <span class: css.VLIST_R;
+        <span class: css.VLIST_R,
             <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(0.0 - min_pos)>
         >
     >
@@ -708,19 +708,19 @@ fn render_sub_only(base_box, sub_box, init_sub, x_height, si, is_char, font_scal
     // For compound sub_boxes (groups via hbox), strip the lm_base wrapper
     // so the inner span contains the atoms directly — matches MathLive.
     let inner_elements = box.elements_of(sub_box)
-    let el = <span class: css.VLIST_T2;
-        <span class: css.VLIST_R;
-            <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height);
-                <span style: "top:" ++ util.fmt_em(top) ++ ";margin-right:0.05em";
+    let el = <span class: css.VLIST_T2,
+        <span class: css.VLIST_R,
+            <span class: css.VLIST, style: "height:" ++ util.fmt_em(vlist_height),
+                <span style: "top:" ++ util.fmt_em(top) ++ ";margin-right:0.05em",
                     <span class: css.PSTRUT, style: "height:3em">
-                    <span style: inner_style;
+                    <span style: inner_style,
                         for (e in inner_elements) e
                     >
                 >
             >
-            <span class: css.VLIST_S; "​">
+            <span class: css.VLIST_S, "​">
         >
-        <span class: css.VLIST_R;
+        <span class: css.VLIST_R,
             <span class: css.VLIST, style: "height:" ++ util.fmt_em(depth_holder)>
         >
     >
@@ -768,30 +768,30 @@ fn render_sup_only(base_box, sup_box, init_sup, min_sup, x_height, context, font
     let inner_style = "height:" ++ util.fmt_em_ceil2(sup_h_s + sup_d_s) ++
         ";display:inline-block" ++ script_font_suffix(font_scale)
     let sup_elements = merge_script_elements(box.elements_of(sup_box))
-    let top_row = <span style: "top:" ++ util.fmt_em_ceil2(top) ++ ";margin-right:0.05em";
+    let top_row = <span style: "top:" ++ util.fmt_em_ceil2(top) ++ ";margin-right:0.05em",
         <span class: css.PSTRUT, style: "height:" ++ util.fmt_em_ceil2(pstrut)>
-        <span style: inner_style;
+        <span style: inner_style,
             for (el in sup_elements) el
         >
     >
     // Two vlist rows only when the content dips below the baseline (rare for a
     // sup, e.g. a deep descender shifted little); otherwise a single row.
     let el = if (has_depth)
-        <span class: css.VLIST_T2;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(max_pos);
+        <span class: css.VLIST_T2,
+            <span class: css.VLIST_R,
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(max_pos),
                     top_row
                 >
-                <span class: css.VLIST_S; "​">
+                <span class: css.VLIST_S, "​">
             >
-            <span class: css.VLIST_R;
+            <span class: css.VLIST_R,
                 <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(depth_out)>
             >
         >
     else
-        <span class: css.VLIST_T;
-            <span class: css.VLIST_R;
-                <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(max_pos);
+        <span class: css.VLIST_T,
+            <span class: css.VLIST_R,
+                <span class: css.VLIST, style: "height:" ++ util.fmt_em_ceil2(max_pos),
                     top_row
                 >
             >
@@ -824,8 +824,8 @@ fn can_merge_script_text(a, b) {
 }
 
 fn merge_script_two(a, b) {
-    let txt = (a[0]) ++ (b[0])
-    <span class: a.class; txt>
+    let txt = (a[0]) ++ (b[0]);
+    <span class: a.class, txt>
 }
 
 fn merge_script_scan(items, i, acc) {

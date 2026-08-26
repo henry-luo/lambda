@@ -2,43 +2,43 @@
 // Layer: 1 | Category: datatype | Covers: path types, schemes, wildcards
 
 // ===== Path literals =====
-/etc.hosts
-/usr.local.bin
+/.etc.hosts;
+/.usr.local.bin
 
 // ===== Path type check =====
-type(/etc.hosts)
+type(/.etc.hosts)
 
 // ===== Path with different schemes =====
 http.api.example.com
 https.secure.api
 
 // ===== Relative path =====
-.test.input.dir
+\.test.input.dir;
 
 // ===== Path with quoted segments =====
-/etc.'nginx.conf'
-/home.user.'config.json'
+/.etc.'nginx.conf';
+/.home.user.'config.json'
 
 // ===== Path in let binding =====
-let config = /etc.config
-config
+let config = /.etc.config
+config;
 
 // ===== Wildcard patterns =====
-/src.*
-/src.**
+/.src.*;
+/.src.**;
 
 // ===== Path in collections =====
-[/a, /b, http.x]
-{input: /data.input, output: /data.output}
+[/.a, /.b, http.x]
+{input: /.data.input, output: /.data.output}
 
 // ===== Dynamic segment =====
 let segment = "config"
-let dynamic = /etc[segment]
-dynamic
+let dynamic = /.etc[segment]
+dynamic;
 
 // ===== Path with 6+ segments =====
-/home.user.documents.projects.lambda.test
+/.home.user.documents.projects.lambda.test
 
 // ===== Path exists =====
-exists(/etc)
-exists(/this_path_does_not_exist)
+exists(/.etc)
+exists(/.this_path_does_not_exist)

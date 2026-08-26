@@ -1,0 +1,20 @@
+{
+  "name": "dom package checkbox behavior",
+  "html": "test/lambda/ui/dom_pkg_checkbox.ls",
+  "viewport": {"width": 400, "height": 300},
+  "events": [
+    {"type": "log", "message": "=== dom package supplies checkbox UA behavior ==="},
+    {"type": "assert_count", "target": {"selector": ".cb"}, "count": 1},
+    {"type": "assert_checked", "target": {"selector": ".cb"}, "checked": false},
+    {"type": "assert_count", "target": {"selector": ".changed"}, "count": 0},
+
+    {"type": "log", "message": "--- click: behavior template checks it and fires change ---"},
+    {"type": "click", "target": {"selector": ".cb"}},
+    {"type": "assert_checked", "target": {"selector": ".cb"}, "checked": true},
+    {"type": "assert_count", "target": {"selector": ".changed"}, "min_count": 1},
+
+    {"type": "log", "message": "--- click again: unchecks ---"},
+    {"type": "click", "target": {"selector": ".cb"}},
+    {"type": "assert_checked", "target": {"selector": ".cb"}, "checked": false}
+  ]
+}

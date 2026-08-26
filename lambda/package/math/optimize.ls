@@ -9,8 +9,8 @@ fn can_merge(a, b) {
 }
 
 fn merge_two(a, b) {
-    let txt = (a[0]) ++ (b[0])
-    <span class: a.class; txt>
+    let txt = (a[0]) ++ (b[0]);
+    <span class: a.class, txt>
 }
 
 fn do_merge(items, i, acc) {
@@ -46,7 +46,7 @@ fn build_merged(el) {
         (let kids = (for (i in 0 to (n - 1)) walk(el[i])),
          let merged = if (has_direct_merge_boundary_child(kids, 0)) kids else merge_list(kids),
          let items = (for (j in 0 to (len(merged) - 1)) merged[j]),
-         <span class: el.class, style: el.style, id: el.id, math_data_attrs: el.math_data_attrs;
+         <span class: el.class, style: el.style, id: el.id, math_data_attrs: el.math_data_attrs,
              for (c in items) c
          >)
 }

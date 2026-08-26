@@ -532,3 +532,209 @@ and migrate each guest on its own semantic authority.
 - **D4 — GC-root queries:** the current physical `MIR_reg_type()` uses may remain during the
   migration. Once root candidates carry `MirValue`, prefer `value_class` and provenance and keep
   only calls that are demonstrably required to form physical MIR operands.
+
+---
+
+## 10. Map field storage lanes and the TypedItem slot (added 2026-08-20)
+
+Expression representation (§1–§7) covers values in REGISTERS. This section is
+the same discipline for values in PACKED MAP SLOTS: one classification
+authority decides each field's storage lane, and every writer and reader obeys
+it. Rulings **TB1/TB2** below were given 2026-08-20; the boundary/adoption
+consequences live in [`Lambda_Design_Type_Boundary.md`](Lambda_Design_Type_Boundary.md),
+which defers to this section for the storage rules. Investigation record:
+`impl/Lambda_Impl_Tune19.md` §11.
+
+### 10.1 The classification authority and the slot formats
+
+`type_field_storage_type_id(entry->type)` (`lambda-data.hpp`) is the single
+authority; `shape_entry_storage_type_id` is its ShapeEntry wrapper. Verified
+slot formats as implemented:
+
+| classification | slot | writer arm |
+|---|---|---|
+| `BOOL` | 1B bool | `set_field_value` |
+| `INT` | 8B i64 lane (sentinels in-band) | same |
+| `INT64`/`UINT64` | 8B raw | same |
+| `FLOAT` | 8B double | same |
+| `NUM_SIZED` | 8B packed Item | same |
+| nullable native (`int?`, `float?`, `bool?`, pointer bases) | lane w/ sentinel via `map_shape_field_store_native_lane` | checked before the switch |
+| strings/symbols/decimal/dtime/complex/path + all containers | 8B raw pointer, null = 0, pointee self-describes | same |
+| `LMD_TYPE_NULL` (compiler could not resolve the field) | **8B raw tagged Item** | same |
+| `LMD_TYPE_UNDEFINED` | no payload (tag-only) | same |
+| `LMD_TYPE_ANY` | **9B packed `TypedItem`** (`#pragma pack(1)`: 1B tag + 8B payload union) | same, plus `map_field_store` (runtime twin) |
+
+### 10.2 When is TypedItem used on a store? — the complete inventory
+
+A field stores as TypedItem iff its entry classifies `LMD_TYPE_ANY`, which
+happens in exactly three ways:
+
+1. **The entry's type is `any`** — declared `any` fields, and literal fields
+   whose value the compiler could not type (ANY-census). This includes
+   `{value: v}` where `v` is an untyped parameter — i.e. the splay
+   `create_node` literal stores its `value` field as TypedItem TODAY, in the
+   literal's own inferred shape.
+2. **Abstract numeric contracts** — historically `TYPE_INTEGER`/`TYPE_NUMBER`
+   (deliberate: a numeric Item, never a `Type*` payload). After TB4 only
+   `number` remains here; `integer` reclassifies to the `Decimal*` lane.
+3. **`LMD_TYPE_TYPE` non-simple contracts** — unions without a
+   native-base null form, constrained `T where …`, and occurrence contracts
+   `T[]`/`T[]?` (the TB1 gap).
+
+Write sites: `set_field_value` (core; reached from `map_fill`/`set_fields`/
+`set_fields_items` at construction) and `map_field_store` (runtime twin in
+`lambda-eval.cpp`; reached from `map_rebuild_for_type_change`). Read sites:
+`_map_read_field`'s ANY arm → `typeditem_to_item`, wrapped by
+`map_shape_field_to_item` and the validator's field readers. ⚠ The C16
+subtlety: an `int` in a TypedItem stores its VALUE in `double_val`, not an
+Item payload.
+
+**TB3 (2026-08-20) — why TypedItem exists, and what it does NOT license.**
+TypedItem's purpose is that WIDE SCALARS pack inline: `int64`, `uint64`, and a
+BigInt's `Decimal*` all fit the 9-byte tag+payload slot with **no heap box and
+no extra allocation** — the same rationale as arrays packing wide scalars
+inline in their payload rather than boxing per element. `{a: any}` and
+`{value: v}` with `v` untyped legitimately store as TypedItem. But TypedItem
+is **one possible packing, chosen by the VALUE's own shape** — a contract
+never dictates packing. `{a: true}` packs `a` as a 1-byte bool slot and must
+work where `{a: any}` is expected: readers resolve through the value's own
+`ShapeEntry` (`map_shape_field_to_item` walks the value's TypeMap, never the
+contract's), and the emitter must not assume ANY packing for an any/untyped
+field — no fast lane, generic accessor only. Both halves are already enforced:
+`is_direct_access_type(LMD_TYPE_ANY)` is false, and every reader dispatches on
+the value's entry. TB3 makes them normative.
+
+Three asymmetries worth knowing:
+
+- **Two dynamic conventions coexist**: a `NULL`-classified field stores an
+  8-byte raw Item; an `ANY`-classified field stores a 9-byte TypedItem. The
+  9-byte form exists because full-width `int64`/`uint64` cannot live in an
+  8-byte Item without a heap home; TypedItem gives them an inline payload.
+- **The writer is duplicated**: `set_field_value` (core) and
+  `map_field_store` (runtime) implement the same convention independently.
+- **The mutation path already drifts to actual-member storage**: `fn_map_set`
+  on an ANY/union-classified entry can never take its same-type fast path
+  (a value's runtime type is never ANY), so it falls to
+  `map_rebuild_for_type_change`, which replaces the entry's type with the
+  concrete stored member. TypedItem slots are therefore written at
+  CONSTRUCTION and admission-rebuild time; ordinary mutation erases them.
+  This is TB2's storage model already in force on one of the two paths.
+
+### 10.3 Rulings TB1 and TB2 (2026-08-20)
+
+**TB1 — occurrence contracts are pointer lanes.** `T[]` and `T[]?` classify to
+the pointer lane (8B `Container*`, null = 0, pointee self-describes), never to
+ANY/TypedItem. The `ShapeEntry.type` keeps the full `int[]` contract — TB1
+changes only the storage classification. Today's classifier misses this
+because an occurrence's own `type_id` is `LMD_TYPE_TYPE`, so it falls into the
+non-simple → ANY branch before the pointer-lane check can see the base.
+
+**TB2 — union fields are packed by their ACTUAL member, and compiled code
+never addresses them by fixed offset.** The union contract lives in the
+admission layer only; the runtime shape records the current member (which
+§10.2's mutation-path note shows is already the behavior on store); switching
+members is a shape transition. Compiled code reads such fields through the
+generic accessor (`map_get`/`fn_member`) — already enforced at the emitter,
+since `is_direct_access_type(LMD_TYPE_ANY)` is false. Width-compatibility is
+NOT sufficient to share a slot without the tag: `int | float` are both 8B but
+carry i64-lane vs double — the tag is what disambiguates.
+
+**TB4 (2026-08-20) — abstract numerics split.** `number` → TypedItem is ruled
+acceptable (its domain spans every numeric carrier; the tag disambiguates).
+`integer` → ruled to the **`Decimal*` pointer lane** (integer ≤ decimal), with
+one consequence flagged for confirmation before implementation. The runtime
+facts: there is NO `LMD_TYPE_INTEGER` value tag. `TYPE_INTEGER` is an abstract
+`LMD_TYPE_TYPE` singleton; membership (`is`, validator, admission) is
+`item_type_is_integer_subtype` — compact `int` (int53 lane), `int64`,
+`uint64`, integral `NUM_SIZED`, **plus BigInt, which is carried as `Decimal*`
+with `Decimal.unlimited == DECIMAL_BIGINT`** (`lambda.h:1357`);
+`TYPE_INTEGER_VALUE = {.type_id = LMD_TYPE_DECIMAL}` is what `is`/`type()`
+report for a BigInt payload. So `Decimal*` is today the carrier of the
+UNBOUNDED tail only (`123n` literals): a `n: integer` field on the `Decimal*`
+lane converts a compact-int store into a heap Decimal.
+
+**CONFIRMED 2026-08-20: `integer` → `Decimal*` lane, boxing accepted** —
+uniform lane, consistent with the `decimal` type. Consequence worth naming: an
+`integer`-contracted field becomes a POINTER lane, so contracts containing
+`integer` fields are storage-valid and adoptable under the Type_Boundary gate.
+
+Recorded refinements, not blockers: (a) Decimal/BigInt sharing one
+`LMD_TYPE_DECIMAL` tag discriminated by `Decimal.unlimited` is accepted for
+now; (b) `Decimal` is currently a two-word wrapper
+`{uint8_t unlimited; mpd_t* dec_val;}` (`lambda-data.hpp:160`) — the
+discriminator should eventually move inside the `mpd_t` allocation so the
+wrapper shrinks, using libmpdec's public fields only (vendored code is off
+limits, CLAUDE.md rule 16).
+
+**TB5 (2026-08-20) — non-simple contracts never classify ANY.** Each falls to
+an existing lane: occurrence `T[]`/`T[]?` → pointer lane (TB1); constrained
+`T where …` → the BASE type's lane; union → admission-only, storage records
+the actual member (TB2). **Final TypedItem whitelist (confirmed 2026-08-20): exactly `any`, untyped
+(ANY-census), and `number`.** Nothing else classifies to TypedItem; declared
+composite contracts stop producing TypedItem slots entirely.
+
+### 10.4 Union-typed LOCALS — the register side (verified 2026-08-20)
+
+The register-world analogue of TB2. For a local `let a: T1 | T2 = …` there is
+no shape entry to record the actual member — the boxed **Item's tag** plays
+that role, and there is no TypedItem in registers (wide scalars go through
+number/scalar homes instead). Verified behavior matrix:
+
+| declaration | carrier today | verdict |
+|---|---|---|
+| `T \| null` (one concrete payload) | normalized to `T?` → T's NATIVE nullable lane (in-band sentinel; `x = null` and `x is null` verified correct) | ✓ correct |
+| `int \| string`, dynamic RHS | boxed Item + `lambda_type_check` per unproven store | ✓ correct |
+| any union, statically invalid member (`z = "oops"` into `int \| float`) | compile-time `E201` rejection | ✓ correct |
+| any union, statically proven member (`z = z + 1` all-int) | check elided (T-A1 redundancy) | ✓ correct |
+| **union, member SWITCH** | boxed Item carrier from declaration; both directions verified, static and dynamic | ✓ **fixed 2026-08-20** |
+| union, out-of-union store (`a = 1.5` into `int \| string`) | runtime E201 at the assignment boundary, containable with `^` | ✓ **fixed 2026-08-20** (was: skipped the check, then miscompiled) |
+
+**G6 — FIXED 2026-08-20** (was pre-existing; reproduced on the session-start
+control). Root cause: the declaration lowering already decided
+`var_tid = LMD_TYPE_ANY` for union annotations — with a comment stating the
+invariant — and the inference-narrowing line three lines below (written for
+UNANNOTATED bindings) clobbered it back to the initializer's member. Symptoms:
+`z = 1.5` (static) failed MIR verification (`dmov` into the i64 register);
+`z = f()` returning 1.5 dynamically **silently coerced to 1** in the old int
+carrier; `a = "s"` happened to work (pointer RHS is already an i64 word),
+which is why the defect hid — only a float member switch tripped it.
+
+The fix, scoped to `TYPE_KIND_BINARY` so occurrence (`int[]`) and optional
+declarations keep their existing carriers exactly:
+
+1. the narrowing line is guarded off for binary-union annotations, and the
+   initializer is boxed into the Item carrier at declaration;
+2. the assignment boundary gains a membership clause: a union contract checks
+   every store the compiler cannot statically prove
+   (`mir_boundary_is_redundant` still elides proven members) — previously a
+   concrete-but-unproven RHS (`a = 1.5` into `int \| string`) skipped the
+   check entirely because its val_tid was neither ANY nor NULL.
+
+The assignment store needed no change — its `ANY-var ← concrete val` arm
+already boxes. Regression test:
+`test/lambda/proc/union_local_carrier.ls` (static switches both directions,
+dynamic switch, pointer member, `is` on the current member, `T \| null` lane
+preservation, and the out-of-union rejection contained with `^`). Baseline
+3828/3828. The benchmark corpus contains zero union-typed locals (grepped), so
+there is no perf exposure and no paired run was warranted.
+
+⚠ Probe authoring note: `x is null ++ "\n"` parses as `x is (null ++ "\n")`
+and prints `false` — a precedence trap that briefly looked like a soundness
+bug. Parenthesize or bind to a local before printing.
+
+### 10.4b Known violations (gap ledger)
+
+| gap | site | state |
+|---|---|---|
+| G1 | classifier sends `T[]`/`T[]?` to ANY | **FIXED 2026-08-20** — occurrence contracts classify to the pointer lane (`LMD_TYPE_ARRAY`); the pointee's own `type_id` discriminates Array vs ArrayNum, as `map?` fields already do |
+| G2 | unions classify ANY at construction | open — admission-only under TB2; construction should record the actual member like mutation already does |
+| G2b | constrained `T where …` classifies ANY | **FIXED 2026-08-20** — recurses to the base type's lane (self-reference guarded) |
+| G5 | `integer` classifies ANY/TypedItem | ruled `Decimal*` (TB4) but **NOT implemented — needs conversion plumbing first.** `set_field_value`'s DECIMAL arm is a bare `*(Decimal**)field_ptr = item.get_decimal()`: it assumes the Item ALREADY carries a Decimal. Reclassifying without a compact-int → heap-Decimal conversion at the store (and in `map_field_store`, its runtime twin) would silently corrupt `n: integer = 3`. Split out of the G1/G2b slice for that reason |
+| G6 | union-typed LOCAL's carrier narrowed from the initializer (§10.4) | **FIXED 2026-08-20** — boxed Item from declaration for binary-union annotations + membership check on unproven stores; test `test/lambda/proc/union_local_carrier.ls` |
+| G3 | AST contract shapes: offsets computed under a flat `sizeof(void*)` stride, slots consumed as 9B TypedItem — malformed | **FIXED 2026-08-20** — the map-TYPE parser (`parse_type_pattern.cpp`, both sites) now strides by `type_info[type_field_storage_type_id(...)].byte_size`. It was ONE builder, not the multi-path audit §11.3 anticipated (Tune19 §12.7) |
+| G4 | `set_field_value`/`map_field_store` honor ANY on G3 shapes (the byte-24 tag clobber, byte-32 overflow of Tune19 §11.3) | closes with G1–G3 |
+
+⚠ Open observation: the `map_get ANY type is UNKNOWN: 0` [ERR!] lines visible
+in the PASSING `proc_type_numeric_structural_admission` run mean an ANY slot
+with tag 0 is read somewhere in today's green tree — the seam may already be
+touched benignly. Audit alongside G3.

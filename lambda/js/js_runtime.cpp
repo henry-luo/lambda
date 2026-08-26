@@ -11,9 +11,11 @@
 #include "js_regex_generated_properties.h"
 #include "js_state_guards.h"
 #include "js_exec_profile.h"
-#include "js_permission.h"
+#include "../jube/jube_node_permission.h"
 #include "../jube/jube_registry.h"
 #include "../jube/jube_interface.h"
+#include "../module/node_core/node_trace_events.hpp"
+#include "../module/node_core/node_runtime_state.hpp"
 #include "../runtime/lambda-error.h"
 #include "../runtime/lambda-root-frame.hpp"
 #include "../runtime/heap_api.h"
@@ -76,7 +78,6 @@ Item js_set_name_key(Item object, const char* name, Item value) {
 #define js_dc_key js_runtime_key
 #define js_cluster_key js_runtime_key
 #define js_repl_key js_runtime_key
-#define js_trace_key js_runtime_key
 #define js_async_hooks_key js_runtime_key
 #define js_vm_stm_key js_runtime_key
 #define js_cc_key js_runtime_key
@@ -235,7 +236,7 @@ extern "C" double it2d(Item item);
 
 static bool js_mir_owner_is_current(Context* runtime, const char* boundary) {
     EvalContext* owner = (EvalContext*)runtime;
-    if (!owner || !eval_context_thread_matches(owner) ||
+    if (!owner || !eval_context_matches(owner) ||
             !js_runtime_state_thread_matches(owner)) {
         // Retained MIR owners validate routing; they must never authorize a
         // native callback to replace this thread's evaluator.
@@ -460,7 +461,7 @@ static int64_t js_array_dense_required(const Array* arr) {
 static bool js_array_value_is_numeric(Item value) {
     TypeId value_type = get_type_id(value);
     return value_type == LMD_TYPE_INT || value_type == LMD_TYPE_INT64 ||
-        value_type == LMD_TYPE_FLOAT || value_type == LMD_TYPE_FLOAT64 ||
+        value_type == LMD_TYPE_FLOAT ||
         value_type == LMD_TYPE_UINT64;
 }
 
@@ -4680,6 +4681,13 @@ static const JsBuiltinProtoSpec k_builtin_proto_specs[] = {
     {"String", "__primitiveValue__", JS_PROTO_VALUE_EMPTY_STRING, 0},
 };
 
+static void js_define_data_prop_key(Item object, Item key, Item value, uint8_t flags) {
+    js_set_key_default(object, key, value);
+    if (flags & JS_PROTO_PROP_NON_ENUMERABLE) js_mark_non_enumerable(object, key);
+    if (flags & JS_PROTO_PROP_NON_WRITABLE) js_mark_non_writable(object, key);
+    if (flags & JS_PROTO_PROP_NON_CONFIGURABLE) js_mark_non_configurable(object, key);
+}
+
 static void js_define_data_prop(Item object, const char* name, int name_len,
         Item value, uint8_t flags) {
     Item key = js_name_item(name, name_len);
@@ -5449,11 +5457,9 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         js_materialize_builtin_proto_specs(fn->prototype, nm, nl);
                         // Array.prototype.length = 0 (per spec, Array.prototype is an Array exotic object)
                         if (nl == 5 && strncmp(nm, "Array", 5) == 0) {
-                            Item lk = (Item){.item = s2it(heap_create_name("length", 6))};
-                            js_set_key_default(fn->prototype, lk, js_make_number(0));
                             // ES spec: length is {writable:true, enumerable:false, configurable:false}
-                            js_mark_non_enumerable(fn->prototype, lk);
-                            js_mark_non_configurable(fn->prototype, lk);
+                            js_define_data_prop(fn->prototype, "length", 6, js_make_number(0),
+                                JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_CONFIGURABLE);
                             // ES spec 23.1.3.34: Array.prototype[@@unscopables]
                             // {writable:false, enumerable:false, configurable:true}
                             // Value: object with boolean true for each scoped-out method
@@ -5468,10 +5474,8 @@ extern "C" Item js_get_key_core(Item object, Item key,
                                 Item uk = (Item){.item = s2it(heap_create_name(unscopal_keys[ui], strlen(unscopal_keys[ui])))};
                                 js_set_key_default(unscopal_val, uk, (Item){.item = b2it(true)});
                             }
-                            Item us_k = js_well_known_symbol_key(11);
-                            js_set_key_default(fn->prototype, us_k, unscopal_val);
-                            js_mark_non_enumerable(fn->prototype, us_k);
-                            js_mark_non_writable(fn->prototype, us_k);
+                            js_define_data_prop_key(fn->prototype, js_well_known_symbol_key(11),
+                                unscopal_val, JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE);
                         }
                         // Annex B Object.prototype.__proto__ accessor.
                         if (nl == 6 && strncmp(nm, "Object", 6) == 0) {
@@ -5494,20 +5498,11 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         // v18g: For error constructors, set name and message on prototype
                         bool is_error = js_intrinsic_is_error_name(nm, nl);
                         if (is_error) {
-                            Item nk = (Item){.item = s2it(heap_create_name("name", 4))};
-                            Item nv = (Item){.item = s2it(heap_create_name(nm, nl))};
-                            js_set_key_default(fn->prototype, nk, nv);
-                            js_mark_non_enumerable(fn->prototype, nk);
-                            Item mk = (Item){.item = s2it(heap_create_name("message", 7))};
-                            Item mv = (Item){.item = s2it(heap_create_name("", 0))};
-                            js_set_key_default(fn->prototype, mk, mv);
-                            js_mark_non_enumerable(fn->prototype, mk);
+                            js_define_data_prop(fn->prototype, "name", 4, js_name_item(nm, nl), JS_PROTO_PROP_NON_ENUMERABLE);
+                            js_define_data_prop(fn->prototype, "message", 7, js_name_item("", 0), JS_PROTO_PROP_NON_ENUMERABLE);
                             // Set Error.prototype.toString to generic Error toString builtin
-                            Item ts_key = (Item){.item = s2it(heap_create_name("toString", 8))};
-                            Item ts_fn = js_intrinsic_binding_get(
-                                JS_BUILTIN_OWNER_ERROR_INTERNAL, "toString", 8);
-                            js_set_key_default(fn->prototype, ts_key, ts_fn);
-                            js_mark_non_enumerable(fn->prototype, ts_key);
+                            js_define_data_prop(fn->prototype, "toString", 8,
+                                js_intrinsic_binding_get(JS_BUILTIN_OWNER_ERROR_INTERNAL, "toString", 8), JS_PROTO_PROP_NON_ENUMERABLE);
                             // For error subclasses, set __proto__ to Error.prototype
                             if (!(nl == 5 && strncmp(nm, "Error", 5) == 0)) {
                                 Item err_name = (Item){.item = s2it(heap_create_name("Error", 5))};
@@ -5577,9 +5572,7 @@ extern "C" Item js_get_key_core(Item object, Item key,
                             Item values_fn = js_intrinsic_binding_get(
                                 JS_BUILTIN_OWNER_SET_PROTOTYPE_METHOD, "values", 6);
                             if (values_fn.item != ItemNull.item) {
-                                Item keys_key = (Item){.item = s2it(heap_create_name("keys", 4))};
-                                js_set_key_default(fn->prototype, keys_key, values_fn);
-                                js_mark_non_enumerable(fn->prototype, keys_key);
+                                js_define_data_prop(fn->prototype, "keys", 4, values_fn, JS_PROTO_PROP_NON_ENUMERABLE);
                             }
                             // Symbol.iterator = values
                             js_intrinsic_set_symbol_method(fn->prototype, 1,
@@ -5629,10 +5622,8 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         }
                         // v88: Populate Promise.prototype methods
                         if (nl == 7 && strncmp(nm, "Promise", 7) == 0) {
-                            Item ctor_key = (Item){.item = s2it(heap_create_name("constructor", 11))};
-                            Item ctor_val = (Item){.function = (Function*)fn};
-                            js_set_key_default(fn->prototype, ctor_key, ctor_val);
-                            js_mark_non_enumerable(fn->prototype, ctor_key);
+                            js_define_data_prop(fn->prototype, "constructor", 11,
+                                (Item){.function = (Function*)fn}, JS_PROTO_PROP_NON_ENUMERABLE);
                             // Symbol.toStringTag = "Promise"
                             js_intrinsic_set_to_string_tag(fn->prototype, "Promise", 7);
                         }
@@ -5645,11 +5636,8 @@ extern "C" Item js_get_key_core(Item object, Item key,
                         }
                         // v29: Populate String.prototype methods for test262 compliance
                         if (nl == 6 && strncmp(nm, "String", 6) == 0) {
-                            Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
-                            js_set_key_default(fn->prototype, length_key, (Item){.item = i2it(0)});
-                            js_mark_non_writable(fn->prototype, length_key);
-                            js_mark_non_enumerable(fn->prototype, length_key);
-                            js_mark_non_configurable(fn->prototype, length_key);
+                            js_define_data_prop(fn->prototype, "length", 6, (Item){.item = i2it(0)},
+                                JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE | JS_PROTO_PROP_NON_CONFIGURABLE);
                             // Symbol.iterator
                             js_intrinsic_set_symbol_method(fn->prototype, 1,
                                 JS_BUILTIN_OWNER_STRING_ITERATOR_INTERNAL,
@@ -5674,14 +5662,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
                                 js_set_prototype(function_proto_root.get(),
                                     object_proto_root.get());
                             }
-                            Item length_key = (Item){.item = s2it(heap_create_name("length", 6))};
-                            js_set_key_default(fn->prototype, length_key, (Item){.item = i2it(0)});
-                            js_mark_non_writable(fn->prototype, length_key);
-                            js_mark_non_enumerable(fn->prototype, length_key);
-                            Item name_key = (Item){.item = s2it(heap_create_name("name", 4))};
-                            js_set_key_default(fn->prototype, name_key, (Item){.item = s2it(heap_create_name("", 0))});
-                            js_mark_non_writable(fn->prototype, name_key);
-                            js_mark_non_enumerable(fn->prototype, name_key);
+                            js_define_data_prop(fn->prototype, "length", 6, (Item){.item = i2it(0)},
+                                JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE);
+                            js_define_data_prop(fn->prototype, "name", 4, js_name_item("", 0),
+                                JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE);
                             js_populate_builtin_prototype_methods(fn->prototype, nm, nl);
                             Item thrower = js_intrinsic_binding_get(
                                 JS_BUILTIN_OWNER_FUNCTION_SYMBOL_INTERNAL, "ThrowTypeError", 14);
@@ -5689,13 +5673,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
                             Item arguments_key = (Item){.item = s2it(heap_create_name("arguments", 9))};
                             js_install_native_accessor(fn->prototype, caller_key, thrower, thrower, JSPD_NON_ENUMERABLE);
                             js_install_native_accessor(fn->prototype, arguments_key, thrower, thrower, JSPD_NON_ENUMERABLE);
-                            Item has_instance_key = js_well_known_symbol_key(3);
-                            Item has_instance = js_intrinsic_binding_get(
-                                JS_BUILTIN_OWNER_FUNCTION_SYMBOL_INTERNAL, "[Symbol.hasInstance]", 20);
-                            js_set_key_default(fn->prototype, has_instance_key, has_instance);
-                            js_mark_non_writable(fn->prototype, has_instance_key);
-                            js_mark_non_enumerable(fn->prototype, has_instance_key);
-                            js_mark_non_configurable(fn->prototype, has_instance_key);
+                            js_define_data_prop_key(fn->prototype, js_well_known_symbol_key(3),
+                                js_intrinsic_binding_get(JS_BUILTIN_OWNER_FUNCTION_SYMBOL_INTERNAL,
+                                    "[Symbol.hasInstance]", 20),
+                                JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE | JS_PROTO_PROP_NON_CONFIGURABLE);
                         }
                         // Boolean methods must be published on the real
                         // prototype. Property-miss synthesis formerly hid the
@@ -17192,6 +17173,47 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
     // Unicode binary properties such as Alphabetic are valid in both /u and
     // /v but RE2 does not recognize all of their names. Flatten their generated
     // ranges together with /v set operations before RE2 sees the class.
+    // The rewriter below only flattens property escapes that sit *inside* a
+    // class, so a bare \p{White_Space} reached RE2 unflattened and threw
+    // "invalid character class range", while the identical [\p{White_Space}]
+    // matched fine. Wrap bare property escapes in a one-element class first so
+    // both spellings take the same path. 13 of the 20 most common binary
+    // properties were affected (White_Space, Alphabetic, Math, Uppercase, ...).
+    std::string bare_property_wrapped;
+    if (compile_info.unicode || compile_info.unicode_sets) {
+        int class_depth = 0;
+        bool wrapped_any = false;
+        for (int i = 0; i < vpat_len; i++) {
+            char c = vpat[i];
+            if (c == '\\' && i + 1 < vpat_len) {
+                char nx = vpat[i + 1];
+                if (class_depth == 0 && (nx == 'p' || nx == 'P') &&
+                        i + 2 < vpat_len && vpat[i + 2] == '{') {
+                    int close = i + 3;
+                    while (close < vpat_len && vpat[close] != '}') close++;
+                    if (close < vpat_len) {
+                        bare_property_wrapped += (nx == 'P') ? "[^\\p{" : "[\\p{";
+                        bare_property_wrapped.append(vpat + i + 3, (size_t)(close - (i + 3)));
+                        bare_property_wrapped += "}]";
+                        i = close;
+                        wrapped_any = true;
+                        continue;
+                    }
+                }
+                bare_property_wrapped += c;
+                bare_property_wrapped += nx;
+                i++;
+                continue;
+            }
+            if (c == '[') class_depth++;
+            else if (c == ']' && class_depth > 0) class_depth--;
+            bare_property_wrapped += c;
+        }
+        if (wrapped_any) {
+            vpat = bare_property_wrapped.c_str();
+            vpat_len = (int)bare_property_wrapped.size();
+        }
+    }
     if (compile_info.unicode || compile_info.unicode_sets) {
         char* rewritten = nullptr;
         int rewritten_len = 0;
@@ -19164,6 +19186,17 @@ static Item js_regexp_symbol_search(Item this_val, Item arg0) {
 
 // RegExp.prototype[@@split](string, limit)
 // RegExp.prototype[@@split](string, limit) — ES spec §22.2.5.13
+// True when a UTF-16 code-unit index names the *trailing* half of an astral
+// character. The subject stays UTF-8, where that boundary lives inside a single
+// 4-byte sequence and therefore has no byte offset — `exec` cannot be seated
+// there at all. In a well-formed UTF-8 subject a low surrogate code unit only
+// ever arises as the second half of such a pair, so this is exact.
+static bool js_split_index_is_trailing_surrogate(String* s, int index) {
+    if (!s || s->is_ascii || index <= 0) return false;
+    int unit = js_utf16_code_unit_at(s->chars, (int)s->len, (bool)s->is_ascii, index);
+    return utf_is_low_surrogate((uint32_t)unit);
+}
+
 static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     // Step 2: Type(rx) must be Object
     if (!js_is_object_value(this_val)) {
@@ -19209,9 +19242,18 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
         if (fl[i] == 'u') unicode_matching = true;
         if (fl[i] == 'y') has_y = true;
     }
-    int size = unicode_matching
-        ? (int)(s_str ? js_utf16_len(s_str->chars, (int)s_str->len, (bool)s_str->is_ascii) : 0)
-        : byte_size;
+    // RegExpExec reports match positions and writes lastIndex in UTF-16 code
+    // units whatever the flags say, so @@split's own cursors must count the
+    // same unit. Sizing and slicing this loop in UTF-8 bytes only agreed with
+    // `e` for ASCII subjects; on any wider character the two drifted apart and
+    // the loop both sliced mid-character and compared incommensurable offsets.
+    // `unicode_matching` still selects surrogate-pair handling in
+    // AdvanceStringIndex below — that, and not the index unit, is what `u`
+    // governs here.
+    int size = (int)(s_str
+        ? js_utf16_len(s_str->chars, (int)s_str->len, (bool)s_str->is_ascii)
+        : 0);
+    (void)byte_size;
     // Step 7: newFlags = has_y ? flags : flags + "y"
     Item new_flags_item;
     if (has_y) {
@@ -19251,8 +19293,6 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     // Step 12: If lim == 0, return A.
     if (lim == 0) return A;
 
-    const char* chars = s_str ? s_str->chars : "";
-
     // Step 13: If size == 0:
     if (size == 0) {
         // a. z = ? RegExpExec(splitter, S)
@@ -19266,37 +19306,73 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
 
     // Step 14-onwards: q = p = 0; loop
     int p = 0, q = 0;
+    // Without `u`, AdvanceStringIndex steps one code unit, so `q` can land
+    // between an astral character's surrogate halves — a position this UTF-8
+    // subject cannot express as a byte offset. Only a zero-width match is
+    // possible there: a pattern needing surrogate granularity would already
+    // have had its subject expanded (needs_utf16_subject), and anything
+    // consuming input cannot start inside a character. So carry the splitter's
+    // zero-width answer from the last position we *could* seat it and apply it
+    // to the one we cannot, instead of asking exec for an impossible offset.
+    JsRegexData* split_rd = js_get_regex_data(splitter);
+    bool subject_is_utf8 = !unicode_matching &&
+        (!split_rd || !split_rd->needs_utf16_subject);
+    bool zero_width_at_last_seat = false;
+    // The last successful match object, replayed for its captures when the
+    // synthesized branch below stands in for an unseatable position.
+    Item last_z = ItemNull;
     Item li_key = js_name_item("lastIndex", 9);
     while (q < size) {
-        // a. ? Set(splitter, "lastIndex", q, true)
-        JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(splitter, li_key, q));
-        // b. z = ? RegExpExec(splitter, S)
-        JS_ASSIGN_OR_RETURN(z, js_regexp_exec_dispatch(splitter, str));
+        Item z = ItemNull;
+        bool synthesized = subject_is_utf8 &&
+            js_split_index_is_trailing_surrogate(s_str, q);
+        if (synthesized) {
+            if (!zero_width_at_last_seat) {
+                q = (int)js_regex_advance_string_index_units(s_str, q, unicode_matching);
+                continue;
+            }
+            // Stand in for exec: a zero-width match at q, carrying the last
+            // match object so the capture replay below stays identical.
+            z = last_z;
+        } else {
+            // a. ? Set(splitter, "lastIndex", q, true)
+            JS_ASSIGN_OR_RETURN(set_result, js_regex_set_lastindex_strict(splitter, li_key, q));
+            // b. z = ? RegExpExec(splitter, S)
+            JS_ASSIGN_OR_RETURN_INTO(z, js_regexp_exec_dispatch(splitter, str));
+        }
         // c. If z is null, q = AdvanceStringIndex(S, q, unicode)
         if (get_type_id(z) == LMD_TYPE_NULL || z.item == ItemNull.item) {
+            zero_width_at_last_seat = false;
             q = (int)js_regex_advance_string_index_units(s_str, q, unicode_matching);
         } else {
             // d. e = ? ToLength(? Get(splitter, "lastIndex"))
-            JS_ASSIGN_OR_RETURN(li_val, js_get_key_default(splitter, li_key));
-            JS_ASSIGN_OR_RETURN(li_num, js_to_number(li_val));
-            double dle = js_get_number(li_num);
             int64_t e_int;
-            if (isnan(dle) || dle <= 0) e_int = 0;
-            else if (dle > 9007199254740991.0) e_int = (int64_t)9007199254740991LL;
-            else e_int = (int64_t)dle;
+            if (synthesized) {
+                e_int = q;  // zero-width by construction; lastIndex is stale here
+            } else {
+                JS_ASSIGN_OR_RETURN(li_val, js_get_key_default(splitter, li_key));
+                JS_ASSIGN_OR_RETURN_INTO(li_val, js_to_number(li_val));
+                double dle = js_get_number(li_val);
+                if (isnan(dle) || dle <= 0) e_int = 0;
+                else if (dle > 9007199254740991.0) e_int = (int64_t)9007199254740991LL;
+                else e_int = (int64_t)dle;
+            }
             // e. e = min(e, size)
             int e = (e_int > size) ? size : (int)e_int;
+            if (!synthesized) {
+                // the splitter is sticky, so a match begins at q; e == q means
+                // it matched zero-width right here.
+                zero_width_at_last_seat = (e == q);
+                last_z = z;
+            }
             // f. If e == p, q = AdvanceStringIndex(S, q, unicode)
             if (e == p) {
                 q = (int)js_regex_advance_string_index_units(s_str, q, unicode_matching);
             } else {
                 // i. T = substring(S, p, q)
                 int t_len = q - p;
-                Item T = (t_len > 0)
-                    ? (unicode_matching
-                        ? js_str_substring_utf16(str, p, q)
-                        : (Item){.item = s2it(heap_strcpy((char*)(chars + p), t_len))})
-                    : js_name_item("", 0);
+                Item T = (t_len > 0) ? js_str_substring_utf16(str, p, q)
+                                     : js_name_item("", 0);
                 // ii. Append T to A; lengthA++; if lengthA == lim, return A
                 js_array_push(A, T); lengthA++;
                 if ((uint32_t)lengthA == lim) return A;
@@ -19326,11 +19402,8 @@ static Item js_regexp_symbol_split(Item this_val, Item str, Item limit) {
     }
     // Step 17-18: T = substring(S, p, size); append T
     int t_len = size - p;
-    Item T = (t_len > 0)
-        ? (unicode_matching
-            ? js_str_substring_utf16(str, p, size)
-            : (Item){.item = s2it(heap_strcpy((char*)(chars + p), t_len))})
-        : js_name_item("", 0);
+    Item T = (t_len > 0) ? js_str_substring_utf16(str, p, size)
+                         : js_name_item("", 0);
     js_array_push(A, T);
     return A;
 }
@@ -22411,6 +22484,23 @@ static Item js_string_intrinsic_algorithm(Item str,
             Item result = js_array_new(0);
             js_array_push(result, js_name_item("", 0));
             return result;
+        }
+        String* sep_str = it2s(sep);
+        if (sep_str && sep_str->len == 0 && !sstr->is_ascii) {
+            // An empty separator splits into UTF-16 code units in ECMAScript,
+            // so an astral character becomes its two surrogate halves.
+            // Lambda's fn_split splits by code point (S17.1.1) — right for
+            // Lambda, wrong here. ASCII keeps the shared path: there the two
+            // readings coincide and fn_split is cheaper.
+            Item units_result = js_array_new(0);
+            int64_t units = js_utf16_len(sstr->chars, (int)sstr->len,
+                (bool)sstr->is_ascii);
+            for (int64_t i = 0; i < units; i++) {
+                if ((uint64_t)i >= (uint64_t)lim) break;
+                js_array_push(units_result,
+                    js_str_substring_utf16(str, (int)i, (int)i + 1));
+            }
+            return units_result;
         }
         Item result = fn_split(str, sep);
         // Clear is_content flag to prevent array flattening in JS context
@@ -32662,15 +32752,22 @@ static Item js_dc_stores_key(void);
 extern "C" Item js_als_context_call_args(Item context, Item callback, Item this_val, Item* args, int argc);
 
 #define JS_DC_CHANNEL_MAX JS_DIAGNOSTICS_CHANNEL_MAX
-#define js_dc_channel_names (js_runtime_state.diagnostics_channels.channel_names)
-#define js_dc_channels (js_runtime_state.diagnostics_channels.channels)
-#define js_dc_channel_count (js_runtime_state.diagnostics_channels.channel_count)
-#define js_dc_channel_proto (js_runtime_state.diagnostics_channels.channel_prototype)
-#define js_dc_tracing_channel_proto (js_runtime_state.diagnostics_channels.tracing_channel_prototype)
-#define js_dc_bounded_channel_proto (js_runtime_state.diagnostics_channels.bounded_channel_prototype)
-#define js_dc_channel_ctor (js_runtime_state.diagnostics_channels.channel_constructor)
-#define js_dc_tracing_channel_ctor (js_runtime_state.diagnostics_channels.tracing_channel_constructor)
-#define js_dc_bounded_channel_ctor (js_runtime_state.diagnostics_channels.bounded_channel_constructor)
+static JsDiagnosticsChannelState* js_diagnostics_channel_state_current(bool attach) {
+    if (attach) jube_modules_runtime_attach();
+    void* session = jube_node_runtime_current_session();
+    return session ? jube_node_diagnostics_channel_state(session) : NULL;
+}
+
+#define js_dc_state (*js_diagnostics_channel_state_current(true))
+#define js_dc_channel_names (js_dc_state.channel_names)
+#define js_dc_channels (js_dc_state.channels)
+#define js_dc_channel_count (js_dc_state.channel_count)
+#define js_dc_channel_proto (js_dc_state.channel_prototype)
+#define js_dc_tracing_channel_proto (js_dc_state.tracing_channel_prototype)
+#define js_dc_bounded_channel_proto (js_dc_state.bounded_channel_prototype)
+#define js_dc_channel_ctor (js_dc_state.channel_constructor)
+#define js_dc_tracing_channel_ctor (js_dc_state.tracing_channel_constructor)
+#define js_dc_bounded_channel_ctor (js_dc_state.bounded_channel_constructor)
 
 static bool js_dc_is_symbol(Item value) {
     return get_type_id(value) == LMD_TYPE_SYMBOL ||
@@ -32837,8 +32934,8 @@ static Item js_als_apply_context(Item context);
 static void js_als_restore_context(Item previous);
 
 #define JS_DC_DEFERRED_ERROR_MAX JS_DIAGNOSTICS_DEFERRED_ERROR_MAX
-#define js_dc_deferred_errors (js_runtime_state.diagnostics_channels.deferred_errors)
-#define js_dc_deferred_error_count (js_runtime_state.diagnostics_channels.deferred_error_count)
+#define js_dc_deferred_errors (js_dc_state.deferred_errors)
+#define js_dc_deferred_error_count (js_dc_state.deferred_error_count)
 
 static Item js_dc_emit_deferred_error(void) {
     if (js_dc_deferred_error_count <= 0) return (Item){.item = ITEM_JS_UNDEFINED};
@@ -32853,7 +32950,7 @@ static Item js_dc_emit_deferred_error(void) {
 }
 
 static void js_dc_defer_transform_error(Item error) {
-    js_root_range_ensure_registered(&js_runtime_state.diagnostics_channels.roots);
+    js_root_range_ensure_registered(&js_dc_state.roots);
     if (js_dc_deferred_error_count >= JS_DC_DEFERRED_ERROR_MAX) {
         js_process_emit(js_name_item("uncaughtException", 17), error);
         return;
@@ -33010,7 +33107,7 @@ static Item js_dc_channel_withStoreScope(Item message) {
 
 // dc.channel(name) — create or return existing channel
 static Item js_dc_channel_factory(Item name) {
-    js_root_range_ensure_registered(&js_runtime_state.diagnostics_channels.roots);
+    js_root_range_ensure_registered(&js_dc_state.roots);
     RootFrame roots(2);
     Rooted<Item> name_root(roots, name);
     if (get_type_id(name) != LMD_TYPE_STRING && !js_dc_is_symbol(name)) {
@@ -34561,352 +34658,6 @@ static Item js_als_withScope(Item store) {
     return scope;
 }
 
-// trace_events are realm diagnostics: a context enables and drains only its
-// own categories and event list, using ordinary owner-thread accesses.
-#define js_trace_categories (js_runtime_state.trace.categories)
-#define js_trace_category_count (js_runtime_state.trace.category_count)
-#define js_trace_events (js_runtime_state.trace.events)
-#define js_trace_event_count (js_runtime_state.trace.event_count)
-#define js_trace_initialized (js_runtime_state.trace.initialized)
-#define js_trace_file_written (js_runtime_state.trace.file_written)
-
-static void js_trace_copy_cstr(char* dst, int dst_size, const char* src, int src_len) {
-    if (!dst || dst_size <= 0) return;
-    if (!src) src = "";
-    if (src_len < 0) src_len = (int)strlen(src);
-    if (src_len >= dst_size) src_len = dst_size - 1;
-    memcpy(dst, src, (size_t)src_len);
-    dst[src_len] = '\0';
-}
-
-static bool js_trace_category_matches(const char* enabled, const char* category) {
-    if (!enabled || !enabled[0] || !category || !category[0]) return false;
-    if (strcmp(enabled, category) == 0) return true;
-    if (strcmp(enabled, "node") == 0 && strncmp(category, "node.", 5) == 0) return true;
-    return strcmp(enabled, "*") == 0;
-}
-
-static int js_trace_find_category(const char* name) {
-    for (int i = 0; i < js_trace_category_count; i++) {
-        if (strcmp(js_trace_categories[i].name, name) == 0) return i;
-    }
-    return -1;
-}
-
-static void js_trace_add_category(const char* name, bool from_exec_argv) {
-    if (!name || !name[0]) return;
-    int idx = js_trace_find_category(name);
-    if (idx >= 0) {
-        js_trace_categories[idx].refs++;
-        js_trace_categories[idx].from_exec_argv =
-            js_trace_categories[idx].from_exec_argv || from_exec_argv;
-        return;
-    }
-    if (js_trace_category_count >= JS_TRACE_MAX_CATEGORIES) return;
-    JsTraceCategory* cat = &js_trace_categories[js_trace_category_count++];
-    js_trace_copy_cstr(cat->name, (int)sizeof(cat->name), name, -1);
-    cat->refs = 1;
-    cat->from_exec_argv = from_exec_argv;
-}
-
-static void js_trace_remove_category(const char* name) {
-    int idx = js_trace_find_category(name);
-    if (idx < 0 || js_trace_categories[idx].from_exec_argv) return;
-    if (js_trace_categories[idx].refs > 0) js_trace_categories[idx].refs--;
-    if (js_trace_categories[idx].refs > 0) return;
-    for (int i = idx; i + 1 < js_trace_category_count; i++) {
-        js_trace_categories[i] = js_trace_categories[i + 1];
-    }
-    js_trace_category_count--;
-}
-
-static void js_trace_add_categories_from_chars(const char* chars, int len, bool from_exec_argv) {
-    if (!chars || len <= 0) return;
-    int start = 0;
-    for (int i = 0; i <= len; i++) {
-        if (i == len || chars[i] == ',') {
-            int end = i;
-            while (start < end && (chars[start] == ' ' || chars[start] == '\t')) start++;
-            while (end > start && (chars[end - 1] == ' ' || chars[end - 1] == '\t')) end--;
-            if (end > start) {
-                char name[64];
-                js_trace_copy_cstr(name, (int)sizeof(name), chars + start, end - start);
-                js_trace_add_category(name, from_exec_argv);
-            }
-            start = i + 1;
-        }
-    }
-}
-
-static void js_trace_init_from_exec_argv(void) {
-    if (js_trace_initialized) return;
-    js_trace_initialized = true;
-    Item exec_argv = js_get_process_exec_argv();
-    if (get_type_id(exec_argv) != LMD_TYPE_ARRAY) return;
-    int64_t len = js_array_length(exec_argv);
-    for (int64_t i = 0; i < len; i++) {
-        Item arg = js_elements_get_int(exec_argv, i);
-        if (get_type_id(arg) != LMD_TYPE_STRING) continue;
-        String* s = it2s(arg);
-        if (!s) continue;
-        const char* prefix = "--trace-event-categories=";
-        int prefix_len = (int)strlen(prefix);
-        if ((int)s->len > prefix_len && memcmp(s->chars, prefix, (size_t)prefix_len) == 0) {
-            js_trace_add_categories_from_chars(s->chars + prefix_len, (int)s->len - prefix_len, true);
-        } else if (s->len == 24 && memcmp(s->chars, "--trace-event-categories", 24) == 0 &&
-                   i + 1 < len) {
-            Item next = js_elements_get_int(exec_argv, i + 1);
-            if (get_type_id(next) == LMD_TYPE_STRING) {
-                String* ns = it2s(next);
-                if (ns) js_trace_add_categories_from_chars(ns->chars, (int)ns->len, true);
-            }
-            i++;
-        }
-    }
-}
-
-extern "C" bool js_trace_is_category_enabled_cstr(const char* category) {
-    js_trace_init_from_exec_argv();
-    for (int i = 0; i < js_trace_category_count; i++) {
-        if (js_trace_categories[i].refs > 0 &&
-            js_trace_category_matches(js_trace_categories[i].name, category)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static void js_trace_append_json_string(StrBuf* sb, const char* chars) {
-    if (!chars) chars = "";
-    strbuf_append_char(sb, '"');
-    for (int i = 0; chars[i]; i++) {
-        unsigned char c = (unsigned char)chars[i];
-        switch (c) {
-            case '"': strbuf_append_str_n(sb, "\\\"", 2); break;
-            case '\\': strbuf_append_str_n(sb, "\\\\", 2); break;
-            case '\n': strbuf_append_str_n(sb, "\\n", 2); break;
-            case '\r': strbuf_append_str_n(sb, "\\r", 2); break;
-            case '\t': strbuf_append_str_n(sb, "\\t", 2); break;
-            default:
-                if (c < 0x20) {
-                    char esc[8];
-                    snprintf(esc, sizeof(esc), "\\u%04x", c);
-                    strbuf_append_str_n(sb, esc, 6);
-                } else {
-                    strbuf_append_char(sb, (char)c);
-                }
-                break;
-        }
-    }
-    strbuf_append_char(sb, '"');
-}
-
-extern "C" void js_trace_emit_async_hooks_init(const char* type_chars, int type_len,
-                                                int64_t async_id, int64_t trigger_id) {
-    if (!js_trace_is_category_enabled_cstr("node.async_hooks")) return;
-    if (js_trace_event_count >= JS_TRACE_MAX_EVENTS) return;
-    JsTraceEvent* ev = &js_trace_events[js_trace_event_count++];
-    ev->ph = 'b';
-    js_trace_copy_cstr(ev->cat, (int)sizeof(ev->cat), "node,node.async_hooks", -1);
-    js_trace_copy_cstr(ev->name, (int)sizeof(ev->name), type_chars, type_len);
-    ev->ts = uv_hrtime() / 1000;
-    ev->id = async_id;
-    ev->has_id = true;
-    (void)trigger_id;
-    js_trace_file_written = false;
-}
-
-extern "C" void js_trace_flush(void) {
-    js_trace_init_from_exec_argv();
-    if (js_trace_file_written || js_trace_event_count <= 0) return;
-    FILE* fp = fopen("node_trace.1.log", "wb");
-    if (!fp) {
-        log_error("trace_events: failed to open node_trace.1.log");
-        return;
-    }
-    StrBuf* sb = strbuf_new();
-    strbuf_append_str_n(sb, "{\"traceEvents\":[", 16);
-    long pid = (long)uv_os_getpid();
-    for (int i = 0; i < js_trace_event_count; i++) {
-        JsTraceEvent* ev = &js_trace_events[i];
-        if (i > 0) strbuf_append_char(sb, ',');
-        strbuf_append_str_n(sb, "{\"pid\":", 7);
-        strbuf_append_int64(sb, (int64_t)pid);
-        strbuf_append_str_n(sb, ",\"tid\":0,\"ts\":", 14);
-        strbuf_append_int64(sb, (int64_t)ev->ts);
-        strbuf_append_str_n(sb, ",\"ph\":\"", 7);
-        strbuf_append_char(sb, ev->ph);
-        strbuf_append_str_n(sb, "\",\"cat\":", 8);
-        js_trace_append_json_string(sb, ev->cat);
-        strbuf_append_str_n(sb, ",\"name\":", 8);
-        js_trace_append_json_string(sb, ev->name);
-        if (ev->has_id) {
-            char id_buf[32];
-            snprintf(id_buf, sizeof(id_buf), "0x%llx", (long long)ev->id);
-            strbuf_append_str_n(sb, ",\"id\":", 6);
-            js_trace_append_json_string(sb, id_buf);
-        }
-        strbuf_append_str_n(sb, ",\"args\":{}}", 11);
-    }
-    strbuf_append_str_n(sb, "]}", 2);
-    fwrite(sb->str, 1, sb->length, fp);
-    fclose(fp);
-    strbuf_free(sb);
-    js_trace_file_written = true;
-}
-
-static Item js_trace_getEnabledCategories(void) {
-    js_trace_init_from_exec_argv();
-    StrBuf* sb = strbuf_new();
-    bool first = true;
-    for (int i = 0; i < js_trace_category_count; i++) {
-        if (js_trace_categories[i].refs <= 0) continue;
-        if (!first) strbuf_append_char(sb, ',');
-        first = false;
-        strbuf_append_str_n(sb, js_trace_categories[i].name, strlen(js_trace_categories[i].name));
-    }
-    Item result = js_name_item(sb->str, (int)sb->length);
-    strbuf_free(sb);
-    return result;
-}
-
-static bool js_trace_value_to_category_string(Item value, char* out, int out_size) {
-    if (get_type_id(value) != LMD_TYPE_STRING) return false;
-    String* s = it2s(value);
-    if (!s || s->len == 0) return false;
-    js_trace_copy_cstr(out, out_size, s->chars, (int)s->len);
-    return true;
-}
-
-JS_FORWARD_STATIC_ITEM(js_trace_throw_invalid_arg, (void), js_throw_type_error_code,
-    ("ERR_INVALID_ARG_TYPE", "The \"options.categories\" property must be an array of strings."))
-
-static Item js_trace_enable(void) {
-    Item self = js_get_this();
-    Item enabled = js_get_key_default(self, js_trace_key("enabled"));
-    if (get_type_id(enabled) != LMD_TYPE_BOOL || !it2b(enabled)) {
-        Item cats = js_get_key_default(self, js_trace_key("__lambda_trace_categories__"));
-        if (get_type_id(cats) == LMD_TYPE_STRING) {
-            String* s = it2s(cats);
-            if (s) js_trace_add_categories_from_chars(s->chars, (int)s->len, false);
-        }
-        js_set_key_default(self, js_trace_key("enabled"), (Item){.item = b2it(true)});
-    }
-    return self;
-}
-
-static Item js_trace_disable(void) {
-    Item self = js_get_this();
-    Item enabled = js_get_key_default(self, js_trace_key("enabled"));
-    if (get_type_id(enabled) == LMD_TYPE_BOOL && it2b(enabled)) {
-        Item cats = js_get_key_default(self, js_trace_key("__lambda_trace_categories__"));
-        if (get_type_id(cats) == LMD_TYPE_STRING) {
-            String* s = it2s(cats);
-            if (s) {
-                int start = 0;
-                for (int i = 0; i <= (int)s->len; i++) {
-                    if (i == (int)s->len || s->chars[i] == ',') {
-                        char cat[64];
-                        js_trace_copy_cstr(cat, (int)sizeof(cat), s->chars + start, i - start);
-                        js_trace_remove_category(cat);
-                        start = i + 1;
-                    }
-                }
-            }
-        }
-        js_set_key_default(self, js_trace_key("enabled"), (Item){.item = b2it(false)});
-    }
-    return self;
-}
-
-static Item js_trace_createTracing(Item options) {
-    TypeId options_type = get_type_id(options);
-    if (options_type != LMD_TYPE_MAP && options_type != LMD_TYPE_OBJECT) {
-        return js_throw_type_error_code("ERR_INVALID_ARG_TYPE",
-            "The \"options\" argument must be an object.");
-    }
-    Item categories = js_get_key_default(options, js_trace_key("categories"));
-    if (get_type_id(categories) != LMD_TYPE_ARRAY) return js_trace_throw_invalid_arg();
-    int64_t len = js_array_length(categories);
-    if (len <= 0) {
-        return js_throw_type_error_code("ERR_TRACE_EVENTS_CATEGORY_REQUIRED",
-            "At least one category is required.");
-    }
-    StrBuf* joined = strbuf_new();
-    for (int64_t i = 0; i < len; i++) {
-        char cat[64];
-        if (!js_trace_value_to_category_string(js_elements_get_int(categories, i),
-                                               cat, (int)sizeof(cat))) {
-            strbuf_free(joined);
-            return js_trace_throw_invalid_arg();
-        }
-        if (i > 0) strbuf_append_char(joined, ',');
-        strbuf_append_str_n(joined, cat, strlen(cat));
-    }
-
-    Item tracing = js_new_object();
-    js_set_key_default(tracing, js_trace_key("categories"),
-        js_name_item(joined->str, (int)joined->length));
-    js_set_key_default(tracing, js_trace_key("__lambda_trace_categories__"),
-        js_name_item(joined->str, (int)joined->length));
-    js_set_key_default(tracing, js_trace_key("enabled"), (Item){.item = b2it(false)});
-    js_runtime_set_native_key(tracing, js_trace_key("enable"), js_trace_enable);
-    js_runtime_set_native_key(tracing, js_trace_key("disable"), js_trace_disable);
-    strbuf_free(joined);
-    return tracing;
-}
-
-static Item js_trace_isTraceCategoryEnabled(Item category) {
-    char cat[128];
-    if (!js_trace_value_to_category_string(category, cat, (int)sizeof(cat))) {
-        return (Item){.item = b2it(false)};
-    }
-    return (Item){.item = b2it(js_trace_is_category_enabled_cstr(cat))};
-}
-
-static Item js_trace_manual_trace(Item phase, Item category, Item name, Item id, Item args) {
-    (void)args;
-    char cat[128];
-    char trace_name[96];
-    if (!js_trace_value_to_category_string(category, cat, (int)sizeof(cat))) return make_js_undefined();
-    if (!js_trace_is_category_enabled_cstr(cat)) return make_js_undefined();
-    if (!js_trace_value_to_category_string(name, trace_name, (int)sizeof(trace_name))) return make_js_undefined();
-    if (js_trace_event_count >= JS_TRACE_MAX_EVENTS) return make_js_undefined();
-    JsTraceEvent* ev = &js_trace_events[js_trace_event_count++];
-    if (get_type_id(phase) == LMD_TYPE_INT) ev->ph = (char)it2i(phase);
-    else if (get_type_id(phase) == LMD_TYPE_STRING && it2s(phase) && it2s(phase)->len > 0) ev->ph = it2s(phase)->chars[0];
-    else ev->ph = 'i';
-    js_trace_copy_cstr(ev->cat, (int)sizeof(ev->cat), cat, -1);
-    js_trace_copy_cstr(ev->name, (int)sizeof(ev->name), trace_name, -1);
-    ev->ts = uv_hrtime() / 1000;
-    ev->has_id = get_type_id(id) == LMD_TYPE_INT || get_type_id(id) == LMD_TYPE_INT64;
-    ev->id = ev->has_id ? it2i(id) : 0;
-    js_trace_file_written = false;
-    return make_js_undefined();
-}
-
-extern "C" Item js_get_trace_events_namespace(void) {
-    static Item trace_ns = {0};
-    static uint64_t trace_epoch = (uint64_t)-1;
-    if (trace_ns.item == 0 || trace_epoch != js_heap_epoch) {
-        trace_epoch = js_heap_epoch;
-        trace_ns = js_new_object();
-        heap_register_gc_root(&trace_ns.item);
-        js_runtime_set_native_key(trace_ns, js_trace_key("createTracing"), js_trace_createTracing);
-        js_runtime_set_native_key(trace_ns, js_trace_key("getEnabledCategories"), js_trace_getEnabledCategories);
-        js_set_key_default(trace_ns, js_trace_key("default"), trace_ns);
-    }
-    return trace_ns;
-}
-
-extern "C" Item js_get_internal_trace_events_binding(void) {
-    Item binding = js_new_object();
-    js_runtime_set_native_key(binding, js_trace_key("isTraceCategoryEnabled"), js_trace_isTraceCategoryEnabled);
-    js_runtime_set_native_key(binding, js_trace_key("trace"), js_trace_manual_trace);
-    js_set_key_default(binding, js_trace_key("getCategoryEnabledBuffer"), js_new_object());
-    return binding;
-}
-
 #define JS_ASYNC_HOOK_MAX JS_ASYNC_HOOK_STATE_MAX
 #define JS_ASYNC_PENDING_DESTROY_MAX JS_ASYNC_PENDING_DESTROY_STATE_MAX
 #define js_async_hooks_enabled_count (js_runtime_state.async_hooks.enabled_count)
@@ -35038,7 +34789,7 @@ extern "C" Item js_async_hooks_stamp_resource(Item resource, const char* type_ch
     js_set_key_default(resource, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
     js_async_hooks_stamp_id_symbols(resource, async_id, trigger_id);
     js_async_hooks_emit_init(async_id, type, trigger_id, resource);
-    js_trace_emit_async_hooks_init(type_chars, type_len, async_id, trigger_id);
+    node_trace_events_emit_async_hooks_init(type_chars, type_len, async_id, trigger_id);
     return resource;
 }
 
@@ -35182,7 +34933,7 @@ static Item js_ar_constructor(Item type, Item options) {
     js_set_key_default(self, js_async_hooks_key("__lambda_async_resource_destroyed__"), (Item){.item = b2it(false)});
     js_async_hooks_stamp_id_symbols(self, async_id, trigger_id);
     js_async_hooks_emit_init(async_id, type, trigger_id, self);
-    js_trace_emit_async_hooks_init(type_str->chars, (int)type_str->len, async_id, trigger_id);
+    node_trace_events_emit_async_hooks_init(type_str->chars, (int)type_str->len, async_id, trigger_id);
     if (!require_manual_destroy && !js_async_hooks_is_gc_tracker(self)) {
         js_async_hooks_queue_destroy(self);
     }
@@ -36289,7 +36040,7 @@ extern "C" Item js_internal_binding(Item name) {
     }
 
     if (s->len == 12 && memcmp(s->chars, "trace_events", 12) == 0) {
-        return js_get_internal_trace_events_binding();
+        return node_trace_events_internal_binding();
     }
 
     // internalBinding('config')
@@ -36345,10 +36096,17 @@ static bool js_cc_env_truthy(const char* name) {
     return value && value[0] && strcmp(value, "0") != 0;
 }
 
-#define g_js_cc_dir (js_runtime_state.commonjs_compile_cache.directory)
-#define g_js_cc_enabled (js_runtime_state.commonjs_compile_cache.enabled)
-#define g_js_cc_disabled (js_runtime_state.commonjs_compile_cache.disabled)
-#define g_js_cc_reported (js_runtime_state.commonjs_compile_cache.reported)
+static JsCommonJsCompileCacheState* js_commonjs_compile_cache_state_current(bool attach) {
+    if (attach) jube_modules_runtime_attach();
+    void* session = jube_node_runtime_current_session();
+    return session ? jube_node_commonjs_compile_cache_state(session) : NULL;
+}
+
+#define g_js_cc_state (*js_commonjs_compile_cache_state_current(true))
+#define g_js_cc_dir (g_js_cc_state.directory)
+#define g_js_cc_enabled (g_js_cc_state.enabled)
+#define g_js_cc_disabled (g_js_cc_state.disabled)
+#define g_js_cc_reported (g_js_cc_state.reported)
 
 static bool js_cc_write_allowed(const char* dir) {
     return js_permission_has_fs_write(dir) != 0;
@@ -36641,15 +36399,15 @@ extern "C" Item js_get_repl_namespace(void) {
 }
 
 extern "C" Item js_get_diagnostics_channel_namespace(void) {
-    static Item diagnostics_namespace = {0};
-    static uint64_t diagnostics_epoch = (uint64_t)-1;
-    if (diagnostics_namespace.item != 0 && diagnostics_epoch == js_heap_epoch) {
-        return diagnostics_namespace;
+    JsDiagnosticsChannelState* state = js_diagnostics_channel_state_current(true);
+    if (!state) return ItemNull;
+    if (state->namespace_object.item != 0 && state->namespace_epoch == js_heap_epoch) {
+        return state->namespace_object;
     }
-    diagnostics_epoch = js_heap_epoch;
-    diagnostics_namespace = js_new_object();
-    heap_register_gc_root(&diagnostics_namespace.item);
-    js_root_range_ensure_registered(&js_runtime_state.diagnostics_channels.roots);
+    state->namespace_epoch = js_heap_epoch;
+    if (!js_root_range_ensure_registered(&state->roots)) return ItemError;
+    state->namespace_object = js_new_object();
+    Item diagnostics_namespace = state->namespace_object;
     js_dc_channel_proto = js_new_object();
     js_dc_tracing_channel_proto = js_new_object();
     js_dc_bounded_channel_proto = js_new_object();
@@ -36680,7 +36438,8 @@ extern "C" Item js_get_diagnostics_channel_namespace(void) {
     js_set_key_cstr(diagnostics_namespace, "TracingChannel", js_dc_tracing_channel_ctor);
     js_set_key_cstr(diagnostics_namespace, "BoundedChannel", js_dc_bounded_channel_ctor);
     js_set_key_cstr(diagnostics_namespace, "default", diagnostics_namespace);
-    return diagnostics_namespace;
+    state->namespace_object = diagnostics_namespace;
+    return state->namespace_object;
 }
 
 typedef void (*JsInternalNamespacePopulate)(Item);
@@ -36782,15 +36541,6 @@ extern "C" Item js_module_get_builtin(Item specifier) {
     }
     if (jube_status != JUBE_SPECIFIER_UNKNOWN) return ItemNull;
 
-    // The N4 parity checkpoint intentionally runs with no catalog so it can
-    // compare the pre-flip host zlib implementation against node-zlib. Keep
-    // this sole fallback until N4.4 removes that source from the host image.
-    if ((spec->len == 4 && memcmp(spec->chars, "zlib", 4) == 0) ||
-        (spec->len == 7 && memcmp(spec->chars, "zlib.js", 7) == 0) ||
-        (spec->len == 9 && memcmp(spec->chars, "node:zlib", 9) == 0)) {
-        extern Item js_get_zlib_namespace(void);
-        return js_get_zlib_namespace();
-    }
     return ItemNull;
 }
 
@@ -37307,12 +37057,6 @@ void js_deep_batch_reset() {
     js_async_hook_count = 0;
     memset(js_async_pending_destroy_resources, 0, sizeof(js_async_pending_destroy_resources));
     js_async_pending_destroy_count = 0;
-    memset(js_trace_categories, 0, sizeof(js_trace_categories));
-    js_trace_category_count = 0;
-    memset(js_trace_events, 0, sizeof(js_trace_events));
-    js_trace_event_count = 0;
-    js_trace_initialized = false;
-    js_trace_file_written = false;
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();
     // generator proto caches point into old heap — must reset

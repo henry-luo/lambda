@@ -489,7 +489,8 @@ typedef struct TextShadow TextShadow;
 // tier-2: view-pool, rebuilt each relayout
 struct FontProp {
     char* family;  // font family name
-    float font_size;  // font size in pixels, scaled by pixel_ratio
+    float font_size;  // computed font size in CSS pixels
+    float used_zoom;  // effective CSS zoom applied to used font metrics
     // CSS Inline 3 initial letters retain their computed font size for em-based
     // properties while glyph layout uses the size derived from parent metrics.
     float initial_letter_computed_font_size;
@@ -508,12 +509,12 @@ struct FontProp {
     bool font_size_from_medium;  // true if font_size originates from the CSS 'medium' keyword (initial value)
     // derived font properties
     float space_width;  // width of a space character of the current font
+    float average_char_width;  // primary font average character width
     float ascender;    // font ascender in pixels
     float descender;   // font descender in pixels
     float font_height; // font height in pixels
     bool has_kerning;  // whether the font has kerning
-    struct FontHandle* font_handle; // unified font handle (populated by setup_font)
-    bool owns_font_handle; // true when this FontProp owns a retained font_handle ref
+    struct FontHandle* font_handle; // cache-owned handle pinned while this prop aliases it
     TextShadow* text_shadow;  // CSS text-shadow (linked list for multiple shadows)
     CssEnum text_deco_style;          // CSS text-decoration-style: solid, dashed, dotted, wavy, double
     Color text_deco_color;            // CSS text-decoration-color (default: {0} = use currentColor)
@@ -521,11 +522,25 @@ struct FontProp {
     float text_underline_offset;      // CSS text-underline-offset in px (0 = auto)
 };
 
+inline float font_prop_used_size(const FontProp* fp) {
+    if (!fp) return 0.0f;
+    float zoom = fp->used_zoom > 0.0f ? fp->used_zoom : 1.0f;
+    return fp->font_size * zoom;
+}
+
+inline void font_prop_copy(FontProp* destination, const FontProp* source) {
+    if (!destination || !source || destination == source) return;
+    // A copied FontProp is another alias, so keep its cache entry pinned.
+    font_cache_unpin_handle(destination->font_handle);
+    *destination = *source;
+    font_cache_pin_handle(destination->font_handle);
+}
+
 // build a FontStyleDesc from a FontProp (for font_load_glyph fallback resolution)
 inline FontStyleDesc font_style_desc_from_prop(const FontProp* fp) {
     FontStyleDesc sd = {};
     sd.family  = fp->family;
-    sd.size_px = fp->font_size;
+    sd.size_px = font_prop_used_size(fp);
 
     // Use numeric weight if set, otherwise map from CssEnum keyword
     if (fp->font_weight_numeric > 0) {
@@ -1027,6 +1042,18 @@ typedef struct {
     int stop_count;
 } ConicGradient;
 
+// CSS image value used by list-style-image.  URL images keep their source
+// string; gradient images keep the already-resolved gradient object so marker
+// sizing and painting use the same value produced by the style cascade.
+// tier-2: view-pool, rebuilt each relayout
+typedef struct {
+    GradientType gradient_type;
+    char* url;
+    LinearGradient* linear_gradient;
+    RadialGradient* radial_gradient;
+    ConicGradient* conic_gradient;
+} ListStyleImage;
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct {
     Color color; // background color
@@ -1257,9 +1284,11 @@ typedef struct MultiColumnProp {
     // Column sizing
     int column_count;            // Number of columns (0 = auto)
     float column_width;          // Ideal column width (0 = auto)
-    float column_height;         // Fragmentainer height (0 = auto)
+    float column_height;         // Fragmentainer height
+    bool column_height_is_specified; // Distinguishes an explicit 0 from auto
     float column_gap;            // Gap between columns (default: 1em)
     bool column_gap_is_normal;   // Use normal (1em) gap
+    bool column_gap_is_percent;  // Gap is a percentage of the content box
 
     // Column rule (divider between columns)
     float rule_width;            // Rule width in pixels
@@ -1275,12 +1304,17 @@ typedef struct MultiColumnProp {
     int computed_column_count;   // Actual number of columns after layout
     int computed_used_column_count; // Columns that received content in layout
     float computed_column_width; // Actual column width after layout
+    float computed_column_gap;   // Used column gap after percentage resolution
     float computed_block_axis_extent; // Used block-axis span in vertical layout
 } MultiColumnProp;
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct BoundaryProp {
     Margin margin;
+    // CSS fragmentation uses the resolved margin box, not the value left after
+    // normal-flow margin collapsing mutates the layout boundary.
+    Margin flow_margin;
+    bool has_flow_margin;
     Spacing padding;
     BorderProp* border;
     BackgroundProp* background;
@@ -1384,14 +1418,22 @@ inline RadiantInsetSide radiant_inset_side(PositionProp* position, CssBoxSide si
 // tier-2: view-pool, rebuilt each relayout
 typedef struct MarkerProp {
     CssEnum marker_type;     // CSS_VALUE_DISC, CSS_VALUE_CIRCLE, CSS_VALUE_SQUARE, CSS_VALUE_DECIMAL, etc.
-    float width;             // Fixed marker width (typically ~1.4em = 22px at 16px font)
+    float width;             // Marker inline advance, including an image separator when present
+    float content_width;     // Painted image width; zero for text and bullet markers
     float height;            // Used marker box height; image markers can exceed line-height
+    float line_height;       // Marker font's normal inline-box height
+    float ascender;          // Marker font normal-line ascender
+    float descender;         // Marker font normal-line descender
     float bullet_size;       // Size of the bullet shape (typically ~0.35em = 5-6px)
+    float trailing_space_width; // Collapsible separator after a default text marker
     char* text_content;      // Text content for numbered markers (decimal, roman, alpha)
-    char* image_url;         // list-style-image URL (data URI or external URL)
+    ListStyleImage image;     // list-style-image URL or gradient
     ImageSurface* loaded_image; // cached loaded image for layout and render
+    bool is_image_marker;     // true for a valid image without URL intrinsic size
     bool is_outside;         // true = outside position (rendered in margin area, no inline advance)
     bool reserves_first_line; // outside marker has no parent list gutter to occupy
+    bool has_explicit_content; // ::marker content overrides the list-style marker
+    bool trailing_space_trimmed; // marker-only lines have discarded the separator
 } MarkerProp;
 
 /**
@@ -1416,6 +1458,15 @@ typedef struct PseudoContentProp {
     bool marker_generated;         // True if marker element created
 } PseudoContentProp;
 
+enum TextAutospaceFlags : uint8_t {
+    TEXT_AUTOSPACE_IDEOGRAPH_ALPHA = 1u << 0,
+    TEXT_AUTOSPACE_IDEOGRAPH_NUMERIC = 1u << 1,
+    TEXT_AUTOSPACE_REPLACE = 1u << 2,
+};
+
+static constexpr uint8_t TEXT_AUTOSPACE_NORMAL =
+    TEXT_AUTOSPACE_IDEOGRAPH_ALPHA | TEXT_AUTOSPACE_IDEOGRAPH_NUMERIC;
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct BlockProp {
     CssEnum text_align;
@@ -1424,6 +1475,7 @@ typedef struct BlockProp {
     bool legacy_align_center_blocks;  // HTML align=center compatibility: center block/table descendants
     CssEnum legacy_block_align;  // HTML align compatibility for block/table descendants
     CssEnum direction;  // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
+    CssEnum unicode_bidi;  // CSS Writing Modes: unicode-bidi embedding mode
     WritingMode writing_mode;  // CSS Writing Modes: the element’s own block/inline axes
     float zoom;  // CSS Viewport 1: local zoom factor; effective zoom multiplies ancestors
     CssEnum text_transform;  // CSS_VALUE_NONE, CSS_VALUE_UPPERCASE, CSS_VALUE_LOWERCASE, CSS_VALUE_CAPITALIZE
@@ -1437,7 +1489,7 @@ typedef struct BlockProp {
     CssEnum given_min_height_type, given_max_height_type;
     CssEnum list_style_type;
     CssEnum list_style_position;  // inside, outside
-    char* list_style_image;         // URL or none
+    ListStyleImage list_style_image;
     char* list_style_type_string;   // custom string marker (CSS Lists 3 §4.1)
     char* counter_reset;            // counter names and values
     char* counter_increment;        // counter names and values
@@ -1445,13 +1497,17 @@ typedef struct BlockProp {
     CssEnum box_sizing;  // CSS_VALUE_CONTENT_BOX or CSS_VALUE_BORDER_BOX
     CssEnum box_decoration_break;  // CSS_VALUE_SLICE (default) | CSS_VALUE_CLONE
     CssEnum white_space;  // CSS_VALUE_NORMAL, CSS_VALUE_NOWRAP, CSS_VALUE_PRE, etc.
+    CssEnum text_wrap_mode;  // CSS Text 4 text-wrap-mode; zero derives from white-space
     CssEnum text_wrap_style;  // CSS Text 4 text-wrap-style
     CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL
     CssEnum overflow_wrap;  // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_WORD, CSS_VALUE_ANYWHERE
     CssEnum line_break;    // CSS_VALUE_AUTO, CSS_VALUE_LOOSE, CSS_VALUE_NORMAL, CSS_VALUE_STRICT, CSS_VALUE_ANYWHERE
     CssEnum text_spacing_trim;  // CSS Text 4 text-spacing-trim
+    uint8_t text_autospace;  // CSS Text 4 text-autospace feature flags
+    bool text_autospace_is_set;
     CssEnum break_before;  // CSS Fragmentation: auto, column, page, always
     CssEnum break_after;   // CSS Fragmentation: auto, column, page, always
+    CssEnum break_inside;  // css fragmentation: auto, avoid
     int orphans;           // CSS Fragmentation: minimum lines before a break
     int widows;            // CSS Fragmentation: minimum lines after a break
     int tab_size;           // CSS tab-size (number of spaces, default 8)
@@ -1522,9 +1578,12 @@ typedef struct BlockProp {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FontBox {
     FontProp *style;  // current font style
-    struct FontHandle* font_handle; // unified font handle (opaque, ref-counted)
     float current_font_size;  // font size of current element
 } FontBox;
+
+inline struct FontHandle* font_box_handle(const FontBox* fbox) {
+    return fbox && fbox->style ? fbox->style->font_handle : nullptr;
+}
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct TextRect {
@@ -2569,7 +2628,7 @@ struct FormControlProp {
     // ------------------------------------------------------------------
     char*    value_at_focus;
     uint32_t value_at_focus_len;
-    void*    history;   // EditHistory*; lazy
+    // (the undo ring moved to the form ViewState in DocState — ESO43)
 
     // ------------------------------------------------------------------
     // F4 (Radiant_Design_Form_Input.md §3.1, §3.8):

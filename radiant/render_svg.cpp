@@ -293,7 +293,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     // therefore a larger word-spacing per gap, visibly over-spacing the line.
     float natural_width = 0.0f;
     int space_count = 0;
-    if (ctx->font.font_handle) {
+    if (font_box_handle(&ctx->font)) {
         size_t content_len = strlen(text_content);
 
         unsigned char* scan = (unsigned char*)text_content;
@@ -325,8 +325,8 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
                 // Use regular font for advance metrics to match layout dimensions.
                 // VS16-preceded codepoints use emoji font for correct advance.
                 LoadedGlyph* glyph = emoji_pres
-                    ? font_load_glyph_emoji(ctx->font.font_handle, &_sd, codepoint, false)
-                    : font_load_glyph(ctx->font.font_handle, &_sd, codepoint, false);
+                    ? font_load_glyph_emoji(font_box_handle(&ctx->font), &_sd, codepoint, false)
+                    : font_load_glyph(font_box_handle(&ctx->font), &_sd, codepoint, false);
                 if (glyph) {
                     natural_width += glyph->advance_x;
                 } else {
@@ -375,8 +375,8 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         // effect fallback retains commands until rasterization, so its paint list
         // must own text that immediate SVG lowering would otherwise consume.
         run.owns_text = ctx->effect_fallback.active;
-        run.font_family = ctx->font.font_handle
-            ? font_handle_get_family_name(ctx->font.font_handle)
+        run.font_family = font_box_handle(&ctx->font)
+            ? font_handle_get_family_name(font_box_handle(&ctx->font))
             : "Arial";
         run.font_size = font_size;
         run.x = x;
@@ -406,7 +406,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     strbuf_append_format(ctx->svg_content,
         "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%.0f\" fill=\"%s\"",
         x, baseline_y,
-        ctx->font.font_handle ? font_handle_get_family_name(ctx->font.font_handle) : "Arial",
+        font_box_handle(&ctx->font) ? font_handle_get_family_name(font_box_handle(&ctx->font)) : "Arial",
         font_size,
         color_str);
 
@@ -977,7 +977,7 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
     }
 
     float column_width = mc->computed_column_width;
-    float gap = mc->column_gap_is_normal ? 16.0f : mc->column_gap;
+    float gap = multicol_column_gap(block);
 
     // Calculate block position
     float block_x = ctx->block.x + block->x;
@@ -1373,8 +1373,9 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
                 StrBuf* escaped = strbuf_new_cap(strlen(src) * 2);
                 escape_append(escaped, src, strlen(src), ESCAPE_RULES_HTML_TEXT,
                               ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
-                const char* family = font->font_handle
-                    ? font_handle_get_family_name(font->font_handle) : "Arial";
+                FontHandle* marker_font_handle = font_box_handle(font);
+                const char* family = marker_font_handle
+                    ? font_handle_get_family_name(marker_font_handle) : "Arial";
                 // right-align text in marker box
                 float text_x = x + width;
                 svg_indent(ctx);
@@ -1523,7 +1524,6 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
 
     // Initialize font from default
     ctx.font.style = &uicon->default_font;
-    ctx.font.font_handle = NULL;
 
     // SVG header
     strbuf_append_format(ctx.svg_content,

@@ -61,19 +61,19 @@ fn parse_fields(text, i, escaped, stack, valid) {
 
 fn record_cell(field, vertical) =>
   <td 'data-record-port': field.port,
-      style: "border:1px solid currentColor;padding:4px 6px;vertical-align:middle;";
+      style: "border:1px solid currentColor;padding:4px 6px;vertical-align:middle;",
     if (field.fields != null) { record_table(field.fields, not vertical) }
     else { field.text }
   >
 
 fn record_rows(fields, vertical) => if (vertical) [
-  for (field in fields) <tr; record_cell(field, vertical)>
-] else [<tr; for field in fields { record_cell(field, vertical) }>]
+  for (field in fields) <tr record_cell(field, vertical)>
+] else [<tr for field in fields { record_cell(field, vertical) }>]
 
 fn record_table(fields, vertical) =>
   <table class: "graphviz-record-table", 'data-record-axis': if (vertical) "vertical" else "horizontal",
-      style: "border-collapse:collapse;border-spacing:0;";
-    <tbody;
+      style: "border-collapse:collapse;border-spacing:0;",
+    <tbody
       for row in record_rows(fields, vertical) { row }
     >
   >

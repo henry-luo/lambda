@@ -90,7 +90,8 @@ typedef struct LambdaModuleState {
     NameId* property_keys;
     void* consts;
     void* type_list;
-    uint32_t var_count;
+    uint32_t var_count;      // live module slots visible to generated code
+    uint32_t var_capacity;   // root-range/storage capacity; may exceed var_count in REPL
     uint32_t property_key_count;
     uint32_t module_id;
     bool vars_registered;
@@ -311,6 +312,32 @@ typedef struct ShapeEntry {
     uint8_t flags;  // JSPD_* flags; 0 = JS default (data, writable/enum/config)
 } ShapeEntry;
 
+// Both shape walks (map_get_by_name_id_keyed and fn_map_set) confirm a field by
+// its NAME BYTES, because a NameId alone is not identity for element/input
+// shapes whose spelling can drift from the id they preserve. That byte
+// confirmation is correct and stays. What was wrong is HOW it was spelled:
+// field names are short identifiers, so the libc memcmp CALL costs more than
+// the comparison it performs -- a sampled richards2 spent 43% of its runtime in
+// _platform_memcmp reached from these two walks, on names like "id" and "link".
+// Compare inline at identifier length and keep memcmp only where its vectorised
+// loop actually pays. Reads the same authoritative bytes, so every shape
+// resolves exactly as before (D4.6.1v2-D4.6.2v2).
+static inline bool shape_field_name_equals(const ShapeEntry* entry,
+        const char* chars, size_t len) {
+    if (!entry || !entry->name || !entry->name->str || !chars) return false;
+    if (entry->name->length != len) return false;
+    const char* name = entry->name->str;
+    // Identifier-length names never reach memcmp's vectorised regime, so the
+    // whole comparison stays inline; measured against a first-byte-reject
+    // variant that still called memcmp for the tail, this full inline form was
+    // worth a further 10 points on richards and 14 on json (untyped).
+    if (len > 32) return memcmp(name, chars, len) == 0;
+    for (size_t i = 0; i < len; i++) {
+        if (name[i] != chars[i]) return false;
+    }
+    return true;
+}
+
 // A1: Property hash table — inline open-addressing table for O(1) property lookup.
 // For objects with ≤32 hash-indexed properties (covers >99% of JS objects), uses
 // a small fixed table indexed by FNV-1a hash. Each slot stores a ShapeEntry
@@ -430,12 +457,18 @@ static inline void* map_field_ptr(void* map_data, const ShapeEntry* field) {
     return (uint8_t*)map_data + field->byte_offset;
 }
 
-static inline TypeId type_field_storage_type_id(const Type* type);
+// Defined in lambda/core/lambda-data.cpp. NOT header-inline: both this and
+// shape_entry_uses_native_lane below are long classifiers (92 and 28 lines),
+// and a `static inline` of that size in a header this widely included is
+// emitted out-of-line in every TU that cannot fully inline it -- which pulled
+// a symbol into test binaries that do not link it and made them fail to LOAD
+// (`symbol not found in flat namespace '_ItemError'`). See Tune19 §12.9.
+TypeId type_field_storage_type_id(const Type* type);
 
 // The full semantic contract, not just TypeId, decides whether a packed field
 // has a nullable native lane.  The implementation lives with the type-contract
 // rules so a ShapeEntry and an array boundary cannot disagree about `T?`.
-static inline bool shape_entry_uses_native_lane(const ShapeEntry* field,
+bool shape_entry_uses_native_lane(const ShapeEntry* field,
         LaneStorageDesc* out);
 
 static inline TypeId shape_entry_storage_type_id(const ShapeEntry* field) {
@@ -755,6 +788,8 @@ typedef struct TypeMethod {
     fn_ptr compiled_fn;         // non-GC JIT code pointer
     const char* compiled_name;  // JIT-owned name used by bound call wrappers
     struct TypeFunc* fn_type;   // semantic signature retained for dynamic calls
+    const struct AstFuncNode* ast_def;  // T0 definition retained beside the JIT entry
+    struct Script* ast_module;  // Script that owns ast_def's slab, consts, and type list
     uint8_t arity;              // user-visible arity, excluding self
     bool is_proc;               // true for pn, false for fn
     struct TypeMethod* next;    // linked list
@@ -922,7 +957,6 @@ extern Type TYPE_U16;
 extern Type TYPE_U32;
 extern Type TYPE_F16;
 extern Type TYPE_F32;
-extern Type TYPE_F64;
 extern Type TYPE_DTIME;
 extern Type TYPE_DATE;   // sub-type of datetime (precision: DATE_ONLY or YEAR_ONLY)
 extern Type TYPE_TIME;   // sub-type of datetime (precision: TIME_ONLY)
@@ -980,74 +1014,6 @@ static inline Type* type_field_unwrap_simple_decl(Type* type) {
         type = inner;
     }
     return type;
-}
-
-static inline TypeId type_field_storage_type_id(const Type* type) {
-    if (!type) return LMD_TYPE_NULL;
-    type = type_field_unwrap_simple_decl((Type*)type);
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY &&
-            ((TypeUnary*)type)->op == OPERATOR_OPTIONAL) {
-        Type* base = type_field_unwrap_simple_decl(((TypeUnary*)type)->operand);
-        if (base && (base->type_id == LMD_TYPE_INT || base->type_id == LMD_TYPE_BOOL ||
-                base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64)) {
-            return base->type_id;
-        }
-        if (base && base->type_id == LMD_TYPE_NUM_SIZED && base != &TYPE_NUM_SIZED &&
-                lambda_num_sized_is_integer(type_num_sized_kind(base))) {
-            return LMD_TYPE_NUM_SIZED;
-        }
-        if (base && lambda_type_id_has_pointer_lane(base->type_id)) return base->type_id;
-    }
-    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY &&
-            ((TypeBinary*)type)->op == OPERATOR_UNION) {
-        TypeBinary* binary = (TypeBinary*)type;
-        Type* base = binary->left && binary->left->type_id == LMD_TYPE_NULL ? binary->right :
-            (binary->right && binary->right->type_id == LMD_TYPE_NULL ? binary->left : NULL);
-        base = type_field_unwrap_simple_decl(base);
-        if (base && (base->type_id == LMD_TYPE_INT || base->type_id == LMD_TYPE_BOOL ||
-                base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64)) {
-            return base->type_id;
-        }
-    }
-    // Abstract numeric contracts describe numeric Items; they are not
-    // Type* payloads. Keep them in the self-describing TypedItem lane so a
-    // map field such as `score: min(values)` cannot be read as a Type pointer.
-    if (type == &TYPE_INTEGER || type == &TYPE_NUMBER) return LMD_TYPE_ANY;
-    if (type->type_id == LMD_TYPE_TYPE && type->kind != TYPE_KIND_SIMPLE) {
-        // Unions and constrained contracts retain their runtime Item tag;
-        // reserving a zero-byte slot would let map_fill write past the shape.
-        return LMD_TYPE_ANY;
-    }
-    return type->type_id;
-}
-
-static inline bool shape_entry_uses_native_lane(const ShapeEntry* field,
-        LaneStorageDesc* out) {
-    if (!field || !field->type || !out) return false;
-    Type* semantic = type_field_unwrap_simple_decl(field->type);
-    Type* base = NULL;
-    if (semantic->type_id == LMD_TYPE_TYPE && semantic->kind == TYPE_KIND_UNARY &&
-            ((TypeUnary*)semantic)->op == OPERATOR_OPTIONAL) {
-        base = ((TypeUnary*)semantic)->operand;
-    } else if (semantic->type_id == LMD_TYPE_TYPE && semantic->kind == TYPE_KIND_BINARY &&
-            ((TypeBinary*)semantic)->op == OPERATOR_UNION) {
-        TypeBinary* binary = (TypeBinary*)semantic;
-        if (binary->left && binary->left->type_id == LMD_TYPE_NULL) base = binary->right;
-        else if (binary->right && binary->right->type_id == LMD_TYPE_NULL) base = binary->left;
-    }
-    if (!base) return false;
-    base = type_field_unwrap_simple_decl(base);
-    *out = {};
-    out->semantic_contract = semantic; out->base_contract = base; out->nullable = 1;
-    if (base->type_id == LMD_TYPE_INT) { out->kind = LANE_STORAGE_INT; out->byte_size = 8; }
-    else if (base->type_id == LMD_TYPE_BOOL) { out->kind = LANE_STORAGE_BOOL; out->byte_size = 1; }
-    else if (base->type_id == LMD_TYPE_FLOAT || base->type_id == LMD_TYPE_FLOAT64) { out->kind = LANE_STORAGE_FLOAT64; out->byte_size = 8; }
-    else if (base->type_id == LMD_TYPE_NUM_SIZED && base != &TYPE_NUM_SIZED &&
-            lambda_num_sized_is_integer(type_num_sized_kind(base))) { out->kind = LANE_STORAGE_SIZED_I64; out->byte_size = 8; }
-    else if (base->type_id == LMD_TYPE_INT64 || base->type_id == LMD_TYPE_UINT64) { out->kind = LANE_STORAGE_ITEM; out->byte_size = 8; }
-    else if (lambda_type_id_has_pointer_lane(base->type_id)) { out->kind = LANE_STORAGE_POINTER; out->byte_size = (uint8_t)sizeof(void*); }
-    else return false;
-    return true;
 }
 
 static inline bool shape_entry_uses_raw_item_storage(const ShapeEntry* field) {
@@ -1110,7 +1076,6 @@ extern TypeType LIT_TYPE_U32;
 extern TypeType LIT_TYPE_U64;
 extern TypeType LIT_TYPE_F16;
 extern TypeType LIT_TYPE_F32;
-extern TypeType LIT_TYPE_F64;
 
 extern TypeMap EmptyMap;
 extern TypeElmt EmptyElmt;

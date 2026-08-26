@@ -10,7 +10,7 @@ fn check_el(x) {
     x is element and (len(x) > 0)
 }
 
-check_el(<div; "a">)       // true: is element=true, len>0=true
+check_el(<div "a">)       // true: is element=true, len>0=true
 check_el(<div>)             // false: is element=true, len>0=false
 check_el("hello")           // false: is element=false
 
@@ -98,7 +98,7 @@ fn check_is_eq(x) {
     x is element and n == 'div'
 }
 
-check_is_eq(<div; "a">)    // true
+check_is_eq(<div "a">)    // true
 check_is_eq(<span>)        // false: name != div
 check_is_eq("text")        // false: not element
 
@@ -110,11 +110,11 @@ fn check_in_eq(x) {
 
 check_in_eq(2)              // true
 check_in_eq(1)              // false: x != 2
-check_in_eq(5)              // false: not in arr
+check_in_eq(5); // false: not in arr
 
 // ---- combined summary ----
 [
-    check_el(<div; "a">),       // true
+    check_el(<div "a">),       // true
     check_str("hello"),         // true
     check_int(42),              // true
     check_is_or("hi"),          // true
@@ -123,6 +123,6 @@ check_in_eq(5)              // false: not in arr
     check_both("hi", 42),       // true
     check_compound("hello"),    // true
     check_not_is("hi"),         // true
-    check_is_eq(<div; "a">),    // true
+    check_is_eq(<div "a">),    // true
     check_in_eq(2)              // true
 ]

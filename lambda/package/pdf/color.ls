@@ -14,7 +14,7 @@
 import util:    .util
 import resolve: .resolve
 
-pub BLACK = "rgb(0,0,0)"
+pub let BLACK = "rgb(0,0,0)"
 
 // Clamp a 0..1 component (PDFs occasionally produce slight overshoot).
 fn _clamp01(v) {

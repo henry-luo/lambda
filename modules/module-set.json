@@ -3,6 +3,7 @@
   "modules": [
     "node-core",
     "node-fs",
-    "node-net"
+    "node-net",
+    "node-crypto"
   ]
 }

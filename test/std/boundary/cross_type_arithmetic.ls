@@ -4,7 +4,7 @@
 // ===== Addition (+) =====
 // Numeric promotion: int + float → float
 42 + 3.14
-0 + 0.0
+0 + 0.0;
 -5 + 2.5
 // Invalid cross-type addition
 42 + "hello"
@@ -47,7 +47,7 @@ null - null
 // ===== Multiplication (*) =====
 // Numeric promotion: int * float → float
 42 * 3.14
-0 * 0.0
+0 * 0.0;
 -3 * 2.5
 // Invalid cross-type multiplication
 42 * "hello"
@@ -77,7 +77,7 @@ null / null
 
 // ===== Modulo (%) =====
 // Only int × int works
-42 % 5
+42 % 5;
 -7 % 3
 // Statically known float-domain modulo cases live in the negative semantic suite.
 // The cases below remain dynamic cross-family errors.
@@ -106,7 +106,7 @@ null ** 2
 
 // ===== Integer Division (div) =====
 // Only int × int works
-42 div 5
+42 div 5;
 -7 div 2
 100 div 3
 // Statically known float-domain div cases live in the negative semantic suite.

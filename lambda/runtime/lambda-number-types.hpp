@@ -11,7 +11,7 @@ static inline LambdaNumericKind lambda_numeric_kind_from_type(const Type* type) 
     case LMD_TYPE_INT: return LAMBDA_NUM_INT;
     case LMD_TYPE_INT64: return LAMBDA_NUM_I64;
     case LMD_TYPE_UINT64: return LAMBDA_NUM_U64;
-    case LMD_TYPE_FLOAT: case LMD_TYPE_FLOAT64: return LAMBDA_NUM_FLOAT;
+    case LMD_TYPE_FLOAT: return LAMBDA_NUM_FLOAT;
     case LMD_TYPE_NUM_SIZED:
         return lambda_numeric_kind_from_sized_type(type_num_sized_kind(type));
     case LMD_TYPE_DECIMAL:

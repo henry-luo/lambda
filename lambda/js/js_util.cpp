@@ -10,6 +10,7 @@
 #include "js_typed_array.h"
 #include "js_class.h"
 #include "js_function.hpp"
+#include "js_object_pair_traversal.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../runtime/transpiler.hpp"
@@ -1546,37 +1547,11 @@ static bool js_util_is_host_singleton_object(Item value) {
     return js_is_global_this_object_value(value) || js_is_process_object_value(value);
 }
 
-typedef struct JsDeepEqualPair {
-    Item a;
-    Item b;
-} JsDeepEqualPair;
-
-typedef struct JsDeepEqualContext {
-    JsDeepEqualPair stack[4096];
-    int depth;
-} JsDeepEqualContext;
 // array-family, not bare LMD_TYPE_ARRAY: a JS array whose elements are all
 // numeric (and a freshly built []) is stored in the LMD_TYPE_ARRAY_NUM lane,
 // so testing the generic tag alone drops such an array to the primitive path
 // and compares Item pointers — deepStrictEqual([1,2],[1,2]) was false.
 JS_FORWARD_STATIC_EXPRESSION(bool, js_util_deep_equal_is_object_like_type, (TypeId type), (type == LMD_TYPE_MAP || is_array_family_type_id(type) || type == LMD_TYPE_OBJECT || type == LMD_TYPE_ELEMENT || type == LMD_TYPE_VMAP))
-
-static int js_util_deep_equal_enter(JsDeepEqualContext* ctx, Item a, Item b) {
-    if (!ctx) return 1;
-    for (int i = 0; i < ctx->depth; i++) {
-        if (ctx->stack[i].a.item == a.item && ctx->stack[i].b.item == b.item) return 0;
-        if (ctx->stack[i].a.item == a.item || ctx->stack[i].b.item == b.item) return -1;
-    }
-    if (ctx->depth >= (int)(sizeof(ctx->stack) / sizeof(ctx->stack[0]))) return -1;
-    ctx->stack[ctx->depth].a = a;
-    ctx->stack[ctx->depth].b = b;
-    ctx->depth++;
-    return 1;
-}
-
-static void js_util_deep_equal_leave(JsDeepEqualContext* ctx) {
-    if (ctx && ctx->depth > 0) ctx->depth--;
-}
 
 static bool js_util_is_nan_number(Item value) {
     TypeId type = get_type_id(value);
@@ -1653,7 +1628,7 @@ static bool js_util_is_error_like_value(Item value) {
     return js_util_has_constructor_prototype(value, "Error", 5);
 }
 
-static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bool strict);
+static Item js_util_isDeepEqual_impl(Item a, Item b, JsObjectPairTraversal* ctx, bool strict);
 
 JS_FORWARD_STATIC_EXPRESSION(bool, js_util_key_is_symbol, (Item key), (get_type_id(key) == LMD_TYPE_INT && it2i(key) <= -(int64_t)JS_SYMBOL_BASE))
 
@@ -1722,7 +1697,7 @@ static Item js_util_find_matching_key(Item keys, Item key) {
     return ItemNull;
 }
 
-static bool js_util_compare_enumerable_properties(Item a, Item b, JsDeepEqualContext* ctx, bool strict) {
+static bool js_util_compare_enumerable_properties(Item a, Item b, JsObjectPairTraversal* ctx, bool strict) {
     Item keys_a = js_util_enumerable_own_keys(a, strict);
     Item keys_b = js_util_enumerable_own_keys(b, strict);
     int64_t la = js_array_length(keys_a);
@@ -1742,7 +1717,7 @@ static bool js_util_compare_enumerable_properties(Item a, Item b, JsDeepEqualCon
 }
 
 static bool js_util_compare_unordered_collection(Item a, Item b,
-        JsDeepEqualContext* ctx, bool strict, bool is_map) {
+        JsObjectPairTraversal* ctx, bool strict, bool is_map) {
     Item size_a = js_collection_method(a, 9, ItemNull, ItemNull);
     Item size_b = js_collection_method(b, 9, ItemNull, ItemNull);
     if (it2i(size_a) != it2i(size_b)) return false;
@@ -1793,7 +1768,7 @@ static bool js_util_date_time_equal(Item a, Item b) {
     return av == bv;
 }
 
-static bool js_util_regexp_slots_equal(Item a, Item b, JsDeepEqualContext* ctx, bool strict) {
+static bool js_util_regexp_slots_equal(Item a, Item b, JsObjectPairTraversal* ctx, bool strict) {
     if (!js_util_is_real_regexp(a) || !js_util_is_real_regexp(b)) return false;
     const char* names[] = {"source", "flags", "lastIndex", NULL};
     const int lens[] = {6, 5, 9, 0};
@@ -1830,7 +1805,7 @@ static bool js_util_is_boxed_primitive(Item value) {
     return found;
 }
 
-static bool js_util_boxed_primitive_equal(Item a, Item b, JsDeepEqualContext* ctx, bool strict) {
+static bool js_util_boxed_primitive_equal(Item a, Item b, JsObjectPairTraversal* ctx, bool strict) {
     if (!js_util_is_boxed_primitive(a) || !js_util_is_boxed_primitive(b)) return false;
     if (js_class_id(a) != js_class_id(b)) return false;
     bool af = false;
@@ -1845,7 +1820,7 @@ static bool js_util_boxed_primitive_equal(Item a, Item b, JsDeepEqualContext* ct
     return true;
 }
 
-static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bool strict) {
+static Item js_util_isDeepEqual_impl(Item a, Item b, JsObjectPairTraversal* ctx, bool strict) {
     // Deep equality uses SameValueZero for NaN; loose mode additionally starts
     // primitive comparison with == before recursing into containers.
     if (js_util_is_nan_number(a) && js_util_is_nan_number(b)) {
@@ -1911,7 +1886,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
 
     bool compare_object_like = a_object_like && b_object_like;
     if (compare_object_like) {
-        int enter_status = js_util_deep_equal_enter(ctx, a, b);
+        int enter_status = ctx->enter(a, b);
         if (enter_status == 0) {
             // cyclic containers re-enter the same active pair; treating it as equal prevents unbounded recursion.
             return (Item){.item = b2it(true)};
@@ -1928,7 +1903,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         bool equal = a_dataview && b_dataview &&
                      js_util_dataview_bytes_equal(a, b) &&
                      js_util_compare_enumerable_properties(a, b, ctx, strict);
-        if (compare_object_like) js_util_deep_equal_leave(ctx);
+        if (compare_object_like) ctx->leave();
         return (Item){.item = b2it(equal)};
     }
 
@@ -1938,7 +1913,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         if (!a_typed_array || !b_typed_array) {
             // Buffer instances are byte views too; missing this branch lets a
             // fake object with copied index keys compare as a plain object.
-            if (compare_object_like) js_util_deep_equal_leave(ctx);
+            if (compare_object_like) ctx->leave();
             return (Item){.item = b2it(false)};
         }
         JsTypedArray* atyped = js_get_typed_array_ptr(a.map);
@@ -1946,12 +1921,12 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         if (!atyped || !btyped) {
             // Borrowed TypedArray/Buffer prototypes do not carry native backing
             // storage; comparing them as byte views makes fake object types pass.
-            if (compare_object_like) js_util_deep_equal_leave(ctx);
+            if (compare_object_like) ctx->leave();
             return (Item){.item = b2it(false)};
         }
         if (strict && atyped && btyped && atyped->is_buffer != btyped->is_buffer) {
             // Buffer shares Uint8Array storage, but strict deep equality must keep the distinct Buffer prototype visible.
-            if (compare_object_like) js_util_deep_equal_leave(ctx);
+            if (compare_object_like) ctx->leave();
             return (Item){.item = b2it(false)};
         }
         bool equal = strict ? js_util_typed_array_bytes_equal(a, b) : false;
@@ -1966,7 +1941,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         // Typed-array bytes are only the indexed storage; enumerable custom and
         // symbol properties still participate in Node deep equality.
         if (equal) equal = js_util_compare_enumerable_properties(a, b, ctx, strict);
-        if (compare_object_like) js_util_deep_equal_leave(ctx);
+        if (compare_object_like) ctx->leave();
         return (Item){.item = b2it(equal)};
     }
 
@@ -1976,7 +1951,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         bool equal = a_arraybuffer && b_arraybuffer &&
                      js_util_arraybuffer_bytes_equal(a, b) &&
                      js_util_compare_enumerable_properties(a, b, ctx, strict);
-        if (compare_object_like) js_util_deep_equal_leave(ctx);
+        if (compare_object_like) ctx->leave();
         return (Item){.item = b2it(equal)};
     }
 
@@ -1985,7 +1960,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
          js_util_deep_dispatch_class(b) == JS_CLASS_DATE)) {
         bool equal = js_util_date_time_equal(a, b) &&
                      js_util_compare_enumerable_properties(a, b, ctx, strict);
-        if (compare_object_like) js_util_deep_equal_leave(ctx);
+        if (compare_object_like) ctx->leave();
         return (Item){.item = b2it(equal)};
     }
 
@@ -1995,21 +1970,21 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         // treating those fakes as plain objects lets distinct object types pass.
         bool equal = js_util_regexp_slots_equal(a, b, ctx, strict) &&
                      js_util_compare_enumerable_properties(a, b, ctx, strict);
-        if (compare_object_like) js_util_deep_equal_leave(ctx);
+        if (compare_object_like) ctx->leave();
         return (Item){.item = b2it(equal)};
     }
 
     if (js_util_is_weak_collection(a) || js_util_is_weak_collection(b)) {
         // Weak collections have unobservable entries; only object identity can
         // prove equality, and identity returned before this branch.
-        if (compare_object_like) js_util_deep_equal_leave(ctx);
+        if (compare_object_like) ctx->leave();
         return (Item){.item = b2it(false)};
     }
 
     if (js_util_is_boxed_primitive(a) || js_util_is_boxed_primitive(b)) {
         bool equal = js_util_boxed_primitive_equal(a, b, ctx, strict) &&
                      js_util_compare_enumerable_properties(a, b, ctx, strict);
-        if (compare_object_like) js_util_deep_equal_leave(ctx);
+        if (compare_object_like) ctx->leave();
         return (Item){.item = b2it(equal)};
     }
 
@@ -2019,7 +1994,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         bool equal = js_class_id(a) == JS_CLASS_URL && js_class_id(b) == JS_CLASS_URL &&
                      js_util_url_href_equal(a, b) &&
                      js_util_compare_enumerable_properties(a, b, ctx, strict);
-        if (compare_object_like) js_util_deep_equal_leave(ctx);
+        if (compare_object_like) ctx->leave();
         return (Item){.item = b2it(equal)};
     }
 
@@ -2028,7 +2003,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         // LMD_TYPE_ARRAY; both are the same JS array to the language, so the
         // lanes must compare across each other, not just within.
         if (!is_array_family_type_id(tb)) {
-            js_util_deep_equal_leave(ctx);
+            ctx->leave();
             return (Item){.item = b2it(false)};
         }
         // Proxies dispatch by target type, but key collection still goes
@@ -2036,7 +2011,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         int64_t la = js_util_array_length_for_deep(a);
         int64_t lb = js_util_array_length_for_deep(b);
         if (la != lb) {
-            js_util_deep_equal_leave(ctx);
+            ctx->leave();
                 return (Item){.item = b2it(false)};
         }
         if (a_arguments && b_arguments) {
@@ -2046,7 +2021,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
                     js_elements_get_int(b, i),
                     ctx, strict);
                 if (!js_is_truthy(r)) {
-                    js_util_deep_equal_leave(ctx);
+                    ctx->leave();
                     return (Item){.item = b2it(false)};
                 }
             }
@@ -2056,21 +2031,21 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         // Array holes differ from present undefined elements; comparing the
         // enumerable own-key set preserves sparseness and custom properties.
         bool equal = js_util_compare_enumerable_properties(a, b, ctx, strict);
-        js_util_deep_equal_leave(ctx);
+        ctx->leave();
         return (Item){.item = b2it(equal)};
     }
 
     if (ta == LMD_TYPE_MAP && tb == LMD_TYPE_MAP) {
         if (js_util_is_error_like_value(a) || js_util_is_error_like_value(b)) {
             if (!js_util_is_error_like_value(a) || !js_util_is_error_like_value(b)) {
-                js_util_deep_equal_leave(ctx);
+                ctx->leave();
                 return (Item){.item = b2it(false)};
             }
             JsClass class_a = js_util_deep_dispatch_class(a);
             JsClass class_b = js_util_deep_dispatch_class(b);
             if (strict && js_class_is_error_like(class_a) &&
                     js_class_is_error_like(class_b) && class_a != class_b) {
-                js_util_deep_equal_leave(ctx);
+                ctx->leave();
                 return (Item){.item = b2it(false)};
             }
             const char* keys[] = {"message", "cause", "errors", NULL};
@@ -2079,7 +2054,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
                 bool ha = js_util_has_own_key(a, keys[i], lens[i]);
                 bool hb = js_util_has_own_key(b, keys[i], lens[i]);
                 if (ha != hb) {
-                    js_util_deep_equal_leave(ctx);
+                    ctx->leave();
                     return (Item){.item = b2it(false)};
                 }
                 if (ha) {
@@ -2088,7 +2063,7 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
                         js_get_key_default(b, js_name_item(keys[i], lens[i])),
                         ctx, strict);
                     if (!js_is_truthy(r)) {
-                        js_util_deep_equal_leave(ctx);
+                        ctx->leave();
                         return (Item){.item = b2it(false)};
                     }
                 }
@@ -2100,33 +2075,32 @@ static Item js_util_isDeepEqual_impl(Item a, Item b, JsDeepEqualContext* ctx, bo
         if (a_set && b_set) {
             bool equal = js_util_compare_unordered_collection(a, b, ctx, strict, false) &&
                 js_util_compare_enumerable_properties(a, b, ctx, strict);
-            js_util_deep_equal_leave(ctx);
+            ctx->leave();
             return (Item){.item = b2it(equal)};
         }
         if (a_map && b_map) {
             bool equal = js_util_compare_unordered_collection(a, b, ctx, strict, true) &&
                 js_util_compare_enumerable_properties(a, b, ctx, strict);
-            js_util_deep_equal_leave(ctx);
+            ctx->leave();
             return (Item){.item = b2it(equal)};
         }
         if ((a_set && !b_set) || (!a_set && b_set) || (a_map && !b_map) || (!a_map && b_map)) {
-            js_util_deep_equal_leave(ctx);
+            ctx->leave();
             return (Item){.item = b2it(false)};
         }
         // Plain object comparison must match enumerable own keys, not just
         // values read through possibly non-enumerable or inherited properties.
         bool equal = js_util_compare_enumerable_properties(a, b, ctx, strict);
-        js_util_deep_equal_leave(ctx);
+        ctx->leave();
         return (Item){.item = b2it(equal)};
     }
 
-    if (compare_object_like) js_util_deep_equal_leave(ctx);
+    if (compare_object_like) ctx->leave();
     return (Item){.item = b2it(false)};
 }
 
 static Item js_util_is_deep_equal_mode(Item a, Item b, bool strict) {
-    JsDeepEqualContext ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    JsObjectPairTraversal ctx;
     return js_util_isDeepEqual_impl(a, b, &ctx, strict);
 }
 JS_FORWARD_ITEM(js_util_isDeepStrictEqual, (Item a, Item b), js_util_is_deep_equal_mode, (a, b, true))

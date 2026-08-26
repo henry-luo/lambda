@@ -143,7 +143,7 @@ static int textarea_visual_line_count(LayoutContext* lycon, FontProp* font,
 
     FontBox font_box = {};
     setup_font(lycon->ui_context, &font_box, font);
-    if (!font_box.font_handle) return 1;
+    if (!font_box_handle(&font_box)) return 1;
 
     int line_count = 1;
     const char* line_start = value;
@@ -160,7 +160,7 @@ static int textarea_visual_line_count(LayoutContext* lycon, FontProp* font,
         while ((*next & 0xC0) == 0x80) next++;
         int candidate_len = (int)(next - line_start);  // INT_CAST_OK: font API takes byte length.
         float candidate_width = font_measure_text(
-            font_box.font_handle, line_start, candidate_len).width;
+            font_box_handle(&font_box), line_start, candidate_len).width;
         if (cursor > line_start && candidate_width > content_width) {
             // Keep this greedy visual-line break in lockstep with textarea paint:
             // the overflowing glyph begins the next editable line.
@@ -222,8 +222,8 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
     } else if (font && font->font_size > 0 && lycon->ui_context) {
         FontBox temp_font;
         setup_font(lycon->ui_context, &temp_font, font);
-        if (temp_font.font_handle) {
-            GlyphInfo zero_glyph = font_get_glyph(temp_font.font_handle, '0');
+        if (font_box_handle(&temp_font)) {
+            GlyphInfo zero_glyph = font_get_glyph(font_box_handle(&temp_font), '0');
             if (zero_glyph.advance_x > 0) {
                 // HTML spec §4.10.5.3.7 + CSS Values §6.1.2 (ch unit):
                 // Use the actual advance width of '0' from the resolved font.
@@ -272,8 +272,8 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
         if (font && font->font_size > 0 && lycon->ui_context) {
             FontBox temp_font;
             setup_font(lycon->ui_context, &temp_font, font);
-            if (temp_font.font_handle) {
-                line_h = calc_normal_line_height(temp_font.font_handle);
+            if (font_box_handle(&temp_font)) {
+                line_h = calc_normal_line_height(font_box_handle(&temp_font));
             }
         }
         if (font && font->font_size > 0 && font->font_size != ua_font_size) {
@@ -319,12 +319,15 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
         bool has_css_font = form_control_has_specified_font(block) ||
             !font->font_size_from_medium;
         float font_size = font->font_size;
-        // Width: cols × char_width + scrollbar_reserve
+        // Width: ceil(cols × average character width) + scrollbar reserve.
+        // HTML rendering §15.5 and Blink's textarea algorithm use the primary
+        // font average metric, not the advance of U+0020.
         float char_w;
         float scrollbar_reserve;
         if (has_css_font) {
-            // CSS specifies font — use space_width if available, else approximate
-            char_w = (font->space_width > 0) ? font->space_width : font_size * 0.60f;
+            char_w = font->average_char_width > 0.0f
+                ? roundf(font->average_char_width)
+                : (font->space_width > 0.0f ? roundf(font->space_width) : roundf(font_size * 0.60f));
             scrollbar_reserve = 16.0f;
         } else {
             // UA default: Chrome monospace ~13.333px, char width ≈ 8px
@@ -332,7 +335,7 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
             char_w = ta_font * 0.60f;
             scrollbar_reserve = 16.0f;
         }
-        float content_w = cols * char_w + scrollbar_reserve;
+        float content_w = ceilf(cols * char_w) + scrollbar_reserve;
         form->intrinsic_width = content_w * pr;
         // Height: rows × the same used line-height that establishes editable baselines.
         float line_ht = textarea_used_line_height(lycon, block, font, has_css_font);
@@ -388,10 +391,10 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
             font && font->font_size > 0 && lycon->ui_context) {
             FontBox temp_font;
             setup_font(lycon->ui_context, &temp_font, font);
-            if (temp_font.font_handle) {
+            if (font_box_handle(&temp_font)) {
                 // author flex buttons lay out real text children; the native
                 // 15px control height would override their CSS normal line-height.
-                float line_h = calc_normal_line_height(temp_font.font_handle);
+                float line_h = calc_normal_line_height(font_box_handle(&temp_font));
                 if (line_h > 0) content_height = line_h;
             }
         }
@@ -563,8 +566,8 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         if (font && font->font_size > 0 && lycon->ui_context) {
             FontBox temp_font;
             setup_font(lycon->ui_context, &temp_font, font);
-            if (temp_font.font_handle) {
-                float lh = calc_normal_line_height(temp_font.font_handle);
+            if (font_box_handle(&temp_font)) {
+                float lh = calc_normal_line_height(font_box_handle(&temp_font));
                 if (lh > content_h) content_h = lh;
             }
         }

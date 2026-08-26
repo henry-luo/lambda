@@ -2,8 +2,8 @@
 // standard contenteditable host uses the DOM compatibility action.
 
 edit <mixed_template_editor> state text: "template", status: "ready" {
-  <div id:"template-host", contenteditable:"true", tabindex:"0"; text>
-  <output id:"template-state"; status ++ ":" ++ text>
+  <div id:"template-host", contenteditable:"true", tabindex:"0", text>
+  <output id:"template-state", status ++ ":" ++ text>
 }
 on beforeinput(evt) {
   if (evt.input_intent != null) {
@@ -15,10 +15,10 @@ on beforeinput(evt) {
 <html
   <body
     <div id:"mixed-root"
-      apply(<mixed_template_editor>, {mode: "edit"})
-      <div id:"dom-host", contenteditable:"true", tabindex:"0";
+, apply(<mixed_template_editor>, {mode: "edit"});
+      <div id:"dom-host", contenteditable:"true", tabindex:"0",
         "dom"
-        <span id:"dom-false-island", contenteditable:"false"; "locked">
+        <span id:"dom-false-island", contenteditable:"false", "locked">
       >
     >
   >

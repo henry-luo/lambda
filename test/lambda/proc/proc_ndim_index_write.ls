@@ -1,6 +1,11 @@
 // Multi-dim write: arr[i, j, k] = v
 // Phase 2b §1 of Lambda_Typed_Array2.md — first-class multi-dim indexing
 
+pn write_nd(var m, i, j, value) int^ {
+    m[i, j] = value
+    return 1
+}
+
 pn test_2d_write() {
     var m = [[1, 2, 3], [4, 5, 6]]
 
@@ -41,11 +46,17 @@ pn test_3d_write() {
 
 pn test_negative_index_write() {
     var m = [[1, 2, 3], [4, 5, 6]]
-    m[-1, -1] = 999
-    m[-2, 0] = 111
-    print(m[1, 2])       // 6 — negative writes are absent/no-op
+    var first_error = null
+    write_nd(m, -1, -1, 999) ^ { first_error = ^ }
+    var second_error = null
+    write_nd(m, -2, 0, 111) ^ { second_error = ^ }
+    print(first_error is error)
     print(" ")
-    print(m[0, 0])       // 1 — negative writes are absent/no-op
+    print(second_error is error)
+    print(" ")
+    print(m[1, 2])       // 6 — rejected writes leave the target unchanged
+    print(" ")
+    print(m[0, 0])       // 1 — rejected writes leave the target unchanged
     print("\n")
 }
 
@@ -63,10 +74,16 @@ pn test_float_write() {
     print("\n")
 }
 
-pn test_out_of_range_silent() {
+pn test_out_of_range_write_error() {
     var m = [[1, 2], [3, 4]]
-    m[5, 5] = 999        // out of range — no-op
-    m[-99, 0] = 777      // also no-op
+    var first_error = null
+    write_nd(m, 5, 5, 999) ^ { first_error = ^ }
+    var second_error = null
+    write_nd(m, -99, 0, 777) ^ { second_error = ^ }
+    print(first_error is error)
+    print(" ")
+    print(second_error is error)
+    print(" ")
     print(m[0, 0])       // 1 (unchanged)
     print(" ")
     print(m[1, 1])       // 4 (unchanged)
@@ -78,5 +95,5 @@ pn main() {
     test_3d_write()
     test_negative_index_write()
     test_float_write()
-    test_out_of_range_silent()
+    test_out_of_range_write_error()
 }

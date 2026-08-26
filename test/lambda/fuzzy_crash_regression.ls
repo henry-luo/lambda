@@ -7,18 +7,18 @@
 // - Crash 4: len() on null from query (tagged null Item passed as raw pointer)
 
 // === Crash 1: argmin/argmax on empty array ===
-'Crash 1: argmin/argmax empty array'
+'Crash 1: argmin/argmax empty array';
 [argmin([]) is null, argmax([]) is null]
 
 // === Crash 2: for-in on error/undefined value ===
-'Crash 2: for-in on error value'
+'Crash 2: for-in on error value';
 [for (c in undefined_var) c]
 
 // === Crash 3: ~ self-reference in type method body ===
 'Crash 3: ~ in type method'
 type Vec {
     x: float,
-    y: float;
+    y: float,
     fn translate(dx: float, dy: float) => <Vec *:~, x: x + dx, y: y + dy>
     fn scale(factor: float) => <Vec *:~, x: x * factor, y: y * factor>
 }
@@ -28,7 +28,7 @@ v.scale(2.0) != null
 
 // === Crash 4: len() on null from optional query ===
 'Crash 4: len on null from query'
-let items = <root>
+let items = <root>;
     <item> "a"
     <item> "b"
 len(items?item)

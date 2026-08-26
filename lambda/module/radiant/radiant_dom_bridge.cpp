@@ -822,7 +822,13 @@ static CssSelectorGroup* radiant_dom_parse_css_selector_group(const char* sel_te
     int pos = 0;
     // DOM selector APIs receive selector lists; parsing only the first selector
     // makes editor hit-tests such as closest("td, th") miss valid cells.
-    return css_parse_selector_group_from_tokens(tokens, &pos, (int)token_count, pool);
+    CssSelectorGroup* group = css_parse_selector_group_from_tokens(
+        tokens, &pos, (int)token_count, pool);
+    if (!group || group->selector_count == 0 ||
+        !css_selector_group_parse_consumed_all(tokens, pos, (int)token_count)) {
+        return nullptr;
+    }
+    return group;
 }
 
 static DomElement* radiant_dom_selector_group_find_first(SelectorMatcher* matcher,
@@ -1666,7 +1672,7 @@ static Item radiant_dom_input_files_get(DomElement* elem) {
     return files;
 }
 
-static Item radiant_dom_input_throw(const char* name, const char* message) {
+static Item radiant_dom_throw_named_error(const char* name, const char* message) {
     Item error = radiant_host_api->script->new_error_with_name(
         (Item){.item = s2it(heap_create_name(name))},
         (Item){.item = s2it(heap_create_name(message))});
@@ -1735,7 +1741,7 @@ RADIANT_C_API int radiant_dom_input_typed_value_set(Item r, Item v, Item* out) {
     if (kind == RADIANT_INPUT_VALUE_FILE) {
         if (text[0]) {
             // File inputs cannot manufacture host paths from script-provided text.
-            *out = radiant_dom_input_throw("InvalidStateError",
+            *out = radiant_dom_throw_named_error("InvalidStateError",
                                           "File input value can only be set to the empty string");
             return 1;
         } else {
@@ -1766,12 +1772,12 @@ RADIANT_C_API int radiant_dom_input_value_as_number_set(Item r, Item v, Item* ou
     double number = radiant_host_api->script->get_number(v);
     char formatted[128];
     if (!isfinite(number)) {
-        *out = radiant_dom_input_throw("TypeError", "valueAsNumber must be finite");
+        *out = radiant_dom_throw_named_error("TypeError", "valueAsNumber must be finite");
         return 1;
     } else if (!radiant_input_value_from_number(
                    elem->get_attribute("type"), number,
                    formatted, sizeof(formatted))) {
-        *out = radiant_dom_input_throw("InvalidStateError",
+        *out = radiant_dom_throw_named_error("InvalidStateError",
                                       "This input type has no numeric value state");
         return 1;
     } else {
@@ -1801,13 +1807,13 @@ RADIANT_C_API int radiant_dom_input_value_as_date_set(Item r, Item v, Item* out)
     if (!elem || !out) return 0;
     const char* type = elem->get_attribute("type");
     if (!radiant_input_value_as_date_supported(type)) {
-        *out = radiant_dom_input_throw("InvalidStateError",
+        *out = radiant_dom_throw_named_error("InvalidStateError",
                                       "This input type has no Date value state");
         return 1;
     } else if (v.item == ITEM_NULL) {
         radiant_input_set_live_value(elem, "");
     } else if (radiant_host_api->script->class_id(v) != JS_CLASS_DATE) {
-        *out = radiant_dom_input_throw("TypeError", "valueAsDate requires a Date or null");
+        *out = radiant_dom_throw_named_error("TypeError", "valueAsDate requires a Date or null");
         return 1;
     } else {
         Item time = radiant_host_api->script->date_method(v, 0);
@@ -1847,7 +1853,7 @@ RADIANT_C_API int radiant_dom_input_files_set_member(Item r, Item v, Item* out) 
         // arbitrary Array would let script bypass the file-input security model.
         radiant_input_set_files(elem, v);
     } else {
-        *out = radiant_dom_input_throw("TypeError", "files must be a FileList or null");
+        *out = radiant_dom_throw_named_error("TypeError", "files must be a FileList or null");
         return 1;
     }
     *out = v;
@@ -1863,7 +1869,7 @@ RADIANT_C_API int radiant_dom_input_step_up(Item r, Item* args, int argc, Item* 
             radiant_input_live_value(elem), elem->get_attribute("min"),
             elem->get_attribute("max"), elem->get_attribute("step"),
             count, stepped, sizeof(stepped))) {
-        *out = radiant_dom_input_throw("InvalidStateError", "Input value cannot be stepped");
+        *out = radiant_dom_throw_named_error("InvalidStateError", "Input value cannot be stepped");
         return 1;
     } else {
         radiant_input_set_live_value(elem, stepped);
@@ -2860,11 +2866,7 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
         }
         CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->document_pool);
         if (!selector_group) {
-            Item err_name = (Item){.item = s2it(heap_create_name("SyntaxError"))};
-            Item err_msg = (Item){.item = s2it(heap_create_name("is not a valid selector"))};
-            radiant_host_api->script->throw_value(
-                radiant_host_api->script->new_error_with_name(err_name, err_msg));
-            *out = ItemNull;
+            *out = radiant_dom_throw_named_error("SyntaxError", "is not a valid selector");
             return 1;
         }
         SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)doc);
@@ -2886,7 +2888,7 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
         }
         CssSelectorGroup* selector_group = radiant_dom_parse_css_selector_group(sel_text, doc->document_pool);
         if (!selector_group) {
-            *out = radiant_dom_array_item();
+            *out = radiant_dom_throw_named_error("SyntaxError", "is not a valid selector");
             return 1;
         }
         SelectorMatcher* matcher = (SelectorMatcher*)js_dom_create_selector_matcher_bridge((void*)doc);

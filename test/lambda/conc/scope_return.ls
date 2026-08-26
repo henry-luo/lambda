@@ -4,7 +4,7 @@ pn child() {
 }
 pn branch() {
     if (true) {
-        start child()
+        start(child)
         print("inside")
         return 7
     }

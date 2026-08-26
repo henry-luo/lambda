@@ -1,12 +1,12 @@
-#!/usr/bin/env lambda
+// #!/usr/bin/env lambda   // (shebang: not parseable — no shebang support)
 
-# Typesetting System Test Runner
-# Runs all typesetting tests from the proper test directory
+// Typesetting System Test Runner
+// Runs all typesetting tests from the proper test directory
 
 print("Lambda Typesetting System - Test Suite")
 print("=====================================")
 
-# Test 1: Basic typesetting functionality
+// Test 1: Basic typesetting functionality
 print("\\nRunning basic typesetting tests...")
 try {
     result1 = run_file("test/lambda/typeset/test_typesetting.ls")
@@ -19,7 +19,7 @@ try {
     print("✗ Basic typesetting tests error:", error)
 }
 
-# Test 2: Refined view tree architecture
+// Test 2: Refined view tree architecture
 print("\\nRunning refined architecture tests...")
 try {
     result2 = run_file("test/lambda/typeset/test_refined_typesetting.ls")

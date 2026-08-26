@@ -88,5 +88,5 @@ pn main() {
     // Clean up symbol target file
     io.delete('lambda_test_symbol.mk')^;
 
-    print("done");
+    print("done")
 }

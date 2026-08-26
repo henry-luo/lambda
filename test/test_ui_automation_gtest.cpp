@@ -457,7 +457,11 @@ static int ui_memory_job_limit_for(unsigned long long physical_bytes,
 }
 
 static int ui_memory_job_limit() {
-    int worker_mb = 1024;
+    // external JS bundles retain source, transpiler state, and JIT pages at
+    // the same time; the old 1 GiB estimate allowed concurrent MIR builds to
+    // enter an unstable memory-pressure regime before the child could report
+    // a normal test failure.
+    int worker_mb = 2048;
     const char* env_worker_mb = getenv("LAMBDA_UI_TEST_WORKER_MB");
     if (env_worker_mb && *env_worker_mb) {
         int requested_mb = atoi(env_worker_mb);

@@ -1,6 +1,6 @@
 # Lambda Double Boxing v3 — Inline Doubles via High-Byte Float Self-Tagging
 
-- **Status:** LANDED — S3 complete 2026-07-11; self-tagged floats are always on and the `LAMBDA_SELF_TAG_FLOAT` transition flag is deleted; implementation record at `Lambda_Impl_Double_Boxing (done).md`. Note the designed residue remains: subnormal/tiny doubles (`|d| < ~1.5e-154`, e.g. `Number.MIN_VALUE`) still box onto the number side stack, so the scalar return lane (`Lambda_Issue_Scalar_Lane.md`) still applies to `FLOAT`.
+- **Status:** LANDED — S3 complete 2026-07-11; self-tagged floats are always on and the `LAMBDA_SELF_TAG_FLOAT` transition flag is deleted; implementation record at `impl/Lambda_Impl_Double_Boxing (done).md`. Note the designed residue remains: subnormal/tiny doubles (`|d| < ~1.5e-154`, e.g. `Number.MIN_VALUE`) still box onto the number side stack, so the scalar return lane (`Lambda_Issue_Scalar_Lane.md`) still applies to `FLOAT`.
 - **Date:** 2026-07-10
 - **Co-Author:** Anthropic Fable
 - **Scope:** the runtime `Item` representation of `float` (binary64) across Lambda core, LambdaJS, the MIR transpilers, and the GC. Supersedes and expands **Part 5** of `Lambda_Tuning_Proposal.md`.
@@ -231,9 +231,14 @@ All zeros are out-of-band, so `-0.0` correctness lives entirely in the cold path
 
 Audited: every `*(double*)… =` write in the tree targets a typed **field slot** in shaped map storage (`transpile-mir.cpp:1659`, `lambda-eval.cpp:5793`, `mark_editor.cpp:356`, `input.cpp:108`, …), never a shared boxed-float payload. Lambda numbers are immutable values with no identity, so copy-by-value encoding is semantically invisible. This is the property that makes the whole scheme correct — re-verify it holds whenever a new numeric mutation path lands.
 
-## 3.7 `LMD_TYPE_FLOAT64` — a second binary64 TypeId collides with canonicalization
+## 3.7 Duplicate binary64 runtime tag — resolved
 
-`LMD_TYPE_FLOAT64` exists as a distinct boxed TypeId with its own packer (`f642it`, `lambda.h:912`) for explicit `f64` literals/annotations. Number model v2 §3.2 already rules `f64` a **pure alias** of `float` ("aliases in, canon out" — `type()` never returns `f64`). Two runtime TypeIds for one value domain breaks the canonical-encoding invariant (§2.6): the same double could be an inline FLOAT or a boxed FLOAT64. **Resolution: retire `LMD_TYPE_FLOAT64` as a runtime TypeId** (keep `f64` as a parse-time alias resolving to FLOAT) **before or with S1**. Touch points: `f642it` producers, `is_numeric_type_id` (`lambda.h:882`), any switch cases on `LMD_TYPE_FLOAT64`. This aligns with the number-model migration schedule (its Part 2 W-items) — coordinate rather than duplicate.
+`f64` is a pure source alias of `float`: literal production and annotations
+canonicalize to the single `FLOAT` runtime TypeId, and `type()` never returns
+`f64`. This is now enforced by removing the duplicate enum tag and its
+consumers, rather than retaining a compatibility hole. The result restores the
+canonical-encoding invariant (§2.6): every binary64 value has one runtime
+domain. This follows the scalar aliases in S2.1.1.
 
 ## 3.8 Cross-frontend and interpreter coverage
 
@@ -254,7 +259,7 @@ The compact `int` band is **±(2⁵³−1)** — deliberately the JS safe-intege
 3. **The int-overflow promotion arm stops allocating.** `jm_box_int_reg`'s out-of-range arm (`js_mir_calls_boxing_types.cpp:356`) promotes to a boxed float via `push_d` — the only allocation in the int packing path. It becomes an inline encode; the results (magnitudes just past 2⁵³) are comfortably in-band.
 4. **JS ingress needs nothing new.** Number model v2 makes JS numbers uniformly `float` (compact-int packing already removed from LambdaJS, §5.1) — which *increased* boxed-double traffic and thus the prize here. Safe-integer-valued JS numbers arrive as doubles and self-tag like any other.
 5. **Type semantics untouched.** `int` and `float` remain distinct runtime types (`type(5)` = `int`; `5 is float` is the §3.4 subsumption question, answered at the type level, not by representation). No temptation to encode ints as inline doubles — that would erase the `int`/`float` distinction the semantics ADR requires.
-6. **The one real change is §3.7** — retiring `LMD_TYPE_FLOAT64`, which the number model's alias rule already implies; this proposal just makes it a hard prerequisite.
+6. **The one real change in §3.7 is complete** — collapsing the duplicate binary64 runtime tag, which the scalar alias rule in S2.1.1 already implies.
 
 ---
 
@@ -265,7 +270,7 @@ The compact `int` band is **±(2⁵³−1)** — deliberately the JS safe-intege
 | Phase | Content | Risk | Gate |
 |---|---|---|---|
 | **S0** — occupancy + comparison audit *(land independently; zero behavior change)* | Renumber `JS_DELETED_SENTINEL_VAL` / `JS_ITER_DONE_SENTINEL` to bits-6,5-clear high bytes (§2.3) + their comparison sites. Add `static_assert(LMD_TYPE_COUNT <= 0x20)` + the bits-6,5-clear invariant comment on the TypeId enum, and compile-time asserts pinning the sentinels. Sweep all raw `>> 56` / high-byte-mask sites (≈24 sites / 11 files) and classify per §3.3. **Audit every raw-Item `MIR_EQ`/`MIR_BEQ` emission site (§3.1): float-free proof or `MIR_DEQ` reroute plan.** Grep Jube runtimes for private tag arithmetic. Confirm GC-internal header tags never materialize into Item high bytes. | none | full baselines green (`make test-lambda-baseline`, JS gtests, Radiant) |
-| **S1** — runtime level, behind `LAMBDA_SELF_TAG_FLOAT` | `get_type_id` inline-double fast path (ordered first); `it2d`/`flt2it` two-arm forms; `js_make_number` + `push_d` wrappers canonicalize; packed-immediate ±0 (`ITEM_FLOAT_P0`/`_N0`) + `it2d_cold` payload-≤1 check (§2.5); **retire `LMD_TYPE_FLOAT64`** (§3.7, coordinated with number-model W-items); producer canonicalization in parsers/MarkBuilder. | medium | test262 full + `make test-lambda-baseline` + Radiant baseline, **flag on vs. off**; new property tests (§5.2) |
+| **S1** — runtime level, behind `LAMBDA_SELF_TAG_FLOAT` | `get_type_id` inline-double fast path (ordered first); `it2d`/`flt2it` two-arm forms; `js_make_number` + `push_d` wrappers canonicalize; packed-immediate ±0 (`ITEM_FLOAT_P0`/`_N0`) + `it2d_cold` payload-≤1 check (§2.5); collapse the duplicate binary64 runtime tag (§3.7); producer canonicalization in parsers/MarkBuilder. | medium | test262 full + `make test-lambda-baseline` + Radiant baseline, **flag on vs. off**; new property tests (§5.2) |
 | **S2** — JIT lowering fast paths | Inline encode at `jm_box_float`, `jm_box_int_reg` overflow arm, Lambda-side `push_d` emission; inline decode at `jm_emit_unbox_float` / Lambda unbox sites (bitcast via scratch slot); apply the §3.1 `MIR_DEQ` reroutes decided in S0. | medium | same gates + benchmark A/B (nbody, mandelbrot, navier_stokes, matmul, splay float keys; richards/splay as the float-light branch-cost canaries), JIT **and** MIR-interp modes |
 | **S3** — GC audit + hardening; default the flag on | §2.7 verification pass (`gc_fixup_embedded_pointers` skip, `item_to_ptr` DBL_MASK early-out, conservative-scan behavior); ASan run of the full benchmark suite; NaN-key hashing tests (§3.4); then flip the default. | low | clean ASan, no baseline regressions, flag-off build kept working one release as escape hatch |
 
@@ -282,7 +287,7 @@ Per the tuning-proposal review: **T0/L0 re-measure → S0 (land now) → S1 → 
 
 ## 5.4 Fallback
 
-If S2 measures worse than expected (branch cost in `get_type_id` on float-light code), the flag confines the experiment and the build reverts cleanly — and §2.9's variants B/C remain available as drop-in swaps of the encode/decode/discriminate primitives if the tag-space budget (B) or something unforeseen ever demands it. The S0 sentinel renumbering, asserts/lint invariant, `MIR_EQ` audit results, and the `LMD_TYPE_FLOAT64` retirement are all worth keeping regardless of the outcome.
+If S2 measures worse than expected (branch cost in `get_type_id` on float-light code), the flag confines the experiment and the build reverts cleanly — and §2.9's variants B/C remain available as drop-in swaps of the encode/decode/discriminate primitives if the tag-space budget (B) or something unforeseen ever demands it. The S0 sentinel renumbering, asserts/lint invariant, `MIR_EQ` audit results, and the duplicate-tag collapse are all worth keeping regardless of the outcome.
 
 ---
 

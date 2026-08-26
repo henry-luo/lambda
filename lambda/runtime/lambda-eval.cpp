@@ -100,6 +100,7 @@ extern Item _map_read_field(ShapeEntry* field, void* map_data);
 extern "C" Pool* eval_context_get_pool(void);
 extern "C" Path* path_extend(Pool* pool, Path* base, const char* segment);
 extern "C" Path* path_concat(Pool* pool, Path* base, Path* suffix);
+extern "C" Path* path_qualify_default(Pool* pool, Path* path);
 extern "C" PathScheme path_get_scheme(Path* path);
 extern "C" bool path_is_absolute(Path* path);
 extern "C" TypeMap* js_typemap_clone_for_mutation_pub(Item obj);
@@ -230,8 +231,7 @@ Bool is_truthy(Item item) {
         return BOOL_FALSE;  // errors are falsy; use `is error` to test them
     case LMD_TYPE_BOOL:
         return item.bool_val ? BOOL_TRUE : BOOL_FALSE;
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
+    case LMD_TYPE_FLOAT: {
         // Lambda truthiness treats every number as truthy; inline floats must not
         // inherit JS-style zero/NaN falsiness from their raw double payload.
         return BOOL_TRUE;
@@ -534,6 +534,39 @@ Item fn_union(Item left, Item right) {
     return { .array = result };
 }
 
+// Set intersection and exclusion, the `&` and `!` value operators. Both mirror
+// fn_union's contract: left-to-right order preserved, duplicates removed, and
+// membership decided by `fn_in` — the same relation the `in` operator tests, so
+// S8.1.1's "whatever for..in walks, in tests" extends to the set operators
+// instead of them inventing a second notion of membership.
+Item fn_intersect(Item left, Item right) {
+    GUARD_ERROR2(left, right);
+    Array* result = array();
+    int64_t left_len = fn_len(left);
+    for (int64_t i = 0; i < left_len; i++) {
+        Item item = item_at(left, i);
+        if (array_has_item(result, item)) continue;
+        Bool present = fn_in(item, right);
+        if (present >= BOOL_ERROR) return ItemError;
+        if (present == BOOL_TRUE) array_push(result, item);
+    }
+    return { .array = result };
+}
+
+Item fn_exclude(Item left, Item right) {
+    GUARD_ERROR2(left, right);
+    Array* result = array();
+    int64_t left_len = fn_len(left);
+    for (int64_t i = 0; i < left_len; i++) {
+        Item item = item_at(left, i);
+        if (array_has_item(result, item)) continue;
+        Bool present = fn_in(item, right);
+        if (present >= BOOL_ERROR) return ItemError;
+        if (present != BOOL_TRUE) array_push(result, item);
+    }
+    return { .array = result };
+}
+
 String *str_repeat(String *str, int64_t times) {
     if (times <= 0) {
         // Return empty string
@@ -666,6 +699,16 @@ static bool range_type_contains_item(TypeRange* range, Item item) {
         start <= value && value <= end;
 }
 
+// One owner for the bad-range-bound diagnosis. The JIT's counted-range lowering
+// (T19-3) re-checks the int53 band itself, because its bounds arrive in the
+// TOTAL int lane where a saturated or null value is an ordinary i64 sentinel;
+// its cold arm reports through here so the message never forks from fn_to's.
+Item fn_range_bound_error(Item item_a, Item item_b) {
+    log_error("fn_to: range bounds must be exact integers or single-codepoint strings, got %s, %s",
+        get_type_name(get_type_id(item_a)), get_type_name(get_type_id(item_b)));
+    return ItemError;
+}
+
 Item fn_to(Item item_a, Item item_b) {
     GUARD_ERROR2(item_a, item_b);
     int64_t start = 0;
@@ -726,9 +769,7 @@ Item fn_to(Item item_a, Item item_b) {
         return {.range = range};
     }
     else {
-        log_error("fn_to: range bounds must be exact integers or single-codepoint strings, got %s, %s",
-            get_type_name(get_type_id(item_a)), get_type_name(get_type_id(item_b)));
-        return ItemError;
+        return fn_range_bound_error(item_a, item_b);
     }
 }
 
@@ -1081,9 +1122,13 @@ static Item lambda_dynamic_invoke_by_count(Function* fn, const Item* args,
         return lambda_dynamic_invoke_host_adapter(fn, args, count, caller);
     }
     if (fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED) {
-        // The single tier-dispatch point (AI7): `args` is already the rooted
-        // span the adapter built, which is exactly what interp_call needs.
-        return interp_call(fn, args, count);
+        // T0 values retain the source entry until this one dispatch boundary.
+        // Upgrade before selecting a C prototype: a published satellite uses
+        // the ordinary generated boxed ABI, while a cold/pinned definition
+        // must keep the exact interpreter call path (D8.1.1v2 §5.3).
+        if (!interp_promote_function_if_hot(fn)) {
+            return interp_call(fn, args, count);
+        }
     }
     // This is the Core boxed ABI dispatch; hosted native callbacks use the
     // shared Item-only switch in hosted-call-dispatch.hpp above.
@@ -1183,7 +1228,9 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
             for (int i = fixed; i < actual; i++) {
                 // Reload both rooted values after each append: growth may collect.
                 rest = (List*)(uintptr_t)adapter_words[fixed];
-                list_push(rest, (Item){.item = source_words[i + 1]});
+                // Arguments are not content: append verbatim so `null` and
+                // adjacent strings survive (see emit_variadic_args).
+                array_push((Array*)rest, (Item){.item = source_words[i + 1]});
             }
         }
     }
@@ -1195,6 +1242,63 @@ static Item lambda_dynamic_call(Function* fn, List* args, uint64_t* result_home,
 Item fn_call_into(Function* fn, List* args, uint64_t* result_home) {
     return lambda_dynamic_call(fn, args, result_home, LAMBDA_DYNAMIC_CALL_FUNCTION,
         "fn_call_into");
+}
+
+// S12.3.4 `call(f, args)` — dynamic application. Shared body for both colours;
+// `caller_is_proc` is fixed by the ENCLOSING context at lowering time, which is
+// what selects the error convention (S12.3.4: fn returns, pn raises). The
+// TARGET's colour is read from its TypeFunc and checked here whenever the
+// static side could not (S12.1.4).
+static Item lambda_dynamic_apply(Item callee, Item args_item, bool caller_is_proc,
+        const char* caller) {
+    Function* fn = get_type_id(callee) == LMD_TYPE_FUNC
+        ? (Function*)(uintptr_t)callee.item : NULL;
+    if (!is_valid_function(fn)) {
+        set_runtime_error(ERR_INVALID_OPERATION,
+            "%s: first argument must be a function", caller);
+        return ItemError;
+    }
+    // S12.1.4: a pn target reached from fn context. Static analysis catches
+    // this when the callee is statically known; a dynamic callee can only be
+    // caught here.
+    TypeFunc* signature = (TypeFunc*)fn->fn_type;
+    if (!caller_is_proc && signature && signature->is_proc) {
+        set_runtime_error(ERR_PROC_IN_FN,
+            "%s: cannot call a procedure (pn) from a function (fn)", caller);
+        return ItemError;
+    }
+    // S12.3.4: `args` is an array, never coerced from a bare value — a
+    // one-element promotion would silently call a 1-arity function. Both the
+    // generic and the packed-numeric array faces are accepted; an `array[num]`
+    // is what an all-numeric literal like `[1, 2]` actually builds.
+    TypeId args_type = get_type_id(args_item);
+    if (args_type == LMD_TYPE_ARRAY) {  // lists are ARRAY at runtime
+        return fn_call_into(fn, it2list(args_item), NULL);
+    }
+    if (args_type == LMD_TYPE_ARRAY_NUM) {
+        // Packed numerics carry no Item[] to hand the dynamic ABI, so widen
+        // through the boundary accessor that already boxes each element.
+        ArrayNum* packed = (ArrayNum*)(uintptr_t)args_item.item;
+        List* widened = list();
+        for (int64_t i = 0; i < packed->length; i++) {
+            // Widening must be length-preserving, and this is an argument
+            // list: append verbatim (LR09-R3).
+            array_push((Array*)widened, array_num_get(packed, i));
+        }
+        return fn_call_into(fn, widened, NULL);
+    }
+    set_runtime_error(ERR_INVALID_OPERATION,
+        "%s: second argument must be an array of arguments, got %s",
+        caller, get_type_name(args_type));
+    return ItemError;
+}
+
+extern "C" Item fn_apply_args(Item callee, Item args_item) {
+    return lambda_dynamic_apply(callee, args_item, false, "call");
+}
+
+extern "C" Item pn_apply_args(Item callee, Item args_item) {
+    return lambda_dynamic_apply(callee, args_item, true, "call");
 }
 
 static Item lambda_dynamic_public_non_function_error(Function* fn, const char* caller) {
@@ -1411,6 +1515,31 @@ static Type* runtime_boundary_unwrap_type(Type* type) {
     return type;
 }
 
+// The named map contract carried by a boundary type, looking through the
+// nullable spellings `N?` and `N | null`. Returns NULL when the contract is not
+// a named map (an open `map` implies no layout, so it is excluded too).
+//
+// Both wrappers report LMD_TYPE_TYPE as their own type_id, so a plain
+// `expected->type_id == LMD_TYPE_MAP` test silently drops every optional record
+// contract -- which is every self-referential one.
+static Type* runtime_boundary_nonnull_map_arm(Type* expected) {
+    Type* type = runtime_boundary_unwrap_type(expected);
+    if (!type) return NULL;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY &&
+            ((TypeUnary*)type)->op == OPERATOR_OPTIONAL) {
+        type = runtime_boundary_unwrap_type(((TypeUnary*)type)->operand);
+    } else if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY &&
+            ((TypeBinary*)type)->op == OPERATOR_UNION) {
+        TypeBinary* binary = (TypeBinary*)type;
+        Type* left = runtime_boundary_unwrap_type(binary->left);
+        Type* right = runtime_boundary_unwrap_type(binary->right);
+        if (left && left->type_id == LMD_TYPE_NULL) type = right;
+        else if (right && right->type_id == LMD_TYPE_NULL) type = left;
+    }
+    if (!type || type->type_id != LMD_TYPE_MAP || type == &TYPE_MAP) return NULL;
+    return type;
+}
+
 static bool runtime_validate_value_against_type(Item item, Type* expected,
         ValidationResult** validation) {
     if (!context || !context->validator) return false;
@@ -1491,7 +1620,6 @@ bool lambda_type_matches(Item item, Type* expected) {
     case LMD_TYPE_INT:
     case LMD_TYPE_INT64:
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
     case LMD_TYPE_DECIMAL:
     case LMD_TYPE_NUM_SIZED:
     case LMD_TYPE_UINT64:
@@ -1543,7 +1671,7 @@ static void runtime_value_summary(Item item, char* buffer, size_t capacity) {
         snprintf(buffer, capacity, "int %lld", (long long)lambda_int_item_to_i64(item));
         return;
     }
-    if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64) {
+    if (type_id == LMD_TYPE_FLOAT) {
         snprintf(buffer, capacity, "float %.17g", item.get_double());
         return;
     }
@@ -1706,7 +1834,6 @@ Bool fn_is(Item a, Item b) {
     case LMD_TYPE_INT:
     case LMD_TYPE_INT64:
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
     case LMD_TYPE_DECIMAL:
     case LMD_TYPE_NUM_SIZED:
     case LMD_TYPE_UINT64:
@@ -2169,6 +2296,10 @@ static Bool fn_eq_depth(Item a_item, Item b_item, int depth) {
         // pointer identity fast-path for all container types
         if (a_item.item == b_item.item) return BOOL_TRUE;
 
+        if (a_tid == LMD_TYPE_PATH && b_tid == LMD_TYPE_PATH) {
+            return path_equal(a_item.path, b_item.path) ? BOOL_TRUE : BOOL_FALSE;
+        }
+
         // type values
         if (a_tid == LMD_TYPE_TYPE && b_tid == LMD_TYPE_TYPE) {
             // compare type values by their inner type
@@ -2277,7 +2408,7 @@ static int total_type_rank(Item item) {
     switch (tid) {
     case LMD_TYPE_NULL: return 0;
     case LMD_TYPE_BOOL: return item.bool_val ? 2 : 1;
-    case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_FLOAT: case LMD_TYPE_FLOAT64:
+    case LMD_TYPE_INT: case LMD_TYPE_INT64: case LMD_TYPE_FLOAT:
     case LMD_TYPE_DECIMAL: case LMD_TYPE_NUM_SIZED: case LMD_TYPE_UINT64:
     case LMD_TYPE_COMPLEX:
         return 3;
@@ -3151,8 +3282,7 @@ String* fn_string(Item itm) {
         int len = strlen(buf);
         return heap_strcpy(buf, len);
     }
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
+    case LMD_TYPE_FLOAT: {
         char buf[32];
         double dval = itm.get_double();
         snprintf(buf, sizeof(buf), "%g", dval);
@@ -4077,7 +4207,25 @@ Item fn_index(Item item, Item index_item) {
     // Arithmetic-derived semantic integers are decimal-backed Items. Sequence
     // access must consume their exact value instead of rejecting the storage tag.
     int64_t index = -1;
-    if (lambda_item_to_int64_exact(index_item, &index)) return item_at(item, index);
+    if (lambda_item_to_int64_exact(index_item, &index)) {
+        // Numeric keys are positional only for indexable faces. Sending a
+        // numeric key to item_at for a map/object used to log an unsupported
+        // type even though S7.1.1v2 requires a quiet null read.
+        switch (item_type) {
+        case LMD_TYPE_ARRAY:
+        case LMD_TYPE_ARRAY_NUM:
+        case LMD_TYPE_RANGE:
+        case LMD_TYPE_ELEMENT:
+        case LMD_TYPE_STRING:
+        case LMD_TYPE_SYMBOL:
+        case LMD_TYPE_BINARY:
+        case LMD_TYPE_PATH:
+        case LMD_TYPE_VMAP:
+            return item_at(item, index);
+        default:
+            return ItemNull;
+        }
+    }
 
     TypeId index_type = get_type_id(index_item);
     switch (index_type) {
@@ -4114,6 +4262,45 @@ Item fn_index(Item item, Item index_item) {
     return ItemNull;
 }
 
+// All dynamic member stores enter through this boundary so a key-domain
+// mismatch cannot be truncated into index zero (or silently dropped by a map
+// setter). Reads remain total in fn_index; writes are hard language errors.
+Item fn_index_set(Item item, Item key, Item value) {
+    TypeId item_type = get_type_id(item);
+    if (item_type == LMD_TYPE_ERROR) return item;
+
+    int64_t index = 0;
+    bool has_index_key = lambda_item_to_int64_exact(key, &index);
+    bool has_name_key = is_text_type_id(get_type_id(key));
+
+    if (item_type == LMD_TYPE_ARRAY || item_type == LMD_TYPE_ARRAY_NUM) {
+        if (!has_index_key) {
+            set_runtime_error(ERR_TYPE_MISMATCH,
+                "invalid sequence member write: key must be an exact non-negative integer");
+            return ItemError;
+        }
+        return fn_array_set(item.array, index, value);
+    }
+    if (item_type == LMD_TYPE_ELEMENT) {
+        if (has_index_key) return fn_array_set(item.array, index, value);
+        if (has_name_key) return fn_map_set(item, key, value);
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "invalid element member write: key must be an exact integer or string/symbol");
+        return ItemError;
+    }
+    if (item_type == LMD_TYPE_MAP || item_type == LMD_TYPE_OBJECT ||
+            item_type == LMD_TYPE_VMAP) {
+        if (has_name_key) return fn_map_set(item, key, value);
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "invalid named member write: key must be string or symbol");
+        return ItemError;
+    }
+
+    set_runtime_error(ERR_TYPE_MISMATCH,
+        "invalid member write: base has no writable member face");
+    return ItemError;
+}
+
 int64_t fn_int64_index(Item item) {
     int64_t value = INT64_MIN;
     return lambda_item_to_int64_exact(item, &value) ? value : INT64_MIN;
@@ -4140,6 +4327,17 @@ static Item lambda_bind_object_method(TypeMethod* method, Item self) {
 // diverging copies — item_attr lacked path/extension/scheme/depth/mode and
 // fn_member lacked is_file and metadata auto-load — so the value of `p.extension`
 // depended on which lane compiled the access (tier mismatch, SI3v2/D3.3.1v2).
+extern "C" bool path_is_property_name(const char* k) {
+    if (!k) return false;
+    static const char* const names[] = {
+        "name", "is_dir", "is_file", "is_link", "size", "modified",
+        "path", "extension", "scheme", "depth", "parent", "mode"};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (strcmp(k, names[i]) == 0) return true;
+    }
+    return false;
+}
+
 extern "C" Item path_property_get(Path* path, const char* k) {
     if (!path || !k) return ItemNull;
 
@@ -4152,7 +4350,7 @@ extern "C" Item path_property_get(Path* path, const char* k) {
     if (strcmp(k, "path") == 0) {
         // return the full OS path string (e.g. "./lib/file.txt")
         StrBuf* sb = strbuf_new();
-        path_to_os_path(path, sb);
+        path_to_os_path(path_qualify_default(eval_context_get_pool(), path), sb);
         String* result = heap_strcpy(sb->str, sb->length);
         strbuf_free(sb);
         return {.item = s2it(result)};
@@ -4234,7 +4432,17 @@ Item fn_member(Item item, Item key) {
             // path metadata and structural property access
             if (is_text_type_id(key._type_id)) {
                 const char* k = key.get_chars();
-                if (k) return path_property_get(path, k);
+                if (k && path_is_property_name(k)) return path_property_get(path, k);
+            }
+            Pool* pool = context ? context->pool : NULL;
+            if (get_type_id(key) == LMD_TYPE_INT && key.int_val >= 0) {
+                return {.item = (uint64_t)(uintptr_t)path_extend_int(pool, path, key.int_val)};
+            }
+            if (get_type_id(key) == LMD_TYPE_INT64 && key.get_int64() >= 0) {
+                return {.item = (uint64_t)(uintptr_t)path_extend_int(pool, path, key.get_int64())};
+            }
+            if (is_text_type_id(key._type_id) && key.get_chars()) {
+                return {.item = (uint64_t)(uintptr_t)path_extend(pool, path, key.get_chars())};
             }
         }
         return ItemNull;
@@ -4406,7 +4614,8 @@ Item fn_member(Item item, Item key) {
         Element *elmt = item.element;
         return elmt_get(elmt, key);
     }
-    case LMD_TYPE_ARRAY: {
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_ARRAY_NUM: {
         // Handle built-in properties for List type
         if (is_text_type_id(key._type_id)) {
             const char* k = key.get_chars();
@@ -4414,6 +4623,12 @@ Item fn_member(Item item, Item key) {
                 List *list = item.array;
                 return {.item = i2it(list->length)};
             }
+        }
+        int64_t index = -1;
+        // Numeric dotted members are IntKey access (`a.1`), not NameKey
+        // lookup; route them through the existing indexed-array helper.
+        if (lambda_item_to_int64_exact(key, &index)) {
+            return item_at(item, index);
         }
         return ItemNull;
     }
@@ -5357,20 +5572,23 @@ Item fn_split(Item str_item, Item sep_item) {
     uint32_t str_len = str_item.get_len();
     uint32_t sep_len = null_sep ? 0 : sep_item.get_len();
 
-    // disable string merging in list_push so split results stay separate
-    bool saved_merging = false;
-    if (context) {
-        saved_merging = context->disable_string_merging;
-        context->disable_string_merging = true;
-    }
-
+    // Segments are separate elements, so every append below uses array_push,
+    // which stores the item verbatim (D2.6.5). list_push would concatenate each
+    // string onto the previous one under S16.7's content rules.
     List* result = list();
     rooted_result.set(result);
     result->is_content = 1;
 
     if (!rooted_str.get().get_chars() || str_len == 0) {
-        if (context) { context->disable_string_merging = saved_merging; }
-        return {.array = rooted_result.get()};  // empty list for empty string
+        // S17.1.1 (ECMAScript rule): an empty subject yields [] when the
+        // delimiter matches the empty string — the empty separator, and the
+        // Python-shaped whitespace form which has no JS analogue — and [""]
+        // otherwise, matching "".split(",") === [""].
+        if (!null_sep && sep_len != 0) {
+            String* only = split_heap_string_slice(rooted_str, 0, 0);
+            array_push((Array*)rooted_result.get(), {.item = s2it(only)});
+        }
+        return {.array = rooted_result.get()};
     }
 
     if (null_sep) {
@@ -5392,9 +5610,8 @@ Item fn_split(Item str_item, Item sep_item) {
                 p++;
             }
             String* part = split_heap_string_slice(rooted_str, word_start, p - word_start);
-            list_push(rooted_result.get(), {.item = s2it(part)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(part)});
         }
-        if (context) { context->disable_string_merging = saved_merging; }
         return {.array = rooted_result.get()};
     }
 
@@ -5406,10 +5623,9 @@ Item fn_split(Item str_item, Item sep_item) {
             int char_len = (int)str_utf8_char_len((unsigned char)str_chars[p]);
             if (char_len <= 0) char_len = 1;  // fallback for invalid UTF-8
             String* part = split_heap_string_slice(rooted_str, p, (size_t)char_len);
-            list_push(rooted_result.get(), {.item = s2it(part)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(part)});
             p += char_len;
         }
-        if (context) { context->disable_string_merging = saved_merging; }
         return {.array = rooted_result.get()};
     }
 
@@ -5424,7 +5640,7 @@ Item fn_split(Item str_item, Item sep_item) {
             // found separator
             size_t part_len = p - start;
             String* part = split_heap_string_slice(rooted_str, start, part_len);
-            list_push(rooted_result.get(), {.item = s2it(part)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
             p += sep_len;
             start = p;
@@ -5435,9 +5651,8 @@ Item fn_split(Item str_item, Item sep_item) {
 
     // add the last part
     String* part = split_heap_string_slice(rooted_str, start, str_len - start);
-    list_push(rooted_result.get(), {.item = s2it(part)});
+    array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
-    if (context) { context->disable_string_merging = saved_merging; }
     return {.array = rooted_result.get()};
 }
 
@@ -5511,17 +5726,11 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
     Rooted<Item> rooted_sep(roots, sep_item);
     Rooted<List*> rooted_result(roots, (List*)NULL);
 
-    bool saved_merging = false;
-    if (context) {
-        saved_merging = context->disable_string_merging;
-        context->disable_string_merging = true;
-    }
 
     List* result = list();
     rooted_result.set(result);
     result->is_content = 1;
     if (!rooted_str.get().get_chars() || str_len == 0 || !rooted_sep.get().get_chars() || sep_len == 0) {
-        if (context) { context->disable_string_merging = saved_merging; }
         return {.array = rooted_result.get()};
     }
 
@@ -5535,11 +5744,11 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
             // push part before separator
             size_t part_len = p - start;
             String* part = split_heap_string_slice(rooted_str, start, part_len);
-            list_push(rooted_result.get(), {.item = s2it(part)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
             // push the delimiter
             String* delim = split_heap_string_slice(rooted_sep, 0, sep_len);
-            list_push(rooted_result.get(), {.item = s2it(delim)});
+            array_push((Array*)rooted_result.get(), {.item = s2it(delim)});
 
             p += sep_len;
             start = p;
@@ -5550,9 +5759,8 @@ Item fn_split3(Item str_item, Item sep_item, Item keep_item) {
 
     // add the last part
     String* part = split_heap_string_slice(rooted_str, start, str_len - start);
-    list_push(rooted_result.get(), {.item = s2it(part)});
+    array_push((Array*)rooted_result.get(), {.item = s2it(part)});
 
-    if (context) { context->disable_string_merging = saved_merging; }
     return {.array = rooted_result.get()};
 }
 
@@ -6847,8 +7055,7 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
         // Keep the packed Item: the TypeId alone does not carry i8 versus u32.
         *(Item*)field_ptr = value;
         break;
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: *(double*)field_ptr = value.get_double(); break;
+    case LMD_TYPE_FLOAT: *(double*)field_ptr = value.get_double(); break;
     case LMD_TYPE_DTIME: *(DateTime**)field_ptr = value.get_datetime_ptr(); break;
     case LMD_TYPE_STRING: {
         *(String**)field_ptr = value.get_safe_string();
@@ -6894,11 +7101,15 @@ static void map_field_store(void* field_ptr, Item value, TypeId value_type) {
             titem.uint64_val = value.get_uint64();
             break;
         case LMD_TYPE_FLOAT:
-        case LMD_TYPE_FLOAT64:
             titem.double_val = value.get_double();
             break;
         case LMD_TYPE_DTIME:
             titem.datetime_ptr = value.get_datetime_ptr();
+            break;
+        case LMD_TYPE_DECIMAL:
+            // Abstract numeric map fields use TypedItem storage; preserve the
+            // decimal owner so integer-domain decimals round-trip as values.
+            titem.decimal = value.get_decimal();
             break;
         case LMD_TYPE_STRING:
             titem.string = value.get_safe_string();
@@ -7858,7 +8069,8 @@ static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* 
         if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ERROR) return rooted_candidate.get();
     }
     if (field) {
-        fn_map_set(rooted_candidate.get(), rooted_key.get(), rooted_value.get());
+        Item set_result = fn_map_set(rooted_candidate.get(), rooted_key.get(), rooted_value.get());
+        if (get_type_id(set_result) == LMD_TYPE_ERROR) return set_result;
     } else if (!map_extend_open_shape(rooted_candidate.get(), rooted_key.get(),
                    rooted_value.get())) {
         return lambda_type_error(rooted_value.get(), contract, boundary);
@@ -8018,9 +8230,31 @@ Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expec
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary, false, NULL);
 }
 
+Item lambda_array_set_checked_item(Item owner, Item key, Item value, Type* expected,
+        const char* boundary) {
+    int64_t index = 0;
+    if (!lambda_item_to_int64_exact(key, &index)) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "invalid typed array member write: key must be an exact integer");
+        return ItemError;
+    }
+    return lambda_array_set_checked(owner, index, value, expected, boundary);
+}
+
 Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary) {
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true, NULL);
+}
+
+Item lambda_array_set_checked_inplace_item(Item owner, Item key, Item value, Type* expected,
+        const char* boundary) {
+    int64_t index = 0;
+    if (!lambda_item_to_int64_exact(key, &index)) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "invalid typed array member write: key must be an exact integer");
+        return ItemError;
+    }
+    return lambda_array_set_checked_inplace(owner, index, value, expected, boundary);
 }
 
 static LaneStorageDesc lambda_array_lane_hint(Type* expected, uint8_t lane_kind,
@@ -8051,7 +8285,7 @@ Item lambda_array_set_checked_inplace_lane(Item owner, int64_t index, Item value
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true, &hint);
 }
 
-Item array_set_cow(Item owner, int64_t index, Item value) {
+Item array_set_cow(Item owner, Item key, Item value) {
     Item replacement = cow_prepare_write(owner);
     if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
     TypeId type_id = get_type_id(replacement);
@@ -8060,16 +8294,26 @@ Item array_set_cow(Item owner, int64_t index, Item value) {
         log_error("cow array mutation rejected non-array owner type %d", type_id);
         return ItemError;
     }
-    if (index < 0) {
-        // Negative procedural indices are absent writes; keep that legacy
-        // no-op while positive out-of-range writes still report their error.
-        return replacement;
+    int64_t index = 0;
+    if (!lambda_item_to_int64_exact(key, &index)) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "invalid sequence member write: key must be an exact integer");
+        return ItemError;
     }
     // COW receives the semantic Item value from a procedural assignment. The
     // canonical setter must decide whether the compact lane can admit it or
     // whether the array must widen; calling array_num_set_item directly would
     // coerce an incompatible value and silently lose the required Item shape.
     if (fn_array_set(replacement.array, index, value).item == ItemError.item) return ItemError;
+    return replacement;
+}
+
+Item member_set_cow(Item owner, Item key, Item value) {
+    Item replacement = cow_prepare_write(owner);
+    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+
+    Item result = fn_index_set(replacement, key, value);
+    if (get_type_id(result) == LMD_TYPE_ERROR) return result;
     return replacement;
 }
 
@@ -8083,7 +8327,8 @@ Item map_set_cow(Item owner, Item key, Item value) {
         return ItemError;
     }
     if (type_id == LMD_TYPE_VMAP) return vmap_set_cow(replacement, key, value);
-    fn_map_set(replacement, key, value);
+    Item result = fn_map_set(replacement, key, value);
+    if (get_type_id(result) == LMD_TYPE_ERROR) return result;
     return replacement;
 }
 
@@ -8657,10 +8902,18 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
     // A trusted compiler-built map contract is an admission certificate only
     // when the candidate carries that exact TypeMap. Dynamic and JS-created
     // shapes still take the validator/conversion path even if their bytes line up.
-    if (get_type_id(value) == LMD_TYPE_MAP && expected->type_id == LMD_TYPE_MAP &&
-            expected != &TYPE_MAP) {
+    //
+    // The named contract is reached through its non-null arm: `N?` is a
+    // TypeUnary whose OWN type_id is LMD_TYPE_TYPE, so testing the wrapper hid
+    // the map arm and the value fell through to the lambda_type_matches
+    // shortcut below -- structurally admitted, never reified. A self-referential
+    // record is necessarily optional (its recursion terminates on null), so the
+    // whole graph kept the literal's packed layout while direct field reads
+    // addressed it with the contract's byte offsets (D3.2.4).
+    Type* expected_map_contract = runtime_boundary_nonnull_map_arm(expected);
+    if (get_type_id(value) == LMD_TYPE_MAP && expected_map_contract) {
         if (cow_profile_enabled()) g_cow_profile.map_admit_calls++;
-        TypeMap* expected_map = (TypeMap*)expected;
+        TypeMap* expected_map = (TypeMap*)expected_map_contract;
         TypeMap* candidate_map = value.map ? (TypeMap*)value.map->type : NULL;
         if (candidate_map && typemap_ptr_is_plausible(candidate_map)) {
             MapContractRelation relation = runtime_map_contract_relation_cached(
@@ -8692,7 +8945,7 @@ static bool runtime_type_admit_value(Item value, Type* expected, Item* converted
                 // Route that conservative result through field admission rather
                 // than letting the generic validator accept a physically
                 // incompatible shape that direct MIR reads would misaddress.
-                return runtime_type_admit_map(value, expected, converted,
+                return runtime_type_admit_map(value, expected_map_contract, converted,
                     relation == MAP_CONTRACT_NEEDS_REIFICATION);
             }
         }
@@ -8762,15 +9015,20 @@ static ShapeEntry* map_detach_shared_ctor_shape_for_type(Item map_item,
     return refreshed ? refreshed : entry;
 }
 
-void fn_map_set(Item map_item, Item key, Item value) {
+Item fn_map_set(Item map_item, Item key, Item value) {
     TypeId map_type_id = get_type_id(map_item);
 
     // VMap: in-place mutation via vtable
     if (map_type_id == LMD_TYPE_VMAP) {
+        if (!is_text_type_id(get_type_id(key))) {
+            set_runtime_error(ERR_TYPE_MISMATCH,
+                "invalid named member write: key must be string or symbol");
+            return ItemError;
+        }
         // VMap backing storage is lazy for host wrappers; route all writes
         // through the public setter so ordinary maps allocate on first write.
         vmap_set(map_item, key, value);
-        return;
+        return ItemNull;
     }
 
     // support both Map and Element (Element has map-like attributes)
@@ -8781,34 +9039,34 @@ void fn_map_set(Item map_item, Item key, Item value) {
 
     if (map_type_id == LMD_TYPE_MAP) {
         Map* mp = map_item.map;
-        if (!mp) { log_error("fn_map_set: null map"); return; }
-        if (mp->is_static) { log_error("fn_map_set: cannot mutate static map"); return; }
+        if (!mp) { log_error("fn_map_set: null map"); return ItemError; }
+        if (mp->is_static) { log_error("fn_map_set: cannot mutate static map"); return ItemError; }
         type_slot = &mp->type;
         data_slot = &mp->data;
         cap_slot = &mp->data_cap;
     } else if (map_type_id == LMD_TYPE_OBJECT) {
         Object* obj = map_item.object;
-        if (!obj) { log_error("fn_map_set: null object"); return; }
-        if (obj->is_static) { log_error("fn_map_set: cannot mutate static object"); return; }
+        if (!obj) { log_error("fn_map_set: null object"); return ItemError; }
+        if (obj->is_static) { log_error("fn_map_set: cannot mutate static object"); return ItemError; }
         type_slot = &obj->type;
         data_slot = &obj->data;
         cap_slot = &obj->data_cap;
     } else if (map_type_id == LMD_TYPE_ELEMENT) {
         Element* el = (Element*)map_item.container;
-        if (!el) { log_error("fn_map_set: null element"); return; }
-        if (el->is_static) { log_error("fn_map_set: cannot mutate static element"); return; }
+        if (!el) { log_error("fn_map_set: null element"); return ItemError; }
+        if (el->is_static) { log_error("fn_map_set: cannot mutate static element"); return ItemError; }
         type_slot = &el->type;
         data_slot = &el->data;
         cap_slot = &el->data_cap;
     } else {
         log_error("fn_map_set: not a map or element (type=%d)", map_type_id);
-        return;
+        return ItemError;
     }
 
     map_type = (TypeMap*)*type_slot;
     if (!map_type || !map_type->shape) {
         log_error("fn_map_set: no shape");
-        return;
+        return ItemError;
     }
 
     // get key text; Lambda strings/symbols are length-bearing even when their
@@ -8827,11 +9085,11 @@ void fn_map_set(Item map_item, Item key, Item value) {
         key_len = sym ? sym->len : 0;
     } else {
         log_error("fn_map_set: key must be string or symbol");
-        return;
+        return ItemError;
     }
     if (!key_cstr) {
         log_error("fn_map_set: null key string");
-        return;
+        return ItemError;
     }
     NameRef key_ref = key_type == LMD_TYPE_STRING &&
         string_is_pooled(key_string) ? key_string : NULL;
@@ -8846,17 +9104,16 @@ void fn_map_set(Item map_item, Item key, Item value) {
         if (identity_key) {
             // Symbol/private diagnostic bytes are not property identity.
             name_matches = entry->name_id != NAME_ID_NONE && entry->name_id == key_id;
-        } else if (entry->name && entry->name->str && entry->name->length == key_len) {
+        } else if (entry->key_kind == NAME_KEY_STRING) {
             // Ordinary Input fields have no NameId, so this is the explicit
             // byte-confirmation seam; pointer equality is never identity.
-            name_matches = entry->key_kind == NAME_KEY_STRING &&
-                memcmp(entry->name->str, key_cstr, key_len) == 0;
+            name_matches = shape_field_name_equals(entry, key_cstr, key_len);
         }
         if (name_matches) {
             TypeId field_type = entry->type->type_id;
             entry = map_detach_shared_ctor_shape_for_type(map_item, &map_type,
                 type_slot, key_cstr, key_len, key_ref, entry, value_type);
-            if (!entry || !entry->type) return;
+            if (!entry || !entry->type) return ItemError;
             // A reserved constructor slot becomes observable only at the
             // source assignment that reaches this storage write.
             if (map_type_id == LMD_TYPE_MAP) {
@@ -8868,20 +9125,20 @@ void fn_map_set(Item map_item, Item key, Item value) {
             LaneStorageDesc lane = {};
             if (shape_entry_uses_native_lane(entry, &lane) &&
                     map_shape_field_store_native_lane(field_ptr, entry, value)) {
-                return;
+                return ItemNull;
             }
 
             if (field_type == value_type) {
                 // same type — fast path: in-place update
                 map_field_decrement_ref(field_ptr, field_type);
                 map_field_store(field_ptr, value, value_type);
-                return;
+                return ItemNull;
             }
 
             // FLOAT field + INT value → widen int to double (lossless, no reshape)
             if (field_type == LMD_TYPE_FLOAT && value_type == LMD_TYPE_INT) {
                 *(double*)field_ptr = lambda_int_item_value(value);
-                return;
+                return ItemNull;
             }
 
             // `int` and `int64` both occupy eight bytes, but their slot
@@ -8898,7 +9155,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
                 if (old_bsz == new_bsz) {
                     map_field_store(field_ptr, value, value_type);
                     entry->type = type_info[value_type].type;
-                    return;
+                    return ItemNull;
                 }
             }
 
@@ -8946,7 +9203,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
                         if (shape_entry_retag_is_safe(map_type, value_type)) {
                             entry->type = type_info[value_type].type;
                         }
-                        return;
+                        return ItemNull;
                     }
                 }
             }
@@ -8961,7 +9218,7 @@ void fn_map_set(Item map_item, Item key, Item value) {
                 if (shape_entry_retag_is_safe(map_type, value_type)) {
                     entry->type = type_info[value_type].type;
                 }
-                return;
+                return ItemNull;
             }
 
             // type change — rebuild shape with new field type
@@ -8971,9 +9228,12 @@ void fn_map_set(Item map_item, Item key, Item value) {
             map_rebuild_for_type_change(type_slot, data_slot, cap_slot,
                                         map_type_id, cont, entry,
                                         type_info[value_type].type, value);
-            return;
+            return ItemNull;
         }
         entry = entry->next;
     }
+    // A shaped map cannot grow through an unknown member write; return the
+    // hard error so callers do not mistake the old silent no-op for success.
     log_error("fn_map_set: field '%s' not found", key_cstr);
+    return ItemError;
 }

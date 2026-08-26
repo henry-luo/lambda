@@ -23,8 +23,8 @@ pn test_attr_type_change() {
 
 // Test 3: Child assignment with child elements
 pn test_child_assign() {
-    var el = <ul; <li; "A">; <li; "B">; <li; "C">>
-    el[1] = <li; "X">
+    var el = <ul <li "A">; <li "B">; <li "C">>
+    el[1] = <li "X">
     print(el[0][0])
     print(" ")
     print(el[1][0])
@@ -59,7 +59,7 @@ pn test_multiple_attr_updates() {
 
 // Test 6: Attribute update preserves children
 pn test_attr_preserves_children() {
-    var el = <div class: "old"; <span; "inner">>
+    var el = <div class: "old", <span "inner">>
     el.class = "new"
     print(el.class)
     print(" ")
@@ -69,7 +69,7 @@ pn test_attr_preserves_children() {
 
 // Test 7: Child update preserves attributes
 pn test_child_preserves_attrs() {
-    var el = <div id: "box"; "original content">
+    var el = <div id: "box", "original content">
     el[0] = "updated"
     print(el.id)
     print(" ")

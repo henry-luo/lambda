@@ -1,0 +1,9 @@
+"=== For Join Group Clauses ==="
+[{
+    name: "Ada",
+    n: 2
+  }, {
+    name: "Ben",
+    n: 1
+  }]
+"All for join group clause tests completed!"

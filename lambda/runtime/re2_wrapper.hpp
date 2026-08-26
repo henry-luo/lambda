@@ -8,6 +8,7 @@
 #pragma once
 
 #include "../lambda-data.hpp"
+#include "../../lib/arraylist.h"
 #include "../../lib/strbuf.h"
 
 // Forward declarations
@@ -24,6 +25,18 @@ struct Pool;
  * @return Compiled TypePattern, or nullptr on error
  */
 TypePattern* compile_pattern_ast(Pool* pool, AstNode* pattern_ast, bool is_symbol, const char** error_msg);
+
+// Materialize one pattern AST as a module-local TypePattern. Callers retain
+// their own syntax node but share one registration path for the type-list ABI.
+bool compile_runtime_pattern(Pool* pool, ArrayList* type_list, TypePattern* pattern,
+                             AstNode* pattern_ast, bool is_symbol);
+
+// Compile named string/symbol pattern declarations and register their stable
+// TypePattern identities in the owning Script type list. Both MIR and T0 use
+// this prepass so an identifier reference always resolves through the same
+// const_pattern_with_tl() contract.
+bool compile_script_pattern_definitions(Pool* pool, ArrayList* type_list,
+                                        AstNode* node);
 
 // Compile a literal-only type union for partial string operations. Literal
 // islands intentionally normalize to ordinary type values, but find/replace/

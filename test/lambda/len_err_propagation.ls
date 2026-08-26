@@ -27,5 +27,5 @@ fn len_with_error_inside() {
 }
 len_with_error_inside()
 
-'-- ordinary lengths are unaffected --'
+'-- ordinary lengths are unaffected --';
 [len([1, 2, 3]), len("abc"), len({a: 1, b: 2})]

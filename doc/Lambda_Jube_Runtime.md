@@ -80,4 +80,4 @@ descriptors. Module discovery happens only at CLI or import fallback points.
 
 The detailed hosted-language architecture and Python implementation sequence
 are maintained in `vibe/Lambda_Design_Jube_Lang_Hosting.md` and
-`vibe/Lambda_Impl_Hosted_Python.md`.
+`vibe/impl/Lambda_Impl_Hosted_Python.md`.

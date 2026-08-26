@@ -30,6 +30,7 @@ static const CssEnumInfo css_value_definitions[] = {
     {"stretch", 7, CSS_VALUE_STRETCH, CSS_VALUE_GROUP_ALIGNMENT},
     {"baseline", 8, CSS_VALUE_BASELINE, CSS_VALUE_GROUP_ALIGNMENT},
     {"auto", 4, CSS_VALUE_AUTO, CSS_VALUE_GROUP_SIZE},
+    {"avoid", 5, CSS_VALUE_AVOID, CSS_VALUE_GROUP_MISC},
     {"text-bottom", 11, CSS_VALUE_TEXT_BOTTOM, CSS_VALUE_GROUP_VERTICAL_ALIGN},
     {"alphabetic", 10, CSS_VALUE_ALPHABETIC, CSS_VALUE_GROUP_VERTICAL_ALIGN},
     {"ideographic", 11, CSS_VALUE_IDEOGRAPHIC, CSS_VALUE_GROUP_VERTICAL_ALIGN},
@@ -495,6 +496,12 @@ static const CssEnumInfo css_value_definitions[] = {
     // Animation iteration-count keyword
     {"infinite", 8, CSS_VALUE_INFINITE, CSS_VALUE_GROUP_ANIMATION},
     {"base-select", 11, CSS_VALUE_BASE_SELECT, CSS_VALUE_GROUP_MISC},
+    {"no-autospace", 12, CSS_VALUE_NO_AUTOSPACE, CSS_VALUE_GROUP_MISC},
+    {"ideograph-alpha", 15, CSS_VALUE_IDEOGRAPH_ALPHA, CSS_VALUE_GROUP_MISC},
+    {"ideograph-numeric", 17, CSS_VALUE_IDEOGRAPH_NUMERIC, CSS_VALUE_GROUP_MISC},
+    {"punctuation", 11, CSS_VALUE_PUNCTUATION, CSS_VALUE_GROUP_MISC},
+    {"insert", 6, CSS_VALUE_INSERT, CSS_VALUE_GROUP_MISC},
+    {"replace", 7, CSS_VALUE_REPLACE, CSS_VALUE_GROUP_MISC},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 

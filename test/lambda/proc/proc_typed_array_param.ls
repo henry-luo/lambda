@@ -1,4 +1,4 @@
-// Test: int[] / int64[] / float[] parameter type annotations
+// Test: int[] / i64[] / float[] parameter type annotations
 // Regression test for ARRAY_INT inline fast path bug:
 //   - get_effective_type returned LMD_TYPE_TYPE (annotation meta-type) instead
 //     of the variable's tracked runtime type (ARRAY_INT), causing fast paths

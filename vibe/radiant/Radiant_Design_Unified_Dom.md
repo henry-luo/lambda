@@ -681,7 +681,6 @@ typedef struct Context {
     Url* cwd;
     void* (*context_alloc)(int size, TypeId type_id);
     bool run_main;
-    bool disable_string_merging;
     uintptr_t stack_limit;
     bool ui_mode;  // NEW: allocate fat DomElement on arena, copy strings on attachment
 } Context;

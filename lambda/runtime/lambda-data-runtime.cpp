@@ -1,6 +1,7 @@
 
 #include "transpiler.hpp"
 #include "../core/lambda-decimal.hpp"
+#include "lambda-error.h"
 #include "heap_api.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
@@ -15,6 +16,7 @@
 // data zone allocation helpers (defined in lambda-mem.cpp)
 
 extern __thread EvalContext* context;
+extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* message);
 #define active_runtime ((Context*)context)
 void array_set(Array* arr, int64_t index, Item itm);
 void array_push(Array* arr, Item itm);
@@ -590,35 +592,58 @@ Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices) {
 }
 
 // Multi-dim write: arr[i, j, k] = value on N-D ArrayNum.
-// Rejected on views (read-only).  Out-of-range indices silently no-op.
-void array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
-    if (!arr || ndim < 1) return;
+// Rejected on views (read-only). Invalid coordinates are hard write errors.
+Item array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value) {
+    if (!arr || !indices || ndim < 1) {
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "invalid multi-dimensional array write target");
+        return ItemError;
+    }
     if (arr->is_view && !arr->is_mutable_view) {
         log_error("array_num_set_nd: cannot mutate a read-only view; copy() first");
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "cannot mutate a read-only numeric array view");
+        return ItemError;
     }
     // mutable view: the strided offset computed below lands in the base buffer
     // (data is pre-offset / strides span the base), so the write goes through.
     if (!arr->is_ndim) {
-        if (ndim != 1) return;
+        if (ndim != 1) {
+            set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+                "multi-dimensional index rank does not match the array");
+            return ItemError;
+        }
         int64_t i = indices[0];
         // c15 forbids hidden tail-relative writes through negative indexes.
-        if (i < 0 || i >= arr->length) return;
+        if (i < 0 || i >= arr->length) {
+            set_runtime_error_no_trace(ERR_INDEX_OUT_OF_BOUNDS,
+                "multi-dimensional array index is out of bounds");
+            return ItemError;
+        }
         array_num_set_item(arr, i, value);
-        return;
+        return ItemNull;
     }
     ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
-    if (!shape || shape->ndim != ndim) return;
+    if (!shape || shape->ndim != ndim) {
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "multi-dimensional index rank does not match the array");
+        return ItemError;
+    }
     int64_t* shp = array_num_shape_dims(shape);
     int64_t* str = array_num_shape_strides(shape);
     int64_t offset = 0;
     for (int ax = 0; ax < ndim; ax++) {
         int64_t i = indices[ax];
         // c15 forbids hidden tail-relative writes through negative coordinates.
-        if (i < 0 || i >= shp[ax]) return;
+        if (i < 0 || i >= shp[ax]) {
+            set_runtime_error_no_trace(ERR_INDEX_OUT_OF_BOUNDS,
+                "multi-dimensional array index is out of bounds");
+            return ItemError;
+        }
         offset += i * str[ax];
     }
     array_num_set_item(arr, offset, value);
+    return ItemNull;
 }
 
 // Returns the iteration count for for-in / index loops:
@@ -893,7 +918,6 @@ void array_float_set_item(ArrayNum *arr, int64_t index, Item value) {
     // Convert item to double based on its type
     switch (type_id) {
         case LMD_TYPE_FLOAT:
-        case LMD_TYPE_FLOAT64:
             dval = value.get_double();
             break;
         case LMD_TYPE_INT64:
@@ -1639,6 +1663,8 @@ uint64_t lambda_item_hash(Item key, uint64_t seed0, uint64_t seed1) {
         }
         return h;
     }
+    case LMD_TYPE_PATH:
+        return path_hash(key.path, seed0, seed1);
     default:
         return hashmap_sip(&key.item, sizeof(uint64_t), seed0, seed1);
     }
@@ -1835,8 +1861,7 @@ Array* fn_group_by_keys_items(Item rows_item, Item keys_item, Item aliases_item)
 
 typedef struct JoinHashEntry {
     Item key;
-    Array* rows;
-    Array* idxs;  // parallel to rows: index/key items for the matched rows (ItemNull when none)
+    int64_t bucket_index;
 } JoinHashEntry;
 
 static uint64_t join_hash_entry(const void* entry, uint64_t seed0, uint64_t seed1) {
@@ -1871,12 +1896,11 @@ static String* join_optional_name(Item name_item) {
 
 static Element* join_tuple_new() {
     if (!active_runtime || !active_runtime->pool) return NULL;
-    Element* tuple = elmt_pooled(active_runtime->pool);
-    TypeElmt* tuple_type = (TypeElmt*)alloc_type(active_runtime->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    String* tag = heap_create_name("tuple", 5);
-    tuple_type->name.str = tag ? tag->chars : "tuple";
-    tuple_type->name.length = tag ? tag->len : 5;
-    tuple->type = tuple_type;
+    // Join tuples retain source rows across later collection and body
+    // evaluation.  A pool Element is invisible to the GC tracer, so forced
+    // collection previously reclaimed every binding stored in the tuple.
+    Element* tuple = (Element*)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
+    if (tuple) tuple->type_id = LMD_TYPE_ELEMENT;
     return tuple;
 }
 
@@ -1884,139 +1908,244 @@ static Element* join_tuple_new() {
 // when present, its index/key binding. prior_tuple may be ItemNull to seed a fresh tuple.
 static Element* join_tuple_extend(Item prior_tuple, String* name, Item value,
         String* idx_name, Item idx_value) {
-    Element* out = join_tuple_new();
-    if (!out) return out;
+    RootFrame roots(4);
+    Rooted<Item> rooted_prior_tuple(roots, prior_tuple);
+    Rooted<Item> rooted_value(roots, value);
+    Rooted<Item> rooted_idx_value(roots, idx_value);
+    Rooted<Element*> rooted_out(roots, (Element*)NULL);
+    rooted_out.set(join_tuple_new());
+    if (!rooted_out.get()) return NULL;
 
-    if (get_type_id(prior_tuple) != LMD_TYPE_NULL) {
-        SymbolKeyList* keys = item_keys(prior_tuple);
+    TypeElmt* tuple_type = (TypeElmt*)alloc_type(active_runtime->pool,
+        LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    if (!tuple_type) return NULL;
+    // The fixed tag belongs to pooled type metadata; do not retain a raw
+    // chars pointer from a transient scalar allocation.
+    tuple_type->name.str = "tuple";
+    tuple_type->name.length = 5;
+    rooted_out.get()->type = tuple_type;
+
+    if (get_type_id(rooted_prior_tuple.get()) != LMD_TYPE_NULL) {
+        SymbolKeyList* keys = item_keys(rooted_prior_tuple.get());
         int64_t len = symbol_key_list_len(keys);
         for (int64_t i = 0; i < len; i++) {
             Symbol* sym = symbol_key_list_at(keys, i);
             if (!sym) continue;
-            Item attr = item_attr(prior_tuple, sym->chars);
+            Item attr = item_attr(rooted_prior_tuple.get(), sym->chars);
             // Join tuple maps are freshly materialized so later phases can bind names by normal member lookup.
-            elmt_put(out, heap_create_name(sym->chars, sym->len), attr, active_runtime->pool);
+            elmt_put(rooted_out.get(), heap_create_name(sym->chars, sym->len), attr,
+                active_runtime->pool);
         }
         if (keys) symbol_key_list_free(keys);
     }
-    if (name) elmt_put(out, name, value, active_runtime->pool);
+    if (name) elmt_put(rooted_out.get(), name, rooted_value.get(), active_runtime->pool);
     // Index/key bindings (e.g. the `i` in `for (i, o in ...)`) travel in the tuple alongside values,
     // so joined/cross-product rows keep their position/key binding available in the body.
-    if (idx_name) elmt_put(out, idx_name, idx_value, active_runtime->pool);
-    return out;
+    if (idx_name) elmt_put(rooted_out.get(), idx_name, rooted_idx_value.get(), active_runtime->pool);
+    return rooted_out.get();
 }
 
 Array* fn_join_seed_tuples(Item rows_item, Item name_item, Item idx_name_item, Item idx_vals_item) {
-    Array* out = array_plain();
-    if (get_type_id(rows_item) != LMD_TYPE_ARRAY || !rows_item.array || !active_runtime || !active_runtime->pool) {
+    RootFrame roots(6);
+    Rooted<Item> rooted_rows_item(roots, rows_item);
+    Rooted<Item> rooted_name_item(roots, name_item);
+    Rooted<Item> rooted_idx_name_item(roots, idx_name_item);
+    Rooted<Item> rooted_idx_vals_item(roots, idx_vals_item);
+    Rooted<Array*> rooted_out(roots, (Array*)NULL);
+    Rooted<Element*> rooted_tuple(roots, (Element*)NULL);
+    rooted_out.set(array_plain());
+    if (get_type_id(rooted_rows_item.get()) != LMD_TYPE_ARRAY || !rooted_rows_item.get().array ||
+            !active_runtime || !active_runtime->pool) {
         log_error("join_seed_tuples: invalid rows/runtime");
-        return out;
+        return rooted_out.get();
     }
-    String* name = join_binding_name(name_item);
-    String* idx_name = join_optional_name(idx_name_item);
-    Array* idx_vals = (get_type_id(idx_vals_item) == LMD_TYPE_ARRAY) ? idx_vals_item.array : NULL;
-    Array* rows = rows_item.array;
+    String* name = join_binding_name(rooted_name_item.get());
+    String* idx_name = join_optional_name(rooted_idx_name_item.get());
+    Array* rows = rooted_rows_item.get().array;
     for (int64_t i = 0; i < rows->length; i++) {
+        rows = rooted_rows_item.get().array;
+        Array* idx_vals = get_type_id(rooted_idx_vals_item.get()) == LMD_TYPE_ARRAY
+            ? rooted_idx_vals_item.get().array : NULL;
         Item idx_val = (idx_name && idx_vals && i < idx_vals->length) ? idx_vals->items[i] : ItemNull;
-        Element* tuple = join_tuple_extend(ItemNull, name, rows->items[i], idx_name, idx_val);
-        if (!tuple) return out;
-        array_push(out, (Item){.element = tuple});
+        rooted_tuple.set(join_tuple_extend(ItemNull, name, rows->items[i], idx_name, idx_val));
+        if (!rooted_tuple.get()) return rooted_out.get();
+        array_push(rooted_out.get(), (Item){.element = rooted_tuple.get()});
+        rooted_tuple.set((Element*)NULL);
     }
-    return out;
+    return rooted_out.get();
 }
 
 // Cross-product expansion: for each prior tuple, emit one tuple per row (prior order, then row
 // order — deterministic). Used for comma sources without an `on` in a joined comprehension.
 Array* fn_cross_join_tuples(Item prior_tuples_item, Item rows_item, Item name_item,
         Item idx_name_item, Item idx_vals_item) {
-    Array* out = array_plain();
-    if (get_type_id(prior_tuples_item) != LMD_TYPE_ARRAY || get_type_id(rows_item) != LMD_TYPE_ARRAY ||
-        !prior_tuples_item.array || !rows_item.array || !active_runtime || !active_runtime->pool) {
+    RootFrame roots(8);
+    Rooted<Item> rooted_prior_tuples_item(roots, prior_tuples_item);
+    Rooted<Item> rooted_rows_item(roots, rows_item);
+    Rooted<Item> rooted_name_item(roots, name_item);
+    Rooted<Item> rooted_idx_name_item(roots, idx_name_item);
+    Rooted<Item> rooted_idx_vals_item(roots, idx_vals_item);
+    Rooted<Array*> rooted_out(roots, (Array*)NULL);
+    Rooted<Item> rooted_prior_tuple(roots, ItemNull);
+    Rooted<Element*> rooted_tuple(roots, (Element*)NULL);
+    rooted_out.set(array_plain());
+    if (get_type_id(rooted_prior_tuples_item.get()) != LMD_TYPE_ARRAY ||
+            get_type_id(rooted_rows_item.get()) != LMD_TYPE_ARRAY ||
+            !rooted_prior_tuples_item.get().array || !rooted_rows_item.get().array ||
+            !active_runtime || !active_runtime->pool) {
         log_error("cross_join_tuples: invalid tuple/rows");
-        return out;
+        return rooted_out.get();
     }
-    Array* prior_tuples = prior_tuples_item.array;
-    Array* rows = rows_item.array;
-    String* name = join_binding_name(name_item);
-    String* idx_name = join_optional_name(idx_name_item);
-    Array* idx_vals = (get_type_id(idx_vals_item) == LMD_TYPE_ARRAY) ? idx_vals_item.array : NULL;
+    String* name = join_binding_name(rooted_name_item.get());
+    String* idx_name = join_optional_name(rooted_idx_name_item.get());
+    Array* prior_tuples = rooted_prior_tuples_item.get().array;
     for (int64_t i = 0; i < prior_tuples->length; i++) {
-        Item prior_tuple = prior_tuples->items[i];
+        prior_tuples = rooted_prior_tuples_item.get().array;
+        rooted_prior_tuple.set(prior_tuples->items[i]);
+        Array* rows = rooted_rows_item.get().array;
         for (int64_t r = 0; r < rows->length; r++) {
+            rows = rooted_rows_item.get().array;
+            Array* idx_vals = get_type_id(rooted_idx_vals_item.get()) == LMD_TYPE_ARRAY
+                ? rooted_idx_vals_item.get().array : NULL;
             Item idx_val = (idx_name && idx_vals && r < idx_vals->length) ? idx_vals->items[r] : ItemNull;
-            Element* tuple = join_tuple_extend(prior_tuple, name, rows->items[r], idx_name, idx_val);
-            if (tuple) array_push(out, (Item){.element = tuple});
+            rooted_tuple.set(join_tuple_extend(rooted_prior_tuple.get(), name, rows->items[r],
+                idx_name, idx_val));
+            if (rooted_tuple.get()) {
+                array_push(rooted_out.get(), (Item){.element = rooted_tuple.get()});
+                rooted_tuple.set((Element*)NULL);
+            }
         }
     }
-    return out;
+    return rooted_out.get();
 }
 
 Array* fn_hash_join_tuples(Item prior_tuples_item, Item prior_keys_item, Item rows_item,
         Item row_keys_item, Item name_item, int64_t optional, Item idx_name_item, Item idx_vals_item) {
-    Array* out = array_plain();
-    if (get_type_id(prior_tuples_item) != LMD_TYPE_ARRAY || get_type_id(prior_keys_item) != LMD_TYPE_ARRAY ||
-        get_type_id(rows_item) != LMD_TYPE_ARRAY || get_type_id(row_keys_item) != LMD_TYPE_ARRAY ||
-        !prior_tuples_item.array || !prior_keys_item.array || !rows_item.array || !row_keys_item.array ||
-        !active_runtime || !active_runtime->pool) {
+    RootFrame roots(15);
+    Rooted<Item> rooted_prior_tuples_item(roots, prior_tuples_item);
+    Rooted<Item> rooted_prior_keys_item(roots, prior_keys_item);
+    Rooted<Item> rooted_rows_item(roots, rows_item);
+    Rooted<Item> rooted_row_keys_item(roots, row_keys_item);
+    Rooted<Item> rooted_name_item(roots, name_item);
+    Rooted<Item> rooted_idx_name_item(roots, idx_name_item);
+    Rooted<Item> rooted_idx_vals_item(roots, idx_vals_item);
+    Rooted<Array*> rooted_out(roots, (Array*)NULL);
+    Rooted<Array*> rooted_row_groups(roots, (Array*)NULL);
+    Rooted<Array*> rooted_idx_groups(roots, (Array*)NULL);
+    Rooted<Array*> rooted_new_rows(roots, (Array*)NULL);
+    Rooted<Array*> rooted_new_idxs(roots, (Array*)NULL);
+    Rooted<Item> rooted_prior_tuple(roots, ItemNull);
+    Rooted<Element*> rooted_tuple(roots, (Element*)NULL);
+    Rooted<Item> rooted_bucket_item(roots, ItemNull);
+    rooted_out.set(array_plain());
+    if (get_type_id(rooted_prior_tuples_item.get()) != LMD_TYPE_ARRAY ||
+            get_type_id(rooted_prior_keys_item.get()) != LMD_TYPE_ARRAY ||
+            get_type_id(rooted_rows_item.get()) != LMD_TYPE_ARRAY ||
+            get_type_id(rooted_row_keys_item.get()) != LMD_TYPE_ARRAY ||
+            !rooted_prior_tuples_item.get().array || !rooted_prior_keys_item.get().array ||
+            !rooted_rows_item.get().array || !rooted_row_keys_item.get().array ||
+            !active_runtime || !active_runtime->pool) {
         log_error("hash_join_tuples: invalid tuple/key rows");
-        return out;
+        return rooted_out.get();
     }
 
-    Array* prior_tuples = prior_tuples_item.array;
-    Array* prior_keys = prior_keys_item.array;
-    Array* rows = rows_item.array;
-    Array* row_keys = row_keys_item.array;
-    String* name = join_binding_name(name_item);
-    String* idx_name = join_optional_name(idx_name_item);
-    Array* idx_vals = (get_type_id(idx_vals_item) == LMD_TYPE_ARRAY) ? idx_vals_item.array : NULL;
+    Array* rows = rooted_rows_item.get().array;
+    String* name = join_binding_name(rooted_name_item.get());
+    String* idx_name = join_optional_name(rooted_idx_name_item.get());
     HashMap* table = hashmap_new(sizeof(JoinHashEntry), rows ? (size_t)rows->length : 8, 0, 0,
         join_hash_entry, join_compare_entry, NULL, NULL);
-    if (!table || !name) return out;
+    rooted_row_groups.set(array_plain());
+    rooted_idx_groups.set(array_plain());
+    if (!table || !name) return rooted_out.get();
 
+    Array* row_keys = rooted_row_keys_item.get().array;
     int64_t row_count = rows->length < row_keys->length ? rows->length : row_keys->length;
     for (int64_t i = 0; i < row_count; i++) {
+        rows = rooted_rows_item.get().array;
+        row_keys = rooted_row_keys_item.get().array;
         Item key = row_keys->items[i];
         if (!join_key_is_matchable(key)) continue;
-        JoinHashEntry probe = { .key = key, .rows = NULL, .idxs = NULL };
+        JoinHashEntry probe = { .key = key, .bucket_index = -1 };
         const JoinHashEntry* existing = (const JoinHashEntry*)hashmap_get(table, &probe);
         if (!existing) {
-            JoinHashEntry entry = { .key = key, .rows = array_plain(), .idxs = array_plain() };
+            // Hash-map entries are native memory, so keep GC arrays in rooted
+            // owner arrays and store only an index in the hash table.
+            int64_t bucket_index = rooted_row_groups.get()->length;
+            rooted_new_rows.set(array_plain());
+            rooted_new_idxs.set(array_plain());
+            array_push(rooted_row_groups.get(), (Item){.array = rooted_new_rows.get()});
+            array_push(rooted_idx_groups.get(), (Item){.array = rooted_new_idxs.get()});
+            rooted_new_rows.set((Array*)NULL);
+            rooted_new_idxs.set((Array*)NULL);
+            JoinHashEntry entry = { .key = key, .bucket_index = bucket_index };
             hashmap_set(table, &entry);
             existing = (const JoinHashEntry*)hashmap_get(table, &probe);
         }
-        if (existing && existing->rows) {
-            array_push(existing->rows, rows->items[i]);
+        if (existing && existing->bucket_index >= 0) {
+            rooted_bucket_item.set(rooted_row_groups.get()->items[existing->bucket_index]);
+            if (get_type_id(rooted_bucket_item.get()) == LMD_TYPE_ARRAY) {
+                array_push(rooted_bucket_item.get().array, rows->items[i]);
+            }
+            Array* idx_vals = get_type_id(rooted_idx_vals_item.get()) == LMD_TYPE_ARRAY
+                ? rooted_idx_vals_item.get().array : NULL;
             Item idx_val = (idx_name && idx_vals && i < idx_vals->length) ? idx_vals->items[i] : ItemNull;
-            if (existing->idxs) array_push(existing->idxs, idx_val);
+            rooted_bucket_item.set(rooted_idx_groups.get()->items[existing->bucket_index]);
+            if (get_type_id(rooted_bucket_item.get()) == LMD_TYPE_ARRAY) {
+                array_push(rooted_bucket_item.get().array, idx_val);
+            }
         }
     }
 
+    Array* prior_tuples = rooted_prior_tuples_item.get().array;
+    Array* prior_keys = rooted_prior_keys_item.get().array;
     int64_t tuple_count = prior_tuples->length < prior_keys->length ? prior_tuples->length : prior_keys->length;
     for (int64_t i = 0; i < tuple_count; i++) {
-        Item prior_tuple = prior_tuples->items[i];
+        prior_tuples = rooted_prior_tuples_item.get().array;
+        prior_keys = rooted_prior_keys_item.get().array;
+        rooted_prior_tuple.set(prior_tuples->items[i]);
         Item key = prior_keys->items[i];
         bool matched = false;
         if (join_key_is_matchable(key)) {
-            JoinHashEntry probe = { .key = key, .rows = NULL, .idxs = NULL };
+            JoinHashEntry probe = { .key = key, .bucket_index = -1 };
             const JoinHashEntry* entry = (const JoinHashEntry*)hashmap_get(table, &probe);
-            if (entry && entry->rows) {
-                for (int64_t r = 0; r < entry->rows->length; r++) {
-                    Item idx_val = (entry->idxs && r < entry->idxs->length) ? entry->idxs->items[r] : ItemNull;
-                    Element* tuple = join_tuple_extend(prior_tuple, name, entry->rows->items[r], idx_name, idx_val);
-                    if (tuple) array_push(out, (Item){.element = tuple});
+            if (entry && entry->bucket_index >= 0) {
+                rooted_bucket_item.set(rooted_row_groups.get()->items[entry->bucket_index]);
+                Array* bucket_rows = get_type_id(rooted_bucket_item.get()) == LMD_TYPE_ARRAY
+                    ? rooted_bucket_item.get().array : NULL;
+                Item idx_bucket_item = rooted_idx_groups.get()->items[entry->bucket_index];
+                Array* bucket_idxs = get_type_id(idx_bucket_item) == LMD_TYPE_ARRAY
+                    ? idx_bucket_item.array : NULL;
+                for (int64_t r = 0; bucket_rows && r < bucket_rows->length; r++) {
+                    rooted_bucket_item.set(rooted_row_groups.get()->items[entry->bucket_index]);
+                    bucket_rows = get_type_id(rooted_bucket_item.get()) == LMD_TYPE_ARRAY
+                        ? rooted_bucket_item.get().array : NULL;
+                    idx_bucket_item = rooted_idx_groups.get()->items[entry->bucket_index];
+                    bucket_idxs = get_type_id(idx_bucket_item) == LMD_TYPE_ARRAY
+                        ? idx_bucket_item.array : NULL;
+                    Item idx_val = (bucket_idxs && r < bucket_idxs->length) ? bucket_idxs->items[r] : ItemNull;
+                    rooted_tuple.set(join_tuple_extend(rooted_prior_tuple.get(), name,
+                        bucket_rows->items[r], idx_name, idx_val));
+                    if (rooted_tuple.get()) {
+                        array_push(rooted_out.get(), (Item){.element = rooted_tuple.get()});
+                        rooted_tuple.set((Element*)NULL);
+                    }
                 }
-                matched = entry->rows->length > 0;
+                matched = bucket_rows && bucket_rows->length > 0;
             }
         }
         if (!matched && optional) {
             // Left-join null padding: the new source's value AND its index/key bind to null.
-            Element* tuple = join_tuple_extend(prior_tuple, name, ItemNull, idx_name, ItemNull);
-            if (tuple) array_push(out, (Item){.element = tuple});
+            rooted_tuple.set(join_tuple_extend(rooted_prior_tuple.get(), name, ItemNull,
+                idx_name, ItemNull));
+            if (rooted_tuple.get()) {
+                array_push(rooted_out.get(), (Item){.element = rooted_tuple.get()});
+                rooted_tuple.set((Element*)NULL);
+            }
         }
     }
 
     hashmap_free(table);
-    return out;
+    return rooted_out.get();
 }
 
 // mark an item as spreadable (for spread operator *expr)
@@ -2240,7 +2369,6 @@ static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
         return Item{.item = u2it(field_ptr)};
     }
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
         return lambda_float_ptr_to_item((double*)field_ptr);
     case LMD_TYPE_DTIME:
         return {.item = k2it(*(DateTime**)field_ptr)};
@@ -2362,8 +2490,7 @@ static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,
                     result = nested_result;
                 }
             }
-        } else if (key && field->name && field->name->length == key->len &&
-                memcmp(field->name->str, key->chars, key->len) == 0) {
+        } else if (key && shape_field_name_equals(field, key->chars, key->len)) {
             // Some element/input shape transitions preserve an older identity
             // while replacing the spelling. The NameId fast path therefore
             // confirms bytes before selecting a slot; this is the correctness
@@ -2497,6 +2624,18 @@ Object* object_fill(Object* obj, ...) {
     va_start(args, obj);
     set_fields((TypeMap*)obj_type, obj->data, args);
     va_end(args);
+    return obj;
+}
+
+// Array-taking sibling of object_fill for callers holding their field values
+// in a rooted Item span rather than in varargs (the T0 walker).
+Object* object_fill_items(Object* obj, const Item* values, int value_count) {
+    if (!obj) return NULL;
+    TypeObject* obj_type = (TypeObject*)obj->type;
+    if (!obj->data && obj_type->byte_size) {
+        obj->data = heap_data_calloc(obj_type->byte_size);
+    }
+    set_fields_items((TypeMap*)obj_type, obj->data, values, value_count);
     return obj;
 }
 
@@ -2997,12 +3136,19 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         if (item_tid == LMD_TYPE_ARRAY_NUM) {
             ArrayNum* src = item.array_num;
             Array* boxed = array();
+            // array_push allocates as it grows, so the half-built result is
+            // collectable for the whole loop and only the caller's source is
+            // rooted. A GC mid-widening freed `boxed` and every element read
+            // back null. Root it for the construction interval.
+            RootFrame roots(2);
+            Rooted<Array*> rooted_boxed(roots, boxed);
+            Rooted<ArrayNum*> rooted_src(roots, src);
             // any[] is a boxed value array; ARRAY_NUM annotations must widen
             // at the boundary instead of leaving a packed numeric layout behind.
-            for (int64_t i = 0; i < src->length; i++) {
-                array_push(boxed, array_num_get(src, i));
+            for (int64_t i = 0; i < rooted_src.get()->length; i++) {
+                array_push(rooted_boxed.get(), array_num_get(rooted_src.get(), i));
             }
-            return (void*)boxed;
+            return (void*)rooted_boxed.get();
         }
     }
 
@@ -3084,11 +3230,15 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
     // convert generic Array/List to typed array (Array and List are the same struct)
     if (item_tid == LMD_TYPE_ARRAY) {
         Array* arr = item.array;
-        Item* items = arr->items;
         int64_t length = arr->length;
+        // arr->items must be read *after* the destination allocation in each
+        // branch below: allocating the typed array can run a GC that relocates
+        // the source's element buffer, and a hoisted pointer then read freed
+        // memory — every element came back null at an any[] -> int[] boundary.
 
         if (element_type_id == LMD_TYPE_INT) {
             ArrayNum* typed = array_int_new(length);
+            Item* items = arr->items;
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (!item_is_integer_typed_array_source(items[i])) {
@@ -3097,13 +3247,17 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
                 }
                 // boxed sized numerics carry their value in NUM_SIZED payload bits,
                 // not the compact-int slot; decode before widening to int[].
-                // C16: the int lane is double-backed.
-                typed->float_items[i] = item_to_float_value(items[i]);
+                // v5: ELEM_INT stores an i64 lane in items[], so land the LANE
+                // value — writing raw double bits through float_items[] here
+                // made every element read back as a >INT53_MAX lane, i.e. `inf`.
+                typed->items[i] = lambda_double_to_int_lane(
+                    item_to_float_value(items[i]));
             }
             return typed;
         }
         else if (element_type_id == LMD_TYPE_FLOAT) {
             ArrayNum* typed = array_float_new(length);
+            Item* items = arr->items;
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_FLOAT && elem_tid != LMD_TYPE_INT &&
@@ -3122,6 +3276,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         }
         else if (element_type_id == LMD_TYPE_INT64) {
             ArrayNum* typed = array_int64_new(length);
+            Item* items = arr->items;
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (!item_is_integer_typed_array_source(items[i])) {
@@ -3136,6 +3291,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         }
         else if (element_type_id == LMD_TYPE_UINT64) {
             ArrayNum* typed = array_num_new(ELEM_UINT64, length);
+            Item* items = arr->items;
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (!item_is_integer_typed_array_source(items[i])) {
@@ -3149,6 +3305,7 @@ void* ensure_typed_array(Item item, TypeId element_type_id) {
         }
         else if (element_type_id == LMD_TYPE_BOOL) {
             ArrayNum* typed = array_num_new(ELEM_BOOL, length);
+            Item* items = arr->items;
             for (int64_t i = 0; i < length; i++) {
                 TypeId elem_tid = get_type_id(items[i]);
                 if (elem_tid != LMD_TYPE_BOOL) {

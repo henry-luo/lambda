@@ -2166,24 +2166,33 @@ static Item event_target_get_idl_handler(Item target, const char* type) {
 }
 
 static void fire_idl_handler(Item target, const char* type, Item event) {
-    Item handler = event_target_get_idl_handler(target, type);
-    if (!js_is_callable(handler)) return;
+    RootFrame roots(5);
+    Rooted<Item> target_root(roots, target);
+    Rooted<Item> event_root(roots, event);
+    Rooted<Item> handler_root(roots,
+        event_target_get_idl_handler(target_root.get(), type));
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> err_root(roots, ItemNull);
+    if (!js_is_callable(handler_root.get())) return;
 
-    Item args[1] = { event };
-    Item result = js_call_function(handler, target, args, 1);
-    if (item_is_error(result)) {
+    Item args[1] = { event_root.get() };
+    // Listener results can carry a GC-owned thrown value; give the call an
+    // exact result home before reporting that value after the callback returns.
+    result_root.set(js_call_function_into(handler_root.get(), target_root.get(),
+        args, 1, result_root.home()));
+    if (item_is_error(result_root.get())) {
         // Event callback exceptions are reported but never abort dispatch.
-        Item err = js_error_lane_payload(result);
-        log_event_exception_detail("event handler", type, err);
-        report_exception_to_window_onerror(err, type);
+        err_root.set(js_error_lane_payload(result_root.get()));
+        log_event_exception_detail("event handler", type, err_root.get());
+        report_exception_to_window_onerror(err_root.get(), type);
         return;
     }
-    if (get_type_id(result) == LMD_TYPE_BOOL && !it2b(result)) {
-        Item cancelable = js_get_key_cstr(event, "cancelable");
-        if (js_is_truthy(cancelable) && !event_flag_get(event, "__in_passive")) {
-            event_set_bool(event, "__default_prevented", true);
-            event_set_bool(event, "defaultPrevented", true);
-            event_set_bool(event, "returnValue", false);
+    if (get_type_id(result_root.get()) == LMD_TYPE_BOOL && !it2b(result_root.get())) {
+        Item cancelable = js_get_key_cstr(event_root.get(), "cancelable");
+        if (js_is_truthy(cancelable) && !event_flag_get(event_root.get(), "__in_passive")) {
+            event_set_bool(event_root.get(), "__default_prevented", true);
+            event_set_bool(event_root.get(), "defaultPrevented", true);
+            event_set_bool(event_root.get(), "returnValue", false);
         }
     }
 }
@@ -2193,6 +2202,13 @@ static void fire_idl_handler(Item target, const char* type, Item event) {
 // target node so capture-then-bubble sub-passes both report AT_TARGET).
 static void fire_listeners(void* key, const char* type, Item event, int phase,
                            bool key_is_dom, int reported_phase = 0) {
+    RootFrame roots(6);
+    Rooted<Item> event_root(roots, event);
+    Rooted<Item> target_root(roots, ItemNull);
+    Rooted<Item> callback_root(roots, ItemNull);
+    Rooted<Item> this_root(roots, ItemNull);
+    Rooted<Item> result_root(roots, ItemNull);
+    Rooted<Item> err_root(roots, ItemNull);
     NodeListeners* nl = find_listeners(key);
     bool has_listeners = (nl && nl->count > 0);
     // Check for an `on<type>` IDL handler on the target. We fire it during
@@ -2201,9 +2217,10 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
     Item target_item = ItemNull;
     if (phase != 1) {
         target_item = wrap_path_key(key, key_is_dom);
+        target_root.set(target_item);
         // DOM nodes and documents are branded VMaps; IDL handlers must be
         // queried through their host-property bridge as well as plain maps.
-        on_handler = event_target_get_idl_handler(target_item, type);
+        on_handler = event_target_get_idl_handler(target_root.get(), type);
     }
     bool has_on = js_is_callable(on_handler);
     if (!has_listeners && !has_on) return;
@@ -2213,13 +2230,13 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
         ? handler_slot->order : 0;
 
     // set eventPhase (use reported_phase if specified; otherwise raw phase)
-    event_set_int(event, "eventPhase", reported_phase ? reported_phase : phase);
+    event_set_int(event_root.get(), "eventPhase", reported_phase ? reported_phase : phase);
 
     // set currentTarget
-    js_set_name_key(event, "currentTarget", wrap_path_key(key, key_is_dom));
+    js_set_name_key(event_root.get(), "currentTarget", wrap_path_key(key, key_is_dom));
 
     // Check stop-immediate flag against per-event slot.
-    #define _STOP_IMM event_flag_get(event, "__stop_imm")
+    #define _STOP_IMM event_flag_get(event_root.get(), "__stop_imm")
 
     // Build a value snapshot: addEventListener() can grow and reallocate the
     // listener array during dispatch, so snapshots must not point into it.
@@ -2259,7 +2276,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
                 ((!handler_slot && handler_order == 0) ||
                  (live_handler && live_handler->active &&
                   live_handler->order == handler_order))) {
-                fire_idl_handler(target_item, type, event);
+                fire_idl_handler(target_root.get(), type, event_root.get());
             }
             handler_fired = true;
         }
@@ -2285,34 +2302,39 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
             this_for_call = callback;
             callback = he;
         }
+        callback_root.set(callback);
+        this_root.set(this_for_call);
 
         // Set passive flag on the event so preventDefault no-ops within this
         // listener (per HTML spec, passive listeners cannot cancel).
-        bool was_passive = event_flag_get(event, "__in_passive");
-        event_set_bool(event, "__in_passive", el->passive);
+        bool was_passive = event_flag_get(event_root.get(), "__in_passive");
+        event_set_bool(event_root.get(), "__in_passive", el->passive);
 
         // Mark for once-removal BEFORE invocation so that recursion / re-add
         // sees the slot as removed.
         if (el->once) live->removed = true;
 
         // call the callback with event as argument; isolate exceptions per spec
-        Item args[1] = { event };
-        Item result = js_call_function(callback, this_for_call, args, 1);
-        if (item_is_error(result)) {
-            Item err = js_error_lane_payload(result);
-            log_event_exception_detail("event listener", type, err);
-            report_exception_to_window_onerror(err, type);
+        Item args[1] = { event_root.get() };
+        // Callback allocation can collect the unhandled error lane before the
+        // native dispatcher reports it, so retain its return in this frame.
+        result_root.set(js_call_function_into(callback_root.get(), this_root.get(),
+            args, 1, result_root.home()));
+        if (item_is_error(result_root.get())) {
+            err_root.set(js_error_lane_payload(result_root.get()));
+            log_event_exception_detail("event listener", type, err_root.get());
+            report_exception_to_window_onerror(err_root.get(), type);
         }
 
         // restore previous passive context
-        event_set_bool(event, "__in_passive", was_passive);
+        event_set_bool(event_root.get(), "__in_passive", was_passive);
     }
 
     if (has_on && !handler_fired && !_STOP_IMM) {
         EventHandlerSlot* live_handler = find_handler_slot(key, type);
         if ((!handler_slot && handler_order == 0) ||
             (live_handler && live_handler->active && live_handler->order == handler_order)) {
-            fire_idl_handler(target_item, type, event);
+                fire_idl_handler(target_root.get(), type, event_root.get());
         }
     }
 
@@ -2320,6 +2342,13 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
 }
 
 Item js_dom_dispatch_event(Item elem_item, Item event_item) {
+    RootFrame roots(4);
+    Rooted<Item> elem_root(roots, elem_item);
+    Rooted<Item> event_root(roots, event_item);
+    Rooted<Item> global_root(roots, ItemNull);
+    Rooted<Item> previous_global_event_root(roots, ItemNull);
+    elem_item = elem_root.get();
+    event_item = event_root.get();
     if (!js_dom_event_runtime_state_ensure()) return (Item){.item = ITEM_FALSE};
     // Per spec: dispatchEvent(null) / dispatchEvent(non-Event) throws TypeError.
     TypeId evt_tid = get_type_id(event_item);
@@ -2470,9 +2499,11 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     // when called inside a Shadow Tree listener (we don't model Shadow
     // DOM headlessly, so we always set it).
     Item global = js_get_global_this();
+    global_root.set(global);
     Item event_key = js_name_item("event");
-    Item prev_global_event = js_get_key_default(global, event_key);
-    js_set_key_default(global, event_key, event_item);
+    Item prev_global_event = js_get_key_default(global_root.get(), event_key);
+    previous_global_event_root.set(prev_global_event);
+    js_set_key_default(global_root.get(), event_key, event_root.get());
 
     #define _STOP_PROP (_stop_propagation || event_flag_get(event_item, "__stop_prop") \
         || event_flag_get(event_item, "cancelBubble"))
@@ -2521,7 +2552,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     event_set_item(event_item, "__dispatch_path", ItemNull);
 
     // Restore the previous `window.event` value (legacy IE-style).
-    js_set_key_default(global, event_key, prev_global_event);
+    js_set_key_default(global_root.get(), event_key, previous_global_event_root.get());
 
     // Compact tombstoned listeners now that dispatch is done. Walk all
     // touched nodes in the path.

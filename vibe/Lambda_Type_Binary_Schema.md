@@ -141,7 +141,7 @@ A `type … : binary` declaration lowers to a new `TypeBinarySchema` (sibling of
 // lambda/lambda-data.hpp
 typedef struct BinFieldDesc {
     StrView      name;
-    TypeId       elem_type;     // LMD_TYPE_UINT8 ... LMD_TYPE_FLOAT64, or nested
+    TypeId       elem_type;     // LMD_TYPE_UINT8 ... LMD_TYPE_FLOAT, or nested
     BinarySchema* nested;       // non-null for sub-struct fields
     uint8_t      endian;        // resolved at schema-build time (inherited or override)
     uint8_t      repeat_mode;   // NONE | COUNT_CONST | COUNT_FIELD | UNTIL_SENTINEL | UNTIL_EOS

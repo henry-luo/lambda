@@ -25,6 +25,8 @@ true
 false
 "=== f64 type ==="
 float
+"=== f64 annotation ==="
+float
 "=== mixed arithmetic ==="
 f32
 float

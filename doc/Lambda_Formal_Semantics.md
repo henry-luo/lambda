@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 4.1.0 (2026-08-18)
+**Spec version:** 15.2.0 (2026-08-25)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -12,7 +12,8 @@ records govern the history and preserve the full deliberations.
 ruling of §4.6. A revised ruling keeps its ID with a version suffix
 (`S4.6.2v2`), replacing its predecessor in place; superseded text is not
 carried. The spec itself uses semantic versioning: MAJOR — an existing ruling
-changed meaning; MINOR — rulings added; PATCH — editorial.
+changed meaning, **or** added rulings break existing programs; MINOR —
+rulings added compatibly; PATCH — editorial.
 
 **Implementation marks.** A ruling marked `*` is not, or only partially,
 implemented; Appendix A carries the footnote. Unmarked rulings are believed
@@ -37,7 +38,11 @@ PD9–PD16 / FC1–FC11
 RF1–RF6 ([`Lambda_Design_Sys_Func.md`](../vibe/Lambda_Design_Sys_Func.md));
 R1–R5 and the effect doctrine
 ([`Lambda_Semantics_Features.md`](../vibe/Lambda_Semantics_Features.md));
-C4/CW ([`Lambda_Design_Runtime_COW.md`](../vibe/Lambda_Design_Runtime_COW.md)).
+C4/CW ([`Lambda_Design_Runtime_COW.md`](../vibe/Lambda_Design_Runtime_COW.md));
+surface syntax
+([`Lambda_Design_Syntax.md`](../vibe/Lambda_Design_Syntax.md)).
+PTH1v2, PTH2v2, PTH3–PTH15, PTH16v2, PTH17–PTH29
+([`Lambda_Type_Path.md`](../vibe/Lambda_Type_Path.md)).
 Appendix C maps sections to records.
 
 ---
@@ -82,6 +87,18 @@ Standing invariants distilled from the rulings — the checkable face of the
 principles. Any observed violation is a bug, never a semantics change; the
 representation-facing subset is verified by the differential and forced-GC
 harnesses.
+
+- **S1.11 — References, not authorities.** When a system function's semantics
+  are otherwise under-determined, resolve them by consulting **ECMAScript
+  first, Python second**. Both are references, not authorities: Lambda departs
+  from either whenever a Lambda principle (S1.1–S1.10), an existing Lambda
+  ruling, or internal consistency with a sibling operation says otherwise, and
+  the departure is then recorded as a ruling rather than left implicit. A
+  *hosted* language keeps its own specification — LambdaJS follows ECMAScript
+  and the Python guest follows CPython regardless of what Lambda chose for the
+  same-named Lambda builtin. Two orderings are settled by this: closing an
+  under-determined edge case beats inventing one, and matching a sibling
+  Lambda operation beats matching the reference. [S17]
 
 - **SI1 — Boxing invisibility.** Representation choices — tagging, unboxed
   arrays, decimal width, lane selection — never affect results. [S1.6]
@@ -130,9 +147,9 @@ harnesses.
   literal outside the band is a compile error; parsed data always lands in
   an exact home — parsers never reject numeric data and never silently
   place it in float. [S4.3]
-- **SI11 — Total reads, checked writes.** Reads never raise — absence is
-  `null` (or `""` for string results), slices clamp; an out-of-bounds
-  write always raises. [S7.1]
+- **SI11 — Total reads, checked writes.** Invalid member reads never raise —
+  they yield `null`; slices clamp. The corresponding invalid member write
+  always raises a hard language error. [S7.1]
 - **SI12 — The length law.** `len(x)` is exactly the number of iterations
   `for (i in x)` performs; `len` is shallow;
   `len(container) = Σ count(item)`. [S8.3]
@@ -187,6 +204,63 @@ harnesses.
   deterministic iteration, order-significant formats — while map **equality
   compares keys unordered** (§S5.4). Representation order is data; identity is
   content. [C8.6-R]
+
+### S2.4 Paths
+
+- **S2.4.1v2*** Path values use dotted steps. `/` selects the logical global
+  reference root and `.` the active relative reference root: a resolver may
+  qualify `/.a.b` as `file.hostname.a.b` (projected as `/a/b`) or as
+  `http.hostname.a.b`; `.a.b` remains relative to the active base. `~~` is the
+  parent step, never a root: `.~~.a` is parent-relative and `.~~.~~.a` applies
+  two parent steps. The retired `/a`, `..a`, and compound `_..` spellings do
+  not exist. Quoted, wildcard, and dynamic steps retain their ordinary
+  dotted/indexed forms. [PTH1v2, PTH2v2, PTH3–PTH4, PTH11, PTH17]
+- **S2.4.2v4*** Every hierarchical reference is a typed root plus ordered
+  operations. Ordinary keys are `NameKey` or non-negative `IntKey`; a dynamic
+  subscript is evaluated and normalized through S8.2.1v2 before lookup.
+  A key-domain mismatch is an invalid member access: its read yields `null`
+  under S7.1.1v2 and its write raises through the hard `T^` channel under
+  S7.1.3v2/S7.4.2. It never implies container conversion. Root, parent, and
+  wildcard navigation are operation kinds, so `a.1.b` and `a.'1'.b` remain
+  distinct. Postfix root `./` discards descendant steps back to the logical or
+  provider/authority anchor; unresolved relative root selection remains as
+  `./`. Parent steps apply left-to-right: they remove a preceding child,
+  accumulate at the relative root, and clamp at an anchored root. Equality,
+  hashing, printing, target resolution, and
+  `base ++ relative_suffix` observe the same normalization. [S1.6, S8.2.1v2,
+  PTH7–PTH9, PTH12–PTH14, PTH25, PTH28]
+- **S2.4.3v2*** Paths, names, symbols, and member expressions use this one
+  reference scheme but retain distinct evaluation contracts. Paths are
+  static root-selected plans and produce lazy target handles; names are
+  statically namespace-qualified (`a` may become `ns.a`) and read bindings;
+  symbols are static `NameKey` reference values and do not implicitly read
+  bindings.
+  Member/index expressions apply typed keys to a runtime base and are dynamic.
+  Name-position parsing is maximal: once an element tag or attribute name has
+  the namespace-qualified `ns.name` form, the complete dotted name is consumed
+  before element content is considered, and whitespace does not terminate it.
+  Thus `<svg.rect>` and `<svg .rect>` name the same qualified tag; a relative
+  path child requires the explicit content boundary `<svg; .rect>`.
+  Static specialization and generic dynamic lookup must be semantically
+  identical; the scheme introduces no mutable reference identity. [S1.6,
+  S5.1.4, S8.2.2v2, S9.1.5, PTH13–PTH15, PTH16v2, PTH20]
+- **S2.4.4*** Each evaluation's immutable resolver deterministically maps
+  logical `/` prefixes, namespaces, and provider aliases to qualified roots.
+  Resolution obeys lexical visibility, exports, sandboxing, and capabilities;
+  it never uses mutable process-global bindings or existence/failure-based
+  provider fallback. Address resolution performs no I/O; forcing an external
+  target is a separate operation with its declared effect/error contract.
+  [S1.10, PTH16v2, PTH17–PTH19]
+- **S2.4.5v2*** Paths have three root forms: rooted `/.a.b`, relative `.a.b`,
+  and absolute `SchemeName...`. Rooted paths qualify logical `/` through the
+  active resolver; absolute paths name their provider/authority directly and
+  bypass that mount. File absolutes use `file./.a.b` for `/a/b` on the current
+  machine and `file.hostname.a.b` for `/a/b` on a named machine; consequently
+  `file.a.b` selects host `a` and path key `b`. A registered scheme name
+  heading a dotted chain is reserved as an absolute-path root. Rooted and
+  absolute path values retain distinct root kinds even when they resolve to
+  the same qualified target. All three forms use the same typed operations.
+  [S5.1.4, PTH21–PTH28]
 
 ---
 
@@ -463,11 +537,14 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
 
 ### S7.1 Reads are total; writes are checked
 
-- **S7.1.1** Out-of-bounds and negative indexing, missing map keys, and
-  string out-of-range indexing yield **`null`**. Null propagates through
-  chained access (`data.users[5].name` → null end-to-end) and scalar
-  arithmetic (`null + 1` → null). `arr[i] or default` is the coalescing
-  idiom.* [C5]
+- **S7.1.1v2*** Every invalid member/index **read yields `null`**. This
+  includes out-of-bounds or negative sequence/string positions, missing named
+  members, a key outside the base's domain (`array["name"]`, `array[5.5]`,
+  `map[1]`), and a non-error base with no applicable member face. No invalid
+  read raises or returns an error value. Null propagates through chained access
+  (`data.users[5].name` → null end-to-end) and scalar arithmetic
+  (`null + 1` → null). `arr[i] or default` is the coalescing idiom. [C5,
+  C5.3b]
 - **S7.1.2** Slices **clamp** to bounds and return an empty collection (or
   `""` for string results — the result type is preserved). Clamping is
   symmetric: a negative offset clamps to 0, never wraps from the end
@@ -475,10 +552,12 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
   makes the whole selection `null` — a missed search degrades end-to-end
   instead of returning a plausible wrong prefix. A non-null non-integral
   offset is an `error`. [C5, RF3D]
-- **S7.1.3** An out-of-bounds **write is a raised error** — not null, not a
-  silent no-op. *Reads ask a question; writes issue a command, and a command
-  that silently does nothing hides bugs.* Growth is explicit
-  (`push`/`splice`). [C5]
+- **S7.1.3v2*** Every invalid member/index **write raises a hard language
+  error** through the `T^` channel of S7.4.2 — never a soft `T | error` value,
+  null, or a silent no-op. This includes the same bounds, key-domain, and base
+  failures covered by S7.1.1v2. *Reads ask a question; writes issue a command,
+  and a command that silently does nothing hides bugs.* Growth is explicit
+  (`push`/`splice`). [C5, C5.3b]
 
 ### S7.2 Indexing and `last`
 
@@ -793,17 +872,41 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   *Whatever `for…in` walks, `in` tests.* [C5.3a]
 - **S8.1.2** On elements, `in` ranges over attribute values then children;
   `at` ranges over attribute keys — one meaning across the map/list duality.
+- **S8.1.3*** **Axis and arity are independent.** The axis (`in`/`at`) selects
+  WHICH members are walked; the arity of the binding selects the PROJECTION
+  over those same members. One name binds the axis's own element — `for (x in
+  c)` a value, `for (k at c)` a name. Two names bind `(key, value)` of each
+  walked member, on either axis: `for (k, v in c)` and `for (k, v at c)`.
+  The axis still decides membership, so the paired forms are not synonyms —
+  on an element `for (k, v at e)` yields attribute pairs only, while
+  `for (k, v in e)` also walks children; on an array `for (k, v at a)` is
+  empty because an `IntKey` is not a name (S8.2.2v2). S8.1.1's mirror law is
+  unaffected: it equates the single-name iteration with membership on the same
+  axis, and the paired form walks that identical member set. [C5.3a]
 
 ### S8.2 The key space
 
-- **S8.2.1** Every item in every container has a key, in one space: maps key
-  by symbol; arrays/lists/ranges by integer index; elements by **both**.
-  `for (k, v in c)` exposes the key uniformly (`[for (k, v in [10,20]) k]` →
-  `[0, 1]`). [§8.0 record]
-- **S8.2.2*** A *name* is a symbol key only. `at` ranges over names, so
+- **S8.2.1v2*** Every container has a fixed key domain. The sequence face of
+  arrays, lists, and ranges uses non-negative `IntKey`s. An `int`, `float`, or
+  `decimal` subscript normalizes to an `IntKey` only when its value is finite,
+  mathematically integral, exact in the index integer domain, and
+  non-negative: `a[5]`, `a[5.0]`, and `a[5.00n]` select the same member.
+  Fractional values such as `5.5`, negative integral positions, strings, and
+  symbols do not name sequence members. The named face of a map accepts
+  string and symbol subscripts as `NameKey`s; the empty string is a valid,
+  distinct name rather than absence. An element exposes both faces: an
+  `IntKey` selects a content child, while a `NameKey` selects an attribute.
+  Any subscript not admitted by the selected container face is an invalid
+  member access: the read yields `null`, while the write raises a hard error
+  under S7.1.3v2/S7.4.2.
+  `for (k, v in c)` exposes the resulting canonical key uniformly
+  (`[for (k, v in [10,20]) k]` → `[0, 1]`). [C5.3b]
+- **S8.2.2v2*** A *name* is a `NameKey`: string and symbol subscripts with the
+  same exact contents normalize to the same name, including the empty name.
+  `at` ranges over names, so
   `1 at [10, 20, 30]` is **false** — the narrower reading is what lets
   `for (k at e)` give an element's attributes without its children; an index
-  bound is written `i < len(arr)`. [§8.0.1 record]
+  bound is written `i < len(arr)`. [C5.3b; §8.0.1 record]
 
 ### S8.3 `len`
 
@@ -865,6 +968,14 @@ construct; `let` is final.* [C4]
 - **S9.1.5** No reference cells; structural `==` is the only equality.
   Cycles are unconstructible, so `==` is total and no cycle collector is
   needed.
+- **S9.1.6*** Member/index assignment may update or add only a member admitted
+  by the container's existing key domain; it never changes the container kind.
+  Thus `var a = []; a["str"] = 1` raises under S7.1.3v2 and `a` remains an array
+  rather than being promoted to a map or object. Changing kinds requires
+  whole-binding replacement with a newly constructed value, for example
+  `var a = [1]; a = {value: 1}`. Such reassignment remains subject to the
+  binding's declared type; an unannotated `var` may change runtime type under
+  S12.2.1. [S8.2.1v2, S9.1.2, C5.3b]
 
 ### S9.2 Covariance, borrows, and views
 
@@ -935,6 +1046,42 @@ construct; `let` is final.* [C4]
   Lambda is a keyword-operator language; new operators prefer words over
   sigils.
 
+### S10.4 Parent navigation
+
+- **S10.4.1*** Postfix `.~~` is the parent-navigation step at the ordinary
+  member/index precedence tier; it chains left-to-right (`value.~~.~~.name`).
+  A value domain or active traversal context supplies the parent relation;
+  absence of one yields `null` and chains by S7.1.1v2. Path values use S2.4.2v4.
+  A field named `.parent` remains an ordinary member, not a syntactic alias.
+  [PTH3, PTH5, PTH9]
+- **S10.4.2*** Bare `~~` is exactly `~.~~`: it is valid exactly where `~` is
+  bound, selects the innermost current-value context, and counts as a free
+  `~` for the S10.1.2 mapping-pipe test. Thus `~~.~~.a` means
+  `~.~~.~~.a`; it never denotes a relative path, whose form starts with `.`.
+  [S10.1.2,
+  S10.1.3, PTH6]
+- **S10.4.3*** Contextual parent navigation is occurrence-based and carries
+  lineage in the evaluation context as a navigation path, cursor, or zipper.
+  It never adds parent pointers or observable identity to Lambda containers or
+  document values. [S1.4, S1.6, S9.1, S9.3, PTH10]
+
+### S10.5 Root navigation
+
+- **S10.5.1*** `/` is the one root-selection operation. Initial `/` selects
+  the logical root of the implicit resolution universe; postfix `./` selects
+  the root of its explicit base. The postfix form has ordinary member/index
+  precedence and chains left-to-right (`value./.name`, `value.~~./.name`).
+  [S1.7, PTH25–PTH26]
+- **S10.5.2*** For a path, `./` selects its logical or provider/authority
+  anchor. For a traversal occurrence it selects the outermost occurrence from
+  the active navigation path/zipper; a declared root-aware model supplies its
+  own root; a standalone hierarchical value is its own root. Absence of a root
+  relation yields `null` and chains by S7.1.1v2. [PTH26–PTH28]
+- **S10.5.3*** Dynamic root navigation is occurrence-based. Its lineage lives
+  in the evaluation context as a navigation path, cursor, or zipper; it never
+  adds root/parent pointers or observable identity to Lambda values. [S1.4,
+  S1.6, S9.1, S9.3, PTH29]
+
 ---
 
 ## S11 Types and Patterns
@@ -963,7 +1110,7 @@ construct; `let` is final.* [C4]
   bounds of mixed domains or strings containing more than one codepoint are
   errors, not coercions. The same membership rule applies in annotations,
   match arms, and value expressions; indexing or iteration materializes each
-  character-range member as a one-codepoint string. [S7.1.1, S11.2.1]
+  character-range member as a one-codepoint string. [S7.1.1v2, S11.2.1]
 
 ### S11.2 Match
 
@@ -1052,6 +1199,15 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 - **S12.1.3** Reactive templates are the doctrine applied: template body =
   pure `fn` transformation; mutation only in `on` handlers (`pn`) — the Elm
   architecture enforced by the effect bit. [Features §3.7]
+- **S12.1.4*** **Effect polymorphism, admitted narrowly.** A function may
+  take its colour from an argument rather than declaring one. `call` (S12.3.4)
+  is the first and, for now, only such function: `call(f, args)` is `fn` when
+  `f` is `fn` and `pn` when `f` is `pn`. The colour is resolved **statically
+  whenever `f`'s is statically known**, and checked at **run time** otherwise
+  — a dynamic callee is exactly the case where the bit cannot be read off the
+  source. This is the minimal instance of SO28's pure-iff-argument-pure
+  polymorphism; it does not generalize to user-declared signatures, which
+  still carry one declared bit each (S12.1.1).
 
 ### S12.2 Assignment
 
@@ -1073,6 +1229,53 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 - **S12.3.2** Two dynamic-call restrictions are deliberate: a dynamic call
   with named arguments is rejected, and a dynamic call to a `var`/inout
   signature is rejected (a value span carries no writable caller location).
+- **S12.3.3** **A member call resolves against the receiver first.** For map,
+  element, and object types, `x.name(...)` looks up a user-defined field or
+  method named `name` on `x` BEFORE any method-eligible builtin, so a member
+  shadows a system function of the same name — a map field or object method
+  called `sum` wins over the built-in `sum()`. Without this, every builtin
+  name would be a latent trap in user types, and the failure is silent: the
+  builtin accepts the receiver as its first argument and returns its own
+  result rather than erroring. The shadow-proof accessor for intrinsic names
+  remains `name(item)` (S15.4).
+
+- **S12.3.4*** **`call(f, args)` is the dynamic-application form.** It
+  applies `f` to the members of the array `args` as individual arguments,
+  and is the sanctioned way to forward a collected argument list — notably
+  `fn outer(...) => call(inner, varg())`, which nothing else expresses when
+  `inner` is itself variadic. Its colour follows `f` (S12.1.4). Three
+  consequences follow from its being dynamic by construction, and are
+  accepted rather than worked around: arity is checked at run time, not
+  statically (S12.3.1 still bounds the callee's own slots); the result type
+  is `any`; and the call takes the dynamic ABI, not a direct-call fast path.
+  A `pn` target reached from `fn` context is an error — statically when `f`'s
+  colour is known, at run time otherwise. Error convention follows the
+  resolved colour: an `fn`-coloured `call` **returns** an error value, a
+  `pn`-coloured `call` **raises**. `args` must be an array; any other type is
+  an error.
+- **S12.3.5*** **Spread does not expand into an argument list.** `*x`
+  splices where a **container** is being built — array, list, and map
+  literals (S16.8.6) — and nowhere else; in argument position it passes its
+  operand as one value. The expansion was considered and **rejected**: it
+  would need call-site syntax and semantics of its own, cost the static
+  arity check that S12.3.1 relies on, and silently divert calls to the
+  dynamic ABI, all for a case `call` already covers generally.
+
+- **S12.3.6** **No arity overloading for user definitions.** Two definitions
+  sharing a name in one scope are a duplicate-definition error regardless of
+  parameter count; a name binds to exactly one function. This follows
+  ECMAScript (S1.11) and costs nothing, because Lambda already expresses the
+  same intent with **optional parameters**: `pn f(a)` and `pn f(a, b)` are one
+  `pn f(a, b?)`, which accepts either arity and rejects anything beyond its
+  declared slots. Overloading would buy only a second spelling for that, at the
+  price of an arity-directed resolution rule interacting with optionals, rest
+  collectors, and dynamic calls.
+
+  The **builtin registry is keyed on `(name, arity)`, but that is a dispatch
+  optimization, not a language rule** — it lets an intrinsic select a
+  specialized row without a runtime arity branch. It does not make builtins
+  overloadable in the source language, and the asymmetry with user definitions
+  is therefore only apparent. [S1.11, TS-8]
 
 ### S12.4 Resources
 
@@ -1100,25 +1303,29 @@ the last write.* [Features R1–R5]
 
 ## S13 Concurrency
 
-*One keyword, two tiers. Concurrency enters a program through exactly one
-word.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concurrency.md) (K11–K32).
+*One procedure, two tiers. Explicit concurrency enters a program through one
+ordinary call surface.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concurrency.md) (K11–K32).
 
 ### S13.1 Tasks and workers
 
-- **S13.1.1** `start` is the only concurrency keyword — contextual, legal
-  only where an expression begins inside a `pn`, operand a `pn` call.
-  Everything else (`wait`, `send`, `receive`, `select`, `worker`, `cancel`,
-  `self`) is a builtin `pn`. **`async` and `await` do not exist.** [K12]
-- **S13.1.2** Calls are **colorless**: `f(x)` synchronously yields the value
-  and may suspend invisibly (`f(x)` ≡ `wait(start f(x))` minus the handle);
+- **S13.1.1v2** `start` is a builtin `pn`, not a keyword. It uses ordinary call
+  grammar as `start(target, args = [], options = {})`, is legal only inside a
+  `pn`, and requires `target` to resolve to a `pn`. `args` is an array; the
+  compiler-recognized `options` literal accepts `mode: 'task' | 'thread' |
+  'process'` and defaults to `'task'`. Everything else (`wait`, `send`,
+  `receive`, `select`, `cancel`, `self`) is also a builtin `pn`.
+  **`async` and `await` do not exist.** [K12v2]
+- **S13.1.2v2** Calls are **colorless**: `f(x)` synchronously yields the value
+  and may suspend invisibly (`f(x)` ≡ `wait(start(f, [x]))` minus the handle);
   may-suspend-ness is inferred and never observable. Every Lambda `pn`
   exposed to JS is uniformly Promise-returning; a Lambda resume is a
   macrotask. [K16]
-- **S13.1.3*** Two tiers, one handle vocabulary: tasks (`start f(x)`, shared
-  context) and workers (`start worker(spec, isolation: 'thread'|'process')`,
-  share-nothing isolate; default `'thread'`). Handles are uniform:
+- **S13.1.3v2*** Two tiers, one handle vocabulary: tasks
+  (`start(f, [x])`, shared context) and isolated workers
+  (`start(f, [x], {mode: 'thread' | 'process'})`, share-nothing isolate).
+  Handles are uniform:
   awaitable, sendable-to, selectable, cancellable; they compare by identity
-  and only the concurrency builtins operate on them. [K11, K31]
+  and only the concurrency builtins operate on them. [K11, K31v2]
 - **S13.1.4** **The capture rule**: a `start` operand must not capture
   `var`s by reference — compile error. Tasks communicate only via messages
   and immutable values; consequence: **thread count is semantically
@@ -1245,22 +1452,343 @@ word.* Full record: [`Lambda_Design_Concurrency.md`](../vibe/Lambda_Design_Concu
 
 ---
 
+## S16 Surface Syntax
+
+Syntax is ruled here because it decides meaning: separation, brace role, and
+element scope each select *which program* a text denotes. A dedicated formal
+syntax document may follow; until it does, this section is the single source.
+Argued in [`Lambda_Design_Syntax.md`](../vibe/Lambda_Design_Syntax.md), cited
+below by its section.
+
+### S16.1 Whitespace and separation
+
+- **S16.1.1*** **Line breaks carry no meaning.** Replacing any line break in
+  an accepted program with a space yields the same program with the same
+  semantics. The converse direction may *reject* — inserting a line break can
+  make a valid program a syntax error (S16.2.3) — but never reinterprets one.
+  [Design_Syntax §3.1]
+- **S16.1.2*** `;` is a **strict separator** between statements — never a
+  terminator, and `,` obeys the same discipline in every list. A separator
+  sits between two items: trailing separators (`{ a; b; }`, `[1, 2,]`,
+  `f(a, b,)`) and empty slots (`{ a; ; b }`, `[1, , 2]`) are syntax errors.
+  A block's value remains its last expression; no separator can discard it.
+  [Design_Syntax §3.2]
+- **S16.1.3v2*** Adjacent statements need **no separator** when the second
+  begins with a token that cannot continue the first, **or when the first
+  has a closed tail**. A tail is closed after the structural closer of a
+  non-postfixable construct — `fn`/`pn`/`type`/`view` bodies, braced
+  `if`/`for`/`while`, `match` — or a self-complete keyword statement
+  (`import`): *after a block, never `;`*. Open tails, which do require the
+  S16.2.3 repair, are `let`/`var`/assignment, type aliases, `=>` bodies,
+  `return`, and every bare expression (primaries take postfix). Declarations
+  are not expressions, so `(fn () {})[1]` is impossible by construction.
+  [Design_Syntax §3.2–3.3, §7.14]
+
+### S16.2 Line-start classification
+
+- **S16.2.1*** An **incomplete** expression continues across a line break
+  unconditionally: a trailing operator, an unclosed bracket, or a keyword
+  form awaiting its remainder binds the next line. [Design_Syntax §3.2]
+- **S16.2.2v2*** After a **complete** expression, a line-start token that can
+  only continue an expression does continue it: `|> | & ! ? .? ** ++ % > =`,
+  `== != <= >=`, and the word operators `and or to in is at div that eq ne
+  lt le ge gt`, plus `else case default`. These are unambiguous in any
+  position and need no separator. `!` is here, not below: it is a pure
+  infix token (S16.8.1). [Design_Syntax §3.3, §7.1]
+- **S16.2.3v2*** After an **open-tail** statement (S16.1.3v2), a line-start
+  **dual-role** token — one that could either continue the expression or
+  start a new one — is a **syntax error**. The set is final:
+  `( [ - + * ^ / < .` — the whole arithmetic family `- + * /` is banned
+  uniformly rather than freeing `+` alone (S16.8.5). Neither reading wins by
+  default; the repair is explicit (`;` to separate, or move the token to the
+  end of the previous line to continue). This is what makes S16.1.1 hold:
+  the parser never guesses, so a line break can never silently split or
+  merge. [Design_Syntax §3.1, §3.3]
+- **S16.2.4v2*** One carve-out: `.` `ident` at line start is **member
+  continuation**, sanctioning full leading-dot fluent chains — widened from
+  `.ident(` calls once the relative path was respelled `\.a.b` (S16.9.4),
+  which vacated the ambiguity. `.` is sub-classified, not retired: `.digit`
+  stays dual-role, since `a.5` is member access with an integer field.
+  [Design_Syntax §3.4, §7.15]
+- **S16.2.5*** `return` followed by a line break and a start token returns
+  that value: `return` ⏎ `42` is `return 42`. A bare return is `return`
+  followed by a separator or the closing brace. The JS restricted-production
+  trap is fixed by inversion, not by a special rule. [Design_Syntax §3.3]
+
+- **S16.2.6*** A handler's brace opens **on the same line as its `^`**
+  (`expr ^ { ... }`). A trailing `^` followed by a line-start `{` is the
+  propagate-versus-handler ambiguity, and the same-line requirement is what
+  resolves it. [Design_Syntax §3.6]
+### S16.3 Juxtaposition
+
+- **S16.3.1*** Juxtaposition **sequences, never combines.** Adjacent
+  expressions are separate statements or content items; no juxtaposed form
+  denotes a value computed from its neighbours. The general `expr expr expr`
+  construct (application, unit suffixes) is therefore permanently
+  unavailable — S16.1.3 claims that syntax space. Constructs needing operand
+  adjacency must use an introducer keyword, a sigil, or explicit delimiters.
+  [Design_Syntax §3.8]
+
+### S16.4 Braces
+
+- **S16.4.1v2** **Interior decides, wherever braces are an expression.** A
+  map needs `key ':'` at the front, and `ident ':'` occurs nowhere in
+  statement space — Lambda has no labels — so the two interiors are
+  **disjoint grammars**: `{a: 1}` is a map, `{let x = 1 x}` and `{f(1)}` are
+  blocks. This is a decidable two-token choice, not a guess, and it holds in
+  every expression position **and in control-form bodies of both spellings**.
+  Grouping parens never flip the reading: `if c {a: 1}` and `if (c) {a: 1}`
+  are the same program, as grouping parens must be. Block expressions
+  therefore exist — `{statements}` is legal in any expression position, its
+  value is its last expression, and its `let`s are block-scoped
+  (`let x = { let y = 1 y + 1 }`), which is what gives arrow functions block
+  bodies without a JS-style `({...})` quirk. [Design_Syntax §5.9]
+- **S16.4.2** **Empty `{}` resolves by context, and only where a tie
+  exists.** Value position — initializers, call arguments, operands, in `fn`
+  *and* `pn` — is the empty **map**. Content position is an empty map item,
+  which is meaningful because it serializes. `if`/`for` bodies take **fn
+  context → empty map, pn context → empty block**, aligning with value use:
+  fn control bodies produce values, pn control bodies discard them. Arrow
+  bodies are fn context by definition, even written inside a `pn`. A bare
+  `{}` **statement** in `pn` is a syntax error — dead code under either
+  reading — which removes the context rule from statement position entirely.
+  [Design_Syntax §5.9]
+- **S16.4.3** **Declaration braces are structural and never read as maps.**
+  `fn`, `pn`, `view`, and `on` bodies, braced match arms (`case T { ... }`),
+  handler arms (`^ { ... }`, `~ { ... }`), and `while` bodies are always
+  blocks; `{}` in each is the empty body. `while` belongs here by the same
+  value-use principle — it is procedural-only, so its body value is always
+  discarded and a map body is dead by construction. Each declaration has an
+  expression escape where a value body is wanted (`fn f() => {a: 1}`,
+  `case int: {a: 1}`). `match`'s outer braces delimit the arm list
+  (S16.6.4); `type` bodies have their own interior; map-*type* patterns
+  (`{a: int}`) live in type space and are untouched. [Design_Syntax §5.9]
+
+  | Braces | Reading |
+  |---|---|
+  | value/expression position, call args, initializers (`fn` **and** `pn`) | map or block by interior; `{}` = map |
+  | `if`/`for` bodies (both spellings), `else`, colon-form match arms, arrow bodies | map or block by interior; `{}` by fn/pn context (arrows: always fn) |
+  | `fn` `pn` `view` `on` bodies, braced match arms, handler arms, `while` bodies | always block; `{}` = empty body |
+  | `match` outer braces | arm list (structural) |
+  | `type` bodies | fields/constraint/methods interior |
+  | content position | map item (`{}` = empty map item, meaningful) |
+  | bare statement position in `pn` | **error** (dead either way) |
+  | type-annotation `{...}` | type space, unaffected |
+
+### S16.5 Element scope
+
+- **S16.5.1*** Inside an element — attribute values and bare content
+  expressions — `< > <= >=` **are not operators.** `>` always terminates the
+  element, `<` always opens a child. A comparison there is written as a
+  parenthesized island (`attr: (a > b)`), inside which the full expression
+  grammar returns, or with the keyword operators, which are element-wise by
+  S10.2.2 and agree with the symbol forms on scalars only. Removing the
+  reading, rather than ranking two readings, is what keeps S16.1.1 true at
+  the markup boundary. [Design_Syntax §5.10]
+
+### S16.6 Control forms
+
+- **S16.6.1*** `if`, `for`, and `while` each have **one node with two
+  spellings**: parenthesized head with any-expression body
+  (`if (c) e`), or bare head with braced body (`if c { … }`). There is no
+  separate statement form; the expression/statement distinction is semantic,
+  not syntactic. [Design_Syntax §5.1]
+- **S16.6.2*** `(` immediately after `if` or `while` **commits** to the
+  parenthesized spelling. Consequently a bare head must not begin with `(`:
+  `if (a+b)*2 { … }` is a syntax error, repaired as `if ((a+b)*2) { … }`.
+  `for` is unaffected — loop declarations begin with an identifier.
+  [Design_Syntax §5.2]
+- **S16.6.3*** `else` is **optional** in both spellings. An absent else
+  yields `null` in value position and contributes nothing in content
+  position. A dangling `else` binds to the nearest `if`. [Design_Syntax §5.4]
+- **S16.6.4*** `match` keeps its single braced form: its braces delimit an
+  arm list, not a body, so no parenthesized spelling exists.
+  [Design_Syntax §5.5]
+- **S16.6.5*** The expression/statement distinction is enforced by semantic
+  analysis on the S12.1 effect boundary, not by grammar: `break`/`continue`
+  and `while` are procedural-only; a `for` is a comprehension in functional
+  context and an effect loop in procedural context. [Design_Syntax §5.6,
+  S12.1]
+- **S16.6.6*** Control statements require braces. `return`, `break`, and
+  `continue` are statements and are admitted **only inside a braced body**.
+  Every unbraced control body — the paren-form `if`/`for` body, an `else`
+  body, a `case T:` arm, and every `=>` arrow body — is an expression
+  position and rejects them (`raise` is an expression and remains valid
+  there). A braced block in any of those positions is the statement spelling
+  and admits them: `if (c) { return x }`, `case T: { return x }`. Two
+  grounds: the C-family unbraced guard interacts fatally with the greedy
+  return (S16.2.5) — `if (c) return` ⏎ `cleanup()` would silently parse as
+  `return cleanup()` — and the paren/bare split (S16.6.1) is precisely the
+  expression/statement split, which a statement body in the paren spelling
+  would dissolve. Each rejection names the repair. [Design_Syntax §6 point
+  35]
+- **S16.6.7*** A procedure has exactly **one body form**: the braced
+  statement block `pn name(...) { ... }`. `=>` bodies are fn-only, named or
+  anonymous — an expression-bodied procedure is redundant with `fn` plus
+  S16.6.6, and the reference grammar never accepted it. [Design_Syntax §6
+  point 36]
+- **S16.6.8*** A **procedural block is a statement, never an expression**.
+  A braced block whose top level contains a pn-only construct (`return`,
+  `break`, `continue`, `var`, assignment) is rejected in every expression
+  position: after `case T:`, in tuple/argument/operand position, as an `=>`
+  arrow body. Ground: an expression must produce a value, and a procedural
+  block may not — `({ return 99 }, 123)` returned 99 from the enclosing
+  procedure and the tuple never existed; the expression syntax was a lie.
+  Functional blocks (`{ 1; 2 }`, `{ let r = f(x); g(r) }`) and maps remain
+  expressions everywhere, so `case T: { … }` stays legal and — by this very
+  ruling — can never conceal a statement: after `:`, braces are a map or a
+  pure block, nothing else. Classification is by interior, extending
+  S16.4.1v2's doctrine from brace-disambiguation to statement-ness.
+  [Design_Syntax §6 point 37]
+- **S16.6.9*** **Branch homogeneity.** An `if`/`else` chain or `match` is
+  either a **value form** — every branch an expression, where functional
+  blocks, maps, and diverging `raise` arms all count as expressions — or a
+  **control form** — every branch a procedural block, the whole form a
+  statement that yields no value and is illegal in value position. Mixtures
+  (`if (c) { return 1 } else 0`, a braced-statement `case` arm beside a
+  `default: expr` arm) are rejected. Match surface reading: `:` arms are
+  value arms, braced arms are control arms. The fn/pn classification rides
+  the S12.1 effect boundary and lives in semantic analysis per S16.6.5.
+  [Design_Syntax §6 point 38]
+
+### S16.7 Script top level
+
+- **S16.7.1** **A script's top level is element content, not a list.** The
+  statement sequence forming a script body is modelled as the content of a
+  virtual `<file …>` / `<script …>` element. This is why the two share a
+  syntax: top-level juxtaposition, separation, and line-start classification
+  (S16.1–S16.3) are the element-content rules applied to the file. The mental
+  model is the normative one — a script *is* content, so it normalizes like
+  content (S16.7.2, S16.7.3) rather than accumulating like a list.
+  [Design_Syntax §7.23]
+- **S16.7.2** **Null is stripped from content.** A `null` reaching content
+  contributes nothing, however it arose — written literally, read from a
+  missing key (S7.1.1v2), or produced by an `else`-less `if` (S16.6.3). If
+  stripping leaves the content empty, the script's value is a single `null`;
+  that residual is the only null observable at top level. Containers do not
+  normalize: `[1, null, 2]` keeps its null, so a null is observed by placing
+  it in a value (`let r = [s.b]`), never by writing it as a bare statement.
+- **S16.7.3** **Adjacent strings are merged.** Two string items with no
+  intervening non-string content collapse into a single text node. Merging is
+  applied *after* null stripping, so `"a" ⏎ null ⏎ "b"` yields `"ab"` — the
+  stripped null does not keep its neighbours apart.
+
+### S16.8 Lexical forms
+
+- **S16.8.1** **`not` is the one logical negation.** Unary `!` is removed
+  from value expressions; `!` keeps its type-level roles (infix exclusion,
+  complement) and is therefore a pure infix token (S16.2.2v2).
+  [Design_Syntax §7.1]
+- **S16.8.2** **`not` binds loose** — below comparisons and `is`/`in`/`at`,
+  above `and`/`or`: `not a == b` ≡ `not (a == b)`, the Python placement.
+  [Design_Syntax §7.2]
+- **S16.8.3** **Numeric spelling.** Sized floats accept integer spellings
+  (`1f32`, symmetric with `1i32`); `_` is a digit separator in every numeric
+  family, hex included, and is spelling only; **hex is the only radix
+  prefix** — `0b`/`0o` are rejected. [Design_Syntax §7.3–§7.5]
+- **S16.8.4*** **No implicit adjacent-literal concatenation**, strings or
+  symbols: `"a" "b"` never combines into one value (S16.3.1). Distinct and
+  kept is content normalization, where adjacent string *items* merge into
+  one text node (S16.7.3) — document construction, not expression-level
+  concatenation. Explicit concatenation is `++`. [Design_Syntax §7.9]
+- **S16.8.5** **Unary `+` is kept** (identity, plus string→number
+  coercion), and `+` stays banned at line start: the arithmetic family
+  `- + * /` is banned as a class, not per token. [Design_Syntax §7.12]
+- **S16.8.6** **`*` is spread; `*` and `...` are two wildcard families,
+  not one.** `*` is the unit wildcard (path segment, any-key, `T*`
+  repetition, spread); `...` is the elided run (pattern gap, rest
+  parameters), with the normative equivalence `...` ≡ `any*`. Paths keep
+  `*`/`**` — an ellipsis would collide with path dots. [Design_Syntax §7.10]
+- **S16.8.7** **A single-quoted literal is a symbol, not a string**, and
+  comma decomposition (`let a, b = expr`) is by design; bracket destructuring
+  patterns are rejected. [Design_Syntax §7.8]
+
+- **S16.8.8*** **The backtick syntax space is reserved and must not be spent
+  otherwise.** String interpolation is deferred with its direction fixed: if
+  built, `` `...` `` is a quoted-DSL mechanism — interpolated text being one
+  instance — never plain string interpolation. [Design_Syntax §7.13]
+
+### S16.9 Declarations, elements, paths
+
+- **S16.9.1** **`pub` is a uniform prefix modifier** — `pub let` / `pub fn`
+  / `pub type`. Bare `pub x = 1` is removed; `pub var` stays illegal by
+  non-composition. [Design_Syntax §7.6]
+- **S16.9.2*** The **`apply;` fused token is retired**: bare `apply` is the
+  keyword statement, disambiguated from `apply(...)` by the S16.2.5 pattern,
+  and any neighbouring `;` is ordinary separation. [Design_Syntax §7.7]
+- **S16.9.3** **`;` has exactly one role language-wide: statement
+  separation.** `,` takes over inside elements and object types, under the
+  two-regime doctrine — **pair-lists are strict comma lists** (maps,
+  attributes, named arguments, parameters, fields/methods: the comma is
+  always required, so `{a: b c: d}` and `<div a:1 b:2>` are both rejected),
+  while **content and statements juxtapose**. The element attribute/content
+  boundary comma is a **biconditional**: present exactly when the element
+  has both attributes and content. `<div "text">` and `<div a:1>` take none;
+  `<div a:1, "text">` requires one; `<div a:1 "text">` and `<div, "text">`
+  are errors. This retires the language's last optional delimiter, so
+  S16.1.2 has no exception. [Design_Syntax §7.11]
+- **S16.9.4*** **The relative path is spelled `\.a.b`** (rooted `/.a.b`
+  unchanged): `\` already carries path flavour from its import-separator
+  role, and unlike `./a.b` it does not collide with S10.5.1's postfix root
+  step. Vacating `.name` is what widens S16.2.4v2. `import .mod` is
+  unaffected — its keyword introducer leaves no ambiguity to escape.
+  [Design_Syntax §7.15]
+- **S16.9.5** **`a?: T` marks an optional field** — the whole field may be
+  absent — which is distinct from `a: T?`, where the field is present and
+  its value nullable. The marker applies in every type-field position:
+  object-type fields, pattern position, and map-type items.*
+  [Design_Syntax §7.22]
+
+---
+
+## S17 System Library
+
+Per-builtin semantics that the general rules above do not already fix. S1.11
+governs how an under-determined case here is resolved.
+
+### S17.1 String splitting
+
+- **S17.1.1** **`split` follows ECMAScript `String.prototype.split`.** The
+  delimiter may be a string or a pattern, and both spellings obey one rule set:
+  a match consumes its span and opens a new segment; the segment before the
+  first match and after the last are both emitted, so a leading or trailing
+  delimiter yields an empty string at that end (`split(",a,b", ",")` is
+  `["", "a", "b"]`, `split("a1b1", \(d))` is `["a", "b", ""]`); a subject with
+  no match yields a one-element result holding the whole subject. In
+  particular Lambda adopts ECMAScript's `e == p` rule: **a match whose end
+  lands on the current segment's start contributes no segment and only
+  advances the search.** That rule is what suppresses the leading and trailing
+  empties of a zero-width delimiter, so `split("ab", \(d*))` is `["a", "b"]`
+  where Python's `re.split` would give `['', 'a', 'b', '']`. A zero-width
+  advance steps a whole codepoint, never a byte. An **empty subject** yields
+  `[]` when the delimiter matches the empty string and `[""]` otherwise
+  (`split("", ",")` is `[""]`, `split("", \(d*))` is `[]`).
+  The Python-shaped whitespace form `split(str, null)` — runs of whitespace,
+  outer whitespace stripped — has no ECMAScript analogue and is retained.
+  Deciding this by S1.11 was over-determined: ECMAScript and Lambda's own
+  empty-**string** delimiter (`split("ab", "")` = `["a", "b"]`) already agreed,
+  so following Python would have made the pattern path disagree with its own
+  sibling. [S1.11, LR09-8]
+
+---
+
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-17. Conformance plans:
-[`Lambda_Impl_Error_Handling (done).md`](../vibe/Lambda_Impl_Error_Handling%20(done).md),
-[`Lambda_Impl_Error_Rework.md`](../vibe/Lambda_Impl_Error_Rework.md),
-[`Lambda_Impl_Int_Total (done).md`](../vibe/Lambda_Impl_Int_Total%20(done).md).
+Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
+[`Lambda_Impl_Error_Handling (done).md`](../vibe/impl/Lambda_Impl_Error_Handling%20(done).md),
+[`Lambda_Impl_Error_Rework.md`](../vibe/impl/Lambda_Impl_Error_Rework.md),
+[`Lambda_Impl_Int_Total (done).md`](../vibe/impl/Lambda_Impl_Int_Total%20(done).md).
 
 | Ruling | Status |
 |---|---|
+| S2.4.1v2, S2.4.2v4, S2.4.3v2–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19: maximal namespace-qualified element/attribute names, explicit `;` before a relative-path element child, logical `/.a`, relative `.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, network hostname discovery, and complete S8.2.1v2 key normalization remain deferred. |
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
 | S5.4.3 | Element `==` defect (map-cast layout bug) — priority fix in the C8.5 bug list. |
 | S5.5.1 | Function self-equality defect open; normalized-AST hash awaits `compile()` (S15.3). |
 | S6.1.1 | `fn_lt` uses `strcmp` (NUL-unsafe) and accepts symbols; two-layer invalid-comparison treatment not landed. |
 | S6.2.1 | `sort()` coerces to float (`sort(["b","a","c"])` → `[nan,nan,nan]`); total order not implemented in `sort`/`order by`. |
-| S7.1.1 | OOB-read→null / write→raise / clamping partially landed; slice-offset rules (RF3D) landed with regression tests. |
+| S7.1.1v2, S7.1.3v2 | Core computed array/map/element reads now return `null` for invalid keys and writes return the hard `ItemError`/`T^` channel; typed-array and mask paths share the same checked key boundary. A broader access-site audit remains for specialized editor/host surfaces. Slice-offset rules (RF3D) landed with regression tests. |
 | S7.2.2–S7.2.4 | `last` keyword, `limit last N`, and `{limit:}/{last:}` options not implemented; ArrayNum negative-index audit outstanding. |
 | S7.3.1 | Strict null propagation + `skip_null` option pending. |
 | S7.4.4 | Skip-edge errors currently surface the bare `ITEM_ERROR` singleton — rich payload pending. |
@@ -1271,7 +1799,8 @@ Status of `*`-marked rulings as of 2026-08-17. Conformance plans:
 | S7.8.1 | TE-17 lane gating pending (predicates exist, gate does not). Known violation V1: `fn_array_set` silently despecializes a declared `int[]` — the dominance invariant (S7.7.2) is false today. The `may_defect` effect split must land before routing or every unanalyzed call costs a native lane. |
 | S7.10.5 | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
 | S7.11.4 | Exec recovery implemented on POSIX. **Blocking hazard H1**: batch mode overwrites the stack-overflow handler, so fault capture differs between batch and standalone runs. Windows SEH never exercised. |
-| S8.2.2 | `at` membership still tests the whole key space (`1 at [10,20,30]` returns true); iteration conforms. |
+| S8.2.1v2, S8.2.2v2, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains, including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. Specialized editor/host access sites still need the same audit. Empty-string map keys are now semantically valid, but their known JSON round-trip corruption remains to be fixed. `at` membership now conforms: `1 at [10,20,30]` is false, matching S8.2.2v2 (this row previously recorded it as still true). |
+| S8.1.3 | **Conformant as of 2026-08-24.** `key_only` redirected the primary binding to the key even when a paired binding was present, so `for (k, v at c)` bound BOTH names to the key — a silent wrong answer, and the three worked examples in `doc/Lambda_Expr_Stam.md` had never been run. Fixed in `build_ast` by gating `key_only` on the absence of `index_name`; `key_filter` is untouched, so the axis still restricts membership (paired `at` on an element yields attribute pairs only, on an array yields nothing). Both tiers read the same flag, so one fix covers MIR Direct and the interpreter. |
 | S8.3.2 | Streams (and hence stream `len`) not implemented. |
 | S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap). Stage 2 pending: `var`-param grammar + exclusivity checks (all four faces), capture-assignment compile errors, view-borrow confinement, module-`var` rule, snapshot iteration. |
 | S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
@@ -1281,10 +1810,17 @@ Status of `*`-marked rulings as of 2026-08-17. Conformance plans:
 | S11.4.5 | Landed check implements the superseded type-directional reject: an ANY-held `3.0` into an `int` boundary errors instead of admitting as `3`. Round-2 deliverable #1. |
 | S11.4.6 | Constrained-type `is`/`fn_is`/validator divergence open; base-only interim is the shipped behavior. |
 | S12.4.1–S12.4.3 | Resource model R1–R5 designed, not implemented. |
-| S13.1.3 | Tasks fully implemented (2026-07-15); the worker tier (thread/process isolation) is pending — process first, thread gated on the isolate-state audit and open item O-D. |
+| S13.1.3v2 | Task mode and the ordinary `start(target, args, options)` call surface are implemented (2026-08-19). Thread/process modes are recognized and rejected as not implemented; process remains first, thread gated on the isolate-state audit and open item O-D. |
 | S13.4.1, S13.4.2 | Pairwise reductions decided, not implemented (sequenced before concurrency work); stream parallelism pending with streams. |
 | S14.2, S14.3 | Group-by and joins (S14.1) are implemented; verbs, `over(...)`, DataFrame, and the whole stream/plan system are pending (phases P3–P8). |
 | S15.3 | `compile()`, closed environments, and `quote` unimplemented; C9 grammar worklist open (general expression children). |
+| S16.1–S16.6 (all) | **Conformant on the S16 harness as of 2026-08-24.** Ratified 2026-08-21 and implemented since: `test/c_s16_conformance.sh` passes 123/123 against the production C recursive-descent parser and `test/ts_s16_conformance.sh` 118/118 against the Tree-sitter reference grammar. The harness is a case sample, not a proof of total conformance, so the `*` marks stand. Both defects this row previously named are fixed: `return` ⏎ *value* now returns the value (S16.2.5), and the type scanners no longer continue on a line-start `!` (S16.2.3). Residue: the `!` fix must still be applied to the four sibling Tree-sitter scanners (`primary_type_pattern_token`, `return_type_token`, `view_pattern_token`, `content_type_token`) — O3 in [Design_Syntax §6](../vibe/Lambda_Design_Syntax.md); and a comment can defeat the line-start guard in Tree-sitter only, one-directionally and benignly ([Design_Syntax §7.17](../vibe/Lambda_Design_Syntax.md)). The user-facing doc sweep (O4) is outstanding: 60 of 172 `lambda` code blocks in `Lambda_Expr_Stam.md`, `Lambda_Reference.md`, `Lambda_Cheatsheet.md`, and `Lambda_Func.md` no longer parse. |
+| S16.4.1v2 | **Conformant as of 2026-08-22.** Two inverse flips were fixed in `lambda/runtime/parser/lambda_parser.c`: `if_statement_body_is_map` bailed out on a `(` head (so the paren spelling rejected every map body in statement position), and `parse_for_expression` gated the map reading on `parenthesized` (so the *bare* `for` spelling rejected one the paren spelling accepted). Both spellings of `if` and `for` now agree; `while` correctly stays always-block per S16.4.3. |
+| S16.4.2 | **Conformant as of 2026-08-22.** `control_body_brace_is_map` breaks the empty-brace tie in `if`/`for` bodies from `procedural_depth`; that depth now tracks the enclosing function's *effect kind* rather than a nesting count, so a `fn` inside a `pn` is fn context, and an arrow body is forced to fn context so `() => {}` mid-procedure is still the empty map. Verified across value, content, `if`, `for` (both spellings), arrow, and `pn` positions, plus fn-in-pn and arrow-in-pn nesting. |
+| S16.6.6, S16.6.7 | **Conformant in both front ends as of 2026-08-24** (ratified and implemented together). The C parser rejects every unbraced control-statement body with a repair-naming diagnostic, and `parse_function_declaration` rejects `pn ... =>` outright — closing a §4.4 divergence where the C parser was the outlier (1 doc site migrated, 0 test/std uses). The Tree-sitter reference grammar enforces the same bar via a zero-width `_expr_body_start` scanner guard withheld before `return`/`break`/`continue`, scoped to the four unbraced body positions rather than to every identifier; without it the word-rule fallback lexed those keywords as identifiers, so `if (c) return -1` misparsed as a subtraction rather than being rejected. A misfiring `runner.cpp` heuristic that rewrote arrow-body errors into the element-ambiguity diagnosis (the `>` of `=>` matched its relation walk-back) was guarded. Verified: C 140/140, Tree-sitter 135/135 on identical case sets; full 700-file `.ls` corpus cross-check shows zero movement (76 pre-existing failures before and after). |
+| S16.6.8, S16.6.9 | **Conformant as of 2026-08-24** (ratified and implemented same day). Enforced in `build_ast` semantic analysis per S16.6.5, reported as `E312`: `reject_procedural_block_operand` guards tuple/list/array elements, call arguments, binary operands and `=>` arrow bodies; `validate_match_branch_homogeneity` and `validate_if_branch_homogeneity` enforce S16.6.9. Classification is the shared `ast_branch_kind`, which is **three-way and recursive** — a first cut that scanned only a block's immediate top level for pn-only statements over-rejected two real shapes: a branch whose sole top-level item is a nested control `if` (`if (c) { if (d) { r = 3 } else { r = 2 } } else { r = 1 }`), and an EMPTY branch (`} else if (c) { } else {`), which commits to neither side and is therefore NEUTRAL, pairing with both. Migration cost was as predicted: 1 doc example (`doc/Lambda_Expr_Stam.md` — its `default: null` value arm beside control arms became the do-nothing control arm `default { }`), 0 test/corpus changes. Verified: C harness 152/152 (12 new cases; detection extended to E312 since these are semantic, not parse, rejections), Tree-sitter 135/135, `make test-lambda-baseline` 3868/3868. C-suite only by design — the reference grammar is a parser and has no semantic tier. |
+| S16.8.4, S16.8.8, S16.9.2, S16.9.4 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
+| S16.9.5 | **Parsing conformant as of 2026-08-25; the field/value distinction is not yet represented.** The 2026-08-22 spot-check that first cleared this ruling was wrong: `a?: T` parsed only on parameters, and both a map-type field (`type R = {a?: int}`) and an element attribute (`type E = <e a?: int>`) were rejected with `error[E103]`. Both now parse (`parse_type_pattern.cpp`, one shared marker helper used by the map-field and element-attribute sites), the validator honours the marker, and `test/validator_test_data/maps.ls` no longer errors against itself. Covered by `test/lambda/optional_field_marker.ls`. **Residue:** the marker is carried by wrapping the field type in `OPERATOR_OPTIONAL`, the same representation `a: T?` produces, so the two spellings this ruling calls *distinct* are currently indistinguishable downstream — separating them needs a field-level flag on `ShapeEntry`. Independently, the declaration binding checker treats an optional field as required (`let v: Rec = {name: "a"}` → `error[E205]`) for **both** spellings; that is pre-existing and not specific to this marker. |
 | int v5 (S4.1) | Substantially landed (lane, encoding, saturation, printing, goldens). Residue: `INT64_ERROR` collides with `INT_LANE_INF` (pre-cutover gate unsatisfied); ELEM_INT SIMD kernels partly gated; nullable lane (`INT_LANE_NULL`) partial; `IntLane`/ValueRep typing of the four i64 meanings pending (known silent bug class). |
 
 ## Appendix B — Open Design Issues
@@ -1292,7 +1828,7 @@ Status of `*`-marked rulings as of 2026-08-17. Conformance plans:
 Numbered `SO#` (semantics-open) for stable reference; each links to its
 record. (The prefix is the spec's own — distinct from the historic review
 findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
-`vibe/Lambda_Issues_Outstanding.md`.)
+`vibe/Lambda_Issue_Ledger.md` §15.)
 
 **Numerics**
 - **SO1** Sized-lane `div`/`%`: [Number_Model §3.3.2](../vibe/Lambda_Semantics_Number_Model.md) says sized×sized `div` stays in the machine lane; this spec (S4.5.3, per Int_Type §2.2) says it leaves the lane — `3i8 div 0i8` needs an explicit call, and Number_Model needs a supersession note.
@@ -1305,10 +1841,10 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO6** Lazy/streaming `for` bodies vs typed-lane destinations (boxed-until-proven presumed, undecided); where containment materializes under deferred evaluation.
 - **SO7** TE-5 R5 sticky `any`; validator schema-`any` uniformity.
 - **SO8** Should `is` become value-aware? Deliberately undecided (S11.3.1 records the intentional asymmetry).
-- **SO9** A surface spelling for `any \ error` (the `!` exclusion operator route is broken); closed named-map opt-in; constrained-type predicate enforcement; checked-cast surface (`as`/`as?`); generics; flow-sensitive narrowing — all out of scope or unowned.
+- **SO9** A surface spelling for `any \ error` (the `!` exclusion operator route is broken — measured 2026-08-24, `&` and `!` evaluate correctly in `is`/`match` pattern position but are rejected in `let`/parameter annotation position; LR02-9 in [`vibe/Lambda_Issue_Ledger.md`](../vibe/Lambda_Issue_Ledger.md)); closed named-map opt-in; constrained-type predicate enforcement; checked-cast surface (`as`/`as?`); generics; flow-sensitive narrowing — all out of scope or unowned.
 - **SO10** A deep "does this data contain an error anywhere?" check (`valid(item)`-shaped) — real question, future design (S7.9.3).
 - **SO11** Whether a non-null scalar iterates once (`len(5)`): `for (i in 5)` yields nothing while `5 |> ~` yields one item; the S8.3.1 law requires them to agree before `len(5)` is settled.
-- **SO12** `for (k, v at c)` paired form does not parse; whether it should exist is open.
+- **SO12** *(closed 2026-08-24 — ruled in as S8.1.3.)* The paired `for (k, v at c)` form exists and binds `(key, value)` over the `at` axis. Both the "does not parse" premise and the both-names-bound-to-the-key implementation were wrong; the latter is fixed and tracked as LR02-R9.
 
 **Values, COW, resources**
 - **SO13** COW granularity on large documents: node representation for spine-copying, refcount discipline for unique-path in-place update, and the gating benchmark. [C4.3]
@@ -1317,7 +1853,10 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO16** Close-error routing (double fault): proposed — normal-exit close failure becomes the `pn`'s error; on error exit the original wins, close error attached suppressed. To confirm. [Features §3.5.2]
 - **SO17** Resource-carrying-type containment rules (when a wrapping value is itself resource-typed). [R3]
 - **SO18** Snapshot iteration to be formally recorded (C4.2d) when implemented.
-- **SO19** Upward/lateral document axes must be path-carrying or zippers, never parent pointers — needs a design note before someone hacks pointers in.
+- **SO19** Root and upward-parent navigation are resolved by S10.4.3,
+  S10.5.3 / PTH10, PTH29: lineage lives in a navigation path, cursor, or
+  zipper, never root/parent pointers on document values. Lateral-axis spellings
+  and exact semantics remain open and must preserve that invariant.
 
 **Concurrency**
 - **SO20** O-D: cross-isolate lifetime for shared graph Items (promote-on-share recommended) — must precede thread-mode workers.
@@ -1332,33 +1871,38 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 **Sys funcs and surface**
 - **SO26** RF6 mutator convention: updated-owner vs unit; and `splice`'s public result (owner / unit / removed members).
 - **SO27** Whether debug logging inside `fn` is a permitted non-observable effect — the purity boundary's one undefined edge; best pre-decided before users ask. [Features §3.6]
-- **SO28** Effect polymorphism (pure-iff-argument-pure HOFs) — dodged by convention; Flix-style Boolean effect polymorphism is the recorded minimal fix.
+- **SO28** Effect polymorphism (pure-iff-argument-pure HOFs) — still dodged by convention for user-declared signatures; Flix-style Boolean effect polymorphism remains the recorded minimal fix. **Partially answered 2026-08-24**: S12.1.4 admits the first effect-polymorphic function, `call` (S12.3.4), whose colour follows its first argument, resolved statically where possible and checked at run time otherwise. Whether that mechanism should be exposed to user signatures — letting an HOF declare "pure iff its function argument is pure" — is the part that stays open.
 - **SO29** File write/append syntax (C6a: `into`/`onto` candidates); string interpolation syntax (note the `$` collision with quote splices); a set type; `assert`/`expect` unification.
-- **SO30** Empty JSON keys (`{"": 1}` currently corrupts on round-trip) — map keys from data need a defined answer given solid symbols.
 - **SO31** The `<file>` element shape (name/size/mime, content as child) — pin with file-I/O spec.
 - **SO32** Match extensions: pipe-context shorthand, string-pattern capture binding in arms, range patterns.
 - **SO33** A10 residue: the aspirational generics text, `as` assertion semantics, and open-vs-closed map matching in assignment position — document or delete.
 - **SO34** `emit()` vs `send()` — two event vocabularies coexist; state the boundary explicitly.
 
+**Surface syntax**
+- **SO35** A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics are argued together, and one source beats two. If the grammar surface outgrows a section, extract S16 into a formal syntax spec and leave pointers — not a second, competing statement. [Design_Syntax]
+- **SO36** Whether a `pn` call may appear nested inside an expression (`(pn_func(), 123)`, `if (exists(path)) …`), or only as a bare statement / the whole RHS of a binding (`let r = pn_func(); (r, 123)`) — the A-normal-form effect-sequencing discipline. Deliberately split off from S16.6.8/S16.6.9 and left open: it is **less severe** than the branching statements those rulings bar, because a pn call still produces a value — the enclosing expression evaluates rather than evaporating; the cost is only effects and their ordering embedded in expression evaluation. Adopting it would outlaw shipped idioms (`if (exists(p)) { … }`, `let config = if exists(p) { input(p, 'json') } else {…}`), so it needs its own cost survey. An S12 effect-boundary question, next to the fn/pn one-bit-effect-system note. [S12.1]
+
 ## Appendix C — Decision-Record Index
 
 | Section | Records | Where argued |
 |---|---|---|
-| S1 principles | C1–C17 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
-| S2 value domain | C1, C1.6a, C2, C8.6-R | `Lambda_Semantics_Formal.md` |
+| S1 principles | C1–C18 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
+| S2 value domain | C1, C1.6a, C2, C8.6-R; PTH1v2, PTH2v2, PTH3–PTH29 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md` |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only) |
 | S6 ordering | C11, C11.4, C11.5 | `Lambda_Semantics_Formal2.md` |
-| S7 absence/errors | C5, C5.3, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
-| S8 membership | C5.3a; §8.0–8.3 records | `Lambda_Semantics_Formal2.md` |
-| S9 mutability | C4, C4.2a/b/c, C4.3, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Design_Runtime_COW.md` |
-| S10 operators | C6, C6.2–C6.4, C10 | `Lambda_Semantics_Formal2.md` |
+| S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
+| S8 membership | C5.3a, C5.3b; §8.0–8.3 records | `Lambda_Semantics_Formal2.md` |
+| S9 mutability | C4, C4.2a/b/c, C4.3, C5.3b, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md` |
+| S10 operators | C6, C6.2–C6.4, C10; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Path.md` |
 | S11 types | C7, C8.5c; TE-1–TE-18 | ibid.; `Lambda_Design_Type_Enforcement.md` |
-| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |
+| S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19 | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |
 | S13 concurrency | K11–K32 | `Lambda_Design_Concurrency.md` |
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
+| S16 surface syntax | Design_Syntax §3–§5 (18 decided points) | `Lambda_Design_Syntax.md` |
+| S17 system library | C18 | `Lambda_Semantics_Formal2.md` |
 
 The decision records preserve the full deliberations — every alternative that
 lost and the arguments that did not persuade. This specification is their

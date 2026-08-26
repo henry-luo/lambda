@@ -11,10 +11,10 @@ let data = [
 ]
 
 let spec =
-<chart width: 200, height: 150;
+<chart width: 200, height: 150,
     <data values: data>
     <mark type: "point">
-    <encoding;
+    <encoding
         <x field: "x", dtype: "quantitative">
         <y field: "y", dtype: "quantitative">
     >

@@ -20,9 +20,9 @@ let a = 100 // comment after let
 let b = a + 1 // comment after let with expr
 b
 
-"4. Comment after containers"
+"4. Comment after containers";
 [1, 2, 3] // comment after array
-{x: 1, y: 2} // comment after map
+{x: 1, y: 2}; // comment after map
 <div id: "test"> // comment after element
 
 "5. Comment after function calls"
@@ -36,8 +36,8 @@ m.a // comment after member access
 let arr = [10, 20, 30]
 arr[1] // comment after index access
 
-"7. Comment after parenthesized expressions"
-(3 + 4) // comment after parens
+"7. Comment after parenthesized expressions";
+(3 + 4); // comment after parens
 (10 / 2) // comment after division in parens
 
 "8. Comment after for comprehension"
@@ -62,7 +62,7 @@ fn add(x, y) {
 } // comment after closing brace
 add(3, 4)
 
-"13. Comment after pipe"
+"13. Comment after pipe";
 [1, 2, 3] |> ~ + 10 // comment after pipe
 
 "14. Comment no space before //"
@@ -79,4 +79,4 @@ d
 99
 
 "17. Comment after nested elements"
-<ul; <li; "item1">; <li; "item2">> // comment after nested
+<ul <li "item1">; <li "item2">> // comment after nested

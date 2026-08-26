@@ -1,0 +1,20 @@
+{
+  p_digit: ["a", "b", "c", ""],
+  p_digits: ["a", "b", "c", ""],
+  p_ws: ["hello", "world"],
+  p_nomatch: ["no-match"],
+  p_keep: ["a", "1", "b", "2", "c", "3", ""],
+  p_zero_len: ["a", "b"],
+  p_zero_len_utf8: ["日", "本"],
+  p_empty_nomatch: [""],
+  p_empty_match: [],
+  s_empty_subject: [""],
+  s_empty_sep: ["a", "b", "c"],
+  trailing_str: ["a", "b", ""],
+  trailing_pat: ["a", "b", ""],
+  leading_str: ["", "a", "b"],
+  leading_pat: ["", "a", "b"],
+  nomatch_str: ["abc"],
+  nomatch_pat: ["abc"],
+  keep_str: ["a", ",", "b", ",", "c"]
+}

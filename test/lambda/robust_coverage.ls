@@ -17,19 +17,19 @@ e2.a
 e2.d
 
 let e3 = <item x: null, name: "hello">
-e3.name
+e3.name;
 
 // Verify element structure with null fields is intact
 <test n: null, v: 55>
 
 // === Mixed-type conditional expressions ===
-'Mixed-Type Conditionals:'
-(if (false) null else "hello")
-(if (true) 42 else null)
+'Mixed-Type Conditionals:';
+(if (false) null else "hello");
+(if (true) 42 else null);
 // Null comparison checks
-(if (false) 42 else null) == null
-(if (true) null else "hello") == null
-(if (true) null else 42) == null
+(if (false) 42 else null) == null;
+(if (true) null else "hello") == null;
+(if (true) null else 42) == null;
 (if (false) "x" else null) == null
 
 // === Modulo with equality comparisons ===
@@ -38,5 +38,5 @@ e3.name
 10 % 4 == 2
 7 % 3 == 1
 10 % 5 == 0
-5 % 3 != 1
+5 % 3 != 1;
 (5 % 3) + 1 == 3

@@ -2,5 +2,5 @@
 fn tiny() float => 5e-324
 fn apply(callback) => callback()
 
-let result = apply(tiny)
+let result = apply(tiny);
 [result, result == 5e-324, apply(tiny) == result]

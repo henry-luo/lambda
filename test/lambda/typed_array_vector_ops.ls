@@ -43,8 +43,8 @@ h + j
 h - j
 
 // ===== division produces float =====
-"=== division ==="
-[10i16, 20i16, 30i16] / 3
+"=== division ===";
+[10i16, 20i16, 30i16] / 3;
 [9.0f32, 16.0f32, 25.0f32] / [3.0f32, 4.0f32, 5.0f32]
 
 // ===== math functions on typed arrays =====
@@ -54,9 +54,9 @@ math.cumsum([1i8, 2i8, 3i8, 4i8])
 math.cumprod([1u8, 2u8, 3u8, 4u8])
 
 // ===== mixed array + range =====
-"=== array + range ==="
+"=== array + range ===";
 [10, 20, 30] + (1 to 3)
 
 // ===== f32 power =====
-"=== power ==="
+"=== power ===";
 [2.0f32, 3.0f32, 4.0f32] ** 2.0

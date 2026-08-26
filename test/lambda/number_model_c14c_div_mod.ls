@@ -11,7 +11,7 @@ let zero = 0
 let numerator = reshape([6, 0, -6, 8], [2, 2])
 let divisor = reshape([2, 0, 3, 2], [2, 2])
 let vector_div = numerator div divisor
-let vector_mod = numerator % divisor
+let vector_mod = numerator % divisor;
 [
     show(7 div 2),
     show(-7 div 2),

@@ -678,7 +678,6 @@ static bool read_bitwise_integer(Item item, BitwiseIntegerValue* out) {
         out->value.raw = (uint64_t)out->value.sval;
         return true;
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
         out->value.sval = (int64_t)item.get_double();
         out->value.raw = (uint64_t)out->value.sval;
         return true;

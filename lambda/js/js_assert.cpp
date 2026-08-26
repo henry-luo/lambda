@@ -12,6 +12,7 @@
 #include "js_class.h"
 #include "js_error_codes.h"
 #include "js_typed_array.h"
+#include "js_object_pair_traversal.hpp"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
@@ -3751,16 +3752,6 @@ static bool js_assert_is_any_arraybuffer(Item value);
 static bool js_assert_is_weak_collection_like(Item value);
 static bool js_assert_is_collection_like(Item value);
 
-typedef struct JsAssertPartialPair {
-    Item actual;
-    Item expected;
-} JsAssertPartialPair;
-
-typedef struct JsAssertPartialContext {
-    JsAssertPartialPair stack[4096];
-    int depth;
-} JsAssertPartialContext;
-
 static bool js_assert_deep_strict_equal_bool(Item actual, Item expected) {
     if (actual.item == expected.item) return true;
     TypeId actual_type = get_type_id(actual);
@@ -3796,7 +3787,7 @@ static bool js_assert_deep_strict_equal_bool(Item actual, Item expected) {
            (get_type_id(result) == LMD_TYPE_BOOL && it2b(result));
 }
 
-static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx);
+static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int depth_left, JsObjectPairTraversal* ctx);
 static bool js_assert_partial_deep_match(Item actual, Item expected, int depth_left);
 JS_FORWARD_STATIC_EXPRESSION(bool, js_assert_is_symbol_key, (Item key), (js_key_is_symbol_c(key) != 0))
 
@@ -3894,29 +3885,6 @@ static bool js_assert_has_constructor_prototype(Item value, const char* ctor_nam
     return js_assert_string_equals(tag, ctor_name);
 }
 
-static int js_assert_partial_deep_enter(JsAssertPartialContext* ctx, Item actual, Item expected) {
-    if (!ctx) return 1;
-    for (int i = 0; i < ctx->depth; i++) {
-        if (ctx->stack[i].actual.item == actual.item &&
-                ctx->stack[i].expected.item == expected.item) {
-            return 0;
-        }
-        if (ctx->stack[i].actual.item == actual.item ||
-                ctx->stack[i].expected.item == expected.item) {
-            return -1;
-        }
-    }
-    if (ctx->depth >= (int)(sizeof(ctx->stack) / sizeof(ctx->stack[0]))) return -1;
-    ctx->stack[ctx->depth].actual = actual;
-    ctx->stack[ctx->depth].expected = expected;
-    ctx->depth++;
-    return 1;
-}
-
-static void js_assert_partial_deep_leave(JsAssertPartialContext* ctx) {
-    if (ctx && ctx->depth > 0) ctx->depth--;
-}
-
 static bool js_assert_is_real_regexp(Item value) {
     if (get_type_id(value) != LMD_TYPE_MAP) return false;
     return js_class_id(value) == JS_CLASS_REGEXP;
@@ -3935,7 +3903,7 @@ static bool js_assert_is_error_like_value(Item value) {
            js_assert_has_constructor_prototype(value, "Error");
 }
 
-static bool js_assert_partial_error_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+static bool js_assert_partial_error_match(Item actual, Item expected, int depth_left, JsObjectPairTraversal* ctx) {
     if (!js_assert_is_error_like_value(actual) || !js_assert_is_error_like_value(expected)) return false;
     if (get_type_id(actual) == LMD_TYPE_MAP && get_type_id(expected) == LMD_TYPE_MAP &&
             js_class_is_error_like(js_class_id(actual)) &&
@@ -3972,7 +3940,7 @@ static bool js_assert_partial_error_match(Item actual, Item expected, int depth_
 }
 
 static bool js_assert_partial_enumerable_properties(Item actual, Item expected,
-        int depth_left, JsAssertPartialContext* ctx, bool skip_search_params) {
+        int depth_left, JsObjectPairTraversal* ctx, bool skip_search_params) {
     Item keys = js_assert_enumerable_own_keys(expected);
     int64_t key_len = js_array_length(keys);
     Item search_params_key = assert_make_string("searchParams");
@@ -3988,7 +3956,7 @@ static bool js_assert_partial_enumerable_properties(Item actual, Item expected,
     return true;
 }
 
-static bool js_assert_partial_regexp_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+static bool js_assert_partial_regexp_match(Item actual, Item expected, int depth_left, JsObjectPairTraversal* ctx) {
     if (!js_assert_is_real_regexp(actual) || !js_assert_is_real_regexp(expected)) return false;
     // Borrowed RegExp prototypes/tags lack native RegExp slots; partial
     // matching them by enumerable keys makes fake object types pass.
@@ -4072,7 +4040,7 @@ static bool js_assert_is_url_like(Item value) {
            js_assert_is_partial_object_like(search_params);
 }
 
-static bool js_assert_partial_url_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+static bool js_assert_partial_url_match(Item actual, Item expected, int depth_left, JsObjectPairTraversal* ctx) {
     if (js_class_id(actual) != JS_CLASS_URL || js_class_id(expected) != JS_CLASS_URL) return false;
     Item href_key = assert_make_string("href");
     Item actual_href = js_get_key_default(actual, href_key);
@@ -4090,11 +4058,11 @@ static bool js_assert_partial_url_match(Item actual, Item expected, int depth_le
 typedef bool (*JsAssertSubsetMatcher)(Item actual, Item expected,
     Item actual_entries, Item expected_entries,
     int64_t actual_index, int64_t expected_index, int depth_left,
-    JsAssertPartialContext* ctx, bool exact_only);
+    JsObjectPairTraversal* ctx, bool exact_only);
 
 static bool js_assert_unordered_subset(Item actual, Item expected,
         Item actual_entries, Item expected_entries,
-        int depth_left, JsAssertPartialContext* ctx,
+        int depth_left, JsObjectPairTraversal* ctx,
         JsAssertSubsetMatcher matcher, bool exact_first) {
     int64_t expected_count = js_array_length(expected_entries);
     int64_t actual_count = js_array_length(actual_entries);
@@ -4128,7 +4096,7 @@ static bool js_assert_unordered_subset(Item actual, Item expected,
 static bool js_assert_partial_key_subset_match(Item actual, Item expected,
         Item actual_keys, Item expected_keys,
         int64_t actual_index, int64_t expected_index, int depth_left,
-        JsAssertPartialContext* ctx, bool exact_only) {
+        JsObjectPairTraversal* ctx, bool exact_only) {
     (void)exact_only;
     Item expected_key = js_elements_get_int(expected_keys, expected_index);
     Item actual_key = js_elements_get_int(actual_keys, actual_index);
@@ -4139,7 +4107,7 @@ static bool js_assert_partial_key_subset_match(Item actual, Item expected,
 
 static bool js_assert_partial_named_key_subset_match(Item actual, Item expected,
         Item actual_keys, Item expected_keys, int64_t actual_index,
-        int64_t expected_index, int depth_left, JsAssertPartialContext* ctx,
+        int64_t expected_index, int depth_left, JsObjectPairTraversal* ctx,
         bool exact_only) {
     (void)exact_only;
     Item actual_key = js_elements_get_int(actual_keys, actual_index);
@@ -4149,10 +4117,10 @@ static bool js_assert_partial_named_key_subset_match(Item actual, Item expected,
         js_get_key_default(actual, actual_key),
         js_get_key_default(expected, expected_key), depth_left - 1, ctx);
 }
-JS_FORWARD_STATIC_RETURN(bool, js_assert_partial_named_key_subset, (Item actual, Item expected, Item actual_keys, Item expected_keys, int depth_left, JsAssertPartialContext* ctx), js_assert_unordered_subset, (actual, expected, actual_keys, expected_keys, depth_left, ctx, js_assert_partial_named_key_subset_match, false))
+JS_FORWARD_STATIC_RETURN(bool, js_assert_partial_named_key_subset, (Item actual, Item expected, Item actual_keys, Item expected_keys, int depth_left, JsObjectPairTraversal* ctx), js_assert_unordered_subset, (actual, expected, actual_keys, expected_keys, depth_left, ctx, js_assert_partial_named_key_subset_match, false))
 
 static bool js_assert_partial_array_like_key_match(Item actual, Item expected,
-        Item actual_keys, Item expected_keys, int depth_left, JsAssertPartialContext* ctx) {
+        Item actual_keys, Item expected_keys, int depth_left, JsObjectPairTraversal* ctx) {
     // Array-like partial equality is value-subset based for indexed elements,
     // but named and symbol keys remain observable own properties. Matching all
     // keys by value let `actual.ignored = v` satisfy `expected.extra = v`, and
@@ -4170,7 +4138,7 @@ static bool js_assert_partial_array_like_key_match(Item actual, Item expected,
         actual_named_keys, expected_named_keys, depth_left, ctx);
 }
 
-static bool js_assert_partial_array_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+static bool js_assert_partial_array_match(Item actual, Item expected, int depth_left, JsObjectPairTraversal* ctx) {
     bool actual_arguments = js_assert_is_arguments_value(actual);
     bool expected_arguments = js_assert_is_arguments_value(expected);
     if (actual_arguments != expected_arguments) {
@@ -4187,7 +4155,7 @@ static bool js_assert_partial_array_match(Item actual, Item expected, int depth_
     return js_assert_partial_array_like_key_match(actual, expected, actual_keys, expected_keys, depth_left, ctx);
 }
 
-static bool js_assert_partial_typed_array_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+static bool js_assert_partial_typed_array_match(Item actual, Item expected, int depth_left, JsObjectPairTraversal* ctx) {
     if (!js_is_typed_array(actual) || !js_is_typed_array(expected)) return false;
     JsTypedArray* actual_ta = js_get_typed_array_ptr(actual.map);
     JsTypedArray* expected_ta = js_get_typed_array_ptr(expected.map);
@@ -4203,7 +4171,7 @@ static bool js_assert_partial_typed_array_match(Item actual, Item expected, int 
 
 static bool js_assert_partial_set_subset_match(Item actual, Item expected,
         Item actual_values, Item expected_values, int64_t actual_index,
-        int64_t expected_index, int depth_left, JsAssertPartialContext* ctx,
+        int64_t expected_index, int depth_left, JsObjectPairTraversal* ctx,
         bool exact_only) {
     (void)actual;
     (void)expected;
@@ -4216,7 +4184,7 @@ static bool js_assert_partial_set_subset_match(Item actual, Item expected,
 
 static bool js_assert_partial_map_subset_match(Item actual, Item expected,
         Item actual_entries, Item expected_entries, int64_t actual_index,
-        int64_t expected_index, int depth_left, JsAssertPartialContext* ctx,
+        int64_t expected_index, int depth_left, JsObjectPairTraversal* ctx,
         bool exact_only) {
     (void)actual;
     (void)expected;
@@ -4231,7 +4199,7 @@ static bool js_assert_partial_map_subset_match(Item actual, Item expected,
             js_elements_get_int(expected_pair, 1), depth_left - 1, ctx);
 }
 
-static bool js_assert_partial_set_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+static bool js_assert_partial_set_match(Item actual, Item expected, int depth_left, JsObjectPairTraversal* ctx) {
     Item actual_values = js_iterable_to_array(actual);
     Item expected_values = js_iterable_to_array(expected);
     // Set matching consumes exact references before structural matches so {} and
@@ -4240,14 +4208,14 @@ static bool js_assert_partial_set_match(Item actual, Item expected, int depth_le
         expected_values, depth_left, ctx, js_assert_partial_set_subset_match, true);
 }
 
-static bool js_assert_partial_map_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+static bool js_assert_partial_map_match(Item actual, Item expected, int depth_left, JsObjectPairTraversal* ctx) {
     Item actual_entries = js_iterable_to_array(actual);
     Item expected_entries = js_iterable_to_array(expected);
     return js_assert_unordered_subset(actual, expected, actual_entries,
         expected_entries, depth_left, ctx, js_assert_partial_map_subset_match, false);
 }
 
-static bool js_assert_partial_collection_match(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+static bool js_assert_partial_collection_match(Item actual, Item expected, int depth_left, JsObjectPairTraversal* ctx) {
 
     if (js_assert_is_weak_collection_like(actual) || js_assert_is_weak_collection_like(expected)) {
         return false;
@@ -4311,7 +4279,7 @@ static bool js_assert_is_boxed_primitive(Item value) {
            cls == JS_CLASS_BIGINT;
 }
 
-static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int depth_left, JsAssertPartialContext* ctx) {
+static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int depth_left, JsObjectPairTraversal* ctx) {
     if (actual.item == expected.item) return true;
     if (depth_left <= 0) return false;
     bool actual_object_like = js_assert_is_partial_object_like(actual);
@@ -4323,7 +4291,7 @@ static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int de
 
     bool entered = false;
     if (actual_object_like || expected_object_like) {
-        int enter_status = js_assert_partial_deep_enter(ctx, actual, expected);
+        int enter_status = ctx->enter(actual, expected);
         if (enter_status == 0) {
             // cyclic partial comparisons must reuse the same active actual/expected pair instead of recursing forever.
             return true;
@@ -4422,13 +4390,12 @@ static bool js_assert_partial_deep_match_impl(Item actual, Item expected, int de
     }
 
 done:
-    if (entered) js_assert_partial_deep_leave(ctx);
+    if (entered) ctx->leave();
     return result;
 }
 
 static bool js_assert_partial_deep_match(Item actual, Item expected, int depth_left) {
-    JsAssertPartialContext ctx;
-    memset(&ctx, 0, sizeof(ctx));
+    JsObjectPairTraversal ctx;
     return js_assert_partial_deep_match_impl(actual, expected, depth_left, &ctx);
 }
 

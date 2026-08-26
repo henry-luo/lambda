@@ -8,5 +8,4 @@ pn main() {
     var err = null
     write_oob() ^ { err = ^ }
     print(err is error)
-    print("\n")
 }

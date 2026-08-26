@@ -19,6 +19,11 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 static bool css_value_is_background_color_candidate(const CssValue* value);
 static CssEnum css_resolve_content_alignment_keyword(const CssValue* value);
+static CssEnum find_inherited_block_keyword(DomElement* element,
+                                            CssPropertyCode property,
+                                            bool check_specified,
+                                            bool reject_match_parent,
+                                            CssEnum fallback);
 static float resolve_spacing_with_inherit(LayoutContext* lycon,
                                           CssPropertyCode prop_id,
                                           const CssValue* value);
@@ -1362,7 +1367,7 @@ static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var
     return nullptr;
 }
 
-static bool is_border_radius_slash(const CssValue* value) {
+static bool css_value_is_slash(const CssValue* value) {
     return value && value->type == CSS_VALUE_TYPE_CUSTOM && value->data.custom_property.name &&
            strcmp(value->data.custom_property.name, "/") == 0;
 }
@@ -1445,11 +1450,12 @@ static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* 
             arg_idx = 1;
         } else if (first_arg->type == CSS_VALUE_TYPE_KEYWORD) {
             CssEnum kw = first_arg->data.keyword;
-            if (kw == CSS_VALUE_TOP) angle = 0.0f;
-            else if (kw == CSS_VALUE_RIGHT) angle = 90.0f;
-            else if (kw == CSS_VALUE_BOTTOM) angle = 180.0f;
-            else if (kw == CSS_VALUE_LEFT) angle = 270.0f;
-            arg_idx = 1;
+            // A named color is also a keyword; only consume the first
+            // argument when it is actually a gradient direction.
+            if (kw == CSS_VALUE_TOP) { angle = 0.0f; arg_idx = 1; }
+            else if (kw == CSS_VALUE_RIGHT) { angle = 90.0f; arg_idx = 1; }
+            else if (kw == CSS_VALUE_BOTTOM) { angle = 180.0f; arg_idx = 1; }
+            else if (kw == CSS_VALUE_LEFT) { angle = 270.0f; arg_idx = 1; }
         } else if (first_arg->type == CSS_VALUE_TYPE_LIST) {
             bool has_top = false, has_bottom = false;
             bool has_left = false, has_right = false;
@@ -1470,7 +1476,7 @@ static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* 
             else if (has_right) angle = 90.0f;
             else if (has_bottom) angle = 180.0f;
             else if (has_left) angle = 270.0f;
-            arg_idx = 1;
+            if (has_top || has_bottom || has_left || has_right) arg_idx = 1;
         }
     }
     lg->angle = angle;
@@ -2466,7 +2472,7 @@ static bool apply_border_radius_shorthand(LayoutContext* lycon, int prop_id, Cor
         for (int i = 0; i < value->data.list.count; i++) {
             CssValue* item = value->data.list.values[i];
             if (!item) continue;
-            if (is_border_radius_slash(item)) {
+            if (css_value_is_slash(item)) {
                 if (seen_slash) return false;
                 seen_slash = true;
                 continue;
@@ -2509,7 +2515,7 @@ static bool apply_corner_radius_value(LayoutContext* lycon, int prop_id, Corner*
     if (value->type == CSS_VALUE_TYPE_LIST) {
         for (int i = 0; i < value->data.list.count; i++) {
             CssValue* item = value->data.list.values[i];
-            if (!item || is_border_radius_slash(item)) continue;
+            if (!item || css_value_is_slash(item)) continue;
             if (count >= 2) return false;
             values[count++] = item;
         }
@@ -2992,6 +2998,10 @@ static CssDisplayKeywordResult css_display_keyword_result(CssEnum keyword,
         {CSS_VALUE_TABLE, CSS_VALUE_BLOCK, CSS_VALUE_TABLE, false, false, false},
         {CSS_VALUE_INLINE_TABLE, CSS_VALUE_INLINE, CSS_VALUE_TABLE, true, false, false},
         {CSS_VALUE_RUBY, CSS_VALUE_INLINE, CSS_VALUE_RUBY, true, false, false},
+        {CSS_VALUE_RUBY_BASE, CSS_VALUE_INLINE, CSS_VALUE_RUBY_BASE, false, false, false},
+        {CSS_VALUE_RUBY_TEXT, CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT, false, false, false},
+        {CSS_VALUE_RUBY_BASE_CONTAINER, CSS_VALUE_INLINE, CSS_VALUE_RUBY_BASE_CONTAINER, false, false, false},
+        {CSS_VALUE_RUBY_TEXT_CONTAINER, CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT_CONTAINER, false, false, false},
         {CSS_VALUE_TABLE_ROW, CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW, true, false, false},
         {CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL, true, false, false},
         {CSS_VALUE_TABLE_ROW_GROUP, CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW_GROUP, true, false, false},
@@ -3048,8 +3058,11 @@ static bool css_display_list_value(const CssValue* value, bool is_replaced,
 
     if (has_list_item) {
         out_display->list_item = true;
+        // CSS Display 3: `inline list-item` remains an inline-level principal
+        // box; treating it as inline-block changes line participation and breaks
+        // marker placement for every following sibling.
         out_display->outer = outer == CSS_VALUE_INLINE
-            ? CSS_VALUE_INLINE_BLOCK : CSS_VALUE_LIST_ITEM;
+            ? CSS_VALUE_INLINE : CSS_VALUE_LIST_ITEM;
         out_display->inner = inner == CSS_VALUE_FLOW_ROOT
             ? CSS_VALUE_FLOW_ROOT
             : (is_replaced && inner == CSS_VALUE_FLOW
@@ -3094,7 +3107,7 @@ static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNod
         MARKUP_NAME_EMBED};
     static const NameId hidden_tags[] = {
         MARKUP_NAME_SCRIPT, MARKUP_NAME_STYLE, MARKUP_NAME_HEAD, MARKUP_NAME_TITLE,
-        MARKUP_NAME_META, MARKUP_NAME_LINK, MARKUP_NAME_BASE, MARKUP_NAME_NOSCRIPT,
+        MARKUP_NAME_META, MARKUP_NAME_LINK, MARKUP_NAME_BASE,
         MARKUP_NAME_TEMPLATE, MARKUP_NAME_MAP, MARKUP_NAME_AREA, MARKUP_NAME_RP,
         MARKUP_NAME_DATALIST};
     static const NameId flow_block_tags[] = {
@@ -3111,6 +3124,9 @@ static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNod
     if (layout_tag_in_list(tag_id, hidden_tags,
                            sizeof(hidden_tags) / sizeof(*hidden_tags))) {
         return {CSS_VALUE_NONE, CSS_VALUE_NONE};
+    }
+    if (layout_noscript_content_suppressed(dom_elem)) {
+        return {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
     }
     if (tag_id == MARKUP_NAME_LI || tag_id == MARKUP_NAME_SUMMARY) {
         DisplayValue display = {CSS_VALUE_LIST_ITEM, CSS_VALUE_FLOW};
@@ -3130,6 +3146,7 @@ static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNod
     if (tag_id == MARKUP_NAME_BUTTON) return {CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW};
     if (tag_id == MARKUP_NAME_HR) return {CSS_VALUE_BLOCK, RDT_DISPLAY_REPLACED};
     if (tag_id == MARKUP_NAME_RUBY) return {CSS_VALUE_INLINE, CSS_VALUE_RUBY};
+    if (tag_id == MARKUP_NAME_RT) return {CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT};
     if (tag_id == MARKUP_NAME_SVG) return {CSS_VALUE_INLINE, RDT_DISPLAY_REPLACED};
     if (tag_id == MARKUP_NAME_TABLE) return {CSS_VALUE_BLOCK, CSS_VALUE_TABLE};
     if (tag_id == MARKUP_NAME_THEAD || tag_id == MARKUP_NAME_TBODY ||
@@ -3331,11 +3348,14 @@ static void resolve_current_font_size(LayoutContext* lycon) {
         font = lam::dom_require<DOM_NODE_TEXT>(lycon->view)->font;
     }
     if (font && font->font_size > 0.0f) {
-        lycon->font.current_font_size = font->font_size;
+        // CSS Viewport 1 applies zoom to used font metrics; line boxes must not
+        // fall back to the unzoomed computed size after the font is resolved.
+        lycon->font.current_font_size = font_prop_used_size(font);
         return;
     }
     lycon->font.current_font_size = lycon->font.style &&
-        lycon->font.style->font_size > 0.0f ? lycon->font.style->font_size : 16.0f;
+        lycon->font.style->font_size > 0.0f
+        ? font_prop_used_size(lycon->font.style) : 16.0f;
 }
 
 // evaluate calc() terms with precedence and nested parentheses.
@@ -3545,14 +3565,10 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             result = num * lycon->root_font_size;
             break;
         case CSS_UNIT_EM:
-            if (effective_property == CSS_PROPERTY_FONT_SIZE) {
-                result = num * lycon->font.style->font_size;
-            } else {
-                if (lycon->font.current_font_size < 0) {
-                    resolve_current_font_size(lycon);
-                }
-                result = num * lycon->font.current_font_size;
-            }
+            // Font-relative lengths resolve against the computed font size;
+            // zoom is applied once below at used-value time.
+            result = num * (lycon->font.style && lycon->font.style->font_size > 0.0f
+                ? lycon->font.style->font_size : lycon->font.current_font_size);
             break;
         case CSS_UNIT_VW:
             // viewport width percentage (result in CSS logical pixels)
@@ -3577,25 +3593,25 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             break;
         }
         case CSS_UNIT_EX: {
-            if (lycon->font.current_font_size < 0) {
-                resolve_current_font_size(lycon);
-            }
-            float x_height_ratio = font_get_x_height_ratio(lycon->font.font_handle);
-            result = num * lycon->font.current_font_size * x_height_ratio;
+            float x_height_ratio = font_get_x_height_ratio(font_box_handle(&lycon->font));
+            float font_size = lycon->font.style && lycon->font.style->font_size > 0.0f
+                ? lycon->font.style->font_size : lycon->font.current_font_size;
+            result = num * font_size * x_height_ratio;
             break;
         }
         case CSS_UNIT_CH: {
             // CSS Values 4 §6.1.1: equal to the advance width of the "0" (zero) glyph
-            if (lycon->font.current_font_size < 0) {
-                resolve_current_font_size(lycon);
-            }
-            if (lycon->font.font_handle) {
+            float font_size = lycon->font.style && lycon->font.style->font_size > 0.0f
+                ? lycon->font.style->font_size : lycon->font.current_font_size;
+            if (font_box_handle(&lycon->font)) {
                 FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
-                LoadedGlyph* zero_glyph = font_load_glyph(lycon->font.font_handle, &style, (uint32_t)'0', false);
+                LoadedGlyph* zero_glyph = font_load_glyph(font_box_handle(&lycon->font), &style, (uint32_t)'0', false);
                 if (zero_glyph && zero_glyph->advance_x > 0.0f) {
                     float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0.0f)
                         ? lycon->ui_context->pixel_ratio : 1.0f;
                     float advance = zero_glyph->advance_x / pixel_ratio;
+                    float zoom = layout_effective_zoom(lycon->view);
+                    if (zoom > 0.0f) advance /= zoom;
                     if (lycon->font.style && lycon->font.style->font_size > 0.0f &&
                         lycon->font.current_font_size > 0.0f &&
                         lycon->font.style->font_size != lycon->font.current_font_size) {
@@ -3603,10 +3619,10 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                     }
                     result = num * advance;
                 } else {
-                    result = num * lycon->font.current_font_size * 0.5f;
+                    result = num * font_size * 0.5f;
                 }
             } else {
-                result = num * lycon->font.current_font_size * 0.5f;
+                result = num * font_size * 0.5f;
             }
             break;
         }
@@ -3620,6 +3636,9 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         double percentage = value->data.percentage.value;
         if (effective_property == CSS_PROPERTY_FONT_SIZE || effective_property == CSS_PROPERTY_LINE_HEIGHT || effective_property == CSS_PROPERTY_VERTICAL_ALIGN) {
             result = percentage * lycon->font.style->font_size / 100.0;
+            if (effective_property == CSS_PROPERTY_LINE_HEIGHT) {
+                result *= layout_effective_zoom(lycon->view);
+            }
         } else if (effective_property == CSS_PROPERTY_LETTER_SPACING) {
             // CSS Text 4 defines spacing percentages against the current font
             if (lycon->font.current_font_size < 0) {
@@ -3804,7 +3823,8 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
         result = NAN;  // Use NAN instead of 0 to indicate unresolvable value
         break;
     }
-    if (value->type == CSS_VALUE_TYPE_LENGTH && !isnan(result)) {
+    if (value->type == CSS_VALUE_TYPE_LENGTH && !isnan(result) &&
+        effective_property != CSS_PROPERTY_FONT_SIZE) {
         // CSS Viewport 1 applies effective zoom to every resolved CSS length,
         result *= layout_effective_zoom(lycon->view);
     }
@@ -4515,8 +4535,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
     if (has_placeholder_font_prop && base_font) {
         FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
         if (placeholder_font) {
-            *placeholder_font = *base_font;
-            placeholder_font->owns_font_handle = false;
+            font_prop_copy(placeholder_font, base_font);
         }
     } else {
         form->placeholder_font = nullptr;
@@ -4627,7 +4646,7 @@ static void apply_initial_letter_used_font_size(DomElement* dom_elem,
     }
     InitialLetterInfo initial = {};
     if (!layout_get_initial_letter_info(dom_elem, &initial) ||
-        !parent_font.style || !parent_font.font_handle ||
+        !parent_font.style || !font_box_handle(&parent_font) ||
         lycon->block.line_height <= 0.0f) {
         return;
     }
@@ -4637,8 +4656,8 @@ static void apply_initial_letter_used_font_size(DomElement* dom_elem,
     if (!span->font || span->fontp()->font_size <= 0.0f) return;
     FontBox computed_font = {};
     setup_font(lycon->ui_context, &computed_font, span->font);
-    const FontMetrics* parent_metrics = font_get_metrics(parent_font.font_handle);
-    const FontMetrics* initial_metrics = font_get_metrics(computed_font.font_handle);
+    const FontMetrics* parent_metrics = font_get_metrics(font_box_handle(&parent_font));
+    const FontMetrics* initial_metrics = font_get_metrics(font_box_handle(&computed_font));
     if (!parent_metrics || !initial_metrics || parent_metrics->cap_height <= 0.0f ||
         initial_metrics->cap_height <= 0.0f) {
         return;
@@ -4981,6 +5000,19 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 inheritance_span->font->font_size_from_medium = ancestor->font->font_size_from_medium;
                 continue;  // Move to next property
             }
+            if (prop_id == CSS_PROPERTY_DIRECTION && !dom_elem->get_attribute("dir")) {
+                // css writing modes: direction inherits from the computed parent value;
+                // html dir can supply that value without a specified CSS declaration.
+                CssEnum inherited_direction = find_inherited_block_keyword(
+                    dom_elem, CSS_PROPERTY_DIRECTION, false, false, CSS_VALUE_LTR);
+                // preserve the canonical LTR default without materializing a block prop
+                // on ordinary elements; some layout paths use prop presence as state.
+                if (inherited_direction != CSS_VALUE_LTR || inheritance_span->blk) {
+                    inheritance_span->ensure_block(lycon);
+                    inheritance_span->blk->direction = inherited_direction;
+                }
+                continue;
+            }
             while (ancestor && !inherited_decl) {
                 if (ancestor->specified_style) {
                     inherited_decl = style_tree_get_declaration(ancestor->specified_style, prop_id);
@@ -5096,11 +5128,15 @@ struct MultiValue {
     const CssValue* style;
 };
 
-void set_multi_value(MultiValue* mv, const CssValue* value) {
+void set_multi_value(LayoutContext* lycon, MultiValue* mv, const CssValue* value) {
     if (!mv || !value) return;
+    value = resolve_var_function(lycon, value);
+    if (!value) return;
     if (value->type == CSS_VALUE_TYPE_LENGTH || value->type == CSS_VALUE_TYPE_PERCENTAGE || value->type == CSS_VALUE_TYPE_NUMBER) {
         mv->length = (CssValue*)value;
-    } else if (value->type == CSS_VALUE_TYPE_COLOR) {
+    // Border shorthand colors such as rgba() are function values; otherwise
+    // they fall through to currentcolor and paint as an opaque black border.
+    } else if (css_value_is_background_color_candidate(value)) {
         mv->color = (CssValue*)value;
     } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
         const CssEnumInfo* info = css_enum_info(value->data.keyword);
@@ -5126,7 +5162,7 @@ void set_multi_value(MultiValue* mv, const CssValue* value) {
     else if (value->type == CSS_VALUE_TYPE_LIST) {
         for (int i = 0; i < value->data.list.count; i++) {
             CssValue* item = value->data.list.values[i];
-            set_multi_value(mv, item);
+            set_multi_value(lycon, mv, item);
         }
     }
 }
@@ -5140,7 +5176,7 @@ static void apply_border_side_shorthand(LayoutContext* lycon, ViewSpan* span, Cs
     BorderProp* border = layout_ensure_border(lycon, span);
     RadiantBorderSide refs = radiant_border_side(border, side);
     MultiValue parts = {0};
-    set_multi_value(&parts, value);
+    set_multi_value(lycon, &parts, value);
     // Physical and logical aliases must share cascade and none/hidden width semantics.
     bool style_applied = parts.style && specificity >= *refs.style_specificity;
     bool hidden_style = false;
@@ -5361,8 +5397,9 @@ static void css_apply_list_style_keyword(LayoutContext* lycon, ViewSpan* span,
         span->blk->list_style_type = CSS_VALUE_NONE;
     }
     if (!list_member || type_already_set) {
-        span->blk->list_style_image = (char*)alloc_prop(lycon, 5);
-        str_copy(span->block()->list_style_image, 5, "none", 4);
+        span->blk->list_style_image = {};
+        span->blk->list_style_image.url = (char*)alloc_prop(lycon, 5);
+        str_copy(span->block()->list_style_image.url, 5, "none", 4);
     }
 }
 
@@ -5397,10 +5434,28 @@ static const char* css_list_style_image_url(const CssValue* value) {
 static bool css_store_list_style_image(LayoutContext* lycon, ViewSpan* span,
                                        const CssValue* value) {
     const char* url = css_list_style_image_url(value);
-    if (!url) return false;
-    size_t length = strlen(url);
-    span->blk->list_style_image = (char*)alloc_prop(lycon, length + 1);
-    str_copy(span->block()->list_style_image, length + 1, url, length);
+    if (url) {
+        size_t length = strlen(url);
+        span->blk->list_style_image = {};
+        span->blk->list_style_image.url = (char*)alloc_prop(lycon, length + 1);
+        str_copy(span->block()->list_style_image.url, length + 1, url, length);
+        return true;
+    }
+
+    GradientType gradient_type = css_background_gradient_type(value);
+    if (gradient_type == GRADIENT_NONE) return false;
+
+    ListStyleImage image = {};
+    image.gradient_type = gradient_type;
+    bool resolved = gradient_type == GRADIENT_LINEAR
+        ? resolve_linear_gradient_value(lycon, value, &image.linear_gradient)
+        : gradient_type == GRADIENT_RADIAL
+            ? resolve_radial_gradient_value(lycon, value, &image.radial_gradient)
+            : resolve_conic_gradient_value(lycon, value, &image.conic_gradient);
+    if (!resolved) return false;
+    // CSS Images gradients have no intrinsic dimensions; retain the resolved
+    // image so list markers can apply the image-marker default object size.
+    span->blk->list_style_image = image;
     return true;
 }
 
@@ -5544,6 +5599,7 @@ static void resolve_gap_property(LayoutContext* lycon, ViewBlock* block,
         block->ensure_multicol(lycon);
         block->multicol_prop()->column_gap = gap;
         block->multicol_prop()->column_gap_is_normal = normal;
+        block->multicol_prop()->column_gap_is_percent = percent;
     }
 }
 
@@ -5589,11 +5645,13 @@ static void resolve_multicol_dimension(LayoutContext* lycon, ViewBlock* block,
     float* target = height ? &multicol->column_height : &multicol->column_width;
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
         *target = 0.0f;
+        if (height) multicol->column_height_is_specified = false;
     } else if (value->type == CSS_VALUE_TYPE_LENGTH ||
                (allow_number && value->type == CSS_VALUE_TYPE_NUMBER)) {
         float size = resolve_length_value(lycon, property, value);
-        if (size > 0.0f) {
+        if (size > 0.0f || (height && size == 0.0f)) {
             *target = size;
+            if (height) multicol->column_height_is_specified = true;
         }
     }
 }
@@ -5663,6 +5721,9 @@ static void resolve_flow_break_property(LayoutContext* lycon, ViewBlock* block,
         resolve_break_value(lycon, block, value, &block->blk->break_before);
     } else if (property == CSS_PROPERTY_BREAK_AFTER || property == CSS_PROPERTY_PAGE_BREAK_AFTER) {
         resolve_break_value(lycon, block, value, &block->blk->break_after);
+    } else if (property == CSS_PROPERTY_BREAK_INSIDE ||
+               property == CSS_PROPERTY_PAGE_BREAK_INSIDE) {
+        resolve_break_value(lycon, block, value, &block->blk->break_inside);
     } else if (property == CSS_PROPERTY_ORPHANS) {
         resolve_line_count_value(lycon, block, value, &block->blk->orphans);
     } else {
@@ -6271,6 +6332,166 @@ static void resolve_text_box_edge_property(ViewBlock* block, const CssValue* val
     }
 }
 
+static bool text_wrap_style_keyword(CssEnum keyword) {
+    return keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_BALANCE;
+}
+
+static bool resolve_text_wrap_mode_keyword(CssEnum keyword, CssEnum* mode) {
+    if (!mode) return false;
+    if (keyword == CSS_VALUE_WRAP || keyword == CSS_VALUE_NOWRAP) {
+        *mode = keyword;
+        return true;
+    }
+    return false;
+}
+
+static bool resolve_text_wrap_value(const CssValue* value, CssEnum* mode,
+                                    CssEnum* style) {
+    if (!value || !mode || !style) return false;
+    *mode = CSS_VALUE_WRAP;
+    *style = CSS_VALUE_AUTO;
+    bool has_mode = false;
+    bool has_style = false;
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (count < 1 || count > 2) return false;
+    for (int i = 0; i < count; i++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+            ? value->data.list.values[i] : value;
+        if (!item || item->type != CSS_VALUE_TYPE_KEYWORD) return false;
+        if (resolve_text_wrap_mode_keyword(item->data.keyword, mode)) {
+            if (has_mode) return false;
+            has_mode = true;
+        } else if (text_wrap_style_keyword(item->data.keyword)) {
+            if (has_style) return false;
+            *style = item->data.keyword;
+            has_style = true;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void resolve_text_wrap_property(LayoutContext* lycon, ViewSpan* span,
+                                       CssPropertyCode property,
+                                       const CssValue* value) {
+    if (!lycon || !span || !value) return;
+    BlockProp* target = span->ensure_block(lycon);
+    if (!target) return;
+    if (property == CSS_PROPERTY_TEXT_WRAP_MODE) {
+        if (value->type != CSS_VALUE_TYPE_KEYWORD) return;
+        CssEnum mode = value->data.keyword;
+        if (mode == CSS_VALUE_INHERIT || mode == CSS_VALUE_UNSET) {
+            target->text_wrap_mode = get_text_wrap_mode_value(
+                dom_parent_element(lam::dom_require_element(lycon->view)));
+        } else if (mode == CSS_VALUE_INITIAL || mode == CSS_VALUE_REVERT) {
+            target->text_wrap_mode = CSS_VALUE_WRAP;
+        } else if (!resolve_text_wrap_mode_keyword(mode, &target->text_wrap_mode)) {
+            target->text_wrap_mode = (CssEnum)0;
+        }
+        return;
+    }
+    CssEnum mode = CSS_VALUE_WRAP;
+    CssEnum style = CSS_VALUE_AUTO;
+    if (!resolve_text_wrap_value(value, &mode, &style)) return;
+    target->text_wrap_mode = mode;
+    target->text_wrap_style = style;
+}
+
+static bool parse_text_autospace_value(const CssValue* value, uint8_t* flags) {
+    if (!value || !flags) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        switch (value->data.keyword) {
+            case CSS_VALUE_NORMAL:
+            case CSS_VALUE_AUTO:
+                *flags = TEXT_AUTOSPACE_NORMAL;
+                return true;
+            case CSS_VALUE_NO_AUTOSPACE:
+                *flags = 0;
+                return true;
+            case CSS_VALUE_IDEOGRAPH_ALPHA:
+                *flags = TEXT_AUTOSPACE_IDEOGRAPH_ALPHA;
+                return true;
+            case CSS_VALUE_IDEOGRAPH_NUMERIC:
+                *flags = TEXT_AUTOSPACE_IDEOGRAPH_NUMERIC;
+                return true;
+            case CSS_VALUE_PUNCTUATION:
+                *flags = 0;
+                return true;
+            default:
+                return false;
+        }
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST || value->data.list.count == 0) return false;
+    uint8_t parsed = 0;
+    bool has_spacing_class = false;
+    for (int i = 0; i < value->data.list.count; i++) {
+        const CssValue* item = value->data.list.values[i];
+        if (!item || item->type != CSS_VALUE_TYPE_KEYWORD) return false;
+        switch (item->data.keyword) {
+            case CSS_VALUE_IDEOGRAPH_ALPHA:
+                parsed |= TEXT_AUTOSPACE_IDEOGRAPH_ALPHA;
+                has_spacing_class = true;
+                break;
+            case CSS_VALUE_IDEOGRAPH_NUMERIC:
+                parsed |= TEXT_AUTOSPACE_IDEOGRAPH_NUMERIC;
+                has_spacing_class = true;
+                break;
+            case CSS_VALUE_PUNCTUATION:
+                // punctuation spacing is language-specific at this level.
+                has_spacing_class = true;
+                break;
+            case CSS_VALUE_INSERT:
+                parsed &= (uint8_t)~TEXT_AUTOSPACE_REPLACE;
+                break;
+            case CSS_VALUE_REPLACE:
+                parsed |= TEXT_AUTOSPACE_REPLACE;
+                break;
+            default:
+                return false;
+        }
+    }
+    if (!has_spacing_class) return false;
+    *flags = parsed;
+    return true;
+}
+
+static uint8_t inherited_text_autospace(ViewSpan* span) {
+    DomElement* element = span && span->is_element()
+        ? lam::dom_require_element(span) : nullptr;
+    DomElement* parent = element ? dom_parent_element(element) : nullptr;
+    while (parent) {
+        if (parent->blk && parent->block()->text_autospace_is_set) {
+            return parent->block()->text_autospace;
+        }
+        parent = dom_parent_element(parent);
+    }
+    return TEXT_AUTOSPACE_NORMAL;
+}
+
+static void resolve_text_autospace_property(LayoutContext* lycon,
+                                             ViewSpan* span,
+                                             const CssValue* value) {
+    if (!lycon || !span || !value) return;
+    BlockProp* target = span->ensure_block(lycon);
+    if (!target) return;
+    uint8_t flags = TEXT_AUTOSPACE_NORMAL;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        if (keyword == CSS_VALUE_INHERIT || keyword == CSS_VALUE_UNSET) {
+            flags = inherited_text_autospace(span);
+        } else if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_REVERT) {
+            flags = TEXT_AUTOSPACE_NORMAL;
+        } else if (!parse_text_autospace_value(value, &flags)) {
+            return;
+        }
+    } else if (!parse_text_autospace_value(value, &flags)) {
+        return;
+    }
+    target->text_autospace = flags;
+    target->text_autospace_is_set = true;
+}
+
 static LayoutShadowValue resolve_shadow_value(LayoutContext* lycon,
                                               CssPropertyCode property,
                                               const CssValue* value,
@@ -6457,6 +6678,10 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         resolve_common_keyword_property(lycon, span, block, prop_id, decl, value)) {
         return;
     }
+    if (prop_id == CSS_PROPERTY_TEXT_AUTOSPACE) {
+        resolve_text_autospace_property(lycon, span, value);
+        return;
+    }
     if (prop_id >= CSS_PROPERTY_BORDER_TOP_WIDTH &&
         prop_id <= CSS_PROPERTY_BORDER_LEFT_COLOR) {
         resolve_border_physical_longhand(lycon, span, prop_id, value, specificity);
@@ -6625,6 +6850,10 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             }
             break;
         }
+        case CSS_PROPERTY_TEXT_WRAP:
+        case CSS_PROPERTY_TEXT_WRAP_MODE:
+            resolve_text_wrap_property(lycon, span, prop_id, value);
+            break;
         case CSS_PROPERTY_DIRECTION: {
             if (!block) {
                 ViewSpan* span = lycon->view->is_element() ? lam::view_require_element(lycon->view) : nullptr;
@@ -6654,6 +6883,29 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 else if (dir_value == CSS_VALUE_LTR || dir_value == CSS_VALUE_RTL) {
                     block->blk->direction = dir_value;
                 }
+            }
+            break;
+        }
+        case CSS_PROPERTY_UNICODE_BIDI: {
+            BlockProp* target = block ? block->ensure_block(lycon) : nullptr;
+            if (!target && lycon->view->is_element()) {
+                ViewSpan* inline_span = lam::view_require_element(lycon->view);
+                target = inline_span ? inline_span->ensure_block(lycon) : nullptr;
+            }
+            if (!target || value->type != CSS_VALUE_TYPE_KEYWORD) break;
+            CssEnum bidi_value = value->data.keyword;
+            if (bidi_value == CSS_VALUE_INHERIT) {
+                DomElement* dom_elem = lam::dom_require_element(lycon->view);
+                target->unicode_bidi = find_inherited_block_keyword(
+                    dom_elem, CSS_PROPERTY_UNICODE_BIDI, false, false,
+                    CSS_VALUE_NORMAL);
+            } else if (bidi_value == CSS_VALUE_NORMAL ||
+                       bidi_value == CSS_VALUE_EMBED ||
+                       bidi_value == CSS_VALUE_ISOLATE ||
+                       bidi_value == CSS_VALUE_BIDI_OVERRIDE ||
+                       bidi_value == CSS_VALUE_ISOLATE_OVERRIDE ||
+                       bidi_value == CSS_VALUE_PLAINTEXT) {
+                target->unicode_bidi = bidi_value;
             }
             break;
         }
@@ -7018,34 +7270,61 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 break;
             }
             block->ensure_multicol(lycon);
-            block->multicol_prop()->column_count = 0;
-            block->multicol_prop()->column_width = 0;
-            int val_count = 1;
-            const CssValue* vals[2] = { value, nullptr };
-            if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count >= 1) {
-                val_count = value->data.list.count < 2 ? value->data.list.count : 2;
-                vals[0] = value->data.list.values[0];
-                if (val_count > 1) vals[1] = value->data.list.values[1];
+            MultiColumnProp* multicol = block->multicol_prop();
+            multicol->column_count = 0;
+            multicol->column_width = 0;
+            multicol->column_height = 0;
+            multicol->column_height_is_specified = false;
+            multicol->wrap = COLUMN_WRAP_AUTO;
+
+            const CssValue* values[8] = {};
+            int value_count = 1;
+            if (value->type == CSS_VALUE_TYPE_LIST) {
+                value_count = min(value->data.list.count, 8);
+                for (int vi = 0; vi < value_count; vi++) {
+                    values[vi] = value->data.list.values[vi];
+                }
+            } else {
+                values[0] = value;
             }
-            for (int vi = 0; vi < val_count; vi++) {
-                const CssValue* v = vals[vi];
-                if (!v) continue;
-                if (v->type == CSS_VALUE_TYPE_KEYWORD && v->data.keyword == CSS_VALUE_AUTO) {
+
+            int slash_index = -1;
+            for (int vi = 0; vi < value_count; vi++) {
+                if (css_value_is_slash(values[vi])) {
+                    slash_index = vi;
+                    break;
+                }
+            }
+            int inline_value_count = slash_index >= 0 ? slash_index : value_count;
+            if (inline_value_count > 2) inline_value_count = 2;
+            for (int vi = 0; vi < inline_value_count; vi++) {
+                const CssValue* v = values[vi];
+                if (!v || (v->type == CSS_VALUE_TYPE_KEYWORD &&
+                           v->data.keyword == CSS_VALUE_AUTO)) {
                     continue;
-                } else if (v->type == CSS_VALUE_TYPE_NUMBER && v->data.number.is_integer) {
-                    int count = (int)v->data.number.value;
-                    if (count > 0) {
-                        block->multicol_prop()->column_count = count;
+                }
+                if (v->type == CSS_VALUE_TYPE_NUMBER) {
+                    int count = (int)v->data.number.value; // INT_CAST_OK: column count
+                    if (v->data.number.value == (double)count && count > 0) {
+                        multicol->column_count = count;
                     }
                 } else if (v->type == CSS_VALUE_TYPE_LENGTH) {
                     float width = resolve_length_value(lycon, prop_id, v);
-                    if (width > 0) {
-                        block->multicol_prop()->column_width = width;
-                    }
-                } else if (v->type == CSS_VALUE_TYPE_NUMBER && !v->data.number.is_integer) {
-                    int count = (int)v->data.number.value;
-                    if (v->data.number.value == (double)count && count > 0) {
-                        block->multicol_prop()->column_count = count;
+                    if (width > 0.0f) multicol->column_width = width;
+                }
+            }
+            if (slash_index >= 0 && slash_index + 1 < value_count) {
+                const CssValue* height = values[slash_index + 1];
+                if (height && height->type == CSS_VALUE_TYPE_KEYWORD &&
+                    height->data.keyword == CSS_VALUE_AUTO) {
+                    multicol->column_height_is_specified = false;
+                } else if (height && (height->type == CSS_VALUE_TYPE_LENGTH ||
+                                      (height->type == CSS_VALUE_TYPE_NUMBER &&
+                                       height->data.number.value == 0.0))) {
+                    float resolved_height = resolve_length_value(lycon, prop_id, height);
+                    if (resolved_height >= 0.0f) {
+                        multicol->column_height = resolved_height;
+                        multicol->column_height_is_specified = true;
                     }
                 }
             }
@@ -7089,6 +7368,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_PAGE_BREAK_BEFORE:
         case CSS_PROPERTY_BREAK_AFTER:
         case CSS_PROPERTY_PAGE_BREAK_AFTER:
+        case CSS_PROPERTY_BREAK_INSIDE:
+        case CSS_PROPERTY_PAGE_BREAK_INSIDE:
         case CSS_PROPERTY_ORPHANS:
         case CSS_PROPERTY_WIDOWS:
             resolve_flow_break_property(lycon, block, prop_id, value);
@@ -7782,8 +8063,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (!css_store_list_style_image(lycon, span, value)) {
                 if (value->type != CSS_VALUE_TYPE_KEYWORD) break;
                 if (value->data.keyword == CSS_VALUE_NONE) {
-                    span->blk->list_style_image = (char*)alloc_prop(lycon, 5);
-                    str_copy(span->block()->list_style_image, 5, "none", 4);
+                    span->blk->list_style_image = {};
+                    span->blk->list_style_image.url = (char*)alloc_prop(lycon, 5);
+                    str_copy(span->block()->list_style_image.url, 5, "none", 4);
                 }
             }
             break;
@@ -7801,7 +8083,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                         if (parent->block()->list_style_position) {
                             span->blk->list_style_position = parent->blk->list_style_position;
                         }
-                        if (parent->block()->list_style_image) {
+                        if (parent->block()->list_style_image.url ||
+                            parent->block()->list_style_image.gradient_type != GRADIENT_NONE) {
                             span->blk->list_style_image = parent->blk->list_style_image;
                         }
                         break;
@@ -7948,13 +8231,13 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 for (int i = 0; i < value->data.list.count; i++) {
                     CssValue* item = value->data.list.values[i];
                     if (!item) continue;
-                    if (is_border_radius_slash(item) && i + 1 < value->data.list.count) {
+                    if (css_value_is_slash(item) && i + 1 < value->data.list.count) {
                         CssValue* size_values[2] = {};
                         int size_count = 0;
                         int j = i + 1;
                         while (j < value->data.list.count && size_count < 2) {
                             CssValue* size_item = value->data.list.values[j];
-                            if (!size_item || is_border_radius_slash(size_item)) break;
+                            if (!size_item || css_value_is_slash(size_item)) break;
                             if (size_item->type == CSS_VALUE_TYPE_LENGTH ||
                                 size_item->type == CSS_VALUE_TYPE_PERCENTAGE ||
                                 (size_item->type == CSS_VALUE_TYPE_KEYWORD &&
@@ -8041,6 +8324,16 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             block->blk->contain_inline_size = contains_inline_size;
             block->blk->contain_positioning =
                 css_contain_value_establishes_positioning_cb(value);
+            break;
+        }
+        case CSS_PROPERTY_CONTAINER_TYPE: {
+            if (!block || !value) break;
+            block->ensure_block(lycon);
+            // CSS Containment: container-type:size maps to size containment;
+            // otherwise the contained box's auto size still grows from content.
+            block->blk->contain_size = css_value_has_identifier(value, "size");
+            block->blk->contain_inline_size = css_value_has_identifier(
+                value, "inline-size");
             break;
         }
         case CSS_PROPERTY_CONTENT_VISIBILITY: {

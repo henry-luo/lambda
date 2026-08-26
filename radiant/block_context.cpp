@@ -329,6 +329,48 @@ FloatBox* block_context_alloc_float_box(BlockContext* ctx) {
 // Float Management
 // ============================================================================
 
+static bool block_context_view_is_descendant_of(ViewElement* child,
+                                                ViewElement* ancestor) {
+    if (!child || !ancestor) return false;
+    ViewElement* walker = child->parent_view();
+    while (walker) {
+        if (walker == ancestor) return true;
+        walker = walker->parent_view();
+    }
+    return false;
+}
+
+static void block_context_update_float_geometry(BlockContext* ctx, FloatBox* box) {
+    if (!ctx || !box || !box->element) return;
+
+    ViewBlock* float_elem = box->element;
+    BoxEdges margin = layout_boundary_margin_edges(
+        float_elem->bound ? float_elem->boundary() : nullptr);
+
+    box->x = float_elem->x;
+    box->y = float_elem->y;
+    box->width = float_elem->width;
+    box->height = float_elem->height;
+
+    // keep the generated-view coordinate conversion used at registration;
+    // inline wrappers do not add a block formatting offset.
+    float bfc_x = float_elem->x;
+    float bfc_y = float_elem->y;
+    ViewElement* parent = float_elem->parent_view();
+    while (parent && parent != ctx->establishing_element) {
+        if (parent->is_block()) {
+            bfc_x += parent->x;
+            bfc_y += parent->y;
+        }
+        parent = parent->parent_view();
+    }
+
+    box->margin_box_left = bfc_x - margin.left - ctx->origin_x;
+    box->margin_box_top = bfc_y - margin.top - ctx->origin_y;
+    box->margin_box_right = bfc_x + float_elem->width + margin.right - ctx->origin_x;
+    box->margin_box_bottom = bfc_y + float_elem->height + margin.bottom - ctx->origin_y;
+}
+
 void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
     if (!float_elem || !float_elem->position) return;
 
@@ -344,44 +386,10 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
         float_elem->block()->initial_letter_float_clearance;
     box->next = nullptr;
 
-    // Get margins
-    BoxEdges margin = layout_boundary_margin_edges(
-        float_elem->bound ? float_elem->boundary() : nullptr);
-    float margin_l = margin.left;
-    float margin_r = margin.right;
-    float margin_t = margin.top;
-    float margin_b = margin.bottom;
+    block_context_update_float_geometry(ctx, box);
 
-    // Store border box (parent-relative coords)
-    box->x = float_elem->x;
-    box->y = float_elem->y;
-    box->width = float_elem->width;
-    box->height = float_elem->height;
-
-    // Convert float position to BFC-relative coordinates
-    // float_elem->x/y are relative to parent, need to accumulate parent positions
-    float bfc_x = float_elem->x;
-    float bfc_y = float_elem->y;
-
-    // Walk up parent chain to accumulate positions relative to BFC
-    // Stop at the BFC establishing element
-    ViewElement* parent = float_elem->parent_view();
-    while (parent && parent != ctx->establishing_element) {
-        if (parent->is_block()) {
-            bfc_x += parent->x;
-            bfc_y += parent->y;
-        }
-        parent = parent->parent_view();
-    }
-
-    // Calculate margin box relative to BFC content area origin
-    box->margin_box_left = bfc_x - margin_l - ctx->origin_x;
-    box->margin_box_top = bfc_y - margin_t - ctx->origin_y;
-    box->margin_box_right = bfc_x + float_elem->width + margin_r - ctx->origin_x;
-    box->margin_box_bottom = bfc_y + float_elem->height + margin_b - ctx->origin_y;
-
-    log_debug("[BlockContext] Add float: bfc_pos=(%.1f,%.1f), margin_box=(%.1f,%.1f,%.1f,%.1f)",
-              bfc_x, bfc_y, box->margin_box_left, box->margin_box_top,
+    log_debug("[BlockContext] Add float: margin_box=(%.1f,%.1f,%.1f,%.1f)",
+              box->margin_box_left, box->margin_box_top,
               box->margin_box_right, box->margin_box_bottom);
 
     // Add to appropriate list
@@ -413,16 +421,34 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
     }
 }
 
+void block_context_refresh_descendant_float_geometry(BlockContext* ctx,
+                                                     ViewElement* ancestor) {
+    if (!ctx || !ancestor) return;
+    for (int pass = 0; pass < 2; pass++) {
+        FloatBox* floating = pass == 0 ? ctx->left_floats : ctx->right_floats;
+        for (; floating; floating = floating->next) {
+            if (!floating->element) continue;
+            ViewElement* float_element = lam::view_require_element(floating->element);
+            if (float_element == ancestor ||
+                block_context_view_is_descendant_of(float_element, ancestor)) {
+                block_context_update_float_geometry(ctx, floating);
+            }
+        }
+    }
+    block_context_recompute_lowest_float_bottom(ctx);
+}
+
 // ============================================================================
 // Float Space Queries
 // ============================================================================
 
 FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height,
                                               bool line_query,
-                                              bool float_placement_query) {
+                                              bool float_placement_query,
+                                              float horizontal_offset) {
     FloatAvailableSpace space;
-    space.left = ctx->float_left_edge;
-    space.right = ctx->float_right_edge;
+    space.left = ctx->float_left_edge + horizontal_offset;
+    space.right = ctx->float_right_edge + horizontal_offset;
     space.has_left_float = false;
     space.has_right_float = false;
 

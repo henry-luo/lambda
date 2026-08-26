@@ -151,15 +151,15 @@ fn marker_component(id, token, index, count, color) {
   let shape = if (spec.base == "none") <g 'data-marker-empty': true>
     else marker_shape(token, color);
   let clipped = if (spec.side == null or spec.base == "none") shape
-    else <g;
-      <clipPath id: clip_id;
+    else <g
+      <clipPath id: clip_id,
         <rect x: 0, y: if (spec.side == "left") 0 else 4,
           width: 8, height: 4>
       >
-      <g 'clip-path': "url(#" ++ clip_id ++ ")"; shape>
+      <g 'clip-path': "url(#" ++ clip_id ++ ")", shape>
     >;
   <g transform: "translate(" ++ string((count - index - 1) * 8) ++ " 0)",
-      'data-marker-component': token, 'data-marker-side': spec.side;
+      'data-marker-component': token, 'data-marker-side': spec.side,
     clipped
   >
 }
@@ -168,7 +168,7 @@ fn marker_content(id, marker_type, color) {
   let tokens = marker_tokens(marker_type);
   if (len(tokens) == 1 and marker_spec(tokens[0]).side == null)
     marker_shape(tokens[0], color)
-  else <g;
+  else <g
     for (i, token in tokens) marker_component(id, token, i, len(tokens), color)
   >
 }
@@ -185,14 +185,14 @@ fn edge_marker(id, marker_type, color, opacity, size) {
       viewBox: "0 0 " ++ string(width) ++ " 8",
       refX: marker_ref_x(tokens), refY: 4,
       orient: "auto-start-reverse", markerUnits: "strokeWidth",
-      opacity: opacity, 'data-marker-type': marker_type;
+      opacity: opacity, 'data-marker-type': marker_type,
     marker_content(id, marker_type, color)
   >
 }
 
 fn edge_defs(edge, color, opacity) {
   let size = max([0.1, float(if (edge.arrow_size != null) edge.arrow_size else 1.0)]);
-  [<defs;
+  [<defs
     edge_marker(marker_id(edge, "start"), edge.marker_start, color, opacity, size)
     edge_marker(marker_id(edge, "end"), edge.marker_end, color, opacity, size)
   >]
@@ -230,7 +230,7 @@ fn edge_svg(edge, width, height, opts) {
   let defs = edge_defs(edge, color, opacity);
   <svg xmlns: "http://www.w3.org/2000/svg", width: width, height: height,
       viewBox: "0 0 " ++ string(width) ++ " " ++ string(height),
-      style: "overflow:visible;pointer-events:none;";
+      style: "overflow:visible;pointer-events:none;",
     for (item in defs) item
     edge_path(edge, color, stroke_width, opacity)
   >
@@ -239,7 +239,7 @@ fn edge_svg(edge, width, height, opts) {
 fn cluster_svg(cluster, width, height) {
   <svg xmlns: "http://www.w3.org/2000/svg", width: width, height: height,
       viewBox: "0 0 " ++ string(width) ++ " " ++ string(height),
-      style: "overflow:visible;pointer-events:none;";
+      style: "overflow:visible;pointer-events:none;",
     <rect x: cluster.x, y: cluster.y, width: cluster.width, height: cluster.height,
         rx: cluster.radius, ry: cluster.radius,
         fill: cluster.fill, stroke: cluster.stroke,

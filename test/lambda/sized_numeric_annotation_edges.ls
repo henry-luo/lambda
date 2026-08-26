@@ -2,23 +2,23 @@
 
 "=== scalar annotations ==="
 let a_source = 49734321
-let a: i32 = i32(a_source)
+let a: i32 = i32(a_source);
 [a, type(a)]
 let b_source = 128
-let b: i8 = i8(b_source)
+let b: i8 = i8(b_source);
 [b, type(b)]
 let c_source = 256
-let c: u8 = u8(c_source)
+let c: u8 = u8(c_source);
 [c, type(c)]
 let d16_source = 32768
-let d16: i16 = i16(d16_source)
+let d16: i16 = i16(d16_source);
 [d16, type(d16)]
 let e16_source = 65536
-let e16: u16 = u16(e16_source)
+let e16: u16 = u16(e16_source);
 [e16, type(e16)]
-let d: u32 = -1u32
+let d: u32 = -1u32;
 [d, type(d)]
-let e: u64 = 18446744073709551615u64
+let e: u64 = 18446744073709551615u64;
 [e, type(e)]
 
 "=== params ==="
@@ -37,9 +37,9 @@ take_u16(param_u16)
 
 "=== returns ==="
 let ret_i8_source = 128
-fn ret_i8() i8 => i8(ret_i8_source)
+fn ret_i8() i8 => i8(ret_i8_source);
 [ret_i8(), type(ret_i8())]
-fn ret_u32() u32 => -1u32
+fn ret_u32() u32 => -1u32;
 [ret_u32(), type(ret_u32())]
 
 "=== fixed-width arithmetic ==="
@@ -60,7 +60,7 @@ type(42i8 + 10u8)
 65535u16 + 1i16
 type(65535u16 + 1i16)
 2147483647i32 + 1u32
-type(2147483647i32 + 1u32)
+type(2147483647i32 + 1u32);
 -1i32 + 4294967295u32
 type(-1i32 + 4294967295u32)
 18446744073709551615u64 + 1u64
@@ -76,11 +76,11 @@ type(255u8 div 2u8)
 255u8 % 2u8
 type(255u8 % 2u8)
 
-"=== unary wrap ==="
+"=== unary wrap ===";
 -(-128i8)
-type(-(-128i8))
+type(-(-128i8));
 -(1u8)
-type(-(1u8))
+type(-(1u8));
 -(9223372036854775807i64 + 1i64)
 type(-(9223372036854775807i64 + 1i64))
 

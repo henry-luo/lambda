@@ -277,6 +277,13 @@ SysFuncInfo sys_func_defs[] = {
     {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
      false, &TYPE_INT64, true},
+    // `i64` is the defined type spelling (S16.8.3 / the sized-int family), and
+    // every sibling — i8/i16/i32/u8/u16/u32/u64/f32 — is callable as a
+    // conversion. i64 was the one gap: it maps to LMD_TYPE_INT64 rather than the
+    // NUM_SIZED family that makes the others callable, so it needs this row.
+    {SYSFUNC_INT64, "i64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false,
+     C_RET_INT64, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
+     false, &TYPE_INT64, true},
 
     {SYSFUNC_FLOAT, "float", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_float", FPTR(fn_float), NULL, NULL, false, 0,
@@ -501,7 +508,9 @@ SysFuncInfo sys_func_defs[] = {
     // Math functions — method-eligible on numbers
     // ========================================================================
     {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_abs", FPTR(fn_abs), "fabs", NPTR(fabs), true, 1},
+     C_RET_ITEM, C_ARG_ITEM, "fn_abs", FPTR(fn_abs), "fabs", NPTR(fabs), true, 1,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_round", FPTR(fn_round), "round", NPTR(round), true, 1,
@@ -524,7 +533,9 @@ SysFuncInfo sys_func_defs[] = {
      /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_SIGN, "sign", 1, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_sign", FPTR(fn_sign), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_ARG0_NUMERIC},
 
     {SYSFUNC_CLIP, "clip", 3, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_clip", FPTR(fn_clip), NULL, NULL, false, 0},
@@ -670,25 +681,33 @@ SysFuncInfo sys_func_defs[] = {
     // Statistical functions — math module
     // ========================================================================
     {SYSFUNC_MEAN, "math_mean", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean1", FPTR(fn_math_mean1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_mean1", FPTR(fn_math_mean1), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_MEAN2, "math_mean", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_mean2", FPTR(fn_math_mean2), NULL, NULL, false, 0},
 
     {SYSFUNC_MEDIAN, "math_median", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_median1", FPTR(fn_math_median1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_median1", FPTR(fn_math_median1), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_MEDIAN2, "math_median", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_median2", FPTR(fn_math_median2), NULL, NULL, false, 0},
 
     {SYSFUNC_VARIANCE, "math_variance", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_variance1", FPTR(fn_math_variance1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_variance1", FPTR(fn_math_variance1), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_VARIANCE2, "math_variance", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_variance2", FPTR(fn_math_variance2), NULL, NULL, false, 0},
 
     {SYSFUNC_DEVIATION, "math_deviation", 1, &TYPE_ANY, false, true, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "fn_math_deviation1", FPTR(fn_math_deviation1), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "fn_math_deviation1", FPTR(fn_math_deviation1), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* result */ SYS_RESULT_REAL_TO_FLOAT},
 
     {SYSFUNC_DEVIATION2, "math_deviation", 2, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, C_ARG_ITEM, "fn_math_deviation2", FPTR(fn_math_deviation2), NULL, NULL, false, 0},
@@ -911,6 +930,11 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_CLOCK, "clock", 0, &TYPE_FLOAT, true, false, false, LMD_TYPE_ANY, false,
      C_RET_DOUBLE, C_ARG_ITEM, "pn_clock", FPTR(pn_clock), NULL, NULL, false, 0},
 
+    // `start` uses ordinary call grammar but remains a compiler intrinsic so
+    // structured ownership and capture checks stay visible in AstStartNode.
+    {SYSPROC_START, "start", -1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_start", NULL, NULL, NULL, false, 0, false},
+
     {SYSPROC_SEND, "send", 2, &TYPE_NULL, true, false, false, LMD_TYPE_ANY, true,
      C_RET_RETITEM, C_ARG_ITEM, "pn_send", FPTR(pn_send), NULL, NULL, false, 0, false},
 
@@ -1059,6 +1083,15 @@ SysFuncInfo sys_func_defs[] = {
     //  C_RET_RETITEM, C_ARG_ITEM, "pn_replace_file4", NULL, NULL, NULL, false, 0},
 
     // ========================================================================
+    // S12.3.4 dynamic application. Two rows, one surface name: the AST builder
+    // picks fn_ or pn_ by ENCLOSING colour, which fixes the error convention.
+    // is_proc marks only the pn row, so an fn context resolves the fn row.
+    {SYSFUNC_CALL, "call", 2, &TYPE_ANY, false, true, false, LMD_TYPE_FUNC, false,
+     C_RET_ITEM, C_ARG_ITEM, "fn_apply_args", FPTR(fn_apply_args), NULL, NULL, false, 0},
+
+    {SYSPROC_CALL, "call", 2, &TYPE_ANY, true, true, false, LMD_TYPE_FUNC, false,
+     C_RET_ITEM, C_ARG_ITEM, "pn_apply_args", FPTR(pn_apply_args), NULL, NULL, false, 0},
+
     // View/edit template apply
     // ========================================================================
     {SYSFUNC_APPLY1, "apply", 1, &TYPE_ANY, false, true, false, LMD_TYPE_ANY, false,
@@ -1196,6 +1229,8 @@ extern void lambda_function_mark_lambda_boxed_function(Function* fn);
 extern void lambda_function_mark_lambda_boxed_procedure(Function* fn);
 extern void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t shape);
 extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
+extern void* lambda_module_const_at_state(void* module_state, uint32_t index);
+extern Item lambda_module_var_at(void* module_state, uint32_t slot);
 extern Item lambda_name_id_to_item(NameId name_id);
 extern uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
 extern Item fn_member_by_id(Item item, NameId name_id);
@@ -1590,8 +1625,20 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_module_var_at", FPTR(lambda_module_var_at),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"lambda_module_const_at", FPTR(lambda_module_const_at),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_module_const_at_state", FPTR(lambda_module_const_at_state),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
@@ -1700,6 +1747,8 @@ JitImport jit_runtime_imports[] = {
     {"fn_pow", FPTR(fn_pow)},
     // value-level union lowers through the generic runtime helper in MIR.
     {"fn_union", FPTR(fn_union)},
+    {"fn_intersect", FPTR(fn_intersect)},
+    {"fn_exclude", FPTR(fn_exclude)},
     {"fn_pos", FPTR(fn_pos)},
     {"fn_neg", FPTR(fn_neg)},
     {"fn_eq", FPTR(fn_eq)},
@@ -1832,11 +1881,13 @@ JitImport jit_runtime_imports[] = {
     {"target_equal", FPTR(target_equal)},
     {"fn_query", FPTR(fn_query)},
     {"fn_to", FPTR(fn_to)},
+    {"fn_range_bound_error", FPTR(fn_range_bound_error)},
 
     // ========================================================================
     // Field access / indexing
     // ========================================================================
     {"fn_index", FPTR(fn_index)},
+    {"fn_index_set", FPTR(fn_index_set)},
     // Member reads never leave a wide payload above the caller's watermark:
     // int64/uint64 map fields come back as `l2it(field_ptr)` pointing at the
     // map's own persistent storage (D5.2.2), native lanes box inline, and the
@@ -1858,7 +1909,11 @@ JitImport jit_runtime_imports[] = {
     // Path functions
     // ========================================================================
     {"path_new", FPTR(path_new)},
+    {"path_new_authority", FPTR(path_new_authority)},
     {"path_extend", FPTR(path_extend)},
+    {"path_extend_int", FPTR(path_extend_int)},
+    {"path_select_parent", FPTR(path_select_parent)},
+    {"path_select_root", FPTR(path_select_root)},
     {"path_concat", FPTR(path_concat)},
     {"path_wildcard", FPTR(path_wildcard)},
     {"path_wildcard_recursive", FPTR(path_wildcard_recursive)},
@@ -1888,12 +1943,15 @@ JitImport jit_runtime_imports[] = {
     // Array/map mutation (procedural)
     // ========================================================================
     {"fn_array_set", FPTR(fn_array_set)},
+    {"lambda_array_set_checked_item", FPTR(lambda_array_set_checked_item)},
+    {"lambda_array_set_checked_inplace_item", FPTR(lambda_array_set_checked_inplace_item)},
     {"fn_mutable_value", FPTR(fn_mutable_value)},
     {"fn_map_set", FPTR(fn_map_set)},
     {"cow_mark_shared", FPTR(cow_mark_shared)},
     {"cow_bind_var", FPTR(cow_bind_var)},
     {"cow_prepare_write", FPTR(cow_prepare_write)},
     {"array_set_cow", FPTR(array_set_cow)},
+    {"member_set_cow", FPTR(member_set_cow)},
     {"map_set_cow", FPTR(map_set_cow)},
     {"cow_path_set_raw", FPTR(cow_path_set_raw)},
     {"cow_path_set", FPTR(cow_path_set)},
@@ -3486,7 +3544,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_mir_double_bits", "lambda_mir_bits_double",
         "lambda_item_adopt_scalar_home", "lambda_item_resolve_pending",
         "lambda_restore_number_frame_top",
-        "owned_item_slot_store", "lambda_module_var_store",
+        "owned_item_slot_store", "lambda_module_var_store", "lambda_module_var_at",
+        "lambda_module_const_at_state",
         "lambda_module_name_id_at",
         "js_active_module_name_id", "js_active_module_name_item",
         "lambda_async_frame_get_word",

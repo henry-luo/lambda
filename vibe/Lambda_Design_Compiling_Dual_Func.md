@@ -14,7 +14,7 @@
 > inline caches in Lambda script — §10 multi-version dispatches via guard
 > chain, never caches),
 > [`Lambda_Design_Type_Enforcement.md`](Lambda_Design_Type_Enforcement.md) (TE-9 error-value returns),
-> [`Lambda_Issue_Type_Support.md`](Lambda_Issue_Type_Support.md) (TS-1..TS-9),
+> [`impl/Lambda_Issue_Type_Support (retired).md`](impl/Lambda_Issue_Type_Support%20(retired).md) (TS-1..TS-9),
 > [`Lambda_Design_Item_Boxing.md`](Lambda_Design_Item_Boxing.md).
 
 ---
@@ -112,7 +112,7 @@ slow body are necessary.
   admission through `lambda_numeric_boundary_admit`; an admitted `int` at a
   declared `float` boundary reaches the raw body as a float Item/carrier.
 - Escaping through `Function*`, imports, exports, or `start` keeps `_b`
-  available. `start f(...)` is escaped because task dispatch invokes a public
+  available. `start(f, args)` is escaped because task dispatch invokes a public
   context ABI rather than the raw ABI.
 
 `pn`/`var` params, closures, methods, variadics, typed arrays, and async/task

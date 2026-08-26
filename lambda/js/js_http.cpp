@@ -16,7 +16,7 @@
 #include "js_event_loop.h"
 #include "js_class.h"
 #include "js_typed_array.h"
-#include "js_permission.h"
+#include "../jube/jube_node_permission.h"
 #include "../lambda-data.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"

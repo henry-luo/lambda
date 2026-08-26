@@ -15,46 +15,50 @@ lambda validate file.json            # Default schema
 
 ## Type System
 
-**Scalar Types:**
-```lambda
-null  bool  int  float  decimal
-string  symbol  binary  datetime  path
-i8  i16  i32  i64        // Sized signed integers
-u8  u16  u32  u64        // Sized unsigned integers
-f16  f32  f64            // Sized floats
-```
+Scalar Types:
 
-**Container Types:**
-```lambda
-range, 1 to 10          // Range (inclusive both ends; also "a" to "z")
-array, [123, true]      // Array of values
-map, {key: 'symbol'}    // Map
-element, <div class: bold; "text" <br>>  // Element
-```
+| Form | Meaning |
+|---|---|
+| `null bool int float decimal` | Primitives |
+| `string symbol binary datetime path` | Primitives |
+| `i8 i16 i32 i64` | Sized signed integers |
+| `u8 u16 u32 u64` | Sized unsigned integers |
+| `f16 f32 f64` | Sized floats |
 
-**Type Operators:**
-```lambda
-int | string     // Union type
-int & number     // Intersection
-int?             // Optional (int | null)
-int*             // Zero or more
-int+             // One or more
-int[]            // Array of ints (same as int*)
-int[5]           // Array of exactly 5 ints
-[int*]           // Bracket form: array of 0+ ints
-[int+]           // Bracket form: array of 1+ ints
-fn (a: int, b: string) bool   // Function type
-fn int                        // Same as fn () int
-{a: int, b: bool}             // Map type
-<div id:symbol; <br>>         // Element type
-```
+Container Types:
 
-**Type Declarations:**
-```lambda
-type User = {name: string, age: int};   // Map type alias
-type Point = (float, float);            // Tuple type
-type Result = int | error;              // Union type
-```
+| Form | Meaning |
+|---|---|
+| `range, 1 to 10` | Range (inclusive both ends; also "a" to "z") |
+| `array, [123, true]` | Array of values |
+| `map, {key: 'symbol'}` | Map |
+| `element, <div class: bold, "text" <br>>` | Element |
+
+Type Operators:
+
+| Form | Meaning |
+|---|---|
+| `int \| string` | Union type |
+| `int & number` | Intersection |
+| `int?` | Optional (int \| null) |
+| `int*` | Zero or more |
+| `int+` | One or more |
+| `int[]` | Array of ints (same as int*) |
+| `int[5]` | Array of exactly 5 ints |
+| `[int*]` | Bracket form: array of 0+ ints |
+| `[int+]` | Bracket form: array of 1+ ints |
+| `fn (a: int, b: string) bool` | Function type |
+| `fn int` | Same as fn () int |
+| `{a: int, b: bool}` | Map type |
+| `<div id:symbol; <br>>` | Element type |
+
+Type Declarations:
+
+| Form | Meaning |
+|---|---|
+| `type User = {name: string, age: int}` | Map type alias |
+| `type Point = (float, float)` | Tuple type |
+| `type Result = int \| error` | Union type |
 
 ## Object Types
 
@@ -62,36 +66,38 @@ type Result = int | error;              // Union type
 ```lambda
 type Point { x: float, y: float }     // Fields only
 type Counter {
-    value: int = 0;                   // Default value
+    value: int = 0,                   // Default value
     fn double() => value * 2          // Functional
     fn add(n: int) => value + n
     pn inc() { value = value + 1 }    // Procedural
 }
-type Circle : Shape { radius: float; }  // Inheritance
+type Circle : Shape { radius: float }   // Inheritance
 ```
 
-**Literals & Access:**
-```lambda
-let p = <Point x: 1.0, y: 2.0>   // Object literal
-let c = <Counter>                // All defaults
-p.x                              // Field access
-c.double()                       // Method call
-<Point *:p, x: 5.0>              // Copy and override
-```
+Literals & Access:
 
-**Type Checking (nominal only):**
-```lambda
-p is Point     // true
-p is object    // true
-p is map       // true (objects are map-compatible)
-{x: 1} is Point  // false (plain maps don't match)
-```
+| Form | Meaning |
+|---|---|
+| `let p = <Point x: 1.0, y: 2.0>` | Object literal |
+| `let c = <Counter>` | All defaults |
+| `p.x` | Field access |
+| `c.double()` | Method call |
+| `<Point *:p, x: 5.0>` | Copy and override |
+
+Type Checking (nominal only):
+
+| Form | Meaning |
+|---|---|
+| `p is Point` | true |
+| `p is object` | true |
+| `p is map` | true (objects are map-compatible) |
+| `{x: 1} is Point` | false (plain maps don't match) |
 
 **Constraints:**
 ```lambda
 type User {
   name: string that (len(~) > 1),  // Field constraint
-  age: int that (0 <= ~ <= 150);
+  age: int that (0 <= ~ <= 150),
   that (~.name != "admin")         // Object constraint
 }
 ```
@@ -99,241 +105,298 @@ type User {
 **Self reference `~`:**
 ```lambda
 type Vec {
-  x: float, y: float;
+  x: float, y: float,
   fn len() => math.sqrt(x**2 + y**2)
-  fn scale(f) => <Vec ~, x:~.x*f, y:~.y*f>  // ~ = self
+  fn scale(f) => <Vec *:~, x: ~.x*f, y: ~.y*f>  // ~ = self
 }
 ```
 
 ## Literals
 
-**Numbers:**
-```lambda
-42        // Integer
-42n       // Arbitrary precision integer
-3.14      // Float
-1.5e-10   // Scientific notation
-123.45m   // Decimal
-1e-3m     // Decimal (negative exponent)
-inf  nan  // Special values
-0xFF      // hexdecimal literal for int value
+Numbers:
 
-// Sized numeric literals (postfix suffix)
-42i8  -128i8  1000i16  100000i32  100i64
-255u8  60000u16  3000000000u32  1000u64
-0.5f16  3.14f32  2.7f64
-```
+| Form | Meaning |
+|---|---|
+| `42` | Integer |
+| `42n` | Arbitrary precision integer |
+| `3.14` | Float |
+| `1.5e-10` | Scientific notation |
+| `123.45m` | Decimal |
+| `1e-3m` | Decimal (negative exponent) |
+| `inf` `nan` | Special values |
+| `0xFF` | Hexadecimal int literal |
 
-**Strings & Symbols:**
-```lambda
-"hello"           // String
-"multi-line       // Multi-line string
-string"
-'symbol'          // Symbol
-symbol            // Unquoted symbol
-'name' == "name"  // false: symbol != string
-"" == null        // false: empty string is a string value
-not ""            // true: empty string is falsy
-// '' is invalid: empty symbols do not exist
-```
+Sized numeric literals (postfix suffix):
 
-**Binary:**
-```lambda
-b'\xDEADBEEF'     // Hex binary
-b'\64QUVGRw=='    // Base64 binary
-```
+| Form | Meaning |
+|---|---|
+| `42i8` `-128i8` `1000i16` `100000i32` `100i64` | Signed |
+| `255u8` `60000u16` `3000000000u32` `1000u64` | Unsigned |
+| `0.5f16` `3.14f32` `2.7f64` | Float |
 
-**DateTime:**
-```lambda
-t'2025-01-01T14:30:00Z'  // DateTime
-t'2025-04-26' is date       // Sub-types: date
-t'10:30:00' is time         // Sub-types: time
+Strings & Symbols:
 
-// Member properties
-dt.date  dt.year  dt.month  dt.day
-dt.time  dt.hour  dt.minute dt.second  dt.millisecond
-dt.weekday  dt.yearday  dt.week  dt.quarter
-dt.unix  dt.timezone  dt.utc_offset  dt.utc  dt.local
+| Form | Meaning |
+|---|---|
+| `"hello"` | String |
+| `"multi-line string"` | Multi-line string — a literal newline may appear inside the quotes |
+| `'symbol'` | Symbol |
+| `symbol` | Unquoted symbol |
+| `'name' == "name"` | `false` — symbol is not string |
+| `"" == null` | `false` — empty string is a string value |
+| `not ""` | `true` — empty string is falsy |
 
-// Formatting
-dt.format("YYYY-MM-DD")  dt.format('iso')
+`''` is invalid: empty symbols do not exist.
 
-// Constructors
-datetime()  today()  justnow()   // current date/time
-datetime(2025, 4, 26, 10, 30)
-date(2025, 4, 26)  time(10, 30, 45)
-```
+Binary:
 
-**Collections:**
-```lambda
-[1, 2, 3]         // Array
-{a: 1, b: 2}      // Map
-<div id: "main">  // Element
-```
+| Form | Meaning |
+|---|---|
+| `b'\xDEADBEEF'` | Hex binary |
+| `b'\64QUVGRw=='` | Base64 binary |
 
-**Indexing & Slicing:**
-```lambda
-arr[0]            // First element
-arr.0             // Alt. syntax for const index
-arr[1 to 3]       // Slice (indices 1, 2, 3)
-map.key           // Map field access
-map["key"]        // Map field by string
-"hello"[1 to 3]   // "ell" — string slicing
-'hello'[1 to 3]   // 'ell' — symbol slicing
-"café"[2 to 3]    // "fé" — UTF-8 aware
-```
+DateTime:
+
+| Form | Meaning |
+|---|---|
+| `t'2025-01-01T14:30:00Z'` | DateTime |
+| `t'2025-04-26' is date` | Sub-type: date |
+| `t'10:30:00' is time` | Sub-type: time |
+
+Member properties:
+
+| Form | Meaning |
+|---|---|
+| `dt.date` `dt.year` `dt.month` `dt.day` | Date parts |
+| `dt.time` `dt.hour` `dt.minute` `dt.second` `dt.millisecond` | Time parts |
+| `dt.weekday` `dt.yearday` `dt.week` `dt.quarter` | Derived |
+| `dt.unix` `dt.timezone` `dt.utc_offset` `dt.utc` `dt.local` | Zone / epoch |
+
+Formatting:
+
+| Form | Meaning |
+|---|---|
+| `dt.format("YYYY-MM-DD")` | Pattern |
+| `dt.format('iso')` | Named format |
+
+Constructors:
+
+| Form | Meaning |
+|---|---|
+| `datetime()` `today()` `justnow()` | Current date/time |
+| `datetime(2025, 4, 26, 10, 30)` | From parts |
+| `date(2025, 4, 26)` `time(10, 30, 45)` | Date / time only |
+
+Collections:
+
+| Form | Meaning |
+|---|---|
+| `[1, 2, 3]` | Array |
+| `{a: 1, b: 2}` | Map |
+| `<div id: "main">` | Element |
+
+Indexing & Slicing:
+
+| Form | Meaning |
+|---|---|
+| `arr[0]` | First element |
+| `arr.0` | Alt. syntax for const index |
+| `arr[1 to 3]` | Slice (indices 1, 2, 3) |
+| `map.key` | Map field access |
+| `map["key"]` | Map field by string |
+| `"hello"[1 to 3]` | "ell" — string slicing |
+| `'hello'[1 to 3]` | 'ell' — symbol slicing |
+| `"café"[2 to 3]` | "fé" — UTF-8 aware |
 
 **Namespaces (via `import` with bare URI):**
 ```lambda
 import svg: 'http://www.w3.org/2000/svg'
 import xlink: 'http://www.w3.org/1999/xlink'
-
-<svg.rect svg.width: 100>   // Namespaced tag & attr
-// desugars to: <svg.rect svg: {width: 100}>
-elem.svg.width              // Chained sub-map access
-elem.svg                    // {width: 100} sub-map
-svg.rect                    // Qualified symbol
-symbol("href", 'xlink_url') // Namespaced symbol
 ```
+
+| Form | Meaning |
+|---|---|
+| `<svg.rect svg.width: 100>` | Namespaced tag & attribute — desugars to `<svg.rect svg: {width: 100}>` |
+| `elem.svg.width` | Chained sub-map access |
+| `elem.svg` | `{width: 100}` sub-map |
+| `svg.rect` | Qualified symbol |
+| `symbol("href", 'xlink_url')` | Namespaced symbol |
 
 ## Variables & Declarations
 
-**Let Expressions (immutable):**
-```lambda
-(let x = 5, x + 1, x * 2)      // Single binding
-(let a = 1, b = 2, a + b)      // Multiple bindings
-```
+Let Expressions (immutable):
 
-**Let Statements (immutable):**
-```lambda
-let x = 42;               // Immutable binding
-let y : int = 100;        // With type annotation
-let a: i8 = 42i8;         // Sized type annotation
-let b: f32 = 3.14f32;     // Sized float annotation
-let a = 1, b = 2;         // Multiple bindings
-x = 10     // ERROR E211: cannot reassign let binding
-```
+| Form | Meaning |
+|---|---|
+| `(let x = 5, x + 1, x * 2)` | Single binding |
+| `(let a = 1, b = 2, a + b)` | Multiple bindings |
 
-**Var Statements (mutable, `pn` only):**
-```lambda
-var x = 0;         // Mutable variable
-var y: int = 42;   // With type annotation
-var a: int[] = [1, 2, 3];  // Array of ints
-var b: float[] = [0.1, 0.2]; // Array of floats
-x = x + 1          // OK: reassignment
-x = "hello"        // OK: type widening (int → string)
-y = "oops"      // ERROR E201: annotated type enforced
-```
+Let Statements (immutable):
+
+| Form | Meaning |
+|---|---|
+| `let x = 42` | Immutable binding |
+| `let y : int = 100` | With type annotation |
+| `let a: i8 = 42i8` | Sized type annotation |
+| `let b: f32 = 3.14f32` | Sized float annotation |
+| `let a = 1, b = 2` | Multiple bindings |
+| `x = 10` | ERROR E211: cannot reassign let binding |
+
+Var Statements (mutable, `pn` only):
+
+| Form | Meaning |
+|---|---|
+| `var x = 0` | Mutable variable |
+| `var y: int = 42` | With type annotation |
+| `var a: int[] = [1, 2, 3]` | Array of ints |
+| `var b: float[] = [0.1, 0.2]` | Array of floats |
+| `x = x + 1` | OK: reassignment |
+| `x = "hello"` | OK: type widening (int → string) |
+| `y = "oops"` | ERROR E201: annotated type enforced |
 
 ## Operators
 
-**Arithmetic:** addition, subtraction, multiplication, division, integer division, modulo, exponentiation
-```lambda
-+  -  *  /  div  %  **
-```
+Arithmetic:
 
-**Spread:** *
-```lambda
-let a = [1, 2, 3]
-(*a, *[10, 20])    // (1, 2, 3, 10, 20)
-```
+| Operator | Meaning |
+|---|---|
+| `+` | addition |
+| `-` | subtraction |
+| `*` | multiplication |
+| `/` | division |
+| `div` | integer division |
+| `%` | modulo |
+| `**` | exponentiation |
 
-**Comparison:** equal, not equal, less than, less equal, greater than, greater equal
-```lambda
-==  !=  <  <=  >  >=
-```
+Spread `*`:
+
+| Given | Expression | Result |
+|---|---|---|
+| `let a = [1, 2, 3]` | `(*a, *[10, 20])` | `(1, 2, 3, 10, 20)` |
+
+Comparison:
+
+| Operator | Meaning |
+|---|---|
+| `==` | equal |
+| `!=` | not equal |
+| `<` | less than |
+| `<=` | less or equal |
+| `>` | greater than |
+| `>=` | greater or equal |
 
 `==` performs **structural deep equality** on all types:
-```lambda
-[1, 2] == [1, 2]          // true  (array)
-{a:1, b:2} == {b:2, a:1}  // true  (map, order-independent)
-[1] == [1.0]              // true  (numeric promotion)
-(1 to 3) == [1, 2, 3]     // true  (cross-type sequence)
-```
 
-**Logical:** logical and, or, not
-```lambda
-and  or  not
-```
+| Form | Meaning |
+|---|---|
+| `[1, 2] == [1, 2]` | true  (array) |
+| `{a:1, b:2} == {b:2, a:1}` | true  (map, order-independent) |
+| `[1] == [1.0]` | true  (numeric promotion) |
+| `(1 to 3) == [1, 2, 3]` | true  (cross-type sequence) |
 
-**Type & Set:** type check, membership, range, union, intersection, exclusion
-```lambda
-is  in  to  |  &  !
-```
+Logical:
 
-**Query:** type-based search
-```lambda
-?   .?           // recursive descendant search
-expr[T]          // child-level query (direct only)
-```
+| Operator | Meaning |
+|---|---|
+| `and` | logical and |
+| `or` | logical or |
+| `not` | logical not |
 
-**Vector Arithmetic:** scalar broadcast, element-wise ops
-```lambda
-1+[2,3] = [3,4]  [1,2]*2 = [2,4]  [1,2]+[3,4] = [4,6]
-```
+Type & Set:
+
+| Operator | Meaning |
+|---|---|
+| `is` | type check |
+| `in` | membership |
+| `to` | range |
+| `\|` | union |
+| `&` | intersection |
+| `!` | exclusion |
+
+Query: type-based search
+
+| Form | Meaning |
+|---|---|
+| `?   .?` | recursive descendant search |
+| `expr[T]` | child-level query (direct only) |
+
+Vector Arithmetic:
+
+| Expression | Result | |
+|---|---|---|
+| `1 + [2, 3]` | `[3, 4]` | scalar broadcast |
+| `[1, 2] * 2` | `[2, 4]` | scalar broadcast |
+| `[1, 2] + [3, 4]` | `[4, 6]` | element-wise |
 Use `++` for list/array concat: `[1,2] ++ [3,4] = [1,2,3,4]`.
 
 ## Pipe Expressions
 
-**Pipe `|>` with current item `~`:**
-```lambda
-[1,2,3] |> ~ * 2          // [2,4,6] - map over items
-[1,2,3] |> sum            // 6 - aggregate (no ~)
-users |> ~.age            // [12,20,62] - extract field
-['a','b'] |> {i:~#, v:~}  // ~# = index/key
-```
+Pipe `|>` with current item `~`:
 
-**Filter with `that`:**
-```lambda
-[1,2,3,4,5] that (~ > 3)         // [4,5]
-users that (age >= 18) |> ~.name  // filter then map
-[1,2,3] |> ~ ** 2 that (~ > 5) |> sum // 13 (4+9)
-```
+| Form | Meaning |
+|---|---|
+| `[1,2,3] \|> ~ * 2` | [2,4,6] - map over items |
+| `[1,2,3] \|> sum` | 6 - aggregate (no ~) |
+| `users \|> ~.age` | [12,20,62] - extract field |
+| `['a','b'] \|> {i:~#, v:~}` | ~# = index/key |
 
-**Spreading in Array Literals:** pipe and filter results flatten
-```lambda
-[1, [2,3] |> ~, 4, 5]          // [1, 2, 3, 4, 5]
-[0, [1,2,3] |> ~ * 10, 99]     // [0, 10, 20, 30, 99]
-[1, [3,5,7] that (~ > 4), 9]   // [1, 5, 7, 9]
-```
+Filter with `that`:
+
+| Form | Meaning |
+|---|---|
+| `[1,2,3,4,5] that (~ > 3)` | [4,5] |
+| `users that (age >= 18) \|> ~.name` | filter then map |
+| `[1,2,3] \|> ~ ** 2 that (~ > 5) \|> sum` | 13 (4+9) |
+
+Spreading in Array Literals: pipe and filter results flatten
+
+| Form | Meaning |
+|---|---|
+| `[1, [2,3] \|> ~, 4, 5]` | [1, 2, 3, 4, 5] |
+| `[0, [1,2,3] \|> ~ * 10, 99]` | [0, 10, 20, 30, 99] |
+| `[1, [3,5,7] that (~ > 4), 9]` | [1, 5, 7, 9] |
 
 ## Query Expressions
 
 **Results in document order** (depth-first, pre-order).
 
-**Query `?` — attributes + all descendants:**
-```lambda
-html?<img>                // all <img> at any depth
-html?<div class: string>  // <div> with class attr
-data?int                  // all int values in tree
-data?(int | string)       // all int or string values
-data?{name: string}       // maps with string 'name'
-data?{status: "ok"}       // maps where status == "ok"
-```
+Query `?` — attributes + all descendants:
 
-**Self-inclusive query `.?` — self + attributes + all descendants:**
-```lambda
-div.?<div>     // includes div itself if it matches
-el.?int        // self + all int values in subtree
-42.?int        // [42] — trivial self-match
-```
+| Form | Meaning |
+|---|---|
+| `html?<img>` | all `<img>` at any depth |
+| `html?<div class: string>` | `<div>` with class attr |
+| `data?int` | all int values in tree |
+| `data?(int \| string)` | all int or string values |
+| `data?{name: string}` | maps with string 'name' |
+| `data?{status: "ok"}` | maps where status == "ok" |
 
-**Child-level query `[T]` — direct attributes + children only (no recursion):**
-```lambda
-[1, "a", 3, true][int]   // [1, 3] — int items
-{name: "Alice", age: 30}[string]  // ["Alice"]
-el[element]     // direct child elements only
-el[string]      // attr values + text children
-```
+Self-inclusive query `.?` — self + attributes + all descendants:
+
+| Form | Meaning |
+|---|---|
+| `div.?<div>` | includes div itself if it matches |
+| `el.?int` | self + all int values in subtree |
+| `42.?int` | [42] — trivial self-match |
+
+Child-level query `[T]` — direct attributes + children only (no recursion):
+
+| Form | Meaning |
+|---|---|
+| `[1, "a", 3, true][int]` | [1, 3] — int items |
+| `{name: "Alice", age: 30}[string]` | ["Alice"] |
+| `el[element]` | direct child elements only |
+| `el[string]` | attr values + text children |
 
 ## File Output (procedural only)
-```lambda
-// Target can be string, symbol, or path
-output(data, 'output.txt')       // file under CWD
-output(data, "./temp/output.txt") // output at a relative path
-output(data, "output.txt", {mode: "append"})
-output(data |> format('json'), "output.json")
-```
+The target can be a string, a symbol, or a path.
+
+| Form | Meaning |
+|---|---|
+| `output(data, 'output.txt')` | File under CWD |
+| `output(data, "./temp/output.txt")` | Relative path |
+| `output(data, "output.txt", {mode: "append"})` | Append mode |
+| `output(data \|> format('json'), "output.json")` | Format then write |
 Data type determines output format:
 
 - String: raw text (no formatting)
@@ -342,20 +405,21 @@ Data type determines output format:
 
 ## Control Flow
 
-**If Expressions (parenthesized condition, else required):**
-```lambda
-if (x > 0) "positive" else "non-positive"
-if (score >= 90) "A"
-else if (score >= 80) "B" else "C"
-if (x > 0) "pos" else { "neg" } // block else
-```
+If Expressions (parenthesized condition, else required):
 
-**If Statements (block body, else optional):**
-```lambda
-if x > 0 { "positive" }
-if condition { something() } else { otherThing() }
-if x > 0 { compute() } else "default"   // expr else
-```
+| Form | Meaning |
+|---|---|
+| `if (x > 0) "positive" else "non-positive"` | Simple |
+| `if (score >= 90) "A" else if (score >= 80) "B" else "C"` | Chained |
+| `if (x > 0) "pos" else { "neg" }` | Block `else` |
+
+If Statements (block body, else optional):
+
+| Form | Meaning |
+|---|---|
+| `if x > 0 { "positive" }` | No `else` |
+| `if condition { something() } else { otherThing() }` | Both blocks |
+| `if x > 0 { compute() } else "default"` | Expression `else` |
 
 Both forms share the same `else` syntax: `else expr`, `else { stam }`, or `else if ...`.
 
@@ -381,20 +445,17 @@ match input {
 }
 ```
 
-**For Expressions:** (produce spreadable arrays — pipe/filter also spread, see above)
-```lambda
-for (x in [1, 2, 3]) x * 2     // [2, 4, 6]
-for (i in 1 to 5) i * i        // [1, 4, 9, 16, 25]
-for (x in data) if (x > 0) x else 0  // Conditional
-// Nested for-expressions flatten
-[for (i in 1 to 2) for (j in 1 to 2) i*j]  // [1,2,2,4]
-// Empty for produces spreadable null (skipped)
-[for (x in [] ) x]             // []
+For Expressions: (produce spreadable arrays — pipe/filter also spread, see above)
 
-// for loop over map by keys
-for (k at {a: 1, b: 2}) k      // 'a', 'b'
-for (k, v at {a: 1, b: 2}) k ++ v  // ['a1', 'b2']
-```
+| Expression | Result | |
+|---|---|---|
+| `for (x in [1, 2, 3]) x * 2` | `[2, 4, 6]` | |
+| `for (i in 1 to 5) i * i` | `[1, 4, 9, 16, 25]` | |
+| `for (x in data) if (x > 0) x else 0` | | conditional body |
+| `[for (i in 1 to 2) for (j in 1 to 2) i*j]` | `[1, 2, 2, 4]` | nested for-expressions flatten |
+| `[for (x in []) x]` | `[]` | empty for produces spreadable null, which is skipped |
+| `for (k at {a: 1, b: 2}) k` | `['a', 'b']` | iterate a map by key |
+| `for (k, v at {a: 1, b: 2}) k ++ v` | `['a1', 'b2']` | key and value (S8.1.3) |
 
 **For Expression Clauses:** `let`, `where`, `group by`, `order by`, `limit`, `offset`
 ```lambda
@@ -424,36 +485,34 @@ for (o in os, c in cs on o.a==c.a and o.b==c.b) {...}  // multi-key
 for item in collection { transform(item) }
 ```
 
-**Procedural Control (in `pn`):**
-```lambda
-var x=0;   // Mutable variable
-while(c) { break;  continue;  return x; }
-```
+Procedural Control (in `pn`):
 
-**Assignment Targets (in `pn`):**
-```lambda
-x = 10              // Variable reassignment (var only)
-arr[i] = val        // Array element reassignment
-obj.field = val     // Map field reassignment
-elem.attr = val     // Element attribute reassignment
-elem[i] = val       // Element child reassignment
-```
+| Form | Meaning |
+|---|---|
+| `var x = 0` | Mutable variable |
+| `while (c) { break; continue; return x }` | Loop and its jumps |
+
+Assignment Targets (in `pn`):
+
+| Form | Meaning |
+|---|---|
+| `x = 10` | Variable reassignment (var only) |
+| `arr[i] = val` | Array element reassignment |
+| `obj.field = val` | Map field reassignment |
+| `elem.attr = val` | Element attribute reassignment |
+| `elem[i] = val` | Element child reassignment |
 
 ## Functions
 
-**Function Declaration:**
-```lambda
-// Function with statement body
-fn add(a: int, b: int) int { a + b }
-// Function  with expression body
-fn multiply(x: int, y: int) => x * y
-// Anonymous function
-let square = (x) => x * x;
-// Procedural function
-pn f(n) { var x=0; while(x<n) {x=x+1}; x }
-// Array parameters
-pn advance(pos: float[], vel: float[], n: int) { ... }
-```
+Function Declaration:
+
+| Form | Meaning |
+|---|---|
+| `fn add(a: int, b: int) int { a + b }` | Statement body |
+| `fn multiply(x: int, y: int) => x * y` | Expression body |
+| `let square = (x) => x * x` | Anonymous function |
+| `pn f(n) { var x = 0; while (x < n) { x = x + 1 }; x }` | Procedural function |
+| `pn advance(pos: float[], vel: float[], n: int) { ... }` | Array parameters |
 
 ## Concurrency (`pn` only)
 
@@ -461,10 +520,12 @@ pn advance(pos: float[], vel: float[], n: int) { ... }
 pn worker() { return receive()^ }
 
 pn main() {
-    let h = start worker()       // scoped child, opaque identity handle
+    let h = start(worker)        // scoped child, opaque identity handle
     send(h, "job")^             // bounded FIFO mailbox (default 1024)
     print(wait(h)^)              // wait for T^E result
 }
+
+start(worker, [job], {mode: 'task'})  // args array + launch options (S13.1.1v2)
 
 wait(h, timeout: 10)             // timeout does not cancel h
 select(h1, h2, timeout: 100)^    // first completed handle
@@ -479,33 +540,36 @@ exit cancels then joins. A `start` operand may not capture an outer `var` by
 reference—copy to `let` or use messages. Imported JS Promises are `wait`-able;
 exported Lambda `pn`s return Promises to JavaScript.
 
-**Advanced Features:**
-```lambda
-fn f(x?:int)    // optional param
-fn f(x=10)      // default param value
-fn f(...)       // variadic args
-f(b:2, a:1)     // named param call
-fn outer(n) { fn inner(x)=>x+n; inner } // closure
-```
+Advanced Features:
+
+| Form | Meaning |
+|---|---|
+| `fn f(x?:int)` | optional param |
+| `fn f(x=10)` | default param value |
+| `fn f(...)` | variadic args |
+| `f(b:2, a:1)` | named param call |
+| `fn outer(n) { fn inner(x)=>x+n; inner }` | closure |
 
 ## String Patterns
 
 Define named patterns for string validation and matching. Uses regex-like syntax integrated into the type system.
 
-**Definition:**
-```lambda
-type digits = \(d+)                    // one or more digits
-type email = \(w+ "@" w+ "." a[2,6]) // email-like
-type ws = \(s+)                        // whitespace
-type keyword = 'if' | 'else' | 'for'  // symbol literal union
-```
+Definition:
 
-**Type check (`is`) — full-match semantics:**
-```lambda
-"hello@world.com" is email    // true
-"abc" is email                // false
-"123" is digits               // true
-```
+| Form | Meaning |
+|---|---|
+| `type digits = \(d+)` | one or more digits |
+| `type email = \(w+ "@" w+ "." a[2,6])` | email-like |
+| `type ws = \(s+)` | whitespace |
+| `type keyword = 'if' \| 'else' \| 'for'` | symbol literal union |
+
+Type check (`is`) — full-match semantics:
+
+| Form | Meaning |
+|---|---|
+| `"hello@world.com" is email` | true |
+| `"abc" is email` | false |
+| `"123" is digits` | true |
 
 **Character classes inside `\(...)`:** `d` digit, `w` word, `s` whitespace, `a` alpha, `.` any char, `...` any string
 
@@ -514,18 +578,20 @@ Reserved inside the island only — quote to match one literally: `\("d" w+)`.
 **Quantifiers:** `?` optional, `+` one or more, `*` zero or more, `[n]` exactly n, `[n,m]` range
 
 **Domain:** `\(...)` matches strings, `\symbol(...)` matches symbols; the tag is checked before the content, and pattern bodies always use string literals for content.
-```lambda
-type SymIdent = \symbol(a w*)
-'foo' is SymIdent             // true
-"foo" is SymIdent             // false — string value, symbol pattern
-```
+Given `type SymIdent = \symbol(a w*)`:
+
+| Form | Result |
+|---|---|
+| `'foo' is SymIdent` | `true` |
+| `"foo" is SymIdent` | `false` — string value, symbol pattern |
 
 **Inline (unnamed) patterns** work anywhere a type does:
-```lambda
-"abc" is \(a+)                // true
-fn f(x: \(d+)) => x           // parameter annotation
-match s { case \(d+): "num" default: "other" }
-```
+
+| Form | Meaning |
+|---|---|
+| `"abc" is \(a+)` | `true` |
+| `fn f(x: \(d+)) => x` | Parameter annotation |
+| `match s { case \(d+): "num" default: "other" }` | Match arm |
 
 ## System Functions
 
@@ -550,39 +616,47 @@ match s { case \(d+): "num" default: "other" }
 **Range:**
 
 `s to e` creates a range from `s` to `e` (inclusive both ends). Bounds are exact integers or single-codepoint strings. `range(s,e,step)` creates a range with custom step (exclusive end).
-```lambda
-1 to 5                 // [1, 2, 3, 4, 5]
-"a" to "e"             // ["a", "b", "c", "d", "e"]  — character range
-range(0, 10, 2)        // [0, 2, 4, 6, 8]
-```
+
+| Form | Meaning |
+|---|---|
+| `1 to 5` | [1, 2, 3, 4, 5] |
+| `"a" to "e"` | ["a", "b", "c", "d", "e"]  — character range |
+| `range(0, 10, 2)` | [0, 2, 4, 6, 8] |
 
 **String:**
 
 `replace(str,old,new)` `split(str,sep)` `join(strs,sep)` `find(str,pattern)` `normalize(str)` `ord(str)` `chr(int)`
 
 All three accept both plain strings and named patterns as the second argument:
-```lambda
-type digit = \(d)
-type digits = \(d+)
-type ws = \(s+)
+Given `type digit = \(d)`, `type digits = \(d+)`, `type ws = \(s+)`:
 
-// replace(str, pattern_or_string, replacement)
-replace("a1b2c3", digit, "X")      // "aXbXcX"
-replace("hello   world", ws, " ")  // "hello world"
-replace("abc", "b", "")            // "ac"
+`replace(str, pattern_or_string, replacement)`
 
-// split(str, pattern_or_string)
-split("a1b2c3", digit)           // ["a", "b", "c", ""]
-split("hello   world", ws)       // ["hello", "world"]
-split("a,b,c", ",")              // ["a", "b", "c"]
-split("a1b2c3", digit, true)
-// ["a", "1", "b", "2", "c", "3", ""] — keep delimiters
+| Form | Result |
+|---|---|
+| `replace("a1b2c3", digit, "X")` | `"aXbXcX"` |
+| `replace("hello   world", ws, " ")` | `"hello world"` |
+| `replace("abc", "b", "")` | `"ac"` |
 
-// find(str, pattern_or_string) → [{value, index}, ...]
-find("a1b22c333", digits)
-// [{value:"1", index:1}, {value:"22", index:3}, ...]
-find("hello world", "lo")  // [{value: "lo", index: 3}]
-```
+`split(str, pattern_or_string)`
+
+| Form | Result |
+|---|---|
+| `split("a,b,c", ",")` | `["a", "b", "c"]` |
+| `split("a1b2c3", digit)` | `["a", "b", "c", ""]` |
+| `split("hello   world", ws)` | `["hello", "world"]` |
+| `split("a1b2c3", digit, true)` | `["a", "1", "b", "2", "c", "3", ""]` — keep delimiters |
+| `split("ab", \(d*))` | `["a", "b"]` — zero-width: no end empties |
+| `split("", ",")` | `[""]`; `split("", \(d*))` → `[]` |
+
+Follows ECMAScript `String.prototype.split` (S17.1.1).
+
+`find(str, pattern_or_string)` → `[{value, index}, ...]`
+
+| Form | Result |
+|---|---|
+| `find("a1b22c333", digits)` | `[{value:"1", index:1}, {value:"22", index:3}, ...]` |
+| `find("hello world", "lo")` | `[{value: "lo", index: 3}]` |
 
 **Collection:**
 
@@ -615,32 +689,33 @@ format(data, 'yaml')                // Format as YAML
 
 ## Modules, Imports & Exports
 
-**Import Syntax:**
-```lambda
-import module_name          // Built-in module
-import .relative_module     // Relative to script's dir
-import .path.to.module      // Nested relative import
-import alias: .module       // Import with alias
-```
+Import Syntax:
+
+| Form | Meaning |
+|---|---|
+| `import module_name` | Built-in module |
+| `import .relative_module` | Relative to script's dir |
+| `import .path.to.module` | Nested relative import |
+| `import alias: .module` | Import with alias |
 
 **Export Declarations:**
 ```lambda
-pub PI = 3.14159                  // Export variable
+pub let PI = 3.14159              // Export variable
 pub fn square(x) => x * x         // Export function
 pub pn log(msg) { print(msg) }    // Export procedure
 pub type Score = int              // Export type alias
 pub type Counter {                // Export object type
-    value: int = 0;
+    value: int = 0,
     fn double() => value * 2
 }
-pub data = input(\"f\") ^ { {} }  // Export, handling err
+pub let data = input("f") ^ { {} }    // Export, handling err
 ```
 
 **Module Usage:**
 ```lambda
 // In math_utils.ls:
-pub PI = 3.14159
-pub type Vec2 { x: float, y: float; fn len() =>
+pub let PI = 3.14159
+pub type Vec2 { x: float, y: float, fn len() =>
     math.sqrt(x**2 + y**2) }
 
 // In main.ls:
@@ -652,18 +727,21 @@ v is Vec2      // true
 ```
 ## Error Handling
 
-**Creating Errors:**
-```lambda
-error("Message")    error("load failed", inner_err)
-error({code: 304, message: "div by zero"})
-```
+Creating Errors:
 
-**Error Return Types (`T^E`):**
-```lambda
-fn parse(s: string) int^ {...}   // int or any error
-fn divide(a, b) int ^ DivErr {...}    // specific error
-fn load(p) Config ^ ParseErr|IOErr {...} // multi errors
-```
+| Form | Meaning |
+|---|---|
+| `error("Message")` | Message only |
+| `error("load failed", inner_err)` | With an inner error |
+| `error({code: 304, message: "div by zero"})` | Structured payload |
+
+Error Return Types (`T^E`):
+
+| Form | Meaning |
+|---|---|
+| `fn parse(s: string) int^ {...}` | int or any error |
+| `fn divide(a, b) int ^ DivErr {...}` | specific error |
+| `fn load(p) Config ^ ParseErr\|IOErr {...}` | multi errors |
 
 **`raise` error , or propagate error with `^`**
 ```lambda
@@ -722,7 +800,7 @@ fn factorial(n: int) int {
 
 **Element Creation:**
 ```lambda
-let article = <article title:"My Article"
+let article = <article title: "My Article",
     <h1 "Introduction">
     <p "Content goes here.">
 >

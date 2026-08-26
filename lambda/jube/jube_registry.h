@@ -2,6 +2,13 @@
 
 #include "jube.h"
 
+typedef struct NodeTraceState NodeTraceState;
+typedef struct JsCjsState JsCjsState;
+typedef struct JsCommonJsCompileCacheState JsCommonJsCompileCacheState;
+typedef struct JsDiagnosticsChannelState JsDiagnosticsChannelState;
+typedef struct JsPermissionPolicy JsPermissionPolicy;
+typedef struct JsCryptoNativeState JsCryptoNativeState;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -60,6 +67,12 @@ uint32_t jube_node_resource_add_with_close(void* session, Item value, const char
 void jube_node_resource_remove_for_session(void* session, uint32_t resource_id);
 void* jube_node_resource_user_data_for_session(void* session, uint32_t resource_id);
 void* jube_node_runtime_current_session(void);
+NodeTraceState* jube_node_trace_state(void* session);
+JsCjsState* jube_node_cjs_state(void* session);
+JsCommonJsCompileCacheState* jube_node_commonjs_compile_cache_state(void* session);
+JsDiagnosticsChannelState* jube_node_diagnostics_channel_state(void* session);
+JsPermissionPolicy* jube_node_permission_policy(void* session);
+JsCryptoNativeState* jube_node_crypto_native_state(void* session);
 int jube_static_module_count(void);
 const JubeModuleDef* jube_static_module_at(int index);
 const JubeModuleDef* jube_find_static_module(const char* name);

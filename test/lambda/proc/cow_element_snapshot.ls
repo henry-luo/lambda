@@ -7,8 +7,8 @@ pn edit_first(var doc: element) {
 
 pn main() {
     var rows = []
-    push(rows, <p revision: 0; "draft">)
-    var doc = <article; rows>
+    push(rows, <p revision: 0, "draft">)
+    var doc = <article rows>
     var snapshot = doc
     edit_first(doc)
     print(snapshot[0][0][0])

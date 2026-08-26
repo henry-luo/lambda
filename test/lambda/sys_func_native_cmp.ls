@@ -10,7 +10,7 @@ fn int_ge(a: int, b: int) { (a >= b) }
 fn int_eq(a: int, b: int) { (a == b) }
 fn int_ne(a: int, b: int) { (a != b) }
 
-"1. Int comparison functions"
+"1. Int comparison functions";
 [
     int_lt(1, 2),   // true
     int_lt(2, 1),   // false
@@ -34,7 +34,7 @@ fn float_ge(a: float, b: float) { (a >= b) }
 fn float_eq(a: float, b: float) { (a == b) }
 fn float_ne(a: float, b: float) { (a != b) }
 
-"2. Float comparison functions"
+"2. Float comparison functions";
 [
     float_lt(1.0, 2.0),   // true
     float_le(2.0, 2.0),   // true
@@ -48,7 +48,7 @@ fn float_ne(a: float, b: float) { (a != b) }
 fn bool_eq(a: bool, b: bool) { (a == b) }
 fn bool_ne(a: bool, b: bool) { (a != b) }
 
-"3. Bool equality (native)"
+"3. Bool equality (native)";
 [
     bool_eq(true, true),    // true
     bool_eq(false, false),  // true
@@ -61,7 +61,7 @@ fn bool_ne(a: bool, b: bool) { (a != b) }
 fn int_float_lt(a: int, b: float) { (a < b) }
 fn float_int_gt(a: float, b: int) { (a > b) }
 
-"4. Mixed int/float comparison (native)"
+"4. Mixed int/float comparison (native)";
 [
     int_float_lt(1, 2.5),   // true
     int_float_lt(3, 2.0),   // false
@@ -73,7 +73,7 @@ fn float_int_gt(a: float, b: int) { (a > b) }
 fn untyped_lt(a, b) { (a < b) }
 fn untyped_eq(a, b) { (a == b) }
 
-"5. Untyped args (runtime fn_*)"
+"5. Untyped args (runtime fn_*)";
 [
     untyped_lt(1, 2),       // true
     untyped_lt("a", "b"),   // true (string comparison)
@@ -85,7 +85,7 @@ fn untyped_eq(a, b) { (a == b) }
 fn mixed_lt(a: int, b) { (a < b) }
 fn mixed_eq(a: int, b) { (a == b) }
 
-"6. Mixed typed/untyped (runtime fn_*)"
+"6. Mixed typed/untyped (runtime fn_*)";
 [
     mixed_lt(1, 2),     // true
     mixed_lt(3, 2),     // false
@@ -98,7 +98,7 @@ fn max_int(a: int, b: int) { if (a > b) a else b }
 fn min_int(a: int, b: int) { if (a < b) a else b }
 fn is_between(x: int, lo: int, hi: int) { (x >= lo) and (x <= hi) }
 
-"7. Comparisons in conditionals"
+"7. Comparisons in conditionals";
 [
     max_int(5, 3),      // 5
     max_int(2, 8),      // 8
@@ -118,7 +118,7 @@ fn sum_range(lo: int, hi: int) {
     if (lo > hi) 0 else lo + sum_range(lo + 1, hi)
 }
 
-"8. Comparisons in recursive functions"
+"8. Comparisons in recursive functions";
 [
     count_down(5),      // 15 (5+4+3+2+1+0)
     sum_range(1, 5)     // 15 (1+2+3+4+5)
@@ -132,7 +132,7 @@ fn classify_int(x: int) {
     else 'large'
 }
 
-"9. Complex expressions with comparisons"
+"9. Complex expressions with comparisons";
 [
     classify_int(-5),   // 'negative'
     classify_int(0),    // 'zero'

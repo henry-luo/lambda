@@ -24,6 +24,9 @@
 #include "../lambda/js/js_xhr.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/edit_bridge.h"
+#include "../lambda/runtime/module_registry.h"
+#include "../lambda/runtime/template_registry.h"
+#include "../lambda/runtime/concurrency.h"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/runtime/render_map.h"
 #include "../lambda/runtime/template_state.h"
@@ -162,6 +165,8 @@ static LruCache* s_script_source_cache = nullptr;
 static JsMirCache* s_js_mir_cache = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
+
+extern "C" bool radiant_eval_context_switch(EvalContext* target);
 
 extern "C" void script_runner_set_retain_js_state(bool retain) {
     s_retain_js_state = retain;
@@ -1624,6 +1629,13 @@ static EvalContext* script_eval_context_prepare(Runtime* runtime) {
     return eval_context;
 }
 
+static bool script_eval_context_activate(Runtime* runtime) {
+    EvalContext* task_context = script_eval_context_prepare(runtime);
+    if (!task_context || !eval_context_init(task_context)) return false;
+    return !task_context->js_state ||
+        js_runtime_state_init(task_context);
+}
+
 static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* preamble,
                                             const char* source, size_t source_len,
                                             const char* filename, bool refresh_snapshot,
@@ -1634,12 +1646,7 @@ static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* p
         source_len = 0;
     }
 
-    EvalContext* task_context = script_eval_context_prepare(runtime);
-    if (!task_context) return ItemError;
-
-    if (!eval_context_thread_initialize(task_context)) return ItemError;
-    if (task_context->js_state &&
-            !js_runtime_state_thread_initialize(task_context)) return ItemError;
+    if (!script_eval_context_activate(runtime)) return ItemError;
     Item result = transpile_js_to_mir_with_preamble_len(runtime, source, source_len, filename,
                                                         preamble, result_home);
     js_mir_accumulate_last_phase_timing(false);
@@ -1647,6 +1654,65 @@ static Item execute_js_source_with_preamble(Runtime* runtime, JsPreambleState* p
     if (refresh_snapshot && get_type_id(result) != LMD_TYPE_ERROR) {
         preamble_state_update_from_eval_snapshot(preamble);
     }
+    return result;
+}
+
+static Item execute_cached_external_classic(Runtime* runtime,
+                                            JsPreambleState* preamble,
+                                            const char* source, size_t source_len,
+                                            const char* filename,
+                                            DocumentScriptPhaseTiming* timing) {
+    if (!runtime || !preamble || !s_js_mir_cache ||
+            !script_eval_context_activate(runtime)) {
+        return ItemError;
+    }
+
+    if (timing) timing->cache_lookups++;
+    const JsPreambleState* cached = js_mir_cache_lookup(
+        s_js_mir_cache, JS_MIR_CACHE_EXTERNAL_CLASSIC,
+        source, source_len, filename, preamble);
+    if (timing) {
+        if (cached) timing->cache_hits++;
+        else timing->cache_misses++;
+    }
+
+    JsPreambleState compiled = {};
+    if (!cached) {
+        Item compile_result = compile_js_mir_with_preamble_len(
+            runtime, source, source_len, filename, preamble, &compiled);
+        js_mir_accumulate_last_phase_timing(false);
+        if (get_type_id(compile_result) == LMD_TYPE_ERROR) {
+            preamble_state_destroy(&compiled);
+            return compile_result;
+        }
+        cached = js_mir_cache_adopt(
+            s_js_mir_cache, JS_MIR_CACHE_EXTERNAL_CLASSIC,
+            source, source_len, filename, preamble, &compiled);
+        if (cached && timing) timing->cache_compiles++;
+        if (!cached) {
+            // Functions materialized by a compiled unit retain its MIR code.
+            // If cache ownership cannot be established, use the normal path
+            // whose deferred-MIR teardown already follows document lifetime.
+            preamble_state_destroy(&compiled);
+            uint64_t result_home = 0;
+            return execute_js_source_with_preamble(
+                runtime, preamble, source, source_len, filename,
+                true, &result_home);
+        }
+    }
+
+    Item result = execute_compiled_js_in_current_realm(
+        runtime, preamble, cached, true);
+    js_mir_cache_record_instantiation(s_js_mir_cache);
+    if (timing) timing->cache_instantiations++;
+    js_mir_accumulate_last_phase_timing(false);
+    if (get_type_id(result) != LMD_TYPE_ERROR &&
+            !preamble_state_update_from_compiled(preamble, cached)) {
+        log_error("script-cache-external: failed to publish declaration snapshot for %s",
+                  filename ? filename : "<external-script>");
+        result = ItemError;
+    }
+    preamble_state_destroy(&compiled);
     return result;
 }
 
@@ -1659,12 +1725,7 @@ static Item execute_js_module_source(Runtime* runtime, const char* source, size_
     }
     (void)source_len;
 
-    EvalContext* task_context = script_eval_context_prepare(runtime);
-    if (!task_context) return ItemError;
-
-    if (!eval_context_thread_initialize(task_context)) return ItemError;
-    if (task_context->js_state &&
-            !js_runtime_state_thread_initialize(task_context)) return ItemError;
+    if (!script_eval_context_activate(runtime)) return ItemError;
     Item result = transpile_js_module_to_mir(runtime, source, filename);
     js_mir_accumulate_last_phase_timing(false);
 
@@ -1802,7 +1863,8 @@ static bool script_scheduler_enqueue(JsScriptTaskCollection* collection,
 static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
                                       JsPreambleState* preamble,
                                       const char* phase_name,
-                                      JsScriptTaskCollection* collection) {
+                                      JsScriptTaskCollection* collection,
+                                      DocumentScriptPhaseTiming* timing) {
     bool fatal_error = false;
     if (!queue) return true;
     size_t accepted_source_bytes = 0;
@@ -1858,10 +1920,18 @@ static bool execute_script_task_queue(Runtime* runtime, ArrayList* queue,
         long task_start_us = timing_enabled ? script_runner_wall_now_us() : 0;
 #endif
         uint64_t result_home = 0;
-        Item result = task->kind == JS_SCRIPT_TASK_MODULE
-            ? execute_js_module_source(runtime, source, task->source_len, filename)
-            : execute_js_source_with_preamble(runtime, preamble, source,
-                                             task->source_len, filename, true, &result_home);
+        Item result;
+        if (task->kind == JS_SCRIPT_TASK_MODULE) {
+            result = execute_js_module_source(
+                runtime, source, task->source_len, filename);
+        } else if (task->external && s_js_mir_cache && !s_retain_js_state) {
+            result = execute_cached_external_classic(
+                runtime, preamble, source, task->source_len, filename, timing);
+        } else {
+            result = execute_js_source_with_preamble(
+                runtime, preamble, source, task->source_len, filename,
+                true, &result_home);
+        }
 #ifndef NDEBUG
         if (timing_enabled) {
             long task_wall_us = script_runner_wall_now_us() - task_start_us;
@@ -2099,7 +2169,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     if (timing) timing->scheduler_us += time_now_us() - phase_start_us;
 
     phase_start_us = timing ? time_now_us() : 0;
-    if (!execute_script_task_queue(runtime, queues.post_dom, preamble, "post-dom", collection)) {
+    if (!execute_script_task_queue(
+            runtime, queues.post_dom, preamble, "post-dom", collection, timing)) {
         any_error = true;
     }
     if (timing) timing->user_scripts_us += time_now_us() - phase_start_us;
@@ -2114,7 +2185,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     if (timing) timing->interactive_us += time_now_us() - phase_start_us;
 
     phase_start_us = timing ? time_now_us() : 0;
-    if (!execute_script_task_queue(runtime, queues.defer, preamble, "defer", collection)) {
+    if (!execute_script_task_queue(
+            runtime, queues.defer, preamble, "defer", collection, timing)) {
         any_error = true;
     }
     if (timing) timing->user_scripts_us += time_now_us() - phase_start_us;
@@ -2130,7 +2202,8 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     // Async classics do not block DOMContentLoaded in Radiant's post-DOM
     // model, but ready async tasks still run before the window load boundary.
     phase_start_us = timing ? time_now_us() : 0;
-    if (!execute_script_task_queue(runtime, queues.async_ready, preamble, "async-ready", collection)) {
+    if (!execute_script_task_queue(
+            runtime, queues.async_ready, preamble, "async-ready", collection, timing)) {
         any_error = true;
     }
     if (timing) timing->async_scripts_us += time_now_us() - phase_start_us;
@@ -2240,6 +2313,13 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         script_runner_cleanup_source_cache();
         return;
     }
+    // Initialize it as a real Runtime. It was previously left as bare zeroed
+    // memory, which silently disabled everything keyed off the script list:
+    // registration no-opped (so every Lambda module loaded into this document
+    // kept module_state_id 0 and collided on one module-state slab, ESO34),
+    // path dedup never hit, and nothing owned the Scripts to free them.
+    // runtime_init memsets, so it must run before the fields set below.
+    runtime_init(runtime);
     runtime->dom_doc = (void*)dom_doc;
     runtime->dom_ui_context = dom_doc->js.host_ui_context;
     Context* saved_input_context = input_context;
@@ -2250,14 +2330,16 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         script_runner_cleanup_source_cache();
         return;
     }
-    // The document owns this eval thread from initialization until document
-    // teardown; an ambient live context cannot be saved and restored here.
-    if (!eval_context_thread_initialize(document_context) ||
-            !js_runtime_state_thread_initialize(document_context)) {
+    // EO5v2: this document — a top-level page or an iframe's — manages its own
+    // Runtime and EvalContext, and takes the thread for its script execution.
+    // Script setup is a quiescent point, so the binding switches here rather
+    // than being refused; nothing is saved for later restore.
+    if (!radiant_eval_context_switch(document_context) ||
+            !js_runtime_state_init(document_context)) {
         if (runtime->eval_context) {
             js_runtime_state_destroy_context();
-            if (eval_context_thread_matches(runtime->eval_context)) {
-                eval_context_thread_shutdown(runtime->eval_context);
+            if (eval_context_matches(runtime->eval_context)) {
+                eval_context_shutdown(runtime->eval_context);
             }
             mem_free(runtime->eval_context);
             runtime->eval_context = nullptr;
@@ -2394,7 +2476,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // Keep the document's canonical context current through its initial task
     // drain.  Promise and timer callbacks allocate and must never observe the
     // caller's restored (or null) context.
-    if (!eval_context_thread_matches(document_context) ||
+    if (!eval_context_matches(document_context) ||
             !js_runtime_state_thread_matches(document_context)) {
         log_error("execute_document_scripts: eval-thread owner changed during execution");
         result = ItemError;
@@ -2437,6 +2519,9 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         dom_doc->js.preamble_state = preamble;
         dom_doc->js.mir_ctx = preamble->mir_ctx;
         dom_doc->js.runtime = runtime;
+        // the preamble installed document/window bindings: this document now
+        // owns a real DOM script realm, which routing gates test explicitly.
+        dom_doc->js_has_dom_realm = true;
         if (s_retain_js_state) {
             log_info("execute_document_scripts: retained MIR context for event handlers");
             // Do NOT destroy heap/pool — they're retained on the document
@@ -2703,9 +2788,9 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     handler_compile_ctx->name_pool = runtime->name_pool;
     handler_compile_ctx->type_list = runtime->type_list;
     handler_compile_ctx->pool = runtime->heap->pool;
-    if (!eval_context_thread_initialize(handler_compile_ctx) ||
+    if (!eval_context_init(handler_compile_ctx) ||
             (handler_compile_ctx->js_state &&
-             !js_runtime_state_thread_initialize(handler_compile_ctx))) {
+             !js_runtime_state_init(handler_compile_ctx))) {
         strbuf_free(compile_buf);
         hashmap_free(handlers->element_map);
         mem_pool_destroy(handlers_pool);
@@ -2780,6 +2865,10 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
 extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (!dom_doc) return;
 
+    // the realm dies with the state torn down below; clear before any early
+    // return so a partially cleaned document never reports a live realm.
+    dom_doc->js_has_dom_realm = false;
+
     // Destroy retained MIR context via preamble_state_destroy
     if (dom_doc->js.preamble_state) {
         JsPreambleState* preamble = (JsPreambleState*)dom_doc->js.preamble_state;
@@ -2792,12 +2881,12 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     if (!runtime) return;
 
     EvalContext* owner = runtime->eval_context;
-    if (owner && !eval_context_thread_initialize(owner)) {
+    if (owner && !eval_context_init(owner)) {
         log_error("script-runner-cleanup: document owner is not current");
         return;
     }
     if (owner && owner->js_state &&
-            !js_runtime_state_thread_initialize(owner)) return;
+            !js_runtime_state_init(owner)) return;
 
     // The document runtime can have queued callback roots even when the
     // caller did not reach the normal loader teardown path.
@@ -2817,6 +2906,13 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     tmpl_state_destroy();
     lambda_module_state_destroy();
 
+    // A Lambda module loaded into this runtime (the dom package) registers a
+    // descriptor whose namespace is an Item in the heap below, so the registry
+    // has to be dropped while that heap is still alive — the same order
+    // runtime_cleanup uses. Nothing registered here before the package could
+    // load into a JS document's runtime.
+    module_registry_cleanup_for_runtime(runtime);
+
     // Destroy retained heap and GC metadata.
     if (runtime->heap) {
         Heap* heap = runtime->heap;
@@ -2835,10 +2931,31 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     }
 
     runtime->name_pool = nullptr;
+    // Lambda modules can be loaded into this runtime (the dom package), and
+    // this teardown is hand-rolled rather than runtime_cleanup, so the pieces
+    // that running Lambda code establishes have to be released here too: the
+    // signal-handler alt stack (64KB, installed on first Lambda execution) and
+    // the Scripts this runtime owns, which nothing else would free.
+    lambda_stack_cleanup();
+    // Running Lambda in this runtime can stand up the task scheduler, which
+    // runtime_cleanup would own but this hand-rolled teardown otherwise leaks.
+    if (runtime->scheduler) {
+        lambda_scheduler_destroy(runtime->scheduler);
+        runtime->scheduler = nullptr;
+    }
+    runtime_free_all_scripts(runtime);
+    // The dom package registers its behavior templates in the EvalContext's
+    // registry (g_template_registry resolves to context->template_registry),
+    // which nothing else owns once this context retires.
+    if (runtime->eval_context) {
+        TemplateRegistry* doc_templates = runtime->eval_context->template_registry;
+        runtime->eval_context->template_registry = nullptr;
+        template_registry_destroy(doc_templates);
+    }
     if (runtime->eval_context) {
         EvalContext* retiring_context = runtime->eval_context;
         js_runtime_state_destroy_context();
-        if (!eval_context_thread_shutdown(retiring_context)) return;
+        if (!eval_context_shutdown(retiring_context)) return;
         mem_free(retiring_context);
         runtime->eval_context = nullptr;
     }

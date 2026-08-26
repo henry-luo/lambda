@@ -7,7 +7,7 @@ fn sum8(a: int, b: int, c: int, d: int, e: int, f: int, g: int, h: int) int {
 }
 
 let dynamic_sum4 = sum4
-let dynamic_sum8 = sum8
+let dynamic_sum8 = sum8;
 
 [
     dynamic_sum4(1, 2, 3, 4),

@@ -12,7 +12,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
     if (!run || !dl || !run->text) return;
 
     FontBox* font = (FontBox*)run->font;
-    FontHandle* font_handle = font ? font->font_handle : nullptr;
+    FontHandle* font_handle = font ? font_box_handle(font) : nullptr;
     FontProp* style = font ? font->style : nullptr;
     FontStyleDesc style_desc = {};
     if (style) {

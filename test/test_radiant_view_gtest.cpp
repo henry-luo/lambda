@@ -333,6 +333,7 @@ TEST(RadiantViewTest, PromotesCachedPngDecodeFromThumbnailToFullSize) {
 TEST(RadiantViewTest, JsMirCacheKeepsFreshDocumentRealms) {
     ASSERT_TRUE(test_radiant_view_file_readable("test/html/js_cache_realm_mutate.html"));
     ASSERT_TRUE(test_radiant_view_file_readable("test/html/js_cache_realm_verify.html"));
+    ASSERT_TRUE(test_radiant_view_file_readable("test/html/js_cache_external_classic.js"));
     test_radiant_view_ensure_temp_dir();
 
     const char* output_dir = "./temp/test_js_mir_cache_realm";
@@ -364,16 +365,54 @@ TEST(RadiantViewTest, JsMirCacheKeepsFreshDocumentRealms) {
         ? strstr(shell_result.stdout_buf, "pool_free: pointer") : nullptr);
     shell_result_free(&shell_result);
 
-    // Only the reusable preamble is shared now; lifecycle tasks execute in
-    // each fresh document realm while window values and prototypes stay local.
+    // The preamble and external code are shared while globals, prototypes,
+    // declarations, lifecycle tasks, and DOM bindings remain document-local.
     EXPECT_TRUE(test_radiant_view_file_contains(
         result_path, "js-cache-realm-isolated|dom|load"));
     EXPECT_FALSE(test_radiant_view_file_contains(
         result_path, "js-cache-realm-leaked"));
     EXPECT_TRUE(test_radiant_view_file_contains(
-        timing_path, "\"script_cache_hits\":1"));
+        timing_path, "\"script_cache_hits\":2"));
     EXPECT_TRUE(test_radiant_view_file_contains(
         timing_path, "\"script_cache_compiles\":0"));
+}
+
+TEST(RadiantViewTest, BatchDocumentFontFaceOverridesSystemCache) {
+    const char* system_font_page =
+        "test/layout/data/baseline/fixed-table-layout-001.htm";
+    const char* document_font_page =
+        "test/layout/data/baseline/grid_span_2_max_content_max_content_indefinite.html";
+    ASSERT_TRUE(test_radiant_view_file_readable(system_font_page));
+    ASSERT_TRUE(test_radiant_view_file_readable(document_font_page));
+    test_radiant_view_ensure_temp_dir();
+
+    const char* output_dir = "./temp/test_document_font_cache";
+#ifdef _WIN32
+    _mkdir(output_dir);
+#else
+    mkdir(output_dir, 0755);
+#endif
+    const char* result_path =
+        "./temp/test_document_font_cache/baseline__grid_span_2_max_content_max_content_indefinite.json";
+    const char* args[] = {
+        "./lambda.exe", "layout", system_font_page, document_font_page,
+        "--output-dir", output_dir,
+        "--font-dir", "test/layout/data/font",
+        "--auto-close", "--no-log", NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+
+    // The second document's embedded Ahem must replace the earlier installed
+    // face, keeping the zero-width-space text on one 80px line.
+    EXPECT_TRUE(test_radiant_view_file_contains(
+        result_path, "\"content\": \"HHHH\xE2\x80\x8B" "HHHH\""));
+    EXPECT_FALSE(test_radiant_view_file_contains(
+        result_path, "\"content\": \"HHHH\""));
 }
 
 struct RadiantViewWorkQueue {

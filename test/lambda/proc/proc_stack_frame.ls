@@ -53,7 +53,7 @@ pn main() {
     var ufailure = null
     maybe_uwide(false) ^ { ufailure = ^ }
     let ufailed = null
-    let handle = start delayed_wide()
+    let handle = start(delayed_wide)
     let across_wait = [wide(), wait(handle)^, reader()]
     let scalar_map = make_scalar_map()
 

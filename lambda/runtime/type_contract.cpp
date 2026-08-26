@@ -93,7 +93,6 @@ static LambdaWideResultProof wide_result_proof_inner(const Type* type,
     // D2.2.2's packed int and pointer-backed values are wide-free. Only the
     // out-of-band scalar family can carry a companion payload (D2.2.3).
     if (type->type_id == LMD_TYPE_FLOAT ||
-            type->type_id == LMD_TYPE_FLOAT64 ||
             type->type_id == LMD_TYPE_INT64 ||
             type->type_id == LMD_TYPE_UINT64) {
         return LAMBDA_WIDE_RESULT_CAPABLE;
@@ -108,7 +107,7 @@ LambdaWideResultProof lambda_type_wide_result_proof(const Type* type) {
 LambdaWideResultProof lambda_type_wide_result_proof(TypeId type_id) {
     if (type_id == LMD_TYPE_ANY || type_id == LMD_TYPE_TYPE)
         return LAMBDA_WIDE_RESULT_UNKNOWN;
-    if (type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64 ||
+    if (type_id == LMD_TYPE_FLOAT ||
             type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64) {
         return LAMBDA_WIDE_RESULT_CAPABLE;
     }
@@ -273,14 +272,23 @@ static void lambda_type_format_name_inner(const Type* type, char* buffer,
     }
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
         const TypeBinary* binary = (const TypeBinary*)type;
-        if (binary->op == OPERATOR_UNION) {
+        // All three set operators render in their source spelling. Only `|` did
+        // before, so an `int & string` contract printed as the bare word "type"
+        // and the diagnostic named neither the operator nor the operands
+        // (LR02-9). `OPERATOR_OR` is the historical spelling of a type-level
+        // `&` and renders the same way.
+        const char* spelling =
+            binary->op == OPERATOR_UNION ? " | " :
+            (binary->op == OPERATOR_INTERSECT || binary->op == OPERATOR_OR) ? " & " :
+            binary->op == OPERATOR_EXCLUDE ? " ! " : NULL;
+        if (spelling) {
             char left_name[128];
             char right_name[128];
             lambda_type_format_name_inner(binary->left, left_name,
                 sizeof(left_name), depth + 1);
             lambda_type_format_name_inner(binary->right, right_name,
                 sizeof(right_name), depth + 1);
-            snprintf(buffer, capacity, "%s | %s", left_name, right_name);
+            snprintf(buffer, capacity, "%s%s%s", left_name, spelling, right_name);
             return;
         }
     }
@@ -418,7 +426,6 @@ bool lambda_type_lane_storage_desc(Type* type, LaneStorageDesc* out) {
         desc.byte_size = (uint8_t)sizeof(uint8_t);
         break;
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
         desc.kind = LANE_STORAGE_FLOAT64;
         desc.byte_size = (uint8_t)sizeof(double);
         break;

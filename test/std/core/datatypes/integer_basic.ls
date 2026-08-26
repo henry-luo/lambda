@@ -2,9 +2,9 @@
 // Layer: 3 | Category: datatype | Covers: int literal, arithmetic, type
 
 0
-1
+1;
 -1
-42
+42;
 -999
 3 + 4
 10 - 3

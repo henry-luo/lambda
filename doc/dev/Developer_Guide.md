@@ -79,7 +79,7 @@ These libraries and tools are required on every platform.
 | Library | Source | Purpose |
 |---------|--------|---------|
 | **tree-sitter** | Built from `lambda/tree-sitter/` | Incremental parser framework. Built using the **amalgamated `lib.c`** approach — compiles to a single object file with **no ICU/Unicode library dependency**. |
-| **tree-sitter-lambda** | Built from `lambda/tree-sitter-lambda/` | Lambda language grammar parser |
+| **tree-sitter-lambda** | Built from `lambda/tree-sitter-lambda/` | Optional Lambda reference grammar for the `lambda-cst` differential verifier |
 | **tree-sitter-javascript** | Built from `lambda/tree-sitter-javascript/` | JavaScript/JSX input parsing |
 | **tree-sitter-latex** | Built from `lambda/tree-sitter-latex/` | LaTeX document parsing |
 | **tree-sitter-latex-math** | Built from `lambda/tree-sitter-latex-math/` | LaTeX math expression parsing |
@@ -298,29 +298,23 @@ The Lambda language grammar is defined in Tree-sitter and drives the entire pars
 ```
 grammar.js  ──→  tree-sitter generate  ──→  parser.c + grammar.json + node-types.json
                                                   │
-                                        utils/update_ts_enum.sh
-                                                  │
                                                   ▼
-                                            ts-enum.h  (enum sym_*/field_* identifiers)
-                                                  │
-                                                  ▼
-                                build_ast.cpp  (matches CST nodes → typed AST)
-                                                  │
-                                                  ▼
-                              transpile-mir.cpp  (code generation)
+                                  lambda-cst differential verifier
 ```
 
-The Makefile tracks this entire chain automatically. When `grammar.js` changes, `make` triggers `tree-sitter generate` → `update_ts_enum.sh` → recompile dependent sources.
+The Makefile tracks this reference-grammar chain automatically. The normal
+Lambda compiler uses the C recursive-descent/Pratt parser and direct AST sink;
+the generated Lambda CST is built only for `lambda-cst` verification.
 
 ### Key Files
 
 | File | Role |
 |------|------|
 | `lambda/tree-sitter-lambda/grammar.js` | **Source of truth** — the Lambda grammar definition |
-| `lambda/tree-sitter-lambda/src/parser.c` | Auto-generated parser (NEVER edit manually) |
-| `lambda/ts-enum.h` | Auto-generated enum mapping of grammar symbols (NEVER edit) |
-| `utils/update_ts_enum.sh` | Script that extracts enums from `parser.c` → `ts-enum.h` |
-| `lambda/build_ast.cpp` | Consumes CST using `sym_*` enums, builds typed AST |
+| `lambda/tree-sitter-lambda/src/parser.c` | Auto-generated reference parser (NEVER edit manually) |
+| `test/lambda_parser_poc_diff.c` | Isolated Tree-sitter/C parser differential verifier |
+| `lambda/runtime/parser/lambda_parser.c` | Production recursive-descent/Pratt parser |
+| `lambda/runtime/build_ast.cpp` | Direct span-based AST sink and semantic construction |
 
 ### How to Modify the Grammar
 
@@ -330,14 +324,12 @@ The Makefile tracks this entire chain automatically. When `grammar.js` changes, 
    ```bash
    make generate-grammar
    ```
-   This runs `npx tree-sitter-cli@0.24.7 generate` inside `lambda/tree-sitter-lambda/` and then runs `update_ts_enum.sh` to update `ts-enum.h`.
+   This runs the pinned Tree-sitter CLI inside `lambda/tree-sitter-lambda/` to regenerate the reference parser artifacts.
 
-3. **Update AST builder** — in `lambda/build_ast.cpp`, handle the new node types using the auto-generated `sym_*` enum values from `ts-enum.h`:
-   ```cpp
-   case sym_my_new_node:
-       // build AST node for the new grammar rule
-       break;
-   ```
+3. **Update the differential verifier** if the grammar change affects the
+   reference parser's acceptance or CST shape. Production syntax changes are
+   implemented in `lambda/runtime/parser/lambda_parser.c` and semantic AST
+   changes in `lambda/runtime/build_ast.cpp`.
 
 4. **Update the transpiler** — add MIR generation in `lambda/transpile-mir.cpp` for the new AST node. The former C2MIR source generator was removed and is not an implementation target.
 
@@ -347,7 +339,8 @@ The Makefile tracks this entire chain automatically. When `grammar.js` changes, 
    make test-lambda-baseline    # Must pass 100%
    ```
 
-> **Important**: Never edit `parser.c` or `ts-enum.h` manually. They are fully auto-generated. The Makefile dependency tracking ensures they stay in sync with `grammar.js`.
+> **Important**: Never edit generated `parser.c`, `grammar.json`, or
+> `node-types.json` manually. They are regenerated from `grammar.js`.
 
 ### Grammar Structure
 
@@ -357,15 +350,6 @@ The grammar (`grammar.js`) defines:
 - **Binary operators**: arithmetic (`+`, `-`, `*`, `/`, `div`, `%`, `^`), comparison (`==`, `!=`, `<`, `<=`, `>=`, `>`), logical (`and`, `or`), pipe (`|>`), range (`to`), set operations (`|`, `&`, `!`), type (`is`, `in`), filter (`that`)
 - **Type expressions**: union (`|`), intersection (`&`), exclusion (`!`)
 - **Attribute context handling**: relational operators excluded when inside element tags to avoid ambiguity
-
-### The `ts-enum.h` Enum
-
-Generated by `utils/update_ts_enum.sh`, this header contains two enums extracted from `parser.c`:
-
-- **`enum ts_symbol_identifiers`**: Maps grammar symbols to integer IDs (e.g., `sym_identifier = 1`, `sym_string = 5`, `anon_sym_PLUS = 31`)
-- **`enum ts_field_identifiers`**: Maps field names to IDs
-
-These enums are the bridge between the Tree-sitter parse tree and the Lambda compiler's AST builder.
 
 ### Additional Grammars
 

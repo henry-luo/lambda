@@ -201,7 +201,7 @@ fn forward_concat(a: string, b: string) string => a ++ b
 fn forward_negate(x: bool) bool => not x
 
 // Mixed: call forward-ref in expression
-10 + forward_add_int(3, 4)       // 17
+10 + forward_add_int(3, 4); // 17
 
 // Forward-ref call inside collection
 [forward_add_int(1, 2), forward_add_int(3, 4), forward_add_int(5, 6)]  // [3, 7, 11]

@@ -24,8 +24,8 @@ len(m[bool])           // 1
 
 // === 4. Element child query ===
 "--- element child query ---"
-let el = <div class: "main";
-    <p; "hello">
+let el = <div class: "main",
+    <p "hello">
     <img src: "photo.jpg">
     "some text">
 
@@ -42,11 +42,11 @@ len(el[img_t])         // 1
 
 // === 6. Child query does NOT recurse ===
 "--- no recursion ---"
-let deep = <div;
-    <div id: "inner";
-        <p; "deep text">
+let deep = <div
+    <div id: "inner",
+        <p "deep text">
     >
-    <span; "shallow">
+    <span "shallow">
 >
 
 type div_t = <div>
@@ -61,11 +61,11 @@ len(deep[div_t][p])    // 1 — finds <p> inside inner div via chaining
 
 // === 8. Mixed child + recursive query ===
 "--- mixed child + recursive ---"
-let html = <html;
-    <head; <title; "Page">>
-    <body;
-        <div; <p; "text1"> <p; "text2">>
-        <div; <p; "text3">>
+let html = <html
+    <head <title "Page">>
+    <body
+        <div <p "text1"> <p "text2">>
+        <div <p "text3">>
     >
 >
 type body = <body>

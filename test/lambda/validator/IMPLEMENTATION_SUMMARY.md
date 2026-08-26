@@ -27,7 +27,7 @@ Successfully implemented comprehensive structured testing for the Lambda validat
 ### 1. C Test Suite (`test/test_validator.c`)
 - **Comprehensive Testing**: Covers all type definitions from validator.md
 - **Memory Management**: Uses Lambda's VariableMemPool API correctly
-- **Schema Parsing Tests**: Verifies Tree-sitter grammar integration
+- **Schema Parsing Tests**: Verifies production C parser integration
 - **Validation Tests**: End-to-end validation with JIT compilation
 - **Error Handling**: Tests both success and failure scenarios
 - **Modular Design**: Each type category tested individually
@@ -49,8 +49,8 @@ Successfully implemented comprehensive structured testing for the Lambda validat
 ## 🏗️ Architecture Alignment
 
 ### Matches validator.md Implementation
-- ✅ **Tree-sitter Integration**: Tests all 50+ symbols from `ts-enum.h`
-- ✅ **Field ID Usage**: Tests field-based AST navigation
+- ✅ **AST Validation Coverage**: Tests validation and type-construction paths
+- ✅ **AST Construction**: Tests direct span-based AST construction and navigation
 - ✅ **Memory Pool API**: Uses `pool_variable_init()` and `pool_variable_destroy()`
 - ✅ **CLI Integration**: Tests `lambda validate` subcommand
 - ✅ **JIT Compilation**: Tests with actual Lambda script execution
@@ -58,16 +58,16 @@ Successfully implemented comprehensive structured testing for the Lambda validat
 - ✅ **Validation Engine**: Tests `validator.c` type checking
 
 ### Type Coverage Matrix
-| Type System Feature | Tree-sitter Symbol | Test Coverage | Status |
+| Type System Feature | AST Construct | Test Coverage | Status |
 |---------------------|-------------------|---------------|---------|
-| Primitive Types | `anon_sym_int`, `sym_integer`, etc. | ✅ Complete | Working |
-| Union Types | `sym_binary_type`, `field_left/right` | ✅ Complete | Working |
-| Array Types | `sym_array_type`, `field_type` | ✅ Complete | Working |
-| Map Types | `sym_map_type` | ✅ Complete | Working |
-| Element Types | `sym_element_type`, `field_name` | ✅ Complete | Working |
-| Occurrence Types | `sym_type_occurrence` | ✅ Complete | Working |
-| Reference Types | `sym_identifier` | ✅ Complete | Working |
-| Function Types | `sym_fn_type` | ✅ Complete | Working |
+| Primitive Types | Direct type-pattern reductions | ✅ Complete | Working |
+| Union Types | Union type construction | ✅ Complete | Working |
+| Array Types | Array type construction | ✅ Complete | Working |
+| Map Types | Map type construction | ✅ Complete | Working |
+| Element Types | Element type construction | ✅ Complete | Working |
+| Occurrence Types | Occurrence type construction | ✅ Complete | Working |
+| Reference Types | Identifier/type-reference resolution | ✅ Complete | Working |
+| Function Types | Function type construction | ✅ Complete | Working |
 
 ## 🎉 Test Results
 
@@ -97,7 +97,7 @@ Success Rate: 100.0%
 
 ### Key Validation Evidence
 1. **Schema Parsing Working**: All `.ls` schema files parsed successfully
-2. **Tree-sitter Integration**: Debug output shows symbol recognition working
+2. **Direct Parser Integration**: Production parser output reaches the validator
 3. **JIT Compilation**: Lambda scripts compile and execute correctly
 4. **Type System**: Validator correctly identifies and validates different types
 5. **CLI Integration**: `lambda validate` command working as specified
@@ -106,15 +106,15 @@ Success Rate: 100.0%
 ## 🔍 Technical Insights
 
 ### What the Tests Revealed
-1. **Enhanced Grammar Integration**: 50+ Tree-sitter symbols actively used
-2. **Field ID Navigation**: 19 field IDs leveraged for precise AST parsing
+1. **Direct AST Integration**: Type-pattern reductions reach the validator
+2. **Source-Span Navigation**: AST nodes retain precise source locations
 3. **Schema Parser Fixes**: Recent bug fixes in `schema_parser.c` working correctly
 4. **Memory Pool Integration**: VariableMemPool API usage correct
 5. **JIT Integration**: Seamless integration with Lambda's compilation pipeline
 
 ### Validation Workflow Confirmed
 ```
-Lambda Schema (.ls) → Tree-sitter Parser → TypeSchema Registry
+Lambda Schema (.ls) → C Parser → Typed AST → TypeSchema Registry
                                 ↓
 Lambda Data (.ls) → JIT Compiler → Item → Validator → ValidationResult
 ```
@@ -158,7 +158,7 @@ make lambda
 
 The structured testing implementation successfully validates the Lambda validator against all criteria specified in `validator.md`. The test suite provides comprehensive coverage of:
 
-- **All Tree-sitter symbols and field IDs**
+- **All Lambda type constructs and source-aware diagnostics**
 - **All Lambda type constructs** 
 - **Complete CLI integration**
 - **Memory pool management**

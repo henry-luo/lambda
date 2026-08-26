@@ -35,7 +35,7 @@ len(arr)
 arr |> ~ * 2
 
 // filter sized array
-arr that ~ == 30
+arr that ~ == 30;
 
 // concatenation
 [1i8, 2i8] ++ [3i8, 4i8]
@@ -49,10 +49,10 @@ m.x + m.y
 
 // ===== Sized types as element content =====
 "=== element content ==="
-let e1 = <data; 42i8>
+let e1 = <data 42i8>
 e1[0]
 
-let e2 = <values; [1i8, 2i8, 3i8]>
+let e2 = <values [1i8, 2i8, 3i8]>
 len(e2[0])
 e2[0][0]
 e2[0][1]

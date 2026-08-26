@@ -13,7 +13,7 @@ fn test_float_err() {
     if (val is error) 99 else val
 }
 
-"1. float^"
+"1. float^";
 [test_float_ok1(), test_float_ok2(), test_float_err()]
 
 // Section 2: string^ return type
@@ -29,7 +29,7 @@ fn test_str_err() {
     if (val is error) 99 else len(val)
 }
 
-"2. string^"
+"2. string^";
 [test_str_ok1(), test_str_ok2(), test_str_err()]
 
 // Section 3: bool^ return type
@@ -45,7 +45,7 @@ fn test_bool_err() {
     if (val is error) 99 else val
 }
 
-"3. bool^"
+"3. bool^";
 [test_bool_ok1(), test_bool_ok2(), test_bool_err()]
 
 // Section 4: int^ return type
@@ -61,7 +61,7 @@ fn test_int_err() {
     if (val is error) 99 else val
 }
 
-"4. int^"
+"4. int^";
 [test_int_ok1(), test_int_ok2(), test_int_err()]
 
 // Section 5: Chained error propagation
@@ -76,7 +76,7 @@ fn test_chain_err() {
     if (val is error) 99 else val
 }
 
-"5. chained"
+"5. chained";
 [test_chain_ok(), test_chain_err()]
 
 // Section 6: handler-preserved error values
@@ -93,7 +93,7 @@ fn check_pair(a: int, b: int) {
     else x + y
 }
 
-"6. handler-preserved error"
+"6. handler-preserved error";
 [check_pair(3, 4), check_pair(0, 4), check_pair(3, 0)]
 
 // Section 7: or-default pattern
@@ -107,5 +107,5 @@ fn with_default(x: int) {
     val or 0
 }
 
-"7. or-default"
+"7. or-default";
 [with_default(5), with_default(0 - 1)]

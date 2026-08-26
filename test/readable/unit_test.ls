@@ -3,7 +3,7 @@
 //
 // Run: ./lambda.exe test/readable/unit_test.ls
 
-import readability: .utils.readability;
+import readability: .utils.readability,
 
 // ============================================
 // Test HTML Samples (using string concatenation for multi-line)

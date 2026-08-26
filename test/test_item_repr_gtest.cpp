@@ -119,10 +119,10 @@ protected:
         ASSERT_NE(input.type_list, nullptr);
         eval.pool = pool;
         eval.type_list = input.type_list;
-        ASSERT_TRUE(eval_context_thread_initialize(&eval));
+        ASSERT_TRUE(eval_context_init(&eval));
         heap_init();
         ASSERT_NE(eval.heap, nullptr);
-        ASSERT_TRUE(js_runtime_state_thread_initialize(&eval));
+        ASSERT_TRUE(js_runtime_state_init(&eval));
         lambda_stack_init();
         eval.stack_limit = _lambda_stack_limit;
         ASSERT_TRUE(lambda_side_stack_bind());
@@ -146,7 +146,7 @@ protected:
             heap_destroy();
             eval.heap = nullptr;
         }
-        EXPECT_TRUE(eval_context_thread_shutdown(&eval));
+        EXPECT_TRUE(eval_context_shutdown(&eval));
         arraylist_free(input.type_list);
         input.type_list = nullptr;
         pool_destroy(pool);
@@ -1060,7 +1060,11 @@ TEST(ItemRepresentation, MirMemberAccessUsesPackedFieldWithoutReconstruction) {
         {NULL, NULL},
     };
     const char* args[] = {
-        "./lambda.exe", "test/lambda/item_repr_container_member_load.ls", NULL,
+        // This test asserts the SHAPE of emitted MIR, so it must pin the JIT
+        // tier: under the default LAMBDA_TIER_AUTO an eligible script is
+        // planned for the T0 interpreter and no MIR is emitted at all.
+        "./lambda.exe", "--tier=jit",
+        "test/lambda/item_repr_container_member_load.ls", NULL,
     };
     ShellOptions options = {0};
     options.env = env;

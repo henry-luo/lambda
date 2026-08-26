@@ -6,23 +6,23 @@
 // VECTORIZED ORDERING COMPARISONS → bool mask
 // ============================================================
 '=== comparison vs scalar ==='
-let a = [1, -2, 3, -4, 5]
-(a gt 0)                        // [true, false, true, false, true]
-(a lt 0)                        // [false, true, false, true, false]
-(a ge 3)                        // [false, false, true, false, true]
+let a = [1, -2, 3, -4, 5];
+(a gt 0); // [true, false, true, false, true]
+(a lt 0); // [false, true, false, true, false]
+(a ge 3); // [false, false, true, false, true]
 (a le -2)                       // [false, true, false, true, false]
 
 '=== comparison vs array (broadcast) ==='
-let b = [2, 2, 2, 2, 2]
-(a gt b)                        // [false, false, true, false, true]
+let b = [2, 2, 2, 2, 2];
+(a gt b); // [false, false, true, false, true]
 (a le b)                        // [true, true, false, true, false]
 
 '=== 2-D comparison ==='
-let m = [[1, 5], [3, 2]]
+let m = [[1, 5], [3, 2]];
 (m gt 2)                        // [[false, true], [true, false]]
 
 '=== float ==='
-let f = [1.5, 2.5, 0.5]
+let f = [1.5, 2.5, 0.5];
 (f ge 1.0)                      // [true, true, false]
 
 // ============================================================

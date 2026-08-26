@@ -1,6 +1,6 @@
 // pn mutation methods
 type Counter {
-    count: int = 0;
+    count: int = 0,
     pn increment() {
         count = count + 1
     }
@@ -14,7 +14,7 @@ type Counter {
 
 type Rect {
     width: float,
-    height: float;
+    height: float,
     pn scale(factor: float) {
         width = width * factor
         height = height * factor

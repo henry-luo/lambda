@@ -10,17 +10,17 @@ len(data?float)        // 3 (int is subtype of float, finds 1, 2, 3.14)
 // === 2. Self-inclusive .? vs non-inclusive ? on scalars ===
 "--- self-inclusive scalar ---"
 len(42?int)            // 0 — ? is not self-inclusive
-len(42.?int)           // 1 — .? is self-inclusive
+len(42.?int); // 1 — .? is self-inclusive
 (42.?int)[0]           // 42
 len("hello"?string)    // 0 — not self-inclusive
 len("hello".?string)   // 1 — self-inclusive
 
 // === 3. Element query ===
 "--- element query ---"
-let page = <div class: "main";
-    <p; "text1">
-    <span; "text2">
-    <div id: "inner"; <p; "text3">>
+let page = <div class: "main",
+    <p "text1">
+    <span "text2">
+    <div id: "inner", <p "text3">>
 >
 
 len(page?<p>)          // 2 (finds both <p>)
@@ -30,9 +30,9 @@ len(page?<span>)       // 1
 
 // === 4. Element query recurses with .? ===
 "--- .? recurses ---"
-let deep = <div;
-    <div;
-        <p; "deep">
+let deep = <div
+    <div
+        <p "deep">
     >
 >
 len(deep?<p>)          // 1 (recursive, not self-inclusive)
@@ -63,3 +63,9 @@ len(page?<div>?<p>)    // 1 (<p> inside inner div)
 // === 9. Query with pipe ===
 "--- query + pipe ---"
 page?<p> |> len(~)      // content length of each <p>
+
+// === 10. Query binds inside an unparenthesized arrow body ===
+"--- query precedence ---"
+let query_fn = () => [1, "a", 2]?int
+type(query_fn)
+query_fn()

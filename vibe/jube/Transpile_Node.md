@@ -69,7 +69,7 @@ Lambda's JS runtime already implements partial Node.js support:
 | `require()`                   | ✅ Full         | CJS require with source wrapping (`module.exports`), resolves relative + bare specifiers via `npm_resolve_module()`                                                                                                                                                         |
 | ES Modules                    | ✅              | import/export with module registry                                                                                                                                                                                                                                          |
 | `node:dns`                    | ✅ Full         | `js_dns.cpp` — lookup (async), lookupSync (sync), resolve                                                                                                                                                                                                                   |
-| `node:zlib`                   | ✅ Full         | `js_zlib.cpp` — gzipSync, gunzipSync, deflateSync, inflateSync, deflateRawSync, inflateRawSync, brotliCompressSync, brotliDecompressSync                                                                                                                                    |
+| `node:zlib`                   | ✅ Full         | `node_zlib_module.cpp` over the host Jube codec provider — gzipSync, gunzipSync, deflateSync, inflateSync, deflateRawSync, inflateRawSync, brotli stubs                                                                                                                                    |
 | `node:readline`               | ✅ Full         | `js_readline.cpp` — createInterface, question, close, on                                                                                                                                                                                                                    |
 | `node:stream`                 | ✅ Full         | `js_stream.cpp` — Readable, Writable, Duplex, Transform, PassThrough, pipeline, finished                                                                                                                                                                                    |
 | `node:net`                    | ✅ Full         | `js_net.cpp` — createServer, createConnection, Socket, isIP/isIPv4/isIPv6                                                                                                                                                                                                   |
@@ -703,7 +703,7 @@ lambda/js/                           # Phase 4 — extended modules
 ├── js_tls.cpp              ✅       # node:tls (connect, createServer, createSecureContext — mbedTLS)
 ├── js_http.cpp             ✅       # node:http (createServer, request, get, IncomingMessage, ServerResponse)
 ├── js_https.cpp            ✅       # node:https (thin wrapper over http + tls)
-├── js_zlib.cpp             ✅       # node:zlib (gzip/gunzip/deflate/inflate sync variants)
+├── node_zlib_module.cpp    ✅       # node:zlib (dynamic namespace + stream facade)
 └── js_readline.cpp         ✅       # node:readline (createInterface, question, close, on)
 ```
 
@@ -811,7 +811,7 @@ All Tier 2 extended modules implemented. 23 built-in modules registered in `js_m
 | `node:tls`                           | Large  | ✅ Done — `js_tls.cpp`, connect, createServer, createSecureContext, TLSSocket (wraps mbedTLS via serve/tls_handler) |
 | `node:http`                          | Large  | ✅ Done — `js_http.cpp`, createServer, request, get, IncomingMessage, ServerResponse, STATUS_CODES |
 | `node:https`                         | Medium | ✅ Done — `js_https.cpp`, createServer, request, get (thin wrapper over http + tls) |
-| `node:zlib`                          | Medium | ✅ Done — `js_zlib.cpp`, gzipSync, gunzipSync, deflateSync, inflateSync, deflateRawSync, inflateRawSync |
+| `node:zlib`                          | Medium | ✅ Done — `node_zlib_module.cpp` over the host Jube codec provider |
 | `node:readline`                      | Small  | ✅ Done — `js_readline.cpp`, createInterface, question, close, on |
 | Module dispatcher update             | Small  | ✅ Done — 11 new modules added to `js_module_get()` + builtin bypass list (21 total) |
 

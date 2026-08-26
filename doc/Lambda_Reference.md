@@ -137,10 +137,10 @@ type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"
 
 // Object types (nominally-typed maps with methods)
 type Point {
-    x: float, y: float;
+    x: float, y: float,
     fn distance(other: Point) => math.sqrt((x - other.x)**2 + (y - other.y)**2)
 }
-type Circle : Point { radius: float; }   // Inheritance
+type Circle : Point { radius: float }    // Inheritance
 let p = <Point x: 3.0, y: 4.0>           // Object literal
 p.distance(<Point x: 0.0, y: 0.0>)       // Method call
 p is Point                                // true (nominal)
@@ -148,40 +148,26 @@ p is Point                                // true (nominal)
 
 #### Expressions (see [Lambda_Expr_Stam.md](Lambda_Expr_Stam.md))
 
+| Kind | Expression | Result / meaning |
+|---|---|---|
+| Pipe | `[1, 2, 3] \| ~ * 2` | `[2, 4, 6]` |
+| | `users \| ~.name that (len(~) > 3)` | filter and transform |
+| Pipe/filter spread | `[1, [2, 3] \| ~, 4, 5]` | `[1, 2, 3, 4, 5]` |
+| | `[0, items that (~ > 3), 9]` | flattened into the enclosing array |
+| Query — recursive | `html?<img>` | all `<img>` at any depth |
+| | `html?<div class: string>` | `<div>` with a class attribute |
+| | `data?int` | all int values in the tree |
+| | `el.?<div>` | self-inclusive query |
+| Query — child-level | `el[element]` | direct child elements |
+| | `el[string]` | attribute values + text children |
+| | `html[body]?<p>` | child then recursive (given `type body = <body>`) |
+| For expression | `(for (x in [1,2,3] where x > 1 order by x desc) x * 2)` | clauses: `let` / `where` / `group by` / `order by` / `limit` / `offset` |
+| | `(for (x in sales group by x.region into g) {region: g.region, n: len(g)})` | each group `g` is a `<group>` element — keys become attributes, members children |
+| | `(for (o in orders, c in customers on o.cust_id == c.id) {id: o.id, name: c.name})` | equi-join; `c?` = left join, `c` is null on no match |
+| If | `if (x > 0) "positive" else "negative"` | |
+| | `if x > 0 { compute(x) } else "default"` | block form, expression `else` |
+
 ```lambda
-// Pipe expressions
-[1, 2, 3] | ~ * 2              // [2, 4, 6]
-users | ~.name that (len(~) > 3) // Filter and transform
-
-// Pipe/filter spread in array literals
-[1, [2, 3] | ~, 4, 5]          // [1, 2, 3, 4, 5]
-[0, items that (~ > 3), 9]      // flattened into enclosing array
-
-// Query expressions — type-based search
-html?<img>                       // all <img> at any depth
-html?<div class: string>         // <div> with class attribute
-data?int                         // all int values in tree
-div.?<div>                       // self-inclusive query
-
-// Child-level query — direct children only (no recursion)
-type body = <body>
-el[element]                      // direct child elements
-el[string]                       // attr values + text children
-html[body]?<p>                   // child then recursive
-
-// For expressions — clauses: let / where / group by / order by / limit / offset
-(for (x in [1,2,3] where x > 1 order by x desc) x * 2)
-
-// group by — binds each group to an element (keys = attributes, members = children)
-(for (x in sales group by x.region into g) {region: g.region, n: len(g)})
-
-// join on — relate comma sources (equi-join; `c?` = left join, c = null on no match)
-(for (o in orders, c in customers on o.cust_id == c.id) {id: o.id, name: c.name})
-
-// If expressions
-if (x > 0) "positive" else "negative"
-if x > 0 { compute(x) } else "default"   // block form, expr else
-
 // String patterns (see Lambda_Type.md § String Patterns)
 type digits = \(d+)
 type email = \(w+ "@" w+ "." a[2,6])
@@ -235,8 +221,10 @@ pn main() {
 #### Concurrency
 
 `pn` concurrency is colorless: suspending callees do not add syntax to their
-callers. `start` launches a scoped child and returns a task handle; the remaining
-operations are builtins.
+callers. Under S13.1.1v2, the builtin
+`start(target, args = [], options = {})` launches a scoped child and returns a
+task handle; `args` is an array and `options.mode` is `'task'`, `'thread'`, or
+`'process'` (only task mode is implemented currently).
 
 ```lambda
 pn worker() {
@@ -245,7 +233,7 @@ pn worker() {
 }
 
 pn main() {
-    let handle = start worker()
+    let handle = start(worker)
     send(handle, "job")^
     print(wait(handle)^)
 }
@@ -293,8 +281,8 @@ Each Lambda Script file is a module that can export public declarations — vari
 // math_utils.ls
 
 // Public values
-pub PI = 3.14159
-pub E = 2.71828
+pub let PI = 3.14159
+pub let E = 2.71828
 
 // Public functions
 pub fn square(x: float) => x * x
@@ -305,13 +293,13 @@ pub type Angle = float
 
 // Public object type with methods
 pub type Vec2 {
-    x: float = 0.0, y: float = 0.0;
+    x: float = 0.0, y: float = 0.0,
     fn len() => math.sqrt(x**2 + y**2)
     fn scale(f) => <Vec2 x: x*f, y: y*f>
 }
 
 // Public, with the error handled at the binding
-pub config = input("config.json", 'json') ^ { {} }
+pub let config = input("config.json", 'json') ^ { {} }
 
 // Private (not exported)
 let v = 123
@@ -355,7 +343,7 @@ Lambda provides built-in modules (`math`, `io`) for mathematical functions and f
 // 1. No import — use full module prefix (default, always available)
 math.sqrt(16)         // 4
 math.pi               // 3.1415926536
-io.copy(@./a, @./b)
+io.copy(\.a, \.b)
 
 // 2. Global import — all functions available without prefix
 import math;
@@ -431,7 +419,7 @@ let report = {
     timestamp: datetime()
 };
 
-print(format(report, 'json'));
+print(format(report, 'json'))
 ```
 
 ### Document Processing
@@ -444,14 +432,14 @@ let doc = input("article.md", 'markdown');
 let headings = doc?(h1 | h2) | ~.content;
 
 // Generate table of contents
-let toc = <div class: "toc";
-    <h2; "Table of Contents">
-    <ul;
-        for (heading in headings) <li; <a href: "#" ++ heading; heading>>
+let toc = <div class: "toc",
+    <h2 "Table of Contents">
+    <ul
+        for (heading in headings) <li <a href: "#" ++ heading, heading>>
     >
 >;
 
-print(format(toc, 'html'));
+print(format(toc, 'html'))
 ```
 
 ### Mathematical Computation
@@ -485,8 +473,8 @@ pn main() {
     print("Starting processing...")
 
     // Load configuration
-    let config = if exists(.config.json) {
-        input(.config.json, 'json')
+    let config = if exists(\.config.json) {
+        input(\.config.json, 'json')
     } else {
         {default: true}
     }

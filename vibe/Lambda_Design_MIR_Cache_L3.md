@@ -3,7 +3,7 @@
 **Status:** Proposal — elaborates MC6 (Route B) of `vibe/Lambda_Design_MIR_Cache.md` §5.3 into an implementable design
 **Date:** 2026-07-24
 **Scope:** Lambda modules and main scripts under MIR Direct. The container format, relocation journal, loader, and verifier are designed **language-neutral** so LambdaJS and other Jube guests can adopt them later (§10); only the Lambda de-pointering plan (§6) is language-specific.
-**Companions:** `Lambda_Design_MIR_Cache.md` (levels & prior decisions MC1–MC8; L1 is implemented per `Lambda_Impl_MIR_Cache_L1 (done).md`), `Lambda_Design_Native_Module.md` §7.4/P14 (cache-not-distribution), `Lambda_Design_JS_Cache.md` (JS in-process cache; supplies the fail-closed state discipline reused here), `Lambda_Design_MIR_Emission_Test.md` (dump/verifier infra reused for the determinism gate).
+**Companions:** `Lambda_Design_MIR_Cache.md` (levels & prior decisions MC1–MC8; L1 is implemented per `impl/Lambda_Impl_MIR_Cache_L1 (done).md`), `Lambda_Design_Native_Module.md` §7.4/P14 (cache-not-distribution), `Lambda_Design_JS_Cache.md` (JS in-process cache; supplies the fail-closed state discipline reused here), `Lambda_Design_MIR_Emission_Test.md` (dump/verifier infra reused for the determinism gate).
 
 ---
 
@@ -207,7 +207,7 @@ Exit gate: baseline 100%, MIR dumps contain **zero** raw-pointer immediates (ext
 
 ## 7. Determinism gate
 
-Model A assumes: same source + same binary ⇒ byte-identical MIR emission across processes. Post-de-pointering this becomes mechanically checkable: CI job compiles a probe set (reuse the `test/mir/` fixtures + picked `test/lambda` scripts) **in two separate processes** and diffs the canonical dumps byte-for-byte (the dump infrastructure and `--transpile-only` path exist; MT2). Byte-golden full-file dumps — newly legal per §3.2 — pin it permanently. The two hashmap-order emission sites (§2.4) are covered by the same diff. Gen-level nondeterminism is separately covered by the §5.4 differential verifier (which diffs *machine code* in-process). (L3-4)
+Model A assumes: same source + same binary ⇒ byte-identical MIR emission across processes. Post-de-pointering this becomes mechanically checkable: CI job compiles a probe set (reuse the `test/mir/` fixtures + picked `test/lambda` scripts) **in two separate processes** and diffs the canonical dumps byte-for-byte using the existing dump infrastructure. Byte-golden full-file dumps — newly legal per §3.2 — pin it permanently. The two hashmap-order emission sites (§2.4) are covered by the same diff. Gen-level nondeterminism is separately covered by the §5.4 differential verifier (which diffs *machine code* in-process). (L3-4)
 
 ## 8. Cache key & management
 

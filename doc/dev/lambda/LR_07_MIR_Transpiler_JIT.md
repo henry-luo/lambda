@@ -3,7 +3,7 @@
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the supported code-generation backend: how the typed AST is lowered **directly to MIR IR** (no intermediate C text), how values are kept native or boxed under MIR's immutable-register constraint, the function calling convention and parameter-type inference, the root/number execution side frames, and the `mir.c` JIT integration that links and generates native code. The removed C-text backend is documented historically in [LR_06 — The C Transpiler](LR_06_C_Transpiler.md).
 >
 > **Primary sources:** `lambda/transpile-mir.cpp` (the `MirTranspiler`, all node lowerings, boxing, rooting, inference), `lambda/mir.c` (import resolution, `jit_init`/`jit_gen_func`, BSS root registration, debug table), `lambda/transpile_shared.cpp` (shared naming/wrapper helpers), `lambda/lambda.h` (the runtime C-API the generated code calls).
-> **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names. This is the most workaround-dense area of the runtime; the Known Issues section is correspondingly long and is part of the design record, not an afterthought.
+> **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the cited symbol names. This is the most workaround-dense area of the runtime; its issue list is correspondingly long and is part of the design record, not an afterthought — it now lives in the [central issue ledger](../../../vibe/Lambda_Issue_Ledger.md) as LR07-1 – LR07-14.
 
 ---
 
@@ -39,11 +39,8 @@ Boxing is inline for cheap tags and a runtime call for the rest. `emit_box` (`:1
 
 - `emit_box_int` (`:829`) — inline INT53 range-check and tag, `ITEM_ERROR` on overflow.
 - `emit_box_bool` (`:885`) — `UEXT8` to clear garbage upper bits, error-check, tag.
-- `emit_box_float` routes through canonical `push_d`; `emit_box_int64` and the
-  `uint64` sibling use the shared full-domain number-home boxers.
-- String/symbol/decimal/binary boxing tags their owned pointers. Datetime
-  boxing calls `push_k`, which creates a GC-owned object rather than a number
-  home.
+- `emit_box_float` routes through canonical `push_d`; `emit_box_int64` and the `uint64` sibling use the shared full-domain number-home boxers.
+- String/symbol/decimal/binary boxing tags their owned pointers. Datetime boxing calls `push_k`, which creates a GC-owned object rather than a number home.
 - `emit_box_container` (`:1011`) — an identity move; the `TypeId` is already in the object header.
 
 Unboxing is the mirror: `emit_unbox` (`:1114`) emits `it2i`/`it2d`/`it2b`/`it2s`/`it2l` runtime calls, or `emit_unbox_container` (`:1096`, an AND-mask to strip the tag). Tying it together is `transpile_box_item` (`:8074`), the **smart gateway**: given a node, it decides whether `transpile_expr` already returned a boxed Item (return it unchanged) or a native value (box it), via a per-operator decision tree (`:8190`) that must *exactly mirror* the producer logic in `transpile_binary`/`transpile_unary`. Any divergence between producer and gateway is a latent double-box or type-confusion bug.
@@ -54,7 +51,7 @@ Unboxing is the mirror: `emit_unbox` (`:1114`) emits `it2i`/`it2d`/`it2b`/`it2s`
 
 A user function is built by `transpile_func_def`: it creates the MIR function, loads the per-module `consts`/`type_list`/`gc` handles from BSS into pinned registers, brackets the body with a root/number side frame (§6), sets up the parameter scope, and handles closure environments (`env_reg`), methods (`self_reg`), proc multi-value returns, the native return type, and tail-call optimization.
 
-Calls split by kind. A direct call to a known local or imported function is a `MIR_new_call_insn` against that MIR func item; functions with typed parameters or a native return get a `_w`/`_b` wrapper, decided by `needs_fn_call_wrapper` (`transpile_shared.cpp:39`). Indirect and closure calls go through the runtime `fn_call0`..`fn_call3` family (`:7420`) — and only up to three arguments are supported (§Known Issues #3).
+Calls split by kind. A direct call to a known local or imported function is a `MIR_new_call_insn` against that MIR func item; functions with typed parameters or a native return get a `_w`/`_b` wrapper, decided by `needs_fn_call_wrapper` (`transpile_shared.cpp:39`). Indirect and closure calls go through the runtime `fn_call0_into`..`fn_call3_into` family for 0–3 arguments and `fn_call_into` for any higher arity (`:18132`ff); each argument is boxed and rooted through `create_gc_root_slot` before the call. The historical three-argument cap is retired ([LR07-R1](../../../vibe/Lambda_Issue_Ledger.md)).
 
 **Parameter-type inference** lets untyped functions still compile to native arithmetic. `infer_param_type` gathers evidence and resolves it through the inference cache. The policy is deliberately conservative: a prior speculative-INT guess truncated float arguments at the call boundary, so weak arithmetic evidence stays `ANY`/boxed. The current rule treats every `OPERATOR_DIV` use as positive FLOAT evidence; that is stale because only int/float-domain true division is float, while `integer`/full-width sized division is decimal. `Lambda_Impl_Numbers.md` requires inference to consume the shared numeric-domain result classifier. The existing fixed parameter-count caps remain a separate known issue.
 
@@ -97,7 +94,7 @@ The cache is intentionally narrow: it applies only to MIR Direct Lambda imports.
 
 Invalidation is mtime/size based. A file-backed cache hit stats the canonical path; if the source changed, the stale script and retained dependents are retired from the index and the current load falls through to a fresh compile. The cache is enabled by default in both debug and release builds (`LAMBDA_MIR_CACHE_DEFAULT=1` unless a build opts out). `LAMBDA_DISABLE_MIR_CACHE=1` disables retained import caching for timing comparisons while keeping normal import deduplication and circular-import detection within a single compilation.
 
-Design and rollout details live in [Level 1 MIR Cache — Implementation Plan](../../../vibe/Lambda_Impl_MIR_Cache_L1.md).
+Design and rollout details live in [Level 1 MIR Cache — Implementation Plan](../../../vibe/impl/Lambda_Impl_MIR_Cache_L1.md).
 
 ---
 
@@ -109,34 +106,11 @@ Design and rollout details live in [Level 1 MIR Cache — Implementation Plan](.
 
 ## Known Issues & Future Improvements
 
-The MIR Direct backend carries a large, deliberate set of workarounds. They cluster around three structural facts: MIR's immutable register types, the dual native-or-boxed value representation, and GC rooting under a non-moving collector.
+Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR07-1 – LR07-14** (open/partial) and **LR07-R1 – LR07-R2** (resolved, Appendix A).
 
-1. **Numeric semantic result and physical representation are still coupled.** `get_effective_type`, `transpile_binary`, and `transpile_box_item` contain separate repairs for runtime helpers that return boxed Items even when the AST names `INT64` or another concrete numeric type. The latest promotion model adds `integer`/decimal results for full-width mixed arithmetic and `/`; all three sites must consume one shared result-domain decision or a raw register can be mistaken for an Item (and vice versa).
-2. **"undeclared reg 0" guard.** Value-less statements would otherwise return the invalid register 0 and crash MIR; `emit_null_item_reg` (`:344`) synthesizes a boxed-null register instead. The same hazard recurs in `match` (`:3484`) and the let/var/break/continue null-move blocks (`:8504`).
-3. **Indirect calls cap at 3 arguments.** `transpile_call`'s dynamic/closure path logs `mir: calls with >3 args not yet fully supported` and returns the wrong value (`:7466`). Direct calls are unaffected; only `fn_call`-dispatched closure calls hit this hard cap. A bare-expression spread is likewise "not yet handled" (`:9083`).
-4. **Typed-array construction gap.** MIR Direct always builds a generic `Array*`; it never emits `array_int()`/`array_int64()`/`array_float()`. This produces a runtime-type divergence from C2MIR in reductions like `fn_sum`/`fn_min`/`fn_max`. Element access and mutation have partial fast paths gated on an `elem_type` proven through `fill()` narrowing or mutation analysis, guarded by `safe_native_int` (`:5736`, `:6036`), with frequent `item_at`/`fn_array_set` fallbacks — and the AST's `nested` type is explicitly distrusted after mutation (`:5737`).
-5. **Type widening is truncate-or-box.** `transpile_assign_stam` (`:7973`) assigns a FLOAT to an INT variable by truncating via `MIR_D2I` *inside loops* (lossy, but required to keep the register type stable) and by boxing to `ANY` *outside* loops. This is the most architecturally impactful divergence from C2MIR. A related sharp edge: an error Item (e.g. from division by zero) is silently coerced to `0`/`0.0`/`false` when a boxed value is unboxed into a native variable (`:8000`).
-6. **`get_effective_type` only narrows IDENTs to ANY** (`:2137`); it does not catch every post-mutation type change, leaving a stale-type boxing hazard for non-identifier expressions.
-7. **MATCH and vectorized-comparison results are forced boxed** (`:2077`, `:2200`) to prevent callers re-boxing an already-boxed value and then dereferencing it as a pointer.
-8. **Inference metadata.** MIR Direct stores per-parameter inference on the
-   AST/function-analysis records. The former parallel `param_types[16]`,
-   `param_mir[16]`, fixed alias-name table, and copied 32-entry parameter-name
-   table are retired. Core source arity remains capped at the intentional
-   `LAMBDA_MAX_FUNCTION_ARGS` language limit; LambdaJS source formals remain
-   dynamically represented. Remaining fixed source-name staging buffers are
-   tracked in `vibe/Lambda_Design_Function_Arg.md`.
-9. **Precise-root correctness is type-driven.** BUG-001's heap-frame growth hole is closed by static side-stack slots and publish-before-call lowering. The remaining invariant is that any register carrying a heap-capable boxed value must retain a heap/ANY MIR type; the root predicate deliberately roots unknown/manual capture entries pessimistically.
-10. **Bitwise ops are special-cased before generic dispatch** (`:6560`) because `SysFuncInfo` has no native-argument-convention field: `band`/`bor`/`bxor` lower to a single MIR instruction, and `shl`/`shr` are guarded against out-of-range shift counts. (Note: the older runtime doc claims these go through `fn_band` calls; the current code lowers them inline.)
-11. **`uint8_t Bool` returns need masking.** Runtime functions returning a `uint8_t` bool leave garbage in the upper 56 bits of the MIR return register, so every bool box/unbox must `emit_uext8` (`:874`, `:1121`).
-12. **Out-of-bounds index semantics differ by type.** Integer index fast paths return `ITEM_NULL` on OOB, preserved by a runtime branch in `transpile_box_item` (`:8330`); float index fast paths return `0.0` in a `D` register and cannot branch against an int, so a float OOB read returns `0.0` rather than null (`:5670`).
-13. **Fixed-size structural caps.** `var_scopes[64]` (overflow at `scope_depth >= 63` errors, `:151`/`:446`), `loop_stack[32]` (`:155`), hashmap key buffers `char name[128]` that silently truncate long identifiers (`:257`), and `proto_name[140]` (`:587`).
-14. **Magic struct offset.** The function prologue loads the GC handle using a hard-coded `heap->gc` offset of 8 with `-Winvalid-offsetof` suppressed (`:10622`) — fragile if `EvalContext` layout changes; it is a magic constant rather than an `offsetof`.
-15. **TCO iteration ceiling.** Tail-recursive loops emit a guard that raises a stack-overflow error past `LAMBDA_TCO_MAX_ITERATIONS` (`:10934`) — a hard-coded iteration cap.
-
-Several cross-cutting gaps remain open: numeric result-domain inference is duplicated across AST/MIR/runtime; `SysFuncInfo` has no complete data-driven argument convention, so some return conventions still use ad-hoc switches; and there is no debug-mode validation that a boxed value carries the representation the transpiler believes it does. The Stack API is the physical ownership authority; `Lambda_Impl_Numbers.md` owns the semantic-promotion consolidation.
+The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOLVED) against the current source, re-resolved `file:line` anchors, and the cross-cutting clusters that group issues shared with other `LR_*` areas.
 
 ---
-
 ## Appendix A — Source map
 
 | File | Responsibility (this doc) |

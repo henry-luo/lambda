@@ -20,18 +20,18 @@ len(m[int])
 len(m[bool])
 
 // ===== Element child query =====
-let el = <div class: "main";
-    <p; "hello">
+let el = <div class: "main",
+    <p "hello">
     <img src: "photo.jpg">
     "some text">
 len(el[element])
 
 // ===== Chained child query =====
-let doc = <div;
-    <div id: "inner";
-        <p; "deep text">
+let doc = <div
+    <div id: "inner",
+        <p "deep text">
     >
-    <span; "shallow">
+    <span "shallow">
 >
 type div_t = <div>
 type p_t = <p>
@@ -42,11 +42,11 @@ len(arr[map])
 len(m[element])
 
 // ===== Mixed child + recursive =====
-let html = <html;
-    <head; <title; "Page">>
-    <body;
-        <div; <p; "text1"> <p; "text2">>
-        <div; <p; "text3">>
+let html = <html
+    <head <title "Page">>
+    <body
+        <div <p "text1"> <p "text2">>
+        <div <p "text3">>
     >
 >
 type body_t = <body>

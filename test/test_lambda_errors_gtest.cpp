@@ -205,6 +205,40 @@ TEST(TypeInferenceStructuralTest, IP2SysFuncRowsResolvePreciseResults) {
     shell_result_free(&result);
 }
 
+TEST(TypeInferenceStructuralTest, IP6JsOperatorsPublishPreciseTypes) {
+    // IP6 [Type_Infer TIG13/TI2]: JS binary expressions publish the type the
+    // operator produces. Every one of them used to be typed `float`.
+    const char* args[] = {LAMBDA_EXE, "--emit-js-ast-dump",
+        "test/js/type_infer_ip6.js", NULL};
+    ShellOptions options = {0};
+    options.timeout_ms = 10000;
+    ShellResult result = shell_exec(LAMBDA_EXE, args, &options);
+    ASSERT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+    ASSERT_NE(result.stdout_buf, nullptr);
+
+    // Equality, relational and membership tests are predicates.
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op strict_eq) (value_type \"bool\")"), nullptr) << result.stdout_buf;
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op lt) (value_type \"bool\")"), nullptr) << result.stdout_buf;
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op in) (value_type \"bool\")"), nullptr) << result.stdout_buf;
+    // `+` is overloaded: string concatenation and numeric addition both appear.
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op add) (value_type \"string\")"), nullptr) << result.stdout_buf;
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op add) (value_type \"float\")"), nullptr) << result.stdout_buf;
+    // JS numbers are binary64: a bitwise result is still a number, and typing
+    // it `int` would claim a carrier the lowering does not produce.
+    EXPECT_NE(strstr(result.stdout_buf,
+        "(op bit_or) (value_type \"float\")"), nullptr) << result.stdout_buf;
+    // No comparison may still report the old blanket `float`.
+    EXPECT_EQ(strstr(result.stdout_buf,
+        "(op strict_eq) (value_type \"float\")"), nullptr) << result.stdout_buf;
+
+    shell_result_free(&result);
+}
+
 TEST(TypeContractMetadataTest, ImplicitParameterErrorMatchArmIsLinted) {
     const char* args[] = {LAMBDA_EXE, "test/lambda/type_implicit_param_match_lint.ls", NULL};
     ShellOptions options = {0};
@@ -1087,6 +1121,37 @@ TEST_F(NegativeScriptTest, StaticArityMismatchIsRejected) {
         "function expects 2 arguments, got 1");
 }
 
+// S12.3.6 makes optional parameters the sanctioned alternative to overloading,
+// so the accepted arity is a range whenever one exists. Reporting only the
+// required count understated it in both directions.
+// A map key is a symbol, not a string. The brace resolver reads `{"k": 1}` by
+// interior and used to fall through to a block, failing at the `:` with a bare
+// "expected an expression".
+TEST_F(NegativeScriptTest, DoubleQuotedMapKeyNamesTheRule) {
+    ExpectErrorMessage("test/std/negative/map_key_double_quoted.ls",
+        "a map key is a symbol, not a string");
+}
+
+// S16.9.3: `;` separates content items, so it cannot open element content.
+// The generic "expected an expression" sent a real user to conclude the grammar
+// was whitespace-sensitive; the diagnostic must name the rule.
+TEST_F(NegativeScriptTest, ElementSemicolonCannotOpenContent) {
+    ExpectErrorMessage("test/std/negative/element_semicolon_opens_content.ls",
+        "';' cannot open element content");
+}
+
+// LR02-9: a `&`/`!` contract must be rejected on a non-conforming value AND
+// named in the diagnostic — it used to print the bare word "type".
+TEST_F(NegativeScriptTest, TypeSetOperatorContractIsNamed) {
+    ExpectErrorMessage("test/std/negative/type_set_operator_mismatch.ls",
+        "cannot initialize 'a' of type int & string with int");
+}
+
+TEST_F(NegativeScriptTest, OptionalParamArityReportsARange) {
+    ExpectErrorMessage("test/std/negative/wrong_arg_count_optional.ls",
+        "function expects 1 to 2 arguments, got 3");
+}
+
 TEST_F(NegativeScriptTest, ImportParseErrorBlocksExecution) {
     ScriptResult result = run_lambda_script("test/lambda/negative/import_parse_error_driver.ls");
 
@@ -1214,12 +1279,17 @@ TEST_F(NegativeScriptTest, SemanticError_StartOutsideProcedure) {
 
 TEST_F(NegativeScriptTest, SemanticError_StartRequiresProcedureCall) {
     ExpectErrorMessage("test/lambda/negative/semantic/start_non_pn.ls",
-        "`start` operand must resolve to a procedure (pn) call");
+        "`start` first argument must resolve to a procedure (pn)");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_StartRejectsMutableCapture) {
     ExpectErrorMessage("test/lambda/negative/semantic/start_mutable_capture.ls",
         "`start` cannot capture mutable var 'value'");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_StartRejectsUnsupportedMode) {
+    ExpectErrorMessage("test/lambda/negative/semantic/start_unsupported_mode.ls",
+        "`start` mode 'thread' is not implemented yet; use 'task'");
 }
 
 TEST_F(NegativeScriptTest, SemanticError_VarTypeMismatch) {

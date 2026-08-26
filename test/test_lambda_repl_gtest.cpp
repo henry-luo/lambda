@@ -171,7 +171,10 @@ TEST(LambdaReplTests, test_complex_arithmetic) {
 }
 
 TEST(LambdaReplTests, test_error_recovery) {
-    test_result result = run_lambda_repl("2 +\n1 + 1\nquit");
+    // `2 +` is no longer an error: S16.2.1 continues an incomplete expression
+    // across a line break unconditionally, so `2 +` / `1 + 1` is `2 + 1 + 1`.
+    // Use an input that is genuinely rejected, keeping the recovery intent.
+    test_result result = run_lambda_repl("\"a\" < \"b\"\n1 + 1\nquit");
     ASSERT_NE(result.output, nullptr) << "Expected output from error recovery test";
     // Should continue running despite syntax error and compute 1+1=2
     ASSERT_TRUE(strstr(result.output, "error") != nullptr ||

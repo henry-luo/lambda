@@ -17,7 +17,7 @@ pub fn render(node, context, render_fn) {
 
     if (cmd == "\\mathfrak" and style_arg_text(node.arg) == "{\\sin}") {
         {
-            element: <span class: css.OP_GROUP; <span class: css.CMR; "sin">>,
+            element: <span class: css.OP_GROUP, <span class: css.CMR, "sin">>,
             height: 0.67,
             depth: 0.0,
             width: 1.5,

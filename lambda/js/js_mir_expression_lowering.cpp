@@ -309,10 +309,8 @@ static MIR_reg_t jm_emit_test262_intercept(JsMirTranspiler* mt, JsCallNode* call
 
 static void jm_emit_pending_call_source(JsMirTranspiler* mt, JsCallNode* call) {
     if (!mt || !call || !mt->tp || !mt->tp->source) return;
-    TSNode node = call->node;
-    if (ts_node_is_null(node)) return;
-    uint32_t start = ts_node_start_byte(node);
-    uint32_t end = ts_node_end_byte(node);
+    uint32_t start = call->source_span.start_byte;
+    uint32_t end = call->source_span.end_byte;
     if (end <= start || end > (uint32_t)mt->tp->source_length) return;
     // assert.ok() uses the original call expression in generated messages;
     // fallback calls previously erased that source-level invariant at runtime.
@@ -483,20 +481,9 @@ static bool jm_is_proto_literal_key(JsAstNode* key) {
 // executed the binding is permanently the value produced by that initializer —
 // which is exactly what the direct-dispatch fast path needs.
 static bool jm_declarator_is_const(JsVariableDeclaratorNode* dn) {
-    if (!dn) return false;
-    TSNode dts = dn->node;
-    if (ts_node_is_null(dts)) return false;
-    TSNode parent = ts_node_parent(dts);
-    if (ts_node_is_null(parent)) return false;
-    const char* ptype = ts_node_type(parent);
-    if (!ptype || strcmp(ptype, "lexical_declaration") != 0) return false;
-    // The keyword token is the first child of `lexical_declaration`; in
-    // tree-sitter-javascript anonymous keyword leaves have their literal text
-    // as the type, so `ts_node_type(first_child)` returns "const" or "let".
-    TSNode kw = ts_node_child(parent, 0);
-    if (ts_node_is_null(kw)) return false;
-    const char* kt = ts_node_type(kw);
-    return kt && strcmp(kt, "const") == 0;
+    if (!dn || !dn->id || dn->id->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* id = (JsIdentifierNode*)dn->id;
+    return id->entry && id->entry->is_const;
 }
 
 static JsFuncCollected* jm_find_direct_function_decl_by_vname(JsMirTranspiler* mt, const char* vname) {
@@ -512,58 +499,31 @@ static JsFuncCollected* jm_find_direct_function_decl_by_vname(JsMirTranspiler* m
     return NULL;
 }
 
-static bool jm_ts_node_is_function_boundary(const char* type) {
-    if (!type) return false;
-    return strcmp(type, "function_declaration") == 0 ||
-           strcmp(type, "function_expression") == 0 ||
-           strcmp(type, "generator_function_declaration") == 0 ||
-           strcmp(type, "generator_function") == 0 ||
-           strcmp(type, "arrow_function") == 0 ||
-           strcmp(type, "method_definition") == 0;
-}
-
-static bool jm_node_has_with_ancestor_until_function(JsAstNode* node) {
-    if (!node || ts_node_is_null(node->node)) return false;
-    TSNode cur = ts_node_parent(node->node);
-    while (!ts_node_is_null(cur)) {
-        const char* type = ts_node_type(cur);
-        if (type && strcmp(type, "with_statement") == 0) return true;
-        if (jm_ts_node_is_function_boundary(type)) return false;
-        cur = ts_node_parent(cur);
-    }
-    return false;
-}
-
 static bool jm_binding_statement_precedes_reference(JsMirTranspiler* mt,
         JsMirVarEntry* var, JsIdentifierNode* id) {
     if (!mt || !var || !id || var->from_env || mt->with_depth > 0 ||
             (mt->current_fc && mt->current_fc->has_direct_eval) ||
-            var->binding_end == 0 || ts_node_is_null(id->node)) {
+            var->binding_end == 0) {
         return false;
     }
-    TSNode child = id->node;
-    TSNode block = ts_node_parent(child);
-    while (!ts_node_is_null(block)) {
-        const char* type = ts_node_type(block);
-        if (type && strcmp(type, "statement_block") == 0) break;
-        child = block;
-        block = ts_node_parent(block);
+    JsBlockNode* block = NULL;
+    if (mt->current_fc && mt->current_fc->node &&
+            mt->current_fc->node->body &&
+            mt->current_fc->node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        block = (JsBlockNode*)mt->current_fc->node->body;
     }
-    if (ts_node_is_null(block)) return false;
-    uint32_t count = ts_node_named_child_count(block);
+    if (!block) return false;
     int binding_index = -1;
     int reference_index = -1;
-    for (uint32_t i = 0; i < count; i++) {
-        TSNode stmt = ts_node_named_child(block, i);
-        uint32_t start = ts_node_start_byte(stmt);
-        uint32_t end = ts_node_end_byte(stmt);
+    int index = 0;
+    for (JsAstNode* stmt = block->statements; stmt; stmt = stmt->next, index++) {
+        uint32_t start = stmt->source_span.start_byte;
+        uint32_t end = stmt->source_span.end_byte;
         if (start <= var->binding_start && var->binding_end <= end) {
-            binding_index = (int)i;
+            binding_index = index;
         }
-        if (ts_node_eq(stmt, child) ||
-                (start <= ts_node_start_byte(id->node) &&
-                 ts_node_end_byte(id->node) <= end)) {
-            reference_index = (int)i;
+        if (start <= id->source_span.start_byte && id->source_span.end_byte <= end) {
+            reference_index = index;
         }
     }
     // A preceding declaration in the same statement block dominates every
@@ -571,9 +531,44 @@ static bool jm_binding_statement_precedes_reference(JsMirTranspiler* mt,
     return binding_index >= 0 && reference_index > binding_index;
 }
 
+static bool jm_ast_contains_target_child(JsAstNode* child, void* data) {
+    return jm_ast_contains_node(child, (JsAstNode*)data);
+}
+
+bool jm_ast_contains_node(JsAstNode* root, JsAstNode* target) {
+    if (!root || !target) return false;
+    if (root == target) return true;
+    return js_ast_any_child(root, jm_ast_contains_target_child, target);
+}
+
+static bool jm_ast_has_with_body_target(JsAstNode* root, JsAstNode* target);
+
+static bool jm_ast_has_with_body_target_child(JsAstNode* child, void* data) {
+    return jm_ast_has_with_body_target(child, (JsAstNode*)data);
+}
+
+static bool jm_ast_has_with_body_target(JsAstNode* root, JsAstNode* target) {
+    if (!root || !target) return false;
+    if (root->node_type == JS_AST_NODE_WITH_STATEMENT) {
+        JsWithStatementNode* with_node = (JsWithStatementNode*)root;
+        if (with_node->body && jm_ast_contains_node(with_node->body, target)) return true;
+    }
+    return js_ast_any_child(root, jm_ast_has_with_body_target_child, target);
+}
+
+bool jm_ast_node_has_with_ancestor(JsAstNode* root, JsAstNode* target) {
+    return jm_ast_has_with_body_target(root, target);
+}
+
+static bool jm_node_has_with_ancestor(JsMirTranspiler* mt, JsAstNode* target) {
+    if (!mt || !target || !mt->current_fc || !mt->current_fc->node ||
+            !mt->current_fc->node->body) return false;
+    return jm_ast_node_has_with_ancestor(mt->current_fc->node->body, target);
+}
+
 static bool jm_current_function_captures_with_scope(JsMirTranspiler* mt) {
-    return mt && mt->current_fc && mt->current_fc->node &&
-        jm_node_has_with_ancestor_until_function((JsAstNode*)mt->current_fc->node);
+    return mt && (mt->with_depth > 0 ||
+        (mt->current_fc && mt->current_fc->uses_with));
 }
 
 static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
@@ -644,11 +639,11 @@ static bool jm_class_declares_private_name(JsClassEntry* ce, const char* suffix,
 }
 
 static bool jm_class_contains_node(JsClassEntry* ce, JsAstNode* node, uint32_t* class_start, uint32_t* class_end) {
-    if (!ce || !ce->node || !node || ts_node_is_null(ce->node->node) || ts_node_is_null(node->node)) return false;
-    uint32_t cs = ts_node_start_byte(ce->node->node);
-    uint32_t ce_end = ts_node_end_byte(ce->node->node);
-    uint32_t ns = ts_node_start_byte(node->node);
-    uint32_t ne = ts_node_end_byte(node->node);
+    if (!ce || !ce->node || !node) return false;
+    uint32_t cs = ce->node->source_span.start_byte;
+    uint32_t ce_end = ce->node->source_span.end_byte;
+    uint32_t ns = node->source_span.start_byte;
+    uint32_t ne = node->source_span.end_byte;
     if (ns < cs || ne > ce_end) return false;
     if (class_start) *class_start = cs;
     if (class_end) *class_end = ce_end;
@@ -1103,41 +1098,48 @@ static MIR_reg_t jm_emit_super_bind_this_with_public_fields(JsMirTranspiler* mt,
     return bound_this;
 }
 
-static bool jm_ts_find_first_super_call(TSNode node, uint32_t* first_start) {
-    if (ts_node_is_null(node)) return false;
-    const char* type = ts_node_type(node);
-    if (type && strcmp(type, "call_expression") == 0) {
-        TSNode callee = ts_node_named_child(node, 0);
-        if (!ts_node_is_null(callee) && strcmp(ts_node_type(callee), "super") == 0) {
-            uint32_t start = ts_node_start_byte(node);
-            if (*first_start == UINT32_MAX || start < *first_start) *first_start = start;
-            return true;
+static bool jm_ast_find_first_super_call(JsAstNode* node, uint32_t* first_start);
+
+static bool jm_ast_find_first_super_call_child(JsAstNode* child, void* data) {
+    return jm_ast_find_first_super_call(child, (uint32_t*)data);
+}
+
+static bool jm_ast_find_first_super_call(JsAstNode* node, uint32_t* first_start) {
+    if (!node || !first_start) return false;
+    if (node->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        JsCallNode* call = (JsCallNode*)node;
+        JsAstNode* callee = call->callee;
+        if (callee && callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            JsIdentifierNode* id = (JsIdentifierNode*)callee;
+            if (id->name && id->name->len == 5 &&
+                    strncmp(id->name->chars, "super", 5) == 0) {
+                uint32_t start = node->source_span.start_byte;
+                if (*first_start == UINT32_MAX || start < *first_start) *first_start = start;
+                return true;
+            }
         }
     }
-    bool found = false;
-    uint32_t count = ts_node_named_child_count(node);
-    for (uint32_t i = 0; i < count; i++) {
-        TSNode child = ts_node_named_child(node, i);
-        const char* child_type = ts_node_type(child);
-        if (child_type && strcmp(child_type, "function_declaration") == 0) continue;
-        if (child_type && strcmp(child_type, "function") == 0) continue;
-        if (child_type && strcmp(child_type, "arrow_function") == 0) continue;
-        if (child_type && strcmp(child_type, "class_declaration") == 0) continue;
-        if (child_type && strcmp(child_type, "class") == 0) continue;
-        if (jm_ts_find_first_super_call(child, first_start)) found = true;
+    if (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
+            node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+            node->node_type == JS_AST_NODE_ARROW_FUNCTION ||
+            node->node_type == JS_AST_NODE_METHOD_DEFINITION ||
+            node->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+            node->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        return false;
     }
-    return found;
+    return js_ast_any_child(node, jm_ast_find_first_super_call_child, first_start);
 }
 
 static bool jm_super_reference_before_constructor_super_call(JsMirTranspiler* mt, JsAstNode* super_ref_node) {
     if (!mt || !super_ref_node || !mt->current_fc || !mt->current_class) return false;
     if (!mt->current_fc->is_constructor) return false;
     if (!mt->current_class->node || !mt->current_class->node->superclass) return false;
-    uint32_t ref_start = ts_node_start_byte(super_ref_node->node);
+    uint32_t ref_start = super_ref_node->source_span.start_byte;
     uint32_t first_super_start = UINT32_MAX;
     bool has_super_call = false;
     if (mt->current_fc->node) {
-        has_super_call = jm_ts_find_first_super_call(mt->current_fc->node->node, &first_super_start);
+        has_super_call = jm_ast_find_first_super_call(mt->current_fc->node->body,
+            &first_super_start);
     }
     return !has_super_call || ref_start < first_super_start;
 }
@@ -1661,11 +1663,10 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
         // Unsupported identifier-shaped AST nodes can reach expression lowering
         // without a parsed name; keep the runtime graceful instead of crashing
         // while resolving an unnameable binding.
-        bool has_ts_node = id && !ts_node_is_null(id->node);
-        TSPoint point = has_ts_node ? ts_node_start_point(id->node) : (TSPoint){0, 0};
-        const char* ts_type = has_ts_node ? ts_node_type(id->node) : "(null)";
-        log_warn("js-mir: nameless identifier node at %u:%u (%s); emitting undefined",
-            point.row + 1, point.column + 1, ts_type ? ts_type : "(unknown)");
+        LambdaSourcePoint point = id ? lambda_source_span_start_point(
+            mt && mt->tp ? mt->tp->source : NULL, id->source_span) : (LambdaSourcePoint){0, 0};
+        log_warn("js-mir: nameless identifier node at %u:%u (node_type=%d); emitting undefined",
+            point.row + 1, point.column + 1, id ? (int)id->node_type : -1);
         return jm_emit_undefined(mt);
     }
 
@@ -1991,7 +1992,7 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
             if (!mc2) {
                 log_debug("js-mir: identifier '%s' not found in vars, module_consts, or entry (func=%s, byte=%u)",
                     vname, mt->current_fc ? mt->current_fc->name : "?",
-                    ts_node_is_null(id->node) ? 0 : ts_node_start_byte(id->node));
+                    id->source_span.start_byte);
             }
         }
     }
@@ -5870,10 +5871,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     (dn->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
                      dn->init->node_type == JS_AST_NODE_ARROW_FUNCTION) &&
                     jm_declarator_is_const(dn)) {
-                    TSNode init_ts = dn->init->node;
-                    TSNode call_ts = ((JsAstNode*)call)->node;
-                    if (!ts_node_is_null(init_ts) && !ts_node_is_null(call_ts) &&
-                        ts_node_end_byte(init_ts) <= ts_node_start_byte(call_ts)) {
+                    if (dn->init->source_span.end_byte <= call->source_span.start_byte) {
                         resolved_fn = (JsFunctionNode*)dn->init;
                     }
                 }
@@ -5963,11 +5961,11 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 // non-tail self recursion must use js_call_function so the call-depth RangeError is catchable.
                 fc = NULL;
             }
-            if (fc && (mt->with_depth > 0 ||
-                    jm_node_has_with_ancestor_until_function((JsAstNode*)call) ||
-                    jm_node_has_with_ancestor_until_function((JsAstNode*)resolved_fn) ||
-                    (mt->current_fc &&
-                     jm_node_has_with_ancestor_until_function((JsAstNode*)mt->current_fc->node)))) {
+            if (fc && (jm_current_function_captures_with_scope(mt) ||
+                    jm_node_has_with_ancestor(mt, (JsAstNode*)call) ||
+                    jm_node_has_with_ancestor(mt, (JsAstNode*)resolved_fn))) {
+                // A closure created below `with` restores that Object Environment
+                // Record at call time, so a syntactically direct callee is dynamic.
                 fc = NULL;
             }
             // Yield in args inside a generator: the direct paths below evaluate
@@ -6978,10 +6976,9 @@ MIR_reg_t jm_transpile_tagged_template(JsMirTranspiler* mt, JsTaggedTemplateNode
 
     uint64_t site_id = 14695981039346656037ULL;
     if (tmpl) {
-        TSNode node = tmpl->node;
         uint64_t source_part = (mt->tp && mt->tp->source) ? (uint64_t)(uintptr_t)mt->tp->source : 0;
-        uint64_t start_part = ts_node_is_null(node) ? 0 : (uint64_t)ts_node_start_byte(node);
-        uint64_t end_part = ts_node_is_null(node) ? 0 : (uint64_t)ts_node_end_byte(node);
+        uint64_t start_part = tmpl->source_span.start_byte;
+        uint64_t end_part = tmpl->source_span.end_byte;
         site_id ^= source_part; site_id *= 1099511628211ULL;
         site_id ^= start_part; site_id *= 1099511628211ULL;
         site_id ^= end_part; site_id *= 1099511628211ULL;

@@ -114,7 +114,7 @@ fn make_counter_let(start: int) {
     fn counter(step) => count ** step
     counter
 }
-let t13 = make_counter_let(5)(3)
+let t13 = make_counter_let(5)(3);
 
 // Final result
 [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13]

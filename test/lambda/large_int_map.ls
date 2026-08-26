@@ -102,7 +102,7 @@ data.b - data.a
 
 // Test 12: Comparison with large integers
 "Test 12: Comparisons"
-12300000000 == 12300000000
+12300000000 == 12300000000;
 (12300000000 > 12299999999)
 1.23e10 == 12300000000
 

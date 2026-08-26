@@ -29,7 +29,7 @@ c                              // [10, 20, 30, 40, 50]
 shape(c)                       // [5]
 sum(c)                         // 150
 
-'=== comprehension to float ==='
+'=== comprehension to float ===';
 [for (x in a) x / 2.0]         // [0.5, 1, 1.5, 2, 2.5]
 shape([for (x in a) x / 2.0])  // [5]
 
@@ -67,6 +67,6 @@ max([for (x in a) x * x])               // 25
 // ============================================================
 // NON-NUMERIC stays generic (no promotion)
 // ============================================================
-'=== non-numeric ==='
-[for (x in a) "item"]          // strings — generic array
+'=== non-numeric ===';
+[for (x in a) "item"]; // strings — generic array
 [for (x in a) [x, x]]          // nested arrays — generic

@@ -43,7 +43,7 @@
   (high bytes `0x80–0x9F`) stops being generic tag headroom and becomes the int inline space.
 - **Convention:** `file:line` references drift; confirm against the symbol name.
 - **Related:** `Lambda_Impl_Int_Total.md` (impl plan), `Lambda_Design_Scalar_GC_Invariant.md`
-  (int exits the wide-scalar world entirely, §3.6), `Lambda_Impl_Double_Boxing (done).md`
+  (int exits the wide-scalar world entirely, §3.6), `impl/Lambda_Impl_Double_Boxing (done).md`
   (the float precedent, including the canonical-encoding rule this doc restates).
 
 ## 0. Summary

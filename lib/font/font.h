@@ -102,6 +102,12 @@ FontHandle* font_resolve(FontContext* ctx, const FontStyleDesc* style);
 FontHandle* font_handle_retain(FontHandle* handle);
 void        font_handle_release(FontHandle* handle);
 
+// Bind/unbind a non-owning FontProp alias. The cache-managed pin retains the
+// handle and excludes it from LRU eviction until the alias is released.
+void        font_cache_adopt_handle_alias(FontHandle* handle);
+void        font_cache_pin_handle(FontHandle* handle);
+void        font_cache_unpin_handle(FontHandle* handle);
+
 // get the resolved style identity of a font handle (for comparison/reuse checks)
 // returns false if handle is NULL, true otherwise
 bool font_handle_get_style(FontHandle* handle, const char** out_family,
@@ -127,6 +133,7 @@ typedef struct FontMetrics {
     float x_height;             // height of lowercase 'x'
     float cap_height;           // height of uppercase letters
     float space_width;          // advance width of U+0020 SPACE
+    float average_char_width;   // OS/2 average character width, in CSS pixels
     float em_size;              // units per em (typically 1000 or 2048)
     float underline_position;   // underline position below baseline (positive = down)
     float underline_thickness;  // underline stroke thickness

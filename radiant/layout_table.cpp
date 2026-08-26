@@ -768,6 +768,11 @@ static float table_cell_line_box_height_for_view(View* view, float cell_line_hei
     float view_height = view->height;
     cell_line_height = table_resolve_cell_line_height(
         view, cell_line_height, line_height_is_normal, parent_font_size, cell_font);
+    if (!line_height_is_normal && cell_line_height > 0.0f) {
+        // CSS Inline: an explicit line-height owns the line box; glyph ink may
+        // overflow it and must not enlarge an auto table row.
+        return cell_line_height;
+    }
     return max(cell_line_height > 0.0f ? cell_line_height : 0.0f, view_height);
 }
 
@@ -789,7 +794,9 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(view);
             bool noted_rect = false;
             for (TextRect* rect = text->rect; rect; rect = rect->next) {
-                float rect_line_height = max(line_height, rect->height);
+                float rect_line_height = line_height_is_normal
+                    ? max(line_height, rect->height) : line_height;
+                if (rect_line_height <= 0.0f) rect_line_height = rect->height;
                 table_note_cell_content_extent(extent, rect->y, rect->y + rect_line_height);
                 table_note_cell_line_position(extent, rect->y, rect_line_height);
                 noted_rect = true;
@@ -835,10 +842,15 @@ static bool table_empty_inline_atomic_line_top(LayoutContext* lycon,
 
 static float measure_cell_content_block_extent(ViewTableCell* tcell) {
     if (!tcell) return 0.0f;
-    // Cell content is still in the horizontal surrogate coordinate space until
-    // the vertical table grid is published. Its accumulated line-stack height,
-    // not the overlapping surrogate x bounds, is the logical block contribution.
-    return max(tcell->content_height, 0.0f);
+    float generic_extent = layout_compute_in_flow_child_width_extent(tcell);
+    float extent = 0.0f;
+    bool has_extent = layout_compute_vertical_in_flow_child_inline_extent(tcell, &extent);
+    // block-flow children already expose their physical block extent; only an
+    // inline-only cell needs the line-box calculation for forced-break columns.
+    if (!layout_vertical_parent_has_block_flow_child(tcell) && has_extent) {
+        return max(extent, 0.0f);
+    }
+    return max(generic_extent - layout_box_metrics(tcell).pad_border_h, 0.0f);
 }
 
 static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tcell) {
@@ -1038,39 +1050,48 @@ static float calculate_cell_height(LayoutContext* lycon, ViewTableCell* tcell, V
                                   float content_height, float explicit_height) {
     bool is_border_box = layout_uses_border_box(tcell);
     bool border_collapse = table && table->tb && table->tb->border_collapse;
+    bool vertical_grid = table_grid_uses_vertical_inline_axis(table);
     TableCellInsets insets = table_cell_content_insets(tcell, border_collapse);
-    float pad_top = insets.padding.top;
-    float pad_bottom = insets.padding.bottom;
+    float pad_start = vertical_grid ? insets.padding.left : insets.padding.top;
+    float pad_end = vertical_grid ? insets.padding.right : insets.padding.bottom;
     bool has_padding = tcell->bound &&
-        tcell->boundary_mut()->padding.top >= 0 &&
-        tcell->boundary_mut()->padding.bottom >= 0;
+        (vertical_grid
+            ? tcell->boundary_mut()->padding.left >= 0 &&
+              tcell->boundary_mut()->padding.right >= 0
+            : tcell->boundary_mut()->padding.top >= 0 &&
+              tcell->boundary_mut()->padding.bottom >= 0);
     if (has_padding) {
-        pad_top = insets.padding.top;
-        pad_bottom = insets.padding.bottom;
+        pad_start = vertical_grid ? insets.padding.left : insets.padding.top;
+        pad_end = vertical_grid ? insets.padding.right : insets.padding.bottom;
     } else {
-        pad_top = 0.0f;
-        pad_bottom = 0.0f;
+        pad_start = 0.0f;
+        pad_end = 0.0f;
     }
-    float border_top = 0, border_bottom = 0;
+    float border_start = 0.0f;
+    float border_end = 0.0f;
     if (table->tb->border_collapse) {
-        // Row sizing uses the pre-publication grid axes; keep its decoration
-        // on the source top/bottom edges until vertical geometry is published.
-        border_top = tcell->td->top_resolved ? tcell->td->top_resolved->width : 0.0f;
-        border_bottom = tcell->td->bottom_resolved ? tcell->td->bottom_resolved->width : 0.0f;
-        float half_borders = (border_top + border_bottom) / 2.0f;
-        border_top = half_borders / 2.0f;
-        border_bottom = half_borders - border_top;
+        // Row sizing stays in source axes until publication; map the shared
+        // border edges with the same axis as the cell block contribution.
+        border_start = vertical_grid
+            ? (tcell->td->left_resolved ? tcell->td->left_resolved->width : 0.0f)
+            : (tcell->td->top_resolved ? tcell->td->top_resolved->width : 0.0f);
+        border_end = vertical_grid
+            ? (tcell->td->right_resolved ? tcell->td->right_resolved->width : 0.0f)
+            : (tcell->td->bottom_resolved ? tcell->td->bottom_resolved->width : 0.0f);
+        float half_borders = (border_start + border_end) / 2.0f;
+        border_start = half_borders / 2.0f;
+        border_end = half_borders - border_start;
     } else {
-        border_top = insets.border.top;
-        border_bottom = insets.border.bottom;
+        border_start = vertical_grid ? insets.border.left : insets.border.top;
+        border_end = vertical_grid ? insets.border.right : insets.border.bottom;
     }
-    float content_total = content_height + pad_top + pad_bottom + border_top + border_bottom;
+    float content_total = content_height + pad_start + pad_end + border_start + border_end;
     if (explicit_height > 0) {
         float explicit_total;
         if (is_border_box) {
             explicit_total = explicit_height;
         } else {
-            explicit_total = explicit_height + pad_top + pad_bottom + border_top + border_bottom;
+            explicit_total = explicit_height + pad_start + pad_end + border_start + border_end;
         }
         return (content_total > explicit_total) ? content_total : explicit_total;
     }
@@ -1344,6 +1365,30 @@ static float compute_cell_strut_baseline(LayoutContext* lycon, ViewTableCell* tc
         (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f;
     float baseline = lycon->block.init_ascender + half_leading;
     return baseline;
+}
+
+static bool table_cell_is_anonymous(ViewTableCell* cell);
+static bool table_cell_is_in_anonymous_table(ViewTableCell* cell);
+
+static void position_zero_height_out_of_flow_cell(LayoutContext* lycon,
+                                                   ViewTableCell* tcell) {
+    if (!lycon || !tcell || !tcell->td || !table_cell_is_in_anonymous_table(tcell) ||
+        tcell->height != 0.0f ||
+        table_cell_has_baseline_line(tcell)) {
+        return;
+    }
+    bool has_out_of_flow_content = false;
+    for (View* child = tcell->first_child; child; child = child->next_sibling) {
+        if (table_cell_vertical_align_skips_child(child)) {
+            has_out_of_flow_content = true;
+            break;
+        }
+    }
+    if (has_out_of_flow_content) {
+        // CSS 2.1 §§10.8.1, 17.2.1: a zero-height cell with only
+        // out-of-flow content still positions its border box on the cell strut.
+        tcell->y = compute_cell_strut_baseline(lycon, tcell);
+    }
 }
 
 static float compute_inline_atomic_baseline_for_cell(LayoutContext* lycon, ViewBlock* block) {
@@ -3886,18 +3931,20 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
 
 }
 
-static void refresh_anonymous_table_fixup_inheritance(LayoutContext* lycon,
-                                                       DomElement* parent) {
+void layout_refresh_anonymous_table_fixup_inheritance(LayoutContext* lycon,
+                                                       DomElement* parent,
+                                                       const FontProp* inherited_font) {
     if (!lycon || !parent) return;
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* element = child->as_element();
         if (element->is_table_fixup()) {
-            inherit_anonymous_table_font_from_parent(lycon, element, parent);
+            const FontProp* source_font = inherited_font ? inherited_font : parent->font;
+            if (source_font) inherit_anonymous_table_font(lycon, element, source_font);
             inherit_anonymous_table_block_props(lycon, element, parent);
             inherit_anonymous_table_inline(lycon, element, parent->in_line);
         }
-        refresh_anonymous_table_fixup_inheritance(lycon, element);
+        layout_refresh_anonymous_table_fixup_inheritance(lycon, element, inherited_font);
     }
 }
 
@@ -4175,7 +4222,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
     if (tableNode->is_element()) {
         // Dynamic source rows resolve after their generated cells are made;
         // refresh the fixup boxes so they inherit the source computed values.
-        refresh_anonymous_table_fixup_inheritance(lycon, tableNode->as_element());
+        layout_refresh_anonymous_table_fixup_inheritance(lycon, tableNode->as_element());
         invalidate_anonymous_table_descendant_styles(tableNode->as_element(), false);
     }
     return table;
@@ -4559,21 +4606,35 @@ static void table_mirror_vertical_grid_descendants(View* view,
     }
 }
 
+static bool table_size_declaration_is_specified(CssDeclaration* declaration) {
+    if (!declaration || !declaration->value) return false;
+    return declaration->value->type != CSS_VALUE_TYPE_KEYWORD ||
+        declaration->value->data.keyword != CSS_VALUE_AUTO;
+}
+
 static bool table_has_explicit_physical_block_size(ViewTable* table) {
     if (!table || !table->is_element()) return false;
     DomElement* element = table->as_element();
     CssDeclaration* declaration = layout_specified_physical_size_declaration(
         element, true);
-    return declaration && declaration->property_code == CSS_PROPERTY_BLOCK_SIZE;
+    return declaration && declaration->property_code == CSS_PROPERTY_BLOCK_SIZE &&
+        table_size_declaration_is_specified(declaration);
 }
 
 static bool table_needs_vertical_geometry_publication(ViewTable* table) {
     if (!table || !layout_block_inline_axis_is_vertical(table)) return false;
-    bool has_explicit_physical_width = table->blk &&
-        table->block_mut()->given_width >= 0.0f;
+    DomElement* element = table->as_element();
+    CssDeclaration* width_declaration = element
+        ? layout_specified_physical_size_declaration(element, true) : nullptr;
+    bool has_explicit_physical_width = width_declaration &&
+        (width_declaration->property_code == CSS_PROPERTY_WIDTH ||
+         width_declaration->property_code == CSS_PROPERTY_BLOCK_SIZE) &&
+        table_size_declaration_is_specified(width_declaration);
     bool has_logical_block_size = table_has_explicit_physical_block_size(table);
     // Explicitly-sized tables retain physical geometry; the conversion below
     // is only for auto grids whose tracks are still stored in logical axes.
+    // auto layout stores the containing-block constraint in given_width; it is
+    // not an author width and must not suppress this axis publication.
     return !has_explicit_physical_width && !has_logical_block_size;
 }
 
@@ -4868,6 +4929,18 @@ static bool table_cell_is_anonymous(ViewTableCell* cell) {
     return element && element->tag_name && strcmp(element->tag_name, "::anon-td") == 0;
 }
 
+static bool table_cell_is_in_anonymous_table(ViewTableCell* cell) {
+    if (!cell) return false;
+    for (DomNode* parent = cell->parent; parent && parent->is_element();
+         parent = parent->parent) {
+        DomElement* element = parent->as_element();
+        if (element->tag_name && strncmp(element->tag_name, "::anon-", 7) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool table_height_allows_cell_percentage_resolution(ViewTable* table,
                                                            ViewTableCell* cell) {
     CssDeclaration* declaration = table
@@ -5110,7 +5183,8 @@ static void table_track_row_metrics(TableMetadata* meta, int row_idx, float row_
     meta->row_heights[row_idx] = row_height;
 }
 
-static void table_place_collapsed_row(ViewTable* table, TableMetadata* meta,
+static void table_place_collapsed_row(LayoutContext* lycon, ViewTable* table,
+                                      TableMetadata* meta,
                                       ViewTableRow* trow, float row_y,
                                       float row_width, float metadata_y,
                                       float* col_widths, float* col_x_positions,
@@ -5204,7 +5278,8 @@ static bool table_layout_flow_row(LayoutContext* lycon, ViewTable* table,
     bool is_collapsed = row_idx < meta->row_count && meta->row_collapsed[row_idx];
     if (is_collapsed) {
         table_place_collapsed_row(
-            table, meta, trow, in_group ? *current_y - group_start_y : *current_y,
+            lycon, table, meta, trow,
+            in_group ? *current_y - group_start_y : *current_y,
             row_width, *current_y, col_widths, col_x_positions, columns, row_idx);
         (*global_row_index)++;
         return false;
@@ -5702,7 +5777,9 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
         lycon, LAYOUT_AXIS_X, -1.0f);
     lycon->available_space = AvailableSpace::make_max_content();
     // Apply the cell's CSS font properties for accurate measurement
-    if (cell->font) {
+    // Anonymous cells retain a reset-time FontProp even after their generated
+    // box is marked resolved; authored cells still use their resolved font.
+    if (cell->font && !cell_elem->is_table_fixup()) {
         setup_font(lycon->ui_context, &lycon->font, cell->font);
     }
     // CSS 2.1: Infinite width for preferred content width (no line wrapping)
@@ -7058,7 +7135,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
     // Retained outer anonymous tables can be the parent's only direct child;
     // refresh them before the early no-orphan return so descendants inherit
     // the current authored parent rather than reset-time font defaults.
-    refresh_anonymous_table_fixup_inheritance(lycon, parent);
+    layout_refresh_anonymous_table_fixup_inheritance(lycon, parent);
     bool has_table_internal = false;
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
@@ -7147,7 +7224,11 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         if (needs_table) {
             // and table-child repair share inheritance and pool ownership.
             DisplayValue parent_display = resolve_display_value((void*)parent);
-            bool parent_is_inline = (parent_display.outer == CSS_VALUE_INLINE);
+            bool parent_is_inline = parent_display.outer == CSS_VALUE_INLINE &&
+                parent_display.inner != CSS_VALUE_FLOW_ROOT;
+            // CSS Display 3: an inline flow-root is an atomic block container;
+            // orphaned table-internal children therefore need block-level table
+            // fixup rather than an inline-table wrapper in its inline run.
             table_wrapper = create_anonymous_table_element(
                 lycon, parent, CSS_VALUE_TABLE, "::anon-table");
             if (table_wrapper) {
@@ -7321,5 +7402,9 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
             table->block_mut()->last_line_baseline = last_baseline;
         }
     }
+    table->each_cell([&](ViewTableRow* row, ViewTableCell* cell) {
+        (void)row;
+        position_zero_height_out_of_flow_cell(lycon, cell);
+    });
 
 }

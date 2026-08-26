@@ -40,7 +40,8 @@ PyAstNode* build_py_parameters(PyTranspiler* tp, TSNode params_node);
 PyAstNode* alloc_py_ast_node(PyTranspiler* tp, PyAstNodeType node_type, TSNode node, size_t size) {
     PyAstNode* ast_node = (PyAstNode*)arena_calloc(tp->ast_arena, size);
     ast_node->node_type = node_type;
-    ast_node->node = node;
+    ast_node->source_span = (SourceSpan){ts_node_start_byte(node),
+        ts_node_end_byte(node)};
     return ast_node;
 }
 

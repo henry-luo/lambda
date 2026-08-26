@@ -1,21 +1,21 @@
 # ANY-census baseline [Type_Infer TI3]. Regenerate with
 # `sh test/type_infer/refresh_census.sh`; commit the diff with the change.
 reason	count
-_scripts	422
+_scripts	423
 arith_operand	1913
 call_result	105
-compare	497
+compare	495
 decompose	64
 dynamic_name	66
 explicit	457
-index_elem	1165
-join	1631
+index_elem	992
+join	1578
 join_op	1001
-list	5388
+list	977
 loop_src	252
-member_shape	4564
+member_shape	4573
 statement	5453
-sysfunc_row	4699
+sysfunc_row	4650
 unary	11
 widened_var	303
-_total	27569
+_total	22890

@@ -17,7 +17,7 @@
 // validator treats 'text' as a sub-role of 'inline' (a string is always an inline)
 // and lets 'mark' roles also satisfy 'inline' (an emphasis element is an inline).
 
-pub md_schema = {
+pub let md_schema = {
   doc:        {role: 'block',  content: [{role: 'block',  qty: 'plus'}], marks: 'none', editable: true},
   paragraph:  {role: 'block',  content: [{role: 'inline', qty: 'star'}], marks: 'all', editable: true},
   heading:    {role: 'block',  content: [{role: 'inline', qty: 'star'}], marks: 'all',
@@ -48,10 +48,10 @@ pub md_schema = {
   code:       {role: 'mark',   content: [{role: 'inline', qty: 'star'}],   marks: 'none', excludes: 'all'}
 }
 
-pub markdown_schema = md_schema
-pub commonmark_strict_schema = md_schema
+pub let markdown_schema = md_schema
+pub let commonmark_strict_schema = md_schema
 
-pub html5_subset_schema = {
+pub let html5_subset_schema = {
   doc:        {role: 'block',  content: [{role: 'block', qty: 'plus'}], marks: 'none', editable: true},
   html:       {role: 'block',  content: [{tag: 'head', qty: 'opt'}, {tag: 'body', qty: 'one'}], marks: 'none'},
   head:       {role: 'block',  content: [{tag: 'title', qty: 'opt'}], marks: 'none'},
@@ -107,4 +107,4 @@ pub html5_subset_schema = {
 // The block element to materialise when the user splits at a position whose
 // schema does not allow the current block to repeat (e.g. Enter at end of
 // a heading produces a paragraph, not another heading).
-pub md_default_block = 'paragraph'
+pub let md_default_block = 'paragraph'

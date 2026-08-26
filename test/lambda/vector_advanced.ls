@@ -3,7 +3,7 @@
 
 "===== VECTOR ADVANCED OPERATIONS TEST ====="
 
-"=== Broadcasting Rules ==="
+"=== Broadcasting Rules ===";
 
 // Single element broadcasting to larger vector
 [5] + [1, 2, 3]
@@ -11,19 +11,19 @@
 // Scalar effectively broadcasts to any size
 3 + [1, 2, 3, 4, 5]
 
-"=== Complex Expressions ==="
+"=== Complex Expressions ===";
 
 // Nested arithmetic with vectors
-([1, 2, 3] + [4, 5, 6]) * [2, 2, 2]
+([1, 2, 3] + [4, 5, 6]) * [2, 2, 2];
 
 // Mixed scalar and vector operations
-[1, 2, 3] * 2 + 5
+[1, 2, 3] * 2 + 5;
 
 // Multiple vector operations
-[1, 2] + [3, 4] - [1, 1] + 10
+[1, 2] + [3, 4] - [1, 1] + 10;
 
 // Precedence with vectors
-[2, 3] * [4, 5] + [1, 2]
+[2, 3] * [4, 5] + [1, 2];
 
 // Complex with parentheses
 ([1, 2] + [3, 4]) * ([5, 6] - [1, 1])
@@ -37,7 +37,7 @@ let scalar = 10
 // Variable vector operations
 vec1 + vec2
 vec1 * scalar
-scalar - vec1
+scalar - vec1;
 
 // Complex variable expressions
 (vec1 + vec2) * scalar
@@ -100,33 +100,33 @@ numbers[1 + 1]
 
 for (x in [1, 2, 3]) x * 2
 
-"=== Mixed Type Vectors ==="
+"=== Mixed Type Vectors ===";
 
 // Heterogeneous vectors with error handling
-[1, "hello", true, 3.14]
+[1, "hello", true, 3.14];
 
 // Operations on mixed vectors produce per-element errors
-[3, "str", 5] + 1
+[3, "str", 5] + 1;
 
 // Mostly numeric with some non-numeric
 [1, 2, "three", 4] * 2
 
-"=== Error Cases ==="
+"=== Error Cases ===";
 
 // Division by zero in vectors
-[1, 2, 3] / 0
+[1, 2, 3] / 0;
 [6, 8, 10] / [2, 0, 2]
 
 // Modulo by zero
-let zero_divisor = 0
-[5, 10, 15] % zero_divisor
+let zero_divisor = 0;
+[5, 10, 15] % zero_divisor;
 [10, 20] % [5, 0]
 
-"=== Vector Comparisons ==="
+"=== Vector Comparisons ===";
 
 // Vector equality as a whole
-[1, 2, 3] == [1, 2, 3]
-[1, 2, 3] == [1, 2, 4]
+[1, 2, 3] == [1, 2, 3];
+[1, 2, 3] == [1, 2, 4];
 [1, 2] == [1, 2, 3]
 
 "=== Performance Tests ==="
@@ -136,10 +136,10 @@ let large_vec = for (i in 1 to 100) i
 sum(large_vec)
 avg(large_vec)
 
-"=== Nested Vector Operations ==="
+"=== Nested Vector Operations ===";
 
 // Vectors containing vectors (2D-like structures)
-[[1, 2], [3, 4], [5, 6]]
+[[1, 2], [3, 4], [5, 6]];
 
 // Vector of strings
 ["hello", "world", "test"]
@@ -148,10 +148,10 @@ avg(large_vec)
 
 // Range operations
 1 to 5
-for (x in 1 to 5) x
+for (x in 1 to 5) x;
 
 // Range with scalar arithmetic
-(1 to 5) * 2
+(1 to 5) * 2;
 (1 to 5) + 10
 
 "=== Memory and Performance Edge Cases ==="

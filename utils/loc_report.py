@@ -164,12 +164,17 @@ JS_SUBMODULES = [
         'js_xhr', 'js_fetch', 'js_formdata', 'js_url_module',
     ])),
     ('node compat', in_dir_with_prefix('lambda/js', [
-        'js_fs', 'js_path', 'js_os', 'js_http', 'js_https', 'js_net', 'js_dns',
+        'js_fs', 'js_path', 'js_os', 'js_http', 'js_https', 'js_net',
         'js_tls', 'js_child_process', 'js_stream', 'js_buffer', 'js_util',
-        'js_querystring', 'js_readline', 'js_string_decoder', 'js_crypto',
-        'js_events', 'js_assert', 'js_zlib', 'js_permission',
+        'js_querystring', 'js_readline', 'js_string_decoder',
+        'js_events', 'js_assert',
     ])),
     ('core js engine', under('lambda/js')),
+]
+
+JUBE_NODE_SUBMODULES = [
+    ('node modules', under('lambda/module/node_')),
+    ('node host providers', in_dir_with_prefix('lambda/jube', ['jube_node_'])),
 ]
 
 RADIANT_SUBMODULES = [
@@ -213,6 +218,7 @@ MODULES = OrderedDict([
         ('tree-sitter', TREE_SITTER),
         ('input parsers', [('input parsers', under('lambda/input'))]),
         ('output formatters', [('output formatters', under('lambda/format'))]),
+        ('jube node', JUBE_NODE_SUBMODULES),
         ('js runtime', JS_SUBMODULES),
         ('bash runtime', [('bash runtime', under('lambda/bash'))]),
         ('python runtime', [('python runtime', under('lambda/module/py'))]),

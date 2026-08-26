@@ -978,15 +978,14 @@ bool StateStore::init(DomDocument* owner_document) {
     owner_document->state_store = this;
     owner_document->state = doc_state;
     doc_state->owner_store = this;
-    Runtime* semantic_runtime = owner_document->lambda_runtime
-        ? owner_document->lambda_runtime : owner_document->js.runtime;
+    Runtime* semantic_runtime = dom_document_script_runtime(owner_document);
     semantic_context = semantic_runtime
         ? runtime_get_eval_context(semantic_runtime) : nullptr;
     if (semantic_context) {
         // Template/render maps belong to the document Runtime, never an
         // unrelated evaluator. Initialization may claim a fresh host thread,
         // but it must not switch an already-owned thread.
-        if (!eval_context_thread_initialize(semantic_context)) {
+        if (!eval_context_init(semantic_context)) {
             log_error("state_store_init: document EvalContext is not the thread owner");
             semantic_context = nullptr;
             destroy();
@@ -1051,7 +1050,7 @@ void StateStore::destroy() {
     if (!state && owner_document && owner_document->state_store == this) {
         state = owner_document->state;
     }
-    if (semantic_context && !eval_context_thread_initialize(semantic_context)) {
+    if (semantic_context && !eval_context_init(semantic_context)) {
         // State maps contain Items owned by this context; destroying them under
         // another evaluator would unregister roots from the wrong heap.
         log_error("state_store_destroy: document EvalContext is not the thread owner");
@@ -2197,8 +2196,14 @@ bool state_get_bool(DocState* state, void* node, const char* name) {
         if (strcmp(name, STATE_FOCUS) == 0) return view_state_get_focused(state, view);
         if (strcmp(name, STATE_CHECKED) == 0) return form_control_get_checked(state, view);
         if (strcmp(name, STATE_DISABLED) == 0) return form_control_is_disabled(state, view);
+        // `readonly` stays the content-attribute mirror, matching input.readOnly;
+        // the CSS "not user-alterable" sense lives in form_control_is_user_readonly
+        // and is reached through the pseudo-class, not this name (F3b).
         if (strcmp(name, STATE_READONLY) == 0) return form_control_is_readonly(state, view);
         if (strcmp(name, STATE_REQUIRED) == 0) return form_control_is_required(state, view);
+        // Derived, never stored: nothing writes :optional since the reflection
+        // pass retired, so the generic slot below would answer a flat false.
+        if (strcmp(name, STATE_OPTIONAL) == 0) return !form_control_is_required(state, view);
     }
 
     Item value = state_get(state, node, name);
@@ -2244,9 +2249,9 @@ bool state_get_pseudo_state(DocState* state, View* view, uint32_t pseudo_state) 
         case PSEUDO_STATE_OPTIONAL:
             return !form_control_is_required(state, view);
         case PSEUDO_STATE_READ_ONLY:
-            return form_control_is_readonly(state, view);
+            return form_control_is_user_readonly(state, view);
         case PSEUDO_STATE_READ_WRITE:
-            return !form_control_is_readonly(state, view);
+            return !form_control_is_user_readonly(state, view);
         case PSEUDO_STATE_INDETERMINATE:
             return state_get_bool(state, view, STATE_INDETERMINATE);
         case PSEUDO_STATE_VALID:
@@ -2277,10 +2282,14 @@ static bool dom_element_default_pseudo_state(DomElement* element, uint32_t pseud
             return element->has_attribute("required");
         case PSEUDO_STATE_OPTIONAL:
             return !element->has_attribute("required");
+        // disabled implies read-only here too, so the stateless resolver agrees
+        // with the state-backed one above (F3b)
         case PSEUDO_STATE_READ_ONLY:
-            return element->has_attribute("readonly");
+            return element->has_attribute("readonly") ||
+                   element->has_attribute("disabled");
         case PSEUDO_STATE_READ_WRITE:
-            return !element->has_attribute("readonly");
+            return !(element->has_attribute("readonly") ||
+                     element->has_attribute("disabled"));
         case PSEUDO_STATE_SELECTED:
             return element->has_attribute("selected");
         default:
@@ -3265,6 +3274,10 @@ static void view_state_release_form_payload(ViewState* view_state) {
     view_state->data.form.current_value_len = 0;
     view_state->data.form.current_value_u16_len = 0;
     view_state->data.form.has_current_value = 0;
+    if (view_state->data.form.history) {
+        te_history_free((EditHistory*)view_state->data.form.history);
+        view_state->data.form.history = NULL;
+    }
 }
 
 static void view_state_release_payload(ViewState* view_state) {
@@ -3272,6 +3285,23 @@ static void view_state_release_payload(ViewState* view_state) {
     if (view_state->kind == VIEW_STATE_FORM_CONTROL) {
         view_state_release_form_payload(view_state);
     }
+}
+
+static ViewState* form_view_state_get_or_create(DocState* state, View* view,
+                                                FormControlProp* form);
+
+// The undo ring is owned by the form ViewState (ESO43), so it survives the
+// FormControlProp being released and rebuilt across relayout. These keep the
+// ViewState plumbing here rather than exporting it to the editing code.
+void* form_control_history_get(DocState* state, View* view) {
+    ViewState* view_state = form_view_state_get(state, view);
+    return view_state ? view_state->data.form.history : NULL;
+}
+
+void form_control_history_set(DocState* state, View* view, void* history) {
+    ViewState* view_state = form_view_state_get_or_create(state, view,
+                                                          form_prop_for_view(view));
+    if (view_state) view_state->data.form.history = history;
 }
 
 static bool form_view_is_text_control(View* view) {
@@ -4206,18 +4236,15 @@ bool form_control_restore_text_control_state(DocState* state, View* view) {
         form->current_value_u16_len = tc_utf8_to_utf16_length(
             form->current_value, form->current_value_len);
     }
+    // The ViewState is the durable copy and no longer needs to be second-guessed
+    // against DocState::sel. Both are written by one publish
+    // (state_store_set_text_control_selection), so a caret newer than the cached
+    // ViewState is no longer reachable — the special case that used to prefer
+    // DocState::sel here existed only because the two were fanned out
+    // separately and could disagree (ESO22).
     uint32_t restore_start = view_state->data.form.selection_start;
     uint32_t restore_end = view_state->data.form.selection_end;
     uint8_t restore_direction = view_state->data.form.selection_direction;
-    if (state && state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
-        state->sel.control == elem) {
-        // fallback relayout can run while the replacement caret is newer than
-        // the cached ViewState; keep StateStore selection authoritative.
-        restore_start = state->sel.start_u16;
-        restore_end = state->sel.end_u16;
-        restore_direction = restore_start == restore_end ? 0 :
-            (state->sel.direction == DOM_SEL_DIR_BACKWARD ? 2 : 1);
-    }
     form->selection_start = restore_start;
     form->selection_end = restore_end;
     if (form->selection_start > form->current_value_u16_len) {
@@ -4538,6 +4565,22 @@ bool form_control_is_readonly(DocState* state, View* view) {
 
     if (!view) return false;
     return view_element_has_attr(view, "readonly");
+}
+
+// CSS `:read-only` asks whether the element is user-alterable, which is a
+// broader question than the readonly content attribute: a disabled control is
+// barred from user modification too (HTML §4.10.18.6). Derived on every read
+// rather than cached — it is a pure function of the markup, so nothing has to
+// write it and it is correct from the first cascade, in batch layout/render,
+// and before any control initializes (F3b/ES16).
+//
+// Deliberately separate from form_control_is_readonly, which stays the mirror
+// of the content attribute that `input.readOnly` and `aria-readonly` reflect.
+// Merging the two is what te_reflect_control_state used to do, and it made a
+// merely-disabled input report readOnly === true.
+bool form_control_is_user_readonly(DocState* state, View* view) {
+    return form_control_is_readonly(state, view) ||
+           form_control_is_disabled(state, view);
 }
 
 void form_control_set_readonly(DocState* state, View* view, bool readonly) {

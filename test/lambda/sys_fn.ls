@@ -8,5 +8,5 @@
 "len of list:"; len([1, 2, 3])
 "len of array:"; len([1, 2, 3])
 "len of map:"; len({'a': "a", 'b': "b"})
-"len of element:"; len(<elmt a:"b"; "text">)
+"len of element:"; len(<elmt a:"b", "text">)
 "len of element:"; len(<elmt>)

@@ -68,10 +68,11 @@ static void ee_error(EarlyErrorCtx* ctx, JsAstNode* n, const char* fmt, ...) {
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
 
-    js_error(ctx->tp, n->node, "%s", buf);
+    js_error(ctx->tp, n->source_span, "%s", buf);
 
-    uint32_t row = ts_node_start_point(n->node).row + 1;
-    uint32_t col = ts_node_start_point(n->node).column + 1;
+    LambdaSourcePoint point = lambda_source_span_start_point(ctx->tp->source, n->source_span);
+    uint32_t row = point.row + 1;
+    uint32_t col = point.column + 1;
     fprintf(stderr, "SyntaxError: %s (at line %u, column %u)\n", buf, row, col); // PRINTF_OK: stderr echo of js_error() for early-stage host visibility.
 }
 
@@ -325,8 +326,8 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
     }
 
     // check via raw source text for unicode-escaped reserved words
-    uint32_t start = ts_node_start_byte(node->node);
-    uint32_t end = ts_node_end_byte(node->node);
+    uint32_t start = node->source_span.start_byte;
+    uint32_t end = node->source_span.end_byte;
     if (end > start && ctx->tp->source) {
         int slen = (int)(end - start);
         const char* raw = ctx->tp->source + start;
@@ -571,7 +572,7 @@ static void check_binding_pattern_reserved(EarlyErrorCtx* ctx, JsAstNode* node) 
 
 static void check_function_name_reserved(EarlyErrorCtx* ctx, JsFunctionNode* func) {
     if (!ctx->in_strict || !func || !func->name) return;
-    if (strcmp(ts_node_type(func->node), "method_definition") == 0) return;
+    if (func->node_type == JS_AST_NODE_METHOD_DEFINITION) return;
     const char* name = func->name->chars;
     if (strcmp(name, "eval") == 0 || strcmp(name, "arguments") == 0) {
         ee_error(ctx, (JsAstNode*)func, "'%s' cannot be used as a function name in strict mode", name);
@@ -689,8 +690,8 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             if (ctx->in_strict) {
                 JsLiteralNode* lit = (JsLiteralNode*)node;
                 if (lit->literal_type == JS_LITERAL_NUMBER && ctx->tp->source) {
-                    uint32_t start = ts_node_start_byte(node->node);
-                    uint32_t end = ts_node_end_byte(node->node);
+                    uint32_t start = node->source_span.start_byte;
+                    uint32_t end = node->source_span.end_byte;
                     int slen = (int)(end - start);
                     if (slen >= 2) {
                         const char* raw = ctx->tp->source + start;
@@ -701,8 +702,8 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
                     }
                 }
                 if (lit->literal_type == JS_LITERAL_STRING && ctx->tp->source) {
-                    uint32_t start = ts_node_start_byte(node->node);
-                    uint32_t end = ts_node_end_byte(node->node);
+                    uint32_t start = node->source_span.start_byte;
+                    uint32_t end = node->source_span.end_byte;
                     int slen = (int)(end - start);
                     const char* raw = ctx->tp->source + start;
                     // check for octal escapes \0-\7 in string literals

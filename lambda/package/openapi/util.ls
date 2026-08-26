@@ -39,7 +39,7 @@ pub fn list_contains(arr, val) {
 // HTTP method list (standard)
 // ============================================================
 
-pub METHODS = ["get", "post", "put", "delete", "patch", "head", "options"]
+pub let METHODS = ["get", "post", "put", "delete", "patch", "head", "options"]
 
 // ============================================================
 // JSON Schema type to Lambda type name mapping

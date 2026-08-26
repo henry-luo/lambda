@@ -1,7 +1,7 @@
 #pragma once
 
 #include <stdint.h>
-#include <tree_sitter/api.h>
+#include "source_span.h"
 #include "../lambda.h"
 #include "value_rep.h"
 
@@ -108,7 +108,7 @@ typedef enum AstNodeType : uint16_t {
     AST_NODE_TYPE_STAM = 515,
     AST_NODE_PATH_EXPR = 516,
     AST_NODE_PATH_INDEX_EXPR = 517,
-    AST_NODE_PARENT_EXPR = 518,
+    AST_NODE_NAVIGATION_EXPR = 518,
     AST_NODE_QUERY_EXPR = 519,
     AST_NODE_SYS_FUNC = 520,
     AST_NODE_NAMED_ARG = 521,
@@ -141,6 +141,10 @@ typedef enum AstNodeType : uint16_t {
     // braced error-handler body; it is distinct from `~` current-item state.
     AST_NODE_CURRENT_ERROR = 545,
     AST_NODE_PATTERN_ISLAND = 546,
+    // A group clause owns a linked list of these; keeping the key distinct
+    // prevents generic AST visitors from casting its smaller layout as the
+    // enclosing AstGroupClause.
+    AST_NODE_GROUP_KEY = 547,
 } AstNodeType;
 
 typedef enum Operator {
@@ -276,6 +280,9 @@ struct NameEntry {
     Type* declared_type;
     bool type_widened;
     bool is_lexical;
+    // loop-head bindings need a distinct capture-analysis fact; this used to
+    // be recovered from parser structure at the binding node.
+    bool is_for_in_head;
     bool is_const;
     bool tdz_active;
     bool is_exported;
@@ -299,12 +306,15 @@ struct NameEntry {
 };
 
 // Static activation shape for one interpreted function (or module top level).
-// Slot layout: [ params | locals | signal | scratch ] — see interp.hpp.
+// Slot layout: [ params | locals | vargs? | signal | scratch ] — see interp.hpp.
 typedef struct FnFramePlan {
     uint16_t param_count;
     uint16_t local_count;
+    // A variadic function keeps its adapter-owned rest list rooted for the
+    // whole body. UINT16_MAX means this frame has no variadic binding.
+    uint16_t vargs_index;
     uint16_t scratch_depth;   // max Items live across a child eval / MAY_GC call
-    uint16_t total_slots;     // params + locals + 1 (signal) + scratch
+    uint16_t total_slots;     // params + locals + vargs? + 1 (signal) + scratch
     bool planned;
 } FnFramePlan;
 
@@ -322,7 +332,7 @@ struct AstNode {
     AstNodeType node_type;
     Type *type;
     AstNode* next;
-    TSNode node;
+    SourceSpan source_span;
 };
 
 // Stable compiler identities and one authoritative child/index contract. The
@@ -357,7 +367,16 @@ typedef struct AstNodeFacts {
     Type* inferred_type;
     ValueRep representation;
     uint32_t flags;
+    // const pass results are immediate Items only. Pointer-backed values stay
+    // out of this table so an AST fact cannot become a MIR-cache relocation
+    // dependency (D8.1.1v2 / DI14).
+    uint64_t folded_item;
 } AstNodeFacts;
+
+enum AstNodeFactFlags : uint32_t {
+    AST_NODE_FACT_NONE = 0,
+    AST_NODE_FACT_CONST_FOLDED = 1u << 0,
+};
 
 #ifdef __cplusplus
 extern "C" {
@@ -365,6 +384,10 @@ extern "C" {
 void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx);
 bool ast_index_build(AstIndex* index, AstNode* root);
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
+// Adds a newly retained AST fragment without invalidating the stable IDs and
+// analysis facts already published for earlier REPL inputs (D8.2.4).
+bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
+                              const LangProfile* profile);
 void ast_index_destroy(AstIndex* index);
 AstNodeId ast_index_find(const AstIndex* index, const AstNode* node);
 #ifdef __cplusplus
@@ -415,9 +438,16 @@ typedef struct AstHandlerNode : AstNode {
     int async_fault_state;
 } AstHandlerNode;
 
+typedef enum StartMode {
+    START_MODE_TASK = 0,
+    START_MODE_THREAD,
+    START_MODE_PROCESS,
+} StartMode;
+
 typedef struct AstStartNode : AstNode {
     AstCallNode* call;
     NameScope* owner_scope;
+    StartMode mode;
     bool escapes;
 } AstStartNode;
 
@@ -498,6 +528,11 @@ typedef struct AstMatchArm : AstNode {
         AstNode *body;
         AstNode *consequent;
     };
+    // S16.6.8/S16.6.9: true for the `case T { ... }` spelling, false for
+    // `case T: expr`. The two reduce to the same node, but only the colon
+    // spelling bars a procedural block, and the distinction drives the
+    // value-arm/control-arm reading.
+    bool body_braced;
 } AstMatchArm;
 
 typedef struct AstMatchNode : AstNode {
@@ -585,6 +620,9 @@ typedef struct AstAssignNode : AstNode {
 // for AST_NODE_ASSIGN with decomposition (let a, b = expr / let a, b at expr)
 typedef struct AstDecomposeNode : AstNode {
     String** names;
+    // `names` is source-facing; T0 binds through these resolved entries so a
+    // decomposed target uses the same planned slot as later identifier reads.
+    NameEntry** entries;
     int name_count;
     AstNode *as;
     bool is_named;
@@ -604,6 +642,22 @@ typedef struct AstCompoundAssignNode : AstAssignNode {
     AstNode *key;
     AstNode *value;
 } AstCompoundAssignNode;
+
+// A vector comparison produces an ArrayNum bool mask, while a source numeric
+// literal may still carry the general ARRAY AST type until it is constructed.
+// T0 shares this syntactic admission test between planning and execution; the
+// runtime fn_index_assign helper still validates the actual ArrayNum lanes and
+// shape before it mutates.
+static inline bool ast_is_direct_numeric_mask_assignment(AstNode* node) {
+    if (!node || node->node_type != AST_NODE_INDEX_ASSIGN_STAM) return false;
+    AstCompoundAssignNode* assignment = (AstCompoundAssignNode*)node;
+    AstNode* key = assignment->key;
+    AstNode* object = assignment->object;
+    return key && !key->next && key->type &&
+        key->type->type_id == LMD_TYPE_ARRAY_NUM && object && object->type &&
+        (object->type->type_id == LMD_TYPE_ARRAY ||
+         object->type->type_id == LMD_TYPE_ARRAY_NUM);
+}
 
 // --- Shared AST shape helpers (promoted from transpile-mir.cpp, rule 13) ---
 // Both tiers need the same answers about an assignment target, so the walks
@@ -828,6 +882,8 @@ typedef enum AnyReason {
     ANY_PIPE,                // pipe result element type (TIG16)
     ANY_JS_BINARY,           // JS binary expression (TIG13)
     ANY_JS_CALL_MEMBER,      // JS call/member result (TIG14)
+    ANY_JS_CALL,             // JS call result specifically (TIG14a)
+    ANY_JS_MEMBER,           // JS member/subscript read specifically (TIG14b)
     ANY_ARITH_OPERAND,       // arithmetic where an operand is not statically numeric
     ANY_JOIN_OP,             // `++` join/concat result
     ANY_CALL_RESULT,         // callee's return type unknown (recursive/open fn)
@@ -1017,6 +1073,28 @@ typedef struct FnVariantAnalysis {
     FnValueAnalysis* values;
     int value_count;
 } FnVariantAnalysis;
+
+// P2 tier-up state belongs to the definition site, rather than to individual
+// Function values: aliases of one `fn` must observe the same immutable native
+// entry once it is published (D8.1.1v2 §5.1).
+typedef enum FnPromotionState {
+    FN_PROMOTION_INTERP,
+    FN_PROMOTION_COMPILING,
+    FN_PROMOTION_COMPILED,
+    FN_PROMOTION_PINNED_INTERP,
+} FnPromotionState;
+
+typedef struct FnPromotionCell {
+    FnPromotionState state;
+    uint32_t call_count;
+    uint32_t backedge_count;
+    // self-tail edges are eligible for entry-equivalent handoff, unlike a
+    // general loop backedge which has no native frame materialization point
+    // (D8.1.1v5).
+    uint32_t tail_edge_count;
+    void* boxed_entry;
+} FnPromotionCell;
+
 typedef struct FnAnalysis {
     FnCapture* captures;
     FnParamEvidence* evidence;
@@ -1040,6 +1118,9 @@ typedef struct FnAnalysis {
     // carry it: push_name deliberately writes no AstNamedNode-only field
     // because that alias is `vars` on a function and the join pointer on a loop.
     NameEntry* decl_entry;
+    // T0/T1 transition state. The Script owns the AST and all generated
+    // satellites, so this cell has the same lifetime as its definition.
+    FnPromotionCell promotion;
 } FnAnalysis;
 
 static inline FnVariantAnalysis* fn_analysis_variant(

@@ -340,9 +340,8 @@ TEST_F(ValidatorFeaturesTest, ValidateZeroOrMoreOperator) {
 // Helper struct matching TypeRegistryEntry layout (from validator/validator.hpp)
 struct TestTypeDefinition {
     StrView name;
-    Type* schema_type;
+    void* schema_type;
     Type* runtime_type;
-    TSNode source_node;
     bool is_exported;
 };
 

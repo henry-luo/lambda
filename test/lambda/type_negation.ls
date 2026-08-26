@@ -10,10 +10,10 @@ null is !null         // false: null IS null
 "hi" is !int          // true: string is not int
 true is !bool         // false: bool IS bool
 3.14 is !float        // false: float IS float
-3.14 is !int          // true: float is not int
+3.14 is !int; // true: float is not int
 
 // Type negation with collections
-[1,2,3] is !array     // false: array IS array
+[1,2,3] is !array; // false: array IS array
 [1,2,3] is !map       // true: array is not map
 {a:1} is !map         // false: map IS map
 {a:1} is !array       // true: map is not array

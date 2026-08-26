@@ -158,7 +158,7 @@ fn _function_stops(pdf, func, ncomp) {
         else { [_stitch_stop(pdf, fs[0], ncomp, 0.0, false), _stitch_stop(pdf, fs[len(fs) - 1], ncomp, 1.0, true)] }
     }
     else {
-        let endpoints = _endpoint_colors(pdf, func, ncomp)
+        let endpoints = _endpoint_colors(pdf, func, ncomp);
         [{ offset: "0%", value: 0.0, color: endpoints[0] },
          { offset: "100%", value: 1.0, color: endpoints[1] }]
     }
@@ -176,7 +176,7 @@ fn _matrix_inverse(m) {
     let det = m[0] * m[3] - m[1] * m[2]
     if (util.fabs(det) < 0.000001) { util.IDENTITY }
     else {
-        let inv_det = 1.0 / det
+        let inv_det = 1.0 / det;
         [
             m[3] * inv_det,
             (0.0 - m[1]) * inv_det,
@@ -242,7 +242,7 @@ fn _emit_axial_with_alpha_matrix(pdf, d, xform, id, page_w, page_h, alpha_mask) 
     let stop_els = _stop_elements(stops, alpha_mask)
     let grad = <linearGradient id: id, gradientUnits: "userSpaceOnUse",
                                x1: util.fmt_num(x0), y1: util.fmt_num(y0),
-                               x2: util.fmt_num(x1), y2: util.fmt_num(y1);
+                               x2: util.fmt_num(x1), y2: util.fmt_num(y1),
                   for (el in stop_els) el
               >
     let cover = <rect x: "0", y: "0",
@@ -276,7 +276,7 @@ fn _emit_radial_with_alpha_matrix(pdf, d, xform, id, page_w, page_h, alpha_mask)
     let grad = <radialGradient id: id, gradientUnits: "userSpaceOnUse",
                                fx: util.fmt_num(cx0), fy: util.fmt_num(cy0),
                                cx: util.fmt_num(cx1), cy: util.fmt_num(cy1),
-                               r:  util.fmt_num(r1);
+                               r:  util.fmt_num(r1),
                   for (el in stop_els) el
               >
     let cover = <rect x: "0", y: "0",
@@ -389,8 +389,8 @@ fn _pop_ctm(stack, fallback) {
 fn _rect_child(rect, fill, ctm) {
     let el = <rect x: util.fmt_num(rect.x), y: util.fmt_num(rect.y),
                    width: util.fmt_num(rect.w), height: util.fmt_num(rect.h),
-                   fill: fill>
-    <g transform: util.fmt_matrix(ctm); el>
+                   fill: fill>;
+    <g transform: util.fmt_matrix(ctm), el>
 }
 
 fn _pattern_color_from_ops(pdf, page, operands, id, ctm, fallback) {
@@ -505,7 +505,7 @@ pub fn from_tiling_pattern_fill(pdf, page, p, id) {
                                    patternUnits: "userSpaceOnUse",
                                    x: util.fmt_num(x), y: util.fmt_num(y),
                                    width: util.fmt_num(w), height: util.fmt_num(h),
-                                   patternTransform: util.fmt_matrix(m);
+                                   patternTransform: util.fmt_matrix(m),
                               for (kid in kids) kid
                           >
                 { defs: extra_defs ++ [pat], fill: "url(#" ++ id ++ ")" }

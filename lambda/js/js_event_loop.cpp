@@ -228,7 +228,9 @@ extern "C" void js_cancelAnimationFrame(Item request_id) {
 }
 
 JS_FORWARD_EXPRESSION(int, js_animation_frame_has_pending, (void),
-    raf_count > 0 ? 1 : 0)
+    // the host loop can outlive a document's JS capsule, so do not read its
+    // per-runtime animation-frame queue after script teardown.
+    js_active_runtime_state && raf_count > 0 ? 1 : 0)
 
 static void js_event_loop_render_checkpoint(void) {
     if (!js_dom_get_ui_context() || js_dom_is_host_driven_loop()) {
@@ -391,7 +393,7 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
     memset(scope, 0, sizeof(JsTimerRuntimeScope));
     scope->saved_doc = js_dom_get_document();
     if (!th->runtime_context || !th->runtime_heap || !th->runtime_name_pool ||
-            !eval_context_thread_matches(th->runtime_context) ||
+            !eval_context_matches(th->runtime_context) ||
             !js_runtime_state_thread_matches(th->runtime_context)) {
         // Timer ownership is a routing check. A loop callback cannot borrow a
         // different evaluator and restore the previous one afterward.

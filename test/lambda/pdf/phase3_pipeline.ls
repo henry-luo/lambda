@@ -26,7 +26,7 @@ pn main() {
 
 // helpers — Lambda doesn't ship a substring count, so do it via split
 fn contains(s, sub) {
-    let parts = split(s, sub)
+    let parts = split(s, sub);
     (len(parts) >= 2)
 }
 

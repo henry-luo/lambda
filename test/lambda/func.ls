@@ -10,7 +10,7 @@ pub fn addition(a, b) {
 
 pub fn mul(a: float, b: float) float => a * b
 
-pub pi = 3.14159
+pub let pi = 3.14159
 
 fn strcat(a: string, b: string) { a ++ b }
 

@@ -248,6 +248,10 @@ const FontMetrics* font_get_metrics(FontHandle* handle) {
     m->x_height    = measure_x_height(handle, scale, m->ascender);
     m->cap_height  = measure_cap_height(handle, scale, m->ascender);
     m->space_width = measure_space_width(handle);
+    m->average_char_width = m->space_width;
+    if (os2t && os2t->avg_char_width > 0) {
+        m->average_char_width = os2t->avg_char_width * scale;
+    }
 
     // em_size from FontTables head
     if (head && head->units_per_em > 0) {
@@ -302,8 +306,9 @@ static int font_get_handle_platform_metrics(FontHandle* handle,
                                             float* out_line_height) {
     if (!handle) return 0;
 #ifdef __APPLE__
-    if (handle->is_document_font && handle->ct_raster_ref) {
-        // document-family aliases may resolve to a substitute; measure the data-backed face.
+    if ((handle->is_document_font || handle->metrics_from_platform_ref) &&
+        handle->ct_raster_ref) {
+        // aliases and platform fallbacks may resolve to a substitute; measure the retained face.
         return font_platform_get_metrics_from_ref(handle->ct_raster_ref,
             out_ascent, out_descent, out_line_height);
     }
@@ -522,6 +527,15 @@ float font_get_cell_height(FontHandle* handle) {
         if (get_font_metrics_platform(family, font_size, &ascent, &descent, &lh)) {
             return ascent + descent;  // without leading
         }
+    }
+
+    float platform_ascent, platform_descent, platform_line_height;
+    if (font_get_handle_platform_metrics(handle, &platform_ascent,
+                                          &platform_descent,
+                                          &platform_line_height)) {
+        // text rectangles use the resolved platform font box; HHEA includes
+        // extra vertical space that Chromium does not expose in DOMRects.
+        return platform_ascent + platform_descent;
     }
 
     // FontTables hhea+head → ascent + descent in CSS pixels

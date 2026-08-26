@@ -3,11 +3,12 @@
 // A module declares its script-facing shape once, in Lambda type syntax
 // (JubeModuleDef.interface_decl), and supplies behavior as binding tables
 // (JubeTypeBinding / JubeMemberBind). At registration this file parses the
-// declaration with the real Lambda grammar (Tree-sitter), cross-checks it
+// declaration with the first-party Lambda parser, cross-checks it
 // against the bindings, and compiles per-type member records plus a
 // content-hashed name index dual-keyed on snake_case and camelCase. The
 // generic host-object paths consult these records, so a fully declared type
-// needs no hand-written dispatch at all.
+// needs no hand-written dispatch at all. Runtime Jube registration therefore
+// does not depend on the editor-oriented Tree-sitter frontend.
 
 #include "jube_interface.h"
 #include "jube_registry.h"
@@ -16,13 +17,12 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/hashmap.h"
-#include <tree_sitter/api.h>
+#include "../runtime/parser/lambda_rd_parser.h"
+#include <errno.h>
 #include <string.h>
 #include <stdlib.h>
 
 // engine entry points not exposed through public headers
-extern "C" TSParser* lambda_parser(void);
-extern "C" TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 extern __thread EvalContext* context;
 // raw VMap backing-store access (vmap.cpp); bypasses host-object routing so
 // the generic expando store cannot recurse back into member dispatch
@@ -955,6 +955,13 @@ typedef struct JubeParsedMember {
 
 #define JUBE_PARSE_MEMBER_CAPACITY 256
 
+typedef struct JubeParsedType {
+    char* name;
+    char* base_name;
+    JubeParsedMember members[JUBE_PARSE_MEMBER_CAPACITY];
+    int member_count;
+} JubeParsedType;
+
 static const JubeTypeDef* jube_module_type_by_name(const JubeModuleDef* module,
                                                    const char* name);
 
@@ -1003,64 +1010,54 @@ static void jube_member_record_init(JubeMemberRecord* record,
         !(bind && (bind->flags & JUBE_MEMBER_NON_ENUMERABLE));
 }
 
-static char* jube_node_text(const char* source, TSNode node) {
-    uint32_t start = ts_node_start_byte(node);
-    uint32_t end = ts_node_end_byte(node);
-    if (end < start) return NULL;
-    return jube_strndup(source + start, end - start);
-}
-
-static bool jube_node_is(TSNode node, const char* type) {
-    return strcmp(ts_node_type(node), type) == 0;
-}
-
 // count fn_param children and detect '^' in the return type of a fn_type node
-static void jube_parse_fn_type(const char* source, TSNode fn_node, int* arity,
-                               bool* can_raise, char** result_type_name) {
+// With the external type-pattern scanner the attr's type is ONE opaque token
+// (`type_pattern_token`), so fn-typed members are recognized and parsed from
+// the token TEXT: `fn(a: T, b: U) R^E`.
+static bool jube_text_is_fn_type(const char* text) {
+    if (!text) return false;
+    while (*text == ' ' || *text == '\t') text++;
+    if (text[0] != 'f' || text[1] != 'n') return false;
+    const char* p = text + 2;
+    while (*p == ' ' || *p == '\t') p++;
+    return *p == '(' || *p == '\0';
+}
+
+static void jube_parse_fn_type_text(char* text, int* arity, bool* can_raise,
+                                    char** result_type_name) {
     *arity = 0;
     *can_raise = false;
     if (result_type_name) *result_type_name = NULL;
-    uint32_t count = ts_node_named_child_count(fn_node);
-    for (uint32_t i = 0; i < count; i++) {
-        TSNode child = ts_node_named_child(fn_node, i);
-        if (jube_node_is(child, "fn_param")) (*arity)++;
-        if (jube_node_is(child, "return_type")) {
-            char* text = jube_node_text(source, child);
-            if (text) {
-                char* raise_marker = strchr(text, '^');
-                if (raise_marker) {
-                    *can_raise = true;
-                    *raise_marker = '\0';
-                }
-                if (result_type_name) *result_type_name = text;
-                else free(text);
+    char* p = strchr(text, '(');
+    char* close = NULL;
+    if (p) {
+        int depth = 0;
+        for (char* q = p; *q; q++) {
+            if (*q == '(') depth++;
+            else if (*q == ')') { depth--; if (!depth) { close = q; break; } }
+            else if (*q == ',' && depth == 1) (*arity)++;
+        }
+        // one param when the parens are non-empty and hold no top-level comma
+        if (close) {
+            for (char* q = p + 1; q < close; q++) {
+                if (*q != ' ' && *q != '\t') { (*arity)++; break; }
             }
         }
     }
-}
-
-static bool jube_parse_default_literal(const char* source, TSNode value_node,
-                                       JubeParsedMember* member) {
-    char* text = jube_node_text(source, value_node);
-    if (!text) return false;
-    if (jube_node_is(value_node, "string")) {
-        size_t len = strlen(text);
-        // strip the surrounding quotes the grammar keeps in the literal text
-        if (len >= 2 && (text[0] == '"' || text[0] == '\'')) {
-            member->default_str = jube_strndup(text + 1, len - 2);
-            free(text);
-        } else {
-            member->default_str = text;
-        }
-        member->default_is_str = true;
-        member->has_default = true;
-        return true;
+    char* rest = close ? close + 1 : text;
+    char* raise_marker = strchr(rest, '^');
+    if (raise_marker) {
+        *can_raise = true;
+        *raise_marker = '\0';
     }
-    member->default_int = strtoll(text, NULL, 10);
-    member->default_is_str = false;
-    member->has_default = true;
+    while (*rest == ' ' || *rest == '\t') rest++;
+    if (result_type_name && *rest) {
+        // trim trailing spaces
+        char* end = rest + strlen(rest);
+        while (end > rest && (end[-1] == ' ' || end[-1] == '\t')) end--;
+        *result_type_name = jube_strndup(rest, (size_t)(end - rest));
+    }
     free(text);
-    return true;
 }
 
 static void jube_free_parsed_members(JubeParsedMember* members, int count) {
@@ -1068,7 +1065,20 @@ static void jube_free_parsed_members(JubeParsedMember* members, int count) {
         if (members[i].name) free(members[i].name);
         if (members[i].default_str) free(members[i].default_str);
         if (members[i].result_type_name) free(members[i].result_type_name);
+        members[i].name = NULL;
+        members[i].default_str = NULL;
+        members[i].result_type_name = NULL;
     }
+}
+
+static void jube_release_parsed_type(JubeParsedType* type) {
+    if (!type) return;
+    jube_free_parsed_members(type->members, type->member_count);
+    type->member_count = 0;
+    if (type->name) free(type->name);
+    if (type->base_name) free(type->base_name);
+    type->name = NULL;
+    type->base_name = NULL;
 }
 
 static int jube_count_binds(const JubeTypeBinding* binding,
@@ -1129,16 +1139,15 @@ static JubeTypeRecord* jube_find_compiled_base(const JubeModuleDef* module,
 
 static void jube_interface_release_record(JubeTypeRecord* trec, bool unregister_roots);
 
-static int jube_compile_type(const JubeModuleDef* module, const char* source,
-                             TSNode type_node, const JubeTypeBinding* bindings,
+static int jube_compile_type(const JubeModuleDef* module,
+                             JubeParsedType* parsed_type,
+                             const JubeTypeBinding* bindings,
                              int32_t binding_count) {
-    TSNode name_node = ts_node_child_by_field_name(type_node, "name", 4);
-    if (ts_node_is_null(name_node)) {
+    if (!parsed_type || !parsed_type->name) {
         log_error("JUBE_IFACE: module '%s' object type missing a name", module->name);
         return -1;
     }
-    char* type_name = jube_node_text(source, name_node);
-    if (!type_name) return -1;
+    const char* type_name = parsed_type->name;
 
     const JubeTypeDef* host_brand = NULL;
     const JubeTypeBinding* binding =
@@ -1146,7 +1155,6 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
     if (!binding) {
         log_error("JUBE_IFACE: module '%s' declares type '%s' with no binding table",
                   module->name, type_name);
-        free(type_name);
         return -1;
     }
     host_brand = binding->host_brand ? binding->host_brand
@@ -1154,70 +1162,24 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
     if (!host_brand) {
         log_error("JUBE_IFACE: module '%s' type '%s' has no host brand JubeTypeDef",
                   module->name, type_name);
-        free(type_name);
         return -1;
     }
 
     // inherited members flatten in first so derived declarations can override
     JubeTypeRecord* base_rec = NULL;
-    TSNode base_node = ts_node_child_by_field_name(type_node, "base", 4);
-    if (!ts_node_is_null(base_node)) {
-        char* base_name = jube_node_text(source, base_node);
-        base_rec = base_name ? jube_find_compiled_base(module, base_name) : NULL;
+    if (parsed_type->base_name) {
+        const char* base_name = parsed_type->base_name;
+        base_rec = jube_find_compiled_base(module, base_name);
         if (!base_rec) {
             log_error("JUBE_IFACE: module '%s' type '%s' inherits unknown/uncompiled "
                       "base '%s' (declare bases before derived types)",
                       module->name, type_name, base_name ? base_name : "(null)");
-            if (base_name) free(base_name);
-            free(type_name);
             return -1;
         }
-        free(base_name);
     }
 
-    JubeParsedMember parsed[JUBE_PARSE_MEMBER_CAPACITY];
-    memset(parsed, 0, sizeof(parsed));
-    int parsed_count = 0;
-
-    uint32_t child_count = ts_node_named_child_count(type_node);
-    for (uint32_t i = 0; i < child_count; i++) {
-        TSNode child = ts_node_named_child(type_node, i);
-        if (!jube_node_is(child, "attr")) continue;
-        if (parsed_count >= JUBE_PARSE_MEMBER_CAPACITY) {
-            log_error("JUBE_IFACE: type '%s' exceeds member capacity", type_name);
-            jube_free_parsed_members(parsed, parsed_count);
-            free(type_name);
-            return -1;
-        }
-        TSNode attr_name = ts_node_child_by_field_name(child, "name", 4);
-        TSNode attr_type = ts_node_child_by_field_name(child, "as", 2);
-        if (ts_node_is_null(attr_name) || ts_node_is_null(attr_type)) continue;
-        JubeParsedMember* member = &parsed[parsed_count];
-        member->name = jube_node_text(source, attr_name);
-        if (!member->name) continue;
-        // symbol-quoted member names ('type': ...) let keywords act as member
-        // names; strip the quotes so bindings match on the bare spelling
-        size_t name_len = strlen(member->name);
-        if (name_len >= 2 && member->name[0] == '\'' &&
-                member->name[name_len - 1] == '\'') {
-            char* bare = jube_strndup(member->name + 1, name_len - 2);
-            free(member->name);
-            member->name = bare;
-            if (!member->name) continue;
-        }
-        if (jube_node_is(attr_type, "fn_type")) {
-            member->is_method = true;
-            jube_parse_fn_type(source, attr_type, &member->arity, &member->can_raise,
-                               &member->result_type_name);
-        } else {
-            member->result_type_name = jube_node_text(source, attr_type);
-        }
-        TSNode default_node = ts_node_child_by_field_name(child, "default", 7);
-        if (!ts_node_is_null(default_node)) {
-            jube_parse_default_literal(source, default_node, member);
-        }
-        parsed_count++;
-    }
+    JubeParsedMember* parsed = parsed_type->members;
+    int parsed_count = parsed_type->member_count;
 
     // cross-check declared members against bindings before compiling records
     for (int i = 0; i < parsed_count; i++) {
@@ -1228,7 +1190,6 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
                           "(only default-valued constants may omit a binding)",
                           type_name, parsed[i].name);
                 jube_free_parsed_members(parsed, parsed_count);
-                free(type_name);
                 return -1;
             }
             continue;
@@ -1240,14 +1201,12 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
                 log_error("JUBE_IFACE: type '%s' method '%s' binding lacks a call handler",
                           type_name, parsed[i].name);
                 jube_free_parsed_members(parsed, parsed_count);
-                free(type_name);
                 return -1;
             }
             if (!parsed[i].is_method && !bind->get && !bind->reflect_attr) {
                 log_error("JUBE_IFACE: type '%s' field '%s' binding lacks a getter",
                           type_name, parsed[i].name);
                 jube_free_parsed_members(parsed, parsed_count);
-                free(type_name);
                 return -1;
             }
         }
@@ -1267,7 +1226,6 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
             log_error("JUBE_IFACE: type '%s' binds undeclared member '%s'",
                       type_name, bind_name);
             jube_free_parsed_members(parsed, parsed_count);
-            free(type_name);
             return -1;
         }
     }
@@ -1275,7 +1233,6 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
     if (s_type_record_count >= JUBE_TYPE_RECORD_CAPACITY) {
         log_error("JUBE_IFACE: type record capacity exceeded at '%s'", type_name);
         jube_free_parsed_members(parsed, parsed_count);
-        free(type_name);
         return -1;
     }
     if (!s_type_index) {
@@ -1285,7 +1242,6 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
         if (!s_type_index) {
             log_error("JUBE_IFACE: failed to allocate type index for '%s'", type_name);
             jube_free_parsed_members(parsed, parsed_count);
-            free(type_name);
             return -1;
         }
     }
@@ -1316,7 +1272,6 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
         if (trec) free(trec);
         if (records) free(records);
         jube_free_parsed_members(parsed, parsed_count);
-        free(type_name);
         return -1;
     }
 
@@ -1366,7 +1321,6 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
                 free(records);
                 free(trec);
                 jube_free_parsed_members(parsed, parsed_count);
-                free(type_name);
                 return -1;
             }
             const JubeMemberBind* override_bind = NULL;
@@ -1420,7 +1374,6 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
                 free(records);
                 free(trec);
                 jube_free_parsed_members(parsed, parsed_count);
-                free(type_name);
                 return -1;
             }
         }
@@ -1452,7 +1405,6 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
     if (hashmap_oom(s_type_index)) {
         jube_interface_release_record(trec, false);
         jube_free_parsed_members(parsed, parsed_count);
-        free(type_name);
         return -1;
     }
     s_type_records[s_type_record_count++] = trec;
@@ -1462,8 +1414,224 @@ static int jube_compile_type(const JubeModuleDef* module, const char* source,
              module->name, type_name, out_count, method_count, const_count, base_count);
 #endif
     jube_free_parsed_members(parsed, parsed_count);
-    free(type_name);
     return 0;
+}
+
+typedef enum JubeDirectValueKind {
+    JUBE_DIRECT_VALUE_GENERIC = 1,
+    JUBE_DIRECT_VALUE_ATOM,
+    JUBE_DIRECT_VALUE_TYPE_SLOT,
+} JubeDirectValueKind;
+
+typedef struct JubeDirectValue {
+    JubeDirectValueKind kind;
+    LambdaTokenKind token_kind;
+    SourceSpan span;
+    struct JubeDirectValue* next;
+} JubeDirectValue;
+
+typedef struct JubeDirectSink {
+    const char* source;
+    size_t source_length;
+    const JubeModuleDef* module;
+    const JubeTypeBinding* bindings;
+    int32_t binding_count;
+    JubeParsedType current_type;
+    JubeDirectValue* values;
+    int compiled_count;
+    bool failed;
+    const char* failure;
+} JubeDirectSink;
+
+static JubeDirectValue* jube_direct_value_from_parse(LambdaParseValue value) {
+    return (JubeDirectValue*)(uintptr_t)value;
+}
+
+static char* jube_direct_span_text(const JubeDirectSink* sink,
+                                   SourceSpan span) {
+    if (!sink || !sink->source || span.end_byte < span.start_byte ||
+            span.end_byte > sink->source_length) return NULL;
+    return jube_strndup(sink->source + span.start_byte,
+                        span.end_byte - span.start_byte);
+}
+
+static JubeDirectValue* jube_direct_new_value(JubeDirectSink* sink,
+                                               JubeDirectValueKind kind,
+                                               LambdaTokenKind token_kind,
+                                               SourceSpan span) {
+    JubeDirectValue* value = (JubeDirectValue*)calloc(1, sizeof(JubeDirectValue));
+    if (!value) {
+        sink->failed = true;
+        sink->failure = "out of memory while reducing interface declaration";
+        return NULL;
+    }
+    value->kind = kind;
+    value->token_kind = token_kind;
+    value->span = span;
+    value->next = sink->values;
+    sink->values = value;
+    return value;
+}
+
+static void jube_direct_fail(JubeDirectSink* sink, const char* message) {
+    if (!sink->failed) sink->failure = message;
+    sink->failed = true;
+}
+
+static bool jube_direct_copy_name(const JubeDirectSink* sink, LambdaToken token,
+                                  char** out) {
+    char* text = jube_direct_span_text(sink, token.span);
+    if (!text) return false;
+    size_t length = strlen(text);
+    if (token.kind == LAMBDA_TOK_SYMBOL && length >= 2 &&
+            text[0] == '\'' && text[length - 1] == '\'') {
+        char* bare = jube_strndup(text + 1, length - 2);
+        free(text);
+        text = bare;
+    }
+    if (!text) return false;
+    *out = text;
+    return true;
+}
+
+static bool jube_direct_parse_default(const JubeDirectSink* sink,
+                                      const JubeDirectValue* value,
+                                      JubeParsedMember* member) {
+    if (!value || !member || value->kind != JUBE_DIRECT_VALUE_ATOM) return false;
+    char* text = jube_direct_span_text(sink, value->span);
+    if (!text) return false;
+    if (value->token_kind == LAMBDA_TOK_STRING) {
+        size_t length = strlen(text);
+        if (length < 2 || (text[0] != '"' && text[0] != '\'')) {
+            free(text);
+            return false;
+        }
+        member->default_str = jube_strndup(text + 1, length - 2);
+        free(text);
+        member->default_is_str = true;
+        member->has_default = member->default_str != NULL;
+        return member->has_default;
+    }
+    if (value->token_kind != LAMBDA_TOK_INTEGER) {
+        free(text);
+        return false;
+    }
+    char* end = NULL;
+    errno = 0;
+    member->default_int = strtoll(text, &end, 10);
+    bool valid = errno == 0 && end && *end == '\0';
+    free(text);
+    if (!valid) return false;
+    member->default_is_str = false;
+    member->has_default = true;
+    return true;
+}
+
+static LambdaParseValue jube_direct_reduce(void* context,
+                                           const LambdaParseReduction* reduction) {
+    JubeDirectSink* sink = (JubeDirectSink*)context;
+    if (!sink || !reduction) return 0;
+    if (sink->failed) return (LambdaParseValue)1;
+
+    JubeDirectValueKind value_kind = reduction->kind == LAMBDA_REDUCE_ATOM
+        ? JUBE_DIRECT_VALUE_ATOM
+        : (reduction->kind == LAMBDA_REDUCE_TYPE_SLOT
+            ? JUBE_DIRECT_VALUE_TYPE_SLOT : JUBE_DIRECT_VALUE_GENERIC);
+    JubeDirectValue* value = jube_direct_new_value(sink, value_kind,
+        reduction->detail_token.kind, reduction->span);
+    if (!value) return (LambdaParseValue)1;
+
+    if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_BEGIN) {
+        if (sink->current_type.name) {
+            jube_direct_fail(sink, "nested or unterminated object type in interface declaration");
+            return (LambdaParseValue)(uintptr_t)value;
+        }
+        memset(&sink->current_type, 0, sizeof(sink->current_type));
+        if (!jube_direct_copy_name(sink, reduction->secondary_token,
+                                   &sink->current_type.name)) {
+            jube_direct_fail(sink, "object type name is outside the interface source span");
+            return (LambdaParseValue)(uintptr_t)value;
+        }
+        if (reduction->detail_token.kind != LAMBDA_TOK_EOF &&
+                reduction->detail_token.span.end_byte >
+                    reduction->detail_token.span.start_byte &&
+                !jube_direct_copy_name(sink, reduction->detail_token,
+                                       &sink->current_type.base_name)) {
+            jube_direct_fail(sink, "object type base name is outside the interface source span");
+        }
+        return (LambdaParseValue)(uintptr_t)value;
+    }
+
+    if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT_FIELD) {
+        if (!sink->current_type.name || sink->current_type.member_count >=
+                JUBE_PARSE_MEMBER_CAPACITY || reduction->child_count < 1) {
+            jube_direct_fail(sink, "invalid object field reduction in interface declaration");
+            return (LambdaParseValue)(uintptr_t)value;
+        }
+        JubeDirectValue* type_value = jube_direct_value_from_parse(
+            reduction->children[0]);
+        if (!type_value || type_value->kind != JUBE_DIRECT_VALUE_TYPE_SLOT) {
+            jube_direct_fail(sink, "object field is missing its type slot");
+            return (LambdaParseValue)(uintptr_t)value;
+        }
+        JubeParsedMember* member = &sink->current_type.members[
+            sink->current_type.member_count];
+        sink->current_type.member_count++;
+        memset(member, 0, sizeof(*member));
+        if (!jube_direct_copy_name(sink, reduction->detail_token, &member->name)) {
+            jube_direct_fail(sink, "object field name is outside the interface source span");
+            return (LambdaParseValue)(uintptr_t)value;
+        }
+        char* type_text = jube_direct_span_text(sink, type_value->span);
+        if (!type_text) {
+            jube_direct_fail(sink, "object field type is outside the interface source span");
+            return (LambdaParseValue)(uintptr_t)value;
+        }
+        if (jube_text_is_fn_type(type_text)) {
+            member->is_method = true;
+            jube_parse_fn_type_text(type_text, &member->arity, &member->can_raise,
+                                    &member->result_type_name);
+        } else {
+            member->result_type_name = type_text;
+        }
+        if (reduction->child_count > 1) {
+            JubeDirectValue* default_value = jube_direct_value_from_parse(
+                reduction->children[1]);
+            if (!jube_direct_parse_default(sink, default_value, member)) {
+                jube_direct_fail(sink,
+                    "Jube interface defaults must be integer or string literals");
+                return (LambdaParseValue)(uintptr_t)value;
+            }
+        }
+        return (LambdaParseValue)(uintptr_t)value;
+    }
+
+    if (reduction->form == LAMBDA_REDUCTION_FORM_TYPE_OBJECT) {
+        if (!sink->current_type.name) {
+            jube_direct_fail(sink, "object type declaration has no begin reduction");
+            return (LambdaParseValue)(uintptr_t)value;
+        }
+        int rc = jube_compile_type(sink->module, &sink->current_type,
+                                   sink->bindings, sink->binding_count);
+        if (rc == 0) sink->compiled_count++;
+        else sink->failed = true;
+        jube_release_parsed_type(&sink->current_type);
+        return (LambdaParseValue)(uintptr_t)value;
+    }
+
+    return (LambdaParseValue)(uintptr_t)value;
+}
+
+static void jube_direct_sink_cleanup(JubeDirectSink* sink) {
+    if (!sink) return;
+    jube_release_parsed_type(&sink->current_type);
+    JubeDirectValue* value = sink->values;
+    while (value) {
+        JubeDirectValue* next = value->next;
+        free(value);
+        value = next;
+    }
+    sink->values = NULL;
 }
 
 static void jube_interface_release_record(JubeTypeRecord* trec, bool unregister_roots) {
@@ -1536,23 +1704,6 @@ extern "C" void jube_interface_cleanup(void) {
     }
 }
 
-static int jube_compile_types_in(const JubeModuleDef* module, const char* source,
-                                 TSNode node, const JubeTypeBinding* bindings,
-                                 int32_t binding_count, int* compiled) {
-    if (jube_node_is(node, "object_type")) {
-        int rc = jube_compile_type(module, source, node, bindings, binding_count);
-        if (rc == 0) (*compiled)++;
-        return rc;
-    }
-    uint32_t child_count = ts_node_named_child_count(node);
-    for (uint32_t i = 0; i < child_count; i++) {
-        int rc = jube_compile_types_in(module, source, ts_node_named_child(node, i),
-                                       bindings, binding_count, compiled);
-        if (rc != 0) return rc;
-    }
-    return 0;
-}
-
 extern "C" int jube_compile_module_interface(const JubeModuleDef* module) {
     const char* decl = jube_module_interface_decl(module);
     if (!decl || !*decl) return 0;
@@ -1564,44 +1715,43 @@ extern "C" int jube_compile_module_interface(const JubeModuleDef* module) {
         return -1;
     }
 
-    TSParser* parser = lambda_parser();
-    if (!parser) {
-        log_error("JUBE_IFACE: failed to create Lambda parser for module '%s'",
-                  module->name);
-        return -1;
-    }
-    TSTree* tree = lambda_parse_source(parser, decl);
-    if (!tree) {
-        ts_parser_delete(parser);
-        log_error("JUBE_IFACE: failed to parse interface of module '%s'", module->name);
-        return -1;
-    }
+    // Jube consumes the first-party reduction stream because release builds
+    // intentionally exclude Tree-sitter; keeping the interface compiler on a
+    // CST would make module activation fail before Radiant can run scripts.
+    JubeDirectSink sink;
+    memset(&sink, 0, sizeof(sink));
+    sink.source = decl;
+    sink.source_length = strlen(decl);
+    sink.module = module;
+    sink.bindings = bindings;
+    sink.binding_count = binding_count;
+    LambdaParseSink parse_sink = {jube_direct_reduce};
+    LambdaParseError parse_error;
+    memset(&parse_error, 0, sizeof(parse_error));
+    LambdaParseStatus status = lambda_rd_parse_source(decl, sink.source_length,
+        &parse_sink, &sink, NULL, &parse_error);
 
     int rc = 0;
-    TSNode root = ts_tree_root_node(tree);
-    if (ts_node_has_error(root)) {
-        log_error("JUBE_IFACE: module '%s' interface_decl has syntax errors",
-                  module->name);
+    if (status != LAMBDA_PARSE_OK) {
+        log_error("JUBE_IFACE: module '%s' interface_decl parse failed at byte %u: %s",
+                  module->name, parse_error.span.start_byte,
+                  parse_error.message ? parse_error.message : "syntax error");
         rc = -1;
     }
-    // object_type statements sit under document > content, so walk the tree
-    // recursively (without descending into matched types) instead of assuming
-    // they are direct children of the root
-    int compiled = 0;
-    if (rc == 0) {
-        rc = jube_compile_types_in(module, decl, root, bindings, binding_count,
-                                   &compiled);
+    if (sink.failed) {
+        log_error("JUBE_IFACE: module '%s' interface reduction failed: %s",
+                  module->name, sink.failure ? sink.failure : "unknown error");
+        rc = -1;
     }
     // top-level fn/pn signatures stay on JubeFuncDef for now; the interface
     // text carries them for documentation until Phase 4 unifies functions
-    if (rc == 0 && compiled == 0) {
+    if (rc == 0 && sink.compiled_count == 0) {
         log_error("JUBE_IFACE: module '%s' interface_decl declares no object types",
                   module->name);
         rc = -1;
     }
 
-    ts_tree_delete(tree);
-    ts_parser_delete(parser);
+    jube_direct_sink_cleanup(&sink);
     if (rc != 0) {
         // A multi-type declaration may compile a prefix before a later type
         // fails; leave no dispatch records visible from that failed module.

@@ -117,6 +117,9 @@ struct FontHandle {
 
     // LRU tracking for face cache eviction
     uint32_t    lru_tick;
+    // Number of FontProp aliases currently bound to this cache-owned handle.
+    // Pinned handles cannot be evicted from the face cache.
+    uint32_t    cache_alias_count;
 
     // font info
     float       size_px;                // requested size in CSS pixels
@@ -128,6 +131,7 @@ struct FontHandle {
     char*       family_name;            // arena-allocated
     char*       metric_family_name;     // optional arena-allocated browser metric family alias
     bool        is_document_font;       // loaded from @font-face (cleared between documents in batch mode)
+    bool        metrics_from_platform_ref; // fallback metrics use the retained platform face
 };
 
 // ============================================================================
@@ -347,6 +351,7 @@ typedef struct KernPairEntry {
 typedef struct CodepointFallbackEntry {
     uint32_t    codepoint;
     float       size_px;    // requested font size — same codepoint at different sizes needs different handles
+    FontHandle* source_handle; // primary face whose platform fallback was resolved
     FontHandle* handle;     // NULL = negative cache (no font has this codepoint)
 } CodepointFallbackEntry;
 
@@ -409,7 +414,10 @@ int                 font_platform_get_metrics_from_ref(void* ct_font_ref,
 float               get_cjk_system_line_height(float font_size);
 // Find a system font that covers a given codepoint (macOS: CoreText, others: NULL)
 // Returns arena-allocated file path or NULL. Caller does NOT free.
-char*               font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index);
+char*               font_platform_find_codepoint_font(void* base_font_ref,
+                                                       uint32_t codepoint,
+                                                       int* out_face_index,
+                                                       void** out_font_ref);
 char*               font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index);
 
 // CoreText GPOS kerning (macOS only): create/destroy CTFont, get pair kerning
@@ -422,7 +430,9 @@ void*               font_platform_create_ct_font(const char* postscript_name,
 void*               font_platform_copy_with_weight_variation(const void* ct_font_ref,
                                                               float size_px,
                                                               int css_weight);
+void*               font_platform_retain_ct_font(void* ct_font_ref);
 void                font_platform_destroy_ct_font(void* ct_font_ref);
+void                font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref);
 bool                font_platform_has_color_glyphs(void* ct_font_ref);
 float               font_platform_get_glyph_advance(void* ct_font_ref, uint32_t codepoint);
 float               font_platform_get_pair_kerning(void* ct_font_ref,
@@ -508,6 +518,9 @@ FontHandle*         font_cache_lookup(FontContext* ctx, const char* key,
 void                font_cache_insert(FontContext* ctx, const char* key, FontHandle* handle,
                                       bool is_global_fallback);
 void                font_cache_evict_lru(FontContext* ctx);
+void                font_cache_adopt_handle_alias(FontHandle* handle);
+void                font_cache_pin_handle(FontHandle* handle);
+void                font_cache_unpin_handle(FontHandle* handle);
 char*               font_cache_make_key(Arena* arena, const char* family,
                                          FontWeight weight, FontSlant slant, float size_px);
 FontHandle*         font_resolve_authored_for_codepoint(FontContext* ctx,
@@ -520,7 +533,8 @@ const char* const*  font_get_browser_compat_aliases(const char* family);
 const char* const*  font_get_aliases(const char* family);
 FontHandle*         font_resolve_fallback(FontContext* ctx, const FontStyleDesc* style);
 FontHandle*         font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* style,
-                                                  uint32_t codepoint);
+                                                  uint32_t codepoint,
+                                                  FontHandle* source_handle);
 void                font_fallback_reset_platform_cache(void);
 
 // font_face.c

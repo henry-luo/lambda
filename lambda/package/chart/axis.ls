@@ -9,7 +9,7 @@ import scale: .scale
 // Default axis configuration
 // ============================================================
 
-pub default_axis_config = {
+pub let default_axis_config = {
     tick_size: 5,
     tick_count: 8,
     label_font_size: 11,
@@ -50,7 +50,7 @@ fn temporal_auto_format(lo_ms, hi_ms) {
 
 fn format_tick_label(sc, tv) {
     if (sc.kind == "temporal")
-        datetime(int64(tv)).format(temporal_auto_format(sc.domain[0], sc.domain[1]))
+        datetime(i64(tv)).format(temporal_auto_format(sc.domain[0], sc.domain[1]))
     else string(tv)
 }
 
@@ -71,13 +71,13 @@ pub fn x_axis(sc, pw, ph, config, title_text) {
     let tick_elements = (for (tv in tick_values)
         (let x_pos = float(scale.scale_apply(sc, tv)) + band_offset,
         if (x_pos >= -1.0 and x_pos <= float(pw) + 1.0)
-            <g class: "tick", transform: svg.translate(x_pos, ph);
+            <g class: "tick", transform: svg.translate(x_pos, ph),
                 svg.line(0, 0, 0, cfg.tick_size, cfg.tick_color, 1);
                 <text x: 0,
                       y: cfg.tick_size + cfg.label_offset + cfg.label_font_size,
                       'text-anchor': "middle",
                       'font-size': cfg.label_font_size,
-                      fill: cfg.label_color;
+                      fill: cfg.label_color,
                     format_tick_label(sc, tv)
                 >
             >
@@ -90,7 +90,7 @@ pub fn x_axis(sc, pw, ph, config, title_text) {
               y: float(ph) + float(cfg.title_padding) + float(cfg.title_font_size),
               'text-anchor': "middle",
               'font-size': cfg.title_font_size,
-              fill: cfg.title_color;
+              fill: cfg.title_color,
             title_text
         >
     else null;
@@ -139,13 +139,13 @@ pub fn y_axis(sc, pw, ph, config, title_text) {
     let tick_elements = (for (tv in tick_values)
         (let y_pos = float(scale.scale_apply(sc, tv)) + band_offset,
         if (y_pos >= -1.0 and y_pos <= float(ph) + 1.0)
-            <g class: "tick", transform: svg.translate(0, y_pos);
+            <g class: "tick", transform: svg.translate(0, y_pos),
                 svg.line(0, 0, 0 - cfg.tick_size, 0, cfg.tick_color, 1);
                 <text x: 0 - cfg.tick_size - cfg.label_offset,
                       y: cfg.label_font_size / 3.0,
                       'text-anchor': "end",
                       'font-size': cfg.label_font_size,
-                      fill: cfg.label_color;
+                      fill: cfg.label_color,
                     format_tick_label(sc, tv)
                 >
             >
@@ -159,7 +159,7 @@ pub fn y_axis(sc, pw, ph, config, title_text) {
               'text-anchor': "middle",
               'font-size': cfg.title_font_size,
               fill: cfg.title_color,
-              transform: svg.rotate(-90, 0.0 - float(cfg.title_padding) - float(cfg.label_font_size), float(ph) / 2.0);
+              transform: svg.rotate(-90, 0.0 - float(cfg.title_padding) - float(cfg.label_font_size), float(ph) / 2.0),
             title_text
         >
     else null;

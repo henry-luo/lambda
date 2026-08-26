@@ -94,6 +94,7 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
 
 // AST building functions (build_js_ast.cpp)
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root);
+void js_report_any_census(JsTranspiler* tp);
 void js_scope_lookup_cache_enable(JsTranspiler* tp);
 typedef struct JsAstIndexPassContext {
     JsTranspiler* transpiler;
@@ -108,6 +109,7 @@ static inline int js_index_compiler_pass(void* opaque) {
 static inline JsAstNode* build_js_ast_indexed(JsTranspiler* tp, TSNode root) {
     JsAstNode* ast = build_js_ast(tp, root);
     if (!ast) return NULL;
+    js_report_any_census(tp);
     js_scope_lookup_cache_enable(tp);
     JsAstIndexPassContext pass_context = {tp, ast};
     CompilerPassManager pass_manager;
@@ -147,7 +149,7 @@ JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode n
 JsOperator js_operator_from_string(const char* op_str, size_t len);
 
 // Error handling functions
-void js_error(JsTranspiler* tp, TSNode node, const char* format, ...);
+void js_error(JsTranspiler* tp, SourceSpan span, const char* format, ...);
 
 // Early error detection (js_early_errors.cpp)
 int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast);
@@ -237,13 +239,16 @@ Item compile_js_mir_with_preamble_len(Runtime* runtime, const char* js_source,
                                       JsPreambleState* out_state);
 Item execute_compiled_js_in_current_realm(Runtime* runtime,
                                           const JsPreambleState* base_preamble,
-                                          const JsPreambleState* compiled_state);
+                                          const JsPreambleState* compiled_state,
+                                          bool retain_unit_state);
 Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
                                         const JsPreambleState* preamble, uint64_t* result_home);
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                            const char* filename, const JsPreambleState* preamble,
                                            uint64_t* result_home);
 bool preamble_state_update_from_eval_snapshot(JsPreambleState* state);
+bool preamble_state_update_from_compiled(JsPreambleState* state,
+                                         const JsPreambleState* compiled_state);
 bool clone_js_preamble_state(const JsPreambleState* source, JsPreambleState* out_state);
 Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
                              JsPreambleState* out_state);

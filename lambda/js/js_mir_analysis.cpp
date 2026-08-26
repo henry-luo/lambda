@@ -10,34 +10,19 @@ int jm_name_cmp(const void* a, const void* b, void* udata) {
 }
 
 bool jm_function_decl_is_direct_binding(JsFunctionNode* fn, bool arrow_body_is_direct) {
-    if (!fn) return false;
-    TSNode fn_node = fn->node;
-    if (ts_node_is_null(fn_node)) return false;
-    TSNode parent = ts_node_parent(fn_node);
-    if (ts_node_is_null(parent)) return false;
-    const char* parent_type = ts_node_type(parent);
-    if (parent_type && strcmp(parent_type, "program") == 0) return true;
-    if (!parent_type || strcmp(parent_type, "statement_block") != 0) return false;
-    TSNode grandparent = ts_node_parent(parent);
-    if (ts_node_is_null(grandparent)) return false;
-    const char* grandparent_type = ts_node_type(grandparent);
-    if (!grandparent_type) return false;
-    bool function_body_parent = strcmp(grandparent_type, "function_declaration") == 0 ||
-        strcmp(grandparent_type, "function_expression") == 0 ||
-        strcmp(grandparent_type, "generator_function_declaration") == 0 ||
-        strcmp(grandparent_type, "generator_function") == 0 ||
-        strcmp(grandparent_type, "arrow_function") == 0;
-    if (!function_body_parent) return false;
-    if (arrow_body_is_direct && strcmp(grandparent_type, "arrow_function") == 0) {
-        // Tree-sitter does not expose arrow block bodies through the same body
-        // field shape; statement lowering still treats direct arrow declarations
-        // as local names.
+    (void)arrow_body_is_direct;
+    if (!fn || !fn->vars || !fn->vars->parent) return false;
+    NameScope* declaration_scope = fn->vars->parent;
+    if (declaration_scope->kind == SCOPE_KIND_GLOBAL ||
+            declaration_scope->kind == SCOPE_KIND_MODULE) {
         return true;
     }
-    TSNode body = ts_node_child_by_field_name(grandparent, "body", 4);
-    return !ts_node_is_null(body) &&
-        ts_node_start_byte(body) == ts_node_start_byte(parent) &&
-        ts_node_end_byte(body) == ts_node_end_byte(parent);
+    if (declaration_scope->kind != SCOPE_KIND_BLOCK || !declaration_scope->parent)
+        return false;
+    // The builder creates a block scope for a function body. A declaration in
+    // that block is direct; a declaration in any deeper block is Annex B
+    // block-scoped and must be recreated at runtime.
+    return declaration_scope->parent->kind == SCOPE_KIND_FUNCTION;
 }
 
 // Forward declare
@@ -72,22 +57,7 @@ static bool jm_binding_is_inside_range(uint32_t binding_start, uint32_t binding_
 // identify a lexical binding from the AST instead of copying its generated
 // name into a fixed-capacity function-side table.
 static bool jm_entry_is_lexical_for_head(NameEntry* entry) {
-    if (!entry || !entry->is_lexical || !entry->node) return false;
-    JsAstNode* binding = (JsAstNode*)entry->node;
-    if (ts_node_is_null(binding->node)) return false;
-    uint32_t binding_start = ts_node_start_byte(binding->node);
-    uint32_t binding_end = ts_node_end_byte(binding->node);
-    for (TSNode parent = ts_node_parent(binding->node);
-         !ts_node_is_null(parent); parent = ts_node_parent(parent)) {
-        if (strcmp(ts_node_type(parent), "for_in_statement") != 0) continue;
-        TSNode left = ts_node_child_by_field_name(parent, "left", 4);
-        if (!ts_node_is_null(left) &&
-            binding_start >= ts_node_start_byte(left) &&
-            binding_end <= ts_node_end_byte(left)) {
-            return true;
-        }
-    }
-    return false;
+    return entry && entry->is_lexical && entry->is_for_in_head;
 }
 
 static void jm_name_set_add_ref(struct hashmap* set, const char* name, JsIdentifierNode* id,
@@ -97,10 +67,8 @@ static void jm_name_set_add_ref(struct hashmap* set, const char* name, JsIdentif
     e.name = jm_persist_name(name);
     if (id && id->entry && id->entry->node) {
         JsAstNode* def = (JsAstNode*)id->entry->node;
-        if (!ts_node_is_null(def->node)) {
-            e.binding_start = ts_node_start_byte(def->node);
-            e.binding_end = ts_node_end_byte(def->node);
-        }
+        e.binding_start = def->source_span.start_byte;
+        e.binding_end = def->source_span.end_byte;
         e.var_kind = id->entry->is_const ? JS_VAR_CONST :
             (id->entry->is_lexical ? JS_VAR_LET : 0);
         e.entry = id->entry;
@@ -138,9 +106,9 @@ static void jm_name_set_add_binding(struct hashmap* set, const char* name, JsAst
     JsNameSetEntry e;
     memset(&e, 0, sizeof(e));
     e.name = jm_persist_name(name);
-    if (binding_node && !ts_node_is_null(binding_node->node)) {
-        e.binding_start = ts_node_start_byte(binding_node->node);
-        e.binding_end = ts_node_end_byte(binding_node->node);
+    if (binding_node) {
+        e.binding_start = binding_node->source_span.start_byte;
+        e.binding_end = binding_node->source_span.end_byte;
     }
     JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(set, &e);
     if (existing) {
@@ -192,12 +160,11 @@ static bool jm_ref_is_local_binding(struct hashmap* locals, JsNameSetEntry* ref)
 static bool jm_ref_binding_is_inside_function(JsFunctionNode* fn,
                                                JsNameSetEntry* ref) {
     if (!fn || !fn->body || !ref ||
-        (ref->binding_start == 0 && ref->binding_end == 0) ||
-        ts_node_is_null(fn->body->node)) {
+        (ref->binding_start == 0 && ref->binding_end == 0)) {
         return false;
     }
-    uint32_t body_start = ts_node_start_byte(fn->body->node);
-    uint32_t body_end = ts_node_end_byte(fn->body->node);
+    uint32_t body_start = fn->body->source_span.start_byte;
+    uint32_t body_end = fn->body->source_span.end_byte;
     return ref->binding_start >= body_start && ref->binding_end <= body_end;
 }
 
@@ -858,9 +825,9 @@ void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names) {
                                 entry.var_kind = (int)v->kind;
                                 JsAstNode* binding_node = id->entry && id->entry->node ?
                                     (JsAstNode*)id->entry->node : decl->id;
-                                if (binding_node && !ts_node_is_null(binding_node->node)) {
-                                    entry.binding_start = ts_node_start_byte(binding_node->node);
-                                    entry.binding_end = ts_node_end_byte(binding_node->node);
+                                if (binding_node) {
+                                    entry.binding_start = binding_node->source_span.start_byte;
+                                    entry.binding_end = binding_node->source_span.end_byte;
                                 }
                                 hashmap_set(names, &entry);
                             } else {
@@ -1170,9 +1137,9 @@ void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block) {
             ve->is_let_const = true;
             ve->is_const = (e->var_kind == 2);  // JS_VAR_CONST
             ve->tdz_active = true;
-            if (binding_node && !ts_node_is_null(binding_node->node)) {
-                ve->binding_start = ts_node_start_byte(binding_node->node);
-                ve->binding_end = ts_node_end_byte(binding_node->node);
+            if (binding_node) {
+                ve->binding_start = binding_node->source_span.start_byte;
+                ve->binding_end = binding_node->source_span.end_byte;
             }
         }
         // A block lexical can shadow a parameter with the same source name.
@@ -1362,36 +1329,33 @@ void jm_collect_param_default_refs(JsAstNode* params, struct hashmap* refs) {
 }
 
 static bool jm_analysis_function_is_method_syntax(JsFunctionNode* fn) {
-    if (!fn || ts_node_is_null(fn->node)) return false;
-    TSNode parent = ts_node_parent(fn->node);
-    if (ts_node_is_null(parent)) return false;
-    const char* parent_type = ts_node_type(parent);
-    if (!parent_type) return false;
-    return strcmp(parent_type, "method_definition") == 0;
+    return fn && fn->node_type == JS_AST_NODE_METHOD_DEFINITION;
 }
 
-static bool jm_analysis_ts_has_with(TSNode node, bool root) {
-    if (ts_node_is_null(node)) return false;
-    const char* type = ts_node_type(node);
-    if (type && strcmp(type, "with_statement") == 0) return true;
-    if (!root && type && (strcmp(type, "function_declaration") == 0 ||
-            strcmp(type, "function_expression") == 0 ||
-            strcmp(type, "arrow_function") == 0 ||
-            strcmp(type, "method_definition") == 0 ||
-            strcmp(type, "class_declaration") == 0 ||
-            strcmp(type, "class") == 0)) {
+static bool jm_analysis_ast_has_with(JsAstNode* node, bool root);
+
+static bool jm_analysis_ast_has_with_child(JsAstNode* child, void*) {
+    return jm_analysis_ast_has_with(child, false);
+}
+
+static bool jm_analysis_ast_has_with(JsAstNode* node, bool root) {
+    if (!node) return false;
+    if (node->node_type == JS_AST_NODE_WITH_STATEMENT) return true;
+    if (!root && (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
+            node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+            node->node_type == JS_AST_NODE_ARROW_FUNCTION ||
+            node->node_type == JS_AST_NODE_METHOD_DEFINITION ||
+            node->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+            node->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
         return false;
     }
-    uint32_t count = ts_node_named_child_count(node);
-    for (uint32_t i = 0; i < count; i++) {
-        if (jm_analysis_ts_has_with(ts_node_named_child(node, i), false)) return true;
-    }
-    return false;
+    return js_ast_any_child(node, jm_analysis_ast_has_with_child, NULL);
 }
 
 void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
                          struct hashmap* module_consts,
-                         struct hashmap* ancestor_func_locals) {
+                         struct hashmap* ancestor_func_locals,
+                         bool captures_with_scope) {
     JsFunctionNode* fn = fc->node;
     fc->capture_count = 0;
     fc->analysis.captures = fc->captures;
@@ -1414,9 +1378,9 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     // Collect all identifier references in the body
     struct hashmap* refs = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
-    if (fn->body && !ts_node_is_null(fn->body->node)) {
+    if (fn->body) {
         jm_collect_body_refs_impl(fn->body, refs,
-            ts_node_start_byte(fn->body->node), ts_node_end_byte(fn->body->node));
+            fn->body->source_span.start_byte, fn->body->source_span.end_byte);
     }
     // Also collect refs from default parameter expressions (e.g., function f(x, t=F) — F is a ref)
     jm_collect_param_default_refs(fn->params, refs);
@@ -1427,8 +1391,10 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     fc->observes_this = jm_name_set_has(refs, "_js_this") || fc->has_direct_eval;
     fc->observes_new_target = jm_name_set_has(refs, "_js_new.target") ||
         fc->has_direct_eval;
-    fc->uses_with = fc->has_direct_eval || (fn->body &&
-        jm_analysis_ts_has_with(fn->body->node, true));
+    // A function nested below a `with` is created with that Object Environment
+    // Record and must keep dynamic name lookup after the enclosing body returns.
+    fc->uses_with = captures_with_scope || fc->has_direct_eval || (fn->body &&
+        jm_analysis_ast_has_with(fn->body, true));
 
     // Find captures: referenced identifiers that are not params/locals but ARE in outer scope
     // Track self-references separately — if the function has other captures (and thus

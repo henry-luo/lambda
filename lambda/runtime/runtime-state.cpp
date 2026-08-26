@@ -10,7 +10,7 @@
 // focused runtime fixtures share one provider without linking each other.
 __thread EvalContext* context = nullptr;
 
-bool eval_context_thread_initialize(EvalContext* owner) {
+bool eval_context_init(EvalContext* owner) {
     if (!owner) {
         log_error("eval-thread-init: missing EvalContext owner");
         return false;
@@ -35,11 +35,11 @@ bool eval_context_thread_initialize(EvalContext* owner) {
     return true;
 }
 
-bool eval_context_thread_matches(const EvalContext* owner) {
+bool eval_context_matches(const EvalContext* owner) {
     return owner && context == owner;
 }
 
-bool eval_context_thread_shutdown(EvalContext* owner) {
+bool eval_context_shutdown(EvalContext* owner) {
     if (!owner || context != owner) {
         log_error("eval-thread-shutdown: owner mismatch current=%p owner=%p",
                   (void*)context, (void*)owner);
@@ -176,12 +176,16 @@ extern "C" bool lambda_module_state_prepare(uint32_t module_id,
     LambdaModuleState* state = owner->module_states[module_id];
     if (state) {
         if (state->var_count != var_count) {
-            log_error("module-state: sealed layout changed for module %u", module_id);
+            // Report both layouts: this fires when two different modules end up
+            // sharing one id, and the pair of var_counts is what identifies them.
+            log_error("module-state: sealed layout changed for module %u "
+                      "(sealed var_count=%u, requested var_count=%u)",
+                      module_id, state->var_count, var_count);
             return false;
         }
         if (state->vars && !state->vars_registered) {
             if (!heap_try_register_gc_root_range((uint64_t*)state->vars,
-                    (int)state->var_count)) return false;
+                    (int)state->var_capacity)) return false;
             state->vars_registered = true;
         }
         return true;
@@ -191,6 +195,7 @@ extern "C" bool lambda_module_state_prepare(uint32_t module_id,
     if (!state) return false;
     state->module_id = module_id;
     state->var_count = var_count;
+    state->var_capacity = var_count;
     if (var_count) {
         state->vars = (Item*)mem_calloc(var_count, sizeof(Item), MEM_CAT_EVAL);
         state->var_payloads = (uint64_t*)mem_calloc(var_count, sizeof(uint64_t), MEM_CAT_EVAL);
@@ -205,6 +210,146 @@ extern "C" bool lambda_module_state_prepare(uint32_t module_id,
     }
     owner->module_states[module_id] = state;
     return true;
+}
+
+extern "C" bool lambda_module_state_grow_vars(uint32_t module_id,
+        uint32_t var_count) {
+    EvalContext* owner = context;
+    if (!owner) return false;
+    if (module_id >= owner->module_state_capacity || !owner->module_states ||
+            !owner->module_states[module_id]) {
+        return lambda_module_state_prepare(module_id, var_count);
+    }
+    LambdaModuleState* state = owner->module_states[module_id];
+    if (var_count <= state->var_count) return true;
+
+    if (var_count <= state->var_capacity) {
+        // Reusing the already registered tail keeps ordinary REPL binding
+        // growth O(fragment); newly exposed slots must start unrooted/null.
+        memset(state->vars + state->var_count, 0,
+            (var_count - state->var_count) * sizeof(Item));
+        memset(state->var_payloads + state->var_count, 0,
+            (var_count - state->var_count) * sizeof(uint64_t));
+        state->var_count = var_count;
+        return true;
+    }
+
+    uint32_t capacity = state->var_capacity ? state->var_capacity : 8;
+    while (capacity < var_count && capacity <= UINT32_MAX / 2) capacity *= 2;
+    if (capacity < var_count) capacity = var_count;
+
+    Item* vars = (Item*)mem_calloc(capacity, sizeof(Item), MEM_CAT_EVAL);
+    uint64_t* payloads = (uint64_t*)mem_calloc(capacity, sizeof(uint64_t),
+        MEM_CAT_EVAL);
+    if (!vars || !payloads) {
+        mem_free(vars);
+        mem_free(payloads);
+        return false;
+    }
+    if (state->var_count) {
+        memcpy(vars, state->vars, state->var_count * sizeof(Item));
+        memcpy(payloads, state->var_payloads, state->var_count * sizeof(uint64_t));
+    }
+    if (!heap_try_register_gc_root_range((uint64_t*)vars, (int)capacity)) {
+        mem_free(vars);
+        mem_free(payloads);
+        return false;
+    }
+
+    // Publish the replacement root before retiring the old range: a REPL
+    // append can allocate while extending its binding slab, so no existing
+    // closure or module value may become temporarily unrooted (D5.3.3).
+    if (state->vars_registered) heap_unregister_gc_root_range((uint64_t*)state->vars);
+    mem_free(state->vars);
+    mem_free(state->var_payloads);
+    state->vars = vars;
+    state->var_payloads = payloads;
+    state->var_count = var_count;
+    state->var_capacity = capacity;
+    state->vars_registered = true;
+    return true;
+}
+
+extern "C" bool lambda_module_state_snapshot(uint32_t module_id,
+        LambdaModuleStateSnapshot* snapshot) {
+    if (!snapshot) return false;
+    memset(snapshot, 0, sizeof(*snapshot));
+    EvalContext* owner = context;
+    if (!owner || module_id >= owner->module_state_capacity ||
+            !owner->module_states || !owner->module_states[module_id]) return false;
+    LambdaModuleState* state = owner->module_states[module_id];
+    snapshot->count = state->var_count;
+    if (snapshot->count == 0) return true;
+    snapshot->vars = (Item*)mem_calloc(snapshot->count, sizeof(Item), MEM_CAT_EVAL);
+    snapshot->payloads = (uint64_t*)mem_calloc(snapshot->count, sizeof(uint64_t),
+        MEM_CAT_EVAL);
+    if (!snapshot->vars || !snapshot->payloads) {
+        lambda_module_state_snapshot_dispose(snapshot);
+        return false;
+    }
+    memcpy(snapshot->vars, state->vars, snapshot->count * sizeof(Item));
+    memcpy(snapshot->payloads, state->var_payloads,
+        snapshot->count * sizeof(uint64_t));
+    if (!heap_try_register_gc_root_range((uint64_t*)snapshot->vars,
+            (int)snapshot->count)) {
+        lambda_module_state_snapshot_dispose(snapshot);
+        return false;
+    }
+    snapshot->roots_registered = true;
+    return true;
+}
+
+extern "C" bool lambda_module_state_restore(uint32_t module_id,
+        const LambdaModuleStateSnapshot* snapshot) {
+    EvalContext* owner = context;
+    if (!snapshot || !owner || module_id >= owner->module_state_capacity ||
+            !owner->module_states || !owner->module_states[module_id]) return false;
+    LambdaModuleState* state = owner->module_states[module_id];
+    if (snapshot->count > state->var_count) return false;
+    if (snapshot->count) {
+        memcpy(state->vars, snapshot->vars, snapshot->count * sizeof(Item));
+        memcpy(state->var_payloads, snapshot->payloads,
+            snapshot->count * sizeof(uint64_t));
+    }
+    if (snapshot->count < state->var_count) {
+        memset(state->vars + snapshot->count, 0,
+            (state->var_count - snapshot->count) * sizeof(Item));
+        memset(state->var_payloads + snapshot->count, 0,
+            (state->var_count - snapshot->count) * sizeof(uint64_t));
+    }
+    return true;
+}
+
+extern "C" void lambda_module_state_snapshot_dispose(
+        LambdaModuleStateSnapshot* snapshot) {
+    if (!snapshot) return;
+    if (snapshot->roots_registered && snapshot->vars) {
+        heap_unregister_gc_root_range((uint64_t*)snapshot->vars);
+    }
+    mem_free(snapshot->vars);
+    mem_free(snapshot->payloads);
+    memset(snapshot, 0, sizeof(*snapshot));
+}
+
+extern "C" void lambda_module_state_release(uint32_t module_id) {
+    EvalContext* owner = context;
+    if (!owner || module_id >= owner->module_state_capacity ||
+            !owner->module_states) return;
+    LambdaModuleState* state = owner->module_states[module_id];
+    if (!state) return;
+    // A cleared REPL module must drop its exact root before its Script/AST is
+    // destroyed; otherwise stale bindings remain live for the next session.
+    if (state->vars && state->vars_registered) {
+        heap_unregister_gc_root_range((uint64_t*)state->vars);
+    }
+    if (owner->active_js_module_state == state) {
+        owner->active_js_module_state = NULL;
+    }
+    mem_free(state->vars);
+    mem_free(state->var_payloads);
+    mem_free(state->property_keys);
+    mem_free(state);
+    owner->module_states[module_id] = NULL;
 }
 
 extern "C" bool lambda_module_state_prepare_layout(const LambdaModuleLayout* layout) {
@@ -316,6 +461,7 @@ extern "C" bool lambda_active_js_module_state_ensure_vars(
     state->vars = vars;
     state->var_payloads = payloads;
     state->var_count = required_var_count;
+    state->var_capacity = required_var_count;
     state->vars_registered = true;
     return true;
 }
@@ -329,6 +475,13 @@ extern "C" bool lambda_module_state_bind_static(uint32_t module_id,
     state->consts = consts;
     state->type_list = type_list;
     return true;
+}
+
+extern "C" uint32_t lambda_module_state_property_key_count(uint32_t module_id) {
+    EvalContext* owner = context;
+    if (!owner || module_id >= owner->module_state_capacity ||
+            !owner->module_states || !owner->module_states[module_id]) return 0;
+    return owner->module_states[module_id]->property_key_count;
 }
 
 extern "C" Item lambda_name_id_to_item(NameId name_id) {
@@ -358,6 +511,25 @@ extern "C" void* lambda_module_const_at(const LambdaModuleLayout* layout,
     return ((void**)state->consts)[index];
 }
 
+extern "C" void* lambda_module_const_at_state(void* module_state,
+        uint32_t index) {
+    LambdaModuleState* state = (LambdaModuleState*)module_state;
+    if (!state || !state->consts) return NULL;
+    // Satellites carry the owner's slab state directly; resolving constants
+    // through it avoids stale per-image layout metadata during batch linking
+    // (D5.2, D8.2).
+    return ((void**)state->consts)[index];
+}
+
+extern "C" Item lambda_module_var_at(void* module_state, uint32_t slot) {
+    LambdaModuleState* state = (LambdaModuleState*)module_state;
+    if (!state || !state->vars || slot >= state->var_count) return ItemNull;
+    // Keep satellite reads on the same checked slab accessor as T0. A direct
+    // MIR load can be overwritten by root write-back when its value is already
+    // owned by the module root range (D5.2).
+    return state->vars[slot];
+}
+
 extern "C" void lambda_module_var_store(void* module_state, uint32_t slot,
         Item item) {
     LambdaModuleState* state = (LambdaModuleState*)module_state;
@@ -374,7 +546,6 @@ extern "C" void lambda_module_var_store(void* module_state, uint32_t slot,
         state->vars[slot] = {.item = u2it(payload)};
         break;
     case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64:
         if (!(item.item & ITEM_DBL_MASK) && item.item != ITEM_FLOAT_P0 &&
                 item.item != ITEM_FLOAT_N0) {
             *(double*)payload = item.get_double();
@@ -397,8 +568,8 @@ extern "C" void lambda_module_state_reset(void) {
             state->vars_registered = false;
         }
         if (state->vars) {
-            memset(state->vars, 0, state->var_count * sizeof(Item));
-            memset(state->var_payloads, 0, state->var_count * sizeof(uint64_t));
+            memset(state->vars, 0, state->var_capacity * sizeof(Item));
+            memset(state->var_payloads, 0, state->var_capacity * sizeof(uint64_t));
         }
     }
 }

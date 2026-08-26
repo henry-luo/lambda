@@ -53,7 +53,7 @@ void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* impor
     }
     // _ + char offset ensures the fn name is unique across the script
     strbuf_append_char(strbuf, '_');
-    strbuf_append_int(strbuf, ts_node_start_byte(fn_node->node));
+    strbuf_append_int(strbuf, fn_node->source_span.start_byte);
 }
 
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) {
@@ -77,6 +77,29 @@ ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int na
             return field;
         }
         field = field->next;
+    }
+    return NULL;
+}
+
+AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
+        const ShapeEntry* shape) {
+    if (!literal || !shape || !shape->name) return NULL;
+    for (AstNode* item = literal->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) continue;
+        AstNamedNode* key = (AstNamedNode*)item;
+        if (key->name && key->name->len == shape->name->length &&
+                strncmp(key->name->chars, shape->name->str,
+                    shape->name->length) == 0) {
+            return key->as;
+        }
+    }
+    return NULL;
+}
+
+AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal) {
+    if (!literal) return NULL;
+    for (AstNode* item = literal->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) return item;
     }
     return NULL;
 }
@@ -119,8 +142,7 @@ bool static_literal_item_from_type(Type* type, Item* out) {
         out->item = l2it(&value->int64_val);
         return true;
     }
-    case LMD_TYPE_FLOAT:
-    case LMD_TYPE_FLOAT64: {
+    case LMD_TYPE_FLOAT: {
         TypeFloat* value = (TypeFloat*)type;
         *out = lambda_float_ptr_to_item(&value->double_val);
         return true;

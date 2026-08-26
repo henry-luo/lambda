@@ -26,26 +26,39 @@ typedef enum {
     LPATH_SEG_WILDCARD = 1,      // single wildcard (*) - match one segment
     LPATH_SEG_WILDCARD_REC = 2,  // recursive wildcard (**) - match zero or more segments
     LPATH_SEG_DYNAMIC = 3,       // dynamic segment (runtime-computed, name is NULL until resolved)
+    LPATH_SEG_PARENT = 4,         // parent operation (~~)
+    LPATH_SEG_ROOT = 5,           // root operation (./)
+    LPATH_SEG_INT = 6,            // typed non-negative integer key
 } LPathSegmentType;
 
-// Path flags (bits 0-1 for segment type, bit 7 for metadata loaded)
+// Path flags (bits 0-2 for segment type, bit 7 for metadata loaded)
 #define PATH_FLAG_META_LOADED  0x80  // bit 7: metadata has been stat'd and loaded
 
 struct Path {
     TypeId type_id;         // LMD_TYPE_PATH
-    uint8_t flags;          // segment type (bits 0-1), metadata loaded (bit 7)
+    uint8_t flags;          // segment type (bits 0-2), metadata loaded (bit 7)
     const char* name;       // segment name (interned via name_pool), NULL for wildcards
     Path* parent;           // parent segment (NULL for root schemes)
     uint64_t result;        // cached resolved content (0 = not resolved yet)
-    PathMeta* meta;         // optional metadata (NULL until stat'd)
+    PathMeta* meta;             // optional metadata (NULL until stat'd)
+    uint8_t root_scheme;        // PathScheme root carried by every spine node
+    uint8_t authority_kind;     // 0 none, 1 current machine, 2 named host
+    const char* authority_name; // named file authority, owned by the path pool
+    int64_t int_value;          // value for LPATH_SEG_INT
 };
 
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Path, type_id) == 0,
                      "Path TypeId must remain at byte zero");
 
 // Helper macros for path segment type
-#define PATH_GET_SEG_TYPE(p)      ((LPathSegmentType)((p)->flags & 0x03))
-#define PATH_SET_SEG_TYPE(p, t)   ((p)->flags = ((p)->flags & 0xFC) | ((t) & 0x03))
+#define PATH_GET_SEG_TYPE(p)      ((LPathSegmentType)((p)->flags & 0x07))
+#define PATH_SET_SEG_TYPE(p, t)   ((p)->flags = ((p)->flags & 0xF8) | ((t) & 0x07))
+
+typedef enum {
+    PATH_AUTHORITY_NONE = 0,
+    PATH_AUTHORITY_LOCAL = 1,
+    PATH_AUTHORITY_NAMED = 2,
+} PathAuthorityKind;
 
 // Path scheme identifiers (predefined roots)
 typedef enum {
@@ -54,7 +67,8 @@ typedef enum {
     PATH_SCHEME_HTTPS,      // https://
     PATH_SCHEME_SYS,        // sys:// (system info)
     PATH_SCHEME_REL,        // . (relative path)
-    PATH_SCHEME_PARENT,     // .. (parent directory)
+    PATH_SCHEME_PARENT,     // legacy parent root; new syntax uses LPATH_SEG_PARENT
+    PATH_SCHEME_LOGICAL,    // / (logical resolver root)
     PATH_SCHEME_COUNT
 } PathScheme;
 

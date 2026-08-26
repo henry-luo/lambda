@@ -26,6 +26,11 @@ var re6 = new RegExp("^\\p{LC}+$", "u");
 console.log("t6:" + re6.test("Hello") + "," + re6.test("123"));
 
 // --- Test 7: Mixed Unicode property escapes in a pattern ---
+// "_test" is false: U+005F is XID_Continue but NOT XID_Start. JS allows a
+// leading underscore in identifiers through a separate IdentifierStart
+// production ($ | _ | UnicodeIDStart), not by _ being ID_Start. This used to
+// report true only because a bare \p{...} escape reached RE2 unflattened; the
+// [\p{XID_Start}] spelling always reported false here.
 var re7 = new RegExp("^\\p{XID_Start}\\p{XID_Continue}*$", "u");
 console.log("t7:" + re7.test("myVar123") + "," + re7.test("_test") + "," + re7.test("123abc"));
 

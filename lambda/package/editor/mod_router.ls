@@ -96,10 +96,10 @@ pub fn route_orthogonal(a, b, a_bbox, b_bbox) {
                   (b_bbox != null and rect_contains(b_bbox, l_corner))
     if (not crosses) { [a, l_corner, b] }
     else if (horiz_first) {
-      let mx = (a.x + b.x) / 2.0
+      let mx = (a.x + b.x) / 2.0;
       [a, {x: mx, y: a.y}, {x: mx, y: b.y}, b]
     } else {
-      let my = (a.y + b.y) / 2.0
+      let my = (a.y + b.y) / 2.0;
       [a, {x: a.x, y: my}, {x: b.x, y: my}, b]
     }
   }

@@ -153,7 +153,7 @@ extern "C" const char* js_property_index_chars(int64_t index, int* out_len) {
 
 // 2-arg heap_create_name lives in transpiler.hpp (defined in lambda-mem.cpp);
 // forward-declare here so the kernels below can build name keys.
-extern void fn_map_set(Item map_item, Item key, Item value);
+extern Item fn_map_set(Item map_item, Item key, Item value);
 
 // Debug-only property-storage invariants. Empty-string keys are valid.
 #ifndef NDEBUG
@@ -1272,7 +1272,7 @@ extern "C" Item js_set(Item target, JsPropertyLane lane, Item observable_key,
     bool primitive_target = target_type == LMD_TYPE_BOOL ||
         target_type == LMD_TYPE_NUM_SIZED || target_type == LMD_TYPE_INT ||
         target_type == LMD_TYPE_INT64 || target_type == LMD_TYPE_UINT64 ||
-        target_type == LMD_TYPE_FLOAT || target_type == LMD_TYPE_FLOAT64 ||
+        target_type == LMD_TYPE_FLOAT ||
         target_type == LMD_TYPE_DECIMAL || target_type == LMD_TYPE_SYMBOL ||
         target_type == LMD_TYPE_STRING;
     if (primitive_target) {

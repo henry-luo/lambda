@@ -24,8 +24,14 @@ typedef enum TemplateSpecificity {
 typedef struct TemplateHandlerEntry {
     const char* event_name;     // event name (e.g., "click", "init") — interned pointer
     fn_ptr handler_func;        // compiled handler: Item handler(Item model)
+    struct AstEventHandler* interp_handler; // T0 handler body, when present
+    struct AstViewNode* interp_view;         // owning T0 view
+    struct Script* interp_module;            // owning module for const/type lookup
     struct TemplateHandlerEntry* next;
 } TemplateHandlerEntry;
+
+typedef Item (*template_interp_body_fn)(Context* host, struct Script* module,
+                                        struct AstViewNode* view, Item model);
 
 // A compiled template entry in the registry
 typedef struct TemplateEntry {
@@ -39,8 +45,19 @@ typedef struct TemplateEntry {
     const char* match_tag;      // element tag name to match (NULL if not element pattern)
     int match_tag_len;          // length of match_tag
     int match_attr_count;       // number of attribute constraints (0 = tag-only)
+    // Element-pattern attribute predicates, walked at match time. Points at the
+    // pattern's own TypeElmt, whose shape entries carry either a literal type
+    // (`type:'checkbox'` — value must equal) or a non-literal type
+    // (`href`, `type: string` — attribute must be present). Owned by the
+    // script's AST, which outlives the registry entry.
+    const void* match_elmt_type;
+    int match_literal_attr_count;  // predicates that pin a value (specificity)
     int match_field_count;      // number of map field constraints (for map patterns)
     int definition_order;       // order of definition in script (for tie-breaking)
+    // A behavior template supplies UA default behavior for an element kind. It
+    // is never selected by apply() — it attaches at dispatch time to elements it
+    // did not produce — so the two dispatch paths must not see each other.
+    bool is_behavior;
 
     // Template reference for state store keying (interned pointer)
     const char* template_ref;   // name or generated "_view_N" ref
@@ -53,6 +70,13 @@ typedef struct TemplateEntry {
     // Event handlers
     TemplateHandlerEntry* handlers;  // linked list of compiled event handlers
 
+    // A T0 view/edit entry has no generated function pointer. The interpreter
+    // evaluates its body against the active `~` context when apply()
+    // dispatches here; generated MIR entries leave these fields null.
+    struct AstViewNode* interp_view;
+    struct Script* interp_module;
+    template_interp_body_fn interp_body_func;
+
     struct TemplateEntry* next; // linked list
 } TemplateEntry;
 
@@ -61,6 +85,11 @@ typedef struct TemplateRegistry {
     TemplateEntry* first;       // linked list head
     TemplateEntry* last;        // linked list tail
     int count;                  // total number of registered templates
+    // While set, newly added entries are stamped as behavior templates. The dom
+    // package raises this for the span of its own load, so "is this UA behavior"
+    // is decided by provenance rather than by syntax.
+    bool behavior_mode;
+    int behavior_count;         // behavior entries registered (0 = dispatch inert)
 } TemplateRegistry;
 
 // Initialize a new template registry
@@ -79,6 +108,26 @@ void template_registry_add(TemplateRegistry* registry,
                            int match_attr_count,
                            int match_field_count);
 
+// Attach an element pattern's TypeElmt to an entry, deriving its attribute
+// predicate counts. Call after template_registry_add for element patterns.
+void template_registry_set_element_pattern(TemplateEntry* entry, const void* elmt_type);
+
+// Behavior templates (UA default behavior; see vibe/Lambda_Design_DOM_State.md).
+// Raise behavior mode around the dom package's load so its templates register as
+// behavior rather than author templates.
+void template_registry_set_behavior_mode(TemplateRegistry* registry, bool on);
+bool template_registry_has_behavior(TemplateRegistry* registry);
+
+// Find the handler an entry declares for an event, or NULL.
+TemplateHandlerEntry* template_entry_find_handler(TemplateEntry* entry,
+                                                  const char* event_name);
+
+// Best behavior template governing `target` that handles `event_name`, or NULL.
+// Unlike template_registry_match, this never consults author templates.
+TemplateEntry* template_registry_match_behavior(TemplateRegistry* registry,
+                                                Item target,
+                                                const char* event_name);
+
 // Find the best matching template for a given item
 // Returns NULL if no template matches
 TemplateEntry* template_registry_match(TemplateRegistry* registry,
@@ -95,6 +144,14 @@ TemplateEntry* template_registry_find_ref(TemplateRegistry* registry,
 void template_entry_add_handler(TemplateEntry* entry,
                                 const char* event_name,
                                 fn_ptr handler_func);
+
+// Register an AST-owned handler for an interpreter view. Generated handlers
+// continue to use template_entry_add_handler and their erased MIR ABI.
+void template_entry_add_interp_handler(TemplateEntry* entry,
+                                       const char* event_name,
+                                       struct AstEventHandler* handler,
+                                       struct AstViewNode* view,
+                                       struct Script* module);
 
 // The registry is semantic state of the active EvalContext. The compatibility
 // name preserves existing lowering code while preventing process-global

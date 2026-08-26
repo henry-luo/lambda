@@ -1,0 +1,16 @@
+{
+  generic_before: false,
+  generic_set: true,
+  generic_after: true,
+  control_tag: "INPUT",
+  checked_before: false,
+  checked_set: true,
+  checked_after: true,
+  uncheck: true,
+  checked_end: false,
+  hover_read: false,
+  hover_write: false,
+  unknown_read: null,
+  unknown_write: false,
+  free: null
+}

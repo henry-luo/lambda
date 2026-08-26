@@ -3,6 +3,7 @@
 
 #include "transpiler.hpp"
 #include "lambda-number-runtime.hpp"
+#include "lambda-error.h"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/sort.h"
@@ -33,6 +34,7 @@ static int cmp_double_asc(const void* a, const void* b, void* udata) {
 }
 
 extern __thread EvalContext* context;
+extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* message);
 
 // Forward declarations from lambda-eval-num.cpp
 Item push_d(double val);
@@ -495,7 +497,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         if (!is_scalar_numeric(elem_type)) {
             // non-numeric element: produce ERROR, continue
             if (return_array) array_push(arr_result, ItemError);
-            else list_push(list_result, ItemError);
+            else array_push((Array*)list_result, ItemError);
             continue;
         }
 
@@ -524,7 +526,7 @@ static Item vec_scalar_op(Item vec, Item scalar, int op, bool scalar_first) {
         }
 
         if (return_array) array_push(arr_result, res_item);
-        else list_push(list_result, res_item);
+        else array_push((Array*)list_result, res_item);
     }
     if (!return_array && list_result) list_result->is_content = 1;
     return return_array ? Item{ .array = arr_result } : Item{ .array = list_result };
@@ -1077,7 +1079,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
 
         if (!is_scalar_numeric(ta) || !is_scalar_numeric(tb)) {
             if (return_array) array_push(arr_result, ItemError);
-            else list_push(list_result, ItemError);
+            else array_push((Array*)list_result, ItemError);
             continue;
         }
 
@@ -1104,7 +1106,7 @@ static Item vec_vec_op(Item vec_a, Item vec_b, int op) {
         }
 
         if (return_array) array_push(arr_result, res_item);
-        else list_push(list_result, res_item);
+        else array_push((Array*)list_result, res_item);
     }
     if (!return_array && list_result) list_result->is_content = 1;
     return return_array ? Item{ .array = arr_result } : Item{ .array = list_result };
@@ -1948,7 +1950,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
                 Item value = map_get(mp, key_item);
                 Item transformed = transform(value, key_item);
                 if (!filter || is_truthy(transformed)) {
-                    list_push(result, filter ? value : transformed);
+                    array_push((Array*)result, filter ? value : transformed);
                 }
             }
             symbol_key_list_free(keys);
@@ -1966,7 +1968,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
             Item idx = index_to_item(i);
             Item transformed = transform(child, idx);
             if (!filter || is_truthy(transformed)) {
-                list_push(result, filter ? child : transformed);
+                array_push((Array*)result, filter ? child : transformed);
             }
         }
         result->is_content = 1;
@@ -1982,7 +1984,7 @@ static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {
         Item idx = index_to_item(i);
         Item transformed = transform(elem, idx);
         if (!filter || is_truthy(transformed)) {
-            list_push(result, filter ? elem : transformed);
+            array_push((Array*)result, filter ? elem : transformed);
         }
     }
     result->is_content = 1;
@@ -2332,8 +2334,8 @@ Item fn_math_random(Item seed_item) {
     // convert to double in [0.0, 1.0)
     double value = (double)(z >> 11) * 0x1.0p-53;
     List* result = list();
-    list_push(result, push_d(value));
-    list_push(result, box_int64_value((int64_t)state));
+    array_push((Array*)result, push_d(value));
+    array_push((Array*)result, box_int64_value((int64_t)state));
     return { .array = result };
 }
 
@@ -2362,7 +2364,7 @@ Item fn_reverse(Item item) {
         bool preserve_array = type == LMD_TYPE_ARRAY && !item.array->is_spreadable;
         List* result = list();
         for (int64_t i = len - 1; i >= 0; i--) {
-            list_push(result, vector_get(item, i));
+            array_push((Array*)result, vector_get(item, i));
         }
         // sort() returns a plain non-spreadable array; reverse() must preserve that
         // container mode so method chains keep bracketed array output.
@@ -2738,7 +2740,7 @@ Item fn_take(Item vec, Item n_item) {
     }
     else {
         List* result = list();
-        for (int64_t i = 0; i < n; i++) list_push(result, vector_get(vec, i));
+        for (int64_t i = 0; i < n; i++) array_push((Array*)result, vector_get(vec, i));
         result->is_content = 1;
         return { .array = result };
     }
@@ -2801,7 +2803,7 @@ Item fn_drop(Item vec, Item n_item) {
     }
     else {
         List* result = list();
-        for (int64_t i = n; i < len; i++) list_push(result, vector_get(vec, i));
+        for (int64_t i = n; i < len; i++) array_push((Array*)result, vector_get(vec, i));
         result->is_content = 1;
         return { .array = result };
     }
@@ -3079,7 +3081,7 @@ Item fn_shape(Item vec) {
         // off the number stack entirely.
         Item dim = {.item = i2it(dims[i])};
         result = rooted_result.get();
-        list_push(result, dim);
+        array_push((Array*)result, dim);
     }
     return { .array = rooted_result.get() };
 }
@@ -3487,7 +3489,7 @@ Item fn_array_split(Item arr_item, int64_t n, int64_t axis) {
         ArrayNum* part = arr_num_slice_axis(arr, ndim, shp, str, (int)axis, c * chunk, (c + 1) * chunk);
         if (!part) return ItemError;
         result = rooted_result.get();
-        list_push(result, (Item){ .array_num = part });
+        array_push((Array*)result, (Item){ .array_num = part });
     }
     return { .array = rooted_result.get() };
 }
@@ -3919,47 +3921,40 @@ Item fn_mask_index(Item arr_item, Item mask_item) {
 // fn_mask_index.  `mask` is a bool ArrayNum the same shape as `arr`.  Reached only
 // from procedural index-assign statements (so it is procedural by construction).
 // Scalar RHS fills every selected element; array RHS is consumed in order.
-void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
-    // Generic Array with a plain integer index: the index was statically typed ANY
-    // (e.g. a range-for loop variable `for i in a to b { arr[i] = v }`) but is
-    // dynamically an int. Route to the ordinary element write — masks/ranges only
-    // apply to typed numeric arrays. fn_array_set handles negatives and bounds.
-    {
-        TypeId arr_tid = get_type_id(arr_item);
-        int64_t i = 0;
-        if (arr_tid == LMD_TYPE_ARRAY &&
-                lambda_item_to_int64_exact(idx_item, &i)) {
-            fn_array_set(arr_item.array, i, val_item);
-            return;
-        }
-    }
-    if (get_type_id(arr_item) != LMD_TYPE_ARRAY_NUM) {
-        log_error("arr[idx] = v: masked assignment requires a typed numeric array target");
-        return;
+Item fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
+    // Scalar writes and non-numeric containers use the checked member setter so
+    // dynamic keys cannot be truncated and invalid writes cannot disappear.
+    TypeId arr_tid = get_type_id(arr_item);
+    if (arr_tid != LMD_TYPE_ARRAY_NUM || get_type_id(idx_item) != LMD_TYPE_ARRAY_NUM) {
+        return fn_index_set(arr_item, idx_item, val_item);
     }
     ArrayNum* arr = arr_item.array_num;
     if (arr->is_view && !arr->is_mutable_view) {
         log_error("arr[mask] = v: cannot mutate a read-only view; copy() first");
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "cannot mutate a read-only numeric array view");
+        return ItemError;
     }
     TypeId it = get_type_id(idx_item);
     // plain integer index — element write (this path is reached when the index is
     // dynamically typed (ANY), e.g. an index variable, that turns out to be an int).
     int64_t scalar_index = 0;
     if (lambda_item_to_int64_exact(idx_item, &scalar_index)) {
-        int64_t i = scalar_index;
-        if (i >= 0 && i < arr->length) array_num_set_item(arr, i, val_item);
-        return;
+        return fn_index_set(arr_item, idx_item, val_item);
     }
     if (it == LMD_TYPE_RANGE) {
         // range slicing is not an indexing read either (use subview); keep the
         // write side consistent rather than inventing write-only slice semantics.
         log_error("arr[a to b] = v: range slice-assignment is not supported; use subview/element writes");
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "range slice-assignment is not supported");
+        return ItemError;
     }
     if (it != LMD_TYPE_ARRAY_NUM || idx_item.array_num->get_elem_type() != ELEM_BOOL) {
         log_error("arr[idx] = v: index must be a boolean mask (got %s)", get_type_name(it));
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "numeric array write key must be an integer or boolean mask");
+        return ItemError;
     }
     ArrayNum* mask = idx_item.array_num;
     int64_t a_shape[32], a_str[32], m_shape[32], m_str[32];
@@ -3969,7 +3964,9 @@ void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
     for (int d = 0; same && d < a_ndim; d++) if (m_shape[d] != a_shape[d]) same = false;
     if (!same) {
         log_error("arr[mask] = v: mask shape must match the array shape");
-        return;
+        set_runtime_error_no_trace(ERR_TYPE_MISMATCH,
+            "numeric array mask shape must match the target shape");
+        return ItemError;
     }
     int64_t total = 1;
     for (int d = 0; d < a_ndim; d++) total *= a_shape[d];
@@ -3991,6 +3988,7 @@ void fn_index_assign(Item arr_item, Item idx_item, Item val_item) {
             idx[d] = 0; a_off -= a_shape[d] * a_str[d]; m_off -= m_shape[d] * m_str[d];
         }
     }
+    return ItemNull;
 }
 
 Item fn_sum_axis(Item arr, Item axis)     { return array_num_reduce_axis(arr, axis, RED_SUM,  "sum");  }
@@ -4733,9 +4731,9 @@ Item fn_zip(Item a, Item b) {
         rooted_pair.set(pair);
         rooted_left.set(vector_get(rooted_a.get(), i));
         rooted_right.set(vector_get(rooted_b.get(), i));
-        list_push(rooted_pair.get(), rooted_left.get());
-        list_push(rooted_pair.get(), rooted_right.get());
-        list_push(rooted_result.get(), { .array = rooted_pair.get() });
+        array_push((Array*)rooted_pair.get(), rooted_left.get());
+        array_push((Array*)rooted_pair.get(), rooted_right.get());
+        array_push((Array*)rooted_result.get(), { .array = rooted_pair.get() });
         rooted_pair.set((List*)NULL);
         rooted_left.set(ItemNull);
         rooted_right.set(ItemNull);

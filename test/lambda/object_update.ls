@@ -53,7 +53,7 @@ cfg2.debug
 // ~ self-reference in method returns updated object
 type Vec {
     x: float,
-    y: float;
+    y: float,
     fn translate(dx: float, dy: float) => <Vec *:~, x: x + dx, y: y + dy>
     fn scale(factor: float) => <Vec *:~, x: x * factor, y: y * factor>
 }

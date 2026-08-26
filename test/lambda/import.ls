@@ -1,6 +1,6 @@
 import .func
 
-pub PI = 3.1415926
+pub let PI = 3.1415926
 
 let ls = [1, 2.5, 'hi', "h"++"i"]
 ls[0]; ls[1]; [ls[3], ls[2]];
@@ -9,7 +9,7 @@ ls[0]; ls[1]; [ls[3], ls[2]];
 
 "imported vars:"
 PI
-pi
+pi;
 (PI >= pi)
 pi is float
 

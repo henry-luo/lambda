@@ -17,6 +17,14 @@
 #include <math.h>
 
 typedef struct LayoutContext LayoutContext;
+
+// HTML noscript text remains script-visible, but with scripting enabled the
+// element represents nothing and therefore must not create a CSS text box.
+inline bool layout_noscript_content_suppressed(const DomElement* element) {
+    return element && element->tag_id == MARKUP_NAME_NOSCRIPT && element->doc &&
+        element->doc->html_scripting_enabled;
+}
+
 // CSS Inline 3 §7.3 initial-letter value after resolving the size and sink.
 // `raised` also covers the equivalent explicit sink of one line.
 struct InitialLetterInfo {
@@ -300,6 +308,10 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    CssEnum white_space = CSS_VALUE_NORMAL,
                                                    CssEnum overflow_wrap = CSS_VALUE_NORMAL,
                                                    CssEnum word_break = CSS_VALUE_NORMAL);
+uint8_t layout_text_autospace_flags(LayoutContext* lycon, DomNode* text_node = nullptr);
+bool layout_text_contains_rtl_codepoint(const char* text, size_t length);
+bool layout_text_autospace_pair(uint8_t flags, uint32_t previous, uint32_t current);
+float layout_text_autospace_advance(LayoutContext* lycon);
 float layout_vertical_text_block_extent(const char* text, size_t length,
                                          float line_advance,
                                          float available_inline_size);
@@ -350,6 +362,9 @@ float layout_resolve_intrinsic_margin_side(LayoutContext* lycon,
                                             CssPropertyCode property,
                                             float inline_base = -1.0f,
                                             bool include_bound = true);
+void layout_align_deferred_inline_line_runs(ViewElement* parent,
+                                             float final_content_width,
+                                             CssEnum text_align);
 // tier-3: layout-transient, valid within pass
 struct IntrinsicSizesBidirectional {
     float min_content_width;
@@ -1041,24 +1056,38 @@ typedef struct CounterValue {
 typedef struct CounterScope {
     HashMap* counters;
     CounterScope* parent;
+    int owner_depth;
+    bool pseudo_scope;
+    bool reset_replaces_sibling;
+    bool pseudo_reset_for_descendants;
 } CounterScope;
+// tier-3: layout-transient, valid within pass
+typedef struct CounterFrame {
+    CounterScope* entry_scope;
+    CounterScope* element_scope;
+} CounterFrame;
 // tier-3: layout-transient, valid within pass
 typedef struct CounterContext {
     Arena* arena;
     CounterScope* current_scope;
+    // owns every scope allocated during this layout pass
     lam::ArrayList<CounterScope*>* scope_stack;
+    // tracks element/pseudo boundaries separately from the active counter chain
+    lam::ArrayList<CounterFrame>* frame_stack;
 
     bool init(Arena* backing_arena);
     void destroy();
-    void push_scope();
+    void push_scope(bool pseudo_scope = false);
     void pop_scope();
-    void pop_scope_propagate(bool propagate_resets = false);
+    void pop_scope_propagate(bool propagate_resets = false,
+                             bool preserve_reset_scope = false);
 } CounterContext;
 
 CounterContext* counter_context_create(Arena* arena);
 void counter_context_destroy(CounterContext* ctx);
-void counter_push_scope(CounterContext* ctx);
-void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets = false);
+void counter_push_scope(CounterContext* ctx, bool pseudo_scope = false);
+void counter_pop_scope_propagate(CounterContext* ctx, bool propagate_resets = false,
+                                 bool preserve_reset_scope = false);
 void counter_reset(CounterContext* ctx, const char* counter_spec);
 void counter_increment(CounterContext* ctx, const char* counter_spec);
 void counter_set(CounterContext* ctx, const char* counter_spec);
@@ -1280,6 +1309,8 @@ float compute_view_last_text_baseline(
 } // namespace radiant
 
 CssEnum get_white_space_value(DomNode* node);
+CssEnum get_text_wrap_mode_value(DomNode* node);
+bool layout_inline_is_collapsed_whitespace_only(ViewSpan* span);
 inline bool layout_white_space_collapses(CssEnum white_space) {
     return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_NOWRAP ||
            white_space == CSS_VALUE_PRE_LINE || white_space == 0;
@@ -1470,6 +1501,8 @@ void setup_list_container_counters(LayoutContext* lycon, ViewBlock* block, DomEl
 void compute_reversed_counter_initial(LayoutContext* lycon, DomElement* dom_elem);
 void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                        DomElement* dom_elem, DisplayValue display);
+bool layout_marker_is_outside(View* view);
+bool layout_list_item_has_in_flow_content(DomElement* element);
 const char* extract_counter_spec_from_style(StyleTree* style, CssPropertyCode css_property,
                                             LayoutContext* lycon);
 void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
@@ -1480,11 +1513,16 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 typedef struct MulticolFlowItem {
     ViewBlock* block;
     float height;
+    float content_height;
+    float margin_before;
+    float margin_after;
     float inline_offset;
     bool can_fragment;
     bool spans_all;
     bool break_before_column;
     bool break_after_column;
+    // the tail after a forced break in a parallel float, including its margins
+    float parallel_balance_tail;
 } MulticolFlowItem;
 // tier-3: layout-transient, valid within one multicol pass
 typedef struct ColumnState {
@@ -1511,6 +1549,9 @@ typedef struct ColumnFragment {
 // spanner path and the ordinary container path from drifting in ownership.
 struct MulticolGroupScratch {
     float* heights;
+    float* content_heights;
+    float* margin_before;
+    float* margin_after;
     bool* can_fragment;
     bool* break_before;
     bool* break_after;
@@ -1518,6 +1559,12 @@ struct MulticolGroupScratch {
 
     bool init(ScratchArena* scratch) {
         heights = (float*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(float));
+        content_heights = (float*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(float));
+        margin_before = (float*)scratch_alloc(scratch,
+            MAX_MULTICOL_BLOCKS * sizeof(float));
+        margin_after = (float*)scratch_alloc(scratch,
             MAX_MULTICOL_BLOCKS * sizeof(float));
         can_fragment = (bool*)scratch_alloc(scratch,
             MAX_MULTICOL_BLOCKS * sizeof(bool));
@@ -1527,7 +1574,8 @@ struct MulticolGroupScratch {
             MAX_MULTICOL_BLOCKS * sizeof(bool));
         fragments = (ColumnFragment*)scratch_calloc(scratch,
             MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment));
-        return heights && can_fragment && break_before && break_after && fragments;
+        return heights && content_heights && margin_before && margin_after &&
+            can_fragment && break_before && break_after && fragments;
     }
 
     void release(ScratchArena* scratch) {
@@ -1535,12 +1583,18 @@ struct MulticolGroupScratch {
         if (break_after) scratch_free(scratch, break_after);
         if (break_before) scratch_free(scratch, break_before);
         if (can_fragment) scratch_free(scratch, can_fragment);
+        if (margin_after) scratch_free(scratch, margin_after);
+        if (margin_before) scratch_free(scratch, margin_before);
+        if (content_heights) scratch_free(scratch, content_heights);
         if (heights) scratch_free(scratch, heights);
         fragments = nullptr;
         break_after = nullptr;
         break_before = nullptr;
         can_fragment = nullptr;
         heights = nullptr;
+        margin_after = nullptr;
+        margin_before = nullptr;
+        content_heights = nullptr;
     }
 };
 // Keep the bounded flow-item buffer paired with its scratch lifetime; nested
@@ -1579,6 +1633,8 @@ typedef struct FragmentedFlowCursor {
     ColumnGroup* group;
     int current_fragment;
     float block_offset;
+    float pending_margin_after;
+    bool has_item_in_fragment;
 } FragmentedFlowCursor;
 // A normalized projection avoids separate fragment-index math in text and
 // block paths; both must clamp negative offsets and use the same row pitch.
@@ -1601,6 +1657,7 @@ float multicol_intrinsic_vertical_block_extent(LayoutContext* lycon,
                                                DomElement* element);
 bool multicol_spanner_can_escape_child(ViewBlock* child);
 float multicol_normal_gap_size(ViewBlock* block);
+float multicol_column_gap(ViewBlock* block);
 float multicol_empty_intrinsic_inline_size(ViewBlock* block);
 void calculate_multicol_dimensions(
     MultiColumnProp* multicol,
@@ -1759,6 +1816,42 @@ typedef enum BreakKind {
     // Ideographic space
     BRK_IDEOGRAPHIC_SPACE,      // U+3000 (full-width space, hangable, break opportunity)
 } BreakKind;
+
+// CSS 2.1 §10.8.1: discarded overflow must not enlarge the line box after
+// layout backtracks to the saved legal opportunity.
+typedef struct LineMetricsSnapshot {
+    bool valid;
+    float max_ascender;
+    float max_descender;
+    float max_css_baseline_ascender;
+    float ruby_annotation_min_line_height;
+    float ruby_annotation_over_shift;
+    float initial_letter_origin_advance;
+    bool has_initial_letter;
+    bool has_drop_initial_letter;
+    bool has_phantom_inline_fragment;
+    bool has_replaced_content;
+    int atomic_inline_count;
+    float max_desc_before_last_text;
+    bool has_expanded_inline_lh;
+    float max_inline_line_height;
+    float max_atomic_inline_height;
+    float max_text_ascender;
+    float max_text_descender;
+    float clamped_baseline_tail;
+    bool has_clamped_baseline_tail;
+    bool has_different_inline_font;
+    float max_normal_line_height;
+    bool has_c1_control_text;
+    bool has_non_c1_text;
+    bool has_direct_block_text;
+    float c1_control_line_height;
+    bool has_cjk_text;
+    float max_top_bottom_height;
+    float max_top_height;
+    float max_bottom_height;
+} LineMetricsSnapshot;
+
 // tier-3: layout-transient, valid within pass
 typedef struct Linebox {
     float left, right;                // left and right bounds of the line
@@ -1782,6 +1875,8 @@ typedef struct Linebox {
     BreakKind last_non_shy_space_kind;
     float last_non_shy_space_hanging_width;
     float last_non_shy_space_hanging_text_trim;
+    LineMetricsSnapshot last_space_metrics;
+    LineMetricsSnapshot last_non_shy_space_metrics;
     View* start_view;
     bool has_phantom_inline_fragment; // zero-height inline run still needing text-align
     CssEnum vertical_align;
@@ -1812,7 +1907,7 @@ typedef struct Linebox {
     float parent_font_ascender;     // parent element's font ascender (pixels)
     float parent_font_descender;    // parent element's font descender (pixels)
     float parent_font_size;         // parent element's font size (pixels)
-    struct FontHandle* parent_font_handle; // parent element's font handle (for x-height)
+    FontProp* parent_font_style; // parent element's persistent font alias (for x-height)
     TextRect* last_text_rect;       // last text rect output on this line (for trailing space trimming)
     struct ViewText* last_text_view; // ViewText that owns last_text_rect (for bounds update after trimming)
     float trailing_space_width;     // width of trailing space in last text rect (CSS 2.1 §16.6.1)
@@ -1833,6 +1928,7 @@ typedef struct Linebox {
                                          // position (from collapsed inter-element whitespace in a wrappable
                                          // parent); allows nowrap content to break at this boundary
     bool is_last_line;              // CSS 2.1 §16.2: true when this is the last line of a block (for justify)
+    CssEnum inline_base_direction;   // css text 3 §8.3: start/end direction for this line box
     float inline_start_edge_pending;  // CSS 2.1 §8.3: accumulated left margin+border+padding from
                                       // inline spans that haven't produced content yet; re-applied
                                       // after line break so the span's first content is indented
@@ -1841,7 +1937,9 @@ typedef struct Linebox {
     FontBox line_start_font;
     uint32_t prev_glyph_index = 0;   // for kerning
     uint32_t prev_codepoint = 0;     // for CoreText GPOS kerning (codepoint-based)
-    struct FontHandle* prev_kerning_font_handle = nullptr;
+    uint32_t prev_text_spacing_codepoint = 0; // previous character for CSS text-spacing pairs
+    uint32_t prev_text_autospace_codepoint = 0; // previous typographic unit for CSS text-autospace
+    FontProp* prev_kerning_font_style = nullptr;
     bool has_cjk_text = false;       // true if line contains CJK characters (for line-height blending)
     float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
                                      // (used in second pass to expand line box if needed)
@@ -1856,6 +1954,8 @@ typedef struct Linebox {
         last_non_shy_space = NULL;  last_non_shy_space_pos = 0;
         last_non_shy_space_kind = BRK_TEXT;  last_non_shy_space_hanging_width = 0;
         last_non_shy_space_hanging_text_trim = 0;
+        last_space_metrics.valid = false;
+        last_non_shy_space_metrics.valid = false;
         trailing_space_width = 0;
         committed_trailing_rect = NULL;
         committed_trailing_view = NULL;
@@ -2973,6 +3073,12 @@ bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* conta
 bool layout_block_has_automatic_height(ViewBlock* block);
 WritingMode layout_block_writing_mode(ViewBlock* block);
 WritingMode layout_writing_mode_from_css(CssEnum writing_mode);
+inline bool layout_inline_span_isolate(ViewSpan* span) {
+    if (!span || !span->blk) return false;
+    CssEnum unicode_bidi = span->block()->unicode_bidi;
+    return unicode_bidi == CSS_VALUE_ISOLATE ||
+        unicode_bidi == CSS_VALUE_ISOLATE_OVERRIDE;
+}
 void layout_map_vertical_writing_text_geometry(View* view, WritingMode mode,
                                                float block_extent,
                                                float inline_extent,
@@ -3007,6 +3113,9 @@ void layout_normalize_vertical_breaks(ViewBlock* block);
 bool layout_block_inline_axis_is_vertical(ViewBlock* block);
 float layout_compute_in_flow_child_width_extent(
     ViewBlock* parent, bool include_margin_box = false);
+bool layout_compute_vertical_in_flow_child_inline_extent(
+    ViewBlock* parent, float* out_extent);
+bool layout_vertical_parent_has_block_flow_child(ViewBlock* parent);
 inline bool layout_inline_box_is_orthogonal_to_parent(ViewBlock* block) {
     if (!block) return false;
     ViewBlock* parent = layout_nearest_block_ancestor(block->parent_view());
@@ -3081,6 +3190,9 @@ float layout_table_baseline_for_source(LayoutContext* lycon, ViewBlock* table,
 void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row,
     float table_abs_x, float cell_border, float cell_padding);
 bool wrap_orphaned_table_children(LayoutContext* lycon, struct DomElement* parent);
+void layout_refresh_anonymous_table_fixup_inheritance(LayoutContext* lycon,
+                                                       struct DomElement* parent,
+                                                       const FontProp* inherited_font = nullptr);
 bool is_table_internal_display(CssEnum display);
 bool layout_element_is_anonymous_table_fixup(const struct DomElement* element);
 void layout_unwrap_anonymous_table_fixups_for_dom_mutation(struct DomElement* parent);
@@ -3220,6 +3332,8 @@ bool block_context_establishes_bfc(ViewBlock* block);
  * Add a positioned float to the BlockContext
  */
 void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem);
+void block_context_refresh_descendant_float_geometry(BlockContext* ctx,
+                                                     ViewElement* ancestor);
 // recompute the cached lowest edge after existing float boxes are translated.
 void block_context_recompute_lowest_float_bottom(BlockContext* ctx);
 
@@ -3236,11 +3350,14 @@ void block_context_recompute_lowest_float_bottom(BlockContext* ctx);
  *                   line that already originated above the float.
  * @param float_placement_query Apply same-side float intrusion at the
  *                              candidate top even for a zero-height float.
+ * @param horizontal_offset Translate returned bounds into a caller-local
+ *                          inline coordinate system whose origin is in BFC space.
  * @return Available space bounds adjusted for floats
  */
 FloatAvailableSpace block_context_space_at_y(BlockContext* ctx, float y, float height,
                                               bool line_query = false,
-                                              bool float_placement_query = false);
+                                              bool float_placement_query = false,
+                                              float horizontal_offset = 0.0f);
 // Return the next lower edge of any float strictly below the candidate Y.
 // Float-avoidance and positioned static placement share this boundary rule.
 float block_context_next_float_boundary(BlockContext* ctx, float y);
@@ -3331,6 +3448,8 @@ void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_befo
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
                                        bool include_marker = false,
                                        bool create_first_letter = false);
+void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
+                                                DomElement* pseudo_element);
 void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
                                 int iframe_width, int iframe_height);
 View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
@@ -3521,15 +3640,32 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  */
 
 void line_break(LayoutContext* lycon);
+void line_consume_trailing_collapsible_space(LayoutContext* lycon,
+                                             bool trim_text_bounds,
+                                             bool update_ancestor_bounds);
+bool line_has_prior_flow_content(const Linebox* line);
 void line_align(LayoutContext* lycon);
 void layout_shift_preceding_inline_line_views(LayoutContext* lycon,
                                               View* view, float offset);
 void layout_bidi_line(LayoutContext* lycon);
+int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir);
+CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback);
+CssEnum layout_resolve_line_base_direction(LayoutContext* lycon);
 void place_rtl_initial_letter_line(LayoutContext* lycon);
 void adjust_text_bounds(ViewText* text);
+void layout_refresh_html_body_ua_margin(LayoutContext* lycon, DomElement* dom_elem);
 View* layout_inline_fragment_root(View* view);
 float layout_rtl_inline_item_x(Linebox* line, float item_width);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
+// CSS Shadow DOM: return the tree that supplies a host's rendered children;
+// light-DOM children remain the DOM/API tree and are projected at <slot>.
+DomNode* layout_render_child_list(DomElement* element);
+DomNode* layout_rendered_first_child_node(DomElement* element);
+// CSS Shadow DOM: expose the host as the formatting parent of a direct
+// shadow-tree child while preserving the fragment's DOM parentage.
+DomElement* layout_shadow_formatting_parent(DomNode* node);
+bool layout_is_shadow_slot(DomNode* node);
+void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot);
 DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset);
 void layout_block(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_text(LayoutContext* lycon, DomNode* text_node);
@@ -3931,6 +4067,7 @@ void view_vertical_align(LayoutContext* lycon, View* view);
 // this same projection; keeping it here prevents each layout phase from
 // maintaining a subtly different recursive walker.
 void layout_shift_view_tree(View* view, float offset_x, float offset_y);
+void layout_shift_view_tree_geometry(View* view, float offset_x, float offset_y);
 void layout_shift_view_children(View* view, float offset_x, float offset_y);
 // Shift inline descendants while preserving block-child local coordinates.
 // Relative and sticky inline positioning use this narrower projection.
@@ -4036,6 +4173,8 @@ void recompute_span_bounding_box_after_line_layout(
     ViewSpan* span, bool is_multi_line, struct FontHandle* fallback_fh = nullptr);
 void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
+bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
+                                                bool include_inline_table = false);
 bool inline_span_float_continuation_x(
     ViewSpan* span, float* continuation_x, bool* has_left_float);
 // CSS text-transform
@@ -4260,6 +4399,9 @@ struct DocState;
 // View tree printing functions (output CSS logical pixels directly)
 void print_view_tree(ViewElement* view_root, Url* url, const char* output_path = nullptr);
 void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_path = nullptr);
+bool stream_view_tree_json(ViewElement* view_root, const char* input_file, FILE* stream);
+bool write_layout_result_frame(FILE* stream, const char* input_file, bool success,
+                               const char* json = nullptr, size_t json_length = 0);
 bool view_memory_profile_write(DomDocument* doc, const char* input_file,
                                const char* output_path);
 // Print caret state to view_tree.txt (appends caret info)

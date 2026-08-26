@@ -28,7 +28,7 @@ pn main() {
 }
 
 fn contains(s, sub) {
-    let parts = split(s, sub)
+    let parts = split(s, sub);
     (len(parts) >= 2)
 }
 

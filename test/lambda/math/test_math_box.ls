@@ -38,7 +38,7 @@ let nd = box.null_delim()
 "17. null_delim class:"; nd.element.class
 
 // ---- make_box ----
-let mb = box.make_box(<span; "test">, 0.8, 0.2, 1.0, "mord")
+let mb = box.make_box(<span "test">, 0.8, 0.2, 1.0, "mord")
 "18. make type:"; mb.type
 "19. make height:"; mb.height
 "20. make depth:"; mb.depth

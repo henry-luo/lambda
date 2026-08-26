@@ -10,21 +10,21 @@ let data = input('./test/lambda/ui/todos.json', 'json') ^ { null }
 
 // Todo item component: clicking toggles done/not-done, delete emits to parent
 view <todo_item> state toggled: false {
-  let done = if (toggled) (!~.done) else ~.done
+  let done = if (toggled) (not ~.done) else ~.done
   let check_mark = if (done) "✓" else "○"
-  let done_class = if (done) "todo-item done" else "todo-item"
+  let done_class = if (done) "todo-item done" else "todo-item";
   <li class:done_class
-    <span class:"checkbox"; check_mark>
-    <span class:"todo-text"; ~.text>
-    <span class:"delete-btn"; "×">
+, <span class:"checkbox", check_mark>
+    <span class:"todo-text", ~.text>
+    <span class:"delete-btn", "×">
   >
 }
 on click(evt) {
   if (evt.target_class == "delete-btn") {
     emit("delete_item", ~)
-  } else {
-    toggled = not toggled
+    return
   }
+  toggled = not toggled
 }
 
 // Todo list section: edit template for model mutation (delete, clear completed, add)
@@ -32,23 +32,23 @@ edit <todo_list> state new_text: "" {
   let items = ~.items
   let item_count = len(items)
   let done_count = len(for (i in items where i.done) i)
-  let count_text = (done_count) ++ "/" ++ (item_count)
+  let count_text = (done_count) ++ "/" ++ (item_count);
   <div class:"todo-list"
-    <div class:"list-header"
-      <span class:"list-name"; ~.name>
-      <span class:"list-count"; count_text>
+, <div class:"list-header"
+, <span class:"list-name", ~.name>
+      <span class:"list-count", count_text>
     >
     <ul class:"items"
-      for (item in items)
+, for (item in items)
         apply(<todo_item text:item.text, done:item.done, id:item.id>)
     >
     <div class:"add-row"
-      <input type:"text", class:"new-item-input", placeholder:"Add a task...", value:new_text>
-      <button class:"add-btn"; "Add">
+, <input type:"text", class:"new-item-input", placeholder:"Add a task...", value:new_text>
+      <button class:"add-btn", "Add">
     >
     if (done_count > 0) {
       <div class:"list-actions"
-        <button class:"clear-done-btn"; "Clear completed">
+, <button class:"clear-done-btn", "Clear completed">
       >
     }
   >
@@ -94,7 +94,7 @@ on delete_item(evt) {
 // HTML page — outer shell built directly, items rendered via apply()
 // ============================================================================
 
-<html lang:"en"
+<html lang:"en",
 <head
   <meta charset:"UTF-8">
   <title "Lambda Todo App">
@@ -254,19 +254,21 @@ on delete_item(evt) {
   >
 >
 <body
-  <div class:"container"
-    <div class:"header"
+  <div class:"container",
+    <div class:"header",
+      // dynamic element content needs the child separator; without it the
+      // parser treats `data` as an attribute and rejects the member access.
       <h1 data.title>
       <p "Reactive UI — click to toggle, × to delete">
     >
-    <div class:"content"
+    <div class:"content",
       for (lst in data.lists)
         apply(<todo_list name:lst.name, items:lst.items>, {mode: "edit"})
     >
-    <div class:"footer"
+    <div class:"footer",
       let all_items = [for (lst in data.lists) for (item in lst.items) item]
       let total = len(all_items)
-      let done = len(for (item in all_items where item.done) item)
+      let done = len(for (item in all_items where item.done) item);
       ((done) ++ " of " ++ (total) ++ " tasks completed")
     >
   >

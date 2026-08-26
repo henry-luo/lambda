@@ -84,7 +84,6 @@ struct Runtime {
     uint32_t next_module_state_id;  // allocator shared by every language's sealed modules
     struct hashmap* script_index;  // canonical script path -> Script*
     ModuleRegistry* module_registry; // runtime-owned cross-language module definitions
-    TSParser* parser;
     char* current_dir;
     int max_errors;      // error threshold for type checking (default: 10, 0 = unlimited)
     bool static_warning; // --static-warning: report semantic type errors as warnings and keep compiling (Lambda relaxed mode)
@@ -137,20 +136,7 @@ extern const char* g_lambda_home;
 void lambda_home_init(void);    // call once at startup (reads LAMBDA_HOME env var)
 char* lambda_home_path(const char* rel); // returns malloc'd "<g_lambda_home>/<rel>"; caller frees
 
-#define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
-     .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
-
 void* alloc_const(Transpiler* tp, size_t size);
-AstNode* build_map(Transpiler* tp, TSNode map_node);
-AstNode* build_elmt(Transpiler* tp, TSNode element_node);
-AstNode* build_for_stam(Transpiler* tp, TSNode for_node);
-AstNode* build_expr(Transpiler* tp, TSNode expr_node);
-AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global);
-AstNode* build_script(Transpiler* tp, TSNode script_node);
-void print_ts_root(const char *source, TSTree* syntax_tree);
-void print_tree(TSNode node, int depth);
-
-void write_node_source(Transpiler* tp, TSNode node);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix);
@@ -160,9 +146,26 @@ bool needs_fn_call_wrapper(AstFuncNode* fn_node);
 // Shared AST/MIR helpers.
 bool has_typed_params(AstFuncNode* fn_node);
 ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len);
+// Object literals carry only the supplied named fields.  Construction must
+// align each value with its declared ShapeEntry so omitted fields can run their
+// declared defaults instead of being shifted into a later storage lane.
+AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
+    const ShapeEntry* shape);
+// The unkeyed item in an object literal is the `*:source` spread. It must be
+// evaluated once so omitted fields inherit the source value before typed-field
+// storage coercion runs.
+AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal);
 bool has_fixed_shape(TypeMap* map_type);
 bool is_direct_access_type(TypeId type_id);
 bool static_literal_item_from_type(Type* type, Item* out);
+
+// Shape/type-graph helpers shared by the Lambda and JS AST builders.
+// `is_global_simple_type` answers whether a Type* is one of the compact global
+// singletons (which carry only the Type prefix and must never be read as a
+// TypeMap/TypeArray); `unwrap_simple_type_type` peels compiler-built TypeType
+// wrappers off a recorded field type.
+bool is_global_simple_type(const Type* type);
+Type* unwrap_simple_type_type(Type* type);
 
 // ANY-census recorders [Type_Infer TI3]. Every `any` fallback in the builders
 // goes through one of these so the reason is counted; never bare-assign
@@ -189,10 +192,8 @@ void clear_dynamic_imports(void);
 }
 
 // MIR transpiler functions
-// compile_only stops after compilation (and therefore after MIR emission),
-// skipping execution; it backs --transpile-only for the MIR Direct pipeline.
-Input* run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main = false,
-                      bool compile_only = false);
+Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
+                      bool run_main = false);
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms = nullptr,
                                    double* out_transpile_ms = nullptr,
@@ -200,6 +201,12 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                                    uint64_t* out_mir_module_count = nullptr,
                                    uint64_t* out_mir_function_count = nullptr,
                                    uint64_t* out_mir_instruction_count = nullptr);
+
+// P2: compile one T0-supported definition into a Script-owned MIR satellite.
+// Its module bindings are read from the existing T0 slab; the resulting
+// address has the normal generated boxed ABI.
+bool compile_ast_function_satellite(Runtime* runtime, Script* script,
+                                    const AstFuncNode* fn, void** out_boxed_entry);
 
 // Transfers the Script-sized prefix of a finished Transpiler onto its Script.
 // Shared by the MIR Direct handoff and the T0 plan-only load path.
@@ -218,6 +225,9 @@ void runtime_reset_heap(Runtime* runtime);  // reset heap between independent ev
 EvalContext* runtime_get_eval_context(Runtime* runtime);
 void runtime_register_script(Runtime* runtime, Script* script);
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index);
+// Free every Script a runtime owns, with its script list and path index.
+// runtime_cleanup calls this; hosts that tear a runtime down by hand must too.
+void runtime_free_all_scripts(Runtime* runtime);
 void runtime_teardown_batch_scripts(Runtime* runtime);
 void runtime_log_mir_cache_summary(Runtime* runtime);
 void path_reset(void);  // reset path scheme roots (must call after runtime_reset_heap in batch)

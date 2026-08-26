@@ -1,4 +1,4 @@
-import radiant;
+import radiant
 
 let ok = radiant.register_layout("bfc_smoke", (parent, children, ctx) => {
   placements: [for (child in children) {

@@ -178,10 +178,21 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
         }
         if (block->scroll()->pane) {
             DocState* state = block->doc ? block->doc->state : NULL;
+            ScrollInteractionState interaction = {};
+            scroll_state_get_interaction_for_view(state, static_cast<View*>(block),
+                                                  &interaction);
+            // Chromium's auto scrollbars overlay only appear while interacted with;
+            // painting them at rest obscures content in static document renders.
+            bool show_hz_scroll = block->scroll()->has_hz_scroll &&
+                (block->scroll()->overflow_x == CSS_VALUE_SCROLL ||
+                 interaction.h_hovered || interaction.h_dragging);
+            bool show_vt_scroll = block->scroll()->has_vt_scroll &&
+                (block->scroll()->overflow_y == CSS_VALUE_SCROLL ||
+                 interaction.v_hovered || interaction.v_dragging);
             scrollpane_render(rdcon, block->scroll()->pane, &rect,
                 block->content_width * s, block->content_height * s, &rdcon->block.clip, s,
                 state, static_cast<View*>(block),
-                block->scroll()->has_hz_scroll, block->scroll()->has_vt_scroll);
+                show_hz_scroll, show_vt_scroll);
         } else {
             log_error("scroller has no scroll pane");
         }

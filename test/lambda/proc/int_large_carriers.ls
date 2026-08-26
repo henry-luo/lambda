@@ -15,7 +15,7 @@ pn main() {
     print(m.v ++ "\n")
     let m2 = {v: big}
     print(m2.v ++ "\n")
-    let e = <el v: big; "c">
+    let e = <el v: big, "c">
     print(e.v ++ "\n")
 
     // member assignment must write the carrier it reads

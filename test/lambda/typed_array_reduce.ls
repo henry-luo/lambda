@@ -1,6 +1,6 @@
 // Whole-array reductions over compact typed arrays (Typed Array 4, Scope 2.3).
 // These previously returned garbage for compact element types because the
-// integer path read the byte/short/float buffers through `items` (int64).
+// integer path read the byte/short/float buffers through `items` (i64).
 
 "=== i8 sum/min/max ==="
 sum([10i8, 20i8, 30i8])      // 60

@@ -449,8 +449,8 @@ pn greet(name: string) {
     print(msg)
 }
 
-// Expression body
-pn double(x: int) => x * 2
+// A procedure body is always a braced statement block ('=>' bodies are fn-only)
+pn double(x: int) int { return x * 2 }
 
 // With return type annotation
 pn factorial(n: int) int {
@@ -491,7 +491,7 @@ pn main() {
         sum = sum + i
         i = i + 1
     }
-    "Sum 1..10 = " ++ string(sum)
+    "Sum 1..10 = " ++ sum
 }
 ```
 
@@ -567,7 +567,7 @@ type Account {
         ~.name = name                    // ~.name = field, name = parameter
     }
 
-    fn describe() => name ++ ": " ++ string(balance)
+    fn describe() => name ++ ": " ++ balance
 }
 ```
 
@@ -597,13 +597,16 @@ pn child(value) {
 }
 
 pn main() {
-    let handle = start child(41)
+    let handle = start(child, [41])
     print(wait(handle)^)  // 42
 }
 ```
 
-`start` accepts a `pn` call and returns an opaque identity handle. The child is
-owned by the current lexical block. Normal exit joins non-escaped children;
+Under S13.1.1v2, `start(target, args = [], options = {})` is a builtin `pn`
+using ordinary call syntax. `target` must resolve to a `pn`; `args` is an array.
+The optional literal map accepts `mode: 'task' | 'thread' | 'process'` and
+defaults to the currently implemented `'task'` mode. It returns an opaque
+identity handle. The child is owned by the current lexical block. Normal exit joins non-escaped children;
 error exit requests cancellation and joins them with cancellation masked during
 cleanup. Returning a handle lets that task outlive its birth block. Copying or
 sending the handle grants another task a capability but does not transfer
@@ -622,7 +625,7 @@ pn worker() {
 pn main() {
     var mutable = 21
     let snapshot = mutable
-    let handle = start worker()
+    let handle = start(worker)
     send(handle, snapshot)^
     print(wait(handle)^)
 }

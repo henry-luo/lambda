@@ -62,30 +62,30 @@ nested
 "=== Positional Decomposition (let a, b = expr) ==="
 
 // Decompose array
-let a, b, c = [1, 2, 3]
+let a, b, c = [1, 2, 3];
 [a, b, c]
 
 // Decompose list
-let x, y = [10, 20]
+let x, y = [10, 20];
 [x, y]
 
 // Partial decomposition (fewer vars than elements)
-let first, second = [100, 200, 300, 400]
+let first, second = [100, 200, 300, 400];
 [first, second]
 
 // Decompose from nested array
-let p, q = [[5, 6], [7, 8]][0]
+let p, q = [[5, 6], [7, 8]][0];
 [p, q]
 
 "=== Named Decomposition (let a, b at expr) ==="
 
 // Decompose map by field name
 let person = {name: "Bob", age: 25, email: "bob@example.com"}
-let name, age at person
+let name, age at person;
 [name, age]
 
 // Different field order - use email from same person (different fields)
-let email, city at {email: "bob@test.com", city: "NYC"}
+let email, city at {email: "bob@test.com", city: "NYC"};
 [email, city]
 
 // Decompose computed map
@@ -119,7 +119,7 @@ let single = for (v in [42]) v * 2
 single
 
 // Decompose with expression
-let d1, d2 = [1 + 1, 2 + 2]
+let d1, d2 = [1 + 1, 2 + 2];
 [d1, d2]
 
 "All for/decompose tests completed!"

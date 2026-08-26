@@ -96,15 +96,14 @@ enum EnumTypeId {
     LMD_TYPE_INT64,  // int literal, 64-bit
     LMD_TYPE_UINT64, // unsigned 64-bit integer (number-home or owned pointer)
     LMD_TYPE_FLOAT,  // float literal, 64-bit
-    LMD_TYPE_FLOAT64, // legacy reserved tag; f64 syntax canonicalizes to LMD_TYPE_FLOAT
     LMD_TYPE_DECIMAL,
+    // A GC-managed pair of binary64 components.  It is a direct pointer Item
+    // so the payload stays distinct from the self-tagged float encoding.
+    LMD_TYPE_COMPLEX,
     LMD_TYPE_DTIME,
     LMD_TYPE_SYMBOL,
     LMD_TYPE_STRING,
     LMD_TYPE_BINARY,
-    // A GC-managed pair of binary64 components.  It is a direct pointer Item
-    // so the payload stays distinct from the self-tagged float encoding.
-    LMD_TYPE_COMPLEX,
 
     // Path type for file/URL paths
     LMD_TYPE_PATH,  // segmented path with scheme (file, http, https, sys, etc.)
@@ -208,7 +207,6 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_INT), "int tag must be non-
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_INT64), "int64 tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_UINT64), "uint64 tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_FLOAT), "float tag must be non-double");
-LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_FLOAT64), "float64 tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_DECIMAL), "decimal tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_DTIME), "datetime tag must be non-double");
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE(LMD_TYPE_SYMBOL), "symbol tag must be non-double");
@@ -599,6 +597,12 @@ typedef enum SysFunc {
     // file-based find/replace (procedural)
     SYSPROC_REPLACE_FILE,    // pn replace(path, pattern, repl) - sed-like file replace
     SYSPROC_REPLACE_FILE4,   // pn replace(path, pattern, repl, options)
+    // S12.3.4 dynamic application. Two enum rows for one surface name `call`:
+    // the lowering picks the fn- or pn-coloured entry from the ENCLOSING
+    // context, which fixes the error convention (return vs raise), while the
+    // TARGET's colour is what S12.1.4 checks.
+    SYSFUNC_CALL,            // fn  call(f, args) - apply f to array args; returns error
+    SYSPROC_CALL,            // pn  call(f, args) - apply f to array args; raises
     // view/edit template apply
     SYSFUNC_APPLY1,          // apply(target) - apply view templates to target
     SYSFUNC_APPLY2,          // apply(target, options) - apply with options map
@@ -614,6 +618,7 @@ typedef enum SysFunc {
     SYSFUNC_PDF_REGISTER_SVG_IMAGE_RESOLVER,  // pdf_register_svg_image_resolver(svg, pdf) - bind PDF image handles to SVG root
     SYSPROC_PUSH,            // push(arr, val) - append val to a growable array in place (procedural)
     SYSPROC_SPLICE,          // splice(arr, start, count) - remove count elements at start, in place (procedural)
+    SYSPROC_START,           // start(pn, args?, options?) - launch a scoped child task
     SYSPROC_SEND,
     SYSPROC_RECEIVE,
     SYSPROC_WAIT,
@@ -644,6 +649,7 @@ typedef struct VMap VMap;
 typedef struct Element Element;
 typedef struct Object Object;
 typedef struct Function Function;
+struct TypeMethod;
 typedef struct Decimal Decimal;
 typedef struct Complex Complex;
 typedef struct TypePattern TypePattern;
@@ -1137,6 +1143,9 @@ struct Function {
     // natively-compiled and foreign entries.
     const void* def;
     struct Script* def_module;  // owner of def's const_list / type_list / slab
+    // Non-null only for a T0 bound object method. Its receiver lives in the
+    // one-field closure environment so the collector traces it like a capture.
+    const struct TypeMethod* method;
 };
 
 LAMBDA_STATIC_ASSERT(__builtin_offsetof(Function, type_id) == 0,
@@ -1154,6 +1163,10 @@ Item fn_call3(Function* fn, Item a, Item b, Item c);
 // entries resolve their companion lane in Context; hosted callbacks may still
 // supply an explicit payload owner across this C boundary.
 Item fn_call_into(Function* fn, List* args, uint64_t* result_home);
+// S12.3.4 dynamic application; colour-split for the error convention.
+// Named *_apply_args, not *_call: `fn_call` is already the dynamic dispatcher.
+Item fn_apply_args(Item callee, Item args);
+Item pn_apply_args(Item callee, Item args);
 Item fn_call0_into(Function* fn, uint64_t* result_home);
 Item fn_call1_into(Function* fn, Item a, uint64_t* result_home);
 Item fn_call2_into(Function* fn, Item a, Item b, uint64_t* result_home);
@@ -1174,7 +1187,15 @@ typedef struct PathMeta PathMeta;
 
 // Path construction API (called by JIT-generated code)
 Path* path_new(Pool* pool, int scheme);                           // Create new path with scheme
+Path* path_new_authority(Pool* pool, int scheme, const char* authority);
 Path* path_extend(Pool* pool, Path* base, const char* segment);   // Extend path with segment
+Path* path_extend_int(Pool* pool, Path* base, int64_t value);
+Path* path_select_parent(Pool* pool, Path* base);
+Path* path_select_root(Pool* pool, Path* base);
+Path* path_qualify_default(Pool* pool, Path* path);
+bool path_file_authority_is_local(Path* path);
+bool path_equal(Path* left, Path* right);
+uint64_t path_hash(Path* path, uint64_t seed0, uint64_t seed1);
 Path* path_concat(Pool* pool, Path* base, Path* suffix);          // Concatenate two paths
 Path* path_wildcard(Pool* pool, Path* base);                      // Add * wildcard segment
 Path* path_wildcard_recursive(Pool* pool, Path* base);            // Add ** wildcard segment
@@ -1364,7 +1385,7 @@ static inline bool is_numeric_type_id(TypeId type_id) {
 // `em_scalar_return_mode_for_type()` defers to it, and the C-side sys-func
 // metadata fallback in mir.c uses it directly, so the two cannot drift.
 static inline bool lambda_type_id_may_be_wide_scalar(TypeId type_id) {
-    return type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64 ||
+    return type_id == LMD_TYPE_FLOAT ||
            type_id == LMD_TYPE_INT64 || type_id == LMD_TYPE_UINT64 ||
            type_id == LMD_TYPE_ANY;
 }
@@ -1379,7 +1400,7 @@ static inline bool is_integer_type_id(TypeId type_id) {
 }
 
 static inline bool is_float_type_id(TypeId type_id) {
-    return type_id == LMD_TYPE_FLOAT || type_id == LMD_TYPE_FLOAT64;
+    return type_id == LMD_TYPE_FLOAT;
 }
 
 static inline bool is_native_numeric_or_bool_type_id(TypeId type_id) {
@@ -1481,23 +1502,22 @@ LAMBDA_STATIC_ASSERT((uint8_t)(ITEM_JS_DELETED_SENTINEL >> 56) != (uint8_t)ITEM_
                      "storable JS sentinels must not share the pending high byte");
 LAMBDA_STATIC_ASSERT(PENDING_KIND_FLOAT <= PENDING_KIND_MASK,
                      "pending kinds must fit the reserved low bits");
-// The four wide-scalar tags are CONTIGUOUS, and the JIT's pending-pair builder
-// depends on it: `(unsigned)(tag - LMD_TYPE_INT64) <= 3` is the whole fast-path
+// The three wide-scalar tags are CONTIGUOUS, and the JIT's pending-pair builder
+// depends on it: `(unsigned)(tag - LMD_TYPE_INT64) <= 2` is the whole fast-path
 // test, and `tag - LMD_TYPE_INT64` IS the pending kind for the two integer
 // tags. Reordering EnumTypeId without preserving this run silently
 // mis-classifies returns, so pin it here.
 LAMBDA_STATIC_ASSERT(LMD_TYPE_UINT64 == LMD_TYPE_INT64 + 1 &&
-                     LMD_TYPE_FLOAT == LMD_TYPE_INT64 + 2 &&
-                     LMD_TYPE_FLOAT64 == LMD_TYPE_INT64 + 3,
+                     LMD_TYPE_FLOAT == LMD_TYPE_INT64 + 2,
                      "wide scalar tags must stay contiguous from LMD_TYPE_INT64");
 LAMBDA_STATIC_ASSERT((uint64_t)(LMD_TYPE_INT64 - LMD_TYPE_INT64) == PENDING_KIND_INT64 &&
                      (uint64_t)(LMD_TYPE_UINT64 - LMD_TYPE_INT64) == PENDING_KIND_UINT64,
                      "integer pending kinds must equal their tag offset");
-// Tags 0x06-0x09 have bits 6 and 5 clear, so an Item whose high byte lands in
+// Tags 0x06-0x08 have bits 6 and 5 clear, so an Item whose high byte lands in
 // the wide-scalar run can never be an inline double. The pair builder relies on
 // that to skip the ITEM_DBL_MASK test on the wide arm.
 LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)LMD_TYPE_INT64) &&
-                     ITEM_TAG_IS_NON_DOUBLE((uint8_t)LMD_TYPE_FLOAT64),
+                     ITEM_TAG_IS_NON_DOUBLE((uint8_t)LMD_TYPE_FLOAT),
                      "wide scalar tags must be outside inline-double space");
 
 static inline void lambda_item_debug_trap(void) {
@@ -1746,8 +1766,6 @@ inline uint64_t b2it(uint8_t bool_val) {
 #define bi2it(decimal_ptr)   c2it(decimal_ptr)
 #define l2it(long_ptr)       lambda_int64_ptr_to_item_bits((const int64_t*)(long_ptr))
 #define d2it(double_ptr)     ((double_ptr)? ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr)): ITEM_NULL)
-// f64 is a type-language alias for binary64; runtime Items use canonical float encoding.
-#define f642it(double_ptr)   lambda_float_ptr_to_item(double_ptr)
 
 #ifdef __cplusplus
 static inline Item lambda_float_ptr_to_item(const double* double_ptr);
@@ -2084,7 +2102,6 @@ struct Context {
     Url* cwd;  // current working directory
     void* (*context_alloc)(int size, TypeId type_id);
     bool run_main; // whether to run main procedure on start
-    bool disable_string_merging; // disable automatic string merging in list_push
     uintptr_t stack_limit; // stack overflow check limit (from lambda_stack_init)
     bool ui_mode; // allocate fat DomElement/DomText on arena for unified DOM tree
     uint64_t* side_root_base;
@@ -2199,6 +2216,8 @@ extern "C" {
     Object* object_with_data(int64_t type_index);
     Object* object_with_tl(int64_t type_index, void* type_list_ptr);
     Object* object_fill(Object* obj, ...);
+    // Same fill from a caller-rooted Item span; the T0 walker has no varargs.
+    Object* object_fill_items(Object* obj, const Item* values, int value_count);
 
     // these getters use the runtime number side stack
     Item array_get(Array *array, int64_t index);
@@ -2220,6 +2239,7 @@ extern "C" {
     void object_type_set_constraint(int64_t type_index, fn_ptr constraint_func);
     Item item_at(Item data, int64_t index);
     Item item_attr(Item data, const char* key);  // get attribute by name
+    bool path_is_property_name(const char* key);
     Item path_property_get(Path* path, const char* key);  // built-in Path properties (shared by fn_member/item_attr)
     SymbolKeyList* item_keys(Item data);     // get typed list of Symbol* attribute names
     SymbolKeyList* symbol_key_list_new(int64_t initial_capacity);
@@ -2301,6 +2321,7 @@ extern "C" {
 
     // generic field access function
     Item fn_index(Item item, Item index);
+    Item fn_index_set(Item item, Item index, Item value);
     int64_t fn_int64_index(Item item);
     Item fn_member(Item item, Item key);
     Item fn_member_by_id(Item item, uint32_t name_id);
@@ -2343,6 +2364,8 @@ extern "C" {
     Item fn_avg(Item a);
     Item fn_avg_skip_null(Item a, bool skip_null);
     Item fn_union(Item a, Item b);
+    Item fn_intersect(Item a, Item b);
+    Item fn_exclude(Item a, Item b);
     Item fn_pos(Item a);
     Item fn_neg(Item a);
 
@@ -2384,7 +2407,11 @@ extern "C" {
         const char* boundary);
     Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary);
+    Item lambda_array_set_checked_item(Item owner, Item key, Item value, Type* expected,
+        const char* boundary);
     Item lambda_array_set_checked_inplace(Item owner, int64_t index, Item value, Type* expected,
+        const char* boundary);
+    Item lambda_array_set_checked_inplace_item(Item owner, Item key, Item value, Type* expected,
         const char* boundary);
     Item lambda_array_set_checked_lane(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary, uint8_t lane_kind, uint8_t lane_nullable,
@@ -2594,7 +2621,7 @@ extern "C" {
     int64_t array_num_iter_count(ArrayNum* arr);   // shape[0] for N-D, length for 1-D
     ArrayNum* array_num_new_ndim(ArrayNumElemType elem_type, int64_t total, int ndim, int64_t* dims);
     Item array_num_at_nd(ArrayNum* arr, int ndim, int64_t* indices);   // multi-dim scalar read
-    void array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value); // multi-dim write
+    Item array_num_set_nd(ArrayNum* arr, int ndim, int64_t* indices, Item value); // multi-dim write
     Item fn_zip(Item a, Item b);
     Item fn_range3(Item start, Item end, Item step);
     Item fn_math_quantile(Item a, Item p);
@@ -2602,6 +2629,7 @@ extern "C" {
     Item fn_reduce(Item collection, Item func);
 
     Item fn_to(Item a, Item b);
+    Item fn_range_bound_error(Item a, Item b);
 
     // pipe operations
     typedef Item (*PipeMapFn)(Item item, Item index);
@@ -2644,7 +2672,7 @@ extern "C" {
     Item fn_min_axis(Item arr, Item axis);       // min along axis (via min(arr, axis) / min(arr, axis:N))
     Item fn_max_axis(Item arr, Item axis);       // max along axis
     Item fn_mask_index(Item arr, Item mask);     // arr[mask] — boolean mask selection
-    void fn_index_assign(Item arr, Item idx, Item val);  // arr[mask] = v — masked write (procedural in-place)
+    Item fn_index_assign(Item arr, Item idx, Item val);  // arr[mask] = v — masked write (procedural in-place)
     Item vec_cmp(Item a, Item b, int op);        // vectorized a OP b → ELEM_BOOL mask (op = operator-OPERATOR_EQ)
     // overload wrappers (the sysfunc dispatcher resolves fn_<name><argcount>)
     Item fn_sum1(Item arr);            Item fn_sum2(Item arr, Item axis);
@@ -2761,7 +2789,7 @@ extern "C" {
     // compound assignment support (procedural only)
     Item fn_mutable_value(Item value);
     Item fn_array_set(Array* arr, int64_t index, Item value);
-    void fn_map_set(Item map, Item key, Item value);
+    Item fn_map_set(Item map, Item key, Item value);
     bool cow_item_is_container(Item value);
     Item cow_mark_shared(Item value);
     Item cow_bind_var(Item value);
@@ -2771,7 +2799,8 @@ extern "C" {
     void cow_profile_note_vmap_snapshot(void);
     void cow_profile_note_vmap_rejection(void);
     void cow_profile_dump(void);
-    Item array_set_cow(Item owner, int64_t index, Item value);
+    Item array_set_cow(Item owner, Item key, Item value);
+    Item member_set_cow(Item owner, Item key, Item value);
     Item map_set_cow(Item owner, Item key, Item value);
     Item cow_path_set_raw(Item owner, Item key, Item value);
     Item cow_path_set(Item owner, Item path, Item value);

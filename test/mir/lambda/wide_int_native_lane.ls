@@ -1,6 +1,6 @@
 // MT fixture: `+ - *` on two wide operands lower to machine add/sub/mul.
 //
-// int64/uint64 have no inline Item form at any magnitude (D2.2.3), so before
+// i64/uint64 have no inline Item form at any magnitude (D2.2.3), so before
 // this lane existed every such operation boxed both operands, called
 // fn_add/fn_sub/fn_mul, and let pack_sized_integer push a number home for a
 // result the next instruction unboxed again. Three side-stack words per

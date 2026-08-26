@@ -354,12 +354,93 @@ static DomNode* js_dom_mutation_source_parent(DomNode* parent) {
     return parent;
 }
 
-static DomElement* js_dom_prepare_children_for_mutation(DomElement* parent) {
+static DomNode* js_dom_table_fixup_significant_sibling(DomNode* child,
+                                                       bool forward) {
+    for (DomNode* sibling = child ? (forward ? child->next_sibling
+                                             : child->prev_sibling) : nullptr;
+         sibling; sibling = forward ? sibling->next_sibling : sibling->prev_sibling) {
+        if (sibling->is_text()) {
+            if (!layout_dom_text_has_non_whitespace(sibling->as_text())) continue;
+            return sibling;
+        }
+        if (!sibling->is_element()) return sibling;
+        DisplayValue display = resolve_display_value((void*)sibling);
+        if (layout_display_is_none(display)) continue;
+        return sibling;
+    }
+    return nullptr;
+}
+
+static bool js_dom_table_fixup_cells_only_descendants(DomNode* node,
+                                                       bool* has_cell) {
+    if (!node || !node->is_element()) return false;
+    for (DomNode* child = node->as_element()->first_child; child;
+         child = child->next_sibling) {
+        if (child->is_text()) {
+            if (!layout_dom_text_has_non_whitespace(child->as_text())) continue;
+            return false;
+        }
+        if (!child->is_element()) return false;
+        CssEnum display = resolve_display_value((void*)child).inner;
+        if (display == CSS_VALUE_TABLE_CELL) {
+            if (has_cell) *has_cell = true;
+            continue;
+        }
+        if (display != CSS_VALUE_TABLE_ROW &&
+            display != CSS_VALUE_TABLE_ROW_GROUP &&
+            display != CSS_VALUE_TABLE_HEADER_GROUP &&
+            display != CSS_VALUE_TABLE_FOOTER_GROUP) {
+            return false;
+        }
+        if (!child->as_element()->is_table_fixup() ||
+            !js_dom_table_fixup_cells_only_descendants(child, has_cell)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool js_dom_table_fixup_is_cells_only_run(DomNode* node) {
+    if (!node || !node->is_element() || !node->as_element()->is_table_fixup()) {
+        return false;
+    }
+    bool has_cell = false;
+    return js_dom_table_fixup_cells_only_descendants(node, &has_cell) && has_cell;
+}
+
+static bool js_dom_removal_merges_table_fixup_runs(DomElement* parent,
+                                                  DomNode* child) {
+    if (!parent || !child ||
+        resolve_display_value((void*)parent).outer != CSS_VALUE_INLINE) {
+        return false;
+    }
+    DomNode* previous = js_dom_table_fixup_significant_sibling(child, false);
+    DomNode* next = js_dom_table_fixup_significant_sibling(child, true);
+    bool previous_cells = js_dom_table_fixup_is_cells_only_run(previous);
+    bool next_cells = js_dom_table_fixup_is_cells_only_run(next);
+    return previous_cells && next_cells;
+}
+
+static DomElement* js_dom_prepare_children_for_mutation(DomElement* parent,
+                                                        DomNode* changed_child = nullptr) {
     DomNode* source_parent = js_dom_mutation_source_parent(
         static_cast<DomNode*>(parent));
     if (!source_parent || !source_parent->is_element()) return nullptr;
     DomElement* source_element = source_parent->as_element();
-    layout_unwrap_anonymous_table_fixups_for_dom_mutation(source_element);
+    bool changes_table_structure = !changed_child || !changed_child->is_element();
+    bool merges_table_fixup_runs = false;
+    if (changed_child && changed_child->is_element()) {
+        DisplayValue display = resolve_display_value((void*)changed_child);
+        changes_table_structure = is_table_internal_display(display.inner);
+        merges_table_fixup_runs = js_dom_removal_merges_table_fixup_runs(
+            source_element, changed_child);
+    }
+    if (changes_table_structure || merges_table_fixup_runs) {
+        // table-internal removal changes the fixup input; rebuild the generated
+        // boxes so the next layout sees the authored table structure. Removing
+        // a separator between two cell-only runs has the same effect.
+        layout_unwrap_anonymous_table_fixups_for_dom_mutation(source_element);
+    }
     return source_element;
 }
 
@@ -4884,15 +4965,9 @@ static CssSelectorGroup* parse_css_selector_group(const char* sel_text, Pool* po
     if (!sel_text || !pool) return nullptr;
     size_t sel_len = strlen(sel_text);
     if (sel_len == 0) return nullptr;
-
-    size_t token_count = 0;
-    CssToken* tokens = css_tokenize(sel_text, sel_len, pool, &token_count);
-    if (!tokens || token_count == 0) return nullptr;
-
-    int pos = 0;
-    // DOM selector APIs take selector lists; parsing only one selector drops comma-separated
+    // DOM selector APIs take selector lists; the shared parser preserves comma-separated
     // alternatives used by editor hit-testing such as closest("td, th").
-    return css_parse_selector_group_from_tokens(tokens, &pos, (int)token_count, pool);
+    return css_parse_selector_group_text(sel_text, sel_len, pool);
 }
 
 static DomElement* js_dom_selector_group_find_first(SelectorMatcher* matcher,
@@ -6089,6 +6164,7 @@ static bool js_dom_form_named_getter_reserved_name(const char* prop);
     X(SET_SELECTION_RANGE,       "setSelectionRange") \
     X(SHEET,                     "sheet") \
     X(SIZE,                      "size") \
+    X(SLOT,                      "slot") \
     X(SPELLCHECK,                "spellcheck") \
     X(SRCDOC,                    "srcdoc") \
     X(STEP,                      "step") \
@@ -8860,6 +8936,13 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
                                         : s2it(heap_create_name(""))};
     }
 
+    // HTMLElement.slot reflects the content attribute and controls default
+    // versus named-slot assignment in the Shadow DOM flattened tree.
+    if (prop_id == JS_DOM_PROP_SLOT) {
+        const char* slot_name = elem->get_attribute("slot");
+        return js_name_item(slot_name ? slot_name : "");
+    }
+
     if (js_dom_element_is_svg(elem) && prop_id == JS_DOM_PROP_TRANSFORM) {
         return js_dom_svg_get_transform_list(elem);
     }
@@ -10015,13 +10098,31 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 
         bool layout_pending = elem->doc && elem->doc->state &&
             ((DocState*)elem->doc->state)->lifecycle != DOC_LIFECYCLE_COMMITTED;
-        if ((!elem->scroller || !elem->scroll()->pane) && scroll_value < 0.0f) {
+        bool vertical_rl_signed_scroll = !is_vertical && scroll_value < 0.0f &&
+            layout_element_writing_mode(elem) == WM_VERTICAL_RL;
+        const FlexProp* flex = elem->embedp()->flex;
+        CssEnum flex_direction = flex
+            ? (CssEnum)flex->direction
+            : layout_specified_keyword(elem, CSS_PROPERTY_FLEX_DIRECTION, CSS_VALUE_ROW);
+        bool column_reverse_signed_scroll = is_vertical && scroll_value < 0.0f &&
+            flex_direction == CSS_VALUE_COLUMN_REVERSE;
+        bool signed_scroll = vertical_rl_signed_scroll || column_reverse_signed_scroll;
+        bool signed_range_unresolved = signed_scroll && elem->scroller &&
+            elem->scroll()->pane &&
+            (is_vertical ? elem->scroll()->pane->v_min_scroll >= 0.0f
+                         : elem->scroll()->pane->h_min_scroll >= 0.0f);
+        // CSS Overflow permits negative offsets for vertical-rl and column-reverse
+        // flex flows; preserve them while the pane still has its [0, 0]
+        // provisional range so final layout can clamp against real overflow.
+        if ((!elem->scroller || !elem->scroll()->pane) && scroll_value < 0.0f &&
+            !signed_scroll) {
             // Without a committed pane there is no writing-mode-specific
             // signed range to validate against, so pending element scroll
             // state must retain the ordinary non-negative origin.
             scroll_value = 0.0f;
         }
-        if (elem->scroller && elem->scroll()->pane && !layout_pending) {
+        if (elem->scroller && elem->scroll()->pane && !layout_pending &&
+            !signed_range_unresolved) {
             float current_x = 0.0f;
             float current_y = 0.0f;
             DocState* state = elem->doc ? elem->doc->state : nullptr;
@@ -10162,6 +10263,15 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
             log_debug("js_dom_set_property: set id='%s' on <%s>",
                       id_str, elem->tag_name ? elem->tag_name : "?");
         }
+        return value;
+    }
+
+    if (prop_id == JS_DOM_PROP_SLOT) {
+        const char* slot_name = js_dom_to_attr_cstr(value);
+        const char* old_value = elem->get_attribute("slot");
+        elem->set_attribute("slot", slot_name ? slot_name : "");
+        js_dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+                               elem->parent, "slot", old_value);
         return value;
     }
 
@@ -11314,8 +11424,12 @@ static RdtMatrix js_dom_svg_viewbox_transform(DomElement* elem) {
     float viewport_width = js_dom_svg_attribute_number(elem, "width", 0.0f);
     float viewport_height = js_dom_svg_attribute_number(elem, "height", 0.0f);
     if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
-        // hit-testing runs for Lambda template documents without a JS realm;
-        // querying a temporary DOMRect here dereferenced that absent realm.
+        // hit-testing already has committed CSS geometry; flushing through the
+        // generic DOM path can rebuild this element before the second axis.
+        if (viewport_width <= 0.0f) viewport_width = elem->width;
+        if (viewport_height <= 0.0f) viewport_height = elem->height;
+    }
+    if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
         if (viewport_width <= 0.0f) {
             viewport_width = (float)js_dom_geometry_dimension(elem, true);
         }
@@ -12942,6 +13056,9 @@ extern "C" Item js_dom_get_bounding_client_rect_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return ItemNull;
     if (elem->doc) js_dom_ensure_geometry_snapshot(elem->doc);
+    if (layout_noscript_content_suppressed(elem)) {
+        return js_dom_make_rect_object(0.0, 0.0, 0.0, 0.0);
+    }
     float abs_x = 0.0f;
     float abs_y = 0.0f;
     js_dom_viewport_node_position((DomNode*)elem, &abs_x, &abs_y);
@@ -12956,6 +13073,9 @@ extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return js_array_new(0);
     if (elem->doc) js_dom_ensure_geometry_snapshot(elem->doc);
+    if (layout_noscript_content_suppressed(elem)) {
+        return js_array_new(0);
+    }
 
     float abs_x = 0.0f;
     float abs_y = 0.0f;
@@ -13366,7 +13486,7 @@ static bool js_dom_text_is_backed_child(DomElement* parent, DomText* text) {
 
 static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child) {
     if (!parent || !child) return false;
-    parent = js_dom_prepare_children_for_mutation(parent);
+    parent = js_dom_prepare_children_for_mutation(parent, child);
     if (!parent || child->parent != parent) return false;
     if (!child->is_element()) {
         if (child->is_text()) {
@@ -14342,7 +14462,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
 
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-        if (!selector_group) return ItemNull;
+        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         // CSS Selectors defines :scope relative to the Element query receiver.
@@ -14368,7 +14488,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         arr->length = 0;
         arr->capacity = 0;
 
-        if (!selector_group) return (Item){.array = arr};
+        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         // Keep :scope anchored to this Element for relative selector queries.
@@ -14392,7 +14512,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
 
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-        if (!selector_group) return (Item){.item = ITEM_FALSE};
+        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         MatchResult result;
@@ -14408,7 +14528,7 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
 
         Pool* pool = elem->doc->document_pool;
         CssSelectorGroup* selector_group = parse_css_selector_group(sel_text, pool);
-        if (!selector_group) return ItemNull;
+        if (!selector_group) return js_dom_throw_syntax_error("Invalid selector");
 
         SelectorMatcher* matcher = js_dom_create_selector_matcher(elem->doc);
         MatchResult mresult;
@@ -15786,6 +15906,7 @@ extern "C" void js_dom_install_collection_globals(void) {
     for (size_t i = 0; i < sizeof(collection_ifaces) / sizeof(collection_ifaces[0]); i++) {
         _install_iface(global, collection_ifaces[i]);
     }
+    _install_iface(global, "CSSNestedDeclarations");
     _install_nodelist_for_each(global);
     _install_iface(global, "RadioNodeList");
     _install_xpath_evaluator(global);

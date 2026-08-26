@@ -67,7 +67,7 @@ Lambda Script has a rich type system with both primitive and composite types:
 | `map`      | Key-value mappings          | `{key: "value"}`                        |
 | `element`  | Structured markup elements  | `<tag attr: value; content>`            |
 | `range`    | Integer or character ranges | `1 to 10`, `"a" to "z"`                 |
-| `path`     | File paths and URLs         | `/etc.hosts`, `https.'api.example.com'` |
+| `path`     | File paths and URLs         | `/.etc.hosts`, `https.'api.example.com'` |
 | `function` | Functions                   | `(x) => x + 1`                          |
 | `type`     | Type descriptors            | `int`, `string`                         |
 
@@ -501,20 +501,20 @@ The `path` type represents file system paths and URLs in a unified, platform-ind
 ### Path Syntax
 
 ```lambda
-// Absolute file paths (start with /)
-/etc.hosts                    // /etc/hosts
-/home.user.documents          // /home/user/documents
-/usr.local.bin.lambda         // /usr/local/bin/lambda
+// Rooted logical paths (start with /.)
+/.etc.hosts                   // /etc/hosts
+/.home.user.documents         // /home/user/documents
+/.usr.local.bin.lambda        // /usr/local/bin/lambda
 
-// Relative paths (start with . or ..)
+// Relative paths (start with .; .~~ is the parent step)
 .config.json                  // ./config.json
 .src.main.ls                  // ./src/main.ls
-..parent.file                 // ../parent/file
+.~~.parent.file               // ../parent/file
 
 // Quoted segments (for names containing dots or special chars)
-/var.log.'app.log'            // /var/log/app.log
+/.var.log.'app.log'           // /var/log/app.log
 .data.'my-file.json'          // ./data/my-file.json
-/home.user.'Documents and Settings'  // Spaces in names
+/.home.user.'Documents and Settings' // Spaces in names
 
 // HTTP/HTTPS URLs
 http.api.github.com.users     // http://api.github.com/users
@@ -529,16 +529,16 @@ sys.platform                  // Operating system platform
 // Wildcards in paths
 .src.*                        // Single-level: all in ./src
 .test.**                      // Recursive: all under ./test
-/var.log.'*.log'              // Pattern in filename
+/.var.log.'*.log'             // Pattern in filename
 ```
 
 ### Path Schemes
 
 | Scheme             | Root Syntax | Example                  | Resolves To                 |
 | ------------------ | ----------- | ------------------------ | --------------------------- |
-| Absolute file      | `/`         | `/etc.hosts`             | `/etc/hosts`                |
+| Rooted logical     | `/.`        | `/.etc.hosts`            | `/etc/hosts`                |
 | Relative (current) | `.`         | `.src.main`              | `./src/main`                |
-| Relative (parent)  | `..`        | `..shared.lib`           | `../shared/lib`             |
+| Relative (parent)  | `.~~`       | `.~~.shared.lib`         | `../shared/lib`             |
 | HTTP               | `http`      | `http.'api.example.com'` | `http://api.example.com`    |
 | HTTPS              | `https`     | `https.'secure.api'`     | `https://secure.api`        |
 | System             | `sys`       | `sys.env.PATH`           | System environment variable |
@@ -550,11 +550,11 @@ Paths support glob-style wildcards for pattern matching:
 ```lambda
 // Single-level wildcard (*)
 .src.*                        // All items directly in ./src
-/var.log.*                    // All items in /var/log
+/.var.log.*                   // All items in /var/log
 
 // Recursive wildcard (**)
 .test.**                      // All items recursively under ./test
-/home.user.documents.**       // All files recursively
+/.home.user.documents.**      // All files recursively
 ```
 
 ### Path Concatenation
@@ -562,9 +562,9 @@ Paths support glob-style wildcards for pattern matching:
 Paths can be concatenated using the `++` operator:
 
 ```lambda
-let base = /home.user
+let base = /.home.user
 let config = base ++ "config" ++ "settings.json"
-// Result: /home.user.config.'settings.json'
+// Result: /.home.user.config.'settings.json'
 
 let project = .src
 let file = project ++ "main.ls"
@@ -575,7 +575,7 @@ let file = project ++ "main.ls"
 
 | Feature | Path | String |
 |---------|------|--------|
-| Syntax | `/etc.hosts` | `"/etc/hosts"` |
+| Syntax | `/.etc.hosts` | `"/etc/hosts"` |
 | Type | `path` | `string` |
 | URL support | Native | Requires parsing |
 | Wildcards | Built-in (`*`, `**`) | Manual |
@@ -584,7 +584,7 @@ let file = project ++ "main.ls"
 
 ```lambda
 // Path literal - cross-platform, supports URLs
-let p = /home.user.config
+let p = /.home.user.config
 
 // String - platform-specific
 let s = "/home/user/config"
@@ -598,11 +598,11 @@ let data2 = input(s, 'json')
 
 ```lambda
 // Check existence
-exists(/etc.hosts)            // true or false
+exists(/.etc.hosts)           // true or false
 exists(.config.json)          // true or false
 
 // Load content
-let content = input(/etc.hosts, 'text')    // Load file content
+let content = input(/.etc.hosts, 'text')   // Load file content
 let data = input(https.api.example.com.data, 'json')  // Fetch URL
 ```
 
@@ -794,8 +794,8 @@ Key-value mappings with structural typing:
 {key: "value"}
 {name: "Alice", age: 30, active: true}
 
-// Mixed key types
-{"string_key": 1, symbol_key: 2}
+// Keys are symbols: quote one when it is not a bare name
+{'symbol-quoted': 1, name_key: 2}
 
 // Nested maps
 {
@@ -1032,7 +1032,7 @@ state updates.
 b'\xDEAD' ++ b'\xBEEF'     // b'\xDEADBEEF'
 
 // Path concatenation
-/home.user ++ "config"      // /home.user.config
+/.home.user ++ "config"     // /.home.user.config
 ```
 
 For arrays/lists, `+` remains element-wise numeric addition. Use `++` when
@@ -1072,7 +1072,7 @@ let report = {
     items: (for (sale in sales) {
         id: sale.id,
         amount: sale.amount,
-        formatted: "$" ++ string(sale.amount)
+        formatted: "$" ++ sale.amount
     })
 }
 ```

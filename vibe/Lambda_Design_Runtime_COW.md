@@ -31,7 +31,7 @@
   value semantics). This document may not change what a program observes
   (P6: sharing must be unobservable); every mechanism here is implementation
   freedom under that contract.
-- **Supersedes / absorbs:** `vibe/Lambda_Impl_Tune3.md` §4 (M3 "the COW
+- **Supersedes / absorbs:** `vibe/impl/Lambda_Impl_Tune3.md` §4 (M3 "the COW
   anchor" — ON HOLD precisely for this design; its site inventory and
   remedies are absorbed below). Companion surveys:
   `vibe/Lambda_Design_Memory_Model.md` §2.4 (Perceus), §5–6 (composition).
@@ -267,7 +267,8 @@ Lambda-only.
 Stage 1 adds a parallel Lambda-only family:
 
 ```c
-Item array_set_cow(Item owner, int64_t index, Item value);
+Item array_set_cow(Item owner, Item key, Item value);
+Item member_set_cow(Item owner, Item key, Item value);
 Item map_set_cow(Item owner, Item key, Item value);
 Item vmap_set_cow(Item owner, Item key, Item value);
 ```
@@ -831,7 +832,7 @@ bounds-check elimination as a new item not yet in any ledger.
 
 ## Appendix B — C4 residue: outstanding items NOT implemented by Stage 1 (Tune-COW)
 
-> Companion to `vibe/Lambda_Impl_Tune_COW.md` §0 (whose ledger marks these
+> Companion to `vibe/impl/Lambda_Impl_Tune_COW.md` §0 (whose ledger marks these
 > OUT). When that plan completes, **this list is what remains open of C4** —
 > the checklist for declaring C4 fully done. Recorded 2026-07-23.
 
@@ -872,10 +873,10 @@ operation, decided per §5.2.
 
 *Cross-refs:* C4 semantics `doc/Lambda_Formal_Semantics.md` §9 (+§9.6 math
 note); decision records `vibe/Lambda_Semantics_Formal.md` C4–C4.4; anchor
-diagnosis `vibe/Lambda_Impl_Tune3.md` §4 (M3); model survey
+diagnosis `vibe/impl/Lambda_Impl_Tune3.md` §4 (M3); model survey
 `vibe/Lambda_Design_Memory_Model.md`; benchmarks
 `test/benchmark/Overall_Result9.md` and
 `test/benchmark/Overall_Result10.md`; tuning ledger
 `vibe/Lambda_Tuning_Proposal.md` (R-items); implementation
-`vibe/Lambda_Impl_Tune_COW.md` (Stage 1) with §0 ledger mirroring this
+`vibe/impl/Lambda_Impl_Tune_COW.md` (Stage 1) with §0 ledger mirroring this
 appendix.

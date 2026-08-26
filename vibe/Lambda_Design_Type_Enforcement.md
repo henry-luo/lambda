@@ -3,7 +3,7 @@
 **Status:** ROUND 1 IMPLEMENTED (commit `274625d56`) — the core boundary catalog is enforced;
 round-2 items remain open (value-aware numeric admission, `any \ error` fn contracts +
 firewall, `or`-narrowing, fault channel), tracked in
-[`vibe/Lambda_Impl_Type_Enforce.md`](Lambda_Impl_Type_Enforce.md). The annotation-performance
+[`vibe/impl/Lambda_Impl_Type_Enforce.md`](Lambda_Impl_Type_Enforce.md). The annotation-performance
 work explicitly deferred by §1/§9 remains a separate follow-on. TE-15 (soft-error containment:
 skip to the closest safe boundary) and TE-16 (the `^ { }` handler; legacy `^err` and prefix
 error tests retired) were decided 2026-08-01. The handler grammar/runtime slice and the Rev 7
@@ -20,9 +20,9 @@ syntax decided 2026-08-17
 where not, never silently dropped or lossy. This document is **only about enforcement
 (correctness)**. Leveraging annotations for faster code is the explicit *next* stage and is
 touched here only where enforcement is its prerequisite.
-**Related:** `vibe/Lambda_Issue_Type_Support.md` (TS-1…TS-9 issue ledger; evidence),
+**Related:** `vibe/impl/Lambda_Issue_Type_Support (retired).md` (TS-1…TS-9 issue ledger; evidence),
 `doc/Lambda_Formal_Semantics.md` (semantic authority), `doc/Lambda_Type.md`,
-`vibe/Lambda_Issues_Outstanding.md` OI-5 (MIR value-representation contract),
+`vibe/Lambda_Issue_Ledger.md` §15 OI-5 (MIR value-representation contract),
 `doc/dev/lambda/LR_13_Schema_Validator.md` (validator design), and
 [`vibe/Lambda_Design_Sys_Func.md`](Lambda_Design_Sys_Func.md) for
 system-function admission policy.

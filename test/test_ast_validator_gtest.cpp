@@ -22,6 +22,8 @@ extern "C" {
 #include "../lambda/validator/validator.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lambda/input/input.hpp"
+// keep the TSNode test stub tied to the public API; validator headers no longer expose it transitively.
+#include "../lambda/tree-sitter/lib/include/tree_sitter/api.h"
 #include "../lib/mempool.h"
 #include "../lib/arraylist.h"
 #include "../lib/stringbuf.h"
@@ -66,13 +68,6 @@ PathSegment* create_path_segment(PathSegmentType type, const char* name, long in
     }
 
     return segment;
-}
-
-AstNode* build_script(Transpiler* tp, TSNode script_node) {
-    // Stub implementation - return null for tests
-    (void)tp; // Suppress unused parameter warning
-    (void)script_node; // Suppress unused parameter warning
-    return nullptr;
 }
 
 // Test fixture class for AST validator tests

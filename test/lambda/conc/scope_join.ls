@@ -5,7 +5,7 @@ pn child() {
 
 pn main() {
     if (true) {
-        start child()
+        start(child)
         print("inside")
     }
     print("after")

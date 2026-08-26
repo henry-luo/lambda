@@ -18,7 +18,7 @@ v_initial_sum
 // the view: without GC tracing of shape->base, this would dangle.
 let churn = for (i in 0 to 200) sum([i, i+1, i+2, i+3, i+4])
 
-'=== after churn ==='
+'=== after churn ===';
 (sum(churn) > 0)                        // sanity: churn ran
 v                                       // view must still resolve to [102..105]
 sum(v)                                  // must still be 102+103+104+105 = 414
@@ -31,7 +31,7 @@ let fv_sum = sum(fv)
 
 let fchurn = for (i in 0 to 100) sum([i * 1.5, i * 2.5, i * 3.5])
 
-'=== float view after churn ==='
+'=== float view after churn ===';
 (sum(fchurn) > 0)                       // sanity
 fv
 sum(fv)

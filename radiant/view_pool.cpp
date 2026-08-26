@@ -15,6 +15,11 @@
 // When true (default), consecutive ViewText nodes are merged for HTML output compatibility
 // When false, each ViewText is output separately (useful for PDF comparison testing)
 static bool g_combine_text_nodes = true;
+static int g_layout_json_schema_version = 1;
+
+static bool layout_json_is_compact_v2() {
+    return g_layout_json_schema_version == 2;
+}
 
 void set_combine_text_nodes(bool combine) {
     g_combine_text_nodes = combine;
@@ -24,6 +29,15 @@ static const char* flex_enum_name(CssEnum value, const char* fallback) {
     if (value == CSS_VALUE_SPACE_EVENLY) return "space-evenly";
     const CssEnumInfo* info = css_enum_info(value);
     return info && info->name ? (const char*)info->name : fallback;
+}
+
+static const char* inline_list_item_display_name(DisplayValue display) {
+    if (!display.list_item || display.outer != CSS_VALUE_INLINE ||
+        (display.inner != CSS_VALUE_FLOW && display.inner != CSS_VALUE_FLOW_ROOT)) {
+        return nullptr;
+    }
+    return display.inner == CSS_VALUE_FLOW_ROOT
+        ? "inline flow-root list-item" : "inline list-item";
 }
 
 // Helper function to get view type name for JSON
@@ -788,8 +802,7 @@ void ViewTree::recycle_text_rects(TextRect* first) {
 FontProp* alloc_font_prop(LayoutContext* lycon) {
     FontProp* prop = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
     // inherit parent font styles
-    *prop = *lycon->font.style;  // including font family, size, weight, style, etc.
-    prop->owns_font_handle = false;
+    font_prop_copy(prop, lycon->font.style);  // including font family, size, weight, style, etc.
     assert(prop->font_size >= 0);  // CSS allows font-size: 0
     return prop;
 }
@@ -1373,6 +1386,11 @@ static float text_rect_client_height(ViewText* text, TextRect* rect) {
     if (!rect) return 0.0f;
     float height = rect->height;
     ViewBlock* block = text ? layout_nearest_block_ancestor(text->parent_view()) : nullptr;
+    if (block && layout_block_inline_axis_is_vertical(block)) {
+        // CSS Writing Modes maps the text advance into the physical height;
+        // do not replace that mapped glyph extent with horizontal line-height.
+        return height;
+    }
     const CssValue* line_height = block && block->blk
         ? block->block()->line_height : nullptr;
     bool normal_line_height = !line_height ||
@@ -1423,7 +1441,8 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
         // HTML5 §4.5.27: <wbr> is a line break opportunity with no visual box → (0,0,0,0)
         bool is_unrendered_option = (elem->tag() == MARKUP_NAME_OPTION || elem->tag() == MARKUP_NAME_OPTGROUP)
                                     && elem->width == 0 && elem->height == 0;
-        if (elem->display.outer == CSS_VALUE_CONTENTS || is_unrendered_option
+        if (layout_noscript_content_suppressed(elem) ||
+            elem->display.outer == CSS_VALUE_CONTENTS || is_unrendered_option
             || elem->tag() == MARKUP_NAME_WBR) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "\"x\": 0.0,\n");
@@ -1460,7 +1479,6 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, TextRect* rect = nul
     }
 
     apply_css_transforms_to_bounds(view, &css_x, &css_y, &css_width, &css_height);
-
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"x\": %.1f,\n", css_x);
     strbuf_append_char_n(buf, ' ', indent + 4);
@@ -1536,8 +1554,10 @@ static void append_text_object_header(StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
     append_json_string_field(buf, indent + 2, "type", "text", true);
-    append_json_string_field(buf, indent + 2, "tag", "text", true);
-    append_json_string_field(buf, indent + 2, "selector", "text", true);
+    if (!layout_json_is_compact_v2()) {
+        append_json_string_field(buf, indent + 2, "tag", "text", true);
+        append_json_string_field(buf, indent + 2, "selector", "text", true);
+    }
     append_json_key(buf, indent + 2, "content");
 }
 
@@ -1569,7 +1589,7 @@ static void append_text_fragment_json(ViewText* text, StrBuf* buf, int indent,
     }
     strbuf_append_str(buf, ",\n");
 
-    if (include_text_info) {
+    if (include_text_info && !layout_json_is_compact_v2()) {
         strbuf_append_char_n(buf, ' ', indent + 2);
         strbuf_append_str(buf, "\"text_info\": {\n");
         strbuf_append_char_n(buf, ' ', indent + 4);
@@ -1742,13 +1762,18 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
     append_json_string(buf, combined_content);
     strbuf_append_str(buf, ",\n");
 
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"text_info\": {\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"combined_from\": %d,\n", text_node_count);
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"length\": %d\n", combined_len);
-    append_json_after_object(buf, indent + 2, "layout", "{\n");
+    if (layout_json_is_compact_v2()) {
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "\"layout\": {\n");
+    } else {
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "\"text_info\": {\n");
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"combined_from\": %d,\n", text_node_count);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"length\": %d\n", combined_len);
+        append_json_after_object(buf, indent + 2, "layout", "{\n");
+    }
 
     // Calculate absolute position by walking up parent chain (same as print_bounds_json)
     // Start with the minimum rect position (already in parent-relative coords)
@@ -1869,11 +1894,13 @@ static void print_non_rendered_table_marker_json(View* view, StrBuf* buf, int in
     append_json_string(buf, tag_name);
     strbuf_append_str(buf, ",\n");
 
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"selector\": ");
-    append_element_selector_json(elem, buf, tag_name);
-    strbuf_append_str(buf, ",\n");
-    append_element_classes_json(elem, buf, indent + 2);
+    if (!layout_json_is_compact_v2()) {
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "\"selector\": ");
+        append_element_selector_json(elem, buf, tag_name);
+        strbuf_append_str(buf, ",\n");
+        append_element_classes_json(elem, buf, indent + 2);
+    }
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
@@ -2031,13 +2058,15 @@ static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) 
     append_json_key(buf, indent + 2, "tag");
     append_json_string(buf, tag_name);
     strbuf_append_str(buf, ",\n");
-    append_json_key(buf, indent + 2, "selector");
-    append_element_selector_json(elem, buf, tag_name);
-    strbuf_append_str(buf, ",\n");
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"classes\": ");
-    append_class_list_json(buf, elem->get_attribute("class"));
-    strbuf_append_str(buf, ",\n");
+    if (!layout_json_is_compact_v2()) {
+        append_json_key(buf, indent + 2, "selector");
+        append_element_selector_json(elem, buf, tag_name);
+        strbuf_append_str(buf, ",\n");
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "\"classes\": ");
+        append_class_list_json(buf, elem->get_attribute("class"));
+        strbuf_append_str(buf, ",\n");
+    }
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     append_json_format_field(buf, indent + 4, "x", true, "0.0");
@@ -2262,16 +2291,18 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     append_json_string(buf, tag_name);
     strbuf_append_str(buf, ",\n");
 
-    // ENHANCEMENT: Add CSS class information if available
-    append_json_key(buf, indent + 2, "selector");
-    append_element_selector_json(block, buf, tag_name);
-    strbuf_append_str(buf, ",\n");
-    append_element_classes_json(block, buf, indent + 2);
+    if (!layout_json_is_compact_v2()) {
+        append_json_key(buf, indent + 2, "selector");
+        append_element_selector_json(block, buf, tag_name);
+        strbuf_append_str(buf, ",\n");
+        append_element_classes_json(block, buf, indent + 2);
+    }
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     DomElement* block_elem = lam::dom_require_element(block);
-    bool has_fragments = block_elem->layout_fragment_list() && block_elem->layout_fragments_count() > 0;
+    bool has_fragments = !layout_json_is_compact_v2() &&
+        block_elem->layout_fragment_list() && block_elem->layout_fragments_count() > 0;
     print_bounds_json(block, buf, indent, nullptr, has_fragments, is_root);
     if (has_fragments) {
         print_layout_fragments_json(block, buf, indent);
@@ -2293,7 +2324,12 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
             (parent_elem->display.inner == CSS_VALUE_FLEX ||
              parent_elem->display.inner == CSS_VALUE_GRID);
     }
-    if (block->display.inner == CSS_VALUE_GRID) {
+    const char* inline_list_item_display = inline_list_item_display_name(block->display);
+    if (inline_list_item_display) {
+        // CSS Display 3: serialize the computed multi-keyword list-item value;
+        // its used atomic view role must not replace the CSSOM display value.
+        display = inline_list_item_display;
+    } else if (block->display.inner == CSS_VALUE_GRID) {
         // Flex/grid items are blockified, while standalone legacy inline grid/flex
         // values keep their inline outer display in CSSOM serialization.
         display = (display_outer_is_inline && !display_is_blockified_flex_item) ? "inline-grid" : "grid";
@@ -2333,10 +2369,20 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
     else if (block->display.inner == CSS_VALUE_TABLE_CAPTION) display = "table-caption";
     else if (block->display.inner == CSS_VALUE_TABLE_COLUMN) display = "table-column";
     else if (block->display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) display = "table-column-group";
-    strbuf_append_format(buf, "\"display\": \"%s\",\n", display);
+    if (layout_json_is_compact_v2()) {
+        strbuf_append_format(buf, "\"display\": \"%s\"", display);
+        if (block->blk) {
+            strbuf_append_str(buf, ",\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"text_align\": \"%s\"",
+                css_enum_info(block->block()->text_align)->name);
+        }
+        strbuf_append_str(buf, "\n");
+    } else {
+        strbuf_append_format(buf, "\"display\": \"%s\",\n", display);
 
-    // Add block properties if available
-    if (block->blk) {
+        // Add block properties if available
+        if (block->blk) {
         strbuf_append_char_n(buf, ' ', indent + 4);
         // line_height is const CssValue*; resolve to a numeric value for JSON output
         float lh_value = 0;
@@ -2378,7 +2424,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_format(buf, "\"given_height\": %.1f,\n", block->block()->given_height);
         }
-    }
+        }
 
     // Add flex container properties if available
     if (block->display.inner == CSS_VALUE_FLEX && block->embed && block->embedp()->flex) {
@@ -2678,8 +2724,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
 
     // Remove trailing comma from last property
     // Note: we need to track if this is the last property, for now just ensure consistency
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"_cssPropertiesComplete\": true\n");
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "\"_cssPropertiesComplete\": true\n");
+    }
 
     append_json_after_object(buf, indent + 2, "children", "[\n");
 
@@ -2749,13 +2796,14 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     }
     strbuf_append_str(buf, ",\n");
 
-    // Add text fragment information (matching text output)
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"text_info\": {\n");
-    append_json_format_field(buf, indent + 4, "start_index", true, "%d", rect->start_index);
-    append_json_format_field(buf, indent + 4, "length", false, "%d", rect->length);
-    strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "},\n");
+    if (!layout_json_is_compact_v2()) {
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "\"text_info\": {\n");
+        append_json_format_field(buf, indent + 4, "start_index", true, "%d", rect->start_index);
+        append_json_format_field(buf, indent + 4, "length", false, "%d", rect->length);
+        strbuf_append_char_n(buf, ' ', indent + 2);
+        strbuf_append_str(buf, "},\n");
+    }
 
     append_text_rect_layout(text, buf, indent, rect, previous_emitted_rect);
 
@@ -2770,7 +2818,9 @@ void print_br_json(View* br, StrBuf* buf, int indent) {
 
     append_json_string_field(buf, indent + 2, "type", "br", true);
     append_json_string_field(buf, indent + 2, "tag", "br", true);
-    append_json_string_field(buf, indent + 2, "selector", "br", true);
+    if (!layout_json_is_compact_v2()) {
+        append_json_string_field(buf, indent + 2, "selector", "br", true);
+    }
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
@@ -2825,10 +2875,11 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     append_json_string(buf, tag_name);
     strbuf_append_str(buf, ",\n");
 
-    // Generate selector (same logic as blocks)
-    append_json_key(buf, indent + 2, "selector");
-    append_element_selector_json(span, buf, tag_name);
-    strbuf_append_str(buf, ",\n");
+    if (!layout_json_is_compact_v2() || strcmp(tag_name, "span") == 0) {
+        append_json_key(buf, indent + 2, "selector");
+        append_element_selector_json(span, buf, tag_name);
+        strbuf_append_str(buf, ",\n");
+    }
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
@@ -2840,12 +2891,13 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     if (span->display.outer == CSS_VALUE_CONTENTS) {
         strbuf_append_str(buf, "\"display\": \"contents\"");
     } else {
-        strbuf_append_str(buf, "\"display\": \"inline\"");
+        const char* display = inline_list_item_display_name(span->display);
+        strbuf_append_format(buf, "\"display\": \"%s\"", display ? display : "inline");
     }
 
     // Add inline properties if available
     if (span->in_line) {
-        if (span->inl()->cursor) {
+        if (!layout_json_is_compact_v2() && span->inl()->cursor) {
             const char* cursor = "default";
             switch (span->inl()->cursor) {
                 case CSS_VALUE_POINTER: cursor = "pointer"; break;
@@ -2861,7 +2913,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_format(buf, "\"color\": \"#%06x\"", span->inl()->color.c);
         }
-        if (span->inl()->vertical_align) {
+        if (!layout_json_is_compact_v2() && span->inl()->vertical_align) {
             strbuf_append_str(buf, ",\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_format(buf, "\"vertical_align\": \"%s\"", css_enum_info(span->inl()->vertical_align)->name);
@@ -2878,26 +2930,31 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
         strbuf_append_char_n(buf, ' ', indent + 6);
         strbuf_append_format(buf, "\"size\": %g,\n", span->fontp()->font_size);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        const char* style_str = "normal";
-        auto style_val = css_enum_info(span->fontp()->font_style);
-        if (style_val) style_str = (const char*)style_val->name;
-        strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
-        strbuf_append_char_n(buf, ' ', indent + 6);
+        if (!layout_json_is_compact_v2()) {
+            const char* style_str = "normal";
+            auto style_val = css_enum_info(span->fontp()->font_style);
+            if (style_val) style_str = (const char*)style_val->name;
+            strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
+            strbuf_append_char_n(buf, ' ', indent + 6);
+        }
+        const char* weight_terminator = layout_json_is_compact_v2() ? "\n" : ",\n";
         if (span->fontp()->font_weight_numeric > 0) {
             char weight_buf[8];
             snprintf(weight_buf, sizeof(weight_buf), "%d", span->fontp()->font_weight_numeric);
-            strbuf_append_format(buf, "\"weight\": \"%s\",\n", weight_buf);
+            strbuf_append_format(buf, "\"weight\": \"%s\"%s", weight_buf, weight_terminator);
         } else {
             const char* weight_str = "normal";
             auto weight_val = css_enum_info(span->fontp()->font_weight);
             if (weight_val) weight_str = (const char*)weight_val->name;
-            strbuf_append_format(buf, "\"weight\": \"%s\",\n", weight_str);
+            strbuf_append_format(buf, "\"weight\": \"%s\"%s", weight_str, weight_terminator);
         }
-        strbuf_append_char_n(buf, ' ', indent + 6);
-        const char* deco_str = "none";
-        auto deco_val = css_enum_info(span->fontp()->text_deco);
-        if (deco_val) deco_str = (const char*)deco_val->name;
-        strbuf_append_format(buf, "\"decoration\": \"%s\"\n", deco_str);
+        if (!layout_json_is_compact_v2()) {
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            const char* deco_str = "none";
+            auto deco_val = css_enum_info(span->fontp()->text_deco);
+            if (deco_val) deco_str = (const char*)deco_val->name;
+            strbuf_append_format(buf, "\"decoration\": \"%s\"\n", deco_str);
+        }
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "}");
     }
@@ -2983,10 +3040,53 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
     strbuf_append_str(buf, "}");
 }
 
-// Main JSON generation function
-void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_path) {
-    log_debug("Generating JSON layout data (CSS logical pixels)...");
+static void compact_json_whitespace_in_place(StrBuf* buf) {
+    if (!buf || !buf->str) return;
+    size_t write_index = 0;
+    bool in_string = false;
+    bool escaped = false;
+    for (size_t read_index = 0; read_index < buf->length; read_index++) {
+        char ch = buf->str[read_index];
+        if (in_string) {
+            buf->str[write_index++] = ch;
+            if (escaped) {
+                escaped = false;
+            } else if (ch == '\\') {
+                escaped = true;
+            } else if (ch == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+        if (ch == '"') {
+            in_string = true;
+            buf->str[write_index++] = ch;
+        } else if (ch != ' ' && ch != '\n' && ch != '\r' && ch != '\t') {
+            buf->str[write_index++] = ch;
+        }
+    }
+    buf->str[write_index] = '\0';
+    buf->length = write_index;
+}
+
+static StrBuf* build_view_tree_json(ViewElement* view_root, Url* url, int schema_version) {
     StrBuf* json_buf = strbuf_new_cap(2048);
+    if (!json_buf) return nullptr;
+    int previous_schema_version = g_layout_json_schema_version;
+    g_layout_json_schema_version = schema_version;
+
+    if (schema_version == 2) {
+        strbuf_append_str(json_buf, "{\"schema_version\":2,\"layout_tree\":");
+        if (view_root) {
+            print_block_json(lam::view_require_block(view_root), json_buf, 0, true);
+        } else {
+            strbuf_append_str(json_buf, "null");
+        }
+        strbuf_append_char(json_buf, '}');
+        compact_json_whitespace_in_place(json_buf);
+        g_layout_json_schema_version = previous_schema_version;
+        return json_buf;
+    }
 
     strbuf_append_str(json_buf, "{\n");
     strbuf_append_str(json_buf, "  \"test_info\": {\n");
@@ -3013,6 +3113,15 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
         strbuf_append_str(json_buf, "null");
     }
     strbuf_append_str(json_buf, "\n}\n");
+    g_layout_json_schema_version = previous_schema_version;
+    return json_buf;
+}
+
+// Main JSON generation function
+void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_path) {
+    log_debug("Generating JSON layout data (CSS logical pixels)...");
+    StrBuf* json_buf = build_view_tree_json(view_root, url, 1);
+    if (!json_buf) return;
 
     // Write to file in ./test_output/ only when no explicit output_path is given
 #ifndef NDEBUG
@@ -3034,6 +3143,41 @@ void print_view_tree_json(ViewElement* view_root, Url* url, const char* output_p
     }
 #endif
     strbuf_free(json_buf);
+}
+
+static void layout_frame_store_u32_le(unsigned char* target, uint32_t value) {
+    target[0] = (unsigned char)(value & 0xffu);
+    target[1] = (unsigned char)((value >> 8) & 0xffu);
+    target[2] = (unsigned char)((value >> 16) & 0xffu);
+    target[3] = (unsigned char)((value >> 24) & 0xffu);
+}
+
+bool write_layout_result_frame(FILE* stream, const char* input_file, bool success,
+                               const char* json, size_t json_length) {
+    if (!stream) return false;
+    const char* path = input_file ? input_file : "";
+    size_t path_length = strlen(path);
+    if (path_length > UINT32_MAX || json_length > UINT32_MAX) return false;
+
+    unsigned char header[16] = {'L', 'Y', 'T', '2'};
+    layout_frame_store_u32_le(header + 4, (uint32_t)path_length);
+    layout_frame_store_u32_le(header + 8, (uint32_t)json_length);
+    layout_frame_store_u32_le(header + 12, success ? 1u : 0u);
+    bool written = fwrite(header, 1, sizeof(header), stream) == sizeof(header) &&
+        fwrite(path, 1, path_length, stream) == path_length;
+    if (written && json_length > 0) {
+        written = json && fwrite(json, 1, json_length, stream) == json_length;
+    }
+    return written && fflush(stream) == 0;
+}
+
+bool stream_view_tree_json(ViewElement* view_root, const char* input_file, FILE* stream) {
+    StrBuf* json = build_view_tree_json(view_root, nullptr, 2);
+    if (!json) return false;
+    bool success = write_layout_result_frame(
+        stream, input_file, true, json->str, json->length);
+    strbuf_free(json);
+    return success;
 }
 
 /**

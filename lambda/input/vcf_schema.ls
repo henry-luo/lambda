@@ -21,7 +21,7 @@ type CommonParameters = {
     value: 'text' | 'uri' | 'date' | 'time' | 'date-time' | 'date-and-or-time' | 'timestamp' | 'boolean' | 'integer' | 'float' | 'utc-offset' | 'language-tag'?,
     altid: string?,      // Alternative representation ID
     calscale: 'gregorian'?,
-    sort-as: [string*]?
+    'sort-as': [string*]?
 }
 
 // Structured name components

@@ -21,11 +21,11 @@ float(-2.718)
 float(0.0)
 float(1.5e10)
 
-'=== float() from int64 ==='
+'=== float() from i64 ==='
 
-// int64 to float
-float(int64(1000000))
-float(int64(-999999))
+// i64 to float
+float(i64(1000000))
+float(i64(-999999))
 
 '=== float() from decimal ==='
 
@@ -58,7 +58,7 @@ a + b
 
 // chained conversions
 float(int(3.7))
-float(int64(42))
+float(i64(42))
 int(float(3))
 
 '=== float() with user-defined typed functions ==='

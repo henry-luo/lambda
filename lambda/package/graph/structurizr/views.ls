@@ -109,12 +109,12 @@ else string(entry.terminology) ++
   (if (entry.technology != null) ": " ++ string(entry.technology) else "")
 
 fn node_content(entry) =>
-  <content;
-    <div class: "c4-node-content";
-      <strong; entry.name>
-      <small class: "c4-node-kind"; "[" ++ node_meta(entry) ++ "]">
+  <content
+    <div class: "c4-node-content",
+      <strong entry.name>
+      <small class: "c4-node-kind", "[" ++ node_meta(entry) ++ "]">
       if (entry.description != null and entry.description != "") {
-        <p; entry.description>
+        <p entry.description>
       }
     >
   >
@@ -127,8 +127,8 @@ fn graph_node(workspace, entry) {
     label: entry.name, metadata: graph_model.optional(entry, "metadata"),
     group: graph_model.optional(entry, "group"),
     shape: shape, 'structurizr-shape': authored_shape,
-    'source-start': entry["source-start"], 'source-end': entry["source-end"];
-    <label; entry.name>
+    'source-start': entry["source-start"], 'source-end': entry["source-end"],
+    <label entry.name>
     node_content(entry)
     for (tag in children(entry, "tag")) <tag name: tag.name>
     for (property in children(entry, "property"))
@@ -160,8 +160,8 @@ fn graph_edge(workspace, relation, ordered = false) {
     sequence: graph_model.optional(relation, "sequence"),
     'parallel-group': graph_model.optional(relation, "parallel-group"),
     'relationship-ref': graph_model.optional(relation, "relationship-ref"),
-    'source-start': relation["source-start"], 'source-end': relation["source-end"];
-    if (display_label != null) { <label; display_label> }
+    'source-start': relation["source-start"], 'source-end': relation["source-end"],
+    if (display_label != null) { <label display_label> }
     for (tag in children(relation, "tag")) <tag name: tag.name>
     for (property in children(relation, "property"))
       <property name: property.name, value: property.value>
@@ -199,8 +199,8 @@ fn group_label(path, separator) {
 
 fn group_boundary(workspace, path, entries, paths, separator) =>
   <subgraph id: "group:" ++ path, role: "cluster", 'c4-kind': "group",
-    label: group_label(path, separator);
-    <label; group_label(path, separator)>
+    label: group_label(path, separator),
+    <label group_label(path, separator)>
     for (child in paths where group_parent(child, separator) == path)
       group_boundary(workspace, child, entries, paths, separator)
     for (entry in entries where string(graph_model.optional(entry, "group")) == path)
@@ -233,8 +233,8 @@ fn boundary(workspace, diagram, entries) {
       where string(entry.parent) == string(owner.id)) entry];
     let grouped_ids = grouped(inside);
     <subgraph id: owner.id, role: "cluster", 'c4-kind': wanted,
-      label: owner.name;
-      <label; owner.name>
+      label: owner.name,
+      <label owner.name>
       for (group in group_boundaries(workspace, inside)) group
       for (entry in inside where not contains(grouped_ids, entry.id)) graph_node(workspace, entry)
     >
@@ -328,7 +328,7 @@ fn static_graph(workspace, diagram, structure, entries, relations) {
     'diagram-type': diagram.kind, 'source-view-key': diagram.key,
     'base-view-key': graph_model.optional(diagram, "base-key"),
     direction: structure.direction, 'rank-sep': structure["rank-sep"],
-    'node-sep': structure["node-sep"];
+    'node-sep': structure["node-sep"],
     if (cluster != null) { cluster }
     for (group in group_boundaries(workspace, root_entries)) group
     for (entry in root_entries where not contains(grouped_ids, entry.id))
@@ -374,7 +374,7 @@ fn dynamic_project(workspace, diagram) {
     layout: "dot", directed: true, 'ir-stage': "canonical",
     'diagram-type': "dynamic", 'source-view-key': diagram.key,
     direction: diagram.direction, 'rank-sep': diagram["rank-sep"],
-    'node-sep': diagram["node-sep"];
+    'node-sep': diagram["node-sep"],
     for (entry in entries) graph_node(workspace, entry)
     for (item in interactions) graph_edge(workspace, item, true)
     for (assignment in style_assignments(workspace, entries, interactions)) assignment
@@ -454,8 +454,8 @@ fn deployment_entries(workspace, diagram) {
 
 fn deployment_boundary(workspace, entry, entries) =>
   <subgraph id: entry.id, role: "cluster", 'c4-kind': "deployment-node",
-    label: entry.name;
-    <label; entry.name>
+    label: entry.name,
+    <label entry.name>
     for (child in entries where string(child.parent) == string(entry.id) and
       string(child.kind) == "deployment-node") deployment_boundary(workspace, child, entries)
     for (child in entries where string(child.parent) == string(entry.id) and
@@ -508,7 +508,7 @@ fn deployment_project(workspace, diagram) {
     layout: "dot", directed: true, 'ir-stage': "canonical",
     'diagram-type': "deployment", 'source-view-key': diagram.key,
     environment: diagram.environment, direction: diagram.direction,
-    'rank-sep': diagram["rank-sep"], 'node-sep': diagram["node-sep"];
+    'rank-sep': diagram["rank-sep"], 'node-sep': diagram["node-sep"],
     for (entry in entries where string(entry.parent) == environment and
       string(entry.kind) == "deployment-node") deployment_boundary(workspace, entry, entries)
     for (entry in entries where string(entry.parent) == environment and

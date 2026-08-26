@@ -11,6 +11,10 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
+#include "../../lib/arraylist.h"
+#include "../../lib/hashmap.h"
+#include "../../lib/shell.h"
+#include "../../lib/mem.h"
 #include "../lambda.h"
 #include "lambda-path.h"
 #include "../runtime/sysinfo.h"
@@ -55,8 +59,43 @@ static const char* scheme_names[PATH_SCHEME_COUNT] = {
     "https",  // PATH_SCHEME_HTTPS
     "sys",    // PATH_SCHEME_SYS
     ".",      // PATH_SCHEME_REL (relative)
-    ".."      // PATH_SCHEME_PARENT
+    "..",     // PATH_SCHEME_PARENT (legacy only)
+    "/"       // PATH_SCHEME_LOGICAL
 };
+
+static Path* path_root_of(Path* path) {
+    if (!path) return NULL;
+    while (path->parent && path->parent != &ROOT_SENTINEL) {
+        path = path->parent;
+    }
+    return path;
+}
+
+static bool path_is_child(Path* path) {
+    return path && path->parent && path->parent != &ROOT_SENTINEL;
+}
+
+static Path* path_alloc_op(Pool* pool, Path* base, LPathSegmentType type,
+                           const char* name, size_t len, int64_t int_value) {
+    if (!pool || !base) return NULL;
+    Path* path = (Path*)pool_calloc(pool, sizeof(Path));
+    if (!path) return NULL;
+    path->type_id = LMD_TYPE_PATH;
+    path->flags = 0;
+    PATH_SET_SEG_TYPE(path, type);
+    path->parent = base;
+    path->root_scheme = base->root_scheme;
+    path->authority_kind = base->authority_kind;
+    path->authority_name = base->authority_name;
+    path->int_value = int_value;
+    if (name && len > 0 && type == LPATH_SEG_NORMAL) {
+        char* name_copy = (char*)pool_alloc(pool, len + 1);
+        memcpy(name_copy, name, len);
+        name_copy[len] = '\0';
+        path->name = name_copy;
+    }
+    return path;
+}
 
 /**
  * Initialize root scheme paths.
@@ -79,6 +118,8 @@ void path_init(void) {
         root->flags = 0;
         root->name = scheme_names[i];  // static strings, no need to intern
         root->parent = &ROOT_SENTINEL;
+        root->root_scheme = (uint8_t)i;
+        root->authority_kind = (i == PATH_SCHEME_FILE) ? PATH_AUTHORITY_LOCAL : PATH_AUTHORITY_NONE;
         scheme_roots[i] = root;
     }
 
@@ -145,19 +186,21 @@ Path* path_append_len(Path* parent, const char* segment, size_t len) {
         return NULL;
     }
 
-    // Allocate path
-    Path* path = (Path*)pool_calloc(pool, sizeof(Path));
-    path->type_id = LMD_TYPE_PATH;
-    path->flags = 0;
-    path->parent = parent;
+    return path_alloc_op(pool, parent, LPATH_SEG_NORMAL, segment, len, 0);
+}
 
-    // Copy segment name into pool memory
-    char* name_copy = (char*)pool_alloc(pool, len + 1);
-    memcpy(name_copy, segment, len);
-    name_copy[len] = '\0';
-    path->name = name_copy;
-
-    return path;
+Path* path_new_authority(Pool* pool, int scheme, const char* authority) {
+    if (!pool || !authority || !*authority) return NULL;
+    if (scheme < 0 || scheme >= PATH_SCHEME_COUNT) return NULL;
+    Path* root = path_new(pool, scheme);
+    if (!root) return NULL;
+    root->authority_kind = PATH_AUTHORITY_NAMED;
+    size_t len = strlen(authority);
+    char* copy = (char*)pool_alloc(pool, len + 1);
+    memcpy(copy, authority, len);
+    copy[len] = '\0';
+    root->authority_name = copy;
+    return root;
 }
 
 /**
@@ -165,13 +208,10 @@ Path* path_append_len(Path* parent, const char* segment, size_t len) {
  */
 const char* path_get_scheme_name(Path* path) {
     if (!path) return NULL;
-
-    // Walk to root
-    while (path->parent && path->parent != &ROOT_SENTINEL) {
-        path = path->parent;
-    }
-
-    return path->name;
+    Path* root = path_root_of(path);
+    if (!root) return NULL;
+    if ((PathScheme)root->root_scheme == PATH_SCHEME_LOGICAL) return "/";
+    return root->name;
 }
 
 /**
@@ -179,7 +219,7 @@ const char* path_get_scheme_name(Path* path) {
  */
 bool path_is_root(Path* path) {
     if (!path) return false;
-    return path->parent == &ROOT_SENTINEL;
+    return path->parent == &ROOT_SENTINEL || PATH_GET_SEG_TYPE(path) == LPATH_SEG_ROOT;
 }
 
 /**
@@ -189,20 +229,7 @@ bool path_is_root(Path* path) {
  */
 PathScheme path_get_scheme(Path* path) {
     if (!path) return (PathScheme)-1;
-
-    // Walk to root
-    while (path->parent && path->parent != &ROOT_SENTINEL) {
-        path = path->parent;
-    }
-
-    // Check against known scheme roots
-    for (int i = 0; i < PATH_SCHEME_COUNT; i++) {
-        if (path == scheme_roots[i]) {
-            return (PathScheme)i;
-        }
-    }
-
-    return (PathScheme)-1;  // unknown scheme
+    return (PathScheme)path_root_of(path)->root_scheme;
 }
 
 /**
@@ -214,7 +241,8 @@ bool path_is_absolute(Path* path) {
     return scheme == PATH_SCHEME_FILE ||
            scheme == PATH_SCHEME_HTTP ||
            scheme == PATH_SCHEME_HTTPS ||
-           scheme == PATH_SCHEME_SYS;
+           scheme == PATH_SCHEME_SYS ||
+           scheme == PATH_SCHEME_LOGICAL;
 }
 
 /**
@@ -232,129 +260,99 @@ int path_depth(Path* path) {
     return depth;
 }
 
-// Forward declaration for segment display helper
-/**
- * Convert path to Lambda path string.
- * New syntax: "/.etc.hosts" for absolute, ".test.file" for relative.
- * Properly handles wildcards using segment type flags.
- */
+static void path_print_name(StrBuf* out, const char* seg) {
+    const char* text = seg ? seg : "";
+    bool needs_quote = *text == '\0';
+    bool all_digits = *text != '\0';
+    for (const char* c = text; *c; c++) {
+        if (*c < '0' || *c > '9') all_digits = false;
+        if (*c == '.' || *c == ' ' || *c == '@' || *c == '#' ||
+            *c == '$' || *c == '%' || *c == '&' || *c == '?' ||
+            *c == '=' || *c == ':' || *c == '-' || *c == '*') {
+            needs_quote = true;
+            break;
+        }
+    }
+    // Numeric-looking names must stay quoted so NameKey("1") cannot
+    // canonicalize into the distinct IntKey(1) spelling.
+    if (all_digits) needs_quote = true;
+    if (needs_quote) strbuf_append_char(out, '\'');
+    strbuf_append_str(out, text);
+    if (needs_quote) strbuf_append_char(out, '\'');
+}
+
+static void path_print_op(StrBuf* out, Path* op, bool separator) {
+    if (separator) strbuf_append_char(out, '.');
+    switch (PATH_GET_SEG_TYPE(op)) {
+        case LPATH_SEG_WILDCARD: strbuf_append_char(out, '*'); break;
+        case LPATH_SEG_WILDCARD_REC: strbuf_append_str(out, "**"); break;
+        case LPATH_SEG_DYNAMIC: strbuf_append_str(out, "<dynamic>"); break;
+        case LPATH_SEG_PARENT: strbuf_append_str(out, "~~"); break;
+        case LPATH_SEG_ROOT: strbuf_append_char(out, '/'); break;
+        case LPATH_SEG_INT: strbuf_append_int64(out, op->int_value); break;
+        default: path_print_name(out, op->name); break;
+    }
+}
+
+/** Convert a path to its canonical Lambda spelling. */
 void path_to_string(Path* path, void* out_ptr) {
     StrBuf* out = (StrBuf*)out_ptr;
     if (!path || !out) return;
 
-    // Collect segments in reverse order (store Path* to access type info)
-    Path* segments[64];  // max depth 64
-    int count = 0;
-
-    Path* p = path;
-    while (p && p->parent && count < 64) {
-        segments[count++] = p;
-        p = p->parent;
-    }
-    
-    // Handle bare root case (just a root node with no children collected)
-    if (count == 0 && path->parent == NULL) {
-        // This is a root node itself
-        const char* root_name = path->name ? path->name : "";
-        strbuf_append_str(out, root_name);
-        return;
+    Path* root = path_root_of(path);
+    ArrayList* ops = arraylist_new(8);
+    for (Path* p = path; p && p != root; p = p->parent) {
+        arraylist_append(ops, p);
     }
 
-    // Check scheme type for special handling
-    bool is_file_scheme = false;
-    bool is_rel_scheme = false;
-    bool is_parent_scheme = false;
-    if (count > 0) {
-        const char* root_name = segments[count - 1]->name;
-        is_file_scheme = root_name && strcmp(root_name, "file") == 0;
-        is_rel_scheme = root_name && strcmp(root_name, ".") == 0;
-        is_parent_scheme = root_name && strcmp(root_name, "..") == 0;
-    }
-    
-    // Handle bare root cases with shorthand notation
-    if (count == 1) {
-        if (is_file_scheme) {
-            strbuf_append_char(out, '/');
-            return;
-        }
-        if (is_rel_scheme) {
-            strbuf_append_char(out, '.');
-            return;
-        }
-        if (is_parent_scheme) {
-            strbuf_append_str(out, "..");
-            return;
-        }
-    }
-
-    // Output in forward order (root first) with dot separators
-    // Lambda path syntax: /etc.hosts (file), .src.main (rel), ..parent.file (parent)
-    bool just_output_prefix = false;  // tracks if we just output scheme prefix
-    for (int i = count - 1; i >= 0; i--) {
-        Path* seg_path = segments[i];
-        
-        // Handle root segment with shorthand notation
-        if (i == count - 1) {
-            if (is_file_scheme) {
-                strbuf_append_char(out, '/');  // file scheme uses / prefix
-                just_output_prefix = true;
-                continue;  // skip "file" segment itself
-            }
-            if (is_rel_scheme) {
-                strbuf_append_char(out, '.');  // relative scheme uses . prefix
-                just_output_prefix = true;
-                continue;  // skip "." segment itself
-            }
-            if (is_parent_scheme) {
-                strbuf_append_str(out, "..");  // parent scheme uses .. prefix
-                just_output_prefix = true;
-                continue;  // skip ".." segment itself
-            }
-        }
-        
-        // Add separator dot before non-root segments (but not right after scheme prefix)
-        if (i < count - 1 && !just_output_prefix) {
-            strbuf_append_char(out, '.');
-        }
-        just_output_prefix = false;
-
-        LPathSegmentType seg_type = PATH_GET_SEG_TYPE(seg_path);
-
-        // Wildcards don't need quoting
-        if (seg_type == LPATH_SEG_WILDCARD) {
-            strbuf_append_char(out, '*');
-            continue;
-        }
-        if (seg_type == LPATH_SEG_WILDCARD_REC) {
-            strbuf_append_str(out, "**");
-            continue;
-        }
-        if (seg_type == LPATH_SEG_DYNAMIC) {
-            strbuf_append_str(out, "<dynamic>");
-            continue;
-        }
-
-        // Normal segment - check if needs quoting
-        const char* seg = seg_path->name ? seg_path->name : "";
-        
-        bool needs_quote = false;
-        for (const char* c = seg; *c; c++) {
-            if (*c == '.' || *c == ' ' || *c == '@' || *c == '#' ||
-                *c == '$' || *c == '%' || *c == '&' || *c == '?' ||
-                *c == '=' || *c == ':' || *c == '-' || *c == '*') {
-                needs_quote = true;
-                break;
-            }
-        }
-
-        if (needs_quote) {
-            strbuf_append_char(out, '\'');
-            strbuf_append_str(out, seg);
-            strbuf_append_char(out, '\'');
+    PathScheme scheme = (PathScheme)root->root_scheme;
+    if (scheme == PATH_SCHEME_LOGICAL) {
+        strbuf_append_char(out, '/');
+    } else if (scheme == PATH_SCHEME_REL) {
+        strbuf_append_char(out, '.');
+    } else if (scheme == PATH_SCHEME_FILE) {
+        strbuf_append_str(out, "file.");
+        if (root->authority_kind == PATH_AUTHORITY_NAMED) {
+            // Quote hostnames that are not one identifier token so a dotted or
+            // hyphenated authority cannot be reparsed as path child keys.
+            path_print_name(out, root->authority_name);
         } else {
-            strbuf_append_str(out, seg);
+            strbuf_append_char(out, '/');
         }
+    } else if (scheme == PATH_SCHEME_PARENT) {
+        strbuf_append_str(out, ".~~");
+    } else {
+        strbuf_append_str(out, scheme_names[scheme]);
     }
+
+    for (int i = ops->length - 1; i >= 0; i--) {
+        bool separator = !(scheme == PATH_SCHEME_REL && i == ops->length - 1);
+        path_print_op(out, (Path*)arraylist_get(ops, i), separator);
+    }
+    arraylist_free(ops);
+}
+
+bool path_equal(Path* left, Path* right) {
+    if (left == right) return true;
+    if (!left || !right) return false;
+    StrBuf* left_buf = strbuf_new();
+    StrBuf* right_buf = strbuf_new();
+    path_to_string(left, left_buf);
+    path_to_string(right, right_buf);
+    bool equal = left_buf->length == right_buf->length &&
+        memcmp(left_buf->str, right_buf->str, left_buf->length) == 0;
+    strbuf_free(left_buf);
+    strbuf_free(right_buf);
+    return equal;
+}
+
+uint64_t path_hash(Path* path, uint64_t seed0, uint64_t seed1) {
+    if (!path) return hashmap_sip("path:null", 9, seed0, seed1);
+    StrBuf* buf = strbuf_new();
+    path_to_string(path, buf);
+    uint64_t hash = hashmap_sip(buf->str, buf->length, seed0, seed1);
+    strbuf_free(buf);
+    return hash;
 }
 
 /**
@@ -371,6 +369,15 @@ static const char* path_get_os_segment_name(Path* seg_path) {
     }
 }
 
+static void path_append_os_component(StrBuf* out, Path* op) {
+    LPathSegmentType type = PATH_GET_SEG_TYPE(op);
+    if (type == LPATH_SEG_INT) {
+        strbuf_append_int64(out, op->int_value);
+    } else {
+        strbuf_append_str(out, path_get_os_segment_name(op));
+    }
+}
+
 /**
  * Convert path to OS file path (e.g., "/etc/hosts" or "C:\Users\name").
  * Handles wildcards properly using segment type flags.
@@ -378,64 +385,68 @@ static const char* path_get_os_segment_name(Path* seg_path) {
 void path_to_os_path(Path* path, void* out_ptr) {
     StrBuf* out = (StrBuf*)out_ptr;
     if (!path || !out) return;
-
-    // Collect segments in reverse order (store Path* to access type info)
-    Path* segments[64];
-    int count = 0;
-
-    Path* p = path;
-    while (p && p->parent && count < 64) {
-        segments[count++] = p;
-        p = p->parent;
+    if (path_get_scheme(path) == PATH_SCHEME_FILE &&
+            !path_file_authority_is_local(path)) {
+        log_error("path_to_os_path: remote file authority is not supported");
+        return;
+    }
+    if (path_get_scheme(path) == PATH_SCHEME_LOGICAL) {
+        log_error("path_to_os_path: logical root must be qualified first");
+        return;
     }
 
-    // Check scheme (root segment has name set during init)
-    const char* scheme = (count > 0) ? segments[count - 1]->name : NULL;
-    bool is_file = scheme && strcmp(scheme, "file") == 0;
-    bool is_relative = scheme && (strcmp(scheme, ".") == 0 || strcmp(scheme, "..") == 0);
+    Path* root = path_root_of(path);
+    ArrayList* ops = arraylist_new(8);
+    for (Path* p = path; p && p != root; p = p->parent) {
+        arraylist_append(ops, p);
+    }
+    PathScheme scheme = (PathScheme)root->root_scheme;
+    bool skip_drive_component = false;
 
-    // Output path
-    if (is_file) {
-        // Skip "file" scheme, output as absolute path
+    if (scheme == PATH_SCHEME_REL) {
+        strbuf_append_str(out, "./");
+    } else if (scheme == PATH_SCHEME_PARENT) {
+        strbuf_append_str(out, "../");
+    } else if (scheme == PATH_SCHEME_FILE || scheme == PATH_SCHEME_LOGICAL) {
 #ifdef _WIN32
-        // Windows: check for drive letter (e.g., file.C.Users)
-        if (count > 1) {
-            const char* drive = path_get_os_segment_name(segments[count - 2]);
+        if (ops->length > 0) {
+            Path* first = (Path*)arraylist_get(ops, ops->length - 1);
+            const char* drive = path_get_os_segment_name(first);
             if (strlen(drive) == 1 && ((drive[0] >= 'A' && drive[0] <= 'Z') ||
                                         (drive[0] >= 'a' && drive[0] <= 'z'))) {
                 strbuf_append_char(out, drive[0]);
                 strbuf_append_str(out, ":\\");
-                for (int i = count - 3; i >= 0; i--) {
-                    if (i < count - 3) strbuf_append_char(out, '\\');
-                    strbuf_append_str(out, path_get_os_segment_name(segments[i]));
-                }
-                return;
+                skip_drive_component = true;
+            } else {
+                strbuf_append_char(out, '\\');
             }
+        } else {
+            strbuf_append_char(out, '\\');
         }
+#else
+        strbuf_append_char(out, '/');
 #endif
-        // Unix-style absolute path
-        for (int i = count - 2; i >= 0; i--) {  // skip "file"
-            strbuf_append_char(out, '/');
-            strbuf_append_str(out, path_get_os_segment_name(segments[i]));
-        }
-    } else if (is_relative) {
-        // Relative path
-        strbuf_append_str(out, scheme);  // "." or ".."
-        for (int i = count - 2; i >= 0; i--) {
-            strbuf_append_char(out, '/');
-            strbuf_append_str(out, path_get_os_segment_name(segments[i]));
-        }
     } else {
-        // Other schemes: output as URL
-        if (scheme) {
-            strbuf_append_str(out, scheme);
-            strbuf_append_str(out, "://");
-        }
-        for (int i = count - 2; i >= 0; i--) {
-            if (i < count - 2) strbuf_append_char(out, '/');
-            strbuf_append_str(out, path_get_os_segment_name(segments[i]));
-        }
+        strbuf_append_str(out, scheme_names[scheme]);
+        strbuf_append_str(out, "://");
     }
+
+    for (int i = ops->length - 1; i >= 0; i--) {
+        if (skip_drive_component && i == ops->length - 1) continue;
+        Path* op = (Path*)arraylist_get(ops, i);
+        LPathSegmentType type = PATH_GET_SEG_TYPE(op);
+        if (type == LPATH_SEG_ROOT) continue;
+        if (type == LPATH_SEG_PARENT) {
+            strbuf_append_str(out, "../");
+            continue;
+        }
+        if (out->length > 0) {
+            char last = out->str[out->length - 1];
+            if (last != '/' && last != '\\') strbuf_append_char(out, '/');
+        }
+        path_append_os_component(out, op);
+    }
+    arraylist_free(ops);
 }
 
 /**
@@ -470,24 +481,8 @@ static Path* path_append_segment_typed(Pool* pool, Path* parent, const char* seg
         return NULL;
     }
 
-    Path* new_path = (Path*)pool_calloc(pool, sizeof(Path));
-    new_path->type_id = LMD_TYPE_PATH;
-    new_path->parent = parent;
-    PATH_SET_SEG_TYPE(new_path, seg_type);
-
-    if (segment && seg_type == LPATH_SEG_NORMAL) {
-        // Copy segment name into pool memory for normal segments
-        size_t len = strlen(segment);
-        char* name_copy = (char*)pool_alloc(pool, len + 1);
-        memcpy(name_copy, segment, len);
-        name_copy[len] = '\0';
-        new_path->name = name_copy;
-    } else {
-        // Wildcards don't need name storage (type is in flags)
-        new_path->name = NULL;
-    }
-
-    return new_path;
+    return path_alloc_op(pool, parent, seg_type, segment,
+                         segment ? strlen(segment) : 0, 0);
 }
 
 // ============================================================================
@@ -514,6 +509,8 @@ Path* path_new(Pool* pool, int scheme) {
     root->type_id = LMD_TYPE_PATH;
     root->name = scheme_names[scheme];
     root->parent = &ROOT_SENTINEL;
+    root->root_scheme = (uint8_t)scheme;
+    root->authority_kind = (scheme == PATH_SCHEME_FILE) ? PATH_AUTHORITY_LOCAL : PATH_AUTHORITY_NONE;
     return root;
 }
 
@@ -534,6 +531,46 @@ Path* path_extend(Pool* pool, Path* base, const char* segment) {
     return path_append_segment_typed(pool, base, segment, LPATH_SEG_NORMAL);
 }
 
+Path* path_extend_int(Pool* pool, Path* base, int64_t value) {
+    if (!base || value < 0) return base;
+    return path_alloc_op(pool, base, LPATH_SEG_INT, NULL, 0, value);
+}
+
+Path* path_select_parent(Pool* pool, Path* base) {
+    if (!base) return NULL;
+    PathScheme scheme = path_get_scheme(base);
+    LPathSegmentType type = PATH_GET_SEG_TYPE(base);
+
+    if (type == LPATH_SEG_PARENT && scheme == PATH_SCHEME_REL) {
+        return path_alloc_op(pool, base, LPATH_SEG_PARENT, NULL, 0, 0);
+    }
+    if (path_is_child(base)) return base->parent;
+    if (scheme == PATH_SCHEME_REL) {
+        return path_alloc_op(pool, base, LPATH_SEG_PARENT, NULL, 0, 0);
+    }
+    // Anchored roots clamp at their anchor. This is the closed path algebra
+    // required by S2.4.2v3; ordinary values use the dynamic navigation path.
+    return base;
+}
+
+Path* path_select_root(Pool* pool, Path* base) {
+    if (!base) return NULL;
+    Path* root = path_root_of(base);
+    if (path_get_scheme(base) != PATH_SCHEME_REL) return root;
+    if (PATH_GET_SEG_TYPE(base) == LPATH_SEG_ROOT && base->parent == root) return base;
+    return path_alloc_op(pool, root, LPATH_SEG_ROOT, NULL, 0, 0);
+}
+
+bool path_file_authority_is_local(Path* path) {
+    if (!path || path_get_scheme(path) != PATH_SCHEME_FILE) return false;
+    Path* root = path_root_of(path);
+    if (root->authority_kind != PATH_AUTHORITY_NAMED) return true;
+    char* current = shell_get_hostname();
+    bool local = current && root->authority_name && strcmp(current, root->authority_name) == 0;
+    if (current) mem_free(current);
+    return local;
+}
+
 /**
  * Extend an existing path with another path's segments.
  * Appends all segments from suffix to base.
@@ -544,26 +581,30 @@ Path* path_concat(Pool* pool, Path* base, Path* suffix) {
     if (!base) return suffix;
     if (!suffix) return base;
 
-    // Collect suffix segments info in reverse order
-    // Stop before the scheme root (which has parent == &ROOT_SENTINEL)
-    struct { const char* name; LPathSegmentType type; } segments[64];
-    int count = 0;
-
-    Path* p = suffix;
-    while (p && p->parent && p->parent != &ROOT_SENTINEL && count < 64) {
-        segments[count].name = p->name;
-        segments[count].type = PATH_GET_SEG_TYPE(p);
-        count++;
-        p = p->parent;
+    ArrayList* ops = arraylist_new(8);
+    Path* suffix_root = path_root_of(suffix);
+    for (Path* p = suffix; p && p != suffix_root; p = p->parent) {
+        arraylist_append(ops, p);
     }
-
-    // Append segments in forward order (root to leaf)
     Path* result = base;
-    for (int i = count - 1; i >= 0; i--) {
-        result = path_append_segment_typed(pool, result, segments[i].name, segments[i].type);
+    for (int i = ops->length - 1; i >= 0; i--) {
+        Path* op = (Path*)arraylist_get(ops, i);
+        LPathSegmentType type = PATH_GET_SEG_TYPE(op);
+        if (type == LPATH_SEG_PARENT) result = path_select_parent(pool, result);
+        else if (type == LPATH_SEG_ROOT) result = path_select_root(pool, result);
+        else if (type == LPATH_SEG_INT) result = path_extend_int(pool, result, op->int_value);
+        else result = path_append_segment_typed(pool, result, op->name, type);
     }
-
+    arraylist_free(ops);
     return result;
+}
+
+// Qualify the logical resolver root through the default local-file mount.
+// Qualification returns a new spine and leaves the source reference intact.
+Path* path_qualify_default(Pool* pool, Path* path) {
+    if (!pool || !path) return path;
+    if (path_get_scheme(path) != PATH_SCHEME_LOGICAL) return path;
+    return path_concat(pool, path_new(pool, PATH_SCHEME_FILE), path);
 }
 
 /**
@@ -678,7 +719,7 @@ void path_load_metadata(Path* path) {
     }
     
     StrBuf* path_buf = strbuf_new();
-    path_to_os_path(path, path_buf);
+    path_to_os_path(path_qualify_default(pool, path), path_buf);
     
     FileStat fs = file_stat(path_buf->str);
     path_apply_stat_metadata(path, pool, fs);
@@ -756,7 +797,7 @@ Item path_resolve_for_iteration(Path* path) {
         }
         
         StrBuf* path_buf = strbuf_new();
-        path_to_os_path(parent, path_buf);
+        path_to_os_path(path_qualify_default(path_get_pool(), parent), path_buf);
         
         bool recursive = PATH_GET_SEG_TYPE(path) == LPATH_SEG_WILDCARD_REC;
         Item result = expand_wildcard(parent, path_buf->str, recursive);
@@ -768,7 +809,7 @@ Item path_resolve_for_iteration(Path* path) {
     
     // Convert path to OS path string
     StrBuf* path_buf = strbuf_new();
-    path_to_os_path(path, path_buf);
+    path_to_os_path(path_qualify_default(path_get_pool(), path), path_buf);
     const char* os_path = path_buf->str;
     
     // Check if directory or file

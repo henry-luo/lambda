@@ -1,6 +1,6 @@
 # Lambda JavaScript MIR Cache Design
 
-**Status:** Implementing; Phases 1 and 2 complete for Radiant layout batches
+**Status:** Implementing; browser-preamble and repeated-external slices complete for Radiant layout batches
 **Date:** 2026-07-14
 **Scope:** In-process reuse of compiled JavaScript MIR across script executions, with fresh runtime and DOM state per execution
 **Companion:** `vibe/Lambda_Design_MIR_Cache.md`
@@ -18,18 +18,19 @@ The cache retains immutable compilation products:
 - the owning `MIR_context_t`;
 - transpiler AST and name pools referenced by generated code;
 - retained source text and declaration metadata;
-- a description of mutable cells that must be initialized for each execution.
+- the sealed property-name and declaration ABI required for instantiation.
 
 It does **not** retain a document's JavaScript heap, module-variable values,
 DOM wrappers, timers, event listeners, exceptions, or host state. A cache hit
 instantiates the cached code into a fresh execution realm and then executes the
 entry function normally.
 
-This is deliberately an **in-process Level-1 cache only**. JavaScript code
-generation embeds process-local pointers and mutable inline/shape-cache cells.
-Cross-process or disk-backed JS code caching remains out of scope until the JS
-code generator is de-pointered, as required by
-`vibe/Lambda_Design_MIR_Cache.md` MC8.
+This is deliberately an **in-process Level-1 cache only**. JavaScript code may
+reference process-local runtime addresses, while **D1.8** prohibits a
+context-dependent value at a code-baked address and **D8.4.1v2** keeps the
+generated code immutable. Cross-process or disk-backed JS code caching remains
+out of scope until the relocation/verifier prerequisites of **D8.5.2–D8.5.3**
+are complete.
 
 The first consumers, in priority order, are:
 
@@ -60,6 +61,26 @@ The first safe slice is implemented:
 Normal single-file layout execution remains uncached. External scripts, inline
 scripts, modules, browser-global synchronization, crash poisoning, and
 cross-process persistence are not enabled by this checkpoint.
+
+### 1.2 Implementation checkpoint — 2026-08-25
+
+Repeated external classic scripts now use the batch-owned in-process cache.
+This is a local derived cache under **D1.7**: its key includes exact source
+bytes, execution mode, resolved diagnostic filename, and the current preamble
+declaration/property ABI. Generated code remains immutable and contains no
+context-dependent baked address under **D1.8** and **D8.4.1v2**.
+
+On a hit, Radiant creates a fresh document-local module slab, copies the
+current declaration prefix, links the retained property-name image, executes
+the cached entry under the normal recovery/event-loop boundary, and copies the
+resulting declaration metadata into the document preamble. Cached MIR remains
+worker-owned; globals, module values, DOM wrappers, timers, and prototypes
+remain document-owned. Lifecycle snippets currently follow the uncached path.
+
+The focused five-page jQuery batch produced byte-identical compact layout
+frames with cache enabled and disabled. Release elapsed time was 0.86 s cached
+versus 2.76 s uncached. The 4,404-test baseline produced the same 4,397 passes
+and seven existing failures in both modes.
 
 Release measurements on the 381 runnable form tests were:
 
@@ -377,23 +398,15 @@ shutdown, and document cleanup paths should remain the authoritative reset
 helpers. Cache code should call or extend those helpers, not copy their reset
 lists.
 
-### 7.3 Mutable compiled cells
+### 7.3 Immutable code and runtime state
 
-Generated JavaScript currently embeds or references mutable cells for property
-inline caches, object shapes, constructors, regexes, templates, and other
-runtime shortcuts. Every cell must be classified as one of:
-
-| Class | Lifetime | Required action |
-|---|---|---|
-| Immutable compile metadata | Cache entry | Retain with the owning MIR context and pools |
-| Process-stable runtime address | Process | Verify it never points into a document heap |
-| Per-realm mutable cell | Execution instance | Allocate or reset on every instantiation |
-| Unsupported heap pointer | None | Reject caching until de-pointered or relocated |
-
-No general user script becomes cache-eligible until this audit is complete for
-all pointer categories it emits. Engine-owned lifecycle snippets may be enabled
-earlier because their emitted instruction and literal surface is small and can
-be exhaustively inspected.
+**D8.4.1v2** now prohibits LambdaJS inline caches and requires immutable
+generated code. **D1.8** separately prohibits context-dependent values at
+code-baked addresses. Mutable objects, prototypes, regex state, templates,
+module values, and host bindings therefore belong to the execution realm and
+are recreated by the normal runtime/document initialization path. A future
+lowering that introduces a generated mutable cell or document-owned pointer
+must fail cache admission until that state has an explicit per-realm owner.
 
 ---
 
@@ -746,7 +759,7 @@ four per worker process, with unchanged form and Radiant baselines.
 **Exit gate:** `$`/`jQuery` compatibility tests pass without recompiling the
 sync source after every script.
 
-### Phase 4 — Repeated external classic scripts
+### Phase 4 — Repeated external classic scripts (implemented)
 
 1. Promote the source-byte cache to batch lifetime.
 2. Add canonical path/file-identity keys.
@@ -895,7 +908,7 @@ rather than treating the aggregate upper bounds as promised savings.
 | JC4 | Promote existing preamble ownership rather than duplicate it in a Radiant-only cache | Implemented |
 | JC5 | Cache fixed lifecycle snippets before general user scripts | Implemented |
 | JC6 | Fix global/window binding coherence; use cached global-sync only as an interim mechanism | Proposed |
-| JC7 | Admit external scripts by canonical identity; admit inline scripts only after measured repetition | Proposed |
+| JC7 | Admit external scripts by canonical identity; admit inline scripts only after measured repetition | Implemented for external scripts; inline admission remains proposed |
 | JC8 | Reject unsafe pointer categories until per-realm initialization is implemented | Decided invariant |
 | JC9 | Poison cache entries after crashes, timeouts, or integrity failures | Decided invariant |
 | JC10 | Keep JS disk/cross-process caching out of scope until JS de-pointering | Inherited from MIR-cache MC8 |
@@ -904,10 +917,12 @@ rather than treating the aggregate upper bounds as promised savings.
 
 ## 18. Open questions
 
-- **OQ1:** Which JS MIR literal and cache-cell categories currently point into
-  the execution heap rather than a retained compiler-owned pool?
-- **OQ2:** Can mutable IC/shape cells be described and reset generically, or
-  must lowering place them in an explicit per-realm sidecar first?
+- **OQ1 (resolved for in-process external classics):** D1.8 prohibits
+  context-dependent baked addresses; retained source and compiler pools own
+  process-stable compile metadata.
+- **OQ2 (resolved):** D8.4.1v2 prohibits LambdaJS inline caches and requires
+  immutable generated code, so there is no per-site mutable IC/shape cell to
+  share across realms.
 - **OQ3 (resolved for fixed lifecycle units):** Form-suite and focused batch
   verification confirm that units compiled against the immutable base-preamble
   ABI execute after user scripts extend the active declaration snapshot.
@@ -922,5 +937,5 @@ rather than treating the aggregate upper bounds as promised savings.
 - **OQ8:** Can global/window coherence remove `execute_browser_global_sync()`
   entirely without breaking classic-script global declaration semantics?
 
-Until OQ1 and OQ2 are answered, only exhaustively audited engine-owned sources
-should be cache-eligible.
+Cross-process persistence remains excluded by D1.7 and still requires the
+separate D8.5.2–D8.5.3 relocation/verifier design.

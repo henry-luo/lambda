@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.26.0 (2026-08-18)
+**Spec version:** 1.28.0 (2026-08-25)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -305,6 +305,27 @@ language-visible counterparts are the semantics spec's SI ledger.
 - **D2.6.4** Wide-scalar Items inside a container point **only into that
   container's own buffer** (tail regions, `extra` = uniform tail count);
   headers are never reallocated out from under an identity. [SF15]
+- **D2.6.5** **The append API selects content normalization.** Two runtime
+  appends exist and they are not interchangeable. `list_push()` is the
+  **content** constructor: it applies S16.7's normalization — a `null` is
+  dropped, a pushed string is concatenated onto a preceding string, and a
+  pushed content list is spliced in — and is correct **only** when building
+  element content or script top-level content. `array_push()` is the
+  **collection** constructor: it stores the item verbatim, preserving `null`
+  as an element and keeping adjacent strings separate. Every other
+  collection — array and vector results, argument and rest lists, split
+  segments, zipped pairs — is built with `array_push()`, because for those
+  the element count *is* the contract and normalization silently destroys it.
+  Which normalization an input format gets is therefore a property of the
+  **builder it uses**, not of a per-format switch: MarkBuilder appends with
+  `array_append` and never normalizes — which is why LaTeX may hold
+  consecutive strings — while the markup family calls `list_push` and merges
+  them. The choice belongs at the **append site**, which is local and cannot
+  leak. It must not be re-expressed as ambient state: a process-wide
+  "suppress merging" flag stays suspended across every allocation in the
+  interval and leaks on any early return that forgets to restore it. Such a
+  flag existed on `EvalContext`/`InputAllocationContext` and was retired once
+  the append-site split made it dead.* [LR09-R3]
 
 ### D2.7 The scalar-GC invariant
 
@@ -410,6 +431,24 @@ that carries them.
   (declaration on the binding node, inference beside it): an annotation is
   a contract (semantics S11.4.1); inference is never a binding contract
   and may never override what it proved. [TE-1, TE §8.1]
+- **D3.2.4** **A crossing into a named map contract is a reification, not
+  merely a check.** A named contract fixes a *physical* packed layout —
+  per-field `byte_offset` and storage class — and the emitter's direct
+  field access indexes by that layout. So a boundary may be elided only
+  when the source **provably already carries the contract's layout**;
+  semantic compatibility alone is never sufficient, because the same value
+  admits under two different physical shapes. A value acquires that proof
+  in exactly two ways: adopting the contract at construction, or crossing a
+  boundary that reified it. Every consumer of this rule — static elision,
+  runtime admission, and the direct read/write pair — must reach the
+  contract **through the non-null arm** of its spelling: `N?` and `N | null`
+  are wrappers whose own `type_id` is `LMD_TYPE_TYPE`, and a
+  self-referential record is necessarily optional, so testing the wrapper
+  silently exempts precisely the recursive contracts this rule exists to
+  protect. The open `map` fixes no layout and so needs no reification.
+  Violating this is a memory-safety defect, not a missed optimization: an
+  unreified literal shape read through a contract's offsets returns a
+  malformed Item. [Tune19 §11.5, Tune20 §T20-6a]
 
 ### D3.3 Inference
 
@@ -1082,23 +1121,37 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v2*** Tree-sitter grammar → typed AST → **tiered execution**:
-  a boxed AST-walking interpreter (**T0**) is the default execution mode
-  and the retained AST is the runtime source of truth; **MIR Direct**
-  (`transpile-mir.cpp`) → MIR JIT (**T1**) compiles individual hot
-  definitions on demand (per-definition promotion cells, default 3rd
-  call), with whole-module eager compilation under explicit policy. The
-  const-folder is the same engine in CONST mode; MIR-interp demotes to a
-  codegen diagnostic. Promotion swaps entry-pointer data, never patches
-  code (D8.4.1, DI14); D5.1.2's "no hotness detection" continues to
-  scope stack primitives — definition-site counters are tier policy, not
-  primitive adaptivity. *(Historical: v1 ruled the opposite — "no
-  AST-walking interpreter", MIR-interp as sole non-JIT path [U26] —
-  reversed by user ruling 2026-08-15; the full record is
-  `Lambda_Design_Unified_AST.md` §12.)* [AI1–AI22]
-- **D8.1.2** Grammar is regenerated from `grammar.js` (never hand-edit
-  `parser.c`); build config generates the build files (never hand-edit
-  the Lua). [rules 5, 7]
+- **D8.1.1v5*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+  parser → the shared typed AST → **tiered execution**. The parser reduces
+  directly into the retained `AstNode` graph; no Lambda CST or replacement
+  syntax tree is retained. The default file/module path is the C parser, while
+  Tree-sitter remains an explicit reference/rollback parser and the editor/
+  binding grammar. A boxed AST-walking interpreter (**T0**) remains the
+  baseline execution mode and the retained AST is the runtime source of truth;
+  the shipped Lambda script policy is **AUTO**: each definition starts in T0,
+  and an eligible hot definition may promote to its P2 boxed MIR satellite.
+  Ordinary interpreted entries promote at `LAMBDA_JIT_THRESHOLD` (**5** by
+  default). A direct, validated self-tail edge also increments the
+  definition-site call and tail-edge counters; at the same threshold it may
+  synchronously publish the eligible satellite and transfer to its ordinary
+  boxed entry with the rooted next-call arguments. This is a tail-entry
+  handoff, not general OSR: no interpreter program counter or arbitrary local
+  frame is materialized into MIR. General loop backedges remain next-entry
+  promotion candidates (`LAMBDA_JIT_BACKEDGE`, default 1024).
+  `LAMBDA_TIER=interp` pins the run to T0, while `LAMBDA_TIER=jit` explicitly
+  selects eager whole-module **MIR Direct** (`transpile-mir.cpp`) → MIR JIT
+  (**T1**). The REPL and legacy inspection tools
+  may still use the reference Tree-sitter path until their fragment/source-span
+  migration is complete. *(Historical: v1 ruled the opposite — "no
+  AST-walking interpreter", MIR-interp as sole non-JIT path [U26] — reversed
+  by user ruling 2026-08-15; the full record is
+  `Lambda_Design_Unified_AST.md` §12.)* [CGP1, CGP2, AI1–AI22]
+- **D8.1.2v2** The shipped Lambda executable uses the first-party C parser for
+  normal source-to-AST compilation. `grammar-lambda.js` is the complete
+  Tree-sitter syntax oracle and editor/bindings grammar; `grammar.js` and its
+  generated `parser.c` remain a reference artifact and are regenerated from
+  grammar sources (never hand-edit `parser.c`). Build config generates the
+  build files (never hand-edit the Lua). [CGP5, rules 5, 7]
 
 ### D8.2 Unified AST
 
@@ -1260,12 +1313,13 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-17.
+Status of `*`-marked rulings as of 2026-08-24.
 
 | Ruling | Status |
 |---|---|
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
+| D2.6.5 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S16.7 does not run. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
 | D2.4.1–D2.4.3 | `MirValue`/`em_require_rep` infrastructure exists; LambdaJS uses it; propagation through Lambda expression lowering not started (phases L0–L6), sequenced after nullable-lane work. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
@@ -1299,7 +1353,8 @@ Status of `*`-marked rulings as of 2026-08-17.
 | D7.4.5 | Direction only; implementation deferred past DOM4 (user ruling 2026-08-13: DOM4 settles vmap first; the runtime is likely not ready for new carriers). `varray` and `velmt` do not exist: DOM collections are materialized Arrays with companion-map decoration and a 4096-entry issued-collection cache refreshed per mutation (js_dom.cpp); Radiant `Velmt` handles are struct-copied into VMap payloads with strcmp projection. varray + collection conversion = future Jube stage; DOM-node carrier move to velmt = DOM4 OQ9 (DOM5-scale). |
 | D7.5.1 | T1 verification layers staged; T2/T3 directional, neither built (not required until a third-party module story). |
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
-| D8.1.1v2 | Decided 2026-08-15 (user ruling); implementation not started — the shipped pipeline remains whole-module eager MIR JIT with MIR-interp as the size-pressure valve until Ast_Interpreter phases P0–P5 land (`vibe/Lambda_Design_Ast_Interpreter.md` §11). |
+| D8.1.1v5 | Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for aggregate/structured signatures, mutable/index writes, object-field identifiers, indirect/`var` calls, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
+| D8.1.2v2 | Decided 2026-08-24 with D8.1.1v4. `grammar-lambda.js` remains the complete Tree-sitter syntax oracle/editor/bindings grammar; `grammar.js` and generated `parser.c` are reference artifacts regenerated by the normal grammar target and are never hand-edited. The production Lambda parser is maintained in `lambda/runtime/parser/` and is built through the generated build configuration. |
 | D8.2.1–D8.2.3 | Structural Unified AST convergence is substantially landed for Lambda/JS: common core catalog, node aliases, `FnAnalysis`, and `MirEmitter`; Python remains the guest acceptance test. |
 | D8.2.4–D8.2.6 | Indexed compilation unit, authoritative traversal, typed fact/pass process, and demand-driven full-contract `MirValue` continuation are designed in U27–U32; implementation not started. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
@@ -1372,12 +1427,15 @@ Numbered `DO#` (design-open); each links to its record.
   deleted from the tree; the impl doc's status line now reads IMPLEMENTED.
   OE1–OE10 may be cited as landed. History: `vibe/jube/JS_Runtime_Redesign.md`
   JR3.
-- **DO25** Interpreter tier (D8.1.1v2) opens: satellite-module treatment
-  under the MT7 emission budgets (AIO2); cross-context visibility of
-  promotion cells (AIO8); once-called hot bodies — `run`-mode `main`
-  with heavy inline loops never re-enters, so backedge marking never
-  pays; escape hatches vs eventual OSR (AIO11); T0 TCO parity before the
-  default flip (AIO1). [Ast_Interpreter AIO1–AIO12]
+- **DO25** Interpreter tier (D8.1.1v5) remains open for breadth/performance: satellite-module
+  treatment under the MT7 emission budgets (AIO2); cross-context visibility of
+  promotion cells (AIO8); once-called hot bodies — `run`-mode `main` with
+  heavy inline loops never re-enters, so backedge marking never pays; escape
+  hatches vs eventual OSR (AIO11); and the remaining full call-site matrix
+  needed to widen promotion beyond the current fail-closed boundary (AIO1).
+  The release AUTO correctness gate is green; these are follow-on tiering
+  breadth/performance questions, not correctness blockers. [Ast_Interpreter
+  AIO1–AIO12]
 
 **Runtime services & modules**
 - **DO16** Name identity: temporal canonical accepted; dynamic-intern
@@ -1444,9 +1502,9 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.2 | Double_Boxing; Int_Type §5.1; Stack_API §15 | `Lambda_Type_Double_Boxing.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Design_Stack_API.md` |
 | D2.3 | Box_Unbox, Box_Unbox2 | `Lambda_Box_Unbox.md`, `Lambda_Box_Unbox2.md` |
 | D2.4 | Lane §1–§9 | `Lambda_Design_Compiling_Lane.md` |
-| D2.5–D2.6 | Nullable §1–§10; CW16 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md` |
+| D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md` |
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
-| D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Impl_Error_Handling (done).md` |
+| D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
 | D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
 | D3.4 | Shape_Pool §1–§8; Transpile_Map DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b | `Lambda_Shape_Pool.md`, `Lambda_Transpile_Map.md`, `Lambda_Design_Name_Identity.md` |
 | D4.1 | GC1 §2.10.4; CW8; SF16; CR8; Mem_Heap §1 (MP-12, MP-15) | `Lambda_Garbage_Collector.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Mem_Heap.md` |
@@ -1459,18 +1517,18 @@ Numbered `DO#` (design-open); each links to its record.
 | D5.1–D5.3 | SF1–SF20, OS1–OS11; Stack_API phases + invariants; CR1–CR8, RH1–RH8; Merges A/B/C | `Lambda_Design_Stack_Frame.md`, `Lambda_Design_Stack_API.md`, `Lambda_Design_Stack_Rooting.md` |
 | D5.2, D2.7.2, D8.4.2 | RV1–RV16 (+ RV3a, RV10a, RV14a), RVO1–RVO11 | `Lambda_Design_Compiling_Return_Value.md` |
 | D5.4 | RG0–RG14, MT2 contract | `Lambda_Design_Runtime_Globals.md` |
-| D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3; REH-D6–REH-D12 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `Lambda_Impl_Error_Handling (done).md`, `Lambda_Design_Runtime_Error_Handling.md` |
+| D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3; REH-D6–REH-D12 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md` |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
 | D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md` |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
-| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12 | `Lambda_Design_Unified_AST.md`, `Lambda_Impl_Tune_Ast.md`, `Lambda_Design_Ast_Interpreter.md` |
+| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12 | `Lambda_Design_Unified_AST.md`, `vibe/impl/Lambda_Impl_Tune_Ast.md`, `Lambda_Design_Ast_Interpreter.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1 + call-ABI notes; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md` |
-| D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `Lambda_Impl_Tune_Ast.md` |
+| D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `vibe/impl/Lambda_Impl_Tune_Ast.md` |
 
 The decision records preserve the full deliberations — every alternative
 that lost and the arguments that did not persuade. This specification is

@@ -1056,7 +1056,7 @@ TEST_F(GCHeapTest, MarkInlineValueIgnored) {
 
 TEST_F(GCHeapTest, ScalarObjectTagsAreRejectedBeforePublication) {
     const uint16_t scalar_tags[] = {
-        LMD_TYPE_INT64, LMD_TYPE_UINT64, LMD_TYPE_FLOAT, LMD_TYPE_FLOAT64,
+        LMD_TYPE_INT64, LMD_TYPE_UINT64, LMD_TYPE_FLOAT,
     };
     for (size_t i = 0; i < sizeof(scalar_tags) / sizeof(scalar_tags[0]); i++) {
         // Wide scalars require caller/container-owned homes; admitting any tag
@@ -1699,7 +1699,7 @@ TEST_F(GCHeapTest, ClosureNoEnvSafe) {
 // ============================================================================
 
 // VMap layout: { type_id(2@0), pad(6), data*(8@8), vtable*(8@16) } = 24 bytes
-// type_id is Container.id which is uint16_t, matching LMD_TYPE_VMAP = 18
+// type_id is Container.id which is uint16_t, matching LMD_TYPE_VMAP = 20
 
 // Test-local state for VMap callback verification
 static int s_vmap_trace_calls = 0;

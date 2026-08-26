@@ -14,7 +14,7 @@ fn attribute_text(attribute) {
 fn attribute_row(attribute) =>
   <div class: "graph-er-attribute", 'data-attribute-type': attribute["type"],
       'data-attribute-name': attribute.name, 'data-attribute-key': attribute.key,
-      style: "display:block;text-align:left;white-space:nowrap;padding:1px 2px;";
+      style: "display:block;text-align:left;white-space:nowrap;padding:1px 2px;",
     attribute_text(attribute)
   >
 

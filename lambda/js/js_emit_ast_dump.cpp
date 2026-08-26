@@ -1,4 +1,5 @@
-#include "../runtime/emit_sexpr.h"
+#include "../runtime/emit_ast_dump.h"
+#include "../runtime/type_contract.hpp"
 #include "js_transpiler.hpp"
 #include "../ts/ts_ast.hpp"
 #include "../../lib/file.h"
@@ -6,11 +7,9 @@
 #include <stdio.h>
 #include <string.h>
 
-static inline const char* dump_node_src(const char* source, TSNode node, int* out_len) {
-    uint32_t start = ts_node_start_byte(node);
-    uint32_t end = ts_node_end_byte(node);
-    *out_len = (int)(end - start);
-    return source + start;
+static inline const char* dump_node_src(const char* source, SourceSpan span, int* out_len) {
+    *out_len = (int)lambda_source_span_length(span);
+    return source + span.start_byte;
 }
 
 static void dump_escaped_string(const char* str, int len) {
@@ -182,9 +181,9 @@ static void dump_string_field(const char* label, String* str) {
     printf(")");
 }
 
-static void dump_source_field(const char* source, TSNode node) {
+static void dump_source_field(const char* source, SourceSpan span) {
     int len = 0;
-    const char* src = dump_node_src(source, node, &len);
+    const char* src = dump_node_src(source, span, &len);
     if (len <= 0) return;
     printf(" (source ");
     dump_escaped_string(src, len);
@@ -203,6 +202,15 @@ static void emit_js_dump_list(const char* source, const char* label, JsAstNode* 
         node = node->next;
     }
     printf(")");
+}
+
+// Publish the node's inferred static type so IP6 fixtures can assert it, the
+// same way the Lambda dump does [Type_Infer TIG13/TIG14].
+static void js_dump_value_type(JsAstNode* node) {
+    if (!node || !node->type) return;
+    char name[128];
+    lambda_type_format_name(node->type, name, sizeof(name));
+    printf(" (value_type \"%s\")", name);
 }
 
 static void emit_js_dump_field(const char* source, const char* label, JsAstNode* node, int indent) {
@@ -255,7 +263,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
                 printf(" (literal undefined)");
             } else {
                 printf(" (literal number)");
-                dump_source_field(source, node->node);
+                dump_source_field(source, node->source_span);
             }
             if (lit->is_bigint) dump_string_field("bigint", lit->bigint_str);
             break;
@@ -263,6 +271,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
         case JS_AST_NODE_BINARY_EXPRESSION: {
             JsBinaryNode* bin = (JsBinaryNode*)node;
             printf(" (op %s)", js_dump_operator_name(bin->op));
+            js_dump_value_type(node);
             emit_js_dump_field(source, "left", bin->left, indent + 1);
             emit_js_dump_field(source, "right", bin->right, indent + 1);
             break;
@@ -270,6 +279,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
         case JS_AST_NODE_UNARY_EXPRESSION: {
             JsUnaryNode* un = (JsUnaryNode*)node;
             printf(" (op %s)", js_dump_operator_name(un->op));
+            js_dump_value_type(node);
             emit_js_dump_field(source, "operand", un->operand, indent + 1);
             break;
         }
@@ -439,7 +449,7 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
             break;
         }
         default:
-            dump_source_field(source, node->node);
+            dump_source_field(source, node->source_span);
             break;
     }
 

@@ -1,13 +1,34 @@
 /**
- * @file Lambda Script grammar for tree-sitter
+ * @file Lambda Script grammar for tree-sitter — THE OFFICIAL GRAMMAR
  * @author Henry Luo
  * @license MIT
+ *
+ * This single file is the normative surface grammar. It implements
+ * `S16 Surface Syntax` (doc/Lambda_Formal_Semantics.md) and the §7 audit
+ * rulings recorded in vibe/Lambda_Design_Syntax.md.
+ *
+ * ROLE (Design_Syntax §4.4). Tree-sitter is the OFFICIAL GRAMMAR and the
+ * cross-checking reference implementation; the hand-written C
+ * recursive-descent parser in lambda/runtime/parser/ is PRODUCTION. Because
+ * this grammar no longer ships in the parse path, table size and speed stop
+ * being constraints — which is why the former three-file split
+ * (grammar.js + grammar-lambda.js + grammar-common.js) and the seven
+ * sub-language extraction tokens are gone. Type patterns, view patterns, and
+ * path bodies are ordinary rules again, so this file states the whole
+ * language in one readable artifact.
+ *
+ * The external scanner survives with one job only: newline awareness, which
+ * grammar rules cannot express because `/\s/` lives in `extras`. It emits
+ * three zero-width guards — `_join`, `_stmt_boundary`, `_not_paren`. See
+ * src/scanner.c.
+ *
+ * AUTHORITY ORDER: spec/design doc -> this grammar -> C parser. A divergence
+ * anywhere downstream is a bug in the downstream artifact.
  */
 
 // @ts-check
 /// <reference types="../tree-sitter-dsl.d.ts" />
 
-// rule for one or more of the rules separated by a comma
 function comma_sep1(rule) {
   return seq(rule, repeat(seq(',', rule)));
 }
@@ -16,406 +37,502 @@ function comma_sep(rule) {
   return optional(comma_sep1(rule));
 }
 
+// S2.4.3v2: a namespace-qualified name is maximal, so `<svg .rect>` keeps the
+// tag `svg.rect` while `<svg, .rect>` (§7.11) is tag + path child.
 function qualified_name($, precedence) {
   return prec.left(precedence, seq(
     choice($.identifier, $.symbol),
-    repeat1(seq('.', choice($.identifier, $.symbol))),
+    repeat1(prec.left(precedence, seq(
+      // Either dot may arrive here. In a position where a member expression is
+      // also possible — an element interior, where `xml` could equally begin
+      // content — the scanner emits the guarded `_member_dot` and the internal
+      // high-precedence dot is never produced, so a namespaced NAME must accept
+      // both spellings or `<div xml.lang: "en">` cannot parse.
+      choice(token(prec(precedence, '.')), alias($._member_dot, '.')),
+      choice($.identifier, $.symbol),
+    ))),
   ));
 }
 
-const linebreak = /\r\n|\n/;
-const decimal_digits = /\d+/;
-const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
-const hex_integer_literal = seq('0', choice('x', 'X'), /[0-9a-fA-F]+/);
-const exponent_part = seq(choice('e', 'E'), optional(choice('+', '-')), decimal_digits);
-// C16 ruling 9 (revised): an unsuffixed literal's type is LEXICAL, and an
-// EXPONENT makes it a float -- `1e2` is float 100.0, as in C, Python, Java,
-// Go, Rust, Swift, Ruby and Lua. An earlier revision split the exponent by
-// sign so `10e1` lexed as int; that made `1e16` and `1e100` fail to parse (they
-// fall outside int's band) while the identical `1.0e16` parsed fine, a
-// distinction no other language draws. Nothing is lost by conceding the
-// convention: C16 makes `int` the float64-representable integers, a SUBSET of
-// float admitted by membership, so `let n: int = 1e2` still holds.
+// --- numeric literals -------------------------------------------------------
+// §7.4: `_` is permitted between digits in every numeric family, hex included.
+// It is spelling only and never reaches the value. Placement is constrained to
+// digit-underscore-digit, so no leading, trailing, doubled, or suffix-adjacent
+// underscore parses.
+const dec_digits = /[0-9](_?[0-9])*/;
+const hex_digits = /[0-9a-fA-F](_?[0-9a-fA-F])*/;
+const integer_literal = choice('0', seq(/[1-9]/, optional(/(_?[0-9])+/)));
+const hex_integer_literal = seq('0', choice('x', 'X'), hex_digits);
+const exponent_part = seq(choice('e', 'E'), optional(choice('+', '-')), dec_digits);
+// C16 ruling 9: an unsuffixed literal's type is LEXICAL, and an EXPONENT makes
+// it a float — `1e2` is float 100.0, as in C, Python, Java, Go, Rust and Swift.
 const float_literal = choice(
-  seq(integer_literal, '.', decimal_digits, optional(exponent_part)),
-  seq('.', decimal_digits, optional(exponent_part)),
+  seq(integer_literal, '.', dec_digits, optional(exponent_part)),
+  seq('.', dec_digits, optional(exponent_part)),
   seq(integer_literal, exponent_part),
 );
 const decimal_literal = choice(
-  seq(integer_literal, '.', decimal_digits),
-  seq('.', decimal_digits),
+  seq(integer_literal, '.', dec_digits),
+  seq('.', dec_digits),
 );
 
-// sized integer suffixes: i8, i16, i32, i64, u8, u16, u32, u64
 const sized_int_suffix = choice('i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64');
-// sized float suffixes: f16, f32, f64
 const sized_float_suffix = choice('f16', 'f32', 'f64');
 
-// need to exclude relational exprs in attr (to avoid conflicts with element tags)
-// pipe/filter operators are always included
-function binary_expr($, in_attr) {
-  let operand = in_attr ? choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, $.binary_expr))
-                        : $._expr;
-  let ops = [
-    ['+', 'binary_plus'],
-    ['++', 'binary_plus'],
-    ['-', 'binary_plus'],
-    ['*', 'binary_times'],
-    ['/', 'binary_times'],
-    ['div', 'binary_times'],
-    ['%', 'binary_times'],
-    ['**', 'binary_pow', 'right'],
-    [$._binary_eq_symbol_op, 'binary_eq'],
-    [$._binary_eq_word_op, 'binary_eq'],
-    [$._binary_word_relation_op, 'binary_relation'],
-    // Relational operators - excluded in attr to avoid element tag conflicts
-    ...(in_attr ? [] :
-      [['<', 'binary_relation'],
-      ['<=', 'binary_relation'],
-      ['>=', 'binary_relation'],
-      ['>', 'binary_relation']]),
-    ['and', 'logical_and'],
-    ['or', 'logical_or'],
-    ['to', 'range_to'],
-    ['|', 'set_union'],
-    // Pipe/filter operators - always included (even in attr context)
-    ['|>', 'pipe'],
-    ['that', 'pipe'],  // filter operator: items that ~ > 0
-    ['&', 'set_intersect'],
-    ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
-    ['is', 'is_in'],
-    ['in', 'is_in'],
-    [$._at, 'is_in'],
+// --- binary operator table --------------------------------------------------
+// S16.2.3: an operator that can also START an expression is dual-role, so a
+// line may not begin with it. The `_join` guard is what enforces that — the
+// scanner emits it only when the operator is on the same line as its left
+// operand. Operators that can only ever continue (`|> | & % > == != <= >=`,
+// `++`, `**`, and every word operator) carry no guard, so they are free to
+// open a line (S16.2.2).
+//
+// `in_element` drops the symbol relationals entirely: inside an element, `<`
+// and `>` are not operators at all, they delimit (S16.5.1 / §5.10).
+function binary_rules($, in_element) {
+  const operand = in_element
+    ? choice($.primary_expr, $.unary_expr, $.not_expr,
+        alias($.element_binary_expr, $.binary_expr))
+    : $._expr;
+  const mk = (operator, precedence, assoc) => wrap(assoc)(precedence, seq(
+    field('left', operand), field('operator', operator), field('right', operand),
+  ));
+  const wrap = assoc => (assoc === 'right' ? prec.right : prec.left);
+  const rules = [
+    mk(alias($._bin_plus, '+'), 'binary_plus', 'left'),
+    mk(alias($._bin_minus, '-'), 'binary_plus', 'left'),
+    mk('++', 'binary_plus', 'left'),
+    mk(alias($._bin_star, '*'), 'binary_times', 'left'),
+    mk(alias($._bin_slash, '/'), 'binary_times', 'left'),
+    mk('div', 'binary_times', 'left'),
+    mk('%', 'binary_times', 'left'),
+    mk('**', 'binary_pow', 'right'),
+    mk($._binary_eq_symbol_op, 'binary_eq', 'left'),
+    mk($._binary_eq_word_op, 'binary_eq', 'left'),
+    mk($._binary_word_relation_op, 'binary_relation', 'left'),
+    mk('and', 'logical_and', 'left'),
+    mk('or', 'logical_or', 'left'),
+    mk('to', 'range_to', 'left'),
+    mk('|', 'set_union', 'left'),
+    mk('|>', 'pipe', 'left'),
+    mk('that', 'pipe', 'left'),
+    mk('&', 'set_intersect', 'left'),
+    // §7.1 removed unary `!` from value expressions, so infix `!` (set
+    // exclusion) is unguarded: it can only continue.
+    mk('!', 'set_exclude', 'left'),
+    mk('is', 'is_in', 'left'),
+    mk('in', 'is_in', 'left'),
+    mk($._at, 'is_in', 'left'),
   ];
-  return ops.map(([operator, precedence, associativity]) =>
-    (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
-      field('left', operand),
-      field('operator', operator),
-      field('right', operand),
-    )),
-  );
+  if (!in_element) {
+    rules.push(
+      mk(alias($._bin_lt, '<'), 'binary_relation', 'left'),
+      mk('<=', 'binary_relation', 'left'),
+      mk('>=', 'binary_relation', 'left'),
+      mk('>', 'binary_relation', 'left'),
+    );
+  }
+  return rules;
 }
 
-function type_pattern(type_expr) {
+function type_operators(type_expr) {
   return [
     ['|', 'set_union'],
     ['&', 'set_intersect'],
-    ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
-    // ['^', 'set_exclude'],  // set1 ^ set2, elements in either set, but not both.
-  ].map(([operator, precedence, associativity]) =>
-    (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
-      field('left', type_expr),
-      field('operator', operator),
-      field('right', type_expr),
-    )),
-  );
-}
-
-function _attr_content_type($) {
-  return choice(
-    seq(alias($.attr_type, $.attr), repeat(seq(',', alias($.attr_type, $.attr))),
-      optional(seq(choice(linebreak, ';'), $.content_type))
-    ),
-    optional($.content_type)
-  );
+    ['!', 'set_exclude'],
+  ].map(([operator, precedence]) => prec.left(precedence, seq(
+    field('left', type_expr),
+    field('operator', operator),
+    field('right', type_expr),
+  )));
 }
 
 module.exports = grammar({
   name: "lambda",
 
-  extras: $ => [
-    /\s/,
-    $.comment,
-  ],
-
-  externals: $ => [
-    $._start,
-  ],
+  extras: $ => [/\s/, $.comment],
 
   word: $ => $.identifier,
 
-  // an array of hidden rule names for the generated node types
-  // supertype symbols must always have a single visible child
-  supertypes: $ => [
-    // $._expr,
+  externals: $ => [
+    // Guarded operators (S16.2.3). Each consumes its own lexeme and the scanner
+    // emits it only when the operator shares a line with its left operand, so a
+    // line-start `+ - * / < ( [ . ^` can neither continue the previous
+    // expression nor (see `_stmt_boundary`) open a new statement: it is an
+    // error, which is the whole point. They are real tokens rather than one
+    // zero-width marker so operator precedence still resolves at one-token
+    // lookahead.
+    $._bin_plus,
+    $._bin_minus,
+    $._bin_star,
+    $._bin_slash,
+    $._bin_lt,
+    $._call_lparen,
+    $._index_lbracket,
+    // Same line, or across a break for the S16.2.4 `.ident(` member-call form.
+    $._member_dot,
+    $._postfix_caret,
+    // A new statement starts here: emitted only before a start-only token,
+    // which is disjoint from every guarded operator above.
+    $._stmt_boundary,
+    // S16.5.1: the element-scope variant, where `<` starts a child item.
+    $._elem_stmt_boundary,
+    // The next token is not `(`: gates bare `if`/`while` heads (S16.6.2) and
+    // the bare `apply` statement (§7.7).
+    $._not_paren,
+    // §7.16: a numeric literal may not run straight into an identifier.
+    $._num_boundary,
+    // S16.6.6: zero-width, withheld when an unbraced expression body starts
+    // with `return`/`break`/`continue`.
+    $._expr_body_start,
+    // Never valid in the grammar; its presence means error recovery.
+    $._error_sentinel,
   ],
+
+  conflicts: $ => [
+    // After an attribute, a `,` either separates another attribute or is the
+    // required attr-list -> content boundary (§7.11v2). Which one takes two
+    // tokens to see, so GLR forks and the losing branch dies immediately.
+    [$._attr_list],
+    // §7.22 made `a?` ambiguous inside a type body: an optional FIELD marker
+    // (`a?: T`) or an occurrence TYPE used as content (`a?`). The `:` decides,
+    // one token later.
+    // §7.22 made a leading name inside a type body ambiguous: a FIELD name
+    // (`a?: T`, `a: T`) or a bare content TYPE (`a?`, `a`). The `:` decides,
+    // one or two tokens later.
+    [$._field_name, $.primary_type],
+    [$._field_name, $.base_type],
+  ],
+
+  supertypes: $ => [],
 
   inline: $ => [
     $._non_null_literal,
     $._parenthesized_expr,
-    $._arguments,
     $._number,
-    $._key
+    $._key,
+    // S16.6.6: inlined so the guard+expression pair never becomes a reduction
+    // point of its own. As a real nonterminal it forced a choice between
+    // reducing `_expr_body` and continuing a trailing binary operator
+    // (`... => x > y`), which is not an ambiguity the guard should introduce.
+    $._expr_body,
   ],
 
-  conflicts: $ => [
-    [$._expr, $.member_expr],
-    [$._expr, $.parent_expr],                      // expr .. could end expr or start parent access
-    [$._expr, $.query_expr],                       // expr ? or .? could end expr or start query
-  ],
 
   precedences: $ => [
-  // value expr precedences
-  [
-    $.fn_expr_stam,
-    'propagate',
-    $.call_expr,
-    $.index_expr,
-    'member',
-    $.parent_expr,
-    $.primary_expr,
-    $.unary_expr,
-    // statement end: linebreak terminates statement before binary operators can continue
-    'statement_end',
-    // binary operators
-    'binary_pow',
-    'binary_times',
-    'binary_plus',
-    'binary_relation',
-    'binary_eq',
-    // set operators
-    'range_to',
-    'set_intersect',  // like *
-    'set_exclude',    // like -
-    'set_union',      // like or
-    // logic operators
-    'is_in',
-    'logical_and',
-    'logical_or',    
-    // pipe operators (low precedence, just above control flow)
-    'pipe',
-    $.if_expr,
-    $.match_expr,
-    $.for_expr,
-    $.let_expr,
-    $.assign_expr,
-    $.assign_stam,
+    [
+      $.fn_expr_stam,
+      'propagate',
+      $.call_expr,
+      $.index_expr,
+      'query_expr',
+      'member',
+      $.primary_expr,
+      $.unary_expr,
+      'binary_pow',
+      'binary_times',
+      'binary_plus',
+      'binary_relation',
+      'binary_eq',
+      'range_to',
+      'set_intersect',
+      'set_exclude',
+      'set_union',
+      'is_in',
+      // §7.2: `not` binds BELOW comparisons and `is`/`in`/`at`, above
+      // `and`/`or` — the Python placement, so `not a == b` is `not (a == b)`.
+      'logical_not',
+      'logical_and',
+      'logical_or',
+      'pipe',
+      $.if_expr,
+      $.while_expr,
+      $.match_expr,
+      $.for_expr,
+      $.let_expr,
+      $.assign_expr,
+      $.assign_stam,
+    ],
+    [$.element_binary_expr, $._element_expr],
+    ['query_expr', $._expr],
+    [
+      $.range_type,
+      $.primary_type,
+      $.unary_type,
+      $.binary_type,
+      $.negation_type,
+      $._type_pattern,
+      $.return_type,
+      $.fn_type,
+    ],
   ],
-  // type expr precedences
-  [
-    $.range_type,
-    $.primary_type,
-    $.unary_type,         // tight unary types 
-    $.binary_type,        // alternation (|, &, !)
-    $.negation_type,      // A ! B has higher precedence than A (!B)
-    $._type_expr,   
-    $.return_type,   
-    $.fn_type,            // fn binds loosest: fn int+ means fn (int+)
-  ],
-  [$.attr_binary_expr, $._attr_expr]
-],
 
   rules: {
-    document: $ => optional(choice(
-      seq(
-        prec.left(seq(
-          $._import_stam, repeat(seq(choice(linebreak, ';'), $._import_stam)),
-        )),
-        optional(seq( choice(linebreak, ';'), $.content )),
-      ),
-      $.content
-    )),
+    // ======================= Document and statements =======================
 
+    document: $ => optional($.content),
+
+    // §7.17: `comment` is declared BOTH here and in `externals`. The scanner
+    // emits it wherever it runs, so a line break in front of a comment is
+    // carried to the next token; this rule is the fallback tree-sitter uses in
+    // positions where the scanner is not consulted and during error recovery.
     comment: _ => token(prec(1, choice(
       seq('//', /[^\r\n\u2028\u2029]*/),
-      seq(
-        '/*',
-        /[^*]*\*+([^/*][^*]*\*+)*/,
-        '/',
-      ),
+      seq('/*', /[^*]*\*+([^/*][^*]*\*+)*/, '/'),
     ))),
 
-    // Literal Values
+    // S16.1.2: `;` is a STRICT separator — between two statements only. There
+    // is no trailing form and no empty slot; both are syntax errors.
+    // S16.1.3: adjacent statements need no separator at all when the second
+    // begins with a start-only token, which `_stmt_boundary` certifies.
+    content: $ => $._stam_seq,
 
-    // String as single token to prevent /* inside strings being parsed as comments
-    // Matches: "", "content", "content with \" escapes"
-    // Escape sequences: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX, \u{X...}
+    // §7.14: the boundary rule keys off the previous statement's TAIL, not its
+    // kind. A CLOSED tail ends in the structural closer of a non-postfixable
+    // construct, so no dual-role token can continue it and the next statement
+    // simply juxtaposes — "after a block, never `;`". An OPEN tail ends in a
+    // greedy expression, so `;` or the `_stmt_boundary` guard is required and a
+    // line-start dual-role token is the S16.2.3 error.
+    //
+    // The classification is DERIVED from the S16.1.1 golden test: a tail is
+    // open exactly when the one-line spelling would glue. `fn f() {} [0]` is
+    // two items on one line (a declaration is not an expression, and
+    // `index_expr` needs a primary), so juxtaposition changes nothing;
+    // `let x = a [0]` is ONE item on one line, so accepting a split across
+    // lines would change meaning.
+    _stam_seq: $ => choice(
+      $._open_stam,
+      $._closed_stam,
+      seq($._open_stam, choice(';', $._stmt_boundary), $._stam_seq),
+      seq($._closed_stam, optional(choice(';', $._stmt_boundary)), $._stam_seq),
+    ),
+
+    _closed_stam: $ => choice(
+      $.fn_stam,
+      $.object_type,
+      $.view_stam,
+      // Both `while` spellings take a structural body, and `match` closes on
+      // its arm list, so neither can be continued.
+      $.while_expr,
+      $.match_expr,
+      $.break_stam,
+      $.continue_stam,
+      $.apply_stam,
+      // An import's tail is a module NAME, and no dual-role token can continue
+      // one (`,` `:` `.` `\\` are its only continuations), so the `;` the open
+      // set would demand guards nothing: `import math [1,2]` is two items on
+      // one line as well as two.
+      $._import_stam,
+      // Bare-spelling `if`/`for` end in a braced body that admits no postfix.
+      // Their parenthesized spellings take a greedy expression body and are
+      // therefore open, as is any `if` carrying an `else` (the else body is an
+      // expression: `if c {} else {} [0]` glues on one line).
+      $._if_closed,
+      $._for_closed,
+    ),
+
+    _open_stam: $ => choice(
+      $.let_stam,
+      $.var_stam,
+      $.fn_expr_stam,
+      $.type_stam,
+      $.assign_stam,
+      $.return_stam,
+      $._if_open,
+      $._for_open,
+      $._expr_tail,
+    ),
+
+    // `_expr` minus the four control forms, which the statement level
+    // classifies for itself above.
+    _expr_tail: $ => choice(
+      $.primary_expr,
+      $.unary_expr,
+      $.not_expr,
+      $.binary_expr,
+      $.raise_expr,
+    ),
+
+    _declaration: $ => choice(
+      $._import_stam,
+      $.let_stam,
+      $.var_stam,
+      $.fn_stam,
+      $.fn_expr_stam,
+      $.type_stam,
+      $.object_type,
+      $.view_stam,
+    ),
+
+    // ============================== Literals ==============================
+
     string: _ => token(seq(
       '"',
       repeat(choice(
-        /[^"\\]+/,  // any chars except " and \
-        /\\["\\\/bfnrt]/,  // simple escapes
-        /\\u[0-9a-fA-F]{4}/,  // \uXXXX
-        /\\u\{[0-9a-fA-F]+\}/,  // \u{X...}
+        /[^"\\]+/,
+        /\\["\\\/bfnrt]/,
+        /\\u[0-9a-fA-F]{4}/,
+        /\\u\{[0-9a-fA-F]+\}/,
       )),
       '"',
     )),
 
-    // Symbol as single token (same reason as string)
-    // Symbols don't allow newlines within them
     symbol: _ => token(seq(
       "'",
       repeat1(choice(
-        /[^'\\\n]+/,  // any chars except ', \, and newline
-        /\\['\\\/bfnrt]/,  // simple escapes
-        /\\u[0-9a-fA-F]{4}/,  // \uXXXX
-        /\\u\{[0-9a-fA-F]+\}/,  // \u{X...}
+        /[^'\\\n]+/,
+        /\\['\\\/bfnrt]/,
+        /\\u[0-9a-fA-F]{4}/,
+        /\\u\{[0-9a-fA-F]+\}/,
       )),
       "'",
     )),
 
-    // binary token: b'...' containing hex or base64 data
-    // Actual parsing done by AST builder
     binary: _ => token(seq("b'", repeat1(/[^']/), "'")),
 
-    _number: $ => choice($.imaginary, $.integer, $.float, $.decimal, $.sized_integer, $.sized_float),
+    // §7.16: every numeric literal carries a zero-width boundary guard, so a
+    // digit running into an identifier (`123abc`, `0b1010`, `1_`) is a lexical
+    // error rather than a number plus a silently juxtaposed statement. This is
+    // the general form of the §7.3 `1f32` bug.
+    _number: $ => seq(
+      choice($.imaginary, $.integer, $.float, $.decimal,
+        $.sized_integer, $.sized_float),
+      $._num_boundary,
+    ),
 
-    // Keep the imaginary suffix in one token so `4j` cannot be parsed as an
-    // integer followed by an identifier.  Signs remain unary operators.
-    imaginary: _ => token(seq(choice(float_literal, integer_literal, 'inf', 'nan'), 'j')),
-
+    imaginary: _ => token(seq(
+      choice(float_literal, integer_literal, 'inf', 'nan'), 'j',
+    )),
+    // §7.5: hex is the only radix prefix; `0b`/`0o` were considered and
+    // rejected.
     integer: _ => token(choice(hex_integer_literal, integer_literal)),
-
     float: _ => token(float_literal),
 
-    // 'n' = integer, 'm' = decimal (A.5 suffix split). The grammar accepts
-    // both suffixes on every numeric spelling so that fractional 'n'
-    // (e.g. 1.5n) reaches the AST builder and gets a targeted error
-    // pointing at 'm', instead of an opaque parse error.
-    decimal: $ => token(seq(
+    decimal: _ => token(seq(
       choice(float_literal, decimal_literal, integer_literal),
-      choice('n', 'm')
+      choice('n', 'm'),
     )),
 
-    // sized integer: integer literal with type suffix (i8, i16, i32, i64, u8, u16, u32, u64)
     sized_integer: _ => token(seq(
-      choice(hex_integer_literal, integer_literal),
-      sized_int_suffix
+      choice(hex_integer_literal, integer_literal), sized_int_suffix,
     )),
 
-    // sized float: float literal with type suffix (f16, f32, f64)
+    // §7.3: integer spellings are accepted, symmetric with `1i32`. Requiring a
+    // decimal point made `1f32` lex as two tokens with context-dependent
+    // results (bare `1f32` was `1`; `type(1f32)` was the base type `f32`).
     sized_float: _ => token(seq(
-      choice(
-        seq(choice('0', seq(/[1-9]/, optional(/\d+/))), '.', /\d+/),
-        seq('.', /\d+/)
-      ),
-      sized_float_suffix
+      choice(float_literal, decimal_literal, integer_literal), sized_float_suffix,
     )),
 
-    // datetime token: t'...' containing date/time text
-    // Actual parsing done by AST builder via datetime_parse()
-    datetime: _ => token(seq( "t'", repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)), "'" )),
+    datetime: _ => token(seq("t'", repeat(choice(/[0-9]/, /[:\-+.tTzZ ]/)), "'")),
 
-    // Note: 'null' is now part of $.base_type, no separate rule needed
-    // named_value combines scalar poison spellings into one token. Decimal poison
-    // remains visibly decimal and round-trips through the canonical source form.
     named_value: _ => token(choice(
-      'decimal.inf', 'decimal.nan', 'true', 'false', 'inf', 'nan'
+      'decimal.inf', 'decimal.nan', 'true', 'false', 'inf', 'nan',
     )),
 
-    // Containers: list, array, map, element
-
-    // expr statements that need ';'
-    _expr_stam: $ => choice(
-      $.let_stam,
-      $.fn_expr_stam,
-      $.type_stam,
-    ),
-
-    _content_expr: $ => choice(
-      repeat1(choice($.string, $.map, $.element)),
-      $.handler_expr,
-      $._attr_expr,
-      $._expr_stam
-    ),
-
-    // statement content
-    _statement: $ => choice(
-      $.object_type,
-      $.if_stam,
-      $.match_expr,
-      $.for_stam,
-      $.while_stam,
-      $.fn_stam,
-      $.view_stam,
-      $.break_stam,
-      $.continue_stam,
-      $.return_stam,
-      $.raise_stam,
-      $.var_stam,
-      $.assign_stam,
-      $.apply_stam,
-      prec.right('statement_end', seq($._content_expr, choice(token(prec(10, /\r\n|\n/)), ';'))),
-    ),
-
-    content: $ => choice(
-      seq(
-        repeat1($._statement),
-        optional($._content_expr)
-      ),
-      $._content_expr
-    ),
-
-    // list rule removed — (expr) is now only grouping via _parenthesized_expr
-    // [a, b, c] is the only ordered sequence syntax
-
-    // Literals and Containers
     _non_null_literal: $ => choice(
-      $._number,
-      $.string,
-      $.symbol,
-      $.datetime,
-      $.binary,
-      $.named_value,
+      $._number, $.string, $.symbol, $.datetime, $.binary, $.named_value,
     ),
 
-    _key: $ => choice($.symbol, $.identifier, $.base_type, $.last_index, '*'),
+    // ============================ Containers ==============================
 
-    map_item: $ => seq( field('name', $._key), ':', field('as', $._expr) ),
+    // Names, not types: a field/attribute may be spelled with a base-type
+    // keyword (`type: string`, `string: int`), which is what the C parser's
+    // `token_is_key` has always allowed.
+    _field_name: $ => choice($.symbol, $.identifier,
+      alias($._base_type_kw, $.base_type), alias('type', $.base_type)),
 
-    map: $ => seq( '{', comma_sep($.map_item), '}' ),
+    _key: $ => choice($.symbol, $.identifier,
+      alias($._base_type_kw, $.base_type), alias('type', $.base_type),
+      $.last_index, '*'),
 
-    array: $ => seq( '[', comma_sep($._expr), ']'),
+    map_item: $ => seq(field('name', $._key), ':', field('as', $._expr)),
 
-    range: $ => seq( $._expr, 'to', $._expr ),
+    // §5.9v3 / S16.4.1. Three disjoint brace forms. `map` and `block` are told
+    // apart by their interiors; `empty_braces` is the neutral node for `{}`,
+    // whose reading is settled by build_ast from context (value/content
+    // position -> empty map; fn control body -> empty map; pn control body ->
+    // empty block; bare pn statement -> error).
+    map: $ => seq('{', comma_sep1($.map_item), '}'),
 
-    attr_binary_expr: $ => choice(
-      ...binary_expr($, true),
+    // Block expressions (Rust-style): the value is the last expression and the
+    // `let`s are block-scoped. This is what gives arrow functions block bodies
+    // with no `({...})` parenthesization quirk.
+    block: $ => seq('{', $.content, '}'),
+
+    empty_braces: _ => seq('{', '}'),
+
+    _braced: $ => choice($.block, $.map, $.empty_braces),
+    // Declaration bodies are structural: always a block, never a map (§5.9v3).
+    _body_block: $ => choice($.block, $.empty_braces),
+
+    array: $ => seq('[', comma_sep($._expr), ']'),
+
+    // ============================= Elements ===============================
+
+    attr_name: $ => choice(alias($._attr_dotted_name, $.dotted_name), $._key),
+    _attr_dotted_name: $ => qualified_name($, 120),
+    dotted_name: $ => qualified_name($, 120),
+
+    attr: $ => seq(field('name', $.attr_name), ':', field('as', $._element_expr)),
+
+    // §7.11: `;` has left the element. Attributes are a strict comma list
+    // (pair-list regime); the attr-list -> content boundary takes an OPTIONAL
+    // comma — always permitted, and required exactly where the first content
+    // item could otherwise continue the last attribute value (`<div a: x, (y)>`)
+    // or where it disambiguates the tag (`<svg, .rect>` vs the maximal-munch
+    // qualified tag `<svg .rect>`). Content juxtaposes after that: `<div "s">`.
+    element: $ => seq('<',
+      field('tag', choice($.dotted_name, $.symbol, $.identifier)),
+      optional(choice(
+        // Attributes, then content only behind a REQUIRED boundary comma. The
+        // comma is also what settles a greedy attribute value: `<div a: x (y)>`
+        // makes the call `x(y)` the attribute, `<div a: x, (y)>` makes `(y)`
+        // content.
+        seq($._attr_list, optional(seq(',', $.element_content))),
+        // Content alone takes NO comma: `<div "text">` reads as markup should.
+        $.element_content,
+      )),
+      '>',
     ),
 
-    // expr excluding comparison exprs (for element attributes where < > conflict with tags)
-    _attr_expr: $ => choice(
-      $.primary_expr,
-      $.unary_expr,
-      alias($.attr_binary_expr, $.binary_expr),
+    _attr_list: $ => seq($.attr, repeat(seq(',', $.attr))),
+
+    // S16.5.1: element interiors use the relational-free expression tier, so
+    // `>` is unconditionally the terminator and `<` unconditionally opens a
+    // child. Parentheses remain islands: `(a > b)` re-enters the full grammar.
+    element_content: $ => seq(
+      $._element_statement,
+      repeat(seq(choice(';', $._elem_stmt_boundary), $._element_statement)),
+    ),
+
+    _element_statement: $ => choice(
+      $._declaration,
+      $._element_expr,
       $.if_expr,
       $.for_expr,
+      $.while_expr,
+      $.match_expr,
+      $.assign_stam,
+      $.return_stam,
+      $.apply_stam,
     ),
 
-    // Attribute names may be qualified keys such as svg.width.
-    attr_name: $ => choice(alias($._attr_dotted_name, $.dotted_name), $._key),
+    element_binary_expr: $ => choice(...binary_rules($, true)),
 
-    _attr_dotted_name: $ => qualified_name($, 51),
-
-    attr: $ => seq( field('name', $.attr_name), ':', field('as', $._attr_expr) ),
-
-    // Dotted name: arbitrary depth dotted segments
-    // Each segment is an identifier or symbol: a.b.'c'.d
-    // Keep this below primary/member expressions in value positions; it is a
-    // qualified name for element and attribute positions, not a primary expr.
-    dotted_name: $ => qualified_name($, 49),
-
-    element: $ => seq('<',
-      choice($.dotted_name, $.symbol, $.identifier),
-      optional(
-        seq(
-          $.attr,
-          repeat(seq(',', $.attr)),
-        ),
-      ),
-      optional(
-        seq(optional(choice(linebreak, ';')), $.content)
-      ),
-      '>'
+    _element_expr: $ => choice(
+      $.primary_expr,
+      $.unary_expr,
+      $.not_expr,
+      alias($.element_binary_expr, $.binary_expr),
     ),
 
-    // Expressions
+    // ============================ Expressions =============================
 
     _parenthesized_expr: $ => seq(
       '(',
       choice(
         $._expr,
-        // Prefer this prefix over reducing its first `let` as a complete expr.
         seq(repeat1(prec(1, seq($.let_expr, ','))), $._expr),
       ),
       ')',
@@ -424,20 +541,24 @@ module.exports = grammar({
     _expr: $ => choice(
       $.primary_expr,
       $.unary_expr,
+      $.not_expr,
       $.binary_expr,
-      $.let_expr,
       $.if_expr,
+      $.while_expr,
       $.match_expr,
       $.for_expr,
       $.raise_expr,
     ),
 
-    // raise expression - raises an error in functional context
-    raise_expr: $ => prec.right(seq(
-      'raise', field('value', $._expr)
-    )),
+    // S16.6.6: an unbraced body is an expression position, so `return`,
+    // `break` and `continue` are barred there. The zero-width scanner guard is
+    // withheld for exactly those words; `raise` is an expression and stays
+    // valid. A BRACED body in any of these positions is the statement spelling
+    // and is unaffected.
+    _expr_body: $ => seq($._expr_body_start, $._expr),
 
-    // prec(50) to make primary_expr higher priority than content
+    raise_expr: $ => prec.right(seq('raise', field('value', $._expr))),
+
     primary_expr: $ => prec(50, choice(
       $.named_value,
       $.last_index,
@@ -448,293 +569,217 @@ module.exports = grammar({
       $.binary,
       $.array,
       $.map,
+      $.block,
+      $.empty_braces,
       $.element,
-      $.base_type,  // includes null
-      $.pattern_island, // inline string/symbol type pattern
+      // `type` is deliberately absent from value position: it is the
+      // introducer of a type declaration, and admitting it as a bare value
+      // would let `type E { … }` read as three juxtaposed statements (S16.1.3)
+      // instead of a declaration. `type(x)` is reinstated as a call form below.
+      alias($._base_type_kw, $.base_type),
+      $.char_pattern_island,
       $.identifier,
       $.index_expr,
-      $.path_expr,   // /, ., or .. paths with optional segment
+      $.path_expr,
       $.member_expr,
-      $.parent_expr,  // expr.. for parent access shorthand
       $.handler_expr,
       $.propagate_expr,
       $.call_expr,
-      $.start_expr,
-      $.query_expr,         // expr?T or expr.?T - query by type
+      $.query_expr,
       $._parenthesized_expr,
-      $.fn_expr,    // arrow fn: (params) => expr - colocated with list for GLR
-      $.current_expr,   // ~ or ~# for pipe context
-      $.current_error_expr, // ^ inside an active error-handler body
-      $.variadic,       // ... (to prevent ... being parsed as .. + .)
+      $.fn_expr,
+      $.current_expr,
+      $.current_parent_expr,
+      $.current_error_expr,
+      $.variadic,
     )),
 
-    _arguments: $ => seq(
-      '(', comma_sep( field('argument', choice($.named_argument, $._expr)) ), ')',
-    ),
-
+    // Every postfix form below opens with a dual-role token, so each takes the
+    // `_join` guard: on its own line, `(`, `[`, `.`, and `^` are S16.2.3
+    // errors rather than silent continuations or silent new statements.
     call_expr: $ => prec.right(100, seq(
-      field('function', choice($.primary_expr, 'import')),
-      $._arguments,
-  )),
+      field('function', choice($.primary_expr, 'import',
+        alias($._apply_kw, $.identifier),
+        // `type(x)` — the keyword is callable even though it is not a bare
+        // value. One token of lookahead separates it from a declaration:
+        // `(` means call, an identifier means `type Name …`.
+        alias('type', $.base_type))),
+      alias($._call_lparen, '('),
+      comma_sep(field('argument', choice($.named_argument, $._expr))),
+      ')',
+    )),
 
-    // propagation owns its caret at the same postfix-primary tier as member
-    // access; wider operands must be parenthesized before this rule applies.
     propagate_expr: $ => prec.left(100, seq(
       field('operand', $.primary_expr),
-      field('propagate', '^'),
+      field('propagate', alias($._postfix_caret, '^')),
     )),
 
-    // handlers own their caret at the same postfix-primary tier as member
-    // access. The optional `~` arm receives the non-error operand value. The
-    // complete result remains primary-like, so `.field`, indexing, calls,
-    // propagation, and another handler continue through the normal chain.
     handler_expr: $ => prec.left(100, seq(
       field('operand', $.primary_expr),
-      '^', '{', field('body', $.content), '}',
+      // The handler brace must open on the same line as its `^` (§3.6); a
+      // line-start `{` is always a new map or block expression.
+      alias($._postfix_caret, '^'), '{', field('body', $.content), '}',
       optional(seq('~', '{', field('value', $.content), '}')),
     )),
 
-    // `_start` is scanned contextually so ordinary identifiers named `start`
-    // remain valid in parameters, fields, bindings, and call positions.
-    start_expr: $ => prec.right(90, seq(
-      $._start, field('operand', $.call_expr),
-    )),
-
-    // Indexing: arr[i] for 1-D / chained, or arr[i, j, k] for N-D multi-dim
-    // (NumPy/Julia/R/C++23 style; comma-separated indices resolve to a single
-    // stride-walking offset on N-D ArrayNum).
     index_expr: $ => prec.right(100, seq(
       field('object', $.primary_expr),
-      '[',
+      alias($._index_lbracket, '['),
       field('field', $._expr),
       repeat(seq(',', field('field', $._expr))),
       ']',
     )),
-
     last_index: _ => token(prec(2, 'last')),
 
-    // Query expression: expr?T (recursive) or expr.?T (direct)
-    query_expr: $ => seq(
+    query_expr: $ => prec.left('query_expr', seq(
       field('object', $.primary_expr),
       field('op', choice('?', '.?')),
       field('query', $.primary_type),
-    ),
+    )),
 
-    // Path prefix: /, ., or .. for path expressions
-    // Combines path_root, path_self, path_parent into single token for path_expr
-    _path_prefix: _ => token(choice('/', '.', '..')),
-
-    // Variadic marker: ... (higher priority than path_parent)
     variadic: _ => token(prec(2, '...')),
     var_param_marker: _ => token(prec(3, 'var')),
 
-    // Path parent: .. for parent directory (kept separate for parent_expr)
-    path_parent: _ => '..',
+    path_parent: _ => token(prec(3, '~~')),
+    path_root: _ => token(prec(3, '/')),
 
-    // Path expression: /, ., or .. optionally followed by a field
-    // This allows /etc, .test, ..parent, /, ., .. as path expressions
-    path_expr: $ => prec.right(seq(
-      $._path_prefix,
-      optional(field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type)))
-    )),
-
-    // Member access is the value form of dot syntax; dotted_name is reserved
-    // for qualified element and attribute names.
-    member_expr: $ => prec.left('member', seq(
-      field('object', choice($.primary_expr, $.member_expr)), '.',
-      field('field', choice($.identifier, $.symbol, $.integer, $.path_wildcard, $.base_type))
-    )),
-
-    // Parent access: expr.. for .parent, expr.._.. for .parent.parent
-    parent_expr: $ => seq(
-      field('object', $.primary_expr),
-      $.path_parent,                     // .. for parent access
-      repeat(seq('_', $.path_parent))   // _.. for additional parent levels
+    member_expr: $ => choice(
+      prec.left(110, seq(
+        field('object', choice($.primary_expr, $.member_expr)),
+        alias($._member_dot, '.'),
+        field('field', choice($.identifier, $.symbol, $.integer,
+          $.path_wildcard, $.base_type)),
+      )),
+      prec.left('member', seq(
+        field('object', choice($.primary_expr, $.member_expr)),
+        alias($._member_dot, '.'),
+        field('field', choice($.path_parent, $.path_root)),
+      )),
     ),
 
-    // Path wildcard: * (single segment) or ** (recursive, zero or more segments)
+    // S2.4.1v2: rooted `/.a` and relative `.a`. A path expression may only
+    // begin a statement — never continue one — which is why a line-start `.`
+    // is an S16.2.3 error unless it is the `.ident(` member-call form.
+    // §7.15: the RELATIVE path is introduced by `\.` — `\` reads as the escape
+    // character, saying "this dot is not member access, it introduces a path".
+    // The rooted form `/.a` is unchanged. Retiring the bare-`.` relative path is
+    // what lets `.ident` at a line start mean member access and nothing else,
+    // which in turn widens the S16.2.4 carve-out to full leading-dot chains.
+    // (`./` was the front-runner but collides with S10.5.1's postfix root step
+    // `value./.name`; `\.` leaves that spelling untouched.)
+    path_expr: $ => prec.right(choice(
+      seq('/', '.', field('field', choice($.identifier, $.symbol,
+        $.integer, $.path_wildcard, $.base_type, $.path_parent))),
+      seq('\\.', field('field', choice($.identifier, $.symbol,
+        $.integer, $.path_wildcard, $.base_type, $.path_parent, $.path_root))),
+    )),
+
+    current_parent_expr: _ => token(prec(4, '~~')),
     path_wildcard: _ => token(choice('**', '*')),
 
     _binary_eq_symbol_op: _ => token(choice('==', '!=')),
-
     _binary_eq_word_op: _ => token(choice('eq', 'ne')),
-
     _binary_word_relation_op: _ => token(choice('lt', 'le', 'ge', 'gt')),
 
-    binary_expr: $ => choice(
-      ...binary_expr($, false),
-    ),
+    binary_expr: $ => choice(...binary_rules($, false)),
 
-    // Current item (~) or key/index (~#) reference in pipe context
     current_expr: _ => token(choice('~#', '~')),
-
-    // current error reference. The token is admitted by the general expression
-    // grammar so member/index builders can compose with it; build_ast enforces
-    // that it occurs only in a handler body.
     current_error_expr: _ => prec(0, token('^')),
 
     _at: _ => token(prec(2, 'at')),
     _into: _ => token(prec(2, 'into')),
+    _apply_kw: _ => token(prec(2, 'apply')),
 
-    // Unary expression. Error tests use the ordinary `is error` binary form;
-    // caret is reserved for postfix propagation, handlers, and handler-local
-    // current-error access.
-    unary_expr: $ => choice(
-      prec.left(90, seq(
-        field('operator', choice('not', '!', '-', '+', '*')),
-        field('operand', $._expr),
-      )),
-    ),
+    // §7.1: unary `!` is GONE from value expressions — `!true` used to mean
+    // type complement and silently produced a type. `not` is the one logical
+    // negation (S10.3.1 prefers words); `!` keeps its type-level roles.
+    // §7.12: unary `+` is kept, so the whole arithmetic family `- + *` stays
+    // dual-role at a line start rather than `+` becoming a lone exception.
+    unary_expr: $ => prec.right(90, seq(
+      field('operator', choice('-', '+', '*')),
+      field('operand', $._expr),
+    )),
+
+    not_expr: $ => prec.right('logical_not', seq(
+      'not', field('operand', $._expr),
+    )),
 
     identifier: _ => {
-      // ECMAScript 2023-compliant identifier regex:
-      // const identifierRegex = /^[$_\p{ID_Start}][$_\u200C\u200D\p{ID_Continue}]*$/u;
-
-      // 'alpha' and 'alphanumeric' here, copied from Tree-sitter JS grammar,
-      // are not exactly the same as ECMA standard, which is a limitation of Tree-sitter RegEx
       const alpha = /[^\x00-\x1F\s\p{Zs}0-9:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
       const alphanumeric = /[^\x00-\x1F\s\p{Zs}:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
       return token(seq(alpha, repeat(alphanumeric)));
     },
 
-    // Function parameter: identifier/symbol with optional var, type, and default.
-    // Supports: name, name?, name: type, name?: type, name = default, name: type = default
+    // ============================= Functions ==============================
+
     parameter: $ => choice(
       seq(
         optional(field('var', $.var_param_marker)),
         field('name', choice($.identifier, $.symbol)),
-        optional(field('optional', '?')),  // optional marker BEFORE type
-        optional(seq(':', field('type', $._value_type_expr))),
+        optional(field('optional', '?')),
+        optional(seq(':', field('type', $._annotation_type))),
         optional(seq('=', field('default', $._expr))),
       ),
-      field('variadic', $.variadic),  // variadic marker (must be last parameter)
+      field('variadic', $.variadic),
     ),
 
-    // Named argument in function call: name: value
     named_argument: $ => seq(
       field('name', choice($.identifier, $.symbol)),
       ':',
       field('value', $._expr),
     ),
 
-    // fn with stam body
+    // §7.6: `pub` is a uniform prefix MODIFIER — `pub let`, `pub fn`,
+    // `pub type`. The old spelling replaced `let` outright (`pub x = 1`),
+    // which made one keyword compose two different ways. `pub var` stays
+    // illegal simply by the modifier not composing with `var`.
     fn_stam: $ => seq(
-      optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
-      field('kind', choice('fn','pn')), field('name', choice($.identifier, $.symbol)),
-      '(', optional(field('declare', $.parameter)), repeat(seq(',', field('declare', $.parameter))), ')',
-      // return type with optional error type: T or T^E or T^
+      optional(field('pub', 'pub')),
+      field('kind', choice('fn', 'pn')),
+      field('name', choice($.identifier, $.symbol)),
+      '(', optional(field('declare', $.parameter)),
+      repeat(seq(',', field('declare', $.parameter))), ')',
       optional(field('type', $.return_type)),
-      '{', field('body', $.content), '}',
+      field('body', $._body_block),
     ),
 
-    // view/edit template declaration
-    // Syntax: view [name:] pattern [(params)] [return_type] [state k:v, ...] { body } [on event() { ... }]*
-    // Pattern is required; () optional unless return type present; name: optional
-    view_stam: $ => seq(
-      field('kind', token(prec(1, choice('view', 'edit')))),
-      // optional name: (colon disambiguates name from pattern)
-      optional(seq(field('name', $.identifier), ':')),
-      // model pattern — element, map, type name, or union with |
-      // Uses view_pattern (restricted _type_expr) to avoid {map_type}/{body} ambiguity
-      field('pattern', $.view_pattern),
-      // optional params and return type — () required if return type present
-      optional(seq(
-        '(', optional(seq(field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))))), ')',
-        optional(field('type', $.return_type)),
-      )),
-      // optional state declarations
-      optional(field('state', $.state_decl)),
-      // body — functional (fn) semantics
-      '{', field('body', $.content), '}',
-      // zero or more event handlers
-      repeat(field('handler', $.event_handler)),
-    ),
-
-    // View pattern: element or type name (identifier / base_type).
-    // map_type is intentionally excluded to avoid ambiguity with the body {}.
-    // Atom: element_type | identifier | base_type (with optional occurrence)
-    // Union: atom | atom | ...
-    _view_pattern_atom: $ => choice(
-      $.element_type,
-      $.identifier,
-      $.base_type,
-    ),
-
-    view_pattern: $ => choice(
-      $._view_pattern_atom,
-      alias($.view_pattern_union, $.binary_type),
-    ),
-
-    view_pattern_union: $ => prec.left('set_union', seq(
-      field('left', $._view_pattern_atom),
-      field('operator', '|'),
-      field('right', choice($._view_pattern_atom, alias($.view_pattern_union, $.binary_type))),
-    )),
-
-    // State declarations: state name: val, name: val, ...
-    state_decl: $ => seq(
-      'state',
-      $.state_entry, repeat(seq(',', $.state_entry)),
-    ),
-
-    state_entry: $ => seq(
-      field('name', $.identifier), ':', field('value', $._expr),
-    ),
-
-    // Event handler: on event_name(param) { body }
-    // Handler body uses procedural (pn) semantics
-    event_handler: $ => seq(
-      'on', field('event', $.identifier),
-      '(', optional(field('declare', $.parameter)), ')',
-      '{', field('body', $.content), '}',
-    ),
-
-    // Note: apply; (bare apply statement) is a splat statement that
-    // re-dispatches each child of the matched item (~) through the template
-    // registry. Equivalent to `for (c in ~) apply(c)`. Only valid inside a
-    // view/edit body; rejected elsewhere by build_ast semantic analysis.
-    // Tokenized as a single lex unit (no whitespace allowed between 'apply'
-    // and ';') so that `apply(arg)` keeps parsing as a regular call.
-    apply_stam: $ => token(seq('apply', ';')),
-
-    // fn with expr body; to KISS and we don't support pn expr
     fn_expr_stam: $ => seq(
-      optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
+      optional(field('pub', 'pub')),
       'fn', field('name', choice($.identifier, $.symbol)),
-      '(', optional(seq(field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))))), ')',
-      // return type with optional error type: T or T^E or T^
+      '(', optional(seq(field('declare', $.parameter),
+        repeat(seq(',', field('declare', $.parameter))))), ')',
       optional(field('type', $.return_type)),
-      '=>', field('body', $._expr)
+      '=>', field('body', $._expr_body),
     ),
 
-    // Anonymous Function (arrow expression)
-    //
-    // The untyped branch must remain an expression list. With `parameter` here,
-    // Tree-sitter reduces `(x)` to a parenthesized expression before it sees
-    // `=>`; the distinct branch preserves the shift needed for arrow heads.
+    // The arrow body is an ordinary expression, and since `{...}` is now
+    // interior-differentiated (§5.9v3) that covers both block bodies
+    // (`(x) => { let y = x + 1 y }`) and map results (`(x) => {a: x}`).
     fn_expr: $ => prec.right(choice(
       prec.dynamic(1, seq(
-        '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
-        optional(field('type', $.return_type)), '=>', field('body', $._expr),
+        '(', field('declare', $.parameter),
+        repeat(seq(',', field('declare', $.parameter))), ')',
+        optional(field('type', $.return_type)), '=>', field('body', $._expr_body),
       )),
       seq(
         '(', $._expr, repeat(seq(',', $._expr)), ')',
-        optional(field('type', $.return_type)), '=>', field('body', $._expr),
+        optional(field('type', $.return_type)), '=>', field('body', $._expr_body),
       ),
-      seq('(', ')', optional(field('type', $.return_type)), '=>', field('body', $._expr)),
+      seq('(', ')', optional(field('type', $.return_type)),
+        '=>', field('body', $._expr_body)),
     )),
 
-    // use prec.right so the expression is consumed greedily
-    // Single assignment: let x = expr
-    // Positional decomposition: let a, b = expr
-    // Named decomposition: let a, b at expr
+    // ======================= Declarations and control =====================
+
     assign_expr: $ => prec.right(choice(
-      // single variable assignment
       seq(
         field('name', choice($.identifier, $.symbol)),
-        optional(seq(':', field('type', $._value_type_expr))), '=', field('as', $._expr),
+        optional(seq(':', field('type', $._annotation_type))),
+        '=', field('as', $._expr),
       ),
-      // multi-variable decomposition: let a, b = expr OR let a, b at expr
+      // §7.8: comma decomposition stands as designed — `let a, b = expr`
+      // (positional) and `let a, b at expr` (named). Bracket patterns were
+      // rejected; the first `=`/`at` position is the discriminator.
       seq(
         field('name', choice($.identifier, $.symbol)),
         repeat1(seq(',', field('name', choice($.identifier, $.symbol)))),
@@ -743,141 +788,124 @@ module.exports = grammar({
       ),
     )),
 
-    let_expr: $ => seq(
-      'let', field('declare', $.assign_expr)
-    ),
+    let_expr: $ => seq('let', field('declare', $.assign_expr)),
 
     let_stam: $ => seq(
-      choice('let', 'pub'),
-      field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
+      optional(field('pub', 'pub')), 'let',
+      field('declare', $.assign_expr),
+      repeat(seq(',', field('declare', $.assign_expr))),
     ),
 
-    // Expression-form if: if (cond) expr else expr
-    // Condition always in parens. Else is REQUIRED (ternary-style).
-    // Both then and else can be a block { content } (preferred over map via prec.dynamic).
-    if_expr: $ => prec.right(seq(
-      'if', '(', field('cond', $._expr), ')',
+    var_stam: $ => seq(
+      'var', field('declare', $.assign_expr),
+      repeat(seq(',', field('declare', $.assign_expr))),
+    ),
+
+    assign_stam: $ => seq(
+      field('target', choice($.identifier, $.index_expr, $.member_expr)),
+      '=', field('value', $._expr),
+    ),
+
+    // S16.6.1: ONE node, two spellings. There is no separate statement form —
+    // the expression/statement distinction is semantic (S16.6.5), enforced in
+    // build_ast on the fn/pn boundary.
+    // S16.6.2: `(` immediately after the keyword COMMITS to the parenthesized
+    // spelling, so a bare head may not begin with `(`. `_not_paren` is what
+    // makes `if (a+b)*2 { … }` a loud error instead of a second parse.
+    // S16.6.3: `else` is OPTIONAL in both spellings; an absent else yields
+    // null in value position. A dangling `else` binds to the nearest `if`.
+    if_expr: $ => choice($._if_closed, $._if_open),
+
+    // Split by TAIL so §7.14 can classify without re-deriving it: the bare
+    // spelling with no `else` ends on a brace that admits no postfix; every
+    // other shape ends in an expression.
+    _if_closed: $ => seq(
+      'if', $._not_paren, field('cond', $._expr), field('then', $._braced),
+    ),
+    // The split reopens the dangling-else decision at the grammar level: in
+    // `if (a) if b { } else …` the trailing `else` may close either `if`.
+    // S16.6.3 binds it to the NEAREST one, which is this rule taking it, so
+    // `_if_open` outranks `_if_closed`.
+    _if_open: $ => prec.right(1, choice(
+      seq('if', '(', field('cond', $._expr), ')', field('then', $._expr_body),
+        optional(seq('else', field('else', $._expr_body)))),
+      seq('if', $._not_paren, field('cond', $._expr), field('then', $._braced),
+        'else', field('else', $._expr_body)),
+    )),
+
+    // `while` is procedural-only and always discards its body value, so its
+    // body is structurally a block — a map there would be dead (§5.9v3).
+    while_expr: $ => prec.right(seq(
+      'while',
       choice(
-        prec.dynamic(1, seq('{', field('then', $.content), '}')),
-        field('then', $._expr),
-      ),
-      'else', choice(
-        prec.dynamic(1, seq('{', field('else', $.content), '}')),
-        field('else', $._expr),
+        seq('(', field('cond', $._expr), ')', field('body', $._body_block)),
+        seq($._not_paren, field('cond', $._expr), field('body', $._body_block)),
       ),
     )),
 
-    // Block-form if: if cond { stam } [else { stam } | else if_stam | else expr]
-    // Condition without required parens. Block body. Else can be expr (NEW).
-    if_stam: $ => prec.right(1, seq(
-      'if', field('cond', $._expr),
-      '{', optional(field('then', $.content)), '}',
-      optional(seq('else', choice(
-        prec.dynamic(1, seq('{', optional(field('else', $.content)), '}')),
-        field('else', $.if_stam),
-        field('else', $._expr),
-      ))),
-    )),
-
-    // Match expression — unified form with required braces
-    // match expr { case_arms }
-    // Each arm can be expression form (case T: expr) or statement form (case T { stmts })
     match_expr: $ => seq(
       'match', field('scrutinee', $._expr),
-      '{',
-      repeat1(choice($.match_arm, $.match_default)),
-      '}'
+      '{', repeat1(choice($.match_arm, $.match_default)), '}',
     ),
-
+    // §5.5: match keeps its single braced form — the braces delimit an arm
+    // LIST, not a body, so no parenthesized spelling exists.
     match_arm: $ => prec.right(seq(
-      'case', field('pattern', $._type_expr),
+      'case', field('pattern', $._annotation_type),
       choice(
-        seq(':', field('body', $._expr)),
-        seq('{', field('body', $.content), '}')
-      )
+        seq(':', field('body', $._expr_body)),
+        field('body', $._body_block),
+      ),
     )),
-
     match_default: $ => prec.right(seq(
       'default',
       choice(
-        seq(':', field('body', $._expr)),
-        seq('{', field('body', $.content), '}')
-      )
+        seq(':', field('body', $._expr_body)),
+        field('body', $._body_block),
+      ),
     )),
 
-    // Loop variable binding with optional index and type-annotated key
-    // Single variable: for v in expr
-    // Two variables: for k, v in expr (k = index for arrays, key for maps)
-    // Type-filtered: for k:int, v in expr (indexed key only) / for k:symbol, v in expr (named key only)
     loop_expr: $ => choice(
-      // for value in expr
       seq(
         field('name', $.identifier),
         optional(field('optional', '?')),
         field('op', choice('in', $._at)),
         field('as', $._expr),
-        optional(seq('on', field('on', $._expr)))
+        optional(seq('on', field('on', $._expr))),
       ),
-      // for key, value in expr (with optional type annotation on key)
       seq(
         field('index', $.identifier),
         optional(seq(':', field('index_type', $.identifier))),
         ',', field('name', $.identifier),
         optional(field('optional', '?')),
         'in', field('as', $._expr),
-        optional(seq('on', field('on', $._expr)))
+        optional(seq('on', field('on', $._expr))),
       ),
     ),
 
-    // let clause within for: let name = expr
     for_let_clause: $ => seq(
-      'let', field('name', $.identifier), '=', field('value', $._expr)
+      'let', field('name', $.identifier), '=', field('value', $._expr),
     ),
-
-    // where clause: where expr
-    // Use prec.dynamic to prefer this over binary 'where' in for context
-    for_where_clause: $ => prec.dynamic(10, seq(
-      'where', field('cond', $._expr)
-    )),
-
-    // order by clause: order by expr [asc|desc] [, expr [asc|desc], ...]
+    for_where_clause: $ => prec.dynamic(10, seq('where', field('cond', $._expr))),
     order_spec: $ => seq(
-      field('expr', $._expr),
-      optional(field('dir', choice('asc', 'desc')))
+      field('expr', $._expr), optional(field('dir', choice('asc', 'desc'))),
     ),
-
     for_order_clause: $ => seq(
       'order', 'by', field('spec', $.order_spec),
-      repeat(seq(',', field('spec', $.order_spec)))
+      repeat(seq(',', field('spec', $.order_spec))),
     ),
-
-    // group key spec: expr [as alias]
     group_key_spec: $ => seq(
-      field('key', $.primary_expr),
-      optional(seq('as', field('alias', $.identifier)))
+      field('key', $.primary_expr), optional(seq('as', field('alias', $.identifier))),
     ),
-
-    // group by clause: group by expr [as alias] [, expr [as alias], ...] into name
     for_group_clause: $ => prec.dynamic(10, seq(
-      'group', 'by',
-      field('spec', $.group_key_spec),
+      'group', 'by', field('spec', $.group_key_spec),
       repeat(seq(',', field('spec', $.group_key_spec))),
-      $._into, field('name', $.identifier)
+      $._into, field('name', $.identifier),
     )),
-
-    // limit clause: limit expr or limit last expr
     for_limit_clause: $ => seq(
-      'limit',
-      optional(field('last', $.last_index)),
-      field('count', $._expr)
+      'limit', optional(field('last', $.last_index)), field('count', $._expr),
     ),
+    for_offset_clause: $ => seq('offset', field('count', $._expr)),
 
-    // offset clause: offset expr
-    for_offset_clause: $ => seq(
-      'offset', field('count', $._expr)
-    ),
-
-    // shared for clauses: fixed order where → group → order → limit → offset (like SQL)
     for_clauses: $ => repeat1(choice(
       field('where', $.for_where_clause),
       field('group', $.for_group_clause),
@@ -886,392 +914,286 @@ module.exports = grammar({
       field('offset', $.for_offset_clause),
     )),
 
-    // use prec.right so the body expression is consumed greedily
-    for_expr: $ => prec.right(seq(
-      'for', '(',
+    _loop_head: $ => seq(
       field('declare', $.loop_expr),
       repeat(seq(',', field('declare', $.loop_expr))),
-      // optional let clauses (comma-separated after declarations)
       repeat(seq(',', field('let', $.for_let_clause))),
-      // optional clauses: where → group → order → limit → offset
       optional($.for_clauses),
-      ')',
-      choice(
-      prec.dynamic(1, seq('{', field('then', $.content), '}')),
-      field('then', $._expr),
-      )
-    )),
-
-    for_stam: $ => seq(
-      'for',
-      field('declare', $.loop_expr),
-      repeat(seq(',', field('declare', $.loop_expr))),
-      // optional let clauses
-      repeat(seq(',', field('let', $.for_let_clause))),
-      // optional clauses: where → group → order → limit → offset
-      optional($.for_clauses),
-      '{', field('then', $.content), '}'
     ),
 
-    // while statement (procedural only)
-    while_stam: $ => seq(
-      'while', '(', field('cond', $._expr), ')',
-      '{', field('body', $.content), '}'
-    ),
+    // `for` needs no `_not_paren` guard: a loop declaration always begins with
+    // an identifier, so `(` after `for` is unambiguously the paren spelling.
+    for_expr: $ => choice($._for_closed, $._for_open),
+    _for_closed: $ => seq('for', $._loop_head, field('then', $._braced)),
+    _for_open: $ => prec.right(seq('for', '(', $._loop_head, ')',
+      field('then', $._expr_body))),
 
-    // break statement (procedural only)
-    break_stam: $ => seq('break', optional(';')),
+    break_stam: _ => 'break',
+    continue_stam: _ => 'continue',
 
-    // continue statement (procedural only)
-    continue_stam: $ => seq('continue', optional(';')),
-
-    // return statement (procedural only)
-    // use prec.right to prefer consuming expression when present
+    // S16.2.5: `return` takes a following start-token line as its value, so
+    // `return` ⏎ `42` means `return 42`. A bare return is `return` followed by
+    // a separator or the closing brace. The JS restricted-production trap is
+    // fixed by inversion rather than by a special rule.
     return_stam: $ => prec.right(seq(
-      'return',
-      optional(field('value', $._expr)),
-      optional(';')
+      'return', optional(field('value', $._expr)),
     )),
 
-    // raise statement (procedural only) - raises an error to caller
-    // Reuses raise_expr to avoid GLR conflict between raise_expr and raise_stam
-    raise_stam: $ => prec.right(seq(
-      $.raise_expr,
-      optional(';')
-    )),
+    // §7.7: the fused `apply;` token is retired. Bare `apply` is a keyword
+    // statement; `apply(...)` stays an ordinary call. The same-line `(` test
+    // that separates them is exactly the S16.2.5 shape already used by
+    // `return`, so no fused lexeme is needed.
+    apply_stam: $ => seq($._apply_kw, $._not_paren),
 
-    // var statement for mutable variables (procedural only)
-    var_stam: $ => seq(
-      'var', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr))),
-      optional(';')
+    // ========================= View declarations ==========================
+
+    view_stam: $ => seq(
+      field('kind', token(prec(1, choice('view', 'edit')))),
+      optional(seq(field('name', $.identifier), ':')),
+      field('pattern', $.view_pattern),
+      optional(seq(
+        '(', optional(seq(field('declare', $.parameter),
+          repeat(seq(',', field('declare', $.parameter))))), ')',
+        optional(field('type', $.return_type)),
+      )),
+      optional(field('state', $.state_decl)),
+      field('body', $._body_block),
+      repeat(field('handler', $.event_handler)),
     ),
 
-    // assignment statement for mutable variables (procedural only)
-    // use prec.right to prefer consuming expression when present
-    // supports: x = val, arr[i] = val, obj.field = val
-    assign_stam: $ => seq(
-      field('target', choice($.identifier, $.index_expr, $.member_expr)), '=', field('value', $._expr),
-      optional(';')
+    state_decl: $ => seq('state', $.state_entry, repeat(seq(',', $.state_entry))),
+    // `name: expr` is template-local state; a bare `name` binds engine-backed
+    // state whose value the host owns, so the initializer is optional.
+    state_entry: $ => seq(field('name', $.identifier),
+      optional(seq(':', field('value', $._expr)))),
+
+    event_handler: $ => seq(
+      'on', field('event', $.identifier),
+      '(', optional(field('declare', $.parameter)), ')',
+      field('body', $._body_block),
     ),
 
-    // Type Definitions: ----------------------------------
-
-    // Occurrence modifiers for types: ?, +, *, [], [n], [n, m], [n+]
-    occurrence: $ => choice('?', '+', '*', $.occurrence_count),
-
-    // Occurrence count: [] (any), [n] (exact), [n, m] (range), [n+] (unbounded)
-    // Higher precedence than primary_type to prefer occurrence over array_type
-    occurrence_count: $ => prec(2, choice(
-      seq('[', ']'),                                 // any count: T[]
-      seq('[', $.integer, ']'),                      // exactly n: T[5]
-      seq('[', $.integer, ',', $.integer, ']'),      // n to m: T[2, 5]
-      seq('[', $.integer, '+', ']'),                 // n or more: T[3+]
+    _view_pattern_primary: $ => choice($.element_type, $.identifier, $.base_type),
+    view_pattern: $ => choice(
+      $._view_pattern_primary,
+      alias($.view_pattern_union, $.binary_type),
+    ),
+    view_pattern_union: $ => prec.left('set_union', seq(
+      field('left', $._view_pattern_primary),
+      field('operator', '|'),
+      field('right', choice($._view_pattern_primary,
+        alias($.view_pattern_union, $.binary_type))),
     )),
 
-    // Keep type-only keywords in one token; `type` remains separate because it
-    // starts declarations, while the builder distinguishes the other spellings.
+    // ============================ Type language ===========================
+
     _base_type_kw: _ => token(prec(1, choice(
-      'null', 'any', 'bool', 'int64', 'int', 'float', 'f64', 'complex', 'decimal', 'integer', 'number',
-      'datetime', 'date', 'time', 'binary', 'range',
-      'list', 'array', 'map', 'element', 'entity', 'object', 'function',
-      'error', 'string', 'symbol',
-      'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32'
+      'null', 'any', 'bool', 'int64', 'int', 'float', 'f64', 'complex',
+      'decimal', 'integer', 'number', 'datetime', 'date', 'time', 'binary',
+      'range', 'list', 'array', 'map', 'element', 'entity', 'object',
+      'function', 'error', 'string', 'symbol',
+      'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f16', 'f32',
     ))),
+    base_type: $ => choice($._base_type_kw, 'type'),
 
-    base_type: $ => prec(1, choice(
-      $._base_type_kw,
-      'type'
+    occurrence: $ => choice('?', '+', '*', $.occurrence_count),
+    // The occurrence bracket takes the same same-line guard as an index: `[` is
+    // dual-role in TYPE space too (`int[3]` is an occurrence, `[int]` an array
+    // type), so `type T = int` ⏎ `[3]` must be the S16.2.3 error rather than a
+    // silent continuation. This is O3's rule applied on the grammar side — type
+    // space shares the S16.2.2 continuation set instead of keeping its own.
+    occurrence_count: $ => prec(2, choice(
+      seq(alias($._index_lbracket, '['), ']'),
+      seq(alias($._index_lbracket, '['), $.integer, ']'),
+      seq(alias($._index_lbracket, '['), $.integer, ',', $.integer, ']'),
+      seq(alias($._index_lbracket, '['), $.integer, '+', ']'),
     )),
 
-    // list_type for tuple types and pattern grouping
-    // e.g. (int, string) for tuple, ("a" to "z")+ for grouped pattern with occurrence
-    // AST builder rejects comma-separated multi-element list_type in pattern context.
+    return_occurrence_type: $ => seq(
+      field('operand', choice($.base_type, $.identifier)),
+      optional(field('operator', $.occurrence)),
+    ),
+    return_type_pattern: $ => prec.left(seq(
+      field('type', $.return_occurrence_type),
+      repeat(seq(choice('|', '&', '!'), field('type', $.return_occurrence_type))),
+    )),
+    return_type: $ => prec.right(seq(
+      field('ok', $.return_type_pattern),
+      optional(seq('^', optional(field('error', $.return_type_pattern)))),
+    )),
+
     list_type: $ => prec.dynamic(2, seq(
-      // list cannot be empty
-      '(', seq($._value_type_expr, repeat(seq(',', $._value_type_expr))), ')',
+      '(', seq($._type_pattern, repeat(seq(',', $._type_pattern))), ')',
     )),
-
-    array_type: $ => seq(
-      '[', comma_sep($._value_type_expr), ']',
+    array_type: $ => seq('[', comma_sep($._type_pattern), ']'),
+    map_type_item: $ => seq(
+      field('name', $._field_name),
+      optional(field('optional', '?')),  // §7.22: optional FIELD, as in object types
+      ':', field('as', $._type_pattern),
     ),
-
-    map_type_item: $=> seq(
-      field('name', choice($.identifier, $.symbol)), ':', field('as', $._value_type_expr)
-    ),
-
     map_type: $ => seq('{',
-      optional(seq($.map_type_item, repeat(seq(',', $.map_type_item)))), '}'
+      optional(seq($.map_type_item, repeat(seq(',', $.map_type_item)))), '}',
     ),
 
-    attr_type: $ => prec(1, seq(
-      field('name', choice($.symbol, $.identifier)),
-      ':', field('as', $._value_type_expr),
-      optional(seq('=', field('default', $._attr_expr))),
+    pattern_attr_type: $ => prec(1, seq(
+      field('name', $._field_name),
+      // §7.22: `a?: T` marks the FIELD optional (it may be absent);
+      // `a: T?` makes the VALUE nullable. The two are different claims.
+      optional(field('optional', '?')),
+      ':', field('as', $._type_pattern),
+      optional(seq('=', field('default', $._non_null_literal))),
     )),
+    content_type: $ => seq($._type_pattern, repeat(seq(',', $._type_pattern))),
 
-    content_type: $ => seq(
-      $._value_type_expr,
-      repeat(seq(',', $._value_type_expr)),
-    ),
-
-    element_type: $ => seq('<', $.identifier, _attr_content_type($), '>'),
+    // A namespace-qualified tag is legal in an element VALUE (S2.4.3v2), so an
+    // element TYPE must admit one too — `type T = <soap.Fault …>`.
+    element_type: $ => seq('<', choice($.dotted_name, $.identifier), choice(
+      seq(alias($.pattern_attr_type, $.attr),
+        repeat(seq(',', alias($.pattern_attr_type, $.attr))),
+        optional(seq(',', $.content_type))),
+      optional($.content_type),
+    ), '>'),
 
     fn_param: $ => seq(
-      // param type is required
-      field('name', $.identifier), seq(':', field('type', $._value_type_expr)),
+      field('name', $.identifier), seq(':', field('type', $._type_pattern)),
     ),
-
     fn_type: $ => seq(
       'fn',
-      optional(seq(
-        '(', optional(field('declare', $.fn_param)), repeat(seq(',', field('declare', $.fn_param))), ')',
-      )),
+      optional(seq('(', optional(field('declare', $.fn_param)),
+        repeat(seq(',', field('declare', $.fn_param))), ')')),
       field('type', $.return_type),
     ),
 
-    // Range type: literal 'to' literal — supports integer ranges as types
-    // e.g. 1 to 10, 0 to 255
     range_type: $ => prec.left('range_to', seq(
       field('start', $._non_null_literal), 'to', field('end', $._non_null_literal),
     )),
 
     primary_type: $ => choice(
-      $.range_type,        // range_type first to ensure "a" to "z" is parsed as range
-      $._non_null_literal, // non-null literal values; null is now a base type
+      $.range_type,
+      $._non_null_literal,
       $.base_type,
-      $.identifier,  // type reference / pattern reference
+      $.identifier,
       $.list_type,
       $.array_type,
       $.map_type,
       $.element_type,
-      // Delimited string/symbol patterns are self-contained type values.
-      $.pattern_island,
+      $.char_pattern_island,
     ),
 
-    // Occurrence applied to primary type: T?, T+, T*, T[n]
-    // No chaining allowed (like regex) - use explicit grouping: (T*)[2]
-    // Use prec.dynamic(1) to prefer occurrence over concat_type continuation.
     occurrence_type: $ => prec.dynamic(1, prec.right(seq(
-      field('operand', $.primary_type),
-      field('operator', $.occurrence),
+      field('operand', $.primary_type), field('operator', $.occurrence),
     ))),
-
-    // Nullable elements bind before the array occurrence: `int?[]` is an
-    // array of nullable int values, not an optional int array. The existing
-    // occurrence builder receives the inner `int?` as its operand.
     nullable_array_type: $ => prec.dynamic(2, prec.right(seq(
-      field('operand', $.occurrence_type),
-      field('operator', $.occurrence_count),
+      field('operand', $.occurrence_type), field('operator', $.occurrence_count),
     ))),
+    negation_type: $ => prec.right(seq('!', field('operand', $.primary_type))),
 
-    // Prefix negation: !T (for string/symbol patterns: !\d)
-    // Validated in AST builder for context-appropriate usage.
-    negation_type: $ => prec.right(seq(
-      '!', field('operand', $.primary_type),
-    )),
-
-    // Constrained type: base_type that (constraint_expr)
-    // e.g. int that (5 < ~ < 10), string that (len(~) > 0)
-    // The constraint uses ~ to refer to the value being checked
-    // Parentheses required to avoid grammar ambiguity with index expressions
-    constrained_type: $ => seq(
-      field('base', $.unary_type),
-      'that',
-      '(',
-      field('constraint', $._expr),
-      ')',
-    ), 
-
-    // Unary type: primary type with optional occurrence modifier
-    // Replaces the old unary_type → _quantified_type chain
     unary_type: $ => prec.right(choice(
       $.nullable_array_type,
       $.occurrence_type,
-      $.negation_type,          // !T - prefix negation
+      $.negation_type,
       $.primary_type,
-      $.constrained_type
+    )),
+    binary_type: $ => choice(...type_operators($._type_pattern)),
+
+    _type_pattern: $ => choice($.unary_type, $.binary_type, $.fn_type),
+
+    _annotation_type: $ => choice($._type_pattern, $.constrained_type),
+
+    constrained_type: $ => prec.right(seq(
+      field('base', $._type_pattern), 'that', field('constraint', $._expr),
     )),
 
-    binary_type: $ => choice(
-      ...type_pattern(choice($._type_expr)),
-    ),
-    
-    // Unified type expression - flattened hierarchy
-    // Structural precedence (tightest to loosest):
-    //   primary_type > occurrence_type > constrained/concat > binary > fn_type
-    _type_expr: $ => choice(
-      $.unary_type,            // covers primary_type and occurrence_type
-      $.binary_type,           // alternation: T | U, T & U, T ! U
-      $.fn_type,
-    ),
-
-    // In value annotations, T^ is ordinary data-flow shorthand for T | error.
-    // It deliberately does not reuse return_type: that rule carries the raised
-    // channel metadata which is meaningful only on a function return.
-    _value_type_expr: $ => choice(
-      $._type_expr,
-      $.value_error_type,
-    ),
-
-    value_error_type: $ => prec.right(seq(
-      field('ok', $._type_expr),
-      '^',
-      // Keep the error arm within the same simple grammar as return T^E.
-      optional(field('error', $.return_type_pattern)),
+    attr_type: $ => prec(1, seq(
+      field('name', $._field_name),
+      optional(field('optional', '?')),  // §7.22: optional FIELD
+      ':', field('as', $._annotation_type),
+      optional(seq('=', field('default', $._element_expr))),
     )),
 
-    //  String/Symbol Pattern Island ----------------------------
-
-    // The opening tag is one token so `\\symbol (` cannot be mistaken for a
-    // tagged island with whitespace between the tag and its delimiter.
-    _pattern_tag: _ => token(choice('\\symbol(', '\\(')),
-
-    pattern_island: $ => seq(
-      field('tag', $._pattern_tag),
-      field('body', $._pattern_expr),
-      ')'
+    type_assign: $ => seq(
+      field('name', choice($.identifier, $.symbol)), '=',
+      field('as', $._annotation_type),
     ),
-
-    // Character classes are reserved only inside the pattern island.
-    pattern_char_class: _ => choice(
-      '...',   // any string
-      'd',     // digit [0-9]
-      'w',     // word [a-zA-Z0-9_]
-      's',     // whitespace
-      'a',     // alpha [a-zA-Z]
-      '.',     // any character
-    ),
-
-    _pattern_primary_type: $ => choice(
-      $.range_type,
-      $._non_null_literal,
-      $.identifier,
-      $.pattern_char_class,
-    ),
-
-    pattern_occurrence_type: $ => prec.right(seq(
-      field('operand', $._pattern_primary_type),
-      field('operator', $.occurrence),
-    )),
-
-    pattern_negation_type: $ => prec.right(seq(
-      '!', field('operand', $._pattern_primary_type),
-    )),
-
-    grouped_type: $ => prec.right(seq(
-      optional('!'),
-      '(', $._pattern_expr, ')',
-      optional(field('occurrence', $.occurrence))
-    )),
-
-    // Whitespace concatenation exists only in the island. The old dynamic
-    // precedence guard belonged to the open type grammar and is no longer
-    // needed now that ordinary `int[2+]` has no concat alternative.
-    concat_type: $ => prec.left(1, seq(
-      choice($.pattern_unary_type, $.grouped_type),
-      repeat1(choice($.pattern_unary_type, $.grouped_type)),
-    )),
-
-    string_binary_type: $ => choice(
-      ...type_pattern(choice($._pattern_expr)),
-    ),
-
-    pattern_unary_type: $ => prec.right(choice(
-      $.pattern_occurrence_type,
-      $.pattern_negation_type,
-      $._pattern_primary_type,
-    )),
-
-    _pattern_expr: $ => choice(
-      $.pattern_unary_type,
-      $.concat_type,
-      alias($.string_binary_type, $.binary_type),
-      $.grouped_type
-    ),
-
-    // Keep these field names aligned with occurrence_type: the AST builder
-    // reuses the occurrence constructor for return `T?` contracts. Without
-    // them it receives a null operator node and dereferences it while building
-    // a valid nullable return annotation.
-    return_occurrence_type: $ => seq(
-      field('operand', choice($.base_type, $.identifier)),
-      optional(field('operator', $.occurrence)),
-    ),
-
-    // Simple type pattern for return types
-    // This restriction avoids ambiguity with map_type in fn () T { ... }
-    return_type_pattern: $ => prec.left(seq(
-      field('type', $.return_occurrence_type),
-      repeat(seq(choice('|', '&', '!'), field('type', $.return_occurrence_type)))
-    )),
-
-    // Return type with optional error type: T or T^ or T^E
-    // T^ means function may return any error (shorthand for T | error)
-    // T^E means function returns T on success, E on error (E must be simple)
-    // simplified return_type substantially reduced the parser size
-    return_type: $ => prec.right(seq(
-      field('ok', $.return_type_pattern),
-      optional(seq(
-        '^',
-        optional(field('error', $.return_type_pattern))
-      ))
-    )),
-
-    type_assign: $ => seq(field('name', choice($.identifier, $.symbol)), '=', field('as', 
-      $._type_expr)),
-
-    // type_stam handles type aliases and delimited string/symbol patterns.
     type_stam: $ => seq(
-      optional(field('pub', 'pub')),
-      'type',
+      optional(field('pub', 'pub')), 'type',
       field('declare', alias($.type_assign, $.assign_expr)),
-      repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
+      repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr)))),
     ),
 
-    // Object-level constraint: that (expr)
-    that_constraint: $ => seq('that', '(', field('constraint', $._expr), ')'),
+    that_constraint: $ => prec.right(seq('that', field('constraint', $._expr))),
 
-    // Object/element type with optional inheritance, content schema, and methods
-    // Object (no content): type Point { x: float, y: float }
-    // Element (with content): type Article { title: string, string, element; fn render() => ... }
-    // Without content → object type; with content → element type
+    // §7.11: `;` has left the object type too. Fields, the object-level
+    // constraint, and methods are ONE comma list. After a comma, `that` cannot
+    // start a field (fields need `name:`), so the separator itself tells the
+    // object-level constraint from a field-level `z: string that …` — no new
+    // keyword is needed. The comma before a method is load-bearing rather than
+    // stylistic: fn TYPES exist, so a bare `fn` could otherwise continue the
+    // preceding field's type.
     object_type: $ => seq(
       optional(field('pub', 'pub')),
       'type', field('name', choice($.identifier, $.symbol)),
       optional(seq(':', field('base', choice($.identifier, $.symbol)))),
       '{',
-      // optional fields and content (attrs have name:type, content is bare type_expr)
-      optional(choice(
-        seq(
-          alias($.attr_type, $.attr), repeat(seq(',', alias($.attr_type, $.attr))),
-          optional(seq(',', $.content_type)),
-        ),
-        $.content_type,
-      )),
-      // optional ';' introduces methods section
-      optional(seq(';',
-        repeat(choice($.fn_stam, $.fn_expr_stam, $.that_constraint))
-      )),
-      '}'
+      optional(comma_sep1(choice(
+        alias($.attr_type, $.attr),
+        $.that_constraint,
+        $.fn_stam,
+        $.fn_expr_stam,
+        $._type_pattern,
+      ))),
+      '}',
     ),
 
-    // top-level type definitions: type_stam | object_type
+    // ==================== String / symbol pattern islands =================
 
-    // ==================== Module Imports ====================
-    relative_name: $ => repeat1(seq(
-      choice('.', '\\'), $.identifier
+    _char_pattern_tag: _ => token(choice('\\symbol(', '\\(')),
+    char_pattern_island: $ => seq(
+      field('tag', $._char_pattern_tag), field('body', $._char_pattern_expr), ')',
+    ),
+
+    char_class: _ => choice('...', 'd', 'w', 's', 'a', '.'),
+    _char_primary_type: $ => choice(
+      $.range_type, $._non_null_literal, $.identifier, $.char_class,
+    ),
+    char_occurrence_type: $ => prec.right(seq(
+      field('operand', $._char_primary_type), field('operator', $.occurrence),
     )),
+    char_negation_type: $ => prec.right(seq(
+      '!', field('operand', $._char_primary_type),
+    )),
+    char_grouped_type: $ => prec.right(seq(
+      optional('!'), '(', $._char_pattern_expr, ')',
+      optional(field('occurrence', $.occurrence)),
+    )),
+    char_concat_type: $ => prec.left(1, seq(
+      choice($.char_unary_type, $.char_grouped_type),
+      repeat1(choice($.char_unary_type, $.char_grouped_type)),
+    )),
+    char_binary_type: $ => choice(...type_operators($._char_pattern_expr)),
+    char_unary_type: $ => prec.right(choice(
+      $.char_occurrence_type,
+      $.char_negation_type,
+      $._char_primary_type,
+    )),
+    _char_pattern_expr: $ => choice(
+      $.char_unary_type,
+      $.char_concat_type,
+      alias($.char_binary_type, $.binary_type),
+      $.char_grouped_type,
+    ),
 
+    // ============================== Imports ===============================
+
+    relative_name: $ => repeat1(seq(choice('.', '\\'), $.identifier)),
     absolute_name: $ => seq(
-      $.identifier, repeat(seq(choice('.', '\\'), $.identifier))
+      $.identifier, repeat(seq(choice('.', '\\'), $.identifier)),
     ),
-
     import_module: $ => choice(
-        field('module', choice($.absolute_name, $.relative_name, $.symbol)),
-        seq(field('alias', $.identifier), ':',
-          field('module', choice($.absolute_name, $.relative_name, $.symbol)))
+      field('module', choice($.absolute_name, $.relative_name, $.symbol)),
+      seq(field('alias', $.identifier), ':',
+        field('module', choice($.absolute_name, $.relative_name, $.symbol))),
     ),
-
     _import_stam: $ => seq(
       'import', $.import_module, repeat(seq(',', $.import_module)),
     ),

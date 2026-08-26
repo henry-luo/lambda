@@ -8,6 +8,7 @@
 #include <unistd.h>    // for sysconf
 #endif
 #include "transpiler.hpp"
+#include "ast_build.hpp"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/thread_pool.h"
 #include "../io/mark_builder.hpp"
@@ -29,6 +30,7 @@
 #include "template_state.h"
 #include "edit_bridge.h"
 #include "interp.hpp"
+#include "runtime-state.h"
 #include "../../lib/file.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/memtrack.h"
@@ -48,6 +50,98 @@ extern void free_document(DomDocument* doc);
 
 static __thread LambdaCompilerTiming g_last_lambda_compiler_timing;
 static int g_compiler_timing_enabled = -1;
+
+static void record_direct_parse_error(Transpiler* tp, const char* script_path,
+        const LambdaParseError* parse_error) {
+    if (!tp || !tp->source) return;
+    SourceSpan span = parse_error ? parse_error->span : (SourceSpan){0, 0};
+    size_t source_length = strlen(tp->source);
+    if (span.start_byte > source_length) span.start_byte = (uint32_t)source_length;
+    if (span.end_byte < span.start_byte || span.end_byte > source_length) {
+        span.end_byte = span.start_byte;
+    }
+    LambdaSourcePoint start = lambda_source_span_start_point(tp->source, span);
+    LambdaSourcePoint end = lambda_source_span_end_point(tp->source, span);
+    SourceLocation location = src_loc_span(script_path, start.row + 1, start.column + 1,
+        end.row + 1, end.column + 1);
+    location.source = tp->source;
+    char message[256];
+    const char* text = tp->source + span.start_byte;
+    size_t text_length = span.end_byte - span.start_byte;
+    if (text_length == 0 && span.start_byte < source_length) text_length = 1;
+    bool separated_relation = false;
+    if (parse_error) {
+        // Pratt has already consumed the relation before it discovers that
+        // its right operand cannot start a sibling statement. Walk back on
+        // this source line to recover that committed delimiter.
+        size_t cursor = span.start_byte;
+        while (cursor > 0 && tp->source[cursor - 1] != '\n' &&
+                tp->source[cursor - 1] != '\r') {
+            char previous = tp->source[--cursor];
+            if (previous == ' ' || previous == '\t') continue;
+            separated_relation = previous == '<' || previous == '>';
+            // '=>' and '|>' end in '>' but are not relations; without this
+            // guard an arrow-body error ('=> return x') was rewritten into the
+            // element-ambiguity diagnosis, hiding the parser's real repair.
+            if (separated_relation && previous == '>' && cursor > 0 &&
+                    (tp->source[cursor - 1] == '=' || tp->source[cursor - 1] == '|')) {
+                separated_relation = false;
+            }
+            break;
+        }
+    }
+    if (separated_relation) {
+        // The direct Pratt parser reaches the same unseparated relation that
+        // The reference grammar marks this as element-ambiguous; preserve one user-facing
+        // syntax diagnosis instead of exposing parser-internal terminology.
+        snprintf(message, sizeof(message),
+            "'<' and '>' are ambiguous with element syntax at statement level");
+    } else if (parse_error && parse_error->actual_kind == LAMBDA_TOK_ERROR) {
+        // An unlexable token has no structural diagnosis to offer — the parser
+        // can only say "invalid token". Naming the offending text is strictly
+        // more useful here, so this one case keeps the synthesized form.
+        snprintf(message, sizeof(message), "Unexpected syntax near '%.*s'",
+            (int)(text_length > 30 ? 30 : text_length), text);
+    } else if (parse_error && parse_error->message && parse_error->message[0]) {
+        // The parser's own diagnosis names the repair — "write ';' to start a
+        // new statement, or move it to the end of that line", "'pub' modifies a
+        // declaration; write 'pub let'", and the rest. Synthesizing
+        // "Unexpected syntax near 'X'" here discarded every one of them, so the
+        // S16.2.3 rejections reached the user without their repair (§4.2 makes
+        // that text part of the design, not decoration).
+        snprintf(message, sizeof(message), "%s", parse_error->message);
+    } else {
+        snprintf(message, sizeof(message), "Unexpected syntax near '%.*s'",
+            (int)(text_length > 30 ? 30 : text_length), text);
+    }
+    LambdaError* error = err_create(ERR_SYNTAX_ERROR, message, &location);
+    if (!error) return;
+    if (separated_relation) {
+        // The reference grammar attaches the repair to this same diagnosis
+        // (lambda-error.cpp); dropping it here left the C parser naming the
+        // ambiguity without telling the user how to resolve it.
+        error->help = mem_strdup(
+            "Use parentheses to group the comparison expression, e.g. (\"a\" < \"b\").",
+            MEM_CAT_TEMP);
+    }
+    if (tp->errors) arraylist_append(tp->errors, error);
+    else err_free(error);
+    tp->error_count++;
+}
+
+static void record_direct_parse_diagnostics(Transpiler* tp,
+        const char* script_path, const LambdaParseError* fallback) {
+    if (!tp || !tp->source) return;
+    LambdaParseReport report = {};
+    lambda_rd_parse_recovering(tp->source, strlen(tp->source), &report);
+    if (report.error_count == 0) {
+        record_direct_parse_error(tp, script_path, fallback);
+        return;
+    }
+    for (uint32_t i = 0; i < report.error_count; i++) {
+        record_direct_parse_error(tp, script_path, &report.errors[i]);
+    }
+}
 
 static int lambda_index_compiler_pass(void* opaque) {
     Transpiler* tp = (Transpiler*)opaque;
@@ -138,7 +232,6 @@ char* lambda_home_path(const char* rel) {
 // Zero overhead when disabled — all gated by profile_enabled flag.
 
 #define PROFILE_MAX_SCRIPTS 64
-#define PROFILE_MAX_IMPORT_LEVELS 64
 #define PROFILE_PATH_MAX 512
 
 typedef struct PhaseProfile {
@@ -158,21 +251,10 @@ typedef struct PhaseProfile {
     unsigned long thread_id;
 } PhaseProfile;
 
-typedef struct ImportLevelProfile {
-    int level;
-    int modules;
-    int jobs;
-    int threads;
-    int cpu_cap;
-    double elapsed_ms;
-} ImportLevelProfile;
-
 bool profile_enabled = false;
 bool profile_checked = false;
 PhaseProfile profile_data[PROFILE_MAX_SCRIPTS];
 int profile_count = 0;
-ImportLevelProfile import_level_profile_data[PROFILE_MAX_IMPORT_LEVELS];
-int import_level_profile_count = 0;
 #ifndef _WIN32
 static pthread_mutex_t profile_mutex = PTHREAD_MUTEX_INITIALIZER;
 #endif
@@ -235,22 +317,6 @@ static void profile_record_phase(const PhaseProfile* profile) {
 #endif
 }
 
-#ifndef _WIN32
-// windows does not compile the parallel import profiler that records these levels.
-static void profile_record_import_level(const ImportLevelProfile* profile) {
-    if (!profile) return;
-#ifndef _WIN32
-    pthread_mutex_lock(&profile_mutex);
-#endif
-    if (import_level_profile_count < PROFILE_MAX_IMPORT_LEVELS) {
-        import_level_profile_data[import_level_profile_count++] = *profile;
-    }
-#ifndef _WIN32
-    pthread_mutex_unlock(&profile_mutex);
-#endif
-}
-#endif
-
 void profile_dump_to_file() {
     if (!profile_enabled || profile_count == 0) return;
     create_dir_recursive("temp");
@@ -268,15 +334,6 @@ void profile_dump_to_file() {
                 p->script_path, p->parse_ms, p->ast_ms, p->plan_ms, p->transpile_ms,
                 p->jit_init_ms, p->mir_gen_ms, p->interp_exec_ms,
                 total, p->peak_rss_mb, p->code_len, p->worker_thread, p->thread_id);
-    }
-    if (import_level_profile_count > 0) {
-        fprintf(f, "\n# Parallel Import Levels\n");
-        fprintf(f, "# level | modules | jobs | threads | cpu_cap | elapsed_ms\n");
-        for (int i = 0; i < import_level_profile_count; i++) {
-            ImportLevelProfile* p = &import_level_profile_data[i];
-            fprintf(f, "%d\t%d\t%d\t%d\t%d\t%.3f\n",
-                    p->level, p->modules, p->jobs, p->threads, p->cpu_cap, p->elapsed_ms);
-        }
     }
     fclose(f);
 }
@@ -330,8 +387,6 @@ static void print_elapsed_time(const char* label, win_timer start, win_timer end
 extern "C" {
 char* read_text_file(const char *filename);
 void write_text_file(const char *filename, const char *content);
-TSParser* lambda_parser(void);
-TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 void ensure_jit_imports_initialized(void);
 }
 void ensure_sys_func_maps_initialized(void);
@@ -340,10 +395,6 @@ void print_heap_entries();
 
 // thread-specific runtime context is provided by runtime/runtime-state.cpp.
 extern __thread Context* input_context;
-
-// Thread-local parser for parallel module compilation.
-// When non-NULL, load_script() uses this instead of runtime->parser.
-static __thread TSParser* tls_parser = NULL;
 
 typedef struct ScriptIndexEntry {
     const char* path;
@@ -695,6 +746,69 @@ void script_adopt_transpiler(Script* script, Transpiler* tp) {
     memcpy(script, tp, sizeof(Script));
 }
 
+// a parent that falls back to MIR cannot link a dependency that was already
+// admitted to T0: MIR imports require the child's generated symbols. Demote
+// the complete loaded cone in post-order before compiling that parent.
+static bool interp_force_jit_script(Script* script, Runtime* runtime) {
+    if (!script || !runtime) return false;
+    if (script->direct_imports) {
+        for (int i = 0; i < script->direct_imports->length; i++) {
+            Script* dep = (Script*)script->direct_imports->data[i];
+            if (!interp_force_jit_script(dep, runtime)) return false;
+        }
+    }
+    if (script->jit_context) return true;
+    if (!script->interp_supported) {
+        log_error("interp: fallback dependency '%s' has no executable tier",
+            script->reference ? script->reference : "<unknown>");
+        return false;
+    }
+
+    Transpiler tp = {};
+    memcpy(&tp, script, sizeof(Script));
+    tp.runtime = runtime;
+    script->interp_supported = false;
+    script->interp_planned = false;
+    compile_script_as_mir_direct(&tp, script, script->reference, NULL, NULL,
+        NULL, NULL, NULL, NULL);
+    if (!script->jit_context) {
+        log_error("interp: failed to lower fallback dependency '%s' to MIR",
+            script->reference ? script->reference : "<unknown>");
+        return false;
+    }
+    interp_run_stats()->scripts_fallback++;
+    log_notice("interp: demoted dependency file=%s to MIR fallback",
+        script->reference ? script->reference : "<unknown>");
+    return true;
+}
+
+static bool interp_force_jit_import_cone(Transpiler* tp) {
+    if (!tp || !tp->direct_imports) return true;
+    for (int i = 0; i < tp->direct_imports->length; i++) {
+        Script* dep = (Script*)tp->direct_imports->data[i];
+        if (!interp_force_jit_script(dep, tp->runtime)) return false;
+    }
+    return true;
+}
+
+static bool initialize_script_ast_storage(Transpiler* tp) {
+    Input* input_base = Input::create(
+        mem_pool_create(NULL, MEM_ROLE_AST, "script.pool"), nullptr);
+    if (!input_base) {
+        log_error("Error: Failed to initialize Input base");
+        return false;
+    }
+    tp->pool = input_base->pool;
+    tp->arena = input_base->arena;
+    tp->name_pool = input_base->name_pool;
+    tp->type_list = input_base->type_list;
+    tp->url = input_base->url;
+    tp->path = input_base->path;
+    tp->root = input_base->root;
+    tp->const_list = arraylist_new(16);
+    return tp->const_list != NULL;
+}
+
 void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (!script || !script->source) {
         log_error("Error: Source code is NULL");
@@ -710,65 +824,26 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     profile_time_t p0, p1, p2, p3;
     if (profiling || compiler_timing) profile_get_time(&p0);
 
-    // create a parser
     get_time(&start);
-    // parse the source
     tp->source = script->source;
-    tp->syntax_tree = lambda_parse_source(tp->parser, tp->source);
-    if (tp->syntax_tree == NULL) {
-        log_error("Error: Failed to parse the source code.");
+    AstScript* direct_root = NULL;
+    LambdaParseError parse_error = {};
+    if (!initialize_script_ast_storage(tp) ||
+            lambda_rd_build_ast(tp, tp->source, strlen(tp->source),
+                &direct_root, &parse_error) != LAMBDA_PARSE_OK || !direct_root) {
+        // A direct-parser failure must enter the structured diagnostic lane so
+        // callers receive the same source-aware error contract as other inputs.
+        record_direct_parse_diagnostics(tp, script_path, &parse_error);
+        log_error("C parser rejected %s: %s", script_path,
+            parse_error.message ? parse_error.message : "direct AST reduction failed");
         return;
     }
+    tp->ast_root = (AstNode*)direct_root;
     get_time(&end);
     print_elapsed_time("parsing", start, end);
 
     if (profiling || compiler_timing) profile_get_time(&p1);
 
-#ifndef NDEBUG
-    // print the syntax tree as an s-expr
-    print_ts_root(tp->source, tp->syntax_tree);
-#endif
-
-    // check if the syntax tree is valid
-    TSNode root_node = ts_tree_root_node(tp->syntax_tree);
-    if (ts_node_has_error(root_node)) {
-        log_error("Syntax tree has errors.");
-
-        // collect structured parse errors
-        if (!tp->errors) tp->errors = arraylist_new(8);
-        find_errors(root_node, tp->source, script_path, tp->errors);
-        tp->error_count = tp->errors->length;
-        return;
-    }
-
-    // build the AST from the syntax tree
-    get_time(&start);
-
-    // Initialize Input base class (Script extends Input)
-    Input* input_base = Input::create(mem_pool_create(NULL, MEM_ROLE_AST, "script.pool"), nullptr);
-    if (!input_base) {
-        log_error("Error: Failed to initialize Input base");
-        return;
-    }
-
-    // Copy Input fields to Script (Script extends Input)
-    tp->pool = input_base->pool;
-    tp->arena = input_base->arena;
-    tp->name_pool = input_base->name_pool;
-    tp->type_list = input_base->type_list;
-    tp->url = input_base->url;
-    tp->path = input_base->path;
-    tp->root = input_base->root;
-
-    // Initialize Script-specific fields
-    tp->const_list = arraylist_new(16);
-
-    if (strcmp(ts_node_type(root_node), "document") != 0) {
-        log_error("Error: The tree has no valid root node.");
-        return;
-    }
-    // build the AST
-    tp->ast_root = build_script(tp, root_node);
     if (profiling || compiler_timing) profile_get_time(&p2);
     // Publish the first production pass contract now: all later Lambda work
     // consumes the indexed identity table rather than rediscovering children
@@ -804,7 +879,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                     strbuf_append_format(census, " %s=%d",
                         any_reason_name((AnyReason)r), tp->any_census[r]);
                 }
-                log_info("%s (%s)", census->str, script_path);
+                log_notice("%s (%s)", census->str, script_path);
                 strbuf_free(census);
             }
         }
@@ -819,7 +894,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // T0 (D8.1.1v2): stop after the AST passes and interpret. A script whose
     // pre-scan finds a kind the walker cannot execute falls back to the whole
     // module JIT path below, counted and logged — never silently half-run (R4).
-    if (lambda_tier_selected() == LAMBDA_TIER_INTERP) {
+    if (lambda_tier_selected() == LAMBDA_TIER_INTERP ||
+            lambda_tier_selected() == LAMBDA_TIER_AUTO) {
         profile_time_t plan0, plan1;
         if (profiling || compiler_timing) profile_get_time(&plan0);
         // `direct_imports` is normally filled inside compile_script_as_mir_direct,
@@ -858,7 +934,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                 prof.parse_ms = elapsed_ms_val(p0, p1);
                 prof.ast_ms = elapsed_ms_val(p1, p2) + elapsed_ms_val(p2, p3);
                 prof.plan_ms = elapsed_ms_val(plan0, plan1);
-                prof.worker_thread = tls_parser ? 1 : 0;
+                prof.worker_thread = 0;
                 prof.thread_id = profile_current_thread_id();
                 profile_record_phase(&prof);
             }
@@ -870,6 +946,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         interp_run_stats()->scripts_fallback++;
         log_notice("interp: fallback file=%s reason=node:%s",
             script_path, interp_node_kind_name(reject));
+        if (!interp_force_jit_import_cone(tp)) return;
     }
 
     // compile the AST directly to MIR; this is the only supported Lambda backend.
@@ -910,7 +987,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             prof.jit_init_ms = mir_jit_init_ms;
             prof.mir_gen_ms = mir_gen_ms;
             prof.code_len = 0;
-            prof.worker_thread = tls_parser ? 1 : 0;
+            prof.worker_thread = 0;
             prof.thread_id = profile_current_thread_id();
             profile_record_phase(&prof);
         }
@@ -920,380 +997,9 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 }
 
 // ============================================================================
-// Parallel Module Compilation
-// ============================================================================
-// Pre-discovers all import dependencies and compiles modules in parallel,
-// organized by topological depth (leaves first, dependents after).
-// Enabled only for MIR Direct path with ≥3 modules on non-Windows platforms.
-
-#ifndef _WIN32
-
-// Import graph node for dependency discovery
-typedef struct {
-    char* path;        // canonical absolute path (owned)
-    char* source;      // source text (owned)
-    char* directory;   // directory for relative imports (owned)
-    int* deps;         // indices of dependency nodes (owned)
-    int dep_count;
-    int dep_cap;
-    int depth;         // topological depth (0 = leaf, -1 = uncomputed)
-} ImportGraphNode;
-
-// Hashmap entry for path→index dedup
-typedef struct {
-    const char* path;
-    int index;
-} PathIndexEntry;
-
-HASHMAP_DEFINE_STRKEY(path_index, PathIndexEntry, path)
-
-// Resolve a module import path to a canonical absolute path.
-// Returns malloc'd canonical path, or NULL for built-in/URI imports.
-static char* resolve_module_path(const char* module_text, int module_len, const char* import_dir) {
-    if (module_len <= 0) return NULL;
-
-    // skip built-in modules
-    if ((module_len == 4 && strncmp(module_text, "math", 4) == 0) ||
-        (module_len == 2 && strncmp(module_text, "io", 2) == 0))
-        return NULL;
-
-    // skip bare URI imports
-    if (module_text[0] == '\'') return NULL;
-
-    StrBuf* buf = strbuf_new();
-
-    if (module_text[0] == '.') {
-        // relative import: .foo.bar → base_dir/foo/bar.ls
-        const char* base_dir = import_dir ? import_dir : "./";
-        strbuf_append_format(buf, "%s%.*s", base_dir, module_len - 1, module_text + 1);
-        char* ch = buf->str + buf->length - (module_len - 1);
-        while (*ch) { if (*ch == '.') *ch = '/'; ch++; }
-        strbuf_append_str(buf, ".ls");
-    } else {
-        // absolute import: lambda.package.chart → g_lambda_home/package/chart.ls
-        strbuf_append_format(buf, "./%.*s", module_len, module_text);
-        char* ch = buf->str + 2;
-        while (*ch) { if (*ch == '.') *ch = '/'; ch++; }
-        strbuf_append_str(buf, ".ls");
-
-        // replace first segment with g_lambda_home
-        char* segment_end = strchr(buf->str + 2, '/');
-        if (segment_end) {
-            StrBuf* fixed = strbuf_new();
-            const char* home = g_lambda_home;
-            if (home[0] == '.' && home[1] == '/') home += 2;
-            strbuf_append_str(fixed, "./");
-            strbuf_append_str(fixed, home);
-            strbuf_append_str(fixed, segment_end);
-            strbuf_free(buf);
-            buf = fixed;
-        }
-    }
-
-    char* resolved = file_realpath(buf->str);
-    strbuf_free(buf);
-    return resolved;
-}
-
-// Add a dependency edge from parent_idx to dep_idx
-static void add_dep(ImportGraphNode* nodes, int parent_idx, int dep_idx) {
-    ImportGraphNode* parent = &nodes[parent_idx];
-    if (parent->dep_count >= parent->dep_cap) {
-        parent->dep_cap = parent->dep_cap ? parent->dep_cap * 2 : 4;
-        parent->deps = (int*)mem_realloc(parent->deps, sizeof(int) * parent->dep_cap, MEM_CAT_SYSTEM);
-    }
-    parent->deps[parent->dep_count++] = dep_idx;
-}
-
-// Recursively discover all import dependencies starting from a source file.
-// Adds new modules to the graph and records dependency edges.
-static void discover_imports_recursive(
-    TSParser* parser, int parent_idx,
-    ImportGraphNode** nodes, int* count, int* capacity,
-    struct hashmap* path_map)
-{
-    ImportGraphNode* parent = &(*nodes)[parent_idx];
-    TSTree* tree = lambda_parse_source(parser, parent->source);
-    if (!tree) return;
-
-    // Save source and directory pointers BEFORE any recursive calls that might
-    // realloc the nodes array and invalidate the parent pointer.  These are
-    // separate heap allocations that remain valid until cleanup.
-    const char* parent_source = parent->source;
-    const char* parent_dir = parent->directory;
-
-    TSNode root = ts_tree_root_node(tree);
-    TSNode child = ts_node_named_child(root, 0);
-
-    while (!ts_node_is_null(child)) {
-        if (ts_node_symbol(child) == sym_import_module) {
-            TSNode module_node = ts_node_child_by_field_id(child, field_module);
-            if (!ts_node_is_null(module_node)) {
-                uint32_t start = ts_node_start_byte(module_node);
-                uint32_t end_byte = ts_node_end_byte(module_node);
-                const char* module_text = parent_source + start;
-                int module_len = (int)(end_byte - start);
-
-                char* dep_path = resolve_module_path(module_text, module_len, parent_dir);
-                if (dep_path) {
-                    PathIndexEntry key = { .path = dep_path, .index = 0 };
-                    const PathIndexEntry* existing = (const PathIndexEntry*)hashmap_get(path_map, &key);
-
-                    int dep_idx;
-                    if (existing) {
-                        dep_idx = existing->index;
-                        mem_free(dep_path);
-                    } else {
-                        // new module discovered
-                        if (*count >= *capacity) {
-                            *capacity *= 2;
-                            *nodes = (ImportGraphNode*)mem_realloc(*nodes, sizeof(ImportGraphNode) * (*capacity), MEM_CAT_SYSTEM);
-                        }
-                        dep_idx = *count;
-                        ImportGraphNode* n = &(*nodes)[dep_idx];
-                        memset(n, 0, sizeof(ImportGraphNode));
-                        n->path = dep_path;
-                        n->source = read_text_file(dep_path);
-                        n->depth = -1;
-
-                        // extract directory
-                        const char* last_slash = strrchr(dep_path, '/');
-                        if (last_slash) {
-                            int dir_len = (int)(last_slash - dep_path + 1);
-                            n->directory = (char*)mem_alloc(dir_len + 1, MEM_CAT_SYSTEM);
-                            memcpy(n->directory, dep_path, dir_len);
-                            n->directory[dir_len] = '\0';
-                        } else {
-                            n->directory = mem_strdup("./", MEM_CAT_SYSTEM);
-                        }
-
-                        PathIndexEntry entry = { .path = n->path, .index = dep_idx };
-                        hashmap_set(path_map, &entry);
-                        (*count)++;
-
-                        // recurse to discover transitive imports
-                        if (n->source) {
-                            discover_imports_recursive(parser, dep_idx,
-                                nodes, count, capacity, path_map);
-                        }
-                    }
-                    // record dependency: parent depends on dep_idx
-                    // re-fetch parent pointer since realloc may have moved the array
-                    add_dep(*nodes, parent_idx, dep_idx);
-                }
-            }
-        }
-        child = ts_node_next_named_sibling(child);
-    }
-    ts_tree_delete(tree);
-}
-
-// Compute topological depth for a node (0 = leaf, max(deps)+1 for others).
-// Uses recursive DFS with memoization.
-static int compute_depth(ImportGraphNode* nodes, int idx) {
-    if (nodes[idx].depth >= 0) return nodes[idx].depth;
-    nodes[idx].depth = 0;  // mark as computing (breaks cycles)
-    int max_dep = -1;
-    for (int i = 0; i < nodes[idx].dep_count; i++) {
-        int d = compute_depth(nodes, nodes[idx].deps[i]);
-        if (d > max_dep) max_dep = d;
-    }
-    nodes[idx].depth = max_dep + 1;
-    return nodes[idx].depth;
-}
-
-// Worker argument for parallel compilation thread
-typedef struct {
-    Runtime* runtime;
-    ImportGraphNode* node;
-    bool success;
-} CompileWorkerArg;
-
-static void compile_module_worker(void* arg) {
-    CompileWorkerArg* work = (CompileWorkerArg*)arg;
-
-    // create thread-local parser
-    tls_parser = lambda_parser();
-
-    // compile the module via load_script (thread-safe version)
-    // pass pre-read source to avoid redundant file I/O
-    Script* result = load_script(work->runtime, work->node->path, work->node->source, true);
-    work->success = (result != NULL && result->jit_context != NULL);
-
-    // cleanup thread-local parser
-    ts_parser_delete(tls_parser);
-    tls_parser = NULL;
-}
-
-// Pre-compile all import dependencies in parallel before the main script starts.
-// Discovers the full dependency graph, then compiles level by level (leaves first).
-static void precompile_imports(Runtime* runtime, const char* main_script_path) {
-    // read main script source for discovery
-    char* canonical = file_realpath(main_script_path);
-    const char* main_path = canonical ? canonical : main_script_path;
-    const char* main_source = read_text_file(main_path);
-    if (!main_source) {
-        if (canonical) mem_free(canonical);
-        return;
-    }
-
-    // extract main script directory
-    char* main_dir = NULL;
-    const char* last_slash = strrchr(main_path, '/');
-    if (last_slash) {
-        int dir_len = (int)(last_slash - main_path + 1);
-        main_dir = (char*)mem_alloc(dir_len + 1, MEM_CAT_SYSTEM);
-        memcpy(main_dir, main_path, dir_len);
-        main_dir[dir_len] = '\0';
-    } else {
-        main_dir = mem_strdup("./", MEM_CAT_SYSTEM);
-    }
-
-    // initialize graph with main script as sentinel node (index 0, not compiled here)
-    int capacity = 32;
-    int count = 1;
-    ImportGraphNode* nodes = (ImportGraphNode*)mem_calloc(capacity, sizeof(ImportGraphNode), MEM_CAT_SYSTEM);
-    nodes[0].path = mem_strdup(main_path, MEM_CAT_SYSTEM);
-    nodes[0].source = (char*)main_source;
-    nodes[0].directory = main_dir;
-    nodes[0].depth = -1;
-
-    struct hashmap* path_map = path_index_new(64);
-    PathIndexEntry main_entry = { .path = nodes[0].path, .index = 0 };
-    hashmap_set(path_map, &main_entry);
-
-    // discover all imports recursively using a temporary parser
-    TSParser* discovery_parser = lambda_parser();
-    discover_imports_recursive(discovery_parser, 0, &nodes, &count, &capacity, path_map);
-    ts_parser_delete(discovery_parser);
-
-    // check if there are enough modules to justify parallelism
-    int import_count = count - 1;  // exclude main script (index 0)
-    if (import_count >= 2) {
-        log_info("parallel import: discovered %d modules, pre-compiling...", import_count);
-
-        // ensure one-time init before spawning threads
-        ensure_jit_imports_initialized();
-        ensure_sys_func_maps_initialized();
-
-        // compute topological depths
-        int max_depth = 0;
-        for (int i = 1; i < count; i++) {
-            int d = compute_depth(nodes, i);
-            if (d > max_depth) max_depth = d;
-        }
-
-        // compile level by level: depth 0 first (leaves), then 1, 2, ...
-        // main script (index 0) has the highest depth — skip it
-        long ncpus = sysconf(_SC_NPROCESSORS_ONLN);
-        if (ncpus < 1) ncpus = 1;
-        if (ncpus > 8) ncpus = 8;
-
-        for (int level = 0; level <= max_depth; level++) {
-            // collect modules at this depth
-            int batch_count = 0;
-            for (int i = 1; i < count; i++) {
-                if (nodes[i].depth == level && nodes[i].source) batch_count++;
-            }
-            if (batch_count == 0) continue;
-
-            // skip already-cached modules
-            CompileWorkerArg* args = (CompileWorkerArg*)mem_calloc(batch_count, sizeof(CompileWorkerArg), MEM_CAT_SYSTEM);
-            int actual = 0;
-            pthread_mutex_lock(&scripts_mutex);
-            for (int i = 1; i < count; i++) {
-                if (nodes[i].depth != level || !nodes[i].source) continue;
-                // check if already in cache
-                bool cached = runtime_script_index_get_current(runtime, nodes[i].path) != NULL;
-                if (!cached) {
-                    args[actual].runtime = runtime;
-                    args[actual].node = &nodes[i];
-                    args[actual].success = false;
-                    actual++;
-                }
-            }
-            pthread_mutex_unlock(&scripts_mutex);
-
-            if (actual == 0) {
-                mem_free(args);
-                continue;
-            }
-
-            bool level_profiling = is_profile_enabled();
-            profile_time_t level_start, level_end;
-            if (level_profiling) profile_get_time(&level_start);
-            int threads_used = 1;
-            if (actual == 1) {
-                // single module — compile in-place without thread overhead
-                tls_parser = lambda_parser();
-                load_script(runtime, args[0].node->path, args[0].node->source, true);
-                ts_parser_delete(tls_parser);
-                tls_parser = NULL;
-            } else {
-                // parallel compilation via lib/thread_pool. 8MB worker stacks
-                // accommodate the transpiler's deep recursion.
-                threads_used = actual;
-                ThreadPool* tp = tp_create_with_stack(actual, 8 * 1024 * 1024);
-                if (tp) {
-                    for (int i = 0; i < actual; i++) {
-                        tp_submit(tp, compile_module_worker, &args[i]);
-                    }
-                    tp_wait_all(tp);
-                    tp_destroy(tp);
-                }
-            }
-            if (level_profiling) {
-                profile_get_time(&level_end);
-                ImportLevelProfile level_profile;
-                memset(&level_profile, 0, sizeof(level_profile));
-                level_profile.level = level;
-                level_profile.modules = batch_count;
-                level_profile.jobs = actual;
-                level_profile.threads = threads_used;
-                level_profile.cpu_cap = (int)ncpus;
-                level_profile.elapsed_ms = elapsed_ms_val(level_start, level_end);
-                profile_record_import_level(&level_profile);
-            }
-            mem_free(args);
-        }
-
-        log_info("parallel import: pre-compilation complete");
-
-        // compiled MIR imports embed module indexes, so post-compile
-        // renumbering corrupts their mN symbol references. Import-cone traversal
-        // now supplies dependency order without mutating these stable indexes.
-    }
-
-    // cleanup graph
-    hashmap_free(path_map);
-    for (int i = 0; i < count; i++) {
-        // don't free source for index 0 — that was read_text_file'd and will be freed
-        // when load_script reads it again (or it might be the same pointer)
-        if (i > 0) mem_free(nodes[i].source);
-        mem_free(nodes[i].path);
-        mem_free(nodes[i].directory);
-        mem_free(nodes[i].deps);
-    }
-    // index 0's source was malloc'd by read_text_file — free it
-    mem_free((void*)main_source);
-    // main_dir is nodes[0].directory, already freed above
-    mem_free(nodes);
-    if (canonical) mem_free(canonical);
-}
-
-#endif  // !_WIN32
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import) {
     log_info("Loading script: %s (is_import=%d)", script_path, is_import);
-
-#ifndef _WIN32
-    // For the main script, pre-compile all imports in parallel.
-    // Only trigger when: not an import, no source provided (file-based), MIR Direct mode,
-    // and not already in a worker thread (tls_parser == NULL).
-    if (!is_import && !source && runtime->use_mir_direct && !tls_parser) {
-        precompile_imports(runtime, script_path);
-    }
-#endif
 
     // Normalize path to canonical absolute path for reliable deduplication
     // (skip for source-provided scripts like REPL which have synthetic paths)
@@ -1390,7 +1096,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
     Transpiler transpiler;  memset(&transpiler, 0, sizeof(Transpiler));
     memcpy(&transpiler, new_script, sizeof(Script));
-    transpiler.parser = tls_parser ? tls_parser : runtime->parser;
+    transpiler.script_owner = new_script;
     transpiler.runtime = runtime;
     transpiler.error_count = 0;
     transpiler.max_errors = runtime->max_errors > 0 ? runtime->max_errors : 10;  // use runtime setting or default 10
@@ -1465,9 +1171,251 @@ Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
     // MIR Direct backend explicitly before loading the module.
     bool was_mir_direct = runtime->use_mir_direct;
     runtime->use_mir_direct = true;
+    // The JS membrane reaches a Lambda export through a native function
+    // pointer, so this module must actually be JIT-compiled. Under AUTO the
+    // planner would stop at T0 and produce no MIR context at all, leaving
+    // module_build_lambda_namespace with nothing to export and the JS side
+    // reporting "is not a function". Pin the tier for the load only.
+    LambdaTier was_tier = lambda_tier_selected();
+    lambda_tier_set(LAMBDA_TIER_JIT);
     Script* script = load_script(runtime, script_path, source, is_import);
+    lambda_tier_set(was_tier);
     runtime->use_mir_direct = was_mir_direct;
     return script;
+}
+
+static void repl_restore_scope(NameScope* scope, NameEntry* first,
+        NameEntry* last) {
+    if (!scope) return;
+    scope->first = first;
+    scope->last = last;
+    if (last) last->next = NULL;
+}
+
+static void repl_restore_source(Script* script, size_t length) {
+    if (!script || !script->repl_source) return;
+    script->repl_source->length = length;
+    script->repl_source->str[length] = '\0';
+    script->source = script->repl_source->str;
+}
+
+// The REPL owns its diagnostics: nothing downstream prints a rejected
+// fragment's errors, so they are reported here before the list is released.
+// Freeing them silently left the user with a bare "rolled back" notice and no
+// diagnosis at all — every parse and type message the REPL exists to teach
+// with was being dropped.
+static void repl_report_transpiler_errors(ArrayList* errors) {
+    if (!errors) return;
+    for (int i = 0; i < errors->length; i++) {
+        LambdaError* error = (LambdaError*)errors->data[i];
+        if (error) err_print(error);
+    }
+}
+
+static void repl_free_transpiler_errors(ArrayList* errors) {
+    if (!errors) return;
+    for (int i = 0; i < errors->length; i++) {
+        err_free((LambdaError*)errors->data[i]);
+    }
+    arraylist_free(errors);
+}
+
+void interp_repl_session_destroy(InterpReplSession* session) {
+    if (!session) return;
+    Runtime* runtime = session->runner.runtime;
+    Script* script = session->runner.script;
+    if (runtime && script) {
+        // Each REPL Script receives a unique module id. Releasing its exact
+        // root before freeing the Script prevents `clear` from pinning its
+        // former bindings until the whole Runtime exits (D5.3.3).
+        lambda_module_state_release(script->module_state_id);
+        int index = script->index;
+        runtime_free_script(runtime, script, true);
+        if (runtime->scripts && index >= 0 && index < runtime->scripts->length) {
+            runtime->scripts->data[index] = NULL;
+        }
+    }
+    memset(session, 0, sizeof(*session));
+}
+
+bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime) {
+    if (!session || !runtime) return false;
+    interp_repl_session_destroy(session);
+
+    // The normal loader owns AST/pool initialization. Build the empty session
+    // through its T0 branch even when the shell's default remains eager JIT.
+    LambdaTier saved_tier = lambda_tier_selected();
+    lambda_tier_set(LAMBDA_TIER_INTERP);
+    Script* script = load_script(runtime, "<repl-session>", "", false);
+    lambda_tier_set(saved_tier);
+    if (!script || !script->interp_supported) {
+        log_error("interp-repl: could not create initial interpreter module");
+        return false;
+    }
+    script->repl_source = strbuf_new_cap(256);
+    if (!script->repl_source) {
+        log_error("interp-repl: could not allocate retained source state");
+        // The bootstrap source still has Script ownership until both retained
+        // buffers exist; clear partial replacements before common teardown.
+        if (script->repl_source) {
+            strbuf_free(script->repl_source);
+            script->repl_source = NULL;
+        }
+        runner_init(runtime, &session->runner);
+        session->runner.script = script;
+        interp_repl_session_destroy(session);
+        return false;
+    }
+    // `load_script` owns the empty bootstrap buffer; source thereafter aliases
+    // the growable session buffer and runtime_free_script frees it as one unit.
+    mem_free((void*)script->source);
+    script->source = script->repl_source->str;
+
+    runner_init(runtime, &session->runner);
+    session->runner.script = script;
+    runner_setup_context(&session->runner);
+    if (!session->runner.context || !lambda_module_state_prepare(
+            script->module_state_id, script->interp_slab_count)) {
+        log_error("interp-repl: could not prepare persistent module slab");
+        interp_repl_session_destroy(session);
+        return false;
+    }
+    session->initialized = true;
+    return true;
+}
+
+Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
+    if (session) session->last_input_rejected = false;
+    if (!session || !session->initialized || !session->runner.runtime ||
+            !session->runner.script || !source) return (session->last_input_rejected = true), ItemError;
+    Script* script = session->runner.script;
+    AstScript* root = (AstScript*)script->ast_root;
+    if (!root || !script->repl_source) return (session->last_input_rejected = true), ItemError;
+
+    size_t saved_source_length = script->repl_source->length;
+    size_t prefix_length = saved_source_length;
+    if (prefix_length) {
+        strbuf_append_char(script->repl_source, '\n');
+        prefix_length++;
+    }
+    strbuf_append_str(script->repl_source, source);
+    script->source = script->repl_source->str;
+
+    NameScope* globals = root->global_vars;
+    NameEntry* saved_scope_first = globals ? globals->first : NULL;
+    NameEntry* saved_scope_last = globals ? globals->last : NULL;
+    int saved_const_count = script->const_list ? script->const_list->length : 0;
+    int saved_type_count = script->type_list ? script->type_list->length : 0;
+    uint32_t saved_slab_count = script->interp_slab_count;
+
+    Transpiler tp = {};
+    memcpy(&tp, script, sizeof(Script));
+    tp.script_owner = script;
+    tp.runtime = session->runner.runtime;
+    tp.current_scope = globals;
+    tp.max_errors = session->runner.runtime->max_errors > 0
+        ? session->runner.runtime->max_errors : 10;
+    tp.errors = arraylist_new(4);
+
+    AstScript* parsed_root = NULL;
+    LambdaParseError parse_error = {};
+    const char* fragment_source = script->source + prefix_length;
+    LambdaParseStatus parse_status = lambda_rd_build_ast(&tp, fragment_source,
+        strlen(source), &parsed_root, &parse_error);
+    if (parse_status != LAMBDA_PARSE_OK || !parsed_root) {
+        record_direct_parse_diagnostics(&tp, "<repl>", &parse_error);
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        script->interp_slab_count = saved_slab_count;
+        repl_restore_source(script, saved_source_length);
+        repl_report_transpiler_errors(tp.errors);
+        repl_free_transpiler_errors(tp.errors);
+        log_error("interp-repl: direct parser rejected completed input");
+        return (session->last_input_rejected = true), ItemError;
+    }
+
+    AstNode* fragment = parsed_root->child;
+    if (tp.error_count != 0 || !fragment) {
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        script->interp_slab_count = saved_slab_count;
+        repl_restore_source(script, saved_source_length);
+        repl_free_transpiler_errors(tp.errors);
+        return (session->last_input_rejected = true), ItemError;
+    }
+    // Direct parsing is intentionally fragment-local for REPL latency. Rebase
+    // every retained AST span before the fragment sees the append-only source.
+    lambda_ast_shift_source_spans(fragment, (uint32_t)prefix_length);
+    repl_free_transpiler_errors(tp.errors);
+
+    AstScript scan_root = {};
+    scan_root.node_type = AST_SCRIPT;
+    scan_root.child = fragment;
+    Script scan_script = {};
+    scan_script.ast_root = (AstNode*)&scan_root;
+    scan_script.profile = script->profile;
+    AstNodeType reject = AST_NODE_NULL;
+    bool supported = interp_scan_supported(&scan_script, &reject);
+    bool planned = supported && interp_plan_repl_fragment(script, fragment);
+    bool slab_grown = planned && lambda_module_state_grow_vars(
+        script->module_state_id, script->interp_slab_count);
+    if (!supported || !planned || !slab_grown) {
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        if (!slab_grown) script->interp_slab_count = saved_slab_count;
+        repl_restore_source(script, saved_source_length);
+        log_error("interp-repl: rejected fragment node=%s",
+            interp_node_kind_name(reject));
+        return (session->last_input_rejected = true), ItemError;
+    }
+
+    AstNode* prior_last = script->repl_last_top_level;
+    AstNode* fragment_last = fragment;
+    while (fragment_last->next) fragment_last = fragment_last->next;
+    if (prior_last) prior_last->next = fragment;
+    else root->child = fragment;
+    if (!ast_index_append_profile(&script->ast_index, fragment,
+            (AstNode*)root, script->profile)) {
+        if (prior_last) prior_last->next = NULL;
+        else root->child = NULL;
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
+        repl_restore_source(script, saved_source_length);
+        return (session->last_input_rejected = true), ItemError;
+    }
+
+    LambdaModuleStateSnapshot snapshot = {};
+    if (!lambda_module_state_snapshot(script->module_state_id, &snapshot)) {
+        if (prior_last) prior_last->next = NULL;
+        else root->child = NULL;
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
+        repl_restore_source(script, saved_source_length);
+        return (session->last_input_rejected = true), ItemError;
+    }
+    Item result = interp_run_repl_fragment(&session->runner, fragment);
+    if (item_is_error(result)) {
+        lambda_module_state_restore(script->module_state_id, &snapshot);
+        if (prior_last) prior_last->next = NULL;
+        else root->child = NULL;
+        repl_restore_scope(globals, saved_scope_first, saved_scope_last);
+        if (script->const_list) script->const_list->length = saved_const_count;
+        if (script->type_list) script->type_list->length = saved_type_count;
+        ast_index_build_profile(&script->ast_index, script->ast_root, script->profile);
+        repl_restore_source(script, saved_source_length);
+        lambda_module_state_snapshot_dispose(&snapshot);
+        return result;
+    }
+    lambda_module_state_snapshot_dispose(&snapshot);
+    script->repl_last_top_level = fragment_last;
+    return result;
 }
 
 void runner_init(Runtime *runtime, Runner* runner) {
@@ -1515,6 +1463,12 @@ void runner_setup_context(Runner* runner) {
     ctx->type_info = type_info;
     ctx->consts = runner->script->const_list->data;
     ctx->result = ItemNull;  // exec result
+    if (ctx->cwd) {
+        // A new REPL session may replace an unexecuted predecessor; its CWD
+        // never reached the normal execution-boundary cleanup in that case.
+        url_destroy(ctx->cwd);
+        ctx->cwd = NULL;
+    }
     ctx->cwd = get_current_dir();  // proper URL object for current directory
     // initialize decimal context (use shared fixed-precision context for runtime)
     ctx->decimal_ctx = decimal_fixed_context();
@@ -1534,9 +1488,9 @@ void runner_setup_context(Runner* runner) {
     }
 
     input_context = (Context*)ctx;
-    if (!eval_context_thread_initialize(ctx)) return;
+    if (!eval_context_init(ctx)) return;
     // The side-stack bind resolves its owner through the thread's context
-    // identity, so it must follow eval_context_thread_initialize: on a fresh
+    // identity, so it must follow eval_context_init: on a fresh
     // thread the earlier ordering silently bound nothing.
     if (!lambda_side_stack_bind()) {
         log_error("runner side-stack: failed to initialize execution regions");
@@ -1599,7 +1553,7 @@ void runner_setup_context(Runner* runner) {
     // Radiant/Jube Lambda calls reuse JS DOM primitives even without importing
     // JavaScript. Initialize the derived capsule once for this eval-thread
     // lifetime so those native helpers can read their paired TLS state.
-    if (!js_runtime_state_thread_initialize(ctx)) return;
+    if (!js_runtime_state_init(ctx)) return;
 
     // Initialize template registry for view/edit template dispatch
     if (!g_template_registry) {
@@ -1756,7 +1710,6 @@ void runtime_init(Runtime* runtime) {
     // MIR Direct is the sole Lambda backend; keep the mode bit true for cache
     // and import scheduling code that still uses it as a fast-path predicate.
     runtime->use_mir_direct = true;
-    runtime->parser = lambda_parser();
     runtime->scripts = arraylist_new(16);
     runtime->script_index = script_index_new(64);
     runtime->max_errors = 10;  // default error threshold
@@ -1779,11 +1732,52 @@ void runtime_init(Runtime* runtime) {
 }
 
 void runtime_register_script(Runtime* runtime, Script* script) {
-    if (!runtime || !runtime->scripts || !script) return;
+    if (!runtime || !script) return;
+    // Reserve the module-state identity first, and independently of the script
+    // list. The slabs this id indexes live on the EvalContext, so a Script that
+    // never gets one keeps id 0 and shares slot 0 with whatever already owns it.
+    // That is harmless only while both layouts happen to agree; a document
+    // runtime built by script_runner has no script list (it is allocated
+    // without runtime_init), so every Lambda module loaded into a JS page took
+    // id 0 and collapsed onto the JS realm's module state — "sealed layout
+    // changed for module 0", which left the dom package with no templates
+    // (ESO34). Allocation comes from the owning Runtime's counter, the same one
+    // lambda_module_state_reserve() uses, so Lambda and JS ids never overlap.
+    script->module_state_id = runtime->next_module_state_id++;
+    if (!runtime->scripts) {
+        // No script list on this runtime: path dedup and the script index are
+        // unavailable, but the identity above is still valid and unique.
+        log_debug("runtime_register_script: no script list on runtime %p; "
+                  "'%s' keeps module_state_id=%u without path dedup",
+                  (void*)runtime, script->reference ? script->reference : "<none>",
+                  script->module_state_id);
+        return;
+    }
     arraylist_append(runtime->scripts, script);
     script->index = runtime->scripts->length - 1;
-    script->module_state_id = runtime->next_module_state_id++;
     runtime_script_index_put(runtime, script);
+}
+
+// Release every Script this runtime owns, plus the list and path index.
+// Hosts that tear a runtime down by hand (script_runner's per-document JS
+// runtime) must call this too: a Lambda module loaded into such a runtime is
+// owned by nothing else, and skipping it leaks the Script and its pool.
+void runtime_free_all_scripts(Runtime* runtime) {
+    if (!runtime) return;
+    if (runtime->scripts) {
+        for (int i = 0; i < runtime->scripts->length; i++) {
+            Script *script = (Script*)runtime->scripts->data[i];
+            if (!script) continue;
+            runtime_free_script(runtime, script, false);
+            runtime->scripts->data[i] = NULL;
+        }
+        arraylist_free(runtime->scripts);
+        runtime->scripts = NULL;
+    }
+    if (runtime->script_index) {
+        hashmap_free(runtime->script_index);
+        runtime->script_index = NULL;
+    }
 }
 
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
@@ -1792,9 +1786,9 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
         runtime_script_index_delete_script(runtime, script);
     }
     if (script->reference) mem_free((void*)script->reference);
-    if (script->source) mem_free((void*)script->source);
+    if (script->repl_source) strbuf_free(script->repl_source);
+    else if (script->source) mem_free((void*)script->source);
     if (script->directory) mem_free((void*)script->directory);
-    if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
     // The T0 load path keeps the indexed AST alive for the Script's lifetime
     // (AIO4) instead of releasing it at the MIR handoff; destroying a zeroed
     // AstIndex is a no-op, so this covers both tiers.
@@ -1845,14 +1839,14 @@ void runtime_reset_heap(Runtime* runtime) {
     if (runtime->heap) {
         EvalContext* cleanup_context = runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
-        if (!eval_context_thread_initialize(cleanup_context)) return;
+        if (!eval_context_init(cleanup_context)) return;
         cleanup_context->heap = runtime->heap;
         cleanup_context->name_pool = runtime->name_pool;
         cleanup_context->type_list = runtime->type_list;
         cleanup_context->result = ItemNull;
         cleanup_context->scheduler = runtime->scheduler;
         if (cleanup_context->js_state &&
-                !js_runtime_state_thread_initialize(cleanup_context)) return;
+                !js_runtime_state_init(cleanup_context)) return;
         if (cleanup_context->last_error) {
             // Diagnostics can own allocations from the retiring heap. Clear
             // them before teardown so the next batch never frees a stale
@@ -1865,6 +1859,12 @@ void runtime_reset_heap(Runtime* runtime) {
         edit_bridge_destroy();
         render_map_destroy();
         tmpl_state_destroy();
+        // Template entries retain both name-pool strings and JIT body pointers
+        // from this evaluation. Keeping them across heap replacement let the
+        // next script dispatch through unmapped code (D5.4.3).
+        TemplateRegistry* template_registry = cleanup_context->template_registry;
+        cleanup_context->template_registry = NULL;
+        template_registry_destroy(template_registry);
 
         if (runtime->js_runtime_used) {
             // Cross-language JS caches retain Items from the current heap.
@@ -1929,9 +1929,15 @@ void runtime_cleanup(Runtime* runtime) {
     if (!runtime) return;
     EvalContext* cleanup_owner = runtime->eval_context;
     if (cleanup_owner) {
-        if (!eval_context_thread_initialize(cleanup_owner)) return;
+        if (!eval_context_init(cleanup_owner)) return;
         if (cleanup_owner->js_state &&
-                !js_runtime_state_thread_initialize(cleanup_owner)) return;
+                !js_runtime_state_init(cleanup_owner)) return;
+        if (cleanup_owner->cwd) {
+            // A session can end before its first execution; unlike the JIT
+            // output path, that leaves its per-execution cwd URL to cleanup.
+            url_destroy(cleanup_owner->cwd);
+            cleanup_owner->cwd = NULL;
+        }
     }
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
@@ -1953,13 +1959,13 @@ void runtime_cleanup(Runtime* runtime) {
         EvalContext* cleanup_context = cleanup_owner
             ? cleanup_owner : runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
-        if (!eval_context_thread_initialize(cleanup_context)) return;
+        if (!eval_context_init(cleanup_context)) return;
         cleanup_context->heap = runtime->heap;
         cleanup_context->name_pool = runtime->name_pool;
         cleanup_context->type_list = runtime->type_list;
         cleanup_context->result = ItemNull;
         if (cleanup_context->js_state &&
-                !js_runtime_state_thread_initialize(cleanup_context)) return;
+                !js_runtime_state_init(cleanup_context)) return;
 
         // Destruction follows the same owner-bound path as heap replacement.
         edit_bridge_destroy();
@@ -2032,7 +2038,7 @@ void runtime_cleanup(Runtime* runtime) {
     }
     if (!event_loop_cleaned) {
         if (runtime->eval_context && runtime->eval_context->js_state) {
-            if (!js_runtime_state_thread_initialize(runtime->eval_context)) return;
+            if (!js_runtime_state_init(runtime->eval_context)) return;
             js_event_loop_shutdown();
         }
         lambda_uv_cleanup();
@@ -2055,23 +2061,10 @@ void runtime_cleanup(Runtime* runtime) {
         }
         js_runtime_state_destroy_context();
         lambda_module_state_destroy();
-        if (!eval_context_thread_shutdown(retiring_context)) return;
+        if (!eval_context_shutdown(retiring_context)) return;
         mem_free(runtime->eval_context);
         runtime->eval_context = NULL;
     }
     lambda_stack_cleanup();
-    if (runtime->scripts) {
-        for (int i = 0; i < runtime->scripts->length; i++) {
-            Script *script = (Script*)runtime->scripts->data[i];
-            if (!script) continue;
-            runtime_free_script(runtime, script, false);
-            runtime->scripts->data[i] = NULL;
-        }
-        arraylist_free(runtime->scripts);
-        runtime->scripts = NULL;
-    }
-    if (runtime->script_index) {
-        hashmap_free(runtime->script_index);
-        runtime->script_index = NULL;
-    }
+    runtime_free_all_scripts(runtime);
 }

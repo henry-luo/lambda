@@ -558,8 +558,10 @@ float get_cjk_system_line_height(float font_size) {
 
 #ifdef __APPLE__
 
-char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index) {
+char* font_platform_find_codepoint_font(void* base_font_ref, uint32_t codepoint,
+                                        int* out_face_index, void** out_font_ref) {
     if (out_face_index) *out_face_index = 0;
+    if (out_font_ref) *out_font_ref = NULL;
 
     // encode codepoint as UTF-16 for CFString
     UniChar utf16[2];
@@ -569,18 +571,11 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
     CFStringRef str = CFStringCreateWithCharacters(NULL, utf16, utf16_len);
     if (!str) return NULL;
 
-    // cache the base font for repeated fallback lookups (creating a CTFont
-    // per call is expensive — CoreText does font catalog lookups each time)
-    static CTFontRef s_base_font = NULL;
-    if (!s_base_font) {
-        s_base_font = CTFontCreateWithName(CFSTR("Times New Roman"), 12.0, NULL);
-        if (!s_base_font) {
-            CFRelease(str);
-            return NULL;
-        }
-    }
-
-    CTFontRef fallback = CTFontCreateForString(s_base_font, str, CFRangeMake(0, utf16_len));
+    // resolve fallback relative to the actual primary face; CoreText can use
+    // the face's script coverage and traits to select the matching fallback.
+    CTFontRef fallback = base_font_ref
+        ? CTFontCreateForString((CTFontRef)base_font_ref, str, CFRangeMake(0, utf16_len))
+        : NULL;
     CFRelease(str);
 
     if (!fallback) return NULL;
@@ -588,8 +583,8 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
     // get the font URL and PostScript name from the fallback font
     CTFontDescriptorRef desc = CTFontCopyFontDescriptor(fallback);
     CFStringRef ps_name = CTFontCopyPostScriptName(fallback);
-    CFRelease(fallback);
     if (!desc) {
+        CFRelease(fallback);
         if (ps_name) CFRelease(ps_name);
         return NULL;
     }
@@ -597,6 +592,7 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
     CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute);
     CFRelease(desc);
     if (!url) {
+        CFRelease(fallback);
         if (ps_name) CFRelease(ps_name);
         return NULL;
     }
@@ -638,10 +634,13 @@ char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index)
     if (ps_name) CFRelease(ps_name);
 
     if (ok && path[0]) {
+        if (out_font_ref) *out_font_ref = (void*)fallback;
+        else CFRelease(fallback);
         log_debug("font_platform: codepoint U+%04X → '%s' (face %d)",
                   codepoint, path, out_face_index ? *out_face_index : 0);
         return mem_strdup(path, MEM_CAT_FONT);
     }
+    CFRelease(fallback);
     return NULL;
 }
 
@@ -728,7 +727,10 @@ char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
 
 #elif defined(_WIN32)
 
-char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index) {
+char* font_platform_find_codepoint_font(void* base_font_ref, uint32_t codepoint,
+                                        int* out_face_index, void** out_font_ref) {
+    (void)base_font_ref;
+    if (out_font_ref) *out_font_ref = NULL;
     return font_backend_dwrite_find_codepoint_font(codepoint, false, out_face_index);
 }
 
@@ -738,7 +740,10 @@ char* font_platform_find_emoji_font(uint32_t codepoint, int* out_face_index) {
 
 #else
 
-char* font_platform_find_codepoint_font(uint32_t codepoint, int* out_face_index) {
+char* font_platform_find_codepoint_font(void* base_font_ref, uint32_t codepoint,
+                                        int* out_face_index, void** out_font_ref) {
+    (void)base_font_ref;
+    if (out_font_ref) *out_font_ref = NULL;
     (void)codepoint;
     if (out_face_index) *out_face_index = 0;
     return NULL;
@@ -984,6 +989,11 @@ void font_platform_destroy_ct_font(void* ct_font_ref) {
     if (ct_font_ref) {
         CFRelease((CTFontRef)ct_font_ref);
     }
+}
+
+void* font_platform_retain_ct_font(void* ct_font_ref) {
+    if (!ct_font_ref) return NULL;
+    return (void*)CFRetain((CTFontRef)ct_font_ref);
 }
 
 bool font_platform_has_color_glyphs(void* ct_font_ref) {

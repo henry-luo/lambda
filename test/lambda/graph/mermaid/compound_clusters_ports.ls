@@ -35,20 +35,20 @@ fn points_differ(left, right) =>
       abs(point.x - right[i].x) < 0.001 and abs(point.y - right[i].y) < 0.001
   ])
 
-let authored = <graph direction: "LR";
-  <subgraph id: "outer", label: "Outer", padding: 18, fill: "#f7f9fb", z: -4;
-    <node id: "a", shape: "hexagon";
+let authored = <graph direction: "LR",
+  <subgraph id: "outer", label: "Outer", padding: 18, fill: "#f7f9fb", z: -4,
+    <node id: "a", shape: "hexagon",
       "A"
       <port id: "out", side: "east", offset: 0.25>
     >
-    <subgraph id: "inner", label: "Inner", padding: 12, radius: 3, z: -3;
-      <node id: "b", shape: "trapezoid";
+    <subgraph id: "inner", label: "Inner", padding: 12, radius: 3, z: -3,
+      <node id: "b", shape: "trapezoid",
         "B"
         <port id: "out", side: "right", offset: 0.75>
       >
     >
   >
-  <node id: "c", shape: "asymmetric";
+  <node id: "c", shape: "asymmetric",
     "C"
     <port id: "in", side: "west", offset: 0.5>
   >

@@ -102,7 +102,7 @@ let all_typed_editor = edit_exec(all_select_editor, edit_cmd_set_block_type('hea
 "exec set type all second:"; node_at(all_typed_editor.doc, [1]).tag == 'heading'
 "exec set type all selection:"; all_typed_editor.selection.kind == 'all'
 
-let html_editor = edit_open(<doc <html; <body; <p; "Hi">>>>, editor_schemas.html5_subset, null)
+let html_editor = edit_open(<doc <html <body <p "Hi">>>>, editor_schemas.html5_subset, null)
 "open html schema:"; html_editor.schema.html.role == 'block'
 
 let html_text_editor = edit_open(node('doc', [node('p', [text("Hi")])]), editor_schemas.html5_subset,

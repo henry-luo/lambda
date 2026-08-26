@@ -30,30 +30,30 @@ fn alignment_style(align, valign) =>
 
 fn sanitized_element(value, value_tag) {
   if (value_tag == "strong" or value_tag == "b") {
-      [<strong; for child in sanitized_children(value) { child }>]
+      [<strong for child in sanitized_children(value) { child }>]
     }
     else if (value_tag == "em" or value_tag == "i") {
-      [<em; for child in sanitized_children(value) { child }>]
+      [<em for child in sanitized_children(value) { child }>]
     }
-    else if (value_tag == "code") { [<code; for child in sanitized_children(value) { child }>] }
-    else if (value_tag == "u") { [<u; for child in sanitized_children(value) { child }>] }
-    else if (value_tag == "sub") { [<sub; for child in sanitized_children(value) { child }>] }
-    else if (value_tag == "sup") { [<sup; for child in sanitized_children(value) { child }>] }
+    else if (value_tag == "code") { [<code for child in sanitized_children(value) { child }>] }
+    else if (value_tag == "u") { [<u for child in sanitized_children(value) { child }>] }
+    else if (value_tag == "sub") { [<sub for child in sanitized_children(value) { child }>] }
+    else if (value_tag == "sup") { [<sup for child in sanitized_children(value) { child }>] }
     else if (value_tag == "br") { [<br>] }
     else if (value_tag == "hr") { [<hr>] }
     else if (value_tag == "table") {
       [<table class: "graph-label-table",
-          align: safe_enum(value.align, ["left", "center", "right"]);
+          align: safe_enum(value.align, ["left", "center", "right"]),
         for child in sanitized_children(value) { child }
       >]
     }
     else if (value_tag == "tbody") {
-      [<tbody; for child in sanitized_children(value) { child }>]
+      [<tbody for child in sanitized_children(value) { child }>]
     }
     else if (value_tag == "tr") {
       let align = safe_enum(value.align, ["left", "center", "right"]);
       let valign = safe_enum(value.valign, ["top", "middle", "bottom"]);
-      [<tr align: align, valign: valign, style: alignment_style(align, valign);
+      [<tr align: align, valign: valign, style: alignment_style(align, valign),
         for child in sanitized_children(value) { child }>]
     }
     else if (value_tag == "td") {
@@ -62,11 +62,11 @@ fn sanitized_element(value, value_tag) {
       // cell metadata is emitted before recursion because MIR currently reuses recursive locals.
       [<td align: align, valign: valign, colspan: safe_span(value.colspan),
           rowspan: safe_span(value.rowspan), 'data-record-port': safe_port(value.port),
-          style: alignment_style(align, valign);
+          style: alignment_style(align, valign),
         for child in sanitized_children(value) { child }>]
     }
     else if (value_tag == "font") {
-      [<span; for child in sanitized_children(value) { child }>]
+      [<span for child in sanitized_children(value) { child }>]
     }
     // Unknown wrappers are removed while their sanitized text and inline children survive.
     else { sanitized_children(value) }

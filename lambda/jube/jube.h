@@ -1358,6 +1358,11 @@ struct JubeHostNodePermissionAPI {
     // denial. A callback-style client captures that exception before posting.
     Item (*check_fs_read)(const char* path);
     Item (*check_fs_write)(const char* path);
+    // Node-core owns the process.permission object; policy evaluation and
+    // grant mutation stay behind this host table.
+    bool (*enabled)(void);
+    Item (*process_permission_has)(Item scope, Item resource);
+    Item (*process_permission_drop)(Item scope, Item resource);
 };
 
 // Worker/message-port objects remain host-owned because their transfer and
@@ -1397,6 +1402,13 @@ struct JubeHostStreamAPI {
     int (*resource_close)(void* session, uint32_t resource_id);
     int (*resource_ref)(void* session, uint32_t resource_id, bool referenced);
     bool (*resource_is_live)(void* session, uint32_t resource_id);
+    // zlib transforms reuse the host's generic Transform lifecycle while the
+    // module owns the Node-facing codec callbacks.
+    Item (*transform_new)(Item options);
+    Item (*transform_prototype)(void);
+    Item (*readable_push)(Item stream, Item chunk);
+    void (*flush_data_if_flowing)(Item stream);
+    void (*transform_flush_drained)(Item stream);
 };
 
 // Network policy and raw resolver operations stay host-owned, while node-net
@@ -1444,6 +1456,13 @@ struct JubeHostNodeZlibAPI {
     bool (*codec)(enum JubeNodeZlibCodecMode mode, const uint8_t* data, int length,
                   JubeNodeZlibResult* out_result);
     void (*result_release)(JubeNodeZlibResult* result);
+    // stateful transforms remain host-owned so the node-zlib DSO does not
+    // import libz; the module supplies only validated options and byte views.
+    bool (*stream_init)(enum JubeNodeZlibCodecMode mode, int window_bits, int level,
+                        int mem_level, int strategy, void** out_state, int* out_status);
+    bool (*stream_run)(void* state, const uint8_t* data, int length, int flush,
+                       JubeNodeZlibResult* out_result);
+    void (*stream_free)(void* state);
 };
 
 // The host owns filesystem implementation and platform descriptors. Node

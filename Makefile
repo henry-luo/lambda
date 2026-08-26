@@ -43,6 +43,11 @@ else
 	PREMAKE_JUBE_FILE := premake5.jube.win.lua
 endif
 
+# Keep the isolated CST profile's generated Premake file out of the normal
+# profile's generated configuration while retaining the repository root as
+# Premake's relative-path base.
+LAMBDA_CST_PREMAKE_FILE := premake5.lambda-cst.lua
+
 NPROCS := $(shell n="$(NPROCS)"; if expr "$$n" : '^[1-9][0-9]*$$' >/dev/null; then echo "$$n"; else echo 1; fi)
 
 # Render visual tests are CPU-heavy but independent; leave one core free for
@@ -62,6 +67,7 @@ RADIANT_DOM2_WPT_RUNNERS := input_events
 # preliminary projects remain excluded by that runner.
 LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_gtest \
+	test_lambda_parser_poc_gtest \
 	test_mir_gc_stress_gtest \
 	test_mir_ratchet_gtest \
 	test_mir_emission_gtest \
@@ -75,6 +81,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_proc_gtest \
 	test_js_gtest \
 	test_js_opt_gtest \
+	test_lambda_opt_gtest \
 	test_js_test262_gtest \
 	test_compiler_pass_gtest \
 	test_js_bt_regex_gtest \
@@ -158,33 +165,31 @@ ifneq ($(shell which ccache 2>/dev/null),)
 	export CCACHE_COMPRESS := 1
 	# time_macros: __DATE__/__TIME__ shouldn't invalidate cache entries.
 	# include_file_mtime: rely on content hash, not mtime, when headers are
-	#   regenerated identically (common with generated parser.c / ts-enum.h).
+#   regenerated identically (common with generated parser.c).
 	export CCACHE_SLOPPINESS := time_macros,include_file_mtime
 endif
 
 # Tree-sitter grammar dependencies
 # This system automatically manages the dependency chain:
-# grammar.js -> parser.c -> ts-enum.h -> C/C++ source files
-# When grammar.js is modified, the parser and enum header are automatically regenerated
+# grammar.js -> parser.c -> lambda-cst verifier
+# When grammar.js is modified, the reference parser is automatically regenerated
+# One grammar file states the whole language. The former production/reference
+# split (grammar-common.js + grammar-lambda.js) retired with S16: Tree-sitter
+# left the production parse path, so table size stopped constraining it
+# (vibe/Lambda_Design_Syntax.md 4.4).
 GRAMMAR_JS = lambda/tree-sitter-lambda/grammar.js
+GRAMMAR_SCANNER_C = lambda/tree-sitter-lambda/src/scanner.c
 PARSER_C = lambda/tree-sitter-lambda/src/parser.c
 GRAMMAR_JSON = lambda/tree-sitter-lambda/src/grammar.json
 NODE_TYPES_JSON = lambda/tree-sitter-lambda/src/node-types.json
-TS_ENUM_H = lambda/runtime/ts-enum.h
-UPDATE_TS_ENUM_SCRIPT = ./utils/update_ts_enum.sh
 # Use the exact project-pinned CLI directly. `npx package@version` may query
 # npm after a clean even when this dependency is installed, making release
 # builds fail offline before compilation begins.
 TREE_SITTER_CLI = $(CURDIR)/node_modules/.bin/tree-sitter
 
-# Auto-generate parser and ts-enum.h when grammar.js changes
-$(TS_ENUM_H): $(GRAMMAR_JS)
-	@echo "Grammar changed, regenerating parser and ts-enum.h..."
-	@cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate
-	$(UPDATE_TS_ENUM_SCRIPT)
-	@echo "Updated ts-enum.h from grammar changes"
-
-$(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
+# Generate the reference parser outputs once. The generated parser is used only
+# by the isolated lambda-cst verifier; normal Lambda builds use the C parser.
+$(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON) &: $(GRAMMAR_JS) $(GRAMMAR_SCANNER_C)
 	@out=$$(cd lambda/tree-sitter-lambda && $(TREE_SITTER_CLI) generate 2>&1) || { printf '%s\n' "$$out"; exit 1; }
 
 # Tree-sitter library targets
@@ -517,8 +522,14 @@ define run_make_with_error_summary
 endef
 
 # Combined tree-sitter libraries target
-# Core: only parsers needed by lambda.exe (Lambda, JS, TS, LaTeX)
-tree-sitter-core-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+# Core: only parsers needed by lambda.exe (JS, TS, LaTeX)
+# Normal Lambda profiles use the first-party C parser.  The Lambda
+# Tree-sitter archive is built only by the dedicated CST differential profile.
+tree-sitter-core-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+
+# Release frontends use the same direct RD/Pratt parser, so keep the Lambda
+# Tree-sitter archive out of every normal profile.
+tree-sitter-release-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
 # All: includes jube-only parsers (Python, Bash, Ruby)
 tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PYTHON_LIB) $(TREE_SITTER_RUBY_LIB)
@@ -527,11 +538,11 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar generate-names debug release rebuild \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
-    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
-	    tree-sitter-libs tree-sitter-core-libs generate-tree-sitter-python-parser \
+	    tree-sitter-libs tree-sitter-core-libs tree-sitter-release-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
@@ -539,7 +550,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
-	    node-baseline node-regression-gate node-full node-update-baseline node-official-report
+	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-jube-node-net-crypto-dynamic
 
 # Help target - shows available commands
 help:
@@ -555,6 +566,7 @@ help:
 	@echo "  build-release-profile - Build optimized release with JS execution profiling enabled"
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
+	@echo "  lambda-cst    - Build the Tree-sitter Lambda CST differential verifier"
 	@echo "  build-mir     - Build MIR JIT library from vendored source at lambda/mir"
 	@echo "  clean-mir     - Remove MIR build outputs (keeps the vendored source)"
 	@echo "  verify-mir-patches - Check lambda/mir == upstream MIR + patches/mir-*.patch"
@@ -567,7 +579,7 @@ help:
 	@echo "Maintenance:"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  clean-test    - Remove test output and temporary files"
-	@echo "  clean-grammar - Remove generated grammar files (parser.c, ts-enum.h)"
+	@echo "  clean-grammar - Remove generated Lambda CST grammar files"
 	@echo "  clean-all     - Remove all build directories and tree-sitter libraries"
 	@echo "  distclean     - Complete cleanup (build dirs + executables + tests)"
 	@echo "  intellisense  - Update VS Code IntelliSense database (compile_commands.json)"
@@ -583,7 +595,8 @@ help:
 	@echo "  build-jube-test - Build hosted Python compatibility bundle and test executables"
 	@echo ""
 	@echo "Grammar & Parser:"
-	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
+	@echo "  generate-grammar - Generate the Lambda CST parser from grammar.js"
+	@echo "  test-grammar-s16 - S16 surface-syntax conformance (reference grammar)"
 	@echo "                     (automatic when grammar.js changes)"
 	@echo "  generate-names - Regenerate immutable NameId catalogs from the Python source list"
 	@echo "  tree-sitter-libs - Build all tree-sitter libraries (amalgamated, no ICU)"
@@ -688,7 +701,7 @@ env-debug:
 	@echo "IS_MSYS2: '$(IS_MSYS2)'"
 
 # Main build target (incremental)
-build: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build: tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
 	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."
@@ -722,11 +735,19 @@ print-jobs:
 
 $(LAMBDA_EXE): build
 
+# Build the isolated Tree-sitter Lambda CST verifier.  Normal Lambda
+# profiles deliberately do not build or link TREE_SITTER_LAMBDA_LIB.
+lambda-cst: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
+	@mkdir -p temp/lambda-parser-poc build/premake
+	@echo "Generating lambda-cst Premake configuration..."
+	$(PYTHON) utils/generate_premake.py --variant lambda-cst --output $(LAMBDA_CST_PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(LAMBDA_CST_PREMAKE_FILE)
+	$(call run_make_with_error_summary,lambda-cst,debug_native,,lambda-cst)
 
 
 
 # Debug build
-debug: $(TS_ENUM_H) tree-sitter-libs $(RE2_LIB) $(MIR_LIB)
+debug: tree-sitter-libs $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 	@echo "Building debug version using Premake build system..."
 	$(call toolchain_verify)
@@ -758,7 +779,7 @@ build-release:
 	@$(MAKE) clean-all
 	@$(MAKE) build-release-compile
 
-build-release-compile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build-release-compile: tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
 	$(call toolchain_verify)
@@ -780,7 +801,7 @@ endif
 	@touch .lambda_release_build
 	$(call windows_dll_check)
 
-build-release-profile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build-release-profile: tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release_profile version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, JS execution profiling enabled"
 	$(call toolchain_verify)
@@ -796,7 +817,7 @@ build-release-profile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 
 # Keep regular debug free of profiler hooks so its runtime cost reflects only
 # debugging and sanitizer instrumentation; use this target to collect JS profiles.
-build-debug-profile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build-debug-profile: tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building debug_profile version using Premake build system..."
 	@echo "Optimizations: O3 with symbols, frame pointers, JS execution profiling"
 	$(call toolchain_verify)
@@ -814,7 +835,7 @@ build-debug-profile: $(TS_ENUM_H) tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
 lambda-cli: build-cli
 
-build-cli: $(TS_ENUM_H) tree-sitter-libs
+build-cli: tree-sitter-libs
 	@echo "Building Lambda CLI (headless, release) using Premake build system..."
 	@echo "Excluded: Radiant layout engine, GUI windowing, font rendering, image codecs"
 	$(PYTHON) utils/generate_premake.py --variant cli --output $(PREMAKE_CLI_FILE)
@@ -842,7 +863,7 @@ build-jube: build build-lang-python
 # of the standard host build, so Python stays absent unless this target is run.
 # Build the matching host first: an exact Jube service-table bump must not
 # leave a freshly stamped module paired with a stale executable.
-build-lang-python: build build-windows-host-import $(TS_ENUM_H) $(TREE_SITTER_PYTHON_LIB)
+build-lang-python: build build-windows-host-import $(TREE_SITTER_PYTHON_LIB)
 	@echo "Building external lang-python hosted module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
@@ -884,6 +905,14 @@ build-node-net: build build-windows-host-import
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-net
 	@ls -lh modules/node-net/node-net.dylib modules/node-net/node-net.so modules/node-net/node-net.dll 2>/dev/null || true
 
+build-node-crypto: build build-windows-host-import
+	@echo "Building external node-crypto Jube module..."
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	$(MAKE) -C build/premake config=debug_native node-crypto $(NODE_MODULE_BUILD_FLAGS) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
+	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-crypto
+	@ls -lh modules/node-crypto/node-crypto.dylib modules/node-crypto/node-crypto.so modules/node-crypto/node-crypto.dll 2>/dev/null || true
+
 build-node-zlib: build build-windows-host-import
 	@echo "Building external node-zlib Jube module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
@@ -907,12 +936,13 @@ endef
 $(eval $(call release_node_module,core))
 $(eval $(call release_node_module,fs))
 $(eval $(call release_node_module,net))
+$(eval $(call release_node_module,crypto))
 $(eval $(call release_node_module,zlib))
 
 # The release language module is built independently, then copied next to the
 # full distribution's unchanged host executable.  The standard bundle never
 # depends on this target.
-release-lang-python: release $(TS_ENUM_H) $(TREE_SITTER_PYTHON_LIB)
+release-lang-python: release $(TREE_SITTER_PYTHON_LIB)
 	@echo "Building release lang-python hosted module..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
@@ -923,12 +953,12 @@ release-lang-python: release $(TS_ENUM_H) $(TREE_SITTER_PYTHON_LIB)
 
 # Standard and full Jube packages deliberately reuse the identical host.  The
 # full package adds language modules; it never recompiles a second runtime.
-package-standard: release-node-core release-node-fs release-node-net release-node-zlib
+package-standard: release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib
 	@mkdir -p release-standard
 	@cp release/lambda release-standard/lambda
 	@mkdir -p release-standard/modules
 	@cp modules/module-set.json release-standard/modules/module-set.json
-	# The module set advertises node-core, node-fs, and node-net, so their images must ship
+	# The module set advertises node-core, node-fs, node-net, and node-crypto, so their images must ship
 	# with the compatibility bundle instead of falling back to host providers.
 	@mkdir -p release-standard/modules/node-core
 	@cp release/modules/node-core/module.json release-standard/modules/node-core/module.json
@@ -939,10 +969,13 @@ package-standard: release-node-core release-node-fs release-node-net release-nod
 	@mkdir -p release-standard/modules/node-net
 	@cp release/modules/node-net/module.json release-standard/modules/node-net/module.json
 	@cp release/modules/node-net/node-net.dylib release/modules/node-net/node-net.so release/modules/node-net/node-net.dll release-standard/modules/node-net/ 2>/dev/null || true
+	@mkdir -p release-standard/modules/node-crypto
+	@cp release/modules/node-crypto/module.json release-standard/modules/node-crypto/module.json
+	@cp release/modules/node-crypto/node-crypto.dylib release/modules/node-crypto/node-crypto.so release/modules/node-crypto/node-crypto.dll release-standard/modules/node-crypto/ 2>/dev/null || true
 	@mkdir -p release-standard/modules/node-zlib
 	@cp release/modules/node-zlib/module.json release-standard/modules/node-zlib/module.json
 	@cp release/modules/node-zlib/node-zlib.dylib release/modules/node-zlib/node-zlib.so release/modules/node-zlib/node-zlib.dll release-standard/modules/node-zlib/ 2>/dev/null || true
-	@for module in node-core node-fs node-net node-zlib; do \
+	@for module in node-core node-fs node-net node-crypto node-zlib; do \
 		if ! find "release-standard/modules/$$module" -maxdepth 1 -type f \
 			\( -name "$$module.dylib" -o -name "$$module.so" -o -name "$$module.dll" \) \
 			-print -quit | rg -q .; then \
@@ -1304,30 +1337,36 @@ test-jube-node-zlib-dynamic: build-node-zlib build-node-core
 	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-zlib-dynamic/node-core/ 2>/dev/null || true
 	@cp modules/node-zlib/module.json temp/node-zlib-dynamic/node-zlib/module.json
 	@cp modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll temp/node-zlib-dynamic/node-zlib/ 2>/dev/null || true
-	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/node/jube_zlib_dynamic_registry.js --no-log | diff -u test/node/jube_zlib_dynamic_registry.txt -
-	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_zlib_dynamic_registry.js --no-log | diff -u test/node/jube_zlib_dynamic_registry.txt -
+	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/node/jube_zlib_dynamic_registry.js --no-log > temp/node-zlib-dynamic/normal.out
+	@diff -u test/node/jube_zlib_dynamic_registry.txt temp/node-zlib-dynamic/normal.out
+	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_zlib_dynamic_registry.js --no-log > temp/node-zlib-dynamic/forced.out
+	@diff -u test/node/jube_zlib_dynamic_registry.txt temp/node-zlib-dynamic/forced.out
 
 test-jube-node-zlib-negative: build-node-zlib build-node-core
 	@python3 utils/test_jube_module_loader_negative.py --runtime-module-dir modules/node-zlib --runtime-specifier zlib
 
-# The static checkpoint deliberately runs outside a module catalog so the
-# legacy host implementation remains the parity reference. The dynamic half
-# then activates node-zlib and its node-core dependency from copied images.
+# The parity fixture now validates the module-owned namespace against its
+# golden behavior; the host no longer contains a static zlib namespace.
 test-jube-node-zlib-parity: build-node-zlib build-node-core
-	@mkdir -p temp/node-zlib-static-checkpoint temp/node-zlib-dynamic/node-core temp/node-zlib-dynamic/node-zlib
-	@cp lambda.exe temp/node-zlib-static-checkpoint/lambda.exe
+	@mkdir -p temp/node-zlib-dynamic/node-core temp/node-zlib-dynamic/node-zlib
 	@cp modules/node-core/module.json temp/node-zlib-dynamic/node-core/module.json
 	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-zlib-dynamic/node-core/ 2>/dev/null || true
 	@cp modules/node-zlib/module.json temp/node-zlib-dynamic/node-zlib/module.json
 	@cp modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll temp/node-zlib-dynamic/node-zlib/ 2>/dev/null || true
-	@cd temp/node-zlib-static-checkpoint && JUBE_MODULE_PATH=./missing ./lambda.exe js ../../test/node/jube_zlib_parity_registry.js --no-log > static.out
 	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic ./lambda.exe js test/node/jube_zlib_parity_registry.js --no-log > temp/node-zlib-dynamic/dynamic.out
-	@diff -u test/node/jube_zlib_parity_registry.txt temp/node-zlib-static-checkpoint/static.out
-	@diff -u temp/node-zlib-static-checkpoint/static.out temp/node-zlib-dynamic/dynamic.out
-	@cd temp/node-zlib-static-checkpoint && JUBE_MODULE_PATH=./missing LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js ../../test/node/jube_zlib_parity_registry.js --no-log > static-forced.out
-	@JUBE_MODULE_PATH=./temp/node-zlib-dynamic LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 ./lambda.exe js test/node/jube_zlib_parity_registry.js --no-log > temp/node-zlib-dynamic/dynamic-forced.out
-	@diff -u test/node/jube_zlib_parity_registry.txt temp/node-zlib-static-checkpoint/static-forced.out
-	@diff -u temp/node-zlib-static-checkpoint/static-forced.out temp/node-zlib-dynamic/dynamic-forced.out
+	@diff -u test/node/jube_zlib_parity_registry.txt temp/node-zlib-dynamic/dynamic.out
+
+# N6 leaf delivery proof: DNS remains owned by node-net and crypto resolves
+# through its own node-crypto image; neither namespace is a node-core fallback.
+test-jube-node-net-crypto-dynamic: build-node-net build-node-crypto build-node-core
+	@mkdir -p temp/node-net-crypto-dynamic/node-core temp/node-net-crypto-dynamic/node-net temp/node-net-crypto-dynamic/node-crypto
+	@cp modules/node-core/module.json temp/node-net-crypto-dynamic/node-core/module.json
+	@cp modules/node-core/node-core.dylib modules/node-core/node-core.so modules/node-core/node-core.dll temp/node-net-crypto-dynamic/node-core/ 2>/dev/null || true
+	@cp modules/node-net/module.json temp/node-net-crypto-dynamic/node-net/module.json
+	@cp modules/node-net/node-net.dylib modules/node-net/node-net.so modules/node-net/node-net.dll temp/node-net-crypto-dynamic/node-net/ 2>/dev/null || true
+	@cp modules/node-crypto/module.json temp/node-net-crypto-dynamic/node-crypto/module.json
+	@cp modules/node-crypto/node-crypto.dylib modules/node-crypto/node-crypto.so modules/node-crypto/node-crypto.dll temp/node-net-crypto-dynamic/node-crypto/ 2>/dev/null || true
+	@JUBE_MODULE_PATH=./temp/node-net-crypto-dynamic ./lambda.exe js test/node/jube_node_net_crypto_dynamic.js --no-log | diff -u test/node/jube_node_net_crypto_dynamic.txt -
 
 release-jube: package-jube
 	@ln -sfn lambda release-jube/lambda-jube
@@ -1415,7 +1454,6 @@ clean-test:
 
 clean-grammar:
 	@echo "Cleaning generated grammar and embed files..."
-	@rm -f $(TS_ENUM_H)
 	@rm -f $(PARSER_C)
 	@rm -f $(GRAMMAR_JSON)
 	@rm -f $(NODE_TYPES_JSON)
@@ -1432,8 +1470,17 @@ type-chart:
 	@echo "Type hierarchy chart generated: doc/type_hierarchy.svg"
 
 # Generate grammar explicitly (useful for development)
-generate-grammar: $(TS_ENUM_H)
+generate-grammar: $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON)
 	@echo "Grammar generation complete."
+
+# S16 Surface Syntax conformance for the Tree-sitter reference grammar:
+# accept/reject pairs over the line-start classification, brace forms, control
+# forms, and the audit rulings.
+test-grammar-s16:
+	@echo "== reference grammar (tree-sitter) =="
+	@./test/ts_s16_conformance.sh
+	@echo "== production parser (C) =="
+	@./test/c_s16_conformance.sh
 
 generate-names:
 	$(PYTHON) -B utils/generate_well_known_names.py
@@ -1507,7 +1554,7 @@ check-error-recovery:
 	@python3 test/error_handling/check_recovery_boundaries.py
 
 # ---------------------------------------------------------------------------
-# T0 AST interpreter (LAMBDA_TIER=interp) — vibe/Lambda_Impl_Ast_Interp.md
+# T0 AST interpreter (LAMBDA_TIER=interp) — vibe/impl/Lambda_Impl_Ast_Interp.md
 # ---------------------------------------------------------------------------
 
 # Differential gate: every script in the committed P0 subset must match its
@@ -1914,7 +1961,7 @@ test-input-baseline: build-input-baseline ensure-yaml-submodule
 	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json
 
 # Layout baseline suites shared by test-radiant-baseline and test-layout-baseline.
-LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-box wpt-css-text wpt-css-inline wpt-css-sizing wpt-css-images wpt-css-multicol puppertino markdown
+LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-box wpt-css-text wpt-css-inline wpt-css-sizing wpt-css-images wpt-css-tables wpt-css-lists wpt-css-position wpt-css-multicol puppertino markdown bootstrap tailwind
 # The baseline target must select recorded entries before reporting aggregate
 # failures; otherwise untracked work-in-progress fixtures are misreported as
 # baseline regressions.
@@ -3271,7 +3318,9 @@ build-lambda-static: build-radiant
 # Build only the native binaries invoked by test-input-baseline. Keeping this
 # separate prevents that prerequisite from pulling the all-tests target back
 # into test-lambda-baseline transitively.
-build-input-baseline: build-lambda-data
+# input runners link these archives directly, so declare them here to make a
+# clean focused build materialize every linker input before the test link.
+build-input-baseline: build-lambda-data $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB) $(RE2_LIB)
 	@echo "Building input baseline test executables..."
 	$(call run_make_with_error_summary,input-baseline,debug_native,,$(INPUT_BASELINE_TEST_PROJECTS))
 

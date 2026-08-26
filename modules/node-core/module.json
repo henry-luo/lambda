@@ -50,7 +50,6 @@
     "internal/fs/promises",
     "internal/fs/utils",
     "child_process",
-    "crypto",
     "tls",
     "http",
     "_http_agent",

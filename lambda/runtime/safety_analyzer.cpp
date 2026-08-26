@@ -158,22 +158,30 @@ bool has_tail_call(AstNode* expr, AstFuncNode* func_node) {
     }
 
     case AST_NODE_CONTENT: {
-        // Procedural content - check for return statements with tail calls
-        // and if statements that may contain tail calls in their branches
+        // Direct-parser content can put declarations and side-effect
+        // statements before a final value expression. Only that final value
+        // is in tail position; otherwise recursive calls retain their frame.
         AstListNode* list = (AstListNode*)expr;
         AstNode* item = list->item;
-        while (item) {
-            if (item->node_type == AST_NODE_RETURN_STAM) {
-                AstReturnNode* ret = (AstReturnNode*)item;
-                if (ret->value && has_tail_call(ret->value, func_node)) return true;
-            }
-            else if (item->node_type == AST_NODE_IF_EXPR) {
-                if (has_tail_call(item, func_node)) return true;
-            }
-            item = item->next;
+        if (!item) return false;
+        while (item->next) item = item->next;
+        if (is_declaration_node(item->node_type) ||
+                is_side_effect_stam(item->node_type)) {
+            return item->node_type == AST_NODE_RETURN_STAM &&
+                has_tail_call(((AstReturnNode*)item)->value, func_node);
         }
-        return false;
+        return has_tail_call(item, func_node);
     }
+
+    case AST_NODE_BLOCK: {
+        AstNode* statement = ((AstBlockNode*)expr)->statements;
+        if (!statement) return false;
+        while (statement->next) statement = statement->next;
+        return has_tail_call(statement, func_node);
+    }
+
+    case AST_NODE_EXPR_STMT:
+        return has_tail_call(((AstExprStmtNode*)expr)->expression, func_node);
 
     case AST_NODE_RETURN_STAM: {
         // Return statement - the return value is in tail position

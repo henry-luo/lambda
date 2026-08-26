@@ -85,7 +85,7 @@ Sub-paths are also handled where applicable:
 |--------|------|----------|
 | `fs` | `js_fs.cpp` | `readFileSync`, `writeFileSync`, `existsSync`, `statSync`, `mkdirSync`, `readdirSync`, `unlinkSync`, `renameSync`, `appendFileSync`, `copyFileSync`, `realpathSync`, `accessSync`, `rmSync`, `mkdtempSync`, `chmodSync`, `symlinkSync`, `readlinkSync`, `lstatSync`, `readFile` (async), `writeFile` (async), `fs.constants`, `Stats` prototype |
 | `path` | `js_path.cpp` | `join`, `resolve`, `dirname`, `basename`, `extname`, `isAbsolute`, `normalize`, `relative`, `parse`, `format`, `sep`, `delimiter`, `path.posix`, `path.win32` |
-| `crypto` | `js_crypto.cpp` | `createHash` (md5, sha1, sha256, sha384, sha512), `createHmac`, `randomBytes`, `randomUUID`, native SHA implementation |
+| `crypto` | `lambda/module/node_crypto/node_crypto_module.cpp` | `createHash` (md5, sha1, sha256, sha384, sha512), `createHmac`, `randomBytes`, `randomUUID`, native SHA implementation |
 | `os` | `js_os.cpp` | `platform`, `arch`, `type`, `hostname`, `homedir`, `tmpdir`, `totalmem`, `freemem`, `cpus`, `uptime`, `endianness`, `release`, `version`, `networkInterfaces`, `userInfo`, `EOL` |
 | `buffer` | `js_buffer.cpp` | `Buffer.alloc`, `Buffer.from` (utf8/hex/base64/array), `Buffer.concat`, `Buffer.isBuffer`, `Buffer.byteLength`, `toString` (utf8/hex/base64), `write`, `copy`, `equals`, `compare`, `indexOf`, `slice`, `fill` |
 | `events` | `js_events.cpp` | `EventEmitter`: `on`, `once`, `off`, `emit`, `removeAllListeners`, `listeners`, `listenerCount`, `eventNames`, `setMaxListeners`, `getMaxListeners`, `prependListener`, `prependOnceListener` |
@@ -99,8 +99,8 @@ Sub-paths are also handled where applicable:
 | `util` | `js_util.cpp` | `format`, `inspect`, `promisify`, `deprecate`, `inherits`, `isDeepStrictEqual`, `types.*` (isDate, isRegExp, isArray, isMap, isSet, etc.) |
 | `querystring` | `js_querystring.cpp` | `parse`, `stringify`, `escape`, `unescape`, `decode` (alias), `encode` (alias) |
 | `assert` | `js_assert.cpp` | `ok`, `equal`, `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`, `notDeepStrictEqual`, `throws`, `doesNotThrow`, `rejects`, `doesNotReject`, `match`, `doesNotMatch`, `fail`, `ifError`, `assert/strict` (same as assert) |
-| `zlib` | `js_zlib.cpp` | `gzipSync`, `gunzipSync`, `deflateSync`, `inflateSync`, `createGzip`, `createGunzip` |
-| `dns` | `js_dns.cpp` | `lookup`, `resolve`, `resolve4` |
+| `zlib` | `lambda/module/node_zlib/node_zlib_module.cpp` + host Jube codec provider | `gzipSync`, `gunzipSync`, `deflateSync`, `inflateSync`, `createGzip`, `createGunzip` |
+| `dns` | `lambda/module/node_net/node_dns_module.cpp` | `lookup`, `resolve`, `resolve4` |
 | `readline` | `js_readline.cpp` | `createInterface` |
 | `string_decoder` | `js_string_decoder.cpp` | `StringDecoder` |
 
@@ -427,7 +427,7 @@ When running a package binary (like `npx`):
 |------|------:|---------|
 | `js_fs.cpp` | ~1,800 | File system module |
 | `js_path.cpp` | ~1,100 | Path manipulation |
-| `js_crypto.cpp` | ~1,800 | Cryptographic hash, HMAC, random |
+| `lambda/module/node_crypto/node_crypto_module.cpp` | moved | Cryptographic hash, HMAC, random |
 | `js_os.cpp` | ~720 | Operating system info |
 | `js_buffer.cpp` | ~2,500 | Buffer implementation |
 | `js_events.cpp` | ~560 | EventEmitter |
@@ -441,8 +441,8 @@ When running a package binary (like `npx`):
 | `js_util.cpp` | ~1,200 | format, inspect, types |
 | `js_querystring.cpp` | ~460 | Query string parsing |
 | `js_assert.cpp` | ~1,200 | Assertion library |
-| `js_zlib.cpp` | ~460 | Compression |
-| `js_dns.cpp` | ~220 | DNS resolution |
+| `node_zlib_module.cpp` + `jube_node_zlib_codec.cpp` | ~1,580 | Compression |
+| `lambda/module/node_net/node_dns_module.cpp` | moved | DNS resolution |
 | `js_readline.cpp` | ~130 | Readline interface |
 | `js_string_decoder.cpp` | ~150 | String decoder |
 

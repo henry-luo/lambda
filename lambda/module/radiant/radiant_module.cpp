@@ -7,6 +7,7 @@
 #include "radiant_dom_bridge.hpp"
 #include "../../../radiant/layout.hpp"
 #include "../../../radiant/render.hpp"
+#include "../../../radiant/event.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/mem.h"
 #include "../../../lib/mem_context.h"
@@ -325,7 +326,7 @@ static bool radiant_item_to_float(Item item, float* out) {
     if (!out) return false;
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-        type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64 ||
+        type == LMD_TYPE_FLOAT ||
         type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64) {
         *out = (float)it2d(item);
         return true;
@@ -337,7 +338,7 @@ static bool radiant_item_to_index(Item item, int* out) {
     if (!out) return false;
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-        type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64 ||
+        type == LMD_TYPE_FLOAT ||
         type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64) {
         int64_t value = it2i(item);
         if (value < 0 || value > INT_MAX) return false;
@@ -351,7 +352,7 @@ static bool radiant_item_to_int(Item item, int* out) {
     if (!out) return false;
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-        type == LMD_TYPE_FLOAT || type == LMD_TYPE_FLOAT64 ||
+        type == LMD_TYPE_FLOAT ||
         type == LMD_TYPE_NUM_SIZED || type == LMD_TYPE_UINT64) {
         int64_t value = it2i(item);
         if (value < INT_MIN || value > INT_MAX) return false;
@@ -852,7 +853,7 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         } else {
             input_context = nullptr;
         }
-        if (!eval_context_thread_initialize(callback_context)) {
+        if (!eval_context_init(callback_context)) {
             input_context = saved_input_context;
             g_radiant_velmt_active_pass_id = previous_pass_id;
             return false;
@@ -1081,6 +1082,465 @@ RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item valu
     Item args[2] = {name_item, value_item};
     radiant_dom_element_operation(node_item, JUBE_DOM_SET_ATTRIBUTE, args, 2);
     return node_item;
+}
+
+// ---------------------------------------------------------------------------
+// Interaction-state primitives (vibe/Lambda_Design_DOM_State.md ES4/ES6).
+// Behavior templates read and write canonical engine state through these; the
+// storage itself stays native so layout, paint, and the CSS selector matcher
+// keep reading it directly.
+// ---------------------------------------------------------------------------
+
+// Lambda spells state names in snake_case; the engine interns CSS pseudo-class
+// spellings. `read_only` marks the hot states the native transition code owns —
+// hover/active/focus change per pointer move, so script may observe but not
+// drive them (the hot-path guard would otherwise be meaningless).
+// Engine-backed state is mostly boolean pseudo-class state, but a few names
+// carry a payload (ES4). `value` is text: the HTML attribute is its default and
+// the live buffer answers once the control has one, exactly as `checked` falls
+// back to the `checked` attribute until a ViewState bit exists.
+typedef enum RadiantStateKind { RSTATE_BOOL = 0, RSTATE_TEXT } RadiantStateKind;
+
+static const struct {
+    const char* lambda_name;
+    const char* state_name;
+    // Read-only covers two kinds of name: the hot ones a handler must never
+    // drive (hover/active/focus…), and the *derived* ones — required, optional,
+    // readonly — which are pure functions of the markup since the reflection
+    // pass retired (F3b/ES16). A write to a derived name is a category error:
+    // it would route to form_control_set_*, mutating the control instead of
+    // recording a verdict. Changing one means changing the attribute (ESO36).
+    bool read_only;
+    uint32_t pseudo_flag;   // 0 when the name drives no CSS pseudo-class
+    RadiantStateKind kind;
+} RADIANT_STATE_NAME_MAP[] = {
+    {"hover",             STATE_HOVER,          true,  PSEUDO_STATE_HOVER, RSTATE_BOOL},
+    {"active",            STATE_ACTIVE,         true,  PSEUDO_STATE_ACTIVE, RSTATE_BOOL},
+    {"focus",             STATE_FOCUS,          true,  PSEUDO_STATE_FOCUS, RSTATE_BOOL},
+    {"focus_within",      STATE_FOCUS_WITHIN,   true,  0, RSTATE_BOOL},
+    {"focus_visible",     STATE_FOCUS_VISIBLE,  true,  0, RSTATE_BOOL},
+    {"visited",           STATE_VISITED,        false, PSEUDO_STATE_VISITED, RSTATE_BOOL},
+    {"link",              STATE_LINK,           false, PSEUDO_STATE_LINK, RSTATE_BOOL},
+    {"checked",           STATE_CHECKED,        false, PSEUDO_STATE_CHECKED, RSTATE_BOOL},
+    {"indeterminate",     STATE_INDETERMINATE,  false, PSEUDO_STATE_INDETERMINATE, RSTATE_BOOL},
+    {"disabled",          STATE_DISABLED,       false, PSEUDO_STATE_DISABLED, RSTATE_BOOL},
+    {"enabled",           STATE_ENABLED,        false, PSEUDO_STATE_ENABLED, RSTATE_BOOL},
+    {"readonly",          STATE_READONLY,       true,  PSEUDO_STATE_READ_ONLY, RSTATE_BOOL},
+    {"valid",             STATE_VALID,          false, PSEUDO_STATE_VALID, RSTATE_BOOL},
+    {"invalid",           STATE_INVALID,        false, PSEUDO_STATE_INVALID, RSTATE_BOOL},
+    {"required",          STATE_REQUIRED,       true,  PSEUDO_STATE_REQUIRED, RSTATE_BOOL},
+    {"optional",          STATE_OPTIONAL,       true,  PSEUDO_STATE_OPTIONAL, RSTATE_BOOL},
+    {"placeholder_shown", STATE_PLACEHOLDER,    false, 0, RSTATE_BOOL},
+    {"selected",          STATE_SELECTED,       false, 0, RSTATE_BOOL},
+    // text-valued: no interned pseudo name and no pseudo-class of its own
+    {"value",             "value",              false, 0, RSTATE_TEXT},
+};
+
+static const char* radiant_state_name_lookup(const char* lambda_name, bool* out_read_only,
+                                            uint32_t* out_pseudo_flag = nullptr,
+                                            RadiantStateKind* out_kind = nullptr) {
+    if (!lambda_name) return nullptr;
+    for (size_t i = 0; i < sizeof(RADIANT_STATE_NAME_MAP) / sizeof(RADIANT_STATE_NAME_MAP[0]); i++) {
+        if (strcmp(RADIANT_STATE_NAME_MAP[i].lambda_name, lambda_name) == 0) {
+            if (out_read_only) *out_read_only = RADIANT_STATE_NAME_MAP[i].read_only;
+            if (out_pseudo_flag) *out_pseudo_flag = RADIANT_STATE_NAME_MAP[i].pseudo_flag;
+            if (out_kind) *out_kind = RADIANT_STATE_NAME_MAP[i].kind;
+            return RADIANT_STATE_NAME_MAP[i].state_name;
+        }
+    }
+    return nullptr;
+}
+
+// Resolve the element and its document's state store in one step; every state
+// primitive needs both and must fail the same way when either is missing.
+static DocState* radiant_state_for_element(Item node_item, const char* op,
+                                           DomElement** out_elem) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, op);
+    if (!elem) return nullptr;
+    DomDocument* doc = radiant_dom_document_from_node((DomNode*)elem);
+    if (!doc) {
+        log_error("JUBE_RADIANT_%s: element has no owning document", op);
+        return nullptr;
+    }
+    // The store is created lazily — a headless `radiant.load()` document has
+    // none until something asks for state, so ensure rather than require it.
+    DocState* state = radiant_document_ensure_state(doc, op);
+    if (!state) {
+        log_error("JUBE_RADIANT_%s: could not open document state store", op);
+        return nullptr;
+    }
+    if (out_elem) *out_elem = elem;
+    return state;
+}
+
+RADIANT_C_API Item fn_radiant_get_state(Item node_item, Item name_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "GET_STATE", &elem);
+    const char* name = fn_to_cstr(name_item);
+    if (!state || !name) return ItemNull;
+    RadiantStateKind kind = RSTATE_BOOL;
+    const char* interned = radiant_state_name_lookup(name, nullptr, nullptr, &kind);
+    if (!interned) {
+        log_error("JUBE_RADIANT_GET_STATE: unknown state name '%s'", name);
+        return ItemNull;
+    }
+    if (kind == RSTATE_TEXT) {
+        // Live value when the control has a buffer, else the `value` attribute
+        // — the attribute is the default, the buffer is the current value.
+        FormControlProp* f = elem->form_control();
+        if (f && f->current_value) return radiant_string_item(f->current_value);
+        const char* attr = elem->get_attribute("value");
+        return radiant_string_item(attr ? attr : "");
+    }
+    return (Item){.item = b2it(state_get_bool(state, elem, interned) ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item value_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_STATE", &elem);
+    const char* name = fn_to_cstr(name_item);
+    if (!state || !name) return (Item){.item = b2it(0)};
+    bool read_only = false;
+    uint32_t pseudo_flag = 0;
+    RadiantStateKind kind = RSTATE_BOOL;
+    const char* interned = radiant_state_name_lookup(name, &read_only, &pseudo_flag, &kind);
+    if (!interned) {
+        log_error("JUBE_RADIANT_SET_STATE: unknown state name '%s'", name);
+        return (Item){.item = b2it(0)};
+    }
+    if (read_only) {
+        log_error("JUBE_RADIANT_SET_STATE: '%s' is engine-owned and read-only", name);
+        return (Item){.item = b2it(0)};
+    }
+    // state_set_bool routes each name to its canonical home — packed ViewState
+    // bits, the form-control writers, or the generic state map — and schedules
+    // the pseudo-class restyle, so script never bypasses that bookkeeping.
+    if (kind == RSTATE_TEXT) {
+        // tc_set_value is the canonical writer: it replaces the buffer, collapses
+        // the selection, refreshes placeholder state and mirrors the legacy
+        // pointer the renderer reads. Script must not poke the buffer directly.
+        if (!tc_is_text_control(elem)) {
+            log_error("JUBE_RADIANT_SET_STATE: '%s' is only defined on text controls", name);
+            return (Item){.item = b2it(0)};
+        }
+        const char* text = fn_to_cstr(value_item);
+        if (!text) text = "";
+        tc_set_value(elem, text, strlen(text));
+        return (Item){.item = b2it(1)};
+    }
+    bool want = is_truthy(value_item);
+    // Only a real change is worth a restyle. The native writers return early
+    // when the value is unchanged, and validation re-runs on every keystroke,
+    // so syncing unconditionally would schedule a reflow per keypress.
+    // A first write counts as a change even when it equals the default: the
+    // cascade has never seen this bit, so nothing has matched on it yet (ESO32).
+    bool first_write = state_get(state, elem, interned).item == ItemNull.item;
+    bool changed = first_write || state_get_bool(state, elem, interned) != want;
+    state_set_bool(state, elem, interned, want);
+    // the canonical bit is written; CSS only sees it once the pseudo-class
+    // cascade re-runs, which the native writers schedule at each call site
+    if (changed && pseudo_flag) radiant_sync_pseudo_state((View*)elem, pseudo_flag, want);
+    // ESO37: aria-invalid mirrors the validity verdict, and the verdict is
+    // produced here now — te_aria_reflect's other call sites are the native
+    // value-mutation points, which run before the package has validated.
+    if (changed && (strcmp(interned, STATE_VALID) == 0 ||
+                    strcmp(interned, STATE_INVALID) == 0)) {
+        te_aria_reflect(elem);
+    }
+    // Report what actually happened, not merely that a writer was called: a
+    // form-state write is a no-op until layout has built the control's
+    // FormControlProp, and a silent false success would hide that.
+    bool got = state_get_bool(state, elem, interned);
+    if (got != want) {
+        log_error("JUBE_RADIANT_SET_STATE: '%s' did not take on <%s> (control state needs layout?)",
+                  name, elem->tag_name ? elem->tag_name : "?");
+    }
+    return (Item){.item = b2it(got == want ? 1 : 0)};
+}
+
+extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* event_name);
+
+RADIANT_C_API Item fn_radiant_dispatch(Item node_item, Item name_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "DISPATCH");
+    const char* name = fn_to_cstr(name_item);
+    if (!elem || !name || !name[0]) return (Item){.item = b2it(0)};
+    bool ok = radiant_dispatch_event_from_script((void*)elem, name);
+    return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
+// Walk a subtree collecting radio controls that share `name`. The tree walk is
+// mechanism and stays native; which peers to clear, and when, is the behavior
+// template's policy (ES6).
+static void radiant_collect_radio_peers(DomNode* node, const char* name,
+                                        Item out_array, int* count, bool count_only) {
+    for (DomNode* n = node; n; n = n->next_sibling) {
+        if (n->node_type == DOM_NODE_ELEMENT) {
+            DomElement* elem = n->as_element();
+            if (!elem) continue;
+            const char* tag = elem->tag_name;
+            if (tag && (strcmp(tag, "INPUT") == 0 || strcmp(tag, "input") == 0)) {
+                const char* type = elem->get_attribute("type");
+                const char* peer = elem->get_attribute("name");
+                if (type && strcmp(type, "radio") == 0 && peer && strcmp(peer, name) == 0) {
+                    if (count_only) { (*count)++; }
+                    else { radiant_array_push_item(out_array, radiant_dom_wrap_node(elem)); }
+                }
+            }
+            radiant_collect_radio_peers(elem->first_child, name, out_array, count, count_only);
+        }
+    }
+}
+
+// Root to search from: the owning <form> when there is one, else the document.
+static DomNode* radiant_radio_scope(DomElement* elem) {
+    for (DomNode* n = (DomNode*)elem; n; n = n->parent) {
+        if (n->node_type != DOM_NODE_ELEMENT) continue;
+        DomElement* e = n->as_element();
+        if (!e) continue;
+        const char* tag = e->tag_name;
+        if (tag && (strcmp(tag, "FORM") == 0 || strcmp(tag, "form") == 0)) return n;
+    }
+    DomDocument* doc = radiant_dom_document_from_node((DomNode*)elem);
+    return doc ? (DomNode*)doc->root : nullptr;
+}
+
+RADIANT_C_API Item fn_radiant_form_of(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "FORM_OF");
+    if (!elem) return ItemNull;
+    for (DomNode* n = (DomNode*)elem; n; n = n->parent) {
+        if (n->node_type != DOM_NODE_ELEMENT) continue;
+        DomElement* e = n->as_element();
+        if (!e) continue;
+        const char* tag = e->tag_name;
+        if (tag && (strcmp(tag, "FORM") == 0 || strcmp(tag, "form") == 0)) {
+            return radiant_dom_wrap_node(e);
+        }
+    }
+    return ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_radio_group(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "RADIO_GROUP");
+    if (!elem) return ItemNull;
+    const char* name = elem->get_attribute("name");
+    // an unnamed radio forms no group; it is its own sole member
+    if (!name || !name[0]) return radiant_array_new_item(0);
+    DomNode* scope = radiant_radio_scope(elem);
+    if (!scope) return radiant_array_new_item(0);
+
+    int count = 0;
+    radiant_collect_radio_peers(scope, name, ItemNull, &count, true);
+    RootFrame roots(1);
+    Rooted<Item> rooted(roots, radiant_array_new_item(count));
+    int unused = 0;
+    radiant_collect_radio_peers(scope, name, rooted.get(), &unused, false);
+    return rooted.get();
+}
+
+extern "C" bool radiant_select_dropdown_is_open(void* dom_node);
+extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open);
+
+RADIANT_C_API Item fn_radiant_dropdown_open(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "DROPDOWN_OPEN");
+    if (!elem) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(radiant_select_dropdown_is_open((void*)elem) ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_set_dropdown_open(Item node_item, Item open_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "SET_DROPDOWN_OPEN");
+    if (!elem) return (Item){.item = b2it(0)};
+    bool ok = radiant_select_set_dropdown_open((void*)elem, is_truthy(open_item));
+    return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
+// Option count for a <select>; the option list itself is layout-owned.
+RADIANT_C_API Item fn_radiant_option_count(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "OPTION_COUNT");
+    if (!elem || !elem->form_control()) return ItemNull;
+    return radiant_int_item((int64_t)elem->form_control()->option_count);
+}
+
+RADIANT_C_API Item fn_radiant_selected_index(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SELECTED_INDEX", &elem);
+    if (!state) return ItemNull;
+    return radiant_int_item((int64_t)form_control_get_selected_index(state, (View*)elem));
+}
+
+RADIANT_C_API Item fn_radiant_set_selected_index(Item node_item, Item index_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_SELECTED_INDEX", &elem);
+    if (!state) return (Item){.item = b2it(0)};
+    int64_t idx = it2l(index_item);
+    form_control_set_selected_index(state, (View*)elem, (int)idx);
+    return (Item){.item = b2it(1)};
+}
+
+// Custom-validity read, for the dom package's constraint validation (F3). The
+// control's value is not here: it is engine-backed state, read through
+// get_state(elem, "value") like every other state name (ES4).
+RADIANT_C_API Item fn_radiant_custom_validity(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "CUSTOM_VALIDITY");
+    if (!elem || !elem->form_control()) return radiant_string_item("");
+    const char* msg = elem->form_control()->custom_validity_msg;
+    return radiant_string_item(msg ? msg : "");
+}
+
+// Is this control one that holds editable text? The dom package's catch-all
+// `view <input>` template matches every input, including checkbox and radio,
+// so the validation handlers gate on this the same way the retired native pass
+// gated on tc_is_text_control — a checkbox's value attribute is not a value to
+// length-check or parse.
+RADIANT_C_API Item fn_radiant_text_control(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "TEXT_CONTROL");
+    if (!elem) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(tc_is_text_control(elem) ? 1 : 0)};
+}
+
+// ---- F5: the editing waist -------------------------------------------------
+//
+// Three unit systems meet here and the conversions live only in this block:
+// the buffer is UTF-8 *bytes*, the selection IDL is *UTF-16* code units (that
+// is what selectionStart means), and everything Lambda sees is *codepoints* —
+// `len`, `slice` and `ord` are all codepoint-indexed, so a template computing
+// `slice(value, 0, start)` can only be handed codepoint offsets (ES9).
+
+// Resolve the control's live buffer for offset conversion.
+static const char* radiant_tc_buffer(DomElement* elem, uint32_t* out_len) {
+    *out_len = 0;
+    FormControlProp* f = elem ? elem->form_control() : nullptr;
+    if (!f) return nullptr;
+    if (f->current_value) { *out_len = f->current_value_len; return f->current_value; }
+    if (f->value) { *out_len = (uint32_t)strlen(f->value); return f->value; }
+    return "";
+}
+
+static uint32_t radiant_cp_to_u16(const char* buf, uint32_t len, uint32_t cp) {
+    size_t byte_off = str_utf8_char_to_byte(buf, len, cp);
+    if (byte_off == STR_NPOS || byte_off > len) byte_off = len;
+    return tc_utf8_to_utf16_length(buf, (uint32_t)byte_off);
+}
+
+static uint32_t radiant_u16_to_cp(const char* buf, uint32_t len, uint32_t u16) {
+    uint32_t byte_off = tc_utf16_to_utf8_offset(buf, len, u16);
+    return (uint32_t)str_utf8_byte_to_char(buf, len, byte_off);
+}
+
+// Caret/selection reads, in codepoints.
+static Item radiant_selection_edge(Item node_item, const char* op, bool want_end) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, op, &elem);
+    if (!state || !elem) return ItemNull;
+    uint32_t s = 0, e = 0; uint8_t dir = 0;
+    form_control_get_selection(state, (View*)elem, &s, &e, &dir);
+    uint32_t len = 0;
+    const char* buf = radiant_tc_buffer(elem, &len);
+    if (!buf) return ItemNull;
+    return radiant_int_item((int64_t)radiant_u16_to_cp(buf, len, want_end ? e : s));
+}
+
+RADIANT_C_API Item fn_radiant_selection_start(Item node_item) {
+    return radiant_selection_edge(node_item, "SELECTION_START", false);
+}
+
+RADIANT_C_API Item fn_radiant_selection_end(Item node_item) {
+    return radiant_selection_edge(node_item, "SELECTION_END", true);
+}
+
+RADIANT_C_API Item fn_radiant_set_selection(Item node_item, Item start_item, Item end_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_SELECTION", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    uint32_t len = 0;
+    const char* buf = radiant_tc_buffer(elem, &len);
+    if (!buf) return (Item){.item = b2it(0)};
+    int64_t s = it2l(start_item), e = it2l(end_item);
+    if (s < 0) s = 0;
+    if (e < s) e = s;
+    form_control_set_selection(state, (View*)elem,
+                               radiant_cp_to_u16(buf, len, (uint32_t)s),
+                               radiant_cp_to_u16(buf, len, (uint32_t)e), 0);
+    return (Item){.item = b2it(1)};
+}
+
+// Counts splices this waist has performed. The engine samples it either side of
+// a beforeinput dispatch so it can tell "the applier edited" from "the applier
+// claimed the intent but changed nothing" — a maxlength-blocked keystroke is
+// the second, and it must not produce an `input` event.
+static uint64_t g_radiant_splice_epoch = 0;
+
+extern "C" uint64_t radiant_splice_epoch(void) { return g_radiant_splice_epoch; }
+
+// The splice itself stays native (ES9): the template decides *what* range is
+// replaced with *what* text, the engine owns the buffer, the mirrors and the
+// caret. Events are deliberately not fired here — this runs inside beforeinput,
+// and the engine dispatches `input` after the applier returns, exactly as it
+// does for its own splice.
+RADIANT_C_API Item fn_radiant_replace_range(Item node_item, Item start_item,
+                                            Item end_item, Item text_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "REPLACE_RANGE", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    if (!tc_is_text_control(elem)) {
+        log_error("JUBE_RADIANT_REPLACE_RANGE: <%s> is not a text control",
+                  elem->tag_name ? elem->tag_name : "?");
+        return (Item){.item = b2it(0)};
+    }
+    uint32_t len = 0;
+    const char* buf = radiant_tc_buffer(elem, &len);
+    if (!buf) return (Item){.item = b2it(0)};
+
+    int64_t cp_start = it2l(start_item), cp_end = it2l(end_item);
+    if (cp_start < 0) cp_start = 0;
+    if (cp_end < cp_start) cp_end = cp_start;
+    size_t b_start = str_utf8_char_to_byte(buf, len, (size_t)cp_start);
+    size_t b_end = str_utf8_char_to_byte(buf, len, (size_t)cp_end);
+    // A codepoint index past the end clamps to the end rather than failing:
+    // a template computing `len(value)` as an end offset is asking for exactly
+    // that, and STR_NPOS would otherwise splice at a garbage offset.
+    if (b_start == STR_NPOS || b_start > len) b_start = len;
+    if (b_end == STR_NPOS || b_end > len) b_end = len;
+
+    const char* repl = fn_to_cstr(text_item);
+    if (!repl) repl = "";
+    uint32_t repl_len = (uint32_t)strlen(repl);
+    // A collapsed range with nothing to insert changes no bytes; treating it as
+    // a splice would raise the epoch and manufacture an `input` event.
+    if (b_start == b_end && repl_len == 0) return (Item){.item = b2it(1)};
+    bool ok = te_replace_byte_range_no_events(
+        elem, state, (View*)elem, (uint32_t)b_start, (uint32_t)b_end,
+        repl, repl_len);
+    if (ok) g_radiant_splice_epoch++;
+    return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
+// ---- change-on-blur (ESO42) ------------------------------------------------
+//
+// The value as it stood when the control gained focus. The snapshot itself is
+// engine mechanism (te_focus_capture_value); what a template does with it —
+// deciding whether the value was committed — is the policy.
+RADIANT_C_API Item fn_radiant_value_at_focus(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "VALUE_AT_FOCUS");
+    FormControlProp* f = elem ? elem->form_control() : nullptr;
+    if (!f || !f->value_at_focus) return ItemNull;
+    return radiant_string_item(f->value_at_focus);
+}
+
+// Counts change requests. The engine samples it across the commit hook so the
+// template can answer "the value was committed" without dispatching the event
+// itself — native still fires `change`, which is what keeps it ahead of `blur`
+// and keeps the state machine's DISPATCH_CHANGE observation intact.
+static uint64_t g_radiant_change_request_epoch = 0;
+
+extern "C" uint64_t radiant_change_request_epoch(void) {
+    return g_radiant_change_request_epoch;
+}
+
+RADIANT_C_API Item fn_radiant_request_change(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "REQUEST_CHANGE");
+    if (!elem) return (Item){.item = b2it(0)};
+    g_radiant_change_request_epoch++;
+    return (Item){.item = b2it(1)};
 }
 
 RADIANT_C_API Item fn_radiant_free(Item node_item) {
@@ -1457,6 +1917,43 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_attr(Item node, Item name)", (fn_ptr)fn_radiant_attr},
     {"set_attr", "fn(node: dom_node, name: string, value: string) -> dom_node", (fn_ptr)fn_radiant_set_attr, JUBE_FN_NONE,
      "Item fn_radiant_set_attr(Item node, Item name, Item value)", (fn_ptr)fn_radiant_set_attr},
+    {"get_state", "fn(node: dom_node, name: string) -> any", (fn_ptr)fn_radiant_get_state, JUBE_FN_NONE,
+     "Item fn_radiant_get_state(Item node, Item name)", (fn_ptr)fn_radiant_get_state},
+    {"set_state", "fn(node: dom_node, name: string, value: any) -> bool", (fn_ptr)fn_radiant_set_state, JUBE_FN_NONE,
+     "Item fn_radiant_set_state(Item node, Item name, Item value)", (fn_ptr)fn_radiant_set_state},
+    {"dispatch", "fn(node: dom_node, name: string) -> bool", (fn_ptr)fn_radiant_dispatch, JUBE_FN_NONE,
+     "Item fn_radiant_dispatch(Item node, Item name)", (fn_ptr)fn_radiant_dispatch},
+    {"form_of", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_form_of, JUBE_FN_NONE,
+     "Item fn_radiant_form_of(Item node)", (fn_ptr)fn_radiant_form_of},
+    {"radio_group", "fn(node: dom_node) -> array", (fn_ptr)fn_radiant_radio_group, JUBE_FN_NONE,
+     "Item fn_radiant_radio_group(Item node)", (fn_ptr)fn_radiant_radio_group},
+    {"dropdown_open", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dropdown_open, JUBE_FN_NONE,
+     "Item fn_radiant_dropdown_open(Item node)", (fn_ptr)fn_radiant_dropdown_open},
+    {"set_dropdown_open", "fn(node: dom_node, open: bool) -> bool", (fn_ptr)fn_radiant_set_dropdown_open, JUBE_FN_NONE,
+     "Item fn_radiant_set_dropdown_open(Item node, Item open)", (fn_ptr)fn_radiant_set_dropdown_open},
+    {"option_count", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_option_count, JUBE_FN_NONE,
+     "Item fn_radiant_option_count(Item node)", (fn_ptr)fn_radiant_option_count},
+    {"selected_index", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_selected_index, JUBE_FN_NONE,
+     "Item fn_radiant_selected_index(Item node)", (fn_ptr)fn_radiant_selected_index},
+    {"set_selected_index", "fn(node: dom_node, index: int) -> bool", (fn_ptr)fn_radiant_set_selected_index, JUBE_FN_NONE,
+     "Item fn_radiant_set_selected_index(Item node, Item index)", (fn_ptr)fn_radiant_set_selected_index},
+    {"custom_validity", "fn(node: dom_node) -> string", (fn_ptr)fn_radiant_custom_validity, JUBE_FN_NONE,
+     "Item fn_radiant_custom_validity(Item node)", (fn_ptr)fn_radiant_custom_validity},
+    {"text_control", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_text_control, JUBE_FN_NONE,
+     "Item fn_radiant_text_control(Item node)", (fn_ptr)fn_radiant_text_control},
+    // F5 editing waist — all offsets in codepoints
+    {"selection_start", "fn(node: dom_node) -> int", (fn_ptr)fn_radiant_selection_start, JUBE_FN_NONE,
+     "Item fn_radiant_selection_start(Item node)", (fn_ptr)fn_radiant_selection_start},
+    {"selection_end", "fn(node: dom_node) -> int", (fn_ptr)fn_radiant_selection_end, JUBE_FN_NONE,
+     "Item fn_radiant_selection_end(Item node)", (fn_ptr)fn_radiant_selection_end},
+    {"set_selection", "fn(node: dom_node, start: int, end: int) -> bool", (fn_ptr)fn_radiant_set_selection, JUBE_FN_NONE,
+     "Item fn_radiant_set_selection(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_selection},
+    {"replace_range", "fn(node: dom_node, start: int, end: int, text: string) -> bool", (fn_ptr)fn_radiant_replace_range, JUBE_FN_NONE,
+     "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
+    {"value_at_focus", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_value_at_focus, JUBE_FN_NONE,
+     "Item fn_radiant_value_at_focus(Item node)", (fn_ptr)fn_radiant_value_at_focus},
+    {"request_change", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_request_change, JUBE_FN_NONE,
+     "Item fn_radiant_request_change(Item node)", (fn_ptr)fn_radiant_request_change},
     {"free", "fn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
     {"layout", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,

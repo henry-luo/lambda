@@ -1,7 +1,6 @@
 
 #include "../lib/strbuf.h"
 #include "runtime/lambda-error.h"
-#include <tree_sitter/api.h>
 #ifndef _WIN32
 #include <unistd.h>  // for isatty()
 #else
@@ -22,12 +21,6 @@
 
 // Include our custom command line editor
 #include "../lib/cmdedit.h"
-
-// Forward declarations for Tree-sitter parsing
-extern "C" {
-    TSParser* lambda_parser(void);
-    TSTree* lambda_parse_source(TSParser* parser, const char* source);
-}
 
 // Result of checking statement completeness
 enum StatementStatus {
@@ -108,90 +101,26 @@ static bool has_unclosed_brackets(const char* source) {
     return (brace_count > 0 || paren_count > 0 || bracket_count > 0);
 }
 
-// Helper: recursively check for MISSING nodes (but not ERROR nodes)
-static bool has_missing_nodes(TSNode node) {
-    // check if this node is missing (parser-inserted expected token)
-    if (ts_node_is_missing(node)) {
-        return true;
-    }
-
-    // recurse into children
-    uint32_t child_count = ts_node_child_count(node);
-    for (uint32_t i = 0; i < child_count; i++) {
-        TSNode child = ts_node_child(node, i);
-        if (has_missing_nodes(child)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 // Check if a statement is complete, incomplete (needs continuation), or has error
-StatementStatus check_statement_completeness(TSParser* parser, const char* source) {
+StatementStatus check_statement_completeness(const char* source) {
     if (!source || !*source) {
         return STMT_COMPLETE;  // empty input is "complete"
     }
 
     // First, do a quick lexical check for unclosed brackets
-    // This catches incomplete statements that Tree-sitter would report as ERROR
+    // This catches incomplete statements before the direct parser reports them
     if (has_unclosed_brackets(source)) {
         return STMT_INCOMPLETE;
     }
 
-    // Now use Tree-sitter for more sophisticated checking
-    TSTree* tree = lambda_parse_source(parser, source);
-    if (!tree) {
-        return STMT_ERROR;
-    }
-
-    TSNode root = ts_tree_root_node(tree);
-
-    // If no errors at all, statement is complete
-    if (!ts_node_has_error(root)) {
-        ts_tree_delete(tree);
-        return STMT_COMPLETE;
-    }
-
-    // Tree has errors - check if there are MISSING nodes (incomplete)
-    if (has_missing_nodes(root)) {
-        ts_tree_delete(tree);
-        return STMT_INCOMPLETE;
-    }
-
-    // ERROR nodes without MISSING nodes = syntax error
-    ts_tree_delete(tree);
-    return STMT_ERROR;
+    // The direct parser owns the definitive syntax check. Once delimiters are
+    // balanced, let the evaluation path report a committed parse failure.
+    return STMT_COMPLETE;
 }
 
-void print_repl_syntax_error(TSParser* parser, const char* source) {
-    if (!parser || !source) {
-        fputs("Syntax error.\n", stderr);
-        return;
-    }
-
-    TSTree* tree = lambda_parse_source(parser, source);
-    if (!tree) {
-        fputs("Syntax error.\n", stderr);
-        return;
-    }
-
-    TSNode root = ts_tree_root_node(tree);
-    ArrayList* errors = arraylist_new(4);
-    if (errors) {
-        // REPL completeness checks only return a status; reuse structured parse
-        // diagnostics here so ambiguous statement syntax gets the same hint as files.
-        find_errors(root, source, "<repl>", errors);
-        for (int i = 0; i < errors->length; i++) {
-            LambdaError* error = (LambdaError*)errors->data[i];
-            err_print(error);
-            err_free(error);
-        }
-        arraylist_free(errors);
-    } else {
-        fputs("Syntax error.\n", stderr);
-    }
-    ts_tree_delete(tree);
+void print_repl_syntax_error(const char* source) {
+    (void)source;
+    fputs("Syntax error.\n", stderr);
 }
 
 // Get the continuation prompt for multi-line input
@@ -217,7 +146,6 @@ void print_help() {
     printf("Usage:\n");
     printf("  lambda                       - Start REPL mode (default)\n");
     printf("  lambda [script.ls]           - Run a script file\n");
-    printf("  lambda --transpile-only [script.ls] - Compile without execution\n");
     printf("  lambda --max-errors N [script.ls]   - Set max type errors before stopping (default: 10)\n");
     printf("  lambda --no-drain [script.ls]       - Return without draining spawned tasks\n");
     printf("  lambda --optimize=N [script.ls]     - Set MIR optimization level (0-3, default: 2)\n");
@@ -230,7 +158,6 @@ void print_help() {
     printf("  lambda fetch <url> [-o file]  - Fetch HTTP/HTTPS resource\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nScript Options:\n");
-    printf("  --transpile-only             - Compile without execution\n");
     printf("  --max-errors N               - Stop after N type errors (default: 10, 0 = unlimited)\n");
     printf("  --no-drain                   - Return without draining spawned tasks\n");
     printf("  --optimize=N                 - MIR JIT optimization level (0=debug/stack-trace, 1=basic, 2=full)\n");

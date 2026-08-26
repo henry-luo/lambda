@@ -506,29 +506,45 @@ static bool jm_scope_env_key_binding_start(const FnCapture* cap, uint32_t* out_s
     return true;
 }
 
-static bool jm_ts_loop_owns_binding(TSNode closure_node, uint32_t binding_start) {
-    if (ts_node_is_null(closure_node)) return false;
-    uint32_t closure_start = ts_node_start_byte(closure_node);
-    for (TSNode node = ts_node_parent(closure_node);
-         !ts_node_is_null(node); node = ts_node_parent(node)) {
-        const char* type = ts_node_type(node);
-        if (strcmp(type, "for_statement") != 0 &&
-                strcmp(type, "for_in_statement") != 0) continue;
-        TSNode body = ts_node_child_by_field_name(node, "body", 4);
-        if (ts_node_is_null(body)) continue;
-        bool closure_in_body = closure_start >= ts_node_start_byte(body) &&
-            closure_start < ts_node_end_byte(body);
-        bool binding_in_body = binding_start >= ts_node_start_byte(body) &&
-            binding_start < ts_node_end_byte(body);
-        // per-iteration bindings can be declared either in the loop body or
-        // in a for/for-in header immediately before that body. A forced
-        // capture alone is not evidence of loop ownership: normal nested
-        // callbacks force their parent lexical cell too.
-        bool binding_in_header = binding_start >= ts_node_start_byte(node) &&
-            binding_start < ts_node_start_byte(body);
-        if (closure_in_body && (binding_in_body || binding_in_header)) return true;
+struct LoopBindingProbe {
+    JsAstNode* closure_node;
+    uint32_t binding_start;
+};
+
+static bool jm_ast_loop_owns_binding(JsAstNode* root, JsAstNode* closure_node,
+        uint32_t binding_start);
+
+static bool jm_ast_loop_owns_binding_child(JsAstNode* child, void* data) {
+    LoopBindingProbe* probe = (LoopBindingProbe*)data;
+    return jm_ast_loop_owns_binding(child, probe->closure_node, probe->binding_start);
+}
+
+static bool jm_ast_loop_owns_binding(JsAstNode* root, JsAstNode* closure_node,
+        uint32_t binding_start) {
+    if (!root || !closure_node) return false;
+    if (root->node_type == JS_AST_NODE_FOR_STATEMENT ||
+            root->node_type == JS_AST_NODE_FOR_IN_STATEMENT ||
+            root->node_type == JS_AST_NODE_FOR_OF_STATEMENT) {
+        JsForOfNode* loop = (JsForOfNode*)root;
+        if (loop->body) {
+            uint32_t body_start = loop->body->source_span.start_byte;
+            uint32_t body_end = loop->body->source_span.end_byte;
+            uint32_t closure_start = closure_node->source_span.start_byte;
+            bool closure_in_body = closure_start >= body_start && closure_start < body_end;
+            bool binding_in_body = binding_start >= body_start && binding_start < body_end;
+            bool binding_in_header = binding_start >= root->source_span.start_byte &&
+                binding_start < body_start;
+            if (closure_in_body && (binding_in_body || binding_in_header)) return true;
+        }
     }
-    return false;
+    if (root != closure_node && (root->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
+            root->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+            root->node_type == JS_AST_NODE_ARROW_FUNCTION ||
+            root->node_type == JS_AST_NODE_METHOD_DEFINITION ||
+            root->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+            root->node_type == JS_AST_NODE_CLASS_EXPRESSION)) return false;
+    LoopBindingProbe probe = {closure_node, binding_start};
+    return js_ast_any_child(root, jm_ast_loop_owns_binding_child, &probe);
 }
 
 static bool jm_capture_is_loop_private(JsFuncCollected* child,
@@ -542,14 +558,14 @@ static bool jm_capture_is_loop_private(JsFuncCollected* child,
         if (!cap->entry || !cap->entry->node || !child || !child->node ||
                 !parent || !parent->node) return false;
         JsAstNode* binding = (JsAstNode*)cap->entry->node;
-        if (ts_node_is_null(binding->node)) return false;
-        binding_start = ts_node_start_byte(binding->node);
+        binding_start = binding->source_span.start_byte;
     }
     if (!child || !child->node || !parent || !parent->node) return false;
     // A lexical declared in a loop body needs one closure cell per iteration;
     // a function-local lexical merely carries a source key to disambiguate it
     // from a same-named module binding and must remain in the shared parent env.
-    return jm_ts_loop_owns_binding(child->node->node, binding_start);
+    return jm_ast_loop_owns_binding(parent->node->body, (JsAstNode*)child->node,
+        binding_start);
 }
 
 static void jm_mark_mixed_loop_parent_link(JsFuncCollected* child, JsFuncCollected* parent) {
@@ -739,7 +755,7 @@ static bool jm_capture_binding_starts_after_function(JsFuncCollected* parent, Fn
     }
     // A nested closure can outlive a factory before an outer `var` initializer
     // runs; only that source order needs a second, immediate-parent cell link.
-    return binding_start >= ts_node_end_byte(parent->node->node);
+    return binding_start >= parent->node->source_span.end_byte;
 }
 
 static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode* target,
@@ -1230,11 +1246,11 @@ static void jm_copy_cached_function_locals(JsFuncCollected* fc, bool var_only,
 }
 
 static bool jm_ast_node_contains_target(JsAstNode* node, JsAstNode* target) {
-    if (!node || !target || ts_node_is_null(node->node) || ts_node_is_null(target->node)) return false;
-    uint32_t ns = ts_node_start_byte(node->node);
-    uint32_t ne = ts_node_end_byte(node->node);
-    uint32_t ts = ts_node_start_byte(target->node);
-    uint32_t te = ts_node_end_byte(target->node);
+    if (!node || !target) return false;
+    uint32_t ns = node->source_span.start_byte;
+    uint32_t ne = node->source_span.end_byte;
+    uint32_t ts = target->source_span.start_byte;
+    uint32_t te = target->source_span.end_byte;
     return ns <= ts && te <= ne;
 }
 
@@ -1247,8 +1263,8 @@ static bool jm_lexical_pattern_matches_name_key(JsAstNode* pat, const char* name
         if (!id->name) return false;
         const char* vname = jm_var_name(id->name);
         if (strcmp(vname, name) != 0) return false;
-        uint32_t start = ts_node_is_null(pat->node) ? 0 : ts_node_start_byte(pat->node);
-        uint32_t end = ts_node_is_null(pat->node) ? 0 : ts_node_end_byte(pat->node);
+        uint32_t start = pat->source_span.start_byte;
+        uint32_t end = pat->source_span.end_byte;
         *out_key = jm_format_name("%s@%u:%u", name, start, end);
         return true;
     }
@@ -1282,11 +1298,11 @@ static bool jm_lexical_decl_matches_name(JsAstNode* stmt, const char* name,
     if (!stmt || !name || !out_key) return false;
     if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
         JsFunctionNode* fn = (JsFunctionNode*)stmt;
-        if (!fn->name || ts_node_is_null(stmt->node)) return false;
+        if (!fn->name) return false;
         const char* fn_name = jm_var_name(fn->name);
         if (strcmp(fn_name, name) != 0) return false;
         *out_key = jm_format_name("%s@%u:%u", name,
-            ts_node_start_byte(stmt->node), ts_node_end_byte(stmt->node));
+            stmt->source_span.start_byte, stmt->source_span.end_byte);
         return true;
     }
     if (stmt->node_type != JS_AST_NODE_VARIABLE_DECLARATION) return false;
@@ -2185,6 +2201,20 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                     if (mt->func_entries[ci].parent_index == fi) {
                         mt->func_entries[ci].is_strict = true;
                     }
+                }
+            }
+        }
+        // Class definition evaluation, including a heritage expression, is
+        // strict.  A function created in `extends expr` therefore needs the
+        // strict arguments object even though it is not a class method.
+        for (int fi = 0; fi < mt->func_count; fi++) {
+            JsFuncCollected* e = &mt->func_entries[fi];
+            for (int ci = 0; ci < mt->class_count; ci++) {
+                JsClassNode* cls = (JsClassNode*)mt->class_entries[ci].node;
+                if (cls && cls->superclass && e->node &&
+                    jm_ast_contains_node(cls->superclass, (JsAstNode*)e->node)) {
+                    e->is_strict = true;
+                    break;
                 }
             }
         }
@@ -3184,7 +3214,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
                 ancestor_idx = anc->parent_index;
             }
 
-            jm_analyze_captures(fc, ancestor_names, mt->module_consts, ancestor_func_locals);
+            bool captures_with_scope = jm_ast_node_has_with_ancestor(root,
+                (JsAstNode*)fc->node);
+            jm_analyze_captures(fc, ancestor_names, mt->module_consts,
+                ancestor_func_locals, captures_with_scope);
 
             // v29 TDZ: Mark captures that reference let/const variables.
             // Collect let/const names from the enclosing scope(s) and check each capture.
@@ -4189,23 +4222,8 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             for (int k = 0; k < child->capture_count; k++) {
                 bool field_initializer_arrow = false;
                 if (child->node && child->node->is_arrow &&
-                    !ts_node_is_null(child->node->node)) {
-                    for (TSNode enclosing = ts_node_parent(child->node->node);
-                         !ts_node_is_null(enclosing);
-                         enclosing = ts_node_parent(enclosing)) {
-                        const char* enclosing_type = ts_node_type(enclosing);
-                        if (!enclosing_type) break;
-                        if (strcmp(enclosing_type, "field_definition") == 0 ||
-                            strcmp(enclosing_type, "public_field_definition") == 0) {
-                            field_initializer_arrow = true;
-                            break;
-                        }
-                        if (strcmp(enclosing_type, "function_declaration") == 0 ||
-                            strcmp(enclosing_type, "function") == 0 ||
-                            strcmp(enclosing_type, "method_definition") == 0) {
-                            break;
-                        }
-                    }
+                    mt->func_entries[fi].is_class_field_initializer) {
+                    field_initializer_arrow = true;
                 }
                 if (field_initializer_arrow &&
                     jm_capture_is_lexical_meta_binding(child->captures[k].name)) {
@@ -5445,7 +5463,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // entrypoint directly; without this bind, TLA state dereferences a null
     // capsule before the module can be parsed.
     if (!runtime || !context || !context->heap ||
-            !js_runtime_state_thread_initialize(context)) {
+            !js_runtime_state_init(context)) {
         log_error("js-mir: module compilation requires a bound runtime context");
         return ItemError;
     }

@@ -4,6 +4,6 @@ pn worker() {
 }
 
 pn main() {
-    let handle = start worker()
+    let handle = start(worker, [], {mode: 'task'})
     print(wait(handle)^)
 }

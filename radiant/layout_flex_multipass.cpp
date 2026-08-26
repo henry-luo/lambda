@@ -203,7 +203,7 @@ static void flex_normalize_break_item_boxes(LayoutContext* lycon,
         LayoutFontScope font_scope(lycon);
         if (br->font) setup_font(lycon->ui_context, &lycon->font, br->font);
         float break_height = layout_br_line_box_extent(
-            lycon, lycon->font.font_handle);
+            lycon, font_box_handle(&lycon->font));
         if (break_height <= 0.0f) continue;
 
         bool vertical_writing = flex->writing_mode == WM_VERTICAL_LR ||
@@ -838,6 +838,9 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     float content_height = content.height;
     float content_x_offset = content.offset_x;
     float content_y_offset = content.offset_y;
+    // css flex: an auto-sized multicol flex item still establishes its own
+    // multicol formatting context after flex sizing resolves its content box.
+    bool use_multicol_flex_path = is_multicol_container(flex_item);
 
     WritingMode flex_item_writing_mode = layout_block_writing_mode(flex_item);
     bool flex_item_vertical = flex_item_writing_mode == WM_VERTICAL_LR ||
@@ -917,8 +920,9 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 return;
             }
 
-            float flex_width = flex_item->width;
-            float flex_height = flex_item->height;
+            float flex_border_width = flex_item->width;
+            float flex_border_height = flex_item->height;
+            LayoutContentBox iframe_content = layout_content_box(flex_item);
 
             if (!(flex_item->embed && flex_item->embedp()->doc)) {
                 const char *src_value = flex_item->get_attribute("src");
@@ -926,7 +930,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                     lycon->ui_context->iframe_depth++;
 
                     DomDocument* doc = load_html_doc(lycon->ui_context->document->url, (char*)src_value,
-                        (int)flex_width, (int)flex_height, // INT_CAST_OK: viewport API expects int
+                        // The embedded viewport excludes the flex item's border and padding.
+                        (int)iframe_content.width, (int)iframe_content.height, // INT_CAST_OK: viewport API expects int
                         lycon->ui_context->pixel_ratio);
                     if (doc) {
                         radiant_document_ensure_state(doc, "layout_flex_iframe");
@@ -936,8 +941,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                         flex_item->embed->doc = doc;
                         if (doc->html_root) {
                             layout_iframe_embedded_doc(lycon, doc,
-                                (int)flex_width, // INT_CAST_OK: viewport API expects int
-                                (int)flex_height); // INT_CAST_OK: viewport API expects int
+                                (int)iframe_content.width, // INT_CAST_OK: iframe viewport expects int
+                                (int)iframe_content.height); // INT_CAST_OK: iframe viewport expects int
                         }
                         lycon->ui_context->iframe_depth--;
                     } else {
@@ -968,8 +973,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 }
             }
             // CRITICAL: Restore the flex-determined dimensions
-            flex_item->width = flex_width;
-            flex_item->height = flex_height;
+            flex_item->width = flex_border_width;
+            flex_item->height = flex_border_height;
         }
     } else {
         // CRITICAL FIX: Generate pseudo-element content for flex items with ::before/::after
@@ -977,6 +982,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             layout_materialize_pseudo_content(lycon, flex_item);
         }
 
+        bool laid_out_multicol = false;
         DomNode* child = flex_item->first_child;
         if (child) {
             // IMPORTANT: Skip anonymous elements (::anon-table, ::anon-tr) created by
@@ -999,18 +1005,32 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                 }
             }
 
-            do {
-                layout_flow_node(lycon, child);
-                child = child->next_sibling;
-            } while (child);
+            if (use_multicol_flex_path) {
+                // css multicol: a flex item owns its formatting context; route
+                // columns through the same fragmentation path as block flow.
+                flex_item->content_width = content_width;
+                layout_multicol_content(lycon, flex_item);
+                laid_out_multicol = true;
+            } else {
+                do {
+                    layout_flow_node(lycon, child);
+                    child = child->next_sibling;
+                } while (child);
 
-            if (!lycon->line.is_line_start) {
-                line_break(lycon);
+                if (!lycon->line.is_line_start) {
+                    line_break(lycon);
+                }
             }
+        }
+        if (!laid_out_multicol && use_multicol_flex_path) {
+            flex_item->content_width = content_width;
+            layout_multicol_content(lycon, flex_item);
+            laid_out_multicol = true;
         }
     }
 
-    if (flex_item->display.inner != RDT_DISPLAY_REPLACED) {
+    if (flex_item->display.inner != RDT_DISPLAY_REPLACED &&
+        !use_multicol_flex_path) {
         flex_item->content_width = lycon->block.max_width;
         flex_item->content_height = lycon->block.advance_y - content_y_offset;
     }
@@ -1347,19 +1367,29 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     LayoutTextRun run = layout_prepare_text_run(
                         text, strlen(text), LAYOUT_TEXT_RUN_TRIM);
                     if (run.length > 0) {
-                        TextIntrinsicWidths widths = layout_measure_text_intrinsic_widths(
-                            lycon, run.text, run.length,
-                            layout_inherited_text_transform(flex_container), CSS_VALUE_NONE,
-                            CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL);
-                        float text_size = is_row ? widths.max_content : (lycon->font.style ? lycon->font.style->font_size : 16.0f);
-
-                        cumulative_text_offset += text_size;
+                        bool text_is_anonymous_flex_item = false;
+                        for (int i = 0; i < flex->item_count; i++) {
+                            ViewElement* item = lam::view_as_element(flex->flex_items[i]);
+                            if (flex_item_is_anonymous_text(item) && item->fi->anonymous_text == child) {
+                                text_is_anonymous_flex_item = true;
+                                break;
+                            }
+                        }
+                        if (!text_is_anonymous_flex_item) {
+                            TextIntrinsicWidths widths = layout_measure_text_intrinsic_widths(
+                                lycon, run.text, run.length,
+                                layout_inherited_text_transform(flex_container), CSS_VALUE_NONE,
+                                CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL);
+                            float text_size = is_row ? widths.max_content :
+                                (lycon->font.style ? lycon->font.style->font_size : 16.0f);
+                            cumulative_text_offset += text_size;
+                        }
 
                         DomNode* next = child->next_sibling;
                         while (next && !next->is_element()) {
                             next = next->next_sibling;
                         }
-                        if (next && next->is_element()) {
+                        if (!text_is_anonymous_flex_item && next && next->is_element()) {
                             cumulative_text_offset += flex_gap;
                         }
 

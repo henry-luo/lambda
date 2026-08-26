@@ -535,6 +535,23 @@ TEST_F(MarkParserRobustnessTest, MinimalValidInputs) {
     EXPECT_TRUE(parse_succeeded(parse("(tag :attr val)", "mark")));
 }
 
+TEST_F(MarkParserRobustnessTest, RejectsMalformedStrictContainers) {
+    Input* array = parse("[1 2]", "mark");
+    ASSERT_NE(array, nullptr);
+    EXPECT_TRUE(array->parse_failed);
+    EXPECT_EQ(array->root.item, ITEM_ERROR);
+
+    Input* map = parse("{name 1}", "mark");
+    ASSERT_NE(map, nullptr);
+    EXPECT_TRUE(map->parse_failed);
+    EXPECT_EQ(map->root.item, ITEM_ERROR);
+
+    Input* element = parse("<a @>", "mark");
+    ASSERT_NE(element, nullptr);
+    EXPECT_TRUE(element->parse_failed);
+    EXPECT_EQ(element->root.item, ITEM_ERROR);
+}
+
 TEST_F(MarkParserRobustnessTest, DeepNesting) {
     auto nested_mark = [](int depth) {
         std::string mark;

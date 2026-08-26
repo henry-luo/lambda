@@ -4623,7 +4623,7 @@ Item transpile_rb_to_mir(Runtime* runtime, const char* rb_source, const char* fi
             rb_transpiler_destroy(tp);
             return (Item){.item = ITEM_ERROR};
         }
-        if (!eval_context_thread_initialize(rb_context)) {
+        if (!eval_context_init(rb_context)) {
             rb_transpiler_destroy(tp);
             return (Item){.item = ITEM_ERROR};
         }

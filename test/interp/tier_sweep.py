@@ -4,8 +4,8 @@ zero-fallback, output-identical set. Output goes to ./temp/ (CLAUDE rule 2).
 
 Usage: python3 test/interp/tier_sweep.py [--dir test/lambda] [--timeout 20]
 """
-import argparse, os, re, subprocess, sys
-from concurrent.futures import ThreadPoolExecutor
+import argparse, os, re, signal, subprocess, sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 FALLBACK_RE = re.compile(r"interp: executed=(\d+) fallback=(\d+) excluded=(\d+)")
 
@@ -27,16 +27,56 @@ def run(script, tier, timeout, procedural=False):
     else:
         env.pop("LAMBDA_TIER", None)
     argv = ["./lambda.exe", "run", script] if procedural else ["./lambda.exe", script]
+    proc = None
     try:
-        proc = subprocess.run(argv, env=env, timeout=timeout,
-                              capture_output=True, text=True, errors="replace")
+        # A script can start renderer/helper descendants. Give the invocation
+        # its own process group so a timeout closes every inherited pipe; a
+        # bare subprocess.run() kill left those descendants alive and stranded
+        # the worker thread in communicate() during the full corpus sweep.
+        proc = subprocess.Popen(argv, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True,
+                                errors="replace", start_new_session=os.name != "nt")
+        stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        if proc:
+            if os.name == "nt":
+                proc.kill()
+            else:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    # Sandboxed macOS workers may deny process-group signaling
+                    # even though the direct child is ours; fall back to the
+                    # child handle so one renderer timeout cannot abort the
+                    # whole P1 partition refresh (R4).
+                    try:
+                        proc.kill()
+                    except (ProcessLookupError, PermissionError):
+                        pass
+            # A renderer can fork a helper into another session while retaining
+            # stdout/stderr. Draining with communicate() after killing the
+            # direct process then waits forever for that inherited pipe, even
+            # though the timed-out Lambda invocation has already ended. Reap
+            # only the direct child and close our copies; its descendants no
+            # longer participate in this row's timeout verdict.
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
         return None, None, "timeout"
-    stats = FALLBACK_RE.search(proc.stderr or "")
+    stats = FALLBACK_RE.search(stderr or "")
     fallback = int(stats.group(2)) if stats else 0
     executed = int(stats.group(1)) if stats else 0
     status = "ok" if proc.returncode == 0 else f"exit{proc.returncode}"
-    return proc.stdout, (executed, fallback), status
+    return stdout, (executed, fallback), status
 
 
 def main():
@@ -46,6 +86,8 @@ def main():
     ap.add_argument("--timeout", type=int, default=20)
     ap.add_argument("--out", default="temp/interp_tier_sweep.tsv")
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 4) - 1))
+    ap.add_argument("--progress", type=int, default=25,
+                    help="print a completed-row count at this interval (0 disables it)")
     args = ap.parse_args()
 
     def discover(directory, procedural):
@@ -107,8 +149,23 @@ def main():
             verdict = "match"
         return (script, verdict, jit_status, int_status, executed, fallback)
 
+    # `pool.map()` yields in submission order. One early renderer fixture can
+    # therefore hide hundreds of completed classifications behind it and make
+    # a healthy full sweep look hung. Report completions as they arrive while
+    # retaining discovery order in the final TSV.
+    rows = [None] * len(scripts)
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        rows = list(pool.map(verdict_for, scripts))
+        futures = {
+            pool.submit(verdict_for, entry): index
+            for index, entry in enumerate(scripts)
+        }
+        completed = 0
+        for future in as_completed(futures):
+            rows[futures[future]] = future.result()
+            completed += 1
+            if args.progress and (completed % args.progress == 0 or
+                                  completed == len(scripts)):
+                print(f"progress={completed}/{len(scripts)}", flush=True)
 
     supported = [r[0] for r in rows if r[1] == "match"]
     fell_back = [r[0] for r in rows if r[1] == "fallback"]

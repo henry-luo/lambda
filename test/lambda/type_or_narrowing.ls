@@ -14,6 +14,6 @@ fn maybe_value(value: int) int^ {
 
 let direct_contained = maybe_value(0 - 1) or 9
 let dynamic_maybe = maybe_value
-let dynamic_contained = dynamic_maybe(0 - 1) or 11
+let dynamic_contained = dynamic_maybe(0 - 1) or 11;
 
 [parsed, from_any, absent, false_value, true_value, direct_contained, dynamic_contained]

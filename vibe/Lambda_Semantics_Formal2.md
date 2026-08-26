@@ -234,6 +234,36 @@ operator.** The decision path, recorded:
   coherence); implement `at` membership over maps, elements, arrays (index),
   and decide ranges; document the `in`/`at` pair as the value/key axis.
 
+#### C5.3b Subscript key domains and container-kind stability (2026-08-24) — RESOLVED
+
+**Designer ruling:**
+
+1. The sequence face of an array, list, or range accepts only a non-negative,
+   exact integral numeric subscript. `int`, `float`, and `decimal` values share
+   that rule: `5`, `5.0`, and exact decimal `5` select the same integer key;
+   `5.5`, strings, symbols, and negative positions do not name members. Every
+   such invalid read yields `null`; every invalid write raises through the hard
+   `T^` channel. The same convention applies to all other key-domain mismatches.
+2. A map accepts string and symbol subscripts as names. Equal text denotes the
+   same named key, and `""` is explicitly valid: its falsiness does not turn it
+   into absence. This resolves SO30; the observed empty-JSON-key corruption is
+   now unambiguously an implementation bug.
+3. An element dispatches by key kind: an integer key selects a content child;
+   a string or symbol name selects an attribute.
+4. Member/index assignment may update or add a member allowed by the existing
+   container, but never converts the container kind. In particular,
+   `var a = []; a["str"] = 1` raises a hard error; the MIR behavior that routes
+   this through numeric index 0 is a conformance defect, not language precedent.
+5. A kind change is explicit whole-binding replacement with a reconstructed
+   value, for example `var a = [1]; a = {value: 1}`. An unannotated `var` may
+   change runtime type; an annotated binding must admit the replacement type.
+
+This ruling governs subscripting and member assignment. It does not reopen the
+separate `at` membership axis: `at` continues to range over names only. It is
+formalized as S2.4.2v4, S8.2.1v2, S8.2.2v2, and S9.1.6 in formal-semantics
+version 12.0.0. The major version reflects the deliberate rejection of programs
+that relied on accidental array-to-named-key behavior.
+
 #### C5.4 Follow-ups (C5)
 
 1. Implement: array OOB/negative-index reads → null (replacing error values); OOB
@@ -1814,7 +1844,7 @@ user's, not the language's.
 ### C16. Flex `int` redefined: the float64-representable integers (2026-08-01) — RESOLVED: total int arithmetic; `div`/`%` stay int via `int.inf`/`int.nan`; 53-bit literal band retained
 
 Decided by the designer 2026-08-01, out of the TE-15 soft-error-containment discussion
-(`Lambda_Design_Type_Enforcement.md` TE-15; issue evidence in `Lambda_Issue_Type_Support.md`
+(`Lambda_Design_Type_Enforcement.md` TE-15; issue evidence in `impl/Lambda_Issue_Type_Support (retired).md`
 TS-9 and the measured declared-boundary divergence of the same date). Supersedes the
 **promotion arm of C3 — now historical for the flex tier** (C3's machine-int rulings, literal
 strictness, and data-home philosophy stand), and revises the **`int div int → float` typing arm
@@ -1966,7 +1996,7 @@ symmetry: bounded, wrapping, poison-free.
   existing out-of-band-float precedent (`d2it`, `lambda.h:1286`). The 53-bit band survives
   as *carrier capacity*, never again as a semantic bound. Full plan, including the
   `i2it`-overflow-arm fix that closes the O1 divergence, the range-proven-`i64`-lane rule, and
-  the convergence with the 2026-08-01 tuning work: `vibe/Lambda_Impl_Int_Total.md`.
+  the convergence with the 2026-08-01 tuning work: `vibe/impl/Lambda_Impl_Int_Total.md`.
 - `int.inf`/`int.nan` payload encoding (reserved compact payloads vs. cells) — open, see
   that plan's Phase A.
 - Value-aware admission under §11.4 now passes any finite integral float into int (e.g.
@@ -2089,3 +2119,93 @@ and §10.4's rich payloads.
   line (it follows from where the value came from), not a carve-out list, and it is the
   reason C14c and C17 point in opposite directions without conflicting. Recorded in
   spec §4.
+
+---
+
+### C18. Reference order for system-function semantics; `split` follows ECMAScript (2026-08-25) — RESOLVED
+
+Raised while fixing LR09-8. Two rulings came out of it: one general (S1.11), one specific
+(S17.1.1).
+
+**How it surfaced.** `split` with a *pattern* delimiter returned a single merged element —
+`split("a1b2c3", \(d))` gave `["abc"]`, and the keep-delimiters form returned the input
+verbatim. The cause was not a missing implementation: `pattern_split` computed the right
+segments and `list_push` merged them back, because only the *string* path suspended
+adjacent-string merging. Fixing that exposed a second defect — one cursor served as both
+the pending-segment start and the search resume point, so a zero-length match stepped over
+a character that then appeared in no segment (`split("ab", \(d*))` → `["", "", ""]`, losing
+`a` and `b`).
+
+**The question.** With the segments finally correct, the zero-width edge was still
+under-determined. Python's `re.split(r'\d*', 'ab')` gives `['', 'a', 'b', '']`; ECMAScript's
+`"ab".split(/\d*/)` gives `["a", "b"]`. Nothing in `doc/Lambda_Sys_Func.md` ruled on it, and
+the six documented examples all use non-empty matches, where the two references agree.
+
+**Resolved: ECMAScript.** The decisive argument was internal, not comparative. Lambda's own
+empty-**string** delimiter already behaved like JS — `split("ab", "")` = `["a", "b"]` — so
+adopting Python would have made the pattern path contradict its own sibling in the same
+function, which is precisely the inconsistency the LR09-8 fix set out to remove. That JS
+also happened to be the reference-order winner made the choice over-determined rather than
+close.
+
+The operative mechanism is ECMAScript's `e == p` rule: a match whose *end* lands on the
+current segment's start contributes no segment and only advances the search. One condition
+suppresses both the leading and the trailing empty of a zero-width delimiter. Two
+consequences follow that are easy to get wrong: the loop bound is `search < len`, not
+`<= len` (the tail segment is pushed unconditionally afterwards, so searching at `len`
+emits one segment too many), and the zero-width advance must step a whole codepoint — a
+bare `+1` tears multi-byte characters apart.
+
+Empty subject follows the same source: `[]` when the delimiter matches the empty string,
+`[""]` otherwise. The Python-shaped `split(str, null)` whitespace form has no ECMAScript
+analogue and is retained as-is.
+
+**Generalized to S1.11 — references, not authorities.** ECMAScript first, Python second,
+consulted only when a system function's semantics are otherwise under-determined. Neither
+is binding: a Lambda principle, an existing ruling, or consistency with a sibling Lambda
+operation overrides both, and the departure gets recorded rather than left implicit. Hosted
+languages are unaffected — LambdaJS follows ECMAScript and the Python guest follows CPython
+whatever Lambda chose for a same-named builtin. The `split` case fixes the tie-break order:
+matching a sibling Lambda operation beats matching the reference.
+
+**Not a precedent for wholesale JS alignment.** S1.11 is a tie-breaker for
+*under-determined* cases only. It does not reopen settled Lambda departures from JS
+(equality, truthiness, numerics), each of which was decided on Lambda principle.
+
+Recorded in spec §1 (S1.11) and §17 (S17.1.1); implementation and coverage in
+`test/lambda/split_pattern.ls`; ledger entry LR09-R2.
+
+---
+
+### C19. Arity overloading for user definitions — considered and REJECTED (2026-08-25)
+
+Raised from the TS-8 issue entry, which had framed the current behaviour as a defect.
+
+**The observation.** `pn f(a)` and `pn f(a, b)` in one scope is
+`error[E209]: duplicate definition of 'f' in the same scope`, while the *builtin*
+registry is keyed on name **and** arity. TS-8 read that as an unexplained asymmetry
+between user and builtin name resolution.
+
+**Resolved: keep it, and the asymmetry is not real.** Two points settle it.
+
+The builtin registry's `(name, arity)` key is a **dispatch optimization**, not a
+language rule. It lets an intrinsic select a specialized row without a runtime arity
+branch. Builtins are not overloadable in the source language either, so there is no
+semantic difference between the two worlds — only an implementation detail visible
+from the wrong angle. Reading a performance key as a semantic capability is the trap
+here, and it is worth naming because the registry is the kind of table a reader
+naturally treats as the definition of what the language permits.
+
+And nothing is lost, because **optional parameters already express the intent**.
+`pn f(a)` and `pn f(a, b)` are one `pn f(a, b?)`. Verified: it accepts `f(1)` and
+`f(1, 2)`, and rejects arity beyond its declared slots. Overloading would add a
+second spelling for something already sayable, and would import an arity-directed
+resolution rule that has to interact coherently with optional parameters, rest
+collectors, and dynamic calls — a real cost against no new capability.
+
+This is also a clean application of **S1.11**: the case was under-determined by
+Lambda's own principles, ECMAScript is the first reference, and ECMAScript has no
+arity overloading. The reference agreed with the reasoning rather than substituting
+for it.
+
+Recorded in spec §12 (S12.3.6, v15.2.0); ledger entry TS-8 closed as *not a defect*.

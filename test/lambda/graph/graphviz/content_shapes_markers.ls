@@ -44,16 +44,16 @@ let composed_html = [for (edge in html_edges
   where edge["data-from"] == "e" and edge["data-to"] == "f") edge][0]
 let styled = [for (node in nodes where node.id == "i") node][0]
 let styled_html = [for (node in html_nodes where node["data-node-id"] == "i") node][0]
-let unsafe_html = transform.to_html(<graph directed: true;
+let unsafe_html = transform.to_html(<graph directed: true,
   <node id: "unsafe", label: "Unsafe", 'graphviz-shape': "box",
     fill: "red:blue;background:black", stroke: "red;border-width:99px",
     'font-name': "Arial;color:red", 'font-color': "red;background:black",
     style: "filled;background:black">
 >)
 let unsafe_node = direct_children(unsafe_html, "node")[0]
-let graph_scene = scene.from_svg(<svg;
+let graph_scene = scene.from_svg(<svg
   <g 'data-graph-role': "graph", 'data-x': 0, 'data-y': 0,
-      'data-width': 160, 'data-height': 80, 'data-direction': "LR";
+      'data-width': 160, 'data-height': 80, 'data-direction': "LR",
     <node 'data-graph-role': "node", 'data-node-id': "e", 'data-shape': "house",
       'data-x': 0, 'data-y': 10, 'data-width': 40, 'data-height': 40>
     <node 'data-graph-role': "node", 'data-node-id': "f",

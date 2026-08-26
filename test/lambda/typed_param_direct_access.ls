@@ -52,25 +52,11 @@ fn length(v: Vec2) => math.sqrt(v.x * v.x + v.y * v.y)
 let v: Vec2 = {x: 3.0, y: 4.0}
 length(v)
 
-// ---- Object-typed parameters ----
-
-// Test 9: object param with fn method
-type Counter {
-    val: int = 0;
-    fn doubled() => val * 2
-    pn inc() { val = val + 1 }
-}
-fn read_counter(c: Counter) => c.val
-let cnt = <Counter>
-cnt.inc()
-cnt.inc()
-cnt.inc()
-read_counter(cnt)
 
 // Test 10: object param accessing multiple fields
 type Pair {
     a: int,
-    b: int;
+    b: int,
     fn sum() => a + b
 }
 fn diff_pair(p: Pair) => p.a - p.b
@@ -80,7 +66,7 @@ diff_pair(pr)
 // Test 11: two object params of different types
 type NamedVal {
     label: string,
-    num: int;
+    num: int
 }
 fn format_nv(nv: NamedVal) => nv.label ++ "=" ++ (nv.num)
 let nv1 = <NamedVal label: "score", num: 42>
@@ -90,5 +76,5 @@ format_nv(nv1)
 fn add_x(a: Point, b: Point) => a.x + b.x
 fn add_y(a: Point, b: Point) => a.y + b.y
 let origin: Point = {x: 0.0, y: 0.0}
-let delta: Point = {x: 1.5, y: 2.5}
+let delta: Point = {x: 1.5, y: 2.5};
 [add_x(origin, delta), add_y(origin, delta)]

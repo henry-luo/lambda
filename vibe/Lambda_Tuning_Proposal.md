@@ -5,15 +5,15 @@
 - **Scope:** LambdaJS (`lambda/js/`), the shared runtime, and Lambda
   MIR-Direct (`lambda/transpile-mir.cpp`)
 - **Latest full benchmark:** `test/benchmark/Overall_Result15.md`
-- **Related plans:** `Lambda_Impl_Tune_COW (done).md`,
-  `Lambda_Impl_JS_Tune (done).md`, `Lambda_Impl_Tune6 (done).md`,
-  `Lambda_Impl_Tune7_JS_Plain_Call (done).md`,
+- **Related plans:** `impl/Lambda_Impl_Tune_COW (done).md`,
+  `Lambda_Impl_JS_Tune (done).md`, `impl/Lambda_Impl_Tune6 (done).md`,
+  `impl/Lambda_Impl_Tune7_JS_Plain_Call (done).md`,
   `Lambda_Impl_Tune_JS_Dynamic_Call.md`,
   `Lambda_Impl_Tune8_Result15_Bottlenecks.md`, and
-  `Lambda_Impl_Tune9_GC (done).md`, `Lambda_Impl_Tune10.md`, and
-  `Lambda_Issues_Outstanding.md`
-- **Completed Lambda tuning records:** `Lambda_Impl_Tune1 (done).md`,
-  `Lambda_Impl_Tune2 (done).md`, `Lambda_Impl_Tune3.md`
+  `impl/Lambda_Impl_Tune9_GC (done).md`, `Lambda_Impl_Tune10.md`, and
+  `Lambda_Issue_Ledger.md` (§15 carries the OI design gaps; the Outstanding rollup was retired 2026-08-25)
+- **Completed Lambda tuning records:** `impl/Lambda_Impl_Tune1 (done).md`,
+  `impl/Lambda_Impl_Tune2 (done).md`, `Lambda_Impl_Tune3.md`
 
 This revision records both the remaining work and the terminal disposition of
 the old R-items, so a completed, rejected, or intentionally parked track is
@@ -112,7 +112,7 @@ Practical consequences:
 ### R0 — Result11 and the previous LambdaJS regression — **CLOSED**
 
 Lambda COW Stage 1, the output-correct Result11 run, and its provenance were
-completed under `Lambda_Impl_Tune_COW (done).md`. Later Result13–15 records
+completed under `impl/Lambda_Impl_Tune_COW (done).md`. Later Result13–15 records
 supersede Result10/11 as tuning floors. New LambdaJS regressions must follow
 the Result15 protocol: build both release binaries first, interleave each row,
 preserve timestamped raw data under `temp/`, and validate output before

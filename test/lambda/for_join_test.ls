@@ -15,11 +15,11 @@ let customers = [
   {id: 1, name: "Ada-alt", region_id: "r1"},
   {id: 2, name: "Ben", region_id: "r2"},
   {id: null, name: "Null Customer", region_id: "r0"}
-]
+];
 
 // Inner join preserves prior order and duplicate matches preserve new-source order.
 [for (o in orders, c in customers on o.cust_id == c.id)
-  {order: o.id, name: c.name, total: o.total}]
+  {order: o.id, name: c.name, total: o.total}];
 
 // Left join pads missing matches with null; null join keys never match.
 [for (o in orders, c? in customers on o.cust_id == c.id)
@@ -29,7 +29,7 @@ let regions = [
   {id: "r1", label: "West"},
   {id: "r2", label: "East"},
   {id: "r9", label: "No Customer Region"}
-]
+];
 
 // Chained multi-key join: the new source must match both prior bindings.
 [for (o in orders,

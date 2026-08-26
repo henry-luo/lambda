@@ -8,8 +8,8 @@ format([1, 2, 3])
 format({a: 1, b: 2})
 
 // ===== exists() =====
-exists(/etc)
-exists(/this_path_does_not_exist)
+exists(/.etc)
+exists(/.this_path_does_not_exist)
 
 // ===== Type string representation =====
 string(42)

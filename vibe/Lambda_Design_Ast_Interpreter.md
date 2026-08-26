@@ -1,7 +1,7 @@
 # AST Interpreter — Tier-0 Execution for Lambda and LambdaJS
 
 **Date:** 2026-08-15 (rev 2 — DECIDED by user ruling; spec revision landed same day)
-**Status:** **DECIDED 2026-08-15 (user ruling)** — reverses **D8.1.1**/**U26** ("no AST-walking interpreter"). **D8.1.1v2*** landed in `doc/Lambda_Formal_Design.md` (spec v1.23.0) with a brief historical footnote on the v1 rejection; **U26 struck/superseded** in `vibe/Lambda_Design_Unified_AST.md` (rev 10, §12 retained as the historical record); the `Lambda_Impl_Tune_Ast.md` restriction lifted. Implementation NOT started — phases P0–P5 in §11. Ledger **AI1–AI22** (**confirmed**) in §14; open issues **AIO1–AIO12** in §13, adopted into the spec as **DO25**.
+**Status:** **DECIDED 2026-08-15 (user ruling)** — reverses **D8.1.1**/**U26** ("no AST-walking interpreter"). **D8.1.1v2*** landed in `doc/Lambda_Formal_Design.md` (spec v1.23.0) with a brief historical footnote on the v1 rejection; **U26 struck/superseded** in `vibe/Lambda_Design_Unified_AST.md` (rev 10, §12 retained as the historical record); the `impl/Lambda_Impl_Tune_Ast.md` restriction lifted. Implementation NOT started — phases P0–P5 in §11. Ledger **AI1–AI22** (**confirmed**) in §14; open issues **AIO1–AIO12** in §13, adopted into the spec as **DO25**.
 **Design authority:** `doc/Lambda_Formal_Design.md` — **D8.1.1v2** (landed; §15), D1.3/D1.6/D1.7, D5.1–D5.4, D6.1–D6.2, D7.2, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S15.3.
 **Working design:** `vibe/Lambda_Design_Unified_AST.md` (§12/U26 — amended by this doc), `vibe/Lambda_Repl.md`, `vibe/Lambda_Design_MIR_Cache.md` + `_L3`, `vibe/Lambda_Design_Stack_Rooting.md`, `vibe/Lambda_Design_Compiling_Return_Value.md`, `vibe/Lambda_Design_Stack_Frame.md`.
 **Scope:** Stage 1 = Lambda core (§3–§8, §10–§11). Stage 2 = LambdaJS (§9). C2MIR is untouched per D1.6 and CLAUDE rule 14.
@@ -10,7 +10,7 @@
 
 ## 0. Summary
 
-This design makes a **tree-walking interpreter over the existing typed AST the default execution mode (Tier 0)** for Lambda, and turns MIR Direct native compilation into a **selective, per-function, demand-triggered optimizer (Tier 1)** — a function is compiled when it proves hot (default: 3rd call). The AST becomes the single runtime source of truth; native code becomes a derived cache, exactly in the spirit of D1.7 (*"every compiled artifact is a local derived cache… memoization, not a format"*).
+This design makes a **tree-walking interpreter over the existing typed AST the default execution mode (Tier 0)** for Lambda, and turns MIR Direct native compilation into a **selective, per-function, demand-triggered optimizer (Tier 1)** — a function is compiled when it proves hot (default: 5th ordinary call or 5th direct self-tail edge). The AST becomes the single runtime source of truth; native code becomes a derived cache, exactly in the spirit of D1.7 (*"every compiled artifact is a local derived cache… memoization, not a format"*).
 
 The interpreter is **boxed-only, forever**. It executes by calling the same C-ABI runtime helper library (`lambda-eval.cpp` et al.) that generated MIR code calls, and it lives on the same side-root/number stacks with the same rooting discipline as generated frames. Semantic micro-decisions therefore stay where they already live — in the helpers — and the standing invariant SI3/D3.3.1 (*"erasing every inferred type and running boxed must produce identical results"*) is the correctness contract: the interpreter *is* the boxed lane, executed directly, gated by the existing differential harness.
 
@@ -34,7 +34,7 @@ U26 rejected an AST interpreter on five grounds (`Lambda_Design_Unified_AST.md:8
 
 **"Lowering is a single-pass tree walk — the same order of work as one interpretive pass."** Per node visited, roughly yes. But lowering visits *every* node of the module and materializes MIR data structures for all of it, then links and (by default) generates native code for all of it — while interpretation visits only the nodes that actually execute. For run-once code the executed-node count is the same as the lowered-node count and T0 wins by skipping MIR construction + link + codegen entirely; for cold code (functions never called — common in libraries and test scaffolding) T0 visits zero nodes where lowering paid full price. The claim was correct about *lowering* and incorrect about the *pipeline*: measured on real vendor libraries, `MIR_link` alone is 50–82% of total compile time, and on the JS batch corpus compile in total is 33.2% of working CPU (JS_15; `JS_Profiling_Helpers.md`).
 
-**"MIR-interp amortizes over every re-execution of a loop body; a tree-walker pays full price every pass. The AST interpreter would be the slowest of the three options for anything but run-once straight-line code."** Correct, and preserved: that is precisely why T1 exists. The tier boundary is placed so that code which re-executes enough to benefit from amortization crosses it (default: 3rd call; backedge escalation per AI8). The design does not argue T0 is fast; it argues T0 + selective T1 dominates eager whole-module compilation on total cost for the workloads in the table above, while `--jit-all` preserves today's behavior for benchmark/steady-state workloads (§5.6).
+**"MIR-interp amortizes over every re-execution of a loop body; a tree-walker pays full price every pass. The AST interpreter would be the slowest of the three options for anything but run-once straight-line code."** Correct, and preserved: that is precisely why T1 exists. The tier boundary is placed so that code which re-executes enough to benefit from amortization crosses it (default: 5th call or direct self-tail edge; backedge escalation per AI8). The design does not argue T0 is fast; it argues T0 + selective T1 dominates eager whole-module compilation on total cost for the workloads in the table above, while `--jit-all` preserves today's behavior for benchmark/steady-state workloads (§5.6).
 
 **"eval via the pipeline is a feature — identical semantics."** Unchanged in spirit: tier choice is invisible (S1.6; the only sanctioned divergence is fault timing, S7.11.4). The deopt/register-materialization problem U26 warned about does not arise because T0 never inspects T1 frames: promotion is function-entry replacement only, never on-stack (§5, AI8).
 
@@ -46,7 +46,7 @@ U26 rejected an AST interpreter on five grounds (`Lambda_Design_Unified_AST.md:8
 
 **Goals.** (g1) T0 default execution for scripts, REPL, `validate`, `convert`, layout-embedded scripts. (g2) Per-function demand-triggered T1 with function-entry replacement. (g3) Result identity across tiers, enforced by running the baseline suites under both tiers (SI3/D3.3.1 extended). (g4) One evaluation engine reused for const-folding, `that` predicates, and future comptime (S15.3 `compile()` path). (g5) First-class hooks for stepping, breakpoints, per-node profiling, hot reload. (g6) Strictly lower cold-start time and resident memory on compile-dominated workloads, measured (§10).
 
-**Non-goals.** (n1) No bytecode IR — *"no shared bytecode, no shared object model, no interpreter framework"* stays true across languages (Features J2); within Lambda, the typed AST is the only executable form below MIR (AI22). (n2) No OSR in v1 — a function already executing stays in its tier until its next call (AIO11 tracks the long-running-`main` gap). (n3) No unboxed or specialized interpreter lane, ever (AI3). (n4) No inline caches in the Lambda lane (D8.4.1 upheld; tier-up swaps data cells, never patches code). (n5) No change to C2MIR (D1.6). (n6) MIR-interp mode is not removed in v1 — it is demoted from size-pressure valve to codegen diagnostic once T0 reaches parity (AI19).
+**Non-goals.** (n1) No bytecode IR — *"no shared bytecode, no shared object model, no interpreter framework"* stays true across languages (Features J2); within Lambda, the typed AST is the only executable form below MIR (AI22). (n2) No general OSR in v1 — arbitrary interpreter program counters and locals never materialize into MIR frames. A direct validated self-tail call is the narrow exception: it is already a function-entry boundary, so AUTO may hand it to the compiled boxed entry (§5.1; D8.1.1v5). AIO11 still tracks hot inline loops in a once-called `main`. (n3) No unboxed or specialized interpreter lane, ever (AI3). (n4) No inline caches in the Lambda lane (D8.4.1 upheld; tier-up swaps data cells, never patches code). (n5) No change to C2MIR (D1.6). (n6) MIR-interp mode is not removed in v1 — it is demoted from size-pressure valve to codegen diagnostic once T0 reaches parity (AI19).
 
 ## 3. The tier model
 
@@ -165,11 +165,11 @@ T0 implements the two existing channels, nothing new:
 
 ### 4.9 Construct coverage map
 
-The full walker, by node family (the complete per-kind inventory is the P1 checklist; `emit_sexpr.cpp` is the reference for a complete Lambda AST traversal):
+The full walker, by node family (the complete per-kind inventory is the P1 checklist; `emit_ast_dump.cpp` is the reference for a complete Lambda AST traversal):
 
 | Family | Strategy |
 |---|---|
-| Literals, ident, member/index/field access | const-list resolution (§4.1); slot loads (§4.3); `fn_member`/`fn_index` helpers for dynamic access, `null` totality per S7.1.1 comes free from the helpers |
+| Literals, ident, member/index/field access | const-list resolution (§4.1); slot loads (§4.3); `fn_member`/`fn_index` helpers for dynamic access, `null` totality per S7.1.1v2 comes free from the helpers |
 | Unary/binary/comparison/set ops | evaluate operands (left → scratch slot → right), call the boxed helper for the operator (`fn_add`, `fn_eq`, …) — the numeric tower, meets, and int totality (S4.4, SI7) live in the helpers |
 | `and`/`or`/`if` | short-circuit walk (S10.2.3); truthiness by tag via the existing helper (S3.1/S3.2) |
 | `let`/`pub`, destructuring | evaluate initializer, deferred-check per S7.7.2, store slot/slab |
@@ -187,7 +187,7 @@ The full walker, by node family (the complete per-kind inventory is the P1 check
 
 ### 5.1 Trigger
 
-Each `AstFuncNode` (definition site) carries a promotion cell in its `FnAnalysis`: `{ state: INTERP | COMPILING | COMPILED | PINNED_INTERP, call_count, backedge_count, void* boxed_entry }`. `interp_call` increments `call_count` on entry; at `call_count >= LAMBDA_JIT_THRESHOLD` (default **3**) it compiles synchronously, then runs this call natively. Loop backedges in T0 increment `backedge_count`; crossing a backedge budget (default 1024) marks the definition for promotion at its **next call** — never mid-activation (no OSR, n2). D5.1.2's *"no hotness detection — primitives are unconditionally cheap"* is untouched: that ruling scopes stack primitives; this is one counter increment per function entry, the granularity D5.1.2 says nothing about — §15 proposes a clarifying footnote rather than a revision. Counters are per-eval-context state (D5.4.1), so there is no cross-thread counter traffic.
+Each `AstFuncNode` (definition site) carries a promotion cell in its `FnAnalysis`: `{ state: INTERP | COMPILING | COMPILED | PINNED_INTERP, call_count, backedge_count, tail_edge_count, void* boxed_entry }`. An ordinary interpreted entry increments `call_count`; at `call_count >= LAMBDA_JIT_THRESHOLD` (default **5**) it compiles synchronously and runs that entry natively. TCO self-tail iterations reuse the active frame, so each validated logical call increments both `call_count` and the separate `tail_edge_count`. On the fifth direct self-tail edge, the runtime compiles the existing eligible satellite, preserves the rooted source argument vector, detaches the no-longer-active T0 frame, and enters the satellite through the ordinary boxed wrapper. This is not arbitrary on-stack replacement: the tail expression has no continuation and its next state is exactly a new function entry. A compile/admission failure keeps the same coerced T0 slots and continues TCO. General loop backedges increment `backedge_count`; crossing their separate budget (default 1024) still promotes only on a later entry. D5.1.2's *"no hotness detection — primitives are unconditionally cheap"* is untouched: that ruling scopes stack primitives; these are per-function counters (D8.1.1v5). Counters are per-eval-context state (D5.4.1), so there is no cross-thread counter traffic.
 
 ### 5.2 The satellite module
 
@@ -220,7 +220,68 @@ Everything. Satellite-compiled functions are ordinary MIR Direct output: dual-en
 
 ### 5.6 Policy knobs
 
-`LAMBDA_TIER=auto|interp|jit` (auto = T0 + promotion; interp = never promote; jit = today's eager whole-module — alias `--jit-all`), `LAMBDA_JIT_THRESHOLD=<n>` (default 3), `LAMBDA_JIT_BACKEDGE=<n>` (default 1024). `make test` runs the baseline suites under `interp` and `jit` (§10). Benchmarks and release servers document `--jit-all`; `run` mode follows `auto` (its hot inner functions promote; a once-called `main` body with hot *inline* loops is the known v1 gap — AIO11).
+`LAMBDA_TIER=auto|interp|jit` (auto = T0 + promotion; interp = never promote; jit = today's eager whole-module — alias `--jit-all`), `LAMBDA_JIT_THRESHOLD=<n>` (default 5 for both ordinary entries and direct self-tail edges), `LAMBDA_JIT_BACKEDGE=<n>` (default 1024 for general loops). `make test` runs the baseline suites under `interp` and `jit` (§10). Benchmarks and release servers document `--jit-all`; `run` mode follows `auto` (its hot inner functions and self-tail bodies promote; a once-called `main` body with hot *inline* loops is the known v1 gap — AIO11).
+
+### 5.7 Whole-script AUTO POC — [measured 2026-08-24]
+
+An opt-in POC tests the alternative promotion policy requested for D8.1.1v4:
+
+```text
+LAMBDA_TIER=auto LAMBDA_JIT_THRESHOLD=10 LAMBDA_AUTO_WHOLE_SCRIPT=1
+```
+
+At the first eligible threshold trigger, the runtime lowers the complete AST
+module once, then publishes the generated `_b` entries for every definition
+that passes the existing satellite admission gate. The active T0 frame is not
+OSR'd: that trigger call finishes in T0 and later calls use the published
+entries. The MIR image is lowered against the already-rooted T0 module slab
+(D7.2.1), and the AST index is retained while T0 remains live. This avoids
+replacing the live slab with an eager BSS layout. Importing modules remain on
+the normal satellite path until dependency images can be promoted atomically;
+closures, aggregate/mutable parameters, async/task definitions, and other
+satellite-boundary cases remain pinned to T0. This is deliberately opt-in and
+is not the shipped AUTO policy.
+
+The release `test_lambda_gtest` gate remained green (**758/758**) in both
+modes. Sequential host samples ranged from **33.71–40.17s real** for the
+whole-script POC and **32.05–54.48s real** for threshold-10 per-function
+satellites, so the end-to-end result is host-load sensitive rather than a
+stable win. The direct 740-entry batch produced **24 whole-image compile events
+across 20 unique module files** and **226 satellite events**, with every batch
+entry ending successfully. On the 13 benchmark entries that emitted
+`__TIMING__`, the paired snapshot summed to **5,311.4 ms** for the POC versus
+**5,155.2 ms** for per-function promotion (about **3.0% slower**);
+`levenshtein2` was the only clear material win in that sample. The result
+validates the slab-backed whole-image mechanism and shows no correctness
+regression, but does not establish a reliable performance advantage or justify
+making whole-script promotion the default. A future iteration needs an
+import-cone transaction and a work/profitability gate before reconsideration.
+
+The paired per-script body timings were:
+
+| Script | Whole-image JIT (ms) | Per-function JIT (ms) | Delta (ms) |
+|---|---:|---:|---:|
+| `awfy/deltablue.ls` | 928.724 | 873.006 | +55.718 |
+| `awfy/deltablue2.ls` | 946.564 | 907.655 | +38.909 |
+| `awfy/list2.ls` | 12.494 | 9.253 | +3.241 |
+| `beng/binarytrees2.ls` | 58.456 | 54.426 | +4.030 |
+| `beng/pidigits2.ls` | 5.862 | 1.408 | +4.454 |
+| `beng/spectralnorm2.ls` | 128.481 | 118.446 | +10.035 |
+| `kostya/json_gen2.ls` | 113.794 | 110.733 | +3.061 |
+| `kostya/levenshtein2.ls` | 318.896 | 344.640 | -25.744 |
+| `kostya/matmul2.ls` | 2,605.090 | 2,565.190 | +39.900 |
+| `larceny/divrec2.ls` | 8.037 | 7.394 | +0.643 |
+| `larceny/paraffins2.ls` | 32.320 | 21.102 | +11.218 |
+| `larceny/quicksort2.ls` | 135.563 | 126.360 | +9.203 |
+| `r7rs/ack2.ls` | 17.136 | 15.553 | +1.583 |
+
+The table reports the `__TIMING__` body result for each script; it excludes
+parse, module-load, and JIT compilation time. A positive delta means that the
+single whole-image promotion was slower, while a negative delta means that it
+was faster. `base642.ls` is intentionally absent because its aggregate
+parameter/closure shape was rejected by the promotion gate and remained T0 in
+both policies. These are single paired release samples and should be treated
+as directional evidence, not as a benchmark ranking.
 
 ## 6. One engine: const-folding, `that` predicates, comptime
 
@@ -280,7 +341,7 @@ T0 removes the per-line **compile** share (today: full re-lower + re-link + re-c
 
 ## 10. Performance model and validation
 
-**Expectations, stated honestly.** T0 per-node cost ≈ dispatch + slot traffic + helper call, all boxed. Helper-dominated code (strings, containers, elements, I/O — most data-processing scripts) should land within a small factor of T1-boxed; scalar-arithmetic loop kernels are the worst case (each op = boxed helper call vs a native register op) — expect one to two orders of magnitude on those, which is what promotion is for, and `--jit-all` for the rest. Two measured anchors from the JS side bound the picture: MIR-interp — which shares "no native code" with T0 but has cheaper per-op dispatch than a tree-walk — runs a 50M-iteration hot loop only ≈1.65× slower than JIT yet the full Test262 corpus ≈17% *faster* than JIT summed (JS_15), i.e. for short/cold scripts skipping codegen wins even at interpreter speeds; and generated code is 0.6% of working CPU on the JS batch corpus, bounding what a walker can lose on helper-dominated work. The claim this design actually makes is about **total turnaround**: `parse + build + interpret(executed nodes)` beats `parse + build + lower(all nodes) + link + codegen + execute` whenever executed-node count is within a small multiple of total-node count — run-once scripts, test suites, REPL lines, page scripts. No Lambda-side performance numbers are asserted in this doc; producing them is a P0 exit gate, using the instrumentation that already exists (`LAMBDA_PROFILE` phase profile, `LambdaCompilerTiming` incl. `mir_insn_count`) extended with a T0 execution phase and a resident-memory probe (AIO10).
+**Expectations, stated honestly.** T0 per-node cost ≈ dispatch + slot traffic + helper call, all boxed. Helper-dominated code (strings, containers, elements, I/O — most data-processing scripts) should land within a small factor of T1-boxed; scalar-arithmetic loop kernels are the worst case (each op = boxed helper call vs a native register op) — expect one to two orders of magnitude on those, which is what promotion is for, and `--jit-all` for the rest. Two measured anchors from the JS side bound the picture: MIR-interp — which shares "no native code" with T0 but has cheaper per-op dispatch than a tree-walk — runs a 50M-iteration hot loop only ≈1.65× slower than JIT yet the full Test262 corpus ≈17% *faster* than JIT summed (JS_15), i.e. for short/cold scripts skipping codegen wins even at interpreter speeds; and generated code is 0.6% of working CPU on the JS batch corpus, bounding what a walker can lose on helper-dominated work. The claim this design actually makes is about **total turnaround**: `parse + build + interpret(executed nodes)` beats `parse + build + lower(all nodes) + link + codegen + execute` whenever executed-node count is within a small multiple of total-node count — run-once scripts, test suites, REPL lines, page scripts. The release-corpus wall-clock comparison below is the current correctness/perf-floor checkpoint; broader Lambda-side performance claims still require the instrumentation that already exists (`LAMBDA_PROFILE` phase profile, `LambdaCompilerTiming` incl. `mir_insn_count`) extended with a T0 execution phase and a resident-memory probe (AIO10).
 
 **Validation gates (D1.10: every invariant names its gate).**
 
@@ -290,18 +351,157 @@ T0 removes the per-line **compile** share (today: full re-lower + re-link + re-c
 4. **Turnaround:** measured corpus — `test/lambda` suite wall-clock, REPL per-line latency at history sizes {10, 100, 1000}, a Radiant page with N scripts, `validate` on a constrained schema — each with before/after and a stated target in the P0 report, not in this doc.
 5. **Perf floor:** box2d and the benchmark set under `auto` must reach ≥ today's steady-state (hot functions promoted) and under `--jit-all` must be unchanged.
 
+### Release corpus wall-clock comparison — [measured 2026-08-24]
+
+The complete `test_lambda_gtest` corpus was run against the same release
+`lambda.exe` and release `test_lambda_gtest.exe` three times sequentially per
+mode. Each run used `./test/test_lambda_gtest.exe --gtest_brief=1`; the
+external `/usr/bin/time -p` `real` field is the process wall time. Every sample
+passed all **758/758** tests.
+The unset environment was the then-shipped AUTO policy specified by
+**D8.1.1v4**.
+
+| Mode | Selector | Wall samples | Median |
+|---|---|---:|---:|
+| AUTO | `env -u LAMBDA_TIER -u LAMBDA_JIT_THRESHOLD` | 32.86s, 36.93s, 41.83s | **36.93s** |
+| Full interpreter | `LAMBDA_TIER=interp` | 33.06s, 33.14s, 33.93s | **33.14s** |
+| Full JIT | `LAMBDA_TIER=jit` | 36.66s, 37.04s, 43.20s | **37.04s** |
+
+On this corpus, full T0 interpretation is about **11.4% faster** than AUTO
+by median wall time. AUTO and eager JIT are effectively tied (0.11s median
+difference); the wider sample ranges reflect ordinary host-load variance.
+This is a corpus measurement, not a general claim that AUTO dominates either
+fixed tier. The correctness result is the release gate for **D8.1.1v4/P5**;
+the remaining P2 work is promotion breadth and performance tuning.
+
+### Post-fix AUTO remeasurement — [measured 2026-08-25]
+
+After TCO self-tail iterations began contributing to the definition-site
+hotness counter, the same release corpus was rerun three times. AUTO passed
+**758/758** at **35.36s, 37.96s, 38.62s real** (median **37.96s**); the matched
+full-interpreter control passed **758/758** at **36.05s, 36.82s, 34.61s**
+(median **36.05s**). Thus AUTO was **5.3% slower** on this host sample. The
+result measures the counter fix's current end-to-end cost; it is not directly
+comparable to the prior full-JIT row because that row was not rerun on this
+date.
+
+### Threshold-5 tail-handoff remeasurement — [measured 2026-08-25]
+
+With the shipped threshold raised to **5** and the fifth direct self-tail edge
+able to enter an eligible satellite during its first activation
+(**D8.1.1v5**), a freshly rebuilt release `lambda.exe` and release
+`test_lambda_gtest.exe` again passed **758/758** on every AUTO sample:
+**61.26s, 52.41s, 47.96s real** (median **52.41s**). A direct release probe
+of `loop(20, 0)` logged `satellite compiled function='loop'` during that one
+activation and returned `20`; the focused boundary regression also passes
+with forced GC and freed-memory poisoning.
+
+These samples were taken on a substantially more loaded host than the earlier
+2026-08-25 series, so they are a correctness and current-wall-time record,
+not an A/B conclusion against its 37.96s AUTO median. The new policy needs a
+same-session interpreter/JIT control before any profitability claim.
+
+### Latest AUTO vs. full-interpreter remeasurement — [measured 2026-08-25]
+
+The release `test_lambda_gtest` corpus was rerun three times per mode in one
+consecutive host session, with the same release binaries and `/usr/bin/time -p`
+wall-clock measurement. This is the complete **758-test** executable: 740
+auto-discovered golden Lambda-script fixtures plus 17 negative-contract tests
+and one binary-output test. Every sample passed **758/758**. AUTO used the
+unset default selector; the interpreter control set only `LAMBDA_TIER=interp`.
+All threshold/backedge and whole-script-POC overrides were unset.
+
+| Mode | Wall samples | Median | Relative to full interpreter |
+|---|---:|---:|---:|
+| AUTO (**D8.1.1v5**) | 32.55s, 32.41s, 32.39s | **32.41s** | **2.1% faster** |
+| Full interpreter | 33.06s, 33.10s, 33.38s | **33.10s** | baseline |
+
+The within-mode spreads are narrow (0.16s AUTO; 0.32s interpreter), making
+this a usable current end-to-end comparison: AUTO is **0.69s** faster by
+median on this mixed corpus. It does not replace a new AUTO-versus-full-JIT
+control, so it makes no claim about eager-JIT profitability.
+
+### Full-JIT stale-binary diagnostic — [measured 2026-08-25]
+
+Before the release runtime was rebuilt, the existing release
+`test_lambda_gtest` executable was run three times with `LAMBDA_TIER=jit`;
+`LAMBDA_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE`, and
+`LAMBDA_AUTO_WHOLE_SCRIPT` were unset. The current tree discovered **741
+script fixtures**, producing **759 GTests** including the negative-contract
+and binary-output tests.
+
+| Mode | Wall samples | Median | Result |
+|---|---:|---:|---|
+| Full JIT (`LAMBDA_TIER=jit`) | 35.63s, 41.25s, 35.83s | **35.83s** | **758/759 passed** |
+
+All three runs failed the same `for_at_pairs` fixture: the expected paired
+values `a=1`, `b=2`, `c=3` were produced as `a=a`, `b=b`, `c=c`, and the
+filtered map result was empty instead of `['b']`. This is a deterministic
+full-JIT correctness failure in the stale release artifact, so **35.83s is
+diagnostic timing only**, not a passing JIT performance baseline. The source
+already contained the S8.1.3 `key_only && !index_name` admission fix; the
+release `lambda.exe` had not been rebuilt from that source.
+
+### Full-JIT verification after release rebuild — [measured 2026-08-25]
+
+After `make release` and rebuilding `test_lambda_gtest` as `release_native`,
+the focused `for_at_pairs` test passed under `LAMBDA_TIER=jit`. Three fresh
+full-corpus runs, with the same unset threshold/backedge/whole-script-POC
+overrides, passed **759/759** each:
+
+| Mode | Wall samples | Median | Result |
+|---|---:|---:|---|
+| Full JIT (`LAMBDA_TIER=jit`) | 41.85s, 36.14s, 42.67s | **41.85s** | **759/759 passed** |
+
+This confirms the source-level S8.1.3 paired-`at` fix is present in the
+release artifact; the remaining spread is host-load variance, not a fixture
+mismatch. The timing is the current passing full-JIT record for the 741-script
+/ 759-test tree (**D8.1.1v5**).
+
+### AUTO promotion-threshold sweep — [measured 2026-08-24]
+
+The release `lambda.exe` was run in `LAMBDA_TIER=auto` over the same **740
+script** batch corpus with `LAMBDA_JIT_THRESHOLD` set to 3, 5, and 10. A
+script counts as a trigger when its log contains at least one
+`interp-tier: satellite compiled` event; every threshold completed all 740
+scripts with `BATCH_END 0`.
+
+| Call threshold | Scripts with at least one promotion | Promotion events/images | One-event scripts |
+|---:|---:|---:|---:|
+| 3 (then default) | 166 / 740 (**22.4%**) | 471 | 83 (**50.0%**) |
+| 5 | 109 / 740 (**14.7%**) | 347 | 35 (**32.1%**) |
+| 10 | 89 / 740 (**12.0%**) | 272 | 28 (**31.5%**) |
+
+The threshold-5 and threshold-10 full release gates each passed **758/758**.
+Their observed external wall samples were 32.84–33.48s and 33.03–33.85s,
+respectively. The matched threshold-3 control was 32.82s; the earlier
+three-sample AUTO series was 32.86s, 36.93s, and 41.83s. The overlap shows
+that host-load variance is larger than the difference between these settings,
+so the sweep does not establish threshold 10 as a faster default.
+
+Threshold 3 is effective at finding repeatedly called functions, but it is
+aggressive for cold/short functions: raising it to 5 removes 34% of the
+then-default promoting scripts and 26% of promotion events. Raising it again
+to 10 only removes a further 18% of threshold-5 promoting scripts, while
+retaining the high-fanout graph/PDF cases. Threshold 5 is now the shipped
+default (D8.1.1v5), but a work-based profitability gate (estimated body cost
+and backedge work, plus a per-script satellite/MIR budget) is preferable to a
+single global threshold. The existing fail-closed satellite eligibility
+policy remains unchanged; once-called hot loops need a separate `main`/OSR
+policy because backedge promotion is deferred until the next entry.
+
 ## 11. Migration plan
 
-*Detailed implementation plan for P0–P1: `vibe/Lambda_Impl_Ast_Interp.md` (its §6 measurement report is the arc's exit gate).*
+*Detailed implementation plan for P0–P1: `vibe/impl/Lambda_Impl_Ast_Interp.md` (its §6 measurement report is the arc's exit gate).*
 
-- **P0 — skeleton + evidence. ✅ LANDED 2026-08-15.** Frame-plan pass; `InterpFrame`/side-stack integration; walker for the pure L1 core (literals, ident, unary/binary, if, let, call, list/array/map); `LAMBDA_TIER=interp` behind a flag; measurement report (turnaround + memory on the corpus). *Gate met: 81 of 279 corpus scripts run entirely under T0 with golden-identical output, 198 counted fallbacks, **0 divergences**; clean under forced GC.* Measured: **1.69×** faster turnaround on the real-workload subset and **9.4×** on a 1 000-line REPL history (both against native codegen), **11.9–28.5×** on 1k–20k-line run-once scripts against forced native codegen, and resident memory **58× lower** at 20k lines (5.38 GB of MIR IR → 92 MB). Note that the shipped default path routes modules over 100 000 MIR instructions to MIR-interp rather than codegen, so the two largest C2 rows carry a mode column and a separate forced-native baseline. The design's compile-dominance premise is confirmed on the Lambda side; see `vibe/Lambda_Impl_Ast_Interp.md` §6.
+- **P0 — skeleton + evidence. ✅ LANDED 2026-08-15.** Frame-plan pass; `InterpFrame`/side-stack integration; walker for the pure L1 core (literals, ident, unary/binary, if, let, call, list/array/map); `LAMBDA_TIER=interp` behind a flag; measurement report (turnaround + memory on the corpus). *Gate met: 81 of 279 corpus scripts run entirely under T0 with golden-identical output, 198 counted fallbacks, **0 divergences**; clean under forced GC.* Measured: **1.69×** faster turnaround on the real-workload subset and **9.4×** on a 1 000-line REPL history (both against native codegen), **11.9–28.5×** on 1k–20k-line run-once scripts against forced native codegen, and resident memory **58× lower** at 20k lines (5.38 GB of MIR IR → 92 MB). Note that the shipped default path routes modules over 100 000 MIR instructions to MIR-interp rather than codegen, so the two largest C2 rows carry a mode column and a separate forced-native baseline. The design's compile-dominance premise is confirmed on the Lambda side; see `vibe/impl/Lambda_Impl_Ast_Interp.md` §6.
 - **P1 — full coverage.** Remaining constructs per §4.9 (for-clauses, match, elements, patterns, paths, pn statements, imports/module slabs, sys funcs); error/fault channels; recursion budget. *Gate: validation gate 1 (full baseline differential) + gate 2 (GC stress).*
 - **P2 — tiering.** Promotion cells, `LAMBDA_INTERPRETED` entry ABI, satellite lowering contract (§5.2), Script-scoped analysis persistence, entry swap. *Gate: promoted-function outputs identical to interp; perf floor gate 5.*
 - **P3 — one-engine unification.** `EvalMode::CONST` folder in the pass manager; `EvalMode::PREDICATE` for `that`; validator de-JIT. *Gate: fold-on/fold-off differential; `validate` runs with JIT never initialized.*
 - **P4 — REPL/shell persistent environment.** Script-alive-across-lines, appended statements, persistent slab + counters. *Gate: REPL latency flat in history length.*
-- **P5 — default flip + spec.** `auto` becomes default; MIR-interp demoted to diagnostic; size thresholds retired; **D8.1.1v2 + U26 amendment + LR/JS doc updates land in the same change** (§15, per CLAUDE rule 17). Stage 2 (JS) design revision opens after this gate.
+- **P5 — default flip + spec. ✅ LANDED 2026-08-24.** `auto` is the unset default; MIR-interp remains diagnostic and `jit` remains the explicit eager path. The release `test_lambda_gtest` corpus is green under the default AUTO policy (**758/758**), including the P2 scalar-module, dynamic-argument, object/procedure, and var-call regressions. **D8.1.1v5 + the implementation-doc status update record the current selector, threshold, tail-handoff rule, and gate** (§15, per CLAUDE rule 17). Stage 2 (JS) design revision opens after this gate.
 
-Each phase is landable and revertible behind `LAMBDA_TIER`; nothing before P5 changes default behavior.
+Each phase is landable and revertible behind `LAMBDA_TIER`; P5 now makes AUTO the shipped default while preserving explicit `interp` and `jit` controls.
 
 ## 12. Considered and rejected
 
@@ -339,7 +539,7 @@ Each phase is landable and revertible behind `LAMBDA_TIER`; nothing before P5 ch
 | **AI5** | A build-time frame-plan pass assigns `NameEntry` slots/storage classes and static scratch depth onto `FnAnalysis`; joins the D8.2.5 pass manager | **confirmed** |
 | **AI6** | Module-level bindings live in per-context module slabs for T0 and satellites (D7.2.1); `_gvar_*` BSS remains only in whole-module `--jit-all` mode during transition | **confirmed** |
 | **AI7** | `Function` gains `def` (AST definition site — also discharging D6.2.1/S5.5.1 identity) and entry ABI `LAMBDA_INTERPRETED`; `lambda_dynamic_call` is the single tier-dispatch point; `ptr` NULL until promotion | **confirmed** |
-| **AI8** | Promotion trigger: per-definition-site call counter, threshold 3 (`LAMBDA_JIT_THRESHOLD`), checked at interpreted entry; backedge budget marks for next-call promotion; no OSR | **confirmed** |
+| **AI8** | Promotion trigger: per-definition-site ordinary-call and direct-self-tail-edge counters, threshold 5 (`LAMBDA_JIT_THRESHOLD`); the fifth direct tail edge hands off at an entry-equivalent boundary, while general loop backedges still mark for next-call promotion | **confirmed** |
 | **AI9** | Promotion unit: satellite MIR module (function + `_b` wrapper) in the Script's `jit_context`, linked on demand via the existing import resolver, BSS pointers written post-link | **confirmed** |
 | **AI10** | Whole-module AST analyses (call sites, param narrowing, `FnVariantAnalysis`) run once per Script at first promotion and persist Script-scoped; lowering-session tables promoted to Script lifetime | **confirmed** |
 | **AI11** | Suspension-capable definitions (`may_await`/`is_generator`/`needs_task_context`/`START`) bypass T0 — compiled at first call; interpreter continuations are future work | **confirmed** |
@@ -361,7 +561,7 @@ Each phase is landable and revertible behind `LAMBDA_TIER`; nothing before P5 ch
 
 - **`doc/Lambda_Formal_Design.md` v1.23.0** — **D8.1.1v2*** revised in place: tiered execution, T0 default, per-definition promotion (default 3rd call), const-folder = CONST mode, MIR-interp demoted to codegen diagnostic, no-patching restated (D8.4.1/DI14), the D5.1.2 "no hotness detection" scope clarification folded into the ruling text, and a brief historical footnote on the v1 rejection (per user instruction). Appendix A carries the implementation footnote (shipped pipeline unchanged until P0–P5); Appendix B adopts the interpreter opens as **DO25** (AIO1/AIO2/AIO8/AIO11 named; AIO1–AIO12 referenced); Appendix C indexes this doc under D8.1–D8.2.
 - **`vibe/Lambda_Design_Unified_AST.md` rev 10** — **U26 struck and superseded** in the §9 ledger and banner-noted in §12; the historical analysis retained unchanged in place (retired IDs never reused); §12.3's const-folder and KIV oracle recorded as absorbed (AI16, AI18).
-- **`vibe/Lambda_Impl_Tune_Ast.md`** — the "do not implement a new AST interpreter" restriction struck (lifted by D8.1.1v2/AI1); interpreter work proceeds under this doc's phases, not that doc's contingencies.
+- **`vibe/impl/Lambda_Impl_Tune_Ast.md`** — the "do not implement a new AST interpreter" restriction struck (lifted by D8.1.1v2/AI1); interpreter work proceeds under this doc's phases, not that doc's contingencies.
 
 **Lands with implementation (per phase / P5):**
 

@@ -1,32 +1,30 @@
-// Parent access shorthand (..) tests
-// expr .. is shorthand for expr.parent
-// expr .._.. is shorthand for expr.parent.parent
+// Parent navigation and ordinary parent-field access.
 
 // Test 1: parent access on a map with 'parent' field
-"Parent access on map"
+"Parent field on map"
 let node = {name: "child", parent: {name: "root", parent: null}}
-node ..
+node.parent
 
-"Parent name via .."
-(node ..).name
+"Parent name via member";
+(node.parent).name
 
 // Test 2: double parent access on nested structure
-"Double parent access"
-let deep = {name: "leaf", parent: {name: "mid", parent: {name: "top", parent: null}}}
-(deep .._.. ).name
+"Double parent field"
+let deep = {name: "leaf", parent: {name: "mid", parent: {name: "top", parent: null}}};
+(deep.parent.parent).name
 
 // Test 3: parent access on path - get parent directory
 "Path parent access: single"
-let p = /home.user.documents
-p ..
+let p = /.home.user.documents
+p.~~
 
 "Path parent access: double"
-p .._..
+p.~~.~~
 
 // Test 4: parent access chained with member access
-"Chained parent value"
-let tree = {value: 10, parent: {value: 20, parent: {value: 30, parent: null}}}
-(tree ..).value
+"Chained parent field value"
+let tree = {value: 10, parent: {value: 20, parent: {value: 30, parent: null}}};
+(tree.parent).value
 
-"Double parent value"
-(tree .._..).value
+"Double parent field value";
+(tree.parent.parent).value

@@ -5,10 +5,10 @@
 // ============================================================
 // CONSTRUCTION
 // ============================================================
-'=== construction ==='
-[true, false, true]
-[false]
-[true, true, true, true]
+'=== construction ===';
+[true, false, true];
+[false];
+[true, true, true, true];
 []    // empty literal — not a bool array per se
 
 // ============================================================

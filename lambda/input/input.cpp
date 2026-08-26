@@ -22,6 +22,7 @@
 extern "C" {
     #include "../lambda.h"  // for Target, TargetScheme, etc.
 }
+extern "C" Pool* path_get_pool(void);
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
@@ -1057,7 +1058,6 @@ static Input* input_from_source_n_with_name_parent(const char* source,
         }
         allocation_context.pool = input->pool;
         allocation_context.arena = input->arena;
-        allocation_context.disable_string_merging = false;
         allocation_context.ui_mode = input->ui_mode;
         input_allocation_context = &allocation_context;
 
@@ -1368,7 +1368,7 @@ static Input* input_from_target_impl(Target* target, String* type,
 
         // Local file path - convert to OS path
         StrBuf* path_buf = strbuf_new();
-        path_to_os_path(path, path_buf);
+        path_to_os_path(path_qualify_default(path_get_pool(), path), path_buf);
         const char* pathname = path_buf->str;
 
         // Directory case already handled by target_is_dir check above

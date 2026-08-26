@@ -2012,6 +2012,10 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         log_error("Failed to create DomDocument");
         return nullptr;
     }
+    // parsed HTML: the only page kind that may host a JS DOM script realm.
+    dom_doc->page_kind = DOM_PAGE_KIND_HTML;
+    log_debug("[page-kind] html document -> %s",
+              dom_page_kind_name(dom_doc->page_kind));
     if (js_host_config) {
         // The document Runtime is not bound yet.  Keep these settings on the
         // document until script_runner binds its owner context.
@@ -2022,6 +2026,9 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         dom_doc->js.virtual_clock_ms = js_host_config->virtual_clock_ms;
     }
     dom_doc->document_charset = detected_charset;
+    // HTML parsing always runs with scripting enabled in the layout loader;
+    // retain that mode so noscript can suppress only its rendered contents.
+    dom_doc->html_scripting_enabled = true;
 
     // Extract viewport meta tag values before building DOM tree
     extract_viewport_meta(html_root, dom_doc);
@@ -2885,6 +2892,7 @@ static void release_layout_runtime(Runtime* runtime) {
 
 static DomDocument* create_layout_dom(Input* input, Element* root,
                                       const char* document_kind,
+                                      DomPageKind page_kind,
                                       Runtime* owned_runtime,
                                       DomElement** out_root) {
     if (out_root) *out_root = nullptr;
@@ -2894,6 +2902,11 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
         release_layout_runtime(owned_runtime);
         return nullptr;
     }
+    // record provenance at construction; routing must never re-derive it from
+    // which runtime pointer a document happens to hold.
+    document->page_kind = page_kind;
+    log_debug("[page-kind] %s document -> %s", document_kind,
+              dom_page_kind_name(page_kind));
     // Inline declarations are parsed while building DomElement nodes, so the
     // property table must exist before the tree is materialized.
     if (!css_property_system_init(document->document_pool)) {
@@ -2916,11 +2929,12 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
 
 static DomDocument* create_layout_css_document(
         Input* input, Element* root, const char* document_kind,
+        DomPageKind page_kind,
         Runtime* owned_runtime, int viewport_width, int viewport_height,
         Pool* pool, DomElement** out_root, CssEngine** out_engine) {
     if (out_engine) *out_engine = nullptr;
     DomDocument* document = create_layout_dom(
-        input, root, document_kind, owned_runtime, out_root);
+        input, root, document_kind, page_kind, owned_runtime, out_root);
     if (!document) return nullptr;
 
     CssEngine* engine = css_engine_create(pool);
@@ -2956,8 +2970,8 @@ static DomDocument* load_home_styled_source_doc(
     DomElement* dom_root = nullptr;
     CssEngine* css_engine = nullptr;
     DomDocument* document = create_layout_css_document(
-        input, source_root, type_name, nullptr, viewport_width, viewport_height,
-        pool, &dom_root, &css_engine);
+        input, source_root, type_name, DOM_PAGE_KIND_GENERATED, nullptr,
+        viewport_width, viewport_height, pool, &dom_root, &css_engine);
     if (!document) return nullptr;
 
     CssStylesheet* stylesheet = load_home_stylesheet(
@@ -3168,7 +3182,8 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     DomElement* dom_root = nullptr;
     CssEngine* css_engine = nullptr;
     DomDocument* dom_doc = create_layout_css_document(
-        input, markdown_root, "markdown", markdown_math_runtime,
+        input, markdown_root, "markdown", DOM_PAGE_KIND_GENERATED,
+        markdown_math_runtime,
         viewport_width, viewport_height, pool, &dom_root, &css_engine);
     if (!dom_doc) return nullptr;
 
@@ -3320,7 +3335,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
     DomElement* dom_root = nullptr;
     CssEngine* css_engine = nullptr;
     DomDocument* dom_doc = create_layout_css_document(
-        result_input, html_root, "LaTeX", latex_runtime,
+        result_input, html_root, "LaTeX", DOM_PAGE_KIND_GENERATED, latex_runtime,
         viewport_width, viewport_height, pool, &dom_root, &css_engine);
     if (!dom_doc) {
         pool_destroy(result_pool);
@@ -3458,6 +3473,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         log_error("[Lambda XML] Failed to create DOM document");
         return nullptr;
     }
+    dom_doc->page_kind = DOM_PAGE_KIND_GENERATED;
 
     dom_doc->document_pool = pool;
     dom_doc->url = xml_url;
@@ -3557,7 +3573,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         mem_free(runtime);
         return nullptr;
     }
-    if (!eval_context_thread_initialize(layout_context)) {
+    if (!eval_context_init(layout_context)) {
         log_error("load_lambda_script_doc: failed to initialize eval thread");
         release_layout_runtime(runtime);
         return nullptr;
@@ -3583,7 +3599,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
             layout_context->ui_mode = true;
             layout_context->arena = runtime->result_arena;
         }
-        if (!eval_context_thread_matches(layout_context)) {
+        if (!eval_context_matches(layout_context)) {
             log_error("load_lambda_script_doc: eval owner changed during execution");
             release_layout_runtime(runtime);
             pool_destroy(result_pool);
@@ -3728,7 +3744,8 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
     DomElement* dom_root = nullptr;
     CssEngine* css_engine = nullptr;
     DomDocument* dom_doc = create_layout_css_document(
-        result_input, html_elem, "Lambda Script", runtime,
+        result_input, html_elem, "Lambda Script", DOM_PAGE_KIND_LAMBDA_SCRIPT,
+        runtime,
         viewport_width, viewport_height, pool, &dom_root, &css_engine);
     if (!dom_doc) {
         pool_destroy(result_pool);
@@ -4345,6 +4362,7 @@ struct LayoutOptions {
     const char* memory_profile_output_file;      // post-layout six-domain snapshot
     bool auto_close;                            // cancel async JS timers after load/onload
     bool disable_animations;                    // freeze CSS animation/transition effects for snapshots
+    bool stream_layout_results;                 // write compact framed results to stdout
 };
 
 static bool layout_read_option_value(int argc, char** argv, int* index,
@@ -4393,7 +4411,9 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         {nullptr, "--continue-on-error", nullptr, &opts->continue_on_error, LAYOUT_OPTION_FLAG},
         {nullptr, "--summary", nullptr, &opts->summary, LAYOUT_OPTION_FLAG},
         {nullptr, "--auto-close", nullptr, &opts->auto_close, LAYOUT_OPTION_FLAG},
-        {nullptr, "--disable-animations", nullptr, &opts->disable_animations, LAYOUT_OPTION_FLAG}
+        {nullptr, "--disable-animations", nullptr, &opts->disable_animations, LAYOUT_OPTION_FLAG},
+        {nullptr, "--stream-layout-results", nullptr,
+         &opts->stream_layout_results, LAYOUT_OPTION_FLAG}
     };
 
     for (int i = 0; i < argc; i++) {
@@ -4446,9 +4466,8 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
         return false;
     }
 
-    // Batch mode requires --output-dir
-    if (opts->input_file_count > 1 && !opts->output_dir) {
-        log_error("Error: batch mode (multiple input files) requires --output-dir");
+    if (opts->input_file_count > 1 && !opts->output_dir && !opts->stream_layout_results) {
+        log_error("Error: batch mode requires --output-dir or --stream-layout-results");
         return false;
     }
     if (opts->memory_profile_output_file && opts->input_file_count != 1) {
@@ -4696,7 +4715,8 @@ static bool layout_single_file(
     FILE* timing_file = nullptr,
     const char* memory_profile_output_file = nullptr,
     bool auto_close = false,
-    bool disable_animations = false
+    bool disable_animations = false,
+    FILE* result_stream = nullptr
 ) {
     auto total_start = std::chrono::high_resolution_clock::now();
     auto load_start = total_start;
@@ -4915,7 +4935,13 @@ static bool layout_single_file(
         }
 
         output_start = std::chrono::high_resolution_clock::now();
-        print_view_tree(lam::unsafe_view_element_storage(doc->view_tree->root), doc->url, output_path);
+        ViewElement* root = lam::unsafe_view_element_storage(doc->view_tree->root);
+        if (result_stream) {
+            // The batch pipe carries only schema-v2 frames; never materialize a legacy file first.
+            success = stream_view_tree_json(root, input_file, result_stream) && success;
+        } else {
+            print_view_tree(root, doc->url, output_path);
+        }
         output_end = std::chrono::high_resolution_clock::now();
         output_phase_ran = true;
 
@@ -4956,9 +4982,9 @@ static bool layout_single_file(
         if (doc->resource_manager) {
             radiant_cleanup_network_support(doc);
         }
-        Runtime* render_runtime = doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
+        Runtime* render_runtime = dom_document_script_runtime(doc);
         if (render_runtime &&
-                !eval_context_thread_initialize(runtime_get_eval_context(render_runtime))) {
+                !eval_context_init(runtime_get_eval_context(render_runtime))) {
             log_error("[Layout] document cleanup reached a foreign eval thread");
         }
         source_pos_bridge_reset();
@@ -5254,7 +5280,8 @@ int cmd_layout(int argc, char** argv) {
         return 1;
     }
 
-    bool batch_mode = (opts.input_file_count > 1) || (opts.output_dir != nullptr);
+    bool batch_mode = (opts.input_file_count > 1) || (opts.output_dir != nullptr) ||
+        opts.stream_layout_results;
     bool auto_close = opts.auto_close || shell_getenv("LAMBDA_AUTO_CLOSE") != nullptr;
 
     if (batch_mode) {
@@ -5330,7 +5357,8 @@ int cmd_layout(int argc, char** argv) {
                 timing_file,
                 opts.memory_profile_output_file,
                 auto_close,
-                opts.disable_animations
+                opts.disable_animations,
+                opts.stream_layout_results ? stdout : nullptr
             );
         } catch (...) {
             log_error("batch layout: uncaught exception processing %s", input_file);
@@ -5355,7 +5383,8 @@ int cmd_layout(int argc, char** argv) {
                     timing_file,
                     opts.memory_profile_output_file,
                     auto_close,
-                    opts.disable_animations
+                    opts.disable_animations,
+                    opts.stream_layout_results ? stdout : nullptr
                 );
             } catch (...) {
                 log_error("batch layout: uncaught exception processing %s", input_file);
@@ -5368,6 +5397,11 @@ int cmd_layout(int argc, char** argv) {
             _exit(1);
         }
 #endif
+
+        if (!success && opts.stream_layout_results) {
+            // Every non-crashing input gets a terminal frame so the runner retries only true gaps.
+            write_layout_result_frame(stdout, input_file, false);
+        }
 
         if (success) {
             success_count++;
@@ -5388,7 +5422,8 @@ int cmd_layout(int argc, char** argv) {
     auto batch_end = std::chrono::high_resolution_clock::now();
     double total_time_ms = std::chrono::duration<double, std::milli>(batch_end - batch_start).count();
 
-    if (opts.summary || (batch_mode && opts.input_file_count > 1)) {
+    if (!opts.stream_layout_results &&
+            (opts.summary || (batch_mode && opts.input_file_count > 1))) {
         printf("\n=== Layout Summary ===\n");
         printf("Files processed: %d\n", success_count + failure_count);
         printf("Successful: %d\n", success_count);
@@ -5409,7 +5444,9 @@ int cmd_layout(int argc, char** argv) {
     ui_context_cleanup(&ui_context);
     if (cwd) url_destroy(cwd);
 
-    printf("Completed layout command: %d success, %d failed\n", success_count, failure_count);
+    if (!opts.stream_layout_results) {
+        printf("Completed layout command: %d success, %d failed\n", success_count, failure_count);
+    }
     log_notice("Completed layout command: %d success, %d failed", success_count, failure_count);
     return failure_count > 0 ? 1 : 0;
 }

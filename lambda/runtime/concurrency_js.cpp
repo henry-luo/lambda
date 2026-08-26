@@ -166,7 +166,10 @@ static Item lambda_js_procedure_call(Item env_item, Item rest_args) {
     int64_t count = get_type_id(args_root.get()) == LMD_TYPE_ARRAY
         ? js_array_length(args_root.get()) : 0;
     for (int64_t i = 0; i < count; i++) {
-        list_push(args, js_elements_get_int(args_root.get(), i));
+        // An argument list is not element content: list_push would drop a
+        // `null` argument and concatenate adjacent string arguments, changing
+        // the arity the Lambda procedure is called with (LR09-R3).
+        array_push((Array*)args, js_elements_get_int(args_root.get(), i));
     }
     handle_root.set(lambda_task_start_function(function_root.get(), args));
     if (!lambda_task_handle_is(handle_root.get())) {

@@ -5,13 +5,13 @@
 // Root configuration element - defined first to be recognized as root
 type Document = <configuration
     version: string,                  // required version
-    schema: string?;                  // optional schema reference
+    schema: string?,                  // optional schema reference
     any*                              // allow any child elements (open content model)
 >
 
 type ConfigSection = <section
     name: string,                     // section name
-    enabled: string?;                 // optional enabled flag (as string for bool)
+    enabled: string?,                 // optional enabled flag (as string for bool)
     ConfigProperty+                   // one or more properties (demonstrates one-or-more occurrences)
 >
 

@@ -54,15 +54,7 @@ Variable-size GC data and numeric temporaries use separate regions with differen
 
 **The data nursery** is part of the GC data zone (`gc_data_zone_t`, `lib/gc/gc_data_zone.c`). It holds variable-size buffers — array `items[]`, map `data`, closure environments. It **is collected**: on each cycle, `gc_compact_data` (`gc_heap.c:1217`) copies the buffers of surviving objects from the nursery into the `tenured_data` zone and rewrites each owning object's data pointer to the new location (embedded inline numerics inside `items[]` are rebased by `gc_fixup_embedded_pointers`, `gc_heap.c:1187`); then `gc_data_zone_reset` (`gc_heap.c:1689`) resets the nursery wholesale. This is what makes the collector "moving for data": the buffers move, but the objects that own them do not.
 
-**Generic Array tail tracing is precise.** `Array::extra` counts reserved high
-tail slots. Logical Items occupy `[0, min(length, capacity - extra))`; raw
-wide-scalar payload words occupy the counted tail and are never traced as
-Items. A JS array with `CONTAINER_FLAG_JS_PROPS` stores its companion Map Item
-at `items[capacity - 1]`, which the Array trace marks explicitly behind that
-flag. The old conservative `gc_mark_possible_item(extra)` probe is gone:
-`extra` is never a pointer. During data compaction the whole buffer is copied,
-logical Items pointing into scalar payload slots are rebased, and the props Map
-Item simply moves with the tail because its pointee is outside the buffer.
+**Generic Array tail tracing is precise.** `Array::extra` counts reserved high tail slots. Logical Items occupy `[0, min(length, capacity - extra))`; raw wide-scalar payload words occupy the counted tail and are never traced as Items. A JS array with `CONTAINER_FLAG_JS_PROPS` stores its companion Map Item at `items[capacity - 1]`, which the Array trace marks explicitly behind that flag. The old conservative `gc_mark_possible_item(extra)` probe is gone: `extra` is never a pointer. During data compaction the whole buffer is copied, logical Items pointing into scalar payload slots are rebased, and the props Map Item simply moves with the tail because its pointee is outside the buffer.
 
 **The numeric-temporary region** is the raw number execution side-stack. `box_int64_value`, `box_uint64_value`, and the out-of-band arm of `push_d` reserve one 64-bit payload slot after a checked `side_number_top` bump; generated functions save and restore that watermark. The region is separate from the Item root stack so raw numeric bits are never scanned as pointers. Generated returns copy into caller-donated homes before restore. Container and JS-environment stores copy wide payloads into storage-owned scalar tails; reads from movable storage rematerialize in the current number frame. `push_k` never enters this region: dynamic datetimes are GC objects and static Mark datetimes are Input-arena objects.
 
@@ -132,21 +124,11 @@ The rationale: structural identifiers are highly repetitive and benefit from int
 
 ## Known Issues & Future Improvements
 
-The memory subsystem carries a set of structural risks and hard-coded caps; several are flagged in the code, others are emergent invariants discoverable only by reading it.
+Moved to the central ledger: **[Lambda Core Runtime — Central Issue Ledger](../../../vibe/Lambda_Issue_Ledger.md)**, entries **LR08-1 – LR08-10**.
 
-1. **Decimal `mpd_t` leak (in-code TODO).** `gc_finalize_dead_object` does **nothing** for `LMD_TYPE_DECIMAL` because the `mpd_t` from libmpdec cannot be freed from this C file (`gc_heap.c:1383`–`1388`): the comment says dead decimals "will have their mpd_t leaked until context end. TODO: Add a finalization callback mechanism." Mid-execution collections therefore leak `mpd_t` for every dead Decimal; the storage is reclaimed only by `gc_finalize_all_objects` at teardown (`lambda-mem.cpp:708`). This is a real per-cycle leak in decimal-heavy long-running scripts.
-2. **Execution-side-stack capacity is reserved up front.** Root and raw-number regions have fixed virtual limits. Checked prologues fail deterministically instead of corrupting adjacent memory, but workloads that genuinely exceed those reservations cannot grow them dynamically.
-3. **JIT rooting still hinges on honest static types.** The collector trusts the transpiler's `should_gc_root_var` classification. A heap Item mislabeled as a packed scalar could miss a precise slot, although publishing all heap-capable live locals before calls substantially narrows the hazard. Cross-link: [LR_07](LR_07_MIR_Transpiler_JIT.md) §Known Issues.
-4. **Wide scalar ownership must be explicit at every escaping store.** Number-frame temporaries are reclaimed at return, so containers, JS environments, exceptions, and other longer-lived stores must rehome payloads into storage-owned lanes. The shared store/rehome helpers enforce the current paths; a new raw Item store that bypasses them can create a dangling scalar pointer.
-5. **Hard-coded struct byte offsets in tracing/compaction.** `gc_trace_object` and `gc_compact_data` read fields at fixed offsets (Array items @+8, Map data @+16, Element data @+48, ShapeEntry walk, `gc_heap.c:929`–`1145`,`1233`–`1366`). Any change to `Container`/`Map`/`Element`/`TypeMap`/`ShapeEntry`/`Function` layout silently corrupts tracing or compaction; the `TypeId` enum aliasing defends the *enum values* but not the *offsets*. `item_to_ptr` (`gc_heap.c:770`) likewise assumes high-byte-zero heap pointers, a documented-but-unenforced platform assumption.
-6. **`SHAPE_POOL_MAX_CHAIN_LENGTH` = 64 silently returns NULL.** Maps/elements with more than 64 fields get no pooled shape (`shape_pool.cpp:220`,`:285`) — only a `log_warn`, with a possible NULL-deref downstream depending on caller handling.
-7. **Deep recursion consumes root and number watermarks as well as C stack.** Frames no longer allocate heap root blocks, but recursion accumulates each function's statically reserved slots until the function epilogue restores them. The side-stack bound check or the C-stack guard therefore terminates pathological depth, whichever fires first.
-8. **Dead stubs.** `free_item`, `free_container`, `frame_start`, `frame_end` (`lambda-mem.cpp:759`–`776`) are no-op API-compat relics — harmless but dead code.
-9. **Re-entrant allocation during GC silently skips collection.** `gc_collect` guards with `gc->collecting`, and `gc_data_alloc` checks `!gc->collecting` before triggering, so an allocation made *during* tracing or finalize callbacks (vmap_trace, error_trace) that hits the data zone simply skips collecting rather than asserting. Acceptable, but unguarded against pathological growth inside a callback.
-10. **Fixed compile-time sizes.** Object size classes 16/32/48/64/96/128/256 B with a `malloc` large-object path above (`gc_object_zone.h`); data-zone blocks 4 MB; bump blocks 4 MB→64 MB; root/number side-stack reservations and the adaptive-threshold cap are fixed profiles rather than runtime configuration.
+The ledger carries the verification status of each entry (OPEN / PARTIAL / RESOLVED) against the current source, re-resolved `file:line` anchors, and the cross-cutting clusters that group issues shared with other `LR_*` areas.
 
 ---
-
 ## Appendix A — Source map
 
 | File | Responsibility (this doc) |

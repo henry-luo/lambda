@@ -27,11 +27,11 @@ The engine is large enough to stand alone (~30 files: `font_context.c`, `font_gl
 
 - **Requested CSS style:** `family`, `font_size` (in device pixels, already scaled by `pixel_ratio`), `font_style`, `font_weight`, `font_variant`, `font_kerning`, the precise `font_weight_numeric` (100–900, `0` meaning "use the keyword"), plus `letter_spacing`/`word_spacing` and the text-decoration/shadow fields that ride along on the same struct.
 - **Derived metrics** (populated by the bridge, not by CSS): `space_width`, `ascender`, `descender`, `font_height`, `has_kerning` (`view.hpp:422-426`).
-- **The cached handle:** `FontHandle* font_handle` and the ownership flag `owns_font_handle` (`view.hpp:427-428`).
+- **The cached-handle alias:** `FontHandle* font_handle`. `FontProp` does not own the handle directly; it holds a cache-managed alias lease while the prop is live.
 
 The inline helper `font_style_desc_from_prop` (`view.hpp:437`) converts a `FontProp` into the engine's `FontStyleDesc` — mapping `font_weight_numeric` (or, absent that, the `bold`/`bolder`/`lighter` keywords) to a `FontWeight`, and `italic`/`oblique` to a `FontSlant`. This helper is used at the per-glyph layer (it is passed to `font_load_glyph` so the engine knows the requested style when it needs to resolve a fallback face for a missing codepoint); `setup_font` builds an equivalent `FontStyleDesc` inline rather than calling this helper — the two mappings are duplicated (see [§8](#8-known-issues--future-improvements)).
 
-`FontBox` (`view.hpp:1116`) is the transient "current font" the layout context swaps in and out as it enters and leaves inline spans: a `FontProp* style`, the resolved `FontHandle* font_handle`, and `current_font_size`. `lycon->font` is a `FontBox`; `setup_font` is what fills it.
+`FontBox` (`view.hpp`) is the transient "current font" the layout context swaps in and out as it enters and leaves inline spans: a `FontProp* style` and `current_font_size`. It is an alias of the prop, not a second handle owner; `font_box_handle` derives the handle from `style`. `lycon->font` is a `FontBox`; `setup_font` is what fills it. This follows the Radiant seam's pin/copy-as-value contract, **D4.5.1v3**.
 
 ---
 
@@ -43,10 +43,10 @@ The inline helper `font_style_desc_from_prop` (`view.hpp:437`) converts a `FontP
 
 The flow (`font.cpp:99-153`):
 
-1. Initialize the `FontBox` (`style`, `current_font_size`, `font_handle = NULL`) and bail with a logged error if there is no `UiContext`/`FontContext`.
+1. Initialize the `FontBox` (`style`, `current_font_size`) and bail with a logged error if there is no `UiContext`/`FontContext`.
 2. Map CSS weight to a `FontWeight`: `font_weight_numeric` wins if set, else `bold`/`bolder`→`FONT_WEIGHT_BOLD`, `lighter`→`FONT_WEIGHT_LIGHT`, else normal (`font.cpp:111-119`). Map `italic`/`oblique` to a `FontSlant` (`font.cpp:121-123`). Build a `FontStyleDesc` from `family`, `size_px`, `weight`, `slant`.
-3. **Cache hit path:** `font_handle_matches_prop` (`font.cpp:52`) asks the engine for the cached handle's resolved identity via `font_handle_get_style` and compares family, size, weight, and slant. On a match, the existing handle is reused, metrics are re-populated, and it returns — **no `font_resolve`** (`font.cpp:131-135`). This is the common case across the many re-entries.
-4. **Miss/stale path:** release the old handle with `font_prop_release_handle` (`font.cpp:43`, which honors `owns_font_handle`), then call `font_resolve(font_ctx, &style)` (`font.cpp:141`). The engine does everything — `@font-face` descriptors, generic-family mapping, system-DB lookup, platform fallback, the fallback chain — and returns a ref-counted handle. On success the handle is cached on the `FontProp` with `owns_font_handle = true` and metrics are populated (`font.cpp:142-149`). On failure it logs and leaves `font_handle` NULL (`font.cpp:152`).
+3. **Cache hit path:** `font_handle_matches_prop` (`font.cpp`) asks the engine for the cached handle's resolved identity via `font_handle_get_style` and compares family, size, weight, and slant. On a match, the existing cache lease is reused, metrics are re-populated, and it returns — **no `font_resolve`**. This is the common case across the many re-entries.
+4. **Miss/stale path:** `font_prop_release_handle` relinquishes the old cache lease, then `font_resolve(font_ctx, &style)` resolves `@font-face`, generic-family mapping, system-DB lookup, platform fallback, and the fallback chain. On success `font_cache_adopt_handle_alias` transfers the resolver's returned ref into the `FontProp` cache lease and metrics are populated. `setup_font` neither retains nor releases a handle itself. A copied `FontProp` acquires another lease with `font_cache_pin_handle`; teardown releases it with `font_cache_unpin_handle`. On failure it logs and leaves `font_handle` NULL.
 
 ### 3.1 The macOS `system-ui` reuse quirk
 
@@ -65,7 +65,8 @@ Radiant calls a small, stable subset of `lib/font/font.h`. Documented here only 
 | Engine entry point | `font.h` | What Radiant uses it for |
 |---|---|---|
 | `font_resolve` | `:94` | Resolve a `FontStyleDesc` to a ref-counted `FontHandle` (the miss path of `setup_font`). |
-| `font_handle_retain` / `font_handle_release` | `:97-98` | Ownership of the cached handle (`font_prop_release_handle`). |
+| `font_cache_adopt_handle_alias` / `font_cache_pin_handle` / `font_cache_unpin_handle` | `:106-108` | Transfer, copy, and release cache-managed `FontProp` alias leases. |
+| `font_handle_retain` / `font_handle_release` | `:97-98` | Direct resolver clients outside Radiant's persistent `FontProp` path. |
 | `font_handle_get_style` | `:102` | Read a handle's resolved identity for the cache-match test. |
 | `font_get_metrics` | `:135` | Fill `space_width`/`font_height`/`has_kerning` and line metrics. |
 | `font_get_normal_lh_split` | `:306` | `line-height: normal` ascender/descender split (Chrome-compatible). |
@@ -106,7 +107,7 @@ Three entry points feed it:
 
 The engine's `FontContext` — the shared font database, face cache, glyph cache, and native backend state — is created once per `UiContext` in `ui_context.cpp:159-163`: a `FontContextConfig` sets `pixel_ratio`, `max_cached_faces = 64`, and `enable_lcd_rendering = true`, and `font_context_create` builds it (the database is owned internally). `uicon->default_font` and `legacy_default_font` seed the serif default (Times New Roman / Times) matching Chrome (`ui_context.cpp:165-174`). On teardown the context is destroyed and `font_ctx` nulled (`ui_context.cpp:312`).
 
-Handle lifetime is reference-counted and cache-anchored. A `FontProp` that resolves a handle holds one ref (`owns_font_handle = true`) and releases it in `font_prop_release_handle`; the table-driven teardown visitor in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md) releases font handles through `VIEW_PROP_TEARDOWN` as part of view teardown. Because handles are shared and cached, the same physical face is loaded once and reused across layout, measurement, events, and rendering. Between documents in batch mode the engine offers `font_context_reset_document_fonts` (clears `@font-face` descriptors + face cache + codepoint-fallback cache, keeps the system DB) and `font_context_reset_glyph_caches` (`font.h:378-382`).
+Handle lifetime is reference-counted and cache-anchored. A `FontProp` holds a cache-managed alias lease, not a direct owner ref; lease acquisition retains the handle and increments its pin count, and lease release decrements both. LRU skips pinned entries, while cache-key replacement and document-font reset may safely release an old mapping because active leases still retain its face. `FontBox` has no separate handle or lease, so copying layout context cannot resurrect a stale handle. The table-driven teardown visitor in [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md) releases `FontProp` leases through `VIEW_PROP_TEARDOWN` as part of view teardown. This is the cache pin/copy-as-value application of **D4.5.1v3**. Between documents in batch mode the engine offers `font_context_reset_document_fonts` (clears disposable `@font-face` entries and codepoint fallback state) and `font_context_reset_glyph_caches` (`font.h`).
 
 ---
 

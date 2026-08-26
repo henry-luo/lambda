@@ -61,7 +61,7 @@ let pc = pos([0, 2], 0)
 // resolve_pos against a sample document
 //   doc = <doc <paragraph "Hello"> <paragraph "World">>
 // ---------------------------------------------------------------------------
-let doc = <doc <paragraph; "Hello"> <paragraph; "World">>
+let doc = <doc <paragraph "Hello"> <paragraph "World">>
 
 let r0 = resolve_pos(doc, pos([], 0))
 "r0 found:";       r0.found

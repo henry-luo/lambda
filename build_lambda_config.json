@@ -43,8 +43,9 @@
   "source_files": [
     "lib/sqlite/sqlite3.c",
     "lambda/module/node_core/node_events.cpp",
+    "lambda/module/node_core/node_trace_events.cpp",
     "lambda/module/node_core/node_url.cpp",
-    "lambda/js/js_zlib_codec.cpp",
+    "lambda/jube/jube_node_zlib_codec.cpp",
     "lambda/serve/serve_utils.cpp",
     "lambda/serve/tls_handler.cpp"
   ],
@@ -73,7 +74,6 @@
     "lambda/mir",
     "build_temp/re2-noabsl",
     "lambda/tree-sitter/lib/include",
-    "lambda/tree-sitter-lambda/bindings/c",
     "lambda/tree-sitter-typescript/bindings/c",
     "lambda/tree-sitter-javascript/bindings/c",
     "lib/font/woff2/include",
@@ -93,13 +93,6 @@
       "version": "0.25.0",
       "include": "lambda/tree-sitter/lib/include",
       "lib": "lambda/tree-sitter/libtree-sitter.a",
-      "link": "static"
-    },
-    {
-      "name": "tree-sitter-lambda",
-      "version": "0.1.0",
-      "include": "lambda/tree-sitter-lambda/bindings/c",
-      "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
       "link": "static"
     },
     {
@@ -346,6 +339,7 @@
         "lambda/module/node_core/node_querystring.cpp",
         "lambda/module/node_core/node_string_decoder.cpp",
         "lambda/module/node_core/node_timers.cpp",
+        "lambda/module/node_core/node_trace_events.cpp",
         "lambda/module/node_core/node_tty.cpp",
         "lambda/module/node_core/node_v8.cpp",
         "lambda/module/node_core/node_workers.cpp"
@@ -368,7 +362,21 @@
         "LAMBDA_NODE_NET_DYNAMIC_MODULE"
       ],
       "source_files": [
-        "lambda/module/node_net/node_net_module.cpp"
+        "lambda/module/node_net/node_net_module.cpp",
+        "lambda/module/node_net/node_dns_module.cpp"
+      ]
+    },
+    {
+      "name": "node-crypto",
+      "description": "External Node crypto Jube module",
+      "defines": [
+        "LAMBDA_NODE_CRYPTO_DYNAMIC_MODULE"
+      ],
+      "source_files": [
+        "lambda/module/node_crypto/node_crypto_module.cpp"
+      ],
+      "dependencies": [
+        "node-core"
       ]
     },
     {
@@ -558,7 +566,6 @@
       ],
       "libraries": [
         "lambda-lib",
-        "tree-sitter-lambda",
         "tree-sitter-latex",
         "tree-sitter-latex-math",
         "tree-sitter",
@@ -687,7 +694,7 @@
         "lambda/runtime/sys_func_registry.c",
         "lambda/runtime/side_stack.c",
         "lambda/runtime/recovery_frame.c",
-        "lambda/runtime/emit_sexpr.cpp",
+        "lambda/runtime/emit_ast_dump.cpp",
         "lambda/runtime/mem_factory_rt.cpp"
       ],
       "libraries": [
@@ -695,7 +702,6 @@
         "lambda-lib",
         "mir",
         "tree-sitter",
-        "tree-sitter-lambda",
         "tree-sitter-javascript",
         "tree-sitter-typescript",
         "re2",
@@ -816,12 +822,12 @@
       ],
       "libraries": [
         "lambda-rt",
+        "node-core",
         "radiant",
         "lambda-data",
         "lambda-lib",
         "mir",
         "tree-sitter",
-        "tree-sitter-lambda",
         "tree-sitter-javascript",
         "tree-sitter-typescript",
         "tree-sitter-latex",
@@ -854,6 +860,25 @@
       "link": "executable"
     },
     {
+      "name": "lambda-cst",
+      "description": "Tree-sitter Lambda CST differential verifier",
+      "lang": "c17",
+      "source_files": [
+        "test/lambda_parser_poc_diff.c",
+        "lambda/runtime/parser/lambda_lexer.c",
+        "lambda/runtime/parser/lambda_parser.c"
+      ],
+      "libraries": [
+        "tree-sitter",
+        "tree-sitter-lambda"
+      ],
+      "target_dir": ".",
+      "link": "executable",
+      "only_variants": [
+        "lambda-cst"
+      ]
+    },
+    {
       "name": "lambda-runtime-full",
       "description": "Active runtime validation and schema front-end support",
       "lang": "c++17",
@@ -879,7 +904,6 @@
       ],
       "libraries": [
         "tree-sitter",
-        "tree-sitter-lambda",
         "mpdec",
         "pthread"
       ],
@@ -1066,6 +1090,18 @@
       "build_dir": "build_debug_profile",
       "debug": true
     },
+    "lambda-cst": {
+      "description": "Tree-sitter Lambda CST differential-verification profile",
+      "additional_libraries": [
+        {
+          "name": "tree-sitter-lambda",
+          "version": "0.1.0",
+          "include": "lambda/tree-sitter-lambda/bindings/c",
+          "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+          "link": "static"
+        }
+      ]
+    },
     "cli": {
       "description": "Headless CLI-only build: Lambda scripting without Radiant layout engine or GUI support",
       "output": "lambda-cli.exe",
@@ -1104,8 +1140,7 @@
         ".",
         "lambda/mir",
         "build_temp/re2-noabsl",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c"
+        "lambda/tree-sitter/lib/include"
       ],
       "exclude_libraries": [
         "glfw",
@@ -1174,12 +1209,6 @@
           "name": "tree-sitter",
           "include": "lambda/tree-sitter/lib/include",
           "lib": "lambda/tree-sitter/libtree-sitter.a",
-          "link": "static"
-        },
-        {
-          "name": "tree-sitter-lambda",
-          "include": "lambda/tree-sitter-lambda/bindings/c",
-          "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
           "link": "static"
         },
         {
@@ -1591,12 +1620,6 @@
           "name": "tree-sitter",
           "include": "lambda/tree-sitter/lib/include",
           "lib": "lambda/tree-sitter/libtree-sitter.a",
-          "link": "static"
-        },
-        {
-          "name": "tree-sitter-lambda",
-          "include": "lambda/tree-sitter-lambda/bindings/c",
-          "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
           "link": "static"
         },
         {
@@ -2045,6 +2068,7 @@
             "name": "GC Heap Tests",
             "dependencies": [
               "lambda-rt",
+              "node-core",
               "radiant"
             ],
             "libraries": [
@@ -4438,10 +4462,26 @@
             "icon": "🐑"
           },
           {
+            "source": "test/test_lambda_parser_poc_gtest.cpp",
+            "name": "Lambda C Parser POC Tests",
+            "additional_sources": [
+              "lambda/runtime/parser/lambda_lexer.c",
+              "lambda/runtime/parser/lambda_parser.c"
+            ],
+            "binary": "test_lambda_parser_poc_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "parallel": false,
+            "icon": "🔤"
+          },
+          {
             "source": "test/test_lambda_concurrency_gtest.cpp",
             "name": "Lambda Concurrency Runtime Tests",
             "dependencies": [
               "lambda-rt",
+              "node-core",
               "radiant"
             ],
             "additional_sources": [
@@ -4537,6 +4577,7 @@
             "name": "Lambda Item Representation Tests",
             "dependencies": [
               "lambda-rt",
+              "node-core",
               "radiant"
             ],
             "binary": "test_item_repr_gtest.exe",
@@ -4610,6 +4651,7 @@
             "name": "Lambda Error System Tests",
             "dependencies": [
               "lambda-rt",
+              "node-core",
               "radiant"
             ],
             "binary": "test_lambda_errors_gtest.exe",
@@ -4693,6 +4735,21 @@
             ],
             "requires_lambda_exe": true,
             "icon": "⚙️"
+          },
+          {
+            "source": "test/test_lambda_opt_gtest.cpp",
+            "name": "Lambda Optimization Contract Tests",
+            "category": "baseline",
+            "dependencies": [
+              "lambda-lib"
+            ],
+            "binary": "test_lambda_opt_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "requires_lambda_exe": true,
+            "icon": "🧭"
           },
           {
             "source": "test/test_compiler_pass_gtest.cpp",

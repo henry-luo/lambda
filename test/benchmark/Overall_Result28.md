@@ -12,6 +12,7 @@
 - **Methodology:** 3 run(s) per benchmark, median of self-reported `__TIMING__` milliseconds, timeout 180s per run
 - **Engines in this report:** MIR (untyped), MIR (typed), C2MIR, LambdaJS, QuickJS, Node.js
 - **Results source:** `test/benchmark/benchmark_results_v28.json`
+- **Separately measured:** C2MIR measured on 2026-08-19, 3 run(s) from `test/benchmark/run_c2mir_benchmarks.py`. Back-patched 12 rows whose native C ports did not exist during this session (awfy/cd, awfy/deltablue, awfy/havlak, awfy/json, awfy/richards, beng/pidigits, jetstream/crypto_sha1, jetstream/cube3d, jetstream/navier_stokes, jetstream/raytrace3d, jetstream/splay, larceny/deriv); all other C2MIR cells are this session's own. C2MIR measures native C ports through lambda/mir/c2m and does not depend on the Lambda binary; its cells are stable to within a few percent across the v18-v33 sessions.
 - **MIR columns:** untyped and typed; `*` means the typed column reuses the untyped result because no typed source exists
 
 JetStream JavaScript-engine wrappers run each benchmark's own `Benchmark.runIteration()` workload — the loop count is read from the file itself (nbody/cube3d/raytrace3d 8, richards/splay 50, crypto_sha1 25, deltablue 20, navier_stokes/hashmap 1). Each Lambda `.ls` port implements exactly one `runIteration()`, so every engine times the same work. A previous revision hard-coded 8 repeats for every file, which made the JS engines run 8/50 of Lambda's work on richards and splay, and 8x too much on navier_stokes and hashmap.
@@ -25,13 +26,13 @@ C2MIR and Go are native statically typed ports of the same workloads, present as
 | Suite | Total | Timed MIR (untyped) | Timed MIR (typed) | Timed C2MIR | Timed LambdaJS | Timed QuickJS | Timed Node.js | MIR (untyped)/Node geo | MIR (typed)/Node geo | C2MIR/Node geo | LambdaJS/Node geo | QuickJS/Node geo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | R7RS | 10 | 10 | 10 | 10 | 10 | 9 | 10 | 0.87x | 0.49x | 0.19x | 5.81x | 6.49x |
-| AWFY | 14 | 14 | 14 | 9 | 14 | 14 | 14 | 2.47x | 1.32x | 0.08x | 25.9x | 5.25x |
-| BENG | 8 | 8 | 8 | 7 | 8 | 5 | 8 | 0.59x | 0.44x | 0.12x | 7.49x | 1.90x |
+| AWFY | 14 | 14 | 14 | 14 | 14 | 14 | 14 | 2.47x | 1.32x | 0.10x | 25.9x | 5.25x |
+| BENG | 8 | 8 | 8 | 8 | 8 | 5 | 8 | 0.59x | 0.44x | 0.10x | 7.49x | 1.90x |
 | KOSTYA | 7 | 7 | 7 | 7 | 7 | 7 | 7 | 3.13x | 1.65x | 0.23x | 15.9x | 11.9x |
-| LARCENY | 11 | 11 | 11 | 10 | 11 | 11 | 11 | 3.05x | 1.31x | 0.30x | 14.7x | 13.3x |
-| JetStream | 6 | 6 | 6 | 1 | 6 | 4 | 6 | 8.79x | 4.11x | 0.18x | 71.2x | 12.7x |
+| LARCENY | 11 | 11 | 11 | 11 | 11 | 11 | 11 | 3.05x | 1.31x | 0.33x | 14.7x | 13.3x |
+| JetStream | 6 | 6 | 6 | 6 | 6 | 4 | 6 | 8.79x | 4.11x | 0.30x | 71.2x | 12.7x |
 | Text | 3 | 3 | 3 | 3 | 3 | 3 | 3 | 0.92x | 0.69x | 0.02x | 62.8x | 9.38x |
-| **Overall** | 59 | 59 | 59 | 47 | 59 | 53 | 59 | 1.97x | 1.07x | 0.15x | 16.7x | 7.38x |
+| **Overall** | 59 | 59 | 59 | 59 | 59 | 53 | 59 | 1.97x | 1.07x | 0.16x | 16.7x | 7.38x |
 
 > The benchmark runner keeps one canonical row for each known duplicate workload, so no reporting deduplication is required.
 > Ratio < 1.0 means the engine is faster than Node.js on matched timed rows; ratio > 1.0 means Node.js is faster.
@@ -42,32 +43,31 @@ C2MIR and Go are native statically typed ports of the same workloads, present as
 
 How far MIR (typed) is from the same workload written in a statically typed language. These columns are a reference bound, not another Lambda execution path: they say what is still on the table, and C2MIR is the sharper of the two because it shares MIR's code generator, so a gap there is attributable to Lambda's front end rather than to the backend.
 
-- **MIR (typed) / C2MIR geomean:** 5.71x over 47 of 59 rows
+- **MIR (typed) / C2MIR geomean:** 6.87x over 59 of 59 rows
 
 **Widest gaps vs C2MIR**
 
 | Benchmark | MIR (typed) | C2MIR | MIR (typed)/C2MIR |
 |---|---:|---:|---:|
 | kostya/base64 | 48.3 | 0.556 | 86.9x |
+| awfy/deltablue | 100.5 | 1.17 | 86.0x |
 | text/microdiff | 0.951 | 0.019 | 49.9x |
 | awfy/list | 0.906 | 0.022 | 41.2x |
 | text/hyphen | 3.25 | 0.089 | 36.4x |
+| awfy/cd | 547.1 | 15.6 | 35.1x |
 | text/fast_diff | 434.2 | 13.0 | 33.5x |
 | awfy/bounce | 0.746 | 0.024 | 31.2x |
+| awfy/havlak | 55.6 | 1.89 | 29.5x |
+| jetstream/raytrace3d | 62.1 | 2.21 | 28.1x |
 | larceny/quicksort | 4.78 | 0.197 | 24.3x |
 | awfy/towers | 0.653 | 0.028 | 23.3x |
-| jetstream/hashmap | 56.3 | 2.75 | 20.4x |
-| larceny/paraffins | 0.815 | 0.048 | 16.9x |
-| beng/knucleotide | 4.86 | 0.288 | 16.9x |
-| awfy/queens | 0.336 | 0.020 | 16.8x |
 
 ---
 
 ## Notable Results
 
-- Missing timings: **18** cells
+- Missing timings: **6** cells
 - QuickJS missing: r7rs/ack (exit_1), beng/knucleotide (exit_1), beng/regexredux (exit_1), beng/revcomp (exit_1), jetstream/cube3d (exit_1), jetstream/raytrace3d (exit_1)
-- C2MIR missing: awfy/richards (missing_port), awfy/json (missing_port), awfy/deltablue (missing_port), awfy/havlak (missing_port), awfy/cd (missing_port), beng/pidigits (missing_port), larceny/deriv (missing_port), jetstream/cube3d (missing_port), +4 more
 
 ### Largest LambdaJS / Node.js Ratios
 
@@ -118,11 +118,11 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | storage | micro | 0.831 | 0.622 | 0.097 | 15.2 | 2.19 | 0.630 | 1.32x | 0.99x | 0.15x | 24.1x | 3.48x |
 | mandelbrot | compute | 48.3 | 48.1 | 30.7 | 309.9 | 871.0 | 31.2 | 1.55x | 1.54x | 0.99x | 9.94x | 27.9x |
 | nbody | compute | 33.6 | 21.7 | 1.50 | 582.9 | 159.3 | 5.39 | 6.22x | 4.03x | 0.28x | 108x | 29.6x |
-| richards | macro | 2.56s | 257.1 | --- | 1.85s | 191.6 | 47.4 | 53.9x | 5.42x | --- | 39.1x | 4.04x |
-| json | macro | 7.53 | 2.78 | --- | 48.0 | 10.9 | 2.62 | 2.88x | 1.06x | --- | 18.3x | 4.16x |
-| deltablue | macro | 98.1 | 100.5 | --- | 1.03s | 99.3 | 11.8 | 8.33x | 8.53x | --- | 87.2x | 8.43x |
-| havlak | macro | 55.4 | 55.6 | --- | 54.21s | 3.35s | 95.2 | 0.58x | 0.58x | --- | 569x | 35.2x |
-| cd | macro | 903.2 | 547.1 | --- | 10.32s | 967.7 | 35.7 | 25.3x | 15.3x | --- | 289x | 27.1x |
+| richards | macro | 2.56s | 257.1 | 31.2 | 1.85s | 191.6 | 47.4 | 53.9x | 5.42x | 0.66x | 39.1x | 4.04x |
+| json | macro | 7.53 | 2.78 | 0.278 | 48.0 | 10.9 | 2.62 | 2.88x | 1.06x | 0.11x | 18.3x | 4.16x |
+| deltablue | macro | 98.1 | 100.5 | 1.17 | 1.03s | 99.3 | 11.8 | 8.33x | 8.53x | 0.10x | 87.2x | 8.43x |
+| havlak | macro | 55.4 | 55.6 | 1.89 | 54.21s | 3.35s | 95.2 | 0.58x | 0.58x | 0.02x | 569x | 35.2x |
+| cd | macro | 903.2 | 547.1 | 15.6 | 10.32s | 967.7 | 35.7 | 25.3x | 15.3x | 0.44x | 289x | 27.1x |
 
 ## BENG
 
@@ -132,7 +132,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 | fannkuch | permutation | 0.350 | 1.48 | 0.150 | 13.2 | 7.17 | 3.99 | 0.09x | 0.37x | 0.04x | 3.30x | 1.80x |
 | fasta | generation | 0.752 | 0.869 | 0.244 | 26.3 | 8.80 | 6.09 | 0.12x | 0.14x | 0.04x | 4.32x | 1.45x |
 | knucleotide | hashing | 4.43 | 4.86 | 0.288 | 152.0 | --- | 5.01 | 0.88x | 0.97x | 0.06x | 30.3x | --- |
-| pidigits | bignum | 0.295 | 0.298 | --- | 0.314 | 0.131 | 1.95 | 0.15x | 0.15x | --- | 0.16x | 0.07x |
+| pidigits | bignum | 0.295 | 0.298 | 0.047 | 0.314 | 0.131 | 1.95 | 0.15x | 0.15x | 0.02x | 0.16x | 0.07x |
 | regexredux | regex | 1.28 | 1.28 | 1.15 | 17.7 | --- | 2.43 | 0.53x | 0.53x | 0.47x | 7.30x | --- |
 | revcomp | string | 1.37 | 1.21 | 0.382 | 48.8 | --- | 3.32 | 0.41x | 0.37x | 0.11x | 14.7x | --- |
 | spectralnorm | numeric | 45.0 | 2.02 | 0.355 | 300.7 | 64.2 | 2.64 | 17.1x | 0.76x | 0.13x | 114x | 24.3x |
@@ -155,7 +155,7 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | triangl | search | 475.8 | 189.5 | 60.3 | 4.26s | 2.19s | 66.8 | 7.13x | 2.84x | 0.90x | 63.9x | 32.8x |
 | array1 | array | 1.09 | 1.09 | 0.317 | 28.5 | 35.9 | 1.90 | 0.57x | 0.57x | 0.17x | 15.0x | 18.9x |
-| deriv | symbolic | 35.5 | 11.9 | --- | 106.6 | 59.0 | 3.70 | 9.59x | 3.21x | --- | 28.8x | 15.9x |
+| deriv | symbolic | 35.5 | 11.9 | 2.92 | 106.6 | 59.0 | 3.70 | 9.59x | 3.21x | 0.79x | 28.8x | 15.9x |
 | diviter | iterative | 400.2 | 399.4 | 263.9 | 8.21s | 26.56s | 468.7 | 0.85x | 0.85x | 0.56x | 17.5x | 56.7x |
 | divrec | recursive | 15.6 | 2.00 | 4.85 | 26.3 | 35.8 | 7.48 | 2.09x | 0.27x | 0.65x | 3.52x | 4.79x |
 | gcbench | allocation | 239.4 | 153.9 | 70.6 | 1.56s | 550.5 | 23.0 | 10.4x | 6.68x | 3.07x | 67.8x | 23.9x |
@@ -169,12 +169,12 @@ How far MIR (typed) is from the same workload written in a statically typed lang
 
 | Benchmark | Category | MIR (untyped) (ms) | MIR (typed) (ms) | C2MIR (ms) | LambdaJS (ms) | QuickJS (ms) | Node.js (ms) | MIR (untyped)/Node | MIR (typed)/Node | C2MIR/Node | LambdaJS/Node | QuickJS/Node |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| cube3d | 3d | 12.2 | 11.2 | --- | 659.3 | --- | 17.5 | 0.70x | 0.64x | --- | 37.7x | --- |
-| navier_stokes | numeric | 1.02s | 190.9 | --- | 713.9 | 98.6 | 14.3 | 71.3x | 13.4x | --- | 50.0x | 6.91x |
-| splay | data | 153.8 | 258.5 | --- | 513.5 | 146.2 | 19.6 | 7.85x | 13.2x | --- | 26.2x | 7.46x |
+| cube3d | 3d | 12.2 | 11.2 | 0.523 | 659.3 | --- | 17.5 | 0.70x | 0.64x | 0.03x | 37.7x | --- |
+| navier_stokes | numeric | 1.02s | 190.9 | 48.4 | 713.9 | 98.6 | 14.3 | 71.3x | 13.4x | 3.39x | 50.0x | 6.91x |
+| splay | data | 153.8 | 258.5 | 20.4 | 513.5 | 146.2 | 19.6 | 7.85x | 13.2x | 1.04x | 26.2x | 7.46x |
 | hashmap | data | 165.9 | 56.3 | 2.75 | 3.35s | 317.5 | 15.4 | 10.8x | 3.66x | 0.18x | 218x | 20.6x |
-| crypto_sha1 | crypto | 61.8 | 30.4 | --- | 1.75s | 218.5 | 8.80 | 7.02x | 3.46x | --- | 199x | 24.8x |
-| raytrace3d | 3d | 289.4 | 62.1 | --- | 1.13s | --- | 18.5 | 15.6x | 3.36x | --- | 61.0x | --- |
+| crypto_sha1 | crypto | 61.8 | 30.4 | 2.70 | 1.75s | 218.5 | 8.80 | 7.02x | 3.46x | 0.31x | 199x | 24.8x |
+| raytrace3d | 3d | 289.4 | 62.1 | 2.21 | 1.13s | --- | 18.5 | 15.6x | 3.36x | 0.12x | 61.0x | --- |
 
 ## Text
 

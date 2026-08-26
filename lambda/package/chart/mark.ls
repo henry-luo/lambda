@@ -67,8 +67,8 @@ pub fn bar(data, ctx, mark_config) {
         else base_opacity,
         if (tooltip_field)
             <rect x: x_final, y: y1_pos, width: bar_w, height: bar_h,
-                  fill: bar_fill, opacity: bar_opacity, rx: rx;
-                <title; string(d[tooltip_field])>
+                  fill: bar_fill, opacity: bar_opacity, rx: rx,
+                <title string(d[tooltip_field])>
             >
         else
             <rect x: x_final, y: y1_pos, width: bar_w, height: bar_h,
@@ -253,8 +253,8 @@ pub fn point_mark(data, ctx, mark_config) {
         if (tooltip_field)
             <circle cx: x_pos + bw_x, cy: y_pos + bw_y, r: pt_r,
                     fill: pt_fill, opacity: pt_opacity,
-                    stroke: "white", 'stroke-width': 0.5;
-                <title; string(d[tooltip_field])>
+                    stroke: "white", 'stroke-width': 0.5,
+                <title string(d[tooltip_field])>
             >
         else
             <circle cx: x_pos + bw_x, cy: y_pos + bw_y, r: pt_r,
@@ -324,7 +324,7 @@ pub fn text_mark(data, ctx, mark_config) {
         let bw_x = if (x_scale.bandwidth) x_scale.bandwidth / 2.0 else 0.0,
         let label = if (text_field) string(d[text_field]) else string(d[y_field]),
         <text x: x_pos + bw_x, y: y_pos - 4.0,
-              'text-anchor': "middle", 'font-size': font_size, fill: fill_color;
+              'text-anchor': "middle", 'font-size': font_size, fill: fill_color,
             label
         >
     ));
