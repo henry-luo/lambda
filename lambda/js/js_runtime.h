@@ -401,6 +401,8 @@ Item js_super_call_class_into(Item callee, Item this_val, Item* args, int argc,
                               uint64_t* result_home);
 Item js_super_apply_class_into(Item callee, Item this_val, Item args_array,
                                uint64_t* result_home);
+Item js_super_call_native(Item callee, Item this_val, Item* args, int argc);
+Item js_super_apply_native(Item callee, Item this_val, Item args_array);
 Item js_construct_array_like(Item constructor, Item args_array, Item new_target);
 Item js_bind_function(Item func_item, Item bound_this, Item* bound_args, int bound_argc);
 void js_function_root_item_if_needed(void* fn, Item* slot);
@@ -448,6 +450,8 @@ void js_set_pending_call_source(const char* source, int64_t len);
 Item js_super_bind_this(Item this_val, Item construct_result);
 Item js_get_super_this_value(void);
 Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
+Item js_super_property_get(Item receiver, Item key);
+Item js_super_property_set(Item receiver, Item key, Item value, int64_t strict);
 Item js_build_arguments_object(void);
 void js_set_arguments_info(int64_t is_strict);
 

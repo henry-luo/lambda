@@ -36,6 +36,10 @@ struct JsInterpFrame {
     // the side-root window rather than a native-stack copy.
     uint64_t* this_home;
     uint64_t* new_target_home;
+    // The shared call kernel publishes the lexical [[HomeObject]] while the
+    // body runs. Keep it alongside `this` so arrows and post-super fields use
+    // the same runtime class capability rather than a walker-local stack.
+    uint64_t* home_class_home;
     bool strict;
     const char* active_label;
     int active_label_len;
@@ -48,6 +52,7 @@ struct JsInterpReference {
     uint64_t* object_home;
     uint64_t* key_home;
     bool property;
+    bool super_property;
     bool with_binding;
 };
 
@@ -100,6 +105,18 @@ static Item js_interp_frame_new_target(const JsInterpFrame* frame) {
     return (Item){.item = *frame->new_target_home};
 }
 
+static Item js_interp_frame_home_class(const JsInterpFrame* frame) {
+    return frame && frame->home_class_home
+        ? (Item){.item = *frame->home_class_home} : ItemNull;
+}
+
+static Item js_interp_super_this(JsInterpFrame* frame) {
+    Item value = js_interp_frame_this(frame);
+    if (value.item != ITEM_JS_TDZ) return value;
+    return js_throw_reference_error(js_make_string(
+        "Must call super constructor before accessing 'this'"));
+}
+
 static Item js_interp_reference_object(const JsInterpReference* reference) {
     return reference && reference->object_home
         ? (Item){.item = *reference->object_home} : ItemNull;
@@ -114,6 +131,11 @@ static bool js_interp_name_equals(const String* name, const char* chars) {
     if (!name || !chars) return false;
     size_t length = strlen(chars);
     return name->len == length && memcmp(name->chars, chars, length) == 0;
+}
+
+static bool js_interp_member_uses_super(const JsMemberNode* member) {
+    return member && member->object && member->object->node_type == AST_NODE_IDENT &&
+        js_interp_name_equals(((JsIdentifierNode*)member->object)->name, "super");
 }
 
 static Item js_interp_name_key(const String* name) {
@@ -284,8 +306,17 @@ static Item js_interp_make_function(JsInterpFrame* frame, JsFunctionNode* functi
     uint32_t flags = 0;
     if (function->is_arrow) flags |= JS_FUNC_FLAG_ARROW;
     if (frame->strict || function->has_use_strict_directive) flags |= JS_FUNC_FLAG_STRICT;
-    return js_new_interpreted_function(function, frame->script, frame->env,
+    Item result = js_new_interpreted_function(function, frame->script, frame->env,
         js_interp_function_param_count(function), flags);
+    // Arrow functions inherit the surrounding method or class-initializer
+    // [[HomeObject]], which is the common runtime's lexical `super` carrier.
+    if (function->is_arrow && !item_is_error(result)) {
+        Item home_class = js_interp_frame_home_class(frame);
+        if (home_class.item != ItemNull.item && home_class.item != 0) {
+            js_set_function_home_class(result, home_class);
+        }
+    }
+    return result;
 }
 
 static Item js_interp_make_method(JsInterpFrame* frame, JsFunctionNode* function) {
@@ -448,6 +479,7 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
     int instance_field_index = 0;
     JsInterpFrame static_frame = *frame;
     static_frame.this_home = class_root.home();
+    static_frame.home_class_home = class_root.home();
     for (JsAstNode* member = cls->body ? (JsAstNode*)((JsBlockNode*)cls->body)->statements
             : NULL; member; member = (JsAstNode*)member->next) {
         if (member->node_type == JS_AST_NODE_METHOD_DEFINITION) {
@@ -460,10 +492,11 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
             if (item_is_error(method_root.get())) return js_interp_throw(method_root.get());
             js_set_function_home_class(method_root.get(), class_root.get());
             if (method->kind == JsMethodDefinitionNode::JS_METHOD_CONSTRUCTOR) {
-                if (method->static_method || cls->superclass) {
+                if (method->static_method) {
                     return js_interp_throw(js_throw_type_error(
-                        "unsupported interpreted derived class constructor"));
+                        "class constructor cannot be static"));
                 }
+                if (cls->superclass) js_mark_derived_constructor_func(method_root.get());
                 js_set_class_constructor(class_root.get(), method_root.get());
                 js_set_formal_length(class_root.get(), js_interp_function_param_count(
                     (JsFunctionNode*)method));
@@ -497,6 +530,7 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
                 if (field->value) {
                     method_root.set(js_interp_make_field_initializer(frame, field));
                     if (item_is_error(method_root.get())) return js_interp_throw(method_root.get());
+                    js_set_function_home_class(method_root.get(), class_root.get());
                     js_set_class_instance_field_metadata_initializer(class_root.get(),
                         instance_field_index, method_root.get());
                 } else {
@@ -572,15 +606,22 @@ static JsInterpCompletion js_interp_eval_reference(JsInterpFrame* frame,
         RootFrame roots(2);
         Rooted<Item> object_root(roots, ItemNull);
         Rooted<Item> key_root(roots, ItemNull);
-        JsInterpCompletion object = js_interp_eval(frame, (JsAstNode*)member->object);
-        if (object.kind != JS_INTERP_NORMAL) return object;
-        object_root.set(object.value);
+        bool super_property = js_interp_member_uses_super(member);
+        if (super_property) {
+            object_root.set(js_interp_super_this(frame));
+            if (item_is_error(object_root.get())) return js_interp_throw(object_root.get());
+        } else {
+            JsInterpCompletion object = js_interp_eval(frame, (JsAstNode*)member->object);
+            if (object.kind != JS_INTERP_NORMAL) return object;
+            object_root.set(object.value);
+        }
         Item key = js_interp_property_key(frame, member);
         if (item_is_error(key)) return js_interp_throw(key);
         key_root.set(key);
         if (object_home) *object_home = object_root.get().item;
         if (key_home) *key_home = key_root.get().item;
         out_reference->property = true;
+        out_reference->super_property = super_property;
         return js_interp_normal(ItemNull);
     }
     return js_interp_throw(js_throw_type_error("invalid assignment target"));
@@ -598,6 +639,10 @@ static Item js_interp_reference_read(JsInterpFrame* frame,
             reference->entry ? reference->entry->name
                 : it2s(js_interp_reference_key(reference)));
     }
+    if (reference->super_property) {
+        return js_super_property_get(js_interp_reference_object(reference),
+            js_interp_reference_key(reference));
+    }
     return js_get_key_default(js_interp_reference_object(reference),
         js_interp_reference_key(reference));
 }
@@ -614,6 +659,10 @@ static Item js_interp_reference_write(JsInterpFrame* frame,
     if (!reference->property) {
         return js_interp_write_binding(frame, reference->entry,
             reference->entry ? NULL : it2s(js_interp_reference_key(reference)), value, initialize);
+    }
+    if (reference->super_property) {
+        return js_super_property_set(js_interp_reference_object(reference),
+            js_interp_reference_key(reference), value, frame->strict ? 1 : 0);
     }
     return js_set_key_policy(js_interp_reference_object(reference),
         js_interp_reference_key(reference), value,
@@ -895,18 +944,34 @@ static JsInterpCompletion js_interp_eval_call(JsInterpFrame* frame, JsCallNode* 
     Rooted<Item> value_root(roots, ItemNull);
     Rooted<Item> spread_item_root(roots, ItemNull);
     if (item_is_error(arguments_root.get())) return js_interp_throw(arguments_root.get());
-    if (call->function && (call->function->node_type == AST_NODE_MEMBER_EXPR ||
+    bool super_call = !construct && js_interp_identifier_is(
+        (JsAstNode*)call->function, "super");
+    if (super_call) {
+        // The generic dispatcher installed this constructor's home class,
+        // deferred derived `this` binding, and active new.target. Resolve the
+        // live parent through that shared state before evaluating arguments.
+        this_root.set(js_get_super_this_value());
+        callee_root.set(js_get_super_constructor_from_receiver(this_root.get(),
+            make_js_undefined()));
+    } else if (call->function && (call->function->node_type == AST_NODE_MEMBER_EXPR ||
             call->function->node_type == AST_NODE_INDEX_EXPR)) {
         JsMemberNode* member = (JsMemberNode*)call->function;
-        JsInterpCompletion receiver = js_interp_eval(frame, (JsAstNode*)member->object);
-        if (receiver.kind != JS_INTERP_NORMAL) return receiver;
-        this_root.set(receiver.value);
+        if (js_interp_member_uses_super(member)) {
+            this_root.set(js_interp_super_this(frame));
+            if (item_is_error(this_root.get())) return js_interp_throw(this_root.get());
+        } else {
+            JsInterpCompletion receiver = js_interp_eval(frame, (JsAstNode*)member->object);
+            if (receiver.kind != JS_INTERP_NORMAL) return receiver;
+            this_root.set(receiver.value);
+        }
         if (member->optional && js_interp_is_nullish(this_root.get())) {
             return js_interp_normal(make_js_undefined());
         }
         key_root.set(js_interp_property_key(frame, member));
         if (item_is_error(key_root.get())) return js_interp_throw(key_root.get());
-        callee_root.set(js_get_key_default(this_root.get(), key_root.get()));
+        callee_root.set(js_interp_member_uses_super(member)
+            ? js_super_property_get(this_root.get(), key_root.get())
+            : js_get_key_default(this_root.get(), key_root.get()));
     } else {
         JsInterpCompletion callee = js_interp_eval(frame, (JsAstNode*)call->function);
         if (callee.kind != JS_INTERP_NORMAL) return callee;
@@ -957,6 +1022,27 @@ static JsInterpCompletion js_interp_eval_call(JsInterpFrame* frame, JsCallNode* 
             Item result = js_interp_direct_eval(frame, value_root.get());
             return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
         }
+    }
+    if (super_call) {
+        // SuperCall invokes the parent's [[Construct]] with the active
+        // new.target. The runtime helper selects the class or native
+        // capability; the bind helper is the single derived-`this` state
+        // transition and rejects a duplicate `super()`.
+        value_root.set(js_is_class_constructor_value(callee_root.get())
+            ? js_super_apply_class_into(callee_root.get(), this_root.get(),
+                arguments_root.get(), value_root.home())
+            : js_super_apply_native(callee_root.get(), this_root.get(), arguments_root.get()));
+        if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+        value_root.set(js_super_bind_this(this_root.get(), value_root.get()));
+        if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+        if (frame->this_home) *frame->this_home = value_root.get().item;
+        Item home_class = js_interp_frame_home_class(frame);
+        if (home_class.item != ItemNull.item && home_class.item != 0) {
+            Item initialized = js_init_class_instance_fields_after_super(home_class,
+                value_root.get());
+            if (item_is_error(initialized)) return js_interp_throw(initialized);
+        }
+        return js_interp_normal(value_root.get());
     }
     Item result = construct
         ? js_construct_array_like(callee_root.get(), arguments_root.get(), callee_root.get())
@@ -1025,12 +1111,20 @@ static JsInterpCompletion js_interp_eval_tagged_template(JsInterpFrame* frame,
     if (tagged->tag->node_type == AST_NODE_MEMBER_EXPR ||
             tagged->tag->node_type == AST_NODE_INDEX_EXPR) {
         JsMemberNode* member = (JsMemberNode*)tagged->tag;
-        JsInterpCompletion receiver = js_interp_eval(frame, (JsAstNode*)member->object);
-        if (receiver.kind != JS_INTERP_NORMAL) return receiver;
-        this_root.set(receiver.value);
+        bool super_property = js_interp_member_uses_super(member);
+        if (super_property) {
+            this_root.set(js_interp_super_this(frame));
+            if (item_is_error(this_root.get())) return js_interp_throw(this_root.get());
+        } else {
+            JsInterpCompletion receiver = js_interp_eval(frame, (JsAstNode*)member->object);
+            if (receiver.kind != JS_INTERP_NORMAL) return receiver;
+            this_root.set(receiver.value);
+        }
         key_root.set(js_interp_property_key(frame, member));
         if (item_is_error(key_root.get())) return js_interp_throw(key_root.get());
-        tag_root.set(js_get_key_default(this_root.get(), key_root.get()));
+        tag_root.set(super_property
+            ? js_super_property_get(this_root.get(), key_root.get())
+            : js_get_key_default(this_root.get(), key_root.get()));
     } else {
         JsInterpCompletion tag = js_interp_eval(frame, tagged->tag);
         if (tag.kind != JS_INTERP_NORMAL) return tag;
@@ -1372,15 +1466,23 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         RootFrame roots(2);
         Rooted<Item> object_root(roots, ItemNull);
         Rooted<Item> key_root(roots, ItemNull);
-        JsInterpCompletion object = js_interp_eval(frame, (JsAstNode*)member->object);
-        if (object.kind != JS_INTERP_NORMAL) return object;
-        object_root.set(object.value);
+        bool super_property = js_interp_member_uses_super(member);
+        if (super_property) {
+            object_root.set(js_interp_super_this(frame));
+            if (item_is_error(object_root.get())) return js_interp_throw(object_root.get());
+        } else {
+            JsInterpCompletion object = js_interp_eval(frame, (JsAstNode*)member->object);
+            if (object.kind != JS_INTERP_NORMAL) return object;
+            object_root.set(object.value);
+        }
         if (member->optional && js_interp_is_nullish(object_root.get())) {
             return js_interp_normal(make_js_undefined());
         }
         key_root.set(js_interp_property_key(frame, member));
         if (item_is_error(key_root.get())) return js_interp_throw(key_root.get());
-        Item result = js_get_key_default(object_root.get(), key_root.get());
+        Item result = super_property
+            ? js_super_property_get(object_root.get(), key_root.get())
+            : js_get_key_default(object_root.get(), key_root.get());
         return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
     }
     case AST_NODE_CALL_EXPR:
@@ -1483,6 +1585,9 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
                     pair->is_setter ? 1 : 0, 0)
                 : js_create_data_property(result_root.get(), key_root.get(), value_root.get());
             if (item_is_error(set)) return js_interp_throw(set);
+            if (pair->method || pair->is_getter || pair->is_setter) {
+                js_set_function_home_class(value_root.get(), result_root.get());
+            }
         }
         return js_interp_normal(result_root.get());
     }
@@ -2169,11 +2274,9 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
         break;
     }
     case AST_NODE_IDENT:
-        // P2 does not yet materialize function `arguments` or class `super`
-        // environments. Reject before instantiation instead of
-        // exposing a misleading global binding.
+        // P2 does not yet materialize the function `arguments` environment.
+        // `super` is a lexical reference carried by the common call kernel.
         if (js_interp_identifier_is(node, "arguments") ||
-                js_interp_identifier_is(node, "super") ||
                 js_interp_identifier_is(node, "import.meta")) state->supported = false;
         break;
     case AST_NODE_VARIABLE_DECLARATOR:
@@ -2234,11 +2337,12 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     (void)result_home;
     if (!function || function->body_kind != JS_FUNCTION_BODY_AST ||
             !function->ast_function || !function->ast_script) return ItemError;
-    RootFrame roots(2);
+    RootFrame roots(3);
     Rooted<Item> this_root(roots, (function->flags & JS_FUNC_FLAG_ARROW)
         ? function->ast_lexical_this : js_get_this());
     Rooted<Item> new_target_root(roots, (function->flags & JS_FUNC_FLAG_ARROW)
         ? function->ast_lexical_new_target : js_get_new_target());
+    Rooted<Item> home_class_root(roots, function->home_class);
     JsInterpEnv* env = js_interp_env_create(function->ast_function->vars,
         function->interp_env);
     JsInterpEnvRoot env_root(env);
@@ -2249,7 +2353,8 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
     JsInterpEvalLocalFrame eval_local(env);
     if (!eval_local.pushed) return ItemError;
     JsInterpFrame frame = {function->ast_script, env, this_root.home(),
-        new_target_root.home(), (function->flags & JS_FUNC_FLAG_STRICT) != 0, NULL, 0};
+        new_target_root.home(), home_class_root.home(),
+        (function->flags & JS_FUNC_FLAG_STRICT) != 0, NULL, 0};
     JsInterpCompletion initialized = js_interp_initialize_scope(&frame,
         function->ast_function->vars);
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
@@ -2264,7 +2369,15 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
             function->ast_function->body->node_type == AST_NODE_BLOCK
         ? js_interp_exec_block(&frame, (JsBlockNode*)function->ast_function->body)
         : js_interp_eval(&frame, (JsAstNode*)function->ast_function->body);
-    if (result.kind == JS_INTERP_RETURN || result.kind == JS_INTERP_NORMAL) return result.value;
+    if (result.kind == JS_INTERP_RETURN) return result.value;
+    // FunctionDeclaration and method bodies complete with undefined without a
+    // return. Preserve expression-bodied arrows and field-initializer thunks,
+    // whose normal completion is their callable result.
+    if (result.kind == JS_INTERP_NORMAL) {
+        return function->ast_function->body &&
+                function->ast_function->body->node_type == AST_NODE_BLOCK
+            ? make_js_undefined() : result.value;
+    }
     if (result.kind == JS_INTERP_THROW) return result.value;
     return js_throw_syntax_error(js_make_string("illegal control flow"));
 }
@@ -2291,10 +2404,12 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
             !js_set_active_module_state_id(script->module_state_id)) {
         return ItemError;
     }
-    RootFrame roots(2);
+    RootFrame roots(3);
     Rooted<Item> this_root(roots, js_get_global_this());
     Rooted<Item> new_target_root(roots, js_get_new_target());
+    Rooted<Item> home_class_root(roots, ItemNull);
     JsInterpFrame frame = {script, NULL, this_root.home(), new_target_root.home(),
+        home_class_root.home(),
         script->strict_mode, NULL, 0};
     JsInterpCompletion initialized = js_interp_initialize_scope(&frame, script->global_scope);
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;

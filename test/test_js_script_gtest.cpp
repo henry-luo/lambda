@@ -685,3 +685,47 @@ TEST(JsInterpreter, ReadsNewTargetThroughTheSharedConstructCallKernel) {
 
     runtime_cleanup(&runtime);
 }
+
+TEST(JsInterpreter, ExecutesSuperThroughTheSharedClassCallKernel) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "class Parent { constructor(value) { this.value = value; } "
+        "get doubled() { return this.value * 2; } "
+        "set doubled(value) { this.value = value / 2; } "
+        "add(value) { return this.value + value; } "
+        "static increment(value) { return value + 1; } } "
+        "class Child extends Parent { field = this.value + 1; "
+        "constructor(value) { super(value); this.doubled = 84; } "
+        "add(value) { return super.add(value) + 1; } "
+        "read() { return super.doubled; } "
+        "fromArrow() { let parent = () => super.add(0); return parent(); } "
+        "static increment(value) { return super.increment(value) + 1; } } "
+        "let child = new Child(40); child.add(0) + child.read() + child.fromArrow() + child.field + "
+        "Child.increment(0);";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "super.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(212.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesObjectMethodSuperHomeAcrossTheSharedCallKernel) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let parent = { value: 40, add(value) { return this.value + value; } }; "
+        "let child = { value: 40, add(value) { return super.add(value) + 2; } }; "
+        "Object.setPrototypeOf(child, parent); child.add(0);";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "object-super.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
