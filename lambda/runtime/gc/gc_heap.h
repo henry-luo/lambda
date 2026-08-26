@@ -127,6 +127,11 @@ int  gc_native_seen_seen_or_add(gc_native_seen_t* seen, void* ptr);
 // Default data zone usage threshold (75% of block size) to trigger GC
 #define GC_DATA_ZONE_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 3 / 4)
 
+// Object structs live outside the data zone. Keep their allocation pressure
+// visible to the same collector so short-lived lexical environments do not
+// grow the object zone without reaching a data-zone allocation safepoint.
+#define GC_OBJECT_HEAP_THRESHOLD (GC_DATA_ZONE_BLOCK_SIZE * 4)
+
 // Initial registered root slot capacity; grows dynamically as needed.
 #define GC_ROOT_SLOTS_INITIAL 256
 
@@ -261,6 +266,7 @@ typedef struct gc_heap {
 
     // Collection trigger
     size_t gc_threshold;            // data zone bytes that trigger auto-collection
+    size_t object_threshold;        // live object bytes that trigger auto-collection
     int collecting;                 // re-entrancy guard (1 = GC in progress)
     gc_collect_callback_t collect_callback;  // called when threshold exceeded
 

@@ -261,7 +261,54 @@ static bool js_batch_document_start(Runtime* runtime, JsBatchDocument* job,
 }
 
 #if !defined(_WIN32)
-static const size_t JS_CLI_STACK_SIZE = 256 * 1024 * 1024;
+static const size_t JS_EXECUTION_STACK_SIZE = 256 * 1024 * 1024;
+
+static int lambda_main_impl(int argc, char* argv[]);
+
+// js-test-batch keeps its recovery jump buffers on the executing thread. Run
+// the entire command, not an individual source evaluation, on one large stack
+// so recursive AST calls recover on the same thread that installed the guard.
+static __thread bool js_batch_execution_stack_active = false;
+
+struct JsBatchStackArgs {
+    int argc;
+    char** argv;
+    int result;
+};
+
+static void* js_batch_run_on_stack_thread(void* opaque) {
+    JsBatchStackArgs* args = (JsBatchStackArgs*)opaque;
+    if (!args) return NULL;
+    js_batch_execution_stack_active = true;
+    args->result = lambda_main_impl(args->argc, args->argv);
+    return NULL;
+}
+
+static int js_batch_run_with_execution_stack(int argc, char* argv[]) {
+    JsBatchStackArgs args = {argc, argv, 1};
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0) {
+        log_error("js-batch-stack: pthread_attr_init failed");
+        return lambda_main_impl(argc, argv);
+    }
+    if (pthread_attr_setstacksize(&attr, JS_EXECUTION_STACK_SIZE) != 0) {
+        log_error("js-batch-stack: pthread_attr_setstacksize failed");
+        pthread_attr_destroy(&attr);
+        return lambda_main_impl(argc, argv);
+    }
+    pthread_t thread;
+    int create_rc = pthread_create(&thread, &attr, js_batch_run_on_stack_thread, &args);
+    pthread_attr_destroy(&attr);
+    if (create_rc != 0) {
+        log_error("js-batch-stack: pthread_create failed");
+        return lambda_main_impl(argc, argv);
+    }
+    if (pthread_join(thread, NULL) != 0) {
+        log_error("js-batch-stack: pthread_join failed");
+        return 1;
+    }
+    return args.result;
+}
 
 struct JsCliRunArgs {
     Runtime* runtime;
@@ -290,6 +337,8 @@ static void* js_cli_run_on_stack_thread(void* arg) {
         run_args->runtime, run_args->source, run_args->source_len, run_args->filename,
         run_args->result_home);
     if (eval_context->js_state) js_runtime_state_shutdown(eval_context);
+    // Restore this worker's host signal stack before pthread teardown.
+    lambda_stack_cleanup();
     // The large-stack worker is an eval-thread lifetime boundary. Cleanup
     // starts only after join, when the caller acquires the same owner.
     eval_context_shutdown(eval_context);
@@ -313,7 +362,7 @@ static Item js_cli_transpile_with_execution_stack(
         log_error("js-cli-stack: pthread_attr_init failed");
         return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
     }
-    if (pthread_attr_setstacksize(&attr, JS_CLI_STACK_SIZE) != 0) {
+    if (pthread_attr_setstacksize(&attr, JS_EXECUTION_STACK_SIZE) != 0) {
         log_error("js-cli-stack: pthread_attr_setstacksize failed");
         pthread_attr_destroy(&attr);
         return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
@@ -1997,7 +2046,7 @@ static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
     return false;
 }
 
-int main(int argc, char *argv[]) {
+static int lambda_main_impl(int argc, char *argv[]) {
 #ifdef _WIN32
     // Set console to UTF-8 for proper Unicode display on Windows
     SetConsoleOutputCP(CP_UTF8);
@@ -4154,10 +4203,11 @@ int main(int argc, char *argv[]) {
         // allocation and can safely siglongjmp back to the recovery point.
         static char alt_stack_mem[131072];  // 128KB generous alt stack
         stack_t alt_stack;
+        stack_t previous_alt_stack;
         alt_stack.ss_sp = alt_stack_mem;
         alt_stack.ss_size = sizeof(alt_stack_mem);
         alt_stack.ss_flags = 0;
-        sigaltstack(&alt_stack, NULL);
+        sigaltstack(&alt_stack, &previous_alt_stack);
 #endif
 
         // Set up a persistent EvalContext with pre-initialized heap (hot reload mode).
@@ -4744,6 +4794,10 @@ int main(int argc, char *argv[]) {
         sigaction(SIGBUS, &old_bus_sa, NULL);
         sigaction(SIGABRT, &old_abrt_sa, NULL);
         sigaction(SIGTRAP, &old_trap_sa, NULL);
+        // An execution-stack worker must restore ASan's alternate stack before
+        // pthread teardown; retaining the batch stack makes its interceptor
+        // attempt to unmap static storage as a dynamic signal stack.
+        sigaltstack(&previous_alt_stack, NULL);
 #endif
 
         // Diagnostic: log if the batch exited the while loop unexpectedly
@@ -4965,6 +5019,16 @@ int main(int argc, char *argv[]) {
     // memtrack_shutdown runs in lambda_main_finish after normal cleanup.
 
     return lambda_main_finish(ret_code);
+}
+
+int main(int argc, char* argv[]) {
+#if !defined(_WIN32)
+    if (argc >= 2 && strcmp(argv[1], "js-test-batch") == 0 &&
+            !js_batch_execution_stack_active) {
+        return js_batch_run_with_execution_stack(argc, argv);
+    }
+#endif
+    return lambda_main_impl(argc, argv);
 }
 #if defined(_WIN32)
 // Windows PE executables do not publish their host symbols by default; the

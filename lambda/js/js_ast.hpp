@@ -251,7 +251,11 @@ typedef struct JsTaggedTemplateNode : JsAstNode {
 } JsTaggedTemplateNode;
 
 typedef AstSpreadNode JsSpreadElementNode;
-typedef AstClassNode JsClassNode;
+typedef struct JsClassNode : AstClassNode {
+    // A named class expression owns a private lexical self binding. Class
+    // declarations use their surrounding lexical declaration instead.
+    NameScope* expression_scope;
+} JsClassNode;
 
 typedef AstMethodNode JsMethodDefinitionNode;
 
@@ -337,6 +341,12 @@ bool js_ast_has_child_table(JsAstNode* node);
 void js_ast_visit_children(JsAstNode* node, JsAstChildVisit visit, void* ctx);
 // Short-circuiting variant: stops at the first child the predicate accepts.
 bool js_ast_any_child(JsAstNode* node, JsAstChildPredicate predicate, void* ctx);
+
+// Syntactic direct eval belongs to the immediately enclosing function. Both
+// compiler and AST executor use this one classification when installing the
+// shared EvalContext bridge.
+bool js_ast_has_direct_eval_call(JsAstNode* node);
+bool js_ast_is_proto_literal_key(JsAstNode* key);
 
 // Adapter for the shared AstIndex walker. Core-shaped JavaScript nodes are
 // already traversed by ast_visit_core_children(); this reports only the JS

@@ -453,6 +453,10 @@ Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
 Item js_super_property_get(Item receiver, Item key);
 Item js_super_property_set(Item receiver, Item key, Item value, int64_t strict);
 Item js_build_arguments_object(void);
+// Materialize an arguments exotic object for a deferred AST activation without
+// borrowing the ambient callback's transient call span.
+Item js_build_arguments_object_for_call(Item* args, int argc, int64_t is_strict,
+                                        Item callee);
 void js_set_arguments_info(int64_t is_strict);
 
 // Get the native function pointer from a JsFunction Item (handles JsFunction layout)
@@ -969,6 +973,8 @@ Item js_symbol_well_known(Item name);
  */
 Item js_generator_create(void* func_ptr, Item* env, int env_size, int is_async);
 Item js_generator_create_mir(void* func_ptr, Item* env, int env_size, int is_async);
+Item js_generator_create_ast(Item function, Item arguments, Item this_value,
+                             int is_async);
 
 /**
  * Advance the generator: execute next state, return {value, done} result.
@@ -985,6 +991,7 @@ Item js_generator_return(Item generator, Item value);
  * Throw an error into the generator (at yield point).
  */
 Item js_generator_throw(Item generator, Item error);
+Item js_make_iter_result(Item value, bool done);
 
 /**
  * v15: Create a 2-element array [value, next_state] for generator state machine returns.
@@ -1041,6 +1048,10 @@ Item js_promise_any(Item iterable);              // Promise.any([...])
 Item js_promise_all_settled(Item iterable);      // Promise.allSettled([...])
 Item js_promise_with_resolvers(void);            // Promise.withResolvers()
 Item js_await_sync(Item value);                  // Phase 5: synchronous await unwrap
+Item js_await_sync_incremental(Item value);      // wait without draining unrelated jobs
+Item js_promise_async_function_start(void);
+Item js_promise_async_function_finish(Item promise, Item result,
+                                      int64_t had_exception);
 
 // Phase 6: Async state machine runtime
 Item js_async_must_suspend(Item value);          // true if pending promise, false otherwise
@@ -1048,6 +1059,7 @@ Item js_async_get_resolved(void);                // get cached resolved value
 Item js_async_context_create(void* fn_ptr, Item* env, int64_t env_size, Item this_val);
 Item js_async_context_create_mir(void* fn_ptr, Item* env, int64_t env_size,
                                  Item this_val);
+Item js_async_context_create_ast(Item function, Item arguments, Item this_val);
 Item js_async_start(Item ctx_idx);               // begin async execution at state 0
 Item js_async_get_promise(Item ctx_idx);          // get result promise for async ctx
 

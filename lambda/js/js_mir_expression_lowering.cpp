@@ -459,7 +459,7 @@ static void jm_restore_closure_tracker_snapshot(JsMirTranspiler* mt,
     }
 }
 
-static bool jm_is_proto_literal_key(JsAstNode* key) {
+bool js_ast_is_proto_literal_key(JsAstNode* key) {
     if (!key) return false;
     if (key->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)key;
@@ -731,8 +731,10 @@ static String* jm_resolve_private_name(JsMirTranspiler* mt, JsAstNode* access_no
     if (best) return jm_class_private_name(mt, best, name);
     Item eval_resolved = js_eval_private_resolve((Item){.item = s2it(name)});
     if (get_type_id(eval_resolved) == LMD_TYPE_STRING) {
-        String* resolved_name = it2s(eval_resolved);
-        return name_pool_create_len(mt->tp->name_pool, resolved_name->chars, (int)resolved_name->len);
+        // Keep the source spelling through lowering. The runtime resolves it
+        // against the bridged private environment, preserving the private
+        // access path instead of mistaking an identity key for a public name.
+        return name;
     }
     return jm_class_private_name(mt, mt->current_class, name);
 }
@@ -6533,7 +6535,7 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
             if (!p->computed && !p->method && !p->is_getter && !p->is_setter &&
                 !p->shorthand &&
                 p->key && p->value && p->key != p->value) {
-                is_proto_literal = jm_is_proto_literal_key(p->key);
+                is_proto_literal = js_ast_is_proto_literal_key(p->key);
             }
             // function name inference from object property key
             if (!is_proto_literal && p->value &&

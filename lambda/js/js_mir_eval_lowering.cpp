@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "js_interp.hpp"
 #include "js_runtime_state.hpp"
 #include "js_function.hpp"
 #include "js_exec_profile.h"
@@ -709,6 +710,19 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     strbuf_free(sb);
 
     int dynfunc_kind = js_dynfunc_kind_from_prefix(parse_prefix);
+    if (js_ast_interpreter_requested()) {
+        // The forced AST tier must not smuggle dynamic Function bodies through
+        // MIR: the returned closure has to use the caller's EvalContext while
+        // retaining an AST-owned script just like ordinary source functions.
+        RootFrame roots(1);
+        Rooted<Item> fn_root(roots, js_interp_execute_source(js_current_runtime(),
+            source, source_len, "<new Function>", NULL));
+        mem_free(source);
+        if (!item_is_error(fn_root.get())) {
+            js_dynfunc_apply_function_metadata(fn_root.get(), args, argc, source_prefix);
+        }
+        return fn_root.get();
+    }
     uint64_t source_hash = hash_fnv1a_64(source, source_len);
     // Cache reuse is unsafe whenever generated code resolves a preamble slot,
     // whether that slot is a direct-eval local or a realm-global harness/
@@ -1568,6 +1582,14 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         }
     }
 
+    if (js_ast_interpreter_requested() && !is_direct_eval) {
+        // Indirect eval is global code, so it has no caller-local bridge to
+        // preserve. Keep it in the selected AST tier instead of mixing AST
+        // callbacks with a separately-owned JIT library image.
+        return js_interp_execute_source(js_current_runtime(), code_str->chars,
+            code_str->len, eval_filename, NULL);
+    }
+
     size_t code_len = code_str->len;
     Item fn_item = ItemNull;
 
@@ -1589,7 +1611,11 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         // intentionally inherits the caller environment. Indirect eval must
         // execute as global script code so realm-global lexical bindings are
         // visible without capturing caller locals.
-        bool skip_expr_form = !is_direct_eval;
+        // The expression wrapper is a new dynamic Function. Under the AST
+        // runtime its caller can carry interpreter-owned lexical/private
+        // state which that function cannot capture; use the direct-program
+        // evaluator, which preserves the active eval bridge instead.
+        bool skip_expr_form = !is_direct_eval || js_ast_interpreter_requested();
         const char* s = code_str->chars;
         size_t slen = code_str->len;
         // Skip leading whitespace

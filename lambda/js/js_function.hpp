@@ -108,6 +108,11 @@ struct JsFunction {
     JsInterpEnv* interp_env;
     Item ast_lexical_this;
     Item ast_lexical_new_target;
+    // AST execution facts are derived once when the closure is created. They
+    // are immutable because the source AST and lexical function form are too.
+    bool ast_has_direct_eval;
+    bool ast_uses_arguments;
+    bool ast_tail_reuse_safe;
     uint8_t body_kind;
 };
 

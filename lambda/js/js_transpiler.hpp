@@ -343,8 +343,8 @@ Item js_unsigned_right_shift(Item left, Item right);
 // Unary operators
 Item js_unary_plus(Item operand);
 Item js_unary_minus(Item operand);
-Item js_increment(Item operand, bool prefix);
-Item js_decrement(Item operand, bool prefix);
+Item js_increment(Item operand);
+Item js_decrement(Item operand);
 
 // Type conversion functions
 Item js_to_primitive(Item value, const char* hint);

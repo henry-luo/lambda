@@ -433,6 +433,13 @@ JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
     script->source = source_copy;
     script->reference = reference_copy;
     script->destroy_extension = js_script_destroy_extension;
+    if (script->ast_root && script->ast_root->node_type == JS_AST_NODE_PROGRAM &&
+            ((JsProgramNode*)script->ast_root)->has_use_strict_directive) {
+        // The AST tier reads strictness from its retained Script rather than
+        // the ephemeral transpiler; retain a program directive across adoption.
+        script->strict_mode = true;
+        if (script->global_scope) script->global_scope->strict = true;
+    }
 
     // Transfer the complete retained prefix. The parser/diagnostic tail stays
     // in the builder and is released by js_transpiler_destroy().

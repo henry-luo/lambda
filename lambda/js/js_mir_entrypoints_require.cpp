@@ -651,7 +651,7 @@ static size_t js_commonjs_injection_offset(const char* source, size_t source_len
     return i;
 }
 
-static bool js_ast_interpreter_requested(void) {
+bool js_ast_interpreter_requested(void) {
     const char* backend = getenv("JS_EXECUTION_BACKEND");
     return backend && (strcmp(backend, "ast") == 0 ||
         strcmp(backend, "interpreter") == 0);
@@ -833,6 +833,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             ? js_interp_execute_es_module_script(runtime, script, result_home)
             : js_interp_execute_script(runtime, script, result_home);
         js_mir_finish_script_turn(runtime, result);
+        // AST direct eval can schedule callbacks backed by deferred MIR code.
+        // Drain the script turn before matching the JIT fresh-turn cleanup.
+        if (!js_batch_execution_mode) jm_cleanup_deferred_mir();
         return result;
     }
 

@@ -20,6 +20,8 @@ extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_history_reset(void);
 extern "C" void js_xhr_reset(void);
 extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
+struct JsGeneratorStateRecord;
+void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
 
 extern "C" void js_reset_buffer_module(void);
 extern "C" void js_readline_reset(void);
@@ -249,6 +251,10 @@ void js_runtime_state_destroy_context(void) {
     jm_compile_recovery_state_destroy_context(runtime_context->js_state);
     js_runtime_prototype_snapshot_destroy_context(runtime_context->js_state);
     js_runtime_regex_cache_destroy_context(runtime_context->js_state);
+    for (int i = 0; i < runtime_context->js_state->generator_count; i++) {
+        js_interp_generator_clear_continuations(
+            &runtime_context->js_state->generators[i]);
+    }
     if (runtime_context->js_state->operations.symbol_registry) {
         hashmap_free(runtime_context->js_state->operations.symbol_registry);
     }
@@ -1857,6 +1863,24 @@ extern "C" Item js_build_arguments_object() {
     // Arguments construction allocates descriptors after creating the array;
     // every intermediate must remain precisely rooted until publication.
     return arr_root.get();
+}
+
+extern "C" Item js_build_arguments_object_for_call(Item* args, int argc,
+        int64_t is_strict, Item callee) {
+    Item* saved_args = js_pending_call_args;
+    int saved_argc = js_pending_call_argc;
+    int saved_strict = js_pending_args_is_strict;
+    Item saved_callee = js_pending_args_callee;
+    js_pending_call_args = args;
+    js_pending_call_argc = argc;
+    js_pending_args_is_strict = (int)is_strict;
+    js_pending_args_callee = callee;
+    Item result = js_build_arguments_object();
+    js_pending_call_args = saved_args;
+    js_pending_call_argc = saved_argc;
+    js_pending_args_is_strict = saved_strict;
+    js_pending_args_callee = saved_callee;
+    return result;
 }
 
 extern TypeMap EmptyMap;

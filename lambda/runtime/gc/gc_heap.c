@@ -492,6 +492,7 @@ gc_heap_t* gc_heap_create(void) {
 
     // collection trigger
     gc->gc_threshold = GC_DATA_ZONE_THRESHOLD;
+    gc->object_threshold = GC_OBJECT_HEAP_THRESHOLD;
     gc->collecting = 0;
     gc->collect_callback = NULL;
 
@@ -519,7 +520,8 @@ gc_heap_t* gc_heap_create(void) {
         log_debug("gc_heap_create: initial bump block %zu bytes", first_block->size);
     }
 
-    log_debug("gc_heap_create: dual-zone GC heap created (threshold=%zu)", gc->gc_threshold);
+    log_debug("gc_heap_create: GC heap created (data_threshold=%zu object_threshold=%zu)",
+              gc->gc_threshold, gc->object_threshold);
     return gc;
 }
 
@@ -633,6 +635,25 @@ void gc_heap_destroy(gc_heap_t* gc) {
 // Allocation
 // ============================================================================
 
+static void gc_heap_rebase_object_threshold(gc_heap_t* gc) {
+    if (!gc) return;
+    size_t live = gc->total_allocated;
+    size_t next = live > SIZE_MAX / 2 ? SIZE_MAX : live * 2;
+    gc->object_threshold = next > GC_OBJECT_HEAP_THRESHOLD
+        ? next : GC_OBJECT_HEAP_THRESHOLD;
+}
+
+static void gc_heap_maybe_collect_object_pressure(gc_heap_t* gc, const char* site) {
+    if (!gc || gc->collecting || gc->defer_collection_depth > 0 ||
+            !gc->collect_callback || gc->total_allocated < gc->object_threshold) {
+        return;
+    }
+    log_debug("gc-object-pressure: allocated=%zu threshold=%zu site=%s",
+              gc->total_allocated, gc->object_threshold, site ? site : "unknown");
+    gc->collect_callback();
+    gc_heap_rebase_object_threshold(gc);
+}
+
 int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {
     if (!gc || gc->collecting || gc->defer_collection_depth > 0 || !gc->collect_callback ||
             (gc->force_collect_interval == 0 &&
@@ -662,6 +683,7 @@ int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {
         (unsigned)gc->force_random_one_in,
         site ? site : "unknown");
     gc->collect_callback();
+    gc_heap_rebase_object_threshold(gc);
     return 1;
 }
 
@@ -673,7 +695,9 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_alloc");
     gc_assert_allocation_allowed(gc, "gc_heap_alloc");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_heap_maybe_force_collect(gc, "gc_heap_alloc");
+    if (!gc_heap_maybe_force_collect(gc, "gc_heap_alloc")) {
+        gc_heap_maybe_collect_object_pressure(gc, "gc_heap_alloc");
+    }
 
     // try object zone first (for objects up to GC_LARGE_OBJECT_THRESHOLD)
     void* ptr = gc_object_zone_alloc(gc->object_zone, size, type_tag, &gc->all_objects);
@@ -726,7 +750,9 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_calloc_class");
     gc_assert_allocation_allowed(gc, "gc_heap_calloc_class");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_heap_maybe_force_collect(gc, "gc_heap_calloc_class");
+    if (!gc_heap_maybe_force_collect(gc, "gc_heap_calloc_class")) {
+        gc_heap_maybe_collect_object_pressure(gc, "gc_heap_calloc_class");
+    }
     // Fast path: skip gc_heap_alloc → gc_object_zone_alloc class_index lookup.
     // The class index is pre-computed by the JIT at compile time.
     void* ptr = gc_object_zone_alloc_class(gc->object_zone, cls, size, type_tag,
@@ -746,7 +772,9 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_bump_alloc");
     gc_assert_allocation_allowed(gc, "gc_heap_bump_alloc");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_heap_maybe_force_collect(gc, "gc_heap_bump_alloc");
+    if (!gc_heap_maybe_force_collect(gc, "gc_heap_bump_alloc")) {
+        gc_heap_maybe_collect_object_pressure(gc, "gc_heap_bump_alloc");
+    }
     // ---- Fast path: try free list first (recycling after GC) ----
     gc_header_t* free_hdr = gc->object_zone->free_lists[cls];
     if (free_hdr) {
