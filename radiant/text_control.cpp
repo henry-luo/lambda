@@ -310,10 +310,17 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     f->selection_direction = 0;
     f->tc_initialized = 1;
     f->value = buf;
-    form_control_sync_text_control_state(state, (View*)elem);
+    // One publish, not two. state_store_set_text_control_selection is the
+    // single fan-out: it writes the prop's selection, pushes value+selection
+    // into the ViewState (via form_control_sync_text_control_state) and writes
+    // DocState::sel — all three together, so they cannot diverge (ESO22). The
+    // direct sync call that used to stand here ran that same push a second
+    // time and was what let the two projections drift apart in the first place.
     if (state) {
         state_store_set_text_control_selection(state, elem,
             f->selection_start, f->selection_end, f->selection_direction);
+    } else {
+        form_control_sync_text_control_state(state, (View*)elem);
     }
     form_control_sync_text_control_focus_state(state, (View*)elem);
     // Notify if value-setter caused the selection to move (e.g. previous
@@ -355,10 +362,12 @@ void tc_set_selection_range(DomElement* elem,
     f->selection_start = start;
     f->selection_end = end;
     f->selection_direction = dir;
-    form_control_sync_text_control_state(state, (View*)elem);
+    // single publish — see tc_set_value (ESO22)
     if (state) {
         state_store_set_text_control_selection(state, elem,
             f->selection_start, f->selection_end, f->selection_direction);
+    } else {
+        form_control_sync_text_control_state(state, (View*)elem);
     }
     form_control_sync_text_control_focus_state(state, (View*)elem);
     if (start != old_start || end != old_end || dir != old_dir) {

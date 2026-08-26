@@ -92,6 +92,26 @@ fn fit(elem, data, text_len, sel_len) {
     }
 }
 
+// --- commit (change-on-blur) ------------------------------------------------
+
+// Decide whether losing focus commits a changed value, and if so ask the engine
+// to fire `change` (HTML 4.10.5.5: fire it when the value differs from what it
+// was when the control gained focus).
+//
+// This runs on the `commit` hook rather than on `blur`, because `change` has to
+// precede `blur` and the decision is made before either is dispatched (ESO42).
+// The engine fires the event; the template only answers. The snapshot itself
+// stays engine-side — value_at_focus reads it.
+pub pn commit(elem) {
+    let before = radiant.value_at_focus(elem);
+    // No snapshot means this is the first blur after init, which is not a
+    // commit — treating it as one would fire `change` on every focus pass.
+    if (before != null and before != radiant.get_state(elem, "value")) {
+        radiant.request_change(elem)
+    }
+    else { false }
+}
+
 // --- the applier -----------------------------------------------------------
 
 // Returns 'prevent-default' when this applier owned the edit — that is the

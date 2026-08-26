@@ -78,10 +78,12 @@ view <input> state valid, invalid {}
 on init(evt)  { validate.revalidate(~) }
 on input(evt) { validate.revalidate(~) }
 on blur(evt)  { validate.revalidate(~) }
+on commit(evt) { editing.commit(~) }
 on beforeinput(evt) { editing.apply(~, evt, false) }
 
 view <textarea> state valid, invalid {}
 on init(evt)  { validate.revalidate(~) }
 on input(evt) { validate.revalidate(~) }
 on blur(evt)  { validate.revalidate(~) }
+on commit(evt) { editing.commit(~) }
 on beforeinput(evt) { editing.apply(~, evt, true) }
