@@ -3666,7 +3666,7 @@ AstNode* build_literal_from_span(Transpiler* tp, SourceSpan span,
 // E201 "cannot initialize ... of type error".
 // returns the defined syntax for a conceptual alias, or NULL when the name is
 // not a known concept spelling.
-static const char* base_type_alias_suggestion(StrView type_name) {
+const char* base_type_alias_suggestion(StrView type_name) {
     static const struct { const char* concept_name; const char* syntax; } alias_map[] = {
         {"int64", "i64"}, {"uint64", "u64"},
         {"int8", "i8"}, {"int16", "i16"}, {"int32", "i32"},
