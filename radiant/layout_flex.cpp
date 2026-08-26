@@ -2342,6 +2342,23 @@ static float flex_item_laid_out_child_baseline(ViewElement* item,
     }
     return -1.0f;
 }
+
+static bool flex_line_has_empty_multicol_baseline(ViewElement* item) {
+    if (!item) return false;
+    ViewElement* parent = item->parent_view();
+    if (!parent || !parent->embed || !parent->embedp()->flex) return false;
+    for (DomNode* sibling = parent->first_child; sibling; sibling = sibling->next_sibling) {
+        if (!sibling->is_element() || sibling == static_cast<DomNode*>(item)) continue;
+        ViewBlock* sibling_block = lam::view_as_block(sibling);
+        if (!sibling_block || !is_multicol_container(sibling_block)) continue;
+        if (!sibling_block->blk ||
+            sibling_block->block()->first_line_baseline <= 0.0f) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // NOTE: This is a simplified implementation that synthesizes the baseline
 // running after all nested content is laid out, which is not yet implemented.
 float calculate_item_baseline(ViewElement* item) {
@@ -2354,6 +2371,22 @@ float calculate_item_baseline(ViewElement* item) {
     }
 
     ViewBlock* item_block = lam::view_as_block(item);
+    if (item_block && is_multicol_container(item_block)) {
+        // css-align baseline export: multicol has only a first baseline set;
+        // an empty first column/spanner falls back to the border-box end edge.
+        if (item_block->blk && item_block->block()->first_line_baseline > 0.0f) {
+            float parent_offset_y = layout_axis_decoration_start(
+                item ? item->bound : nullptr, LAYOUT_AXIS_Y);
+            return margin_top + parent_offset_y +
+                item_block->block()->first_line_baseline;
+        }
+        return margin_top + item->height;
+    }
+    if (flex_line_has_empty_multicol_baseline(item)) {
+        // css-align baseline export: a no-baseline multicol flex item uses the
+        // border-box end-edge fallback, so its siblings use the same fallback.
+        return margin_top + item->height;
+    }
     if (item_block && item_block->embed && item_block->embedp()->flex &&
         item_block->embedp()->flex->has_baseline_child &&
         item_block->embedp()->flex->first_baseline > 0.0f) {

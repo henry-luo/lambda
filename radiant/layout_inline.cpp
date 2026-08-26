@@ -2141,6 +2141,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     // CSS 2.1 §8.3: Now that this span is closing, remove its contribution from
     if (lycon->line.inline_start_edge_pending > saved_inline_pending) {
+        if (lycon->line.is_line_start) {
+            // a closed clone fragment must not leave its edge in the next sibling's cursor.
+            lycon->line.advance_x -=
+                lycon->line.inline_start_edge_pending - saved_inline_pending;
+        }
         lycon->line.inline_start_edge_pending = saved_inline_pending;
     }
     // CSS 2.1 §10.8.1: For non-replaced inline elements, the inline box height
