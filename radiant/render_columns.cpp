@@ -18,7 +18,7 @@ void render_column_rules(RenderContext* rdcon, ViewBlock* block) {
     }
 
     float column_width = mc->computed_column_width;
-    float gap = mc->column_gap_is_normal ? 16.0f : mc->column_gap;
+    float gap = multicol_column_gap(block);
 
     float block_x = rdcon->block.x;
     float block_y = rdcon->block.y;

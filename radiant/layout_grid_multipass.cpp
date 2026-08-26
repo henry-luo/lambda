@@ -147,6 +147,48 @@ static void grid_store_inline_baselines(LayoutContext* lycon,
     grid_store_inline_baseline(lycon, grid_layout, grid_container, false);
     grid_store_inline_baseline(lycon, grid_layout, grid_container, true);
 }
+
+static bool layout_grid_anonymous_text_content(
+    LayoutContext* lycon, ViewBlock* grid_container) {
+    if (!lycon || !grid_container) return false;
+
+    bool has_text = false;
+    for (DomNode* child = grid_container->first_child; child;
+         child = child->next_sibling) {
+        if (child->is_text() && layout_text_node_has_content(child)) {
+            has_text = true;
+        } else if (child->is_text()) {
+            layout_suppress_ignorable_container_text(child);
+        }
+    }
+    if (!has_text) return false;
+
+    // css grid §4.2: non-empty direct text is laid out as an anonymous grid item.
+    float content_width = grid_container->content_width;
+    if (content_width <= 0.0f) {
+        content_width = layout_content_size_from_border_box(
+            grid_container, grid_container->width, true);
+    }
+    float content_left = layout_axis_decoration_start(
+        grid_container->bound, LAYOUT_AXIS_X);
+    lycon->block.content_width = max(content_width, 0.0f);
+    lycon->block.advance_y = 0.0f;
+    line_init(lycon, content_left, content_left + max(content_width, 0.0f));
+    for (DomNode* child = grid_container->first_child; child;
+         child = child->next_sibling) {
+        if (child->is_text() && layout_text_node_has_content(child)) {
+            layout_flow_node(lycon, child);
+        }
+    }
+    if (!lycon->line.is_line_start) line_break(lycon);
+
+    float content_height = max(lycon->block.advance_y, 0.0f);
+    grid_container->content_height = content_height;
+    grid_container->height = layout_border_size_from_content_box(
+        grid_container, content_height, false);
+    return true;
+}
+
 // Main Entry Point
 
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
@@ -208,6 +250,10 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     int item_count = resolve_grid_item_styles(lycon, grid_container);
 
     if (item_count == 0) {
+        if (layout_grid_anonymous_text_content(lycon, grid_container)) {
+            log_leave();
+            return;
+        }
         // Check if there are absolutely positioned children that use grid lines
         // for their containing block (CSS Grid §9.1 - grid container is containing block).
         // If so, we still need to run track sizing to produce correct grid line positions,

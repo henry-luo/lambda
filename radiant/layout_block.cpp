@@ -3575,9 +3575,7 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
             !(child_block->is_element() &&
               child_block->as_element()->layout_fragments_count() > 1)) {
             float column_pitch = block->multicol_prop()->computed_column_width +
-                (block->multicol_prop()->column_gap_is_normal
-                    ? multicol_normal_gap_size(block)
-                    : block->multicol_prop()->column_gap);
+                multicol_column_gap(block);
             int column_index = column_pitch > 0.0f
                 ? (int)floorf((surrogate_child_y - content_top) / column_pitch + 0.5f)
                 : 0; // INT_CAST_OK: column index from a positive physical inline pitch
@@ -4930,7 +4928,12 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
                 display = layout_button_used_display(elem, display);
             }
             if (display.outer == CSS_VALUE_INLINE || display.outer == CSS_VALUE_INLINE_BLOCK) {
-                has_inline_content = true;
+                // css 2.1 §9.5: an empty inline box does not consume line
+                // space before a later float and must not suppress float prescan.
+                if (display.outer == CSS_VALUE_INLINE
+                    ? prescan_node_has_in_flow_inline_content(child) : true) {
+                    has_inline_content = true;
+                }
                 for (DomNode* text_node = elem->first_child; text_node; text_node = text_node->next_sibling) {
                     if (text_node->is_text()) {
                         DomText* text = text_node->as_text();
@@ -5194,6 +5197,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 bool is_multicol = is_multicol_container(block);
                 if (is_multicol) {
                     layout_multicol_content(lycon, block);
+                    block_context_refresh_descendant_float_geometry(
+                        block_context_find_bfc(&lycon->block),
+                        lam::view_require_element(block));
                     finalize_block_flow(lycon, block, block->display.outer);
                     return;
                 } else {

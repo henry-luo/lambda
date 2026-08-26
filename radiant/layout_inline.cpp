@@ -400,11 +400,39 @@ static void merge_ruby_annotation_line_metrics(Linebox* base_line,
         base_line->has_different_inline_font || annotation_line->has_different_inline_font;
 }
 
+static float ruby_annotation_line_extent(const Linebox* annotation_line) {
+    if (!annotation_line) return 0.0f;
+    return max(annotation_line->max_atomic_inline_height,
+               annotation_line->max_ascender + annotation_line->max_descender);
+}
+
 static void contribute_over_ruby_annotation_line_metrics(Linebox* base_line,
                                                          const Linebox* base_line_before_annotation,
                                                          const BlockContext* base_block,
-                                                         const ViewSpan* annotation) {
+                                                         const ViewSpan* annotation,
+                                                         const Linebox* annotation_line) {
     if (!base_line || !base_line_before_annotation || !base_block || !annotation) return;
+    float annotation_extent = ruby_annotation_line_extent(annotation_line);
+    if (annotation_extent > 0.0f && !base_line_before_annotation->has_initial_letter) {
+        float base_line_extent = max(
+            base_line_before_annotation->max_atomic_inline_height,
+            base_line_before_annotation->max_ascender +
+                base_line_before_annotation->max_descender);
+        float base_ascender = max(
+            base_line_before_annotation->max_ascender,
+            base_line_before_annotation->max_atomic_inline_height);
+        base_line_extent = max(
+            base_line_extent,
+            base_block->line_height);
+        // css-ruby §3.6: when ruby does not fit the specified line-height,
+        // add leading on the annotation side so adjacent ruby does not overlap.
+        base_line->ruby_annotation_min_line_height = max(
+            base_line->ruby_annotation_min_line_height,
+            base_line_extent + annotation_extent);
+        base_line->max_ascender = max(
+            base_line->max_ascender,
+            base_ascender + annotation_extent);
+    }
     if (!base_line_before_annotation->has_initial_letter) return;
     float over_shift = max(0.0f, annotation->height - base_block->lead_y);
     float required_ascender = base_line_before_annotation->max_ascender + over_shift -
@@ -2056,7 +2084,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             begin_ruby_annotation_inline_context(lycon, &saved_base_line);
             layout_flow_node(lycon, annotation);
             Linebox annotation_line = lycon->line;
-
             ViewSpan* annotation_span = lam::view_as<RDT_VIEW_INLINE>(
                 static_cast<View*>(annotation));
             if (annotation_span) {
@@ -2095,7 +2122,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (!ruby_has_text_box_trim_ancestor(span, TEXT_BOX_TRIM_START)) {
                     contribute_over_ruby_annotation_line_metrics(
                         &lycon->line, &saved_base_line, &saved_base_block,
-                        annotation_span);
+                        annotation_span, &annotation_line);
                 }
             }
         }

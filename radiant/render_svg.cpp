@@ -977,7 +977,7 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
     }
 
     float column_width = mc->computed_column_width;
-    float gap = mc->column_gap_is_normal ? 16.0f : mc->column_gap;
+    float gap = multicol_column_gap(block);
 
     // Calculate block position
     float block_x = ctx->block.x + block->x;
