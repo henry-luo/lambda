@@ -3274,6 +3274,10 @@ static void view_state_release_form_payload(ViewState* view_state) {
     view_state->data.form.current_value_len = 0;
     view_state->data.form.current_value_u16_len = 0;
     view_state->data.form.has_current_value = 0;
+    if (view_state->data.form.history) {
+        te_history_free((EditHistory*)view_state->data.form.history);
+        view_state->data.form.history = NULL;
+    }
 }
 
 static void view_state_release_payload(ViewState* view_state) {
@@ -3281,6 +3285,23 @@ static void view_state_release_payload(ViewState* view_state) {
     if (view_state->kind == VIEW_STATE_FORM_CONTROL) {
         view_state_release_form_payload(view_state);
     }
+}
+
+static ViewState* form_view_state_get_or_create(DocState* state, View* view,
+                                                FormControlProp* form);
+
+// The undo ring is owned by the form ViewState (ESO43), so it survives the
+// FormControlProp being released and rebuilt across relayout. These keep the
+// ViewState plumbing here rather than exporting it to the editing code.
+void* form_control_history_get(DocState* state, View* view) {
+    ViewState* view_state = form_view_state_get(state, view);
+    return view_state ? view_state->data.form.history : NULL;
+}
+
+void form_control_history_set(DocState* state, View* view, void* history) {
+    ViewState* view_state = form_view_state_get_or_create(state, view,
+                                                          form_prop_for_view(view));
+    if (view_state) view_state->data.form.history = history;
 }
 
 static bool form_view_is_text_control(View* view) {

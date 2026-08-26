@@ -444,6 +444,11 @@ typedef struct InputIntent {
     int mods;
     bool is_composing;
     uint32_t composition_caret;
+    // ES17 undo/redo payload: the value and selection the template is being
+    // asked to install. Null/zero for every other intent.
+    const char* history_value;
+    uint32_t history_sel_start;   // codepoints, like every Lambda-facing offset
+    uint32_t history_sel_end;
 } InputIntent;
 
 typedef InputIntent EditingIntent;
@@ -1346,11 +1351,25 @@ void editing_dispatch_log_intent(EventContext* evcon,
                                  const EditingSurface* surface,
                                  const EditingIntent* intent);
 
+// Splices performed by the dom package's editing waist (radiant.replace_range).
+// Sampled either side of a beforeinput dispatch to tell an applier that edited
+// from one that claimed the intent and changed nothing (a maxlength-blocked
+// keystroke), which must not produce an `input` event.
+extern "C" uint64_t radiant_splice_epoch(void);
+
 bool editing_dispatch_form_beforeinput(EventContext* evcon,
                                        const EditingSurface* surface,
                                        const EditingIntent* intent,
                                        const EditingFormNotificationHooks* hooks,
-                                       bool* out_prevented);
+                                       bool* out_prevented,
+                                       // Set when a UA behavior template applied
+                                       // the edit itself (F5). Prevention then
+                                       // means "already done", not "cancelled",
+                                       // so the caller must skip its splice but
+                                       // must NOT restore the pre-edit selection
+                                       // — the applier has already moved the
+                                       // caret past the text it inserted.
+                                       bool* out_applied = nullptr);
 
 void editing_dispatch_form_input(EventContext* evcon,
                                  const EditingSurface* surface,
@@ -1780,6 +1799,23 @@ struct EditHistory {
     void destroy();
 };
 
+// Report the entry undo/redo would restore, without moving the cursor (ES17).
+bool te_history_peek(DomElement* elem, bool redo, const char** out_value,
+                     uint32_t* out_len, uint32_t* out_sel_start_u16,
+                     uint32_t* out_sel_end_u16);
+// Move the cursor onto that entry without touching the value, for when a
+// behavior template installed it itself.
+bool te_history_step(DomElement* elem, bool redo);
+
+// Suppress history pushes for the duration of a restore, so installing an
+// entry does not record itself as a new one.
+extern "C" void tc_history_guard_enter(DocState* state);
+extern "C" void tc_history_guard_exit(DocState* state);
+
+// The undo ring, stored on the form ViewState in the State Store (ESO43).
+void* form_control_history_get(DocState* state, View* view);
+void form_control_history_set(DocState* state, View* view, void* history);
+
 EditHistory* te_history_new(uint16_t cap);
 void         te_history_free(EditHistory* h);
 
@@ -1820,12 +1856,12 @@ void te_dispatch_input      (DomElement* elem);
 uint32_t te_paste(DomElement* elem, DocState* state, void* target,
                   const char* text, uint32_t len);
 
-// Build the sanitized replacement that te_paste() would apply. The returned
-// `out_text` is allocated with mem_alloc(MEM_CAT_TEMP); caller owns mem_free().
-bool te_prepare_paste_replacement(DomElement* elem, DocState* state,
-                                  const char* text, uint32_t len,
-                                  char** out_text, uint32_t* out_len,
-                                  uint32_t* out_start, uint32_t* out_end);
+// Resolve the buffer range a paste replaces — the current selection, in bytes,
+// plus the readonly/disabled gate. Sanitization and maxlength are NOT applied:
+// those are policy and live in the dom package's applier (F6), which receives
+// the raw clipboard text.
+bool te_prepare_paste_range(DomElement* elem, DocState* state,
+                            uint32_t* out_start, uint32_t* out_end);
 
 // ---------- F7: IME composition (Radiant_Design_Form_Input.md §3.7) ----
 //
@@ -2256,6 +2292,11 @@ typedef struct ViewState {
             char* current_value;
             uint32_t current_value_len;
             uint32_t current_value_u16_len;
+            // EditHistory*, owned here. The undo ring lives with the rest of
+            // the canonical form state rather than on FormControlProp, which is
+            // released and rebuilt as views churn — history has to outlive that
+            // (ESO43). Released by view_state_release_form_payload.
+            void* history;
         } form;
     } data;
 } ViewState;

@@ -1714,6 +1714,13 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         else mb.putNull("data");
         if (intent->data_mime) mb.put("mime", intent->data_mime);
         else mb.putNull("mime");
+        // ES17: an undo/redo hands the template the entry to install — the
+        // value plus where the selection sat when that state was recorded.
+        if (intent->history_value) {
+            mb.put("history_value", intent->history_value);
+            mb.put("history_sel_start", (int64_t)intent->history_sel_start);
+            mb.put("history_sel_end", (int64_t)intent->history_sel_end);
+        }
         if (intent->html_data) {
             char* sanitized = clipboard_store_sanitize(builder.arena(), "text/html", intent->html_data);
             if (sanitized) mb.put("html", sanitized);
@@ -2718,6 +2725,29 @@ extern "C" bool radiant_dispatch_behavior_input(EventContext* evcon, View* targe
     return dispatch_behavior_handler(evcon, target, "input", nullptr, nullptr);
 }
 
+// F5: the applier seam. A behavior template that handles this `beforeinput`
+// applies the edit itself (through replace_range) and returns 'prevent-default',
+// which is the signal for the native splice to stand down — the same protocol a
+// JS listener uses. A template that returns 'pass', or declares no handler for
+// the intent it was given, leaves the native applier in charge, so the flip can
+// land one input type at a time.
+//
+// The intent is passed through so the handler can read `input_type` and `data`
+// off the event map rather than re-deriving them from the key.
+extern "C" bool radiant_dispatch_behavior_beforeinput(EventContext* evcon,
+                                                      View* target,
+                                                      const InputIntent* intent) {
+    if (!evcon) return false;
+    bool prevented_before = evcon->default_prevented;
+    dispatch_behavior_handler(evcon, target, "beforeinput", intent, nullptr);
+    bool prevented = evcon->default_prevented && !prevented_before;
+    // Confine the verdict to this dispatch: `default_prevented` is the whole
+    // event's flag, and letting an applied edit set it would also suppress
+    // unrelated default actions later in the same event.
+    if (prevented) evcon->default_prevented = prevented_before;
+    return prevented;
+}
+
 static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name,
                                     const InputIntent* intent = nullptr,
                                     bool* out_model_reconciled = nullptr,
@@ -3048,8 +3078,29 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
                                &saved_selection_direction);
 
     bool prevented = false;
+    bool applied_by_template = false;
+    uint64_t splice_epoch_before = radiant_splice_epoch();
     editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
-                                      &prevented);
+                                      &prevented, &applied_by_template);
+    if (applied_by_template) {
+        // F5: a behavior template already performed the splice and left the
+        // caret after the text it inserted. Restoring the pre-edit selection
+        // here would drag the caret back to where the edit started, so every
+        // further keystroke would land at the same offset — typing "hello"
+        // produced "olleh" before this branch existed.
+        // An applier that claimed the intent but spliced nothing made no edit —
+        // a keystroke refused by `maxlength` is exactly that — and an edit that
+        // did not happen must not produce an `input` event.
+        bool mutated = radiant_splice_epoch() != splice_epoch_before;
+        log_debug("dispatch_form_text_replace: applied by behavior template "
+                  "inputType=%s mutated=%d",
+                  input_intent_type_name(input_type), mutated ? 1 : 0);
+        if (mutated) {
+            editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
+            doc_state_request_repaint(state);
+        }
+        return true;
+    }
     if (prevented) {
         if (input_type == INPUT_INTENT_INSERT_TEXT &&
             saved_selection_start != saved_selection_end) {
@@ -3141,11 +3192,8 @@ static uint32_t dispatch_form_text_paste(EventContext* evcon, DomElement* elem,
                                          DocState* state, View* target,
                                          const char* text, uint32_t len) {
     if (!evcon || !elem || !state || !target || !text || len == 0) return 0;
-    char* sanitized = nullptr;
-    uint32_t sanitized_len = 0;
     uint32_t start = 0, end = 0;
-    if (!te_prepare_paste_replacement(elem, state, text, len, &sanitized,
-                                      &sanitized_len, &start, &end)) {
+    if (!te_prepare_paste_range(elem, state, &start, &end)) {
         return 0;
     }
 
@@ -3157,12 +3205,15 @@ static uint32_t dispatch_form_text_paste(EventContext* evcon, DomElement* elem,
     }
     event_log_editing_clipboard(state, surface_ptr, "paste", len, 0);
 
+    // The raw clipboard text goes through as the intent data: the applier owns
+    // newline normalization and maxlength, so handing it a pre-sanitized copy
+    // would leave the policy here after all. The count returned is what was
+    // offered, not what the applier chose to keep.
     bool ok = dispatch_form_text_replace(evcon, elem, state, target,
                                          start, end,
-                                         sanitized, sanitized_len,
+                                         text, len,
                                          INPUT_INTENT_INSERT_FROM_PASTE);
-    mem_free(sanitized);
-    return ok ? sanitized_len : 0;
+    return ok ? len : 0;
 }
 
 static bool dispatch_context_menu_cut(void* user, DomElement* elem,
@@ -3272,8 +3323,7 @@ static bool dispatch_form_copy_selection(EventContext* evcon, DomElement* elem,
 static bool dispatch_form_cut_selection(EventContext* evcon, DomElement* elem,
                                         DocState* state, View* target) {
     if (!evcon || !elem || !state || !target) return false;
-    bool editable = !form_control_is_readonly(state, static_cast<View*>(elem)) &&
-        !form_control_is_disabled(state, static_cast<View*>(elem));
+    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
     if (!editable) return false;
 
     uint32_t start = 0;
@@ -3443,8 +3493,7 @@ static void dispatch_form_delete_key(EventContext* evcon, DomElement* elem,
                                      bool had_keydown_caret,
                                      int keydown_caret_offset,
                                      bool collapse_lambda_selection) {
-    bool editable = !form_control_is_readonly(state, static_cast<View*>(elem)) &&
-        !form_control_is_disabled(state, static_cast<View*>(elem));
+    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
     if (backward && had_lambda_keydown) {
         int base = had_keydown_caret ? keydown_caret_offset : caret;
         const char* operation = "lambdaDeleteBackward";
@@ -3678,30 +3727,59 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
     intent.type = input_type;
     intent.data = "";
 
+    // ES17: peek the entry this would restore and put it on the event, so a
+    // behavior template can install it. The cursor does NOT move here — it
+    // moves only once the entry is consumed, below.
+    bool redo = input_type == INPUT_INTENT_HISTORY_REDO;
+    const char* hist_value = nullptr;
+    uint32_t hist_len = 0, hist_start_u16 = 0, hist_end_u16 = 0;
+    if (te_history_peek(elem, redo, &hist_value, &hist_len,
+                        &hist_start_u16, &hist_end_u16)) {
+        intent.history_value = hist_value;
+        // The entry's selection is UTF-16 against its own snapshot; Lambda
+        // speaks codepoints, so convert against that snapshot, not the value
+        // currently in the control.
+        uint32_t sb = tc_utf16_to_utf8_offset(hist_value, hist_len, hist_start_u16);
+        uint32_t eb = tc_utf16_to_utf8_offset(hist_value, hist_len, hist_end_u16);
+        intent.history_sel_start = (uint32_t)str_utf8_byte_to_char(hist_value, hist_len, sb);
+        intent.history_sel_end = (uint32_t)str_utf8_byte_to_char(hist_value, hist_len, eb);
+    }
+
     EditingFormNotificationHooks hooks = form_editing_notification_hooks();
 
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT,
                                SM_EV_FORM_HISTORY, target);
     bool prevented = false;
+    bool applied_by_template = false;
+    // A restore must not re-push. The waist's write path records history on
+    // every mutation, so bracket whatever the template does with the same
+    // guard te_history_apply_current uses.
+    tc_history_guard_enter(state);
     editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
-                                      &prevented);
+                                      &prevented, &applied_by_template);
+    tc_history_guard_exit(state);
     sm_observe_action(state, SM_ACT_DISPATCH_BEFOREINPUT);
-    if (prevented) {
+    if (prevented && !applied_by_template) {
+        // Cancelled by JS: no restore and no cursor movement, so the same undo
+        // is still available next time.
         log_debug("dispatch_form_history: beforeinput prevented inputType=%s",
                   input_intent_type_name(input_type));
         return true;
     }
 
     uint32_t old_len = event_log_text_len(elem->form ? elem->form->value : nullptr);
-    bool did = input_type == INPUT_INTENT_HISTORY_UNDO
-        ? te_history_undo(elem)
-        : te_history_redo(elem);
+    // The template installed the entry, so only the cursor is left to move;
+    // otherwise native both moves it and applies.
+    bool did = applied_by_template
+        ? te_history_step(elem, redo)
+        : (redo ? te_history_redo(elem) : te_history_undo(elem));
     if (did) {
         FormControlProp* form = elem->form;
         uint32_t new_len = event_log_text_len(form ? form->value : nullptr);
         uint32_t selection_start = form ? form->selection_start : 0;
         uint32_t selection_end = form ? form->selection_end : 0;
-        EditHistory* history = form ? (EditHistory*)form->history : nullptr;
+        EditHistory* history =
+            (EditHistory*)form_control_history_get(state, static_cast<View*>(elem));
         uint32_t depth = history ? history->count : 0;
         uint32_t cursor = history ? history->cursor : 0;
         event_log_editing_history(state, &surface, &intent,
@@ -10165,8 +10243,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         keydown_sel_end_capture, had_keydown_caret,
                         keydown_caret_offset, true);
                 } else if (key_event->key == RDT_KEY_ENTER) {
-                    bool editable = !form_control_is_readonly(state, static_cast<View*>(focus_elem)) &&
-                        !form_control_is_disabled(state, static_cast<View*>(focus_elem));
+                    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(focus_elem));
                     if (had_lambda_keydown) {
                         // Lambda handler processed the enter; adjust caret
                         if (had_keydown_selection) {
@@ -10404,8 +10481,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 (elem->form->control_type == FORM_CONTROL_TEXT ||
                  elem->form->control_type == FORM_CONTROL_TEXTAREA)) {
                 is_form_input = true;
-                bool editable = !form_control_is_readonly(state, static_cast<View*>(elem)) &&
-                    !form_control_is_disabled(state, static_cast<View*>(elem));
+                bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
                 int caret_offset = 0;
                 if (editable && caret_get_offset(state, &caret_offset)) {
                     uint32_t a, b;

@@ -1,0 +1,165 @@
+{
+  "name": "F6/ES17: undo is applied by the template, native owns the ring",
+  "html": "test/ui/test_form_input.html",
+  "viewport": {
+    "width": 800,
+    "height": 600
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "=== native peeks the entry, the template installs it (ES17 option 2) ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name"
+      },
+      "text": "abc"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "abc"
+    },
+    {
+      "type": "key_press",
+      "key": "z",
+      "mods_str": "cmd"
+    },
+    {
+      "type": "log",
+      "message": "value and caret both come from the history entry, not from a native restore"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "ab"
+    },
+    {
+      "type": "log",
+      "message": "the restore must not record itself: a second undo is still available, not a re-push of 'ab'"
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name"
+      },
+      "text": "Z"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "abZ"
+    },
+    {
+      "type": "key_press",
+      "key": "z",
+      "mods_str": "cmd"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "ab"
+    },
+    {
+      "type": "log",
+      "message": "full depth: undo walks the ring back to empty, redo walks forward"
+    },
+    {
+      "type": "key_press",
+      "key": "z",
+      "mods_str": "cmd"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "a"
+    },
+    {
+      "type": "key_press",
+      "key": "z",
+      "mods_str": "cmd"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": ""
+    },
+    {
+      "type": "key_press",
+      "key": "z",
+      "mods_str": "cmd+shift"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "a"
+    },
+    {
+      "type": "log",
+      "message": "ESO43: the ring lives in the State Store, so history outlives the FormControlProp (which the resize below releases)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#name"
+      },
+      "text": "xy"
+    },
+    {
+      "type": "resize",
+      "width": 640,
+      "height": 480
+    },
+    {
+      "type": "resize",
+      "width": 800,
+      "height": 600
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "z",
+      "mods_str": "cmd"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#name"
+      },
+      "equals": "ax"
+    }
+  ]
+}

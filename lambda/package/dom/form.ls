@@ -4,6 +4,7 @@
 // The engine owns the storage; every write goes through the waist primitives.
 import radiant
 import validate: lambda.package.dom.validate
+import editing: lambda.package.dom.editing
 
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
@@ -77,8 +78,10 @@ view <input> state valid, invalid {}
 on init(evt)  { validate.revalidate(~) }
 on input(evt) { validate.revalidate(~) }
 on blur(evt)  { validate.revalidate(~) }
+on beforeinput(evt) { editing.apply(~, evt, false) }
 
 view <textarea> state valid, invalid {}
 on init(evt)  { validate.revalidate(~) }
 on input(evt) { validate.revalidate(~) }
 on blur(evt)  { validate.revalidate(~) }
+on beforeinput(evt) { editing.apply(~, evt, true) }
