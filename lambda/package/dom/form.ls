@@ -35,54 +35,50 @@ on click(evt) {
     radiant.dispatch(~, "change")
 }
 
-// Select activation is NOT claimed yet (F2 blocked).
+// Select activation (F2): a click toggles the dropdown. This template owns
+// open/close only — option commit and the overlay stay native.
 //
-// Opening the dropdown from a behavior template is state-inconsistent with the
-// native dropdown+focus machinery: after the template opens it, a later
-// focus_transition trips the engine's own invariant — "open dropdown state
-// disagrees with form control" (state_machine.cpp). Immediately after the open
-// the two agree (verified: open_dropdown == view, form bit set), so something
-// between the open and that transition desyncs them.
-//
-// The likely root is ordering. Native opens the dropdown at the very end of
-// click handling, after the overlay block has run; behavior dispatch happens
-// much earlier in the same handler, so the dropdown exists during phases that
-// were written assuming it could not. Gating the overlay block on the
-// dropdown that was open when the click arrived was necessary but not
-// sufficient.
-//
-// The primitives this needs — dropdown_open, set_dropdown_open, option_count,
-// selected_index, set_selected_index — are implemented and tested; only the
-// template is withheld. Claiming activation while the state machine reports an
-// inconsistency would repeat the radio mistake from F1.
+// Claiming it needed two engine fixes first. Behavior dispatch runs earlier in
+// click handling than native's open did, so the dropdown now exists during
+// phases written assuming it could not; the overlay block is gated on the
+// dropdown that was open when the click arrived. And the dropdown could outlive
+// the FormControlProp backing it, which tripped "open dropdown state disagrees
+// with form control" in state_machine.cpp — form_control_prop_release now
+// closes a dropdown owning the prop being released, the single point that both
+// release paths share (ESO28).
 view <select> state dropdown_open {}
 on click(evt) {
     if (radiant.get_state(~, "disabled")) { return 'pass' }
     radiant.set_dropdown_open(~, not radiant.dropdown_open(~))
 }
 
-// Text-control constraint validation (F3). This hooks the *post-mutation*
-// `input`, dispatched from editing_dispatch_form_input after the buffer commit,
-// so the handler reads the value the user actually typed. The pre-mutation
-// `input` — the Reactive_UI contract where an app template owns the text — is
-// deliberately not visible to behavior templates: it fires before the value
-// exists, and claiming it would suppress the engine's own insert.
-view <input type:'text'> state valid, invalid {}
+// Constraint validation (F3). There is no native validator behind this any
+// more: te_validate is gone, and these handlers are the only thing that writes
+// :valid/:invalid. Native keeps only the attribute reflection that backs
+// :required/:optional/:read-only, which is engine mechanism (DOM_Pkg rules
+// reflected IDL attributes N).
+//
+// One template covers every text-ish input — `text`, `email`, `url`, `number`,
+// `password`, and an input whose type attribute is missing or unrecognised,
+// which HTML treats as `text`. The type is not a matching concern here: it only
+// selects which content check is_valid() applies, so splitting this per type
+// would be four copies of one rule. Being the lowest-specificity input template
+// it never displaces the checkbox and radio templates above, which declare
+// `click` and win it outright; those two match here as well, and revalidate
+// gates them out because their `value` attribute is not editable text.
+//
+// These hook the *post-mutation* `input`, dispatched from
+// editing_dispatch_form_input after the buffer commit, so the handler reads the
+// value the user actually typed. The pre-mutation `input` — the Reactive_UI
+// contract where an app template owns the text — is deliberately not visible to
+// behavior templates: it fires before the value exists, and claiming it would
+// suppress the engine's own insert.
+view <input> state valid, invalid {}
 on init(evt)  { validate.revalidate(~) }
 on input(evt) { validate.revalidate(~) }
 on blur(evt)  { validate.revalidate(~) }
 
-view <input type:'email'> state valid, invalid {}
-on init(evt)  { validate.revalidate(~) }
-on input(evt) { validate.revalidate(~) }
-on blur(evt)  { validate.revalidate(~) }
-
-view <input type:'url'> state valid, invalid {}
-on init(evt)  { validate.revalidate(~) }
-on input(evt) { validate.revalidate(~) }
-on blur(evt)  { validate.revalidate(~) }
-
-view <input type:'number'> state valid, invalid {}
+view <textarea> state valid, invalid {}
 on init(evt)  { validate.revalidate(~) }
 on input(evt) { validate.revalidate(~) }
 on blur(evt)  { validate.revalidate(~) }

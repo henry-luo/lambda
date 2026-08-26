@@ -97,20 +97,25 @@ pub fn is_valid(elem, text, input_type) {
 }
 
 // Recompute and publish :valid/:invalid for one control.
+//
+// Only :valid/:invalid is written here. The reflection of required/readonly
+// into :required/:optional/:read-only stays native (te_reflect_control_state):
+// those are reflected attributes, and the writes route to form_control_set_*,
+// which mutates the control rather than caching a verdict about it.
 pub pn revalidate(elem) {
-    // Reflect the declared constraints into pseudo-state first, exactly as the
-    // native pass did: :required/:optional are complements, and :read-only
-    // covers disabled too. Claiming validation means owning all of this, not
-    // just the :valid/:invalid pair.
-    let required = radiant.get_state(elem, "required");
-    radiant.set_state(elem, "optional", not required);
-    radiant.set_state(elem, "readonly",
-        radiant.get_state(elem, "readonly") or radiant.get_state(elem, "disabled"));
-
-    let text = radiant.get_state(elem, "value");
-    let raw_type = radiant.attr(elem, "type");
-    let input_type = if (raw_type == null) "text" else lower(raw_type);
-    let ok = is_valid(elem, text, input_type);
-    radiant.set_state(elem, "valid", ok)
-    radiant.set_state(elem, "invalid", not ok)
+    // Validation applies to controls holding editable text. The catch-all
+    // `view <input>` template also matches checkbox and radio, whose `value`
+    // attribute is not text to length-check or parse — the retired native pass
+    // gated on this same predicate.
+    if (radiant.text_control(elem)) {
+        let text = radiant.get_state(elem, "value");
+        let raw_type = radiant.attr(elem, "type");
+        // a missing or unrecognised type behaves as `text` (HTML 4.10.5.1.2);
+        // `password` reaches is_valid with no content check of its own, which
+        // is correct — it constrains only through required/minlength/maxlength
+        let input_type = if (raw_type == null) "text" else lower(raw_type);
+        let ok = is_valid(elem, text, input_type);
+        radiant.set_state(elem, "valid", ok)
+        radiant.set_state(elem, "invalid", not ok)
+    }
 }

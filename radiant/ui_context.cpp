@@ -297,6 +297,10 @@ static void destroy_dom_owned_embed_images(DomNode* node) {
 void free_document(DomDocument* doc) {
     if (!doc) return;
 
+    // queued behavior attaches hold raw View* into this document; drop them
+    // while the views are still alive, or the next drain derefs freed memory
+    radiant_behavior_attach_purge_doc(doc);
+
     // Module-owned DOM wrappers are non-owning; unroot wrappers before the
     // document arena destroys the native nodes they point at.
     radiant_dom_invalidate_document(doc);

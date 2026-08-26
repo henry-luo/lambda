@@ -37,6 +37,7 @@ extern "C" {
 }
 
 extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc);
+extern "C" void radiant_drain_behavior_attach(void);
 extern "C" void js_batch_reset(void);
 extern "C" void js_dom_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
@@ -444,6 +445,12 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     if (doc && doc->view_tree) {
         log_debug("html version: %d", doc->view_tree->html_version);
         render_html_doc(&ui_context, doc->view_tree, NULL);
+        // Controls initialize lazily during render (tc_ensure_init), so their
+        // queued `init` turn runs here, after paint, at a quiescent point. The
+        // batch layout/render path never comes through window.cpp, which is
+        // what makes this drain safe where the layout-commit one was not
+        // (ESO33).
+        radiant_drain_behavior_attach();
     }
     return doc;
 }
@@ -849,6 +856,12 @@ void render(GLFWwindow* window) {
          (ui_context.document->state->needs_repaint &&
           dirty_has_regions(&ui_context.document->state->dirty_tracker)))) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
+        // Controls initialize lazily during render (tc_ensure_init), so their
+        // queued `init` turn runs here, after paint, at a quiescent point. The
+        // batch layout/render path never comes through window.cpp, which is
+        // what makes this drain safe where the layout-commit one was not
+        // (ESO33).
+        radiant_drain_behavior_attach();
         // Phase 19: clear dirty tracker after render (for caret-only repaints)
         doc_state_clear_render_flags(ui_context.document->state);
     } else if (ui_context.document && ui_context.document->state) {
@@ -1094,9 +1107,10 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             doc = load_doc_by_format(file_to_load, cwd, css_width, css_height, pool,
                                      &js_host_config);
         }
-        // EO4: an interactive session gives the document its evaluator here, at
-        // setup, so event dispatch never has to create one.
-        if (doc) radiant_document_ensure_evaluator(doc);
+        // The document's evaluator is created on demand, at the post-render
+        // behavior-attach drain, and only for a document that owns a control
+        // the dom package governs — a thread holds one Runtime, so creating one
+        // for a page that never needs it denies it to a Lambda-script iframe.
         if (!doc) {
             log_error("Failed to load document: %s", file_to_load);
             pool_destroy(pool);
@@ -1200,6 +1214,12 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         if (doc && doc->view_tree) {
             log_mem_stage("before-render");
             render_html_doc(&ui_context, doc->view_tree, NULL);
+        // Controls initialize lazily during render (tc_ensure_init), so their
+        // queued `init` turn runs here, after paint, at a quiescent point. The
+        // batch layout/render path never comes through window.cpp, which is
+        // what makes this drain safe where the layout-commit one was not
+        // (ESO33).
+        radiant_drain_behavior_attach();
             log_mem_stage("after-render");
         }
         log_notice("view: render complete");

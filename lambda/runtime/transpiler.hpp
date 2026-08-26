@@ -225,6 +225,9 @@ void runtime_reset_heap(Runtime* runtime);  // reset heap between independent ev
 EvalContext* runtime_get_eval_context(Runtime* runtime);
 void runtime_register_script(Runtime* runtime, Script* script);
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index);
+// Free every Script a runtime owns, with its script list and path index.
+// runtime_cleanup calls this; hosts that tear a runtime down by hand must too.
+void runtime_free_all_scripts(Runtime* runtime);
 void runtime_teardown_batch_scripts(Runtime* runtime);
 void runtime_log_mir_cache_summary(Runtime* runtime);
 void path_reset(void);  // reset path scheme roots (must call after runtime_reset_heap in batch)

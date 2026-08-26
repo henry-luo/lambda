@@ -516,77 +516,21 @@ void te_dispatch_input(DomElement* elem) {
     js_dom_queue_textcontrol_input(elem);
 }
 
-// ---- minimal validators (no allocation; ASCII fast paths) -------------
-
-static bool te_value_is_number(const char* s, uint32_t len) {
-    if (!s || len == 0) return false;
-    uint32_t i = 0;
-    if (s[i] == '+' || s[i] == '-') i++;
-    bool has_digit = false;
-    while (i < len && s[i] >= '0' && s[i] <= '9') { i++; has_digit = true; }
-    if (i < len && s[i] == '.') {
-        i++;
-        while (i < len && s[i] >= '0' && s[i] <= '9') { i++; has_digit = true; }
-    }
-    if (!has_digit) return false;
-    if (i < len && (s[i] == 'e' || s[i] == 'E')) {
-        i++;
-        if (i < len && (s[i] == '+' || s[i] == '-')) i++;
-        bool exp_digit = false;
-        while (i < len && s[i] >= '0' && s[i] <= '9') { i++; exp_digit = true; }
-        if (!exp_digit) return false;
-    }
-    return i == len;
-}
-
-// Loose RFC 5322-ish: <local>@<domain> with at least one dot in the domain
-// and no spaces or controls anywhere. Mirrors the spec's "valid email
-// address" production used by browsers (HTML §4.10.5.1.5).
-static bool te_value_is_email(const char* s, uint32_t len) {
-    if (!s || len < 3) return false;
-    int at = -1;
-    for (uint32_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)s[i];
-        if (c <= 0x20 || c == 0x7F) return false;
-        if (c == '@') { if (at >= 0) return false; at = (int)i; }
-    }
-    if (at <= 0 || at >= (int)len - 1) return false;
-    bool has_dot = false;
-    for (int i = at + 1; i < (int)len; i++) {
-        if (s[i] == '.') {
-            // dot must not be first/last char of domain
-            if (i == at + 1 || i == (int)len - 1) return false;
-            has_dot = true;
-        }
-    }
-    return has_dot;
-}
-
-// Minimal URL check — must start with a scheme (alpha+ followed by ':')
-// and contain no whitespace/control bytes.
-static bool te_value_is_url(const char* s, uint32_t len) {
-    if (!s || len < 4) return false;
-    uint32_t i = 0;
-    if (!((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z'))) return false;
-    while (i < len && ((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z')
-                       || (s[i] >= '0' && s[i] <= '9') || s[i] == '+'
-                       || s[i] == '-' || s[i] == '.')) i++;
-    if (i == 0 || i >= len || s[i] != ':') return false;
-    for (uint32_t j = 0; j < len; j++) {
-        unsigned char c = (unsigned char)s[j];
-        if (c <= 0x20 || c == 0x7F) return false;
-    }
-    return true;
-}
-
-void te_validate(DomElement* elem) {
+// Reflect a control's declared attributes into the pseudo-state it backs.
+//
+// This is state mechanism, not constraint validation: :required/:optional and
+// :read-only are reflected IDL attributes, which DOM_Pkg's forms table rules
+// native (N). Constraint validation — :valid/:invalid and every content check
+// behind it — has moved wholly to the dom package (lambda/package/dom), so
+// nothing here computes validity and there is no native fallback for it.
+//
+// The writes matter even though the selector matcher resolves :required and
+// :read-only through form_control_is_*: those accessors prefer a ViewState bit
+// once one exists, and the readonly||disabled write below is what makes
+// "disabled implies read-only" (HTML §4.10.18.6) true for a control that
+// carries no readonly attribute of its own.
+void te_reflect_control_state(DomElement* elem) {
     if (!elem || !tc_is_text_control(elem)) return;
-    // Retired when the dom package owns validation (ES5 fallback-until-
-    // registered). The package now covers every point this pass did — `init`
-    // via attach-time dispatch, the post-mutation `input`, and blur — so
-    // running both would mean two implementations writing the same bits from
-    // different rules. Absent the package this stays the implementation.
-    if (radiant_behavior_claims_event(nullptr, (View*)elem, "input")) return;
     FormControlProp* f = elem->form;
     if (!f) return;
     DocState* state = f->state_ref ? f->state_ref : (elem->doc ? (DocState*)elem->doc->state : nullptr);
@@ -594,40 +538,29 @@ void te_validate(DomElement* elem) {
     bool readonly = form_control_is_readonly(state, (View*)elem);
     bool disabled = form_control_is_disabled(state, (View*)elem);
 
+    // Capture what the cascade currently believes, so the restyle below fires
+    // only on an actual flip: this pass runs on every value change, and
+    // sync_pseudo_state re-cascades the whole document (ESO32).
+    bool was_required = state_get_bool(state, elem, STATE_REQUIRED);
+    bool was_readonly = state_get_bool(state, elem, STATE_READONLY);
+    // A control that has never been reflected needs the re-cascade even when
+    // the answer equals the default: the load cascade resolved :read-only from
+    // the attribute alone, so it never saw disabled-implies-readonly (ESO32).
+    // STATE_OPTIONAL is the sentinel because it is written only here and is the
+    // one of the three that state_set_bool leaves in the generic map.
+    bool first_pass = state_get(state, elem, STATE_OPTIONAL).item == ItemNull.item;
+
     state_set_bool(state, elem, STATE_REQUIRED, required);
     state_set_bool(state, elem, STATE_OPTIONAL, !required);
     state_set_bool(state, elem, STATE_READONLY, readonly || disabled);
 
-    // Resolve current value bytes for content-based checks.
-    const char* val = f->current_value
-        ? f->current_value : (f->value ? f->value : "");
-    uint32_t vlen = f->current_value
-        ? f->current_value_len : (uint32_t)strlen(val);
-
-    bool valid = true;
-
-    // Custom validity overrides everything.
-    if (f->custom_validity_msg && f->custom_validity_msg[0] != '\0') {
-        valid = false;
+    // Without this the bits change but CSS never re-matches. One re-cascade
+    // covers every pseudo-class that moved — it is document-wide (ESO32).
+    if (first_pass || was_required != required ||
+            was_readonly != (readonly || disabled)) {
+        radiant_sync_pseudo_state((View*)elem, PSEUDO_STATE_READ_ONLY,
+                                  readonly || disabled);
     }
-    // Required: empty value fails.
-    else if (required && vlen == 0) {
-        valid = false;
-    }
-    // Type-driven content checks (only when non-empty).
-    else if (vlen > 0 && f->input_type) {
-        if (strcasecmp(f->input_type, "number") == 0) {
-            valid = te_value_is_number(val, vlen);
-        } else if (strcasecmp(f->input_type, "email") == 0) {
-            valid = te_value_is_email(val, vlen);
-        } else if (strcasecmp(f->input_type, "url") == 0) {
-            valid = te_value_is_url(val, vlen);
-        }
-    }
-    // TODO(F5): pattern="..." — needs lazy-compiled regex.
-
-    state_set_bool(state, elem, STATE_VALID, valid);
-    state_set_bool(state, elem, STATE_INVALID, !valid);
 }
 
 // ---------- F6: paste sanitization (Radiant_Design_Form_Input.md §3.6) -

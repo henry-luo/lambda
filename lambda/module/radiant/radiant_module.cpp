@@ -1119,11 +1119,11 @@ static const struct {
     {"indeterminate",     STATE_INDETERMINATE,  false, PSEUDO_STATE_INDETERMINATE, RSTATE_BOOL},
     {"disabled",          STATE_DISABLED,       false, PSEUDO_STATE_DISABLED, RSTATE_BOOL},
     {"enabled",           STATE_ENABLED,        false, PSEUDO_STATE_ENABLED, RSTATE_BOOL},
-    {"readonly",          STATE_READONLY,       false, 0 /* validation family: native writes these without a restyle (ESO32) */, RSTATE_BOOL},
-    {"valid",             STATE_VALID,          false, 0 /* validation family: native writes these without a restyle (ESO32) */, RSTATE_BOOL},
-    {"invalid",           STATE_INVALID,        false, 0 /* validation family: native writes these without a restyle (ESO32) */, RSTATE_BOOL},
-    {"required",          STATE_REQUIRED,       false, 0 /* validation family: native writes these without a restyle (ESO32) */, RSTATE_BOOL},
-    {"optional",          STATE_OPTIONAL,       false, 0 /* validation family: native writes these without a restyle (ESO32) */, RSTATE_BOOL},
+    {"readonly",          STATE_READONLY,       false, PSEUDO_STATE_READ_ONLY, RSTATE_BOOL},
+    {"valid",             STATE_VALID,          false, PSEUDO_STATE_VALID, RSTATE_BOOL},
+    {"invalid",           STATE_INVALID,        false, PSEUDO_STATE_INVALID, RSTATE_BOOL},
+    {"required",          STATE_REQUIRED,       false, PSEUDO_STATE_REQUIRED, RSTATE_BOOL},
+    {"optional",          STATE_OPTIONAL,       false, PSEUDO_STATE_OPTIONAL, RSTATE_BOOL},
     {"placeholder_shown", STATE_PLACEHOLDER,    false, 0, RSTATE_BOOL},
     {"selected",          STATE_SELECTED,       false, 0, RSTATE_BOOL},
     // text-valued: no interned pseudo name and no pseudo-class of its own
@@ -1226,7 +1226,10 @@ RADIANT_C_API Item fn_radiant_set_state(Item node_item, Item name_item, Item val
     // Only a real change is worth a restyle. The native writers return early
     // when the value is unchanged, and validation re-runs on every keystroke,
     // so syncing unconditionally would schedule a reflow per keypress.
-    bool changed = state_get_bool(state, elem, interned) != want;
+    // A first write counts as a change even when it equals the default: the
+    // cascade has never seen this bit, so nothing has matched on it yet (ESO32).
+    bool first_write = state_get(state, elem, interned).item == ItemNull.item;
+    bool changed = first_write || state_get_bool(state, elem, interned) != want;
     state_set_bool(state, elem, interned, want);
     // the canonical bit is written; CSS only sees it once the pseudo-class
     // cascade re-runs, which the native writers schedule at each call site
@@ -1368,6 +1371,17 @@ RADIANT_C_API Item fn_radiant_custom_validity(Item node_item) {
     if (!elem || !elem->form_control()) return radiant_string_item("");
     const char* msg = elem->form_control()->custom_validity_msg;
     return radiant_string_item(msg ? msg : "");
+}
+
+// Is this control one that holds editable text? The dom package's catch-all
+// `view <input>` template matches every input, including checkbox and radio,
+// so the validation handlers gate on this the same way the retired native pass
+// gated on tc_is_text_control — a checkbox's value attribute is not a value to
+// length-check or parse.
+RADIANT_C_API Item fn_radiant_text_control(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "TEXT_CONTROL");
+    if (!elem) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(tc_is_text_control(elem) ? 1 : 0)};
 }
 
 RADIANT_C_API Item fn_radiant_free(Item node_item) {
@@ -1766,6 +1780,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_set_selected_index(Item node, Item index)", (fn_ptr)fn_radiant_set_selected_index},
     {"custom_validity", "fn(node: dom_node) -> string", (fn_ptr)fn_radiant_custom_validity, JUBE_FN_NONE,
      "Item fn_radiant_custom_validity(Item node)", (fn_ptr)fn_radiant_custom_validity},
+    {"text_control", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_text_control, JUBE_FN_NONE,
+     "Item fn_radiant_text_control(Item node)", (fn_ptr)fn_radiant_text_control},
     {"free", "fn(node: dom_node) -> null", (fn_ptr)fn_radiant_free, JUBE_FN_NONE,
      "Item fn_radiant_free(Item node)", (fn_ptr)fn_radiant_free},
     {"layout", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_layout, JUBE_FN_NONE,

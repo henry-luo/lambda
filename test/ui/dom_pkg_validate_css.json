@@ -1,0 +1,30 @@
+{
+  "name": "a validity change restyles at control init (ESO32)",
+  "html": "test/lambda/ui/dom_pkg_validate_css.html",
+  "viewport": {
+    "width": 400,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "=== required+empty must match input:invalid \u2014 this never applied before ESO32 ==="
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".em"
+      },
+      "property": "outline-style",
+      "equals": "solid"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": ".em"
+      },
+      "property": "outline-width",
+      "equals": "2px"
+    }
+  ]
+}
