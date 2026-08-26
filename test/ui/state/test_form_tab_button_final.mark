@@ -15,13 +15,13 @@
   <html flags: ['hover', 'focus-within']
     <body index: 2, flags: ['hover', 'focus-within']
       <div index: 5, flags: ['hover']
-        <input index: 3, id: "email", flags: ['hover', 'valid', 'optional'], form: {
+        <input index: 3, id: "email", flags: ['hover', 'valid'], form: {
             sel: [11, 11]
           }>>
       <div index: 7
-        <input index: 3, id: "name", flags: ['valid', 'optional'], form: {
+        <input index: 3, id: "name", flags: ['valid'], form: {
             sel: [5, 5]
           }>>
       <div index: 9
-        <input index: 3, id: "empty", flags: ['valid', 'optional']>>
+        <input index: 3, id: "empty", flags: ['valid']>>
       <button index: 15, id: "btn-submit", flags: ['focus', 'focus-visible', 'focus-within']>>>>

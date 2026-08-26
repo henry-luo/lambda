@@ -24,6 +24,9 @@
 #include "../lambda/js/js_xhr.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/edit_bridge.h"
+#include "../lambda/runtime/module_registry.h"
+#include "../lambda/runtime/template_registry.h"
+#include "../lambda/runtime/concurrency.h"
 #include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/runtime/render_map.h"
 #include "../lambda/runtime/template_state.h"
@@ -2310,6 +2313,13 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         script_runner_cleanup_source_cache();
         return;
     }
+    // Initialize it as a real Runtime. It was previously left as bare zeroed
+    // memory, which silently disabled everything keyed off the script list:
+    // registration no-opped (so every Lambda module loaded into this document
+    // kept module_state_id 0 and collided on one module-state slab, ESO34),
+    // path dedup never hit, and nothing owned the Scripts to free them.
+    // runtime_init memsets, so it must run before the fields set below.
+    runtime_init(runtime);
     runtime->dom_doc = (void*)dom_doc;
     runtime->dom_ui_context = dom_doc->js.host_ui_context;
     Context* saved_input_context = input_context;
@@ -2896,6 +2906,13 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     tmpl_state_destroy();
     lambda_module_state_destroy();
 
+    // A Lambda module loaded into this runtime (the dom package) registers a
+    // descriptor whose namespace is an Item in the heap below, so the registry
+    // has to be dropped while that heap is still alive — the same order
+    // runtime_cleanup uses. Nothing registered here before the package could
+    // load into a JS document's runtime.
+    module_registry_cleanup_for_runtime(runtime);
+
     // Destroy retained heap and GC metadata.
     if (runtime->heap) {
         Heap* heap = runtime->heap;
@@ -2914,6 +2931,27 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     }
 
     runtime->name_pool = nullptr;
+    // Lambda modules can be loaded into this runtime (the dom package), and
+    // this teardown is hand-rolled rather than runtime_cleanup, so the pieces
+    // that running Lambda code establishes have to be released here too: the
+    // signal-handler alt stack (64KB, installed on first Lambda execution) and
+    // the Scripts this runtime owns, which nothing else would free.
+    lambda_stack_cleanup();
+    // Running Lambda in this runtime can stand up the task scheduler, which
+    // runtime_cleanup would own but this hand-rolled teardown otherwise leaks.
+    if (runtime->scheduler) {
+        lambda_scheduler_destroy(runtime->scheduler);
+        runtime->scheduler = nullptr;
+    }
+    runtime_free_all_scripts(runtime);
+    // The dom package registers its behavior templates in the EvalContext's
+    // registry (g_template_registry resolves to context->template_registry),
+    // which nothing else owns once this context retires.
+    if (runtime->eval_context) {
+        TemplateRegistry* doc_templates = runtime->eval_context->template_registry;
+        runtime->eval_context->template_registry = nullptr;
+        template_registry_destroy(doc_templates);
+    }
     if (runtime->eval_context) {
         EvalContext* retiring_context = runtime->eval_context;
         js_runtime_state_destroy_context();

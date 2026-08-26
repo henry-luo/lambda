@@ -59,6 +59,10 @@ void radiant_sync_pseudo_state(View* view, uint32_t pseudo_flag, bool set);
 struct EventContext;
 bool radiant_behavior_claims_event(struct EventContext* evcon, View* target,
                                    const char* event_name);
+
+// Drop queued behavior attaches belonging to a document being freed; call
+// while its views are still alive (top of free_document).
+void radiant_behavior_attach_purge_doc(struct DomDocument* doc);
 #endif
 
 typedef enum  {
@@ -1800,15 +1804,6 @@ bool te_history_redo(DomElement* elem);
 // the JS DOM bridge overrides it with weak linkage.
 void te_dispatch_input      (DomElement* elem);
 
-// Re-evaluate constraint validation for `elem` and refresh the cached
-// pseudo-state bits (:valid, :invalid, :required, :optional, :read-only,
-// :read-write). Cheap; called from tc_ensure_init, tc_set_value and on
-// blur. Implements the v1 minimum from §3.11:
-//   - required   ⇒ invalid when value is empty
-//   - maxlength  ⇒ already enforced by tc_set_value, also reflected here
-//   - type=number / email / url / pattern attribute checked when non-empty
-//   - custom_validity_msg non-empty ⇒ invalid
-void te_validate(DomElement* elem);
 
 // ---------- F6: paste sanitization (Radiant_Design_Form_Input.md §3.6) -
 
@@ -1867,8 +1862,8 @@ bool te_ime_is_composing(DomElement* elem);
 //   :invalid bit set → aria-invalid="true"
 //   <input type=range> → aria-valuenow / aria-valuemin / aria-valuemax
 //
-// Idempotent. Call from tc_ensure_init, tc_set_value, te_validate, and
-// any setter that flips disabled/readonly/required.
+// Idempotent. Call from tc_ensure_init, tc_set_value, and any setter that
+// flips disabled/readonly/required.
 void te_aria_reflect(DomElement* elem);
 
 
@@ -3251,6 +3246,10 @@ void form_control_set_disabled(DocState* state, View* view, bool disabled);
  * Check if a text control is readonly.
  */
 bool form_control_is_readonly(DocState* state, View* view);
+// "Not user-alterable" — the readonly attribute OR disabled. This is what CSS
+// `:read-only`/`:read-write` mean; form_control_is_readonly above stays the
+// content-attribute mirror that `input.readOnly` and `aria-readonly` reflect.
+bool form_control_is_user_readonly(DocState* state, View* view);
 
 /**
  * Set the readonly state for a text control through the state store.

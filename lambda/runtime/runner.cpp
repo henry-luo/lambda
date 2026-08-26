@@ -1718,11 +1718,52 @@ void runtime_init(Runtime* runtime) {
 }
 
 void runtime_register_script(Runtime* runtime, Script* script) {
-    if (!runtime || !runtime->scripts || !script) return;
+    if (!runtime || !script) return;
+    // Reserve the module-state identity first, and independently of the script
+    // list. The slabs this id indexes live on the EvalContext, so a Script that
+    // never gets one keeps id 0 and shares slot 0 with whatever already owns it.
+    // That is harmless only while both layouts happen to agree; a document
+    // runtime built by script_runner has no script list (it is allocated
+    // without runtime_init), so every Lambda module loaded into a JS page took
+    // id 0 and collapsed onto the JS realm's module state — "sealed layout
+    // changed for module 0", which left the dom package with no templates
+    // (ESO34). Allocation comes from the owning Runtime's counter, the same one
+    // lambda_module_state_reserve() uses, so Lambda and JS ids never overlap.
+    script->module_state_id = runtime->next_module_state_id++;
+    if (!runtime->scripts) {
+        // No script list on this runtime: path dedup and the script index are
+        // unavailable, but the identity above is still valid and unique.
+        log_debug("runtime_register_script: no script list on runtime %p; "
+                  "'%s' keeps module_state_id=%u without path dedup",
+                  (void*)runtime, script->reference ? script->reference : "<none>",
+                  script->module_state_id);
+        return;
+    }
     arraylist_append(runtime->scripts, script);
     script->index = runtime->scripts->length - 1;
-    script->module_state_id = runtime->next_module_state_id++;
     runtime_script_index_put(runtime, script);
+}
+
+// Release every Script this runtime owns, plus the list and path index.
+// Hosts that tear a runtime down by hand (script_runner's per-document JS
+// runtime) must call this too: a Lambda module loaded into such a runtime is
+// owned by nothing else, and skipping it leaks the Script and its pool.
+void runtime_free_all_scripts(Runtime* runtime) {
+    if (!runtime) return;
+    if (runtime->scripts) {
+        for (int i = 0; i < runtime->scripts->length; i++) {
+            Script *script = (Script*)runtime->scripts->data[i];
+            if (!script) continue;
+            runtime_free_script(runtime, script, false);
+            runtime->scripts->data[i] = NULL;
+        }
+        arraylist_free(runtime->scripts);
+        runtime->scripts = NULL;
+    }
+    if (runtime->script_index) {
+        hashmap_free(runtime->script_index);
+        runtime->script_index = NULL;
+    }
 }
 
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
@@ -2011,18 +2052,5 @@ void runtime_cleanup(Runtime* runtime) {
         runtime->eval_context = NULL;
     }
     lambda_stack_cleanup();
-    if (runtime->scripts) {
-        for (int i = 0; i < runtime->scripts->length; i++) {
-            Script *script = (Script*)runtime->scripts->data[i];
-            if (!script) continue;
-            runtime_free_script(runtime, script, false);
-            runtime->scripts->data[i] = NULL;
-        }
-        arraylist_free(runtime->scripts);
-        runtime->scripts = NULL;
-    }
-    if (runtime->script_index) {
-        hashmap_free(runtime->script_index);
-        runtime->script_index = NULL;
-    }
+    runtime_free_all_scripts(runtime);
 }
