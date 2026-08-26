@@ -2418,8 +2418,8 @@ extern "C" void js_set_class_instance_field_metadata_name_id_range(
     uint64_t method_mask) {
     if ((get_type_id(class_item) != LMD_TYPE_MAP &&
             get_type_id(class_item) != LMD_TYPE_FUNC) || index < 0 || count <= 0 ||
-            !context || !context->active_js_module_state) return;
-    LambdaModuleState* state = context->active_js_module_state;
+            !context || !context->active_module_state) return;
+    LambdaModuleState* state = context->active_module_state;
     if (!state->property_keys || module_name_base > state->property_key_count ||
             (uint32_t)count > state->property_key_count - module_name_base) return;
     RootFrame roots(4);

@@ -130,9 +130,9 @@ typedef struct EvalContext : Context {
     void* template_state_store;   // context-owned view/edit state map
     void* jube_node_session;      // context-owned Jube Node service session
     JsRuntimeState* js_state;  // context-owned JS semantic state capsule
-    // Native JS ABI paths select a context-owned module slab here. Generated
-    // JS MIR receives this Context directly and can load the same selector.
-    LambdaModuleState* active_js_module_state;
+    // Every language selects its context-owned module slab here. Generated
+    // Lambda and JS MIR receive this Context directly and load the same selector.
+    LambdaModuleState* active_module_state;
     // Indexed by sealed module id.  The table and every state are created at
     // module-instantiation boundaries; generated hot paths only load this
     // pointer and use ordinary owner-thread loads/stores in the selected slab.

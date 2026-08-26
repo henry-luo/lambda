@@ -134,7 +134,7 @@ static bool js_compiled_name_table_inherits_preamble(
 }
 
 bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
-    if (!context || !context->active_js_module_state) return false;
+    if (!context || !context->active_module_state) return false;
     bool inherits_preamble = js_compiled_name_table_inherits_preamble(mt);
     const PropertyKeySpec* inherited_specs = inherits_preamble
         ? g_jm_preamble_in->module_property_specs : NULL;
@@ -151,7 +151,7 @@ bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
         uint32_t active_names = js_active_module_name_count();
         if (active_names == 0 && inherited > 0 &&
                 !lambda_module_state_link_property_keys(
-                    context->active_js_module_state->module_id,
+                    context->active_module_state->module_id,
                     inherited_specs, inherited, inherited_bytes)) {
             return false;
         }
@@ -169,7 +169,7 @@ bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
             inherited_bytes, mt ? mt->module_name_specs : NULL, &image,
             &image_count, &image_bytes)) return false;
     bool linked = lambda_module_state_link_property_keys(
-        context->active_js_module_state->module_id, image, image_count,
+        context->active_module_state->module_id, image, image_count,
         image_bytes);
     mem_free(image);
     if (!linked) return false;
@@ -203,7 +203,7 @@ bool js_prelink_compiled_name_table(const JsMirTranspiler* mt) {
 }
 
 bool js_append_compiled_name_table(const JsMirTranspiler* mt) {
-    if (!context || !context->active_js_module_state) return false;
+    if (!context || !context->active_module_state) return false;
     PropertyKeySpec* image = NULL;
     uint32_t count = 0;
     uint32_t bytes = 0;
@@ -212,7 +212,7 @@ bool js_append_compiled_name_table(const JsMirTranspiler* mt) {
         return false;
     }
     bool linked = lambda_module_state_append_property_keys(
-        context->active_js_module_state->module_id, image, count, bytes);
+        context->active_module_state->module_id, image, count, bytes);
     mem_free(image);
     return linked;
 }
