@@ -15,6 +15,13 @@ Item js_interp_execute_source(Runtime* runtime, const char* source,
 Item js_interp_execute_module_source(Runtime* runtime, const char* source,
                                      size_t source_length, const char* filename,
                                      bool strict, uint64_t* result_home);
+// Compile/link/evaluate a synchronous ES module in the shared registry. The
+// returned value is its stable namespace object, not the body's completion.
+Item js_interp_execute_es_module_source(Runtime* runtime, const char* source,
+                                        size_t source_length, const char* filename,
+                                        uint64_t* result_home);
+Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
+                                        uint64_t* result_home);
 Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
                              uint64_t* result_home);
 bool js_interp_script_is_supported(JsScript* script);

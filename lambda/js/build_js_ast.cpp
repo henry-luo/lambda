@@ -2802,6 +2802,36 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
 
 // Build JavaScript import statement
 // import X from 'module'  |  import { a, b } from 'module'  |  import * as X from 'module'
+static void js_record_interp_import(JsTranspiler* tp, String* local,
+        String* source, String* export_name, bool namespace_import) {
+    if (!tp || !local || !source || (!namespace_import && !export_name)) return;
+    JsInterpImportBinding* binding = (JsInterpImportBinding*)pool_calloc(tp->pool,
+        sizeof(JsInterpImportBinding));
+    if (!binding) return;
+    binding->local_name = local;
+    binding->source = source;
+    binding->export_name = export_name;
+    binding->namespace_import = namespace_import;
+    binding->next = tp->interp_imports;
+    tp->interp_imports = binding;
+}
+
+static void js_record_interp_export(JsTranspiler* tp, String* local,
+        String* export_name, String* source, bool namespace_export,
+        bool star_export) {
+    if (!tp || !local || !export_name) return;
+    JsInterpExportBinding* binding = (JsInterpExportBinding*)pool_calloc(tp->pool,
+        sizeof(JsInterpExportBinding));
+    if (!binding) return;
+    binding->local_name = local;
+    binding->export_name = export_name;
+    binding->source = source;
+    binding->namespace_export = namespace_export;
+    binding->star_export = star_export;
+    binding->next = tp->interp_exports;
+    tp->interp_exports = binding;
+}
+
 JsAstNode* build_js_import_statement(JsTranspiler* tp, TSNode import_node) {
     JsImportNode* node = (JsImportNode*)alloc_js_ast_node(tp, JS_AST_NODE_IMPORT_DECLARATION, import_node, sizeof(JsImportNode));
     node->source = NULL;
@@ -2878,6 +2908,15 @@ JsAstNode* build_js_import_statement(JsTranspiler* tp, TSNode import_node) {
         }
     }
 
+    js_record_interp_import(tp, node->default_name, node->source,
+        name_pool_create_len(tp->name_pool, "default", 7), false);
+    js_record_interp_import(tp, node->namespace_name, node->source, NULL, true);
+    for (JsAstNode* spec = node->specifiers; spec; spec = (JsAstNode*)spec->next) {
+        JsImportSpecifierNode* imported = (JsImportSpecifierNode*)spec;
+        js_record_interp_import(tp, imported->local_name, node->source,
+            imported->remote_name, false);
+    }
+
     node->type = &TYPE_NULL;
     return (JsAstNode*)node;
 }
@@ -2890,6 +2929,8 @@ JsAstNode* build_js_export_statement(JsTranspiler* tp, TSNode export_node) {
     node->specifiers = NULL;
     node->source = NULL;
     node->is_default = false;
+    node->is_star = false;
+    node->is_namespace = false;
 
     // Check for "default" keyword among anonymous children
     uint32_t ccount = ts_node_child_count(export_node);
@@ -2899,7 +2940,8 @@ JsAstNode* build_js_export_statement(JsTranspiler* tp, TSNode export_node) {
             StrView src = js_node_source(tp, child);
             if (src.length == 7 && memcmp(src.str, "default", 7) == 0) {
                 node->is_default = true;
-                break;
+            } else if (src.length == 1 && src.str[0] == '*') {
+                node->is_star = true;
             }
         }
     }
@@ -2979,6 +3021,58 @@ JsAstNode* build_js_export_statement(JsTranspiler* tp, TSNode export_node) {
                         prev_spec->next = spec_node;
                     }
                     prev_spec = spec_node;
+                }
+            }
+        } else if (strcmp(ctype, "namespace_export") == 0) {
+            if (ts_node_named_child_count(child) == 0) continue;
+            TSNode name_node = ts_node_named_child(child, 0);
+            StrView name = js_node_source(tp, name_node);
+            String* exported_name = name_pool_create_len(tp->name_pool,
+                name.str, name.length);
+            if (!exported_name) continue;
+            JsExportSpecifierNode* espec = (JsExportSpecifierNode*)alloc_js_ast_node(
+                tp, JS_AST_NODE_EXPORT_SPECIFIER, child, sizeof(JsExportSpecifierNode));
+            espec->local_name = exported_name;
+            espec->export_name = exported_name;
+            if (!prev_spec) {
+                node->specifiers = (JsAstNode*)espec;
+            } else {
+                prev_spec->next = (JsAstNode*)espec;
+            }
+            prev_spec = (JsAstNode*)espec;
+            node->is_namespace = true;
+        }
+    }
+
+    for (JsAstNode* spec = node->specifiers; spec; spec = (JsAstNode*)spec->next) {
+        JsExportSpecifierNode* exported = (JsExportSpecifierNode*)spec;
+        js_record_interp_export(tp, exported->local_name, exported->export_name,
+            node->source, node->is_namespace, false);
+    }
+    if (node->declaration) {
+        String* default_name = node->is_default
+            ? name_pool_create_len(tp->name_pool, "default", 7) : NULL;
+        if (node->declaration->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
+                node->declaration->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+                node->declaration->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+            JsFunctionNode* function = node->declaration->node_type ==
+                    JS_AST_NODE_FUNCTION_DECLARATION
+                ? (JsFunctionNode*)node->declaration : NULL;
+            String* name = function ? function->name :
+                ((JsClassNode*)node->declaration)->name;
+            js_record_interp_export(tp, name, default_name ? default_name : name, NULL,
+                false, false);
+        } else if (node->declaration->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            JsVariableDeclarationNode* declaration =
+                (JsVariableDeclarationNode*)node->declaration;
+            for (JsAstNode* declarator = (JsAstNode*)declaration->declarations;
+                    declarator; declarator = (JsAstNode*)declarator->next) {
+                JsVariableDeclaratorNode* variable =
+                    (JsVariableDeclaratorNode*)declarator;
+                if (variable->id && variable->id->node_type == AST_NODE_IDENT) {
+                    String* name = ((JsIdentifierNode*)variable->id)->name;
+                    js_record_interp_export(tp, name, default_name ? default_name : name,
+                        NULL, false, false);
                 }
             }
         }

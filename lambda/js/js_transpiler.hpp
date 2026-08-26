@@ -13,6 +13,31 @@ typedef struct JsTranspiler JsTranspiler;
 typedef NameScope JsScope;
 struct hashmap;
 
+// Import/export plans retain only AST/name-pool data. The actual namespace
+// Items stay rooted by the single runtime module registry.
+typedef struct JsInterpImportBinding {
+    String* local_name;
+    String* source;
+    String* export_name;
+    bool namespace_import;
+    struct JsInterpImportBinding* next;
+} JsInterpImportBinding;
+
+typedef struct JsInterpExportBinding {
+    String* local_name;
+    String* export_name;
+    // Non-null for `export { local as exported } from source` and export-star
+    // entries; source writes propagate through the same module registry.
+    String* source;
+    // `export * as ns from source` exposes source's namespace object itself,
+    // rather than one of its named live bindings.
+    bool namespace_export;
+    // Star entries are synthesized only after the target namespace has been
+    // linked. This distinguishes them from explicit named re-exports.
+    bool star_export;
+    struct JsInterpExportBinding* next;
+} JsInterpExportBinding;
+
 // JavaScript variable declaration types
 typedef enum JsVarKind {
     JS_VAR_VAR,     // var - function scoped
@@ -40,9 +65,15 @@ struct JsScript : Script {
     // Module top levels use a private module slab. CJS remains non-strict,
     // while ES modules set both this bit and strict_mode.
     bool is_module;
+    bool is_es_module;
+    // ES declaration instantiation happens before recursive dependency
+    // evaluation so circular imports observe hoisted function exports.
+    bool es_module_scope_initialized;
     bool strict_js;                 // true = reject TS syntax (pure JS mode)
     bool emit_runtime_checks;       // TS development-mode assertion emission
     struct hashmap* type_registry; // TS name → Type* facts for this JS/TS unit
+    JsInterpImportBinding* interp_imports;
+    JsInterpExportBinding* interp_exports;
 };
 
 // JsTranspiler is an ephemeral builder extending the retained JsScript prefix.

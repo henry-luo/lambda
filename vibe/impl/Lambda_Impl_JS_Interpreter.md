@@ -8,7 +8,7 @@ phases remain open.
 
 **Design authority:** `doc/Lambda_Formal_Design.md` **D1.3**, **D1.5**,
 **D1.7**, **D5.3.2–D5.3.3**, **D6.2.2v2**, **D6.2.3v2**,
-**D8.1.3v8**, **D8.2.4**, **D8.4.1v2**, and **D8.4.3v2**. The working
+**D8.1.3v9**, **D8.2.4**, **D8.4.1v2**, and **D8.4.3v2**. The working
 design is `vibe/Lambda_Design_JS_Interpreter.md` P2.
 
 ## Delivered boundary
@@ -19,7 +19,7 @@ same `Runtime` that owns Lambda scripts. The interpreter obtains the
 runtime's canonical `EvalContext`, allocates in its heap, and prepares the
 script's own module-state slab. It therefore shares runtime, context, module
 registry, event-loop owner, and GC heap with Lambda without importing Lambda
-language semantics (**D1.3**, **D1.7**, **D8.1.3v8**).
+language semantics (**D1.3**, **D1.7**, **D8.1.3v9**).
 
 AST functions are `JsFunction` objects with an explicit AST body kind. Their
 normal calls and construction enter the established `fn->invoke` and
@@ -59,8 +59,21 @@ construction reuse the established class construct capability. `super()` uses
 its derived-`this` and live-superclass helpers, then initializes the derived
 fields; `super` property references use the same lexical-home-class property
 helpers for class/object methods, accessors, statics, and arrows. This is all
-within **D8.1.3v8**; it does not create a second JS object, class, iterator,
+within **D8.1.3v9**; it does not create a second JS object, class, iterator,
 or call model.
+
+Synchronous ES modules retain a `JsScript` import/export plan in the same
+runtime registry used by Lambda and CommonJS. A loading module publishes its
+registry-owned namespace placeholder, instantiates hoisted function exports
+in its private module slab, then traverses static dependencies. This preserves
+function identity and live import reads during a circular dependency. The
+admitted path supports default/named/namespace imports, default/named/
+namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`,
+and dynamic `import()` through the same resolver. A `.ls` dependency publishes
+its existing Lambda namespace in that descriptor; JS calls its public function
+through Lambda's boxed dynamic-call ABI after retaining the `TypeFunc` needed
+for argument adaptation. No JS wrapper heap or separate context/heap/registry
+is involved.
 
 ## Lifetime and rejection guarantees
 
@@ -73,7 +86,7 @@ closure escapes and then calls it again.
 Admission occurs after realm setup but before declarations or user code. The
 forced AST backend rejects unsupported forms with a normal JavaScript error;
 it never silently executes a second MIR copy after observable work
-(**D8.1.3v8**, **D8.4.3v2**). The unset backend deliberately remains the
+(**D8.1.3v9**, **D8.4.3v2**). The unset backend deliberately remains the
 existing whole-script MIR policy.
 
 ## Validation
@@ -99,6 +112,9 @@ existing whole-script MIR policy.
   identity.
 - synchronous CommonJS `require()` resolution, cache identity, private wrapper
   bindings, module-registry publication, and restoration of the caller slab.
+- synchronous ES static/dynamic imports, metadata, live named/star re-exports,
+  namespace and anonymous-default exports, circular function imports, and a
+  Lambda `.ls` import invoked through the shared registry and call boundary.
 
 The expanded focused suite additionally covers patterns, iterator loops,
 labels, `with` and escaped `with` closures, templates/tagged templates,
@@ -108,8 +124,8 @@ class methods/accessors/fields/statics/implicit inheritance and explicit
 
 ## Deferred work
 
-The remaining P3–P6 work is intentionally excluded: ES modules,
-T0/T1 shared environment ABI and
+The remaining P3–P6 work is intentionally excluded: ambiguous star exports,
+top-level await/async module evaluation, T0/T1 shared environment ABI and
 promotion, heapified async/generator continuations, and default AUTO
 selection. Those forms are explicitly rejected by admission rather than
 approximated.

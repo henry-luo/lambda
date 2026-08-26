@@ -5,9 +5,11 @@
 #include "js_property_attrs.h"
 #include "../runtime/gc/gc_heap.h"
 #include "../runtime/heap_api.h"
+#include "../runtime/module_registry.h"
 #include "../runtime/runtime-state.h"
 #include "../runtime/side_stack.h"
 #include "../../lib/log.h"
+#include "../../lib/file.h"
 #include "../../lib/mempool.h"
 
 extern __thread EvalContext* context;
@@ -15,6 +17,7 @@ extern Item js_make_number(double value);
 extern "C" Item bigint_from_string(const char* value, int length);
 void jm_resolve_module_path(const char* base_file, const char* specifier,
     int spec_len, char* output, int output_size);
+bool js_activate_runtime_name_pool(void);
 
 enum JsInterpCompletionKind : uint8_t {
     JS_INTERP_NORMAL,
@@ -138,6 +141,25 @@ struct JsInterpModuleStateScope {
     JsInterpModuleStateScope& operator=(const JsInterpModuleStateScope&) = delete;
 };
 
+struct JsInterpModuleNamespaceScope {
+    Item previous;
+    bool active;
+
+    explicit JsInterpModuleNamespaceScope(JsScript* script)
+        : previous(ItemNull), active(false) {
+        if (!script || !script->is_es_module || !script->reference) return;
+        Item namespace_obj = js_module_get(js_make_string(script->reference));
+        if (get_type_id(namespace_obj) == LMD_TYPE_NULL) return;
+        previous = js_set_active_module_namespace(namespace_obj);
+        active = true;
+    }
+    ~JsInterpModuleNamespaceScope() {
+        if (active) js_set_active_module_namespace(previous);
+    }
+    JsInterpModuleNamespaceScope(const JsInterpModuleNamespaceScope&) = delete;
+    JsInterpModuleNamespaceScope& operator=(const JsInterpModuleNamespaceScope&) = delete;
+};
+
 static Item js_interp_super_this(JsInterpFrame* frame) {
     Item value = js_interp_frame_this(frame);
     if (value.item != ITEM_JS_TDZ) return value;
@@ -168,6 +190,163 @@ static bool js_interp_member_uses_super(const JsMemberNode* member) {
 
 static Item js_interp_name_key(const String* name) {
     return name ? (Item){.item = s2it((String*)name)} : ItemNull;
+}
+
+static bool js_interp_name_matches(const String* left, const String* right) {
+    return left && right && left->len == right->len &&
+        memcmp(left->chars, right->chars, left->len) == 0;
+}
+
+static JsInterpImportBinding* js_interp_import_binding(JsScript* script,
+        String* local_name) {
+    for (JsInterpImportBinding* binding = script ? script->interp_imports : NULL;
+            binding; binding = binding->next) {
+        if (js_interp_name_matches(binding->local_name, local_name)) return binding;
+    }
+    return NULL;
+}
+
+static JsInterpExportBinding* js_interp_add_reexport_binding(JsScript* script,
+        String* local_name, String* export_name, String* source) {
+    if (!script || !script->pool || !script->name_pool || !local_name ||
+            !export_name || !source) return NULL;
+    for (JsInterpExportBinding* binding = script->interp_exports; binding;
+            binding = binding->next) {
+        if (binding->source && js_interp_name_matches(binding->source, source) &&
+                js_interp_name_matches(binding->local_name, local_name) &&
+                js_interp_name_matches(binding->export_name, export_name)) {
+            return binding;
+        }
+    }
+    JsInterpExportBinding* binding = (JsInterpExportBinding*)pool_calloc(script->pool,
+        sizeof(JsInterpExportBinding));
+    if (!binding) return NULL;
+    binding->local_name = name_pool_create_len(script->name_pool, local_name->chars,
+        local_name->len);
+    binding->export_name = name_pool_create_len(script->name_pool, export_name->chars,
+        export_name->len);
+    binding->source = name_pool_create_len(script->name_pool, source->chars, source->len);
+    if (!binding->local_name || !binding->export_name || !binding->source) return NULL;
+    binding->star_export = true;
+    binding->next = script->interp_exports;
+    script->interp_exports = binding;
+    return binding;
+}
+
+static bool js_interp_has_explicit_export(JsScript* script, String* export_name) {
+    for (JsInterpExportBinding* binding = script ? script->interp_exports : NULL;
+            binding; binding = binding->next) {
+        if (!binding->star_export && js_interp_name_matches(binding->export_name,
+                export_name)) return true;
+    }
+    return false;
+}
+
+static JsScript* js_interp_script_for_reference(Runtime* runtime,
+        const char* reference) {
+    if (!runtime || !runtime->scripts || !reference) return NULL;
+    for (int index = 0; index < runtime->scripts->length; index++) {
+        Script* candidate = (Script*)runtime->scripts->data[index];
+        if (candidate && candidate->profile == &js_profile && candidate->reference &&
+                strcmp(candidate->reference, reference) == 0) {
+            return (JsScript*)candidate;
+        }
+    }
+    return NULL;
+}
+
+static void js_interp_propagate_reexports(Runtime* runtime, const char* source_ref,
+        String* source_name, Item value, int depth) {
+    if (!runtime || !source_ref || !source_name || depth > 64) return;
+    for (int index = 0; runtime->scripts && index < runtime->scripts->length; index++) {
+        JsScript* candidate = (JsScript*)runtime->scripts->data[index];
+        if (!candidate || candidate->profile != &js_profile || !candidate->is_es_module ||
+                !candidate->reference) continue;
+        ModuleDescriptor* module = module_get_for_runtime(runtime, candidate->reference);
+        if (!module) continue;
+        for (JsInterpExportBinding* binding = candidate->interp_exports;
+                binding; binding = binding->next) {
+            if (!binding->source || !js_interp_name_matches(binding->local_name, source_name)) {
+                continue;
+            }
+            char resolved[512];
+            jm_resolve_module_path(candidate->reference, binding->source->chars,
+                (int)binding->source->len, resolved, (int)sizeof(resolved));
+            if (strcmp(resolved, source_ref) != 0) continue;
+            js_set_key_default(module->namespace_obj,
+                js_interp_name_key(binding->export_name), value);
+            js_interp_propagate_reexports(runtime, candidate->reference,
+                binding->export_name, value, depth + 1);
+        }
+    }
+}
+
+static Item js_interp_read_module_export(Runtime* runtime, const char* reference,
+        String* export_name, int depth) {
+    if (!runtime || !reference || !export_name || depth > 64) return ItemError;
+    Item namespace_obj = js_module_get(js_make_string(reference));
+    if (get_type_id(namespace_obj) == LMD_TYPE_NULL) {
+        return js_throw_reference_error(js_make_string("imported module is unavailable"));
+    }
+    JsScript* source_script = js_interp_script_for_reference(runtime, reference);
+    for (JsInterpExportBinding* binding = source_script
+            ? source_script->interp_exports : NULL; binding; binding = binding->next) {
+        if (!binding->source || !js_interp_name_matches(binding->export_name, export_name)) {
+            continue;
+        }
+        char resolved[512];
+        jm_resolve_module_path(reference, binding->source->chars,
+            (int)binding->source->len, resolved, (int)sizeof(resolved));
+        if (binding->namespace_export) return js_module_get(js_make_string(resolved));
+        return js_interp_read_module_export(runtime, resolved, binding->local_name,
+            depth + 1);
+    }
+    Item has_export = js_has_own_property(namespace_obj, js_interp_name_key(export_name));
+    if (item_is_error(has_export)) return has_export;
+    if (!js_is_truthy(has_export)) {
+        return js_throw_reference_error(js_make_string("imported binding is uninitialized"));
+    }
+    return js_get_key_default(namespace_obj, js_interp_name_key(export_name));
+}
+
+static Item js_interp_read_import_binding(JsScript* script,
+        JsInterpImportBinding* binding) {
+    if (!script || !binding) return ItemError;
+    char resolved[512];
+    jm_resolve_module_path(script->reference, binding->source->chars,
+        (int)binding->source->len, resolved, (int)sizeof(resolved));
+    Item namespace_obj = js_module_get(js_make_string(resolved));
+    if (get_type_id(namespace_obj) == LMD_TYPE_NULL) {
+        return js_throw_reference_error(js_make_string("imported module is unavailable"));
+    }
+    return binding->namespace_import ? namespace_obj : js_interp_read_module_export(
+        context ? context->runtime : NULL, resolved, binding->export_name, 0);
+}
+
+static void js_interp_publish_export_bindings(JsInterpFrame* frame,
+        String* local_name, Item value) {
+    if (!frame || !frame->script || !frame->script->is_es_module || !local_name) return;
+    ModuleDescriptor* module = module_get_for_runtime(context ? context->runtime : NULL,
+        frame->script->reference);
+    if (!module) return;
+    Item namespace_obj = module->namespace_obj;
+    for (JsInterpExportBinding* binding = frame->script->interp_exports;
+            binding; binding = binding->next) {
+        if (!binding->source && js_interp_name_matches(binding->local_name, local_name)) {
+            js_set_key_default(namespace_obj, js_interp_name_key(binding->export_name), value);
+            js_interp_propagate_reexports(context ? context->runtime : NULL,
+                frame->script->reference, binding->export_name, value, 0);
+        }
+    }
+}
+
+static Item js_interp_publish_export_value(JsInterpFrame* frame,
+        Item namespace_obj, String* export_name, Item value) {
+    Item stored = js_set_key_default(namespace_obj, js_interp_name_key(export_name), value);
+    if (item_is_error(stored)) return stored;
+    js_interp_propagate_reexports(context ? context->runtime : NULL,
+        frame && frame->script ? frame->script->reference : NULL, export_name, value, 0);
+    return stored;
 }
 
 static bool js_interp_private_source_name(Item key) {
@@ -349,6 +528,16 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
             js_interp_name_equals(unresolved_name, "new.target")) {
         return js_interp_frame_new_target(frame);
     }
+    if (unresolved_name && !entry && js_interp_name_equals(unresolved_name, "import.meta")) {
+        if (!frame->script || !frame->script->is_es_module) {
+            return js_throw_syntax_error(js_make_string("import.meta outside module"));
+        }
+        RootFrame roots(2);
+        Rooted<Item> meta(roots, js_get_import_meta());
+        Rooted<Item> url(roots, js_make_string(frame->script->reference));
+        Item stored = js_set_key_cstr(meta.get(), "url", url.get());
+        return item_is_error(stored) ? stored : meta.get();
+    }
     // Object Environment Records sit in front of lexical bindings. Probe
     // before reading the static NameEntry so an outer TDZ does not mask a
     // visible `with` property.
@@ -372,6 +561,11 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         if (js_eval_local_has_var_binding(key)) {
             return js_eval_local_get_binding_or_fallback(key, ItemError);
         }
+    }
+    if (!entry) {
+        JsInterpImportBinding* imported = js_interp_import_binding(frame->script,
+            unresolved_name);
+        if (imported) return js_interp_read_import_binding(frame->script, imported);
     }
     if (!entry) {
         if (js_interp_name_equals(unresolved_name, "undefined")) return make_js_undefined();
@@ -398,12 +592,17 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     if (!frame) return ItemError;
     String* name = entry ? entry->name : unresolved_name;
     Item key = js_interp_name_key(name);
+    if (!entry && js_interp_import_binding(frame->script, name)) {
+        if (initialize) return value;
+        return js_throw_type_error("Assignment to constant variable");
+    }
     // `var`/parameter bindings may have been supplied by a previous direct
     // eval. Keep subsequent interpreted writes in the shared function journal
     // instead of accidentally materializing a realm-global property.
     if (!initialize && (!entry || !entry->is_const) &&
             js_eval_local_has_var_binding(key)) {
         js_eval_local_export_var(key, value);
+        js_interp_publish_export_bindings(frame, name, value);
         return value;
     }
     if (!entry) {
@@ -434,6 +633,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
                 if (item_is_error(set_result)) return set_result;
             }
         }
+        js_interp_publish_export_bindings(frame, entry->name, value);
         return value;
     }
     JsInterpEnv* env = js_interp_find_env(frame->env, entry->scope);
@@ -450,7 +650,9 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     }
     env->slots[entry->slot] = value.item;
     Item written = js_interp_write_arguments_param(frame, entry, value);
-    return item_is_error(written) ? written : value;
+    if (item_is_error(written)) return written;
+    js_interp_publish_export_bindings(frame, entry->name, value);
+    return value;
 }
 
 static int js_interp_function_param_count(const JsFunctionNode* function) {
@@ -528,6 +730,7 @@ static Item js_interp_make_field_initializer(JsInterpFrame* frame,
 
 static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node);
 static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node);
+static Item js_interp_load_es_module(Runtime* runtime, const char* filename);
 
 static NameEntry* js_interp_find_binding(JsInterpFrame* frame, String* name) {
     if (!frame || !name) return NULL;
@@ -1234,6 +1437,11 @@ static JsInterpCompletion js_interp_eval_call(JsInterpFrame* frame, JsCallNode* 
         js_interp_identifier_is((JsAstNode*)call->function, "require") &&
         ((JsIdentifierNode*)call->function)->entry == NULL &&
         !js_with_depth_active();
+    bool intrinsic_dynamic_import = !construct && call->function &&
+        call->function->node_type == AST_NODE_IDENT &&
+        js_interp_identifier_is((JsAstNode*)call->function, "import") &&
+        ((JsIdentifierNode*)call->function)->entry == NULL &&
+        !js_with_depth_active();
     if (super_call) {
         // The generic dispatcher installed this constructor's home class,
         // deferred derived `this` binding, and active new.target. Resolve the
@@ -1260,7 +1468,7 @@ static JsInterpCompletion js_interp_eval_call(JsInterpFrame* frame, JsCallNode* 
         callee_root.set(js_interp_member_uses_super(member)
             ? js_super_property_get(this_root.get(), key_root.get())
             : js_get_key_default(this_root.get(), key_root.get()));
-    } else if (!intrinsic_require) {
+    } else if (!intrinsic_require && !intrinsic_dynamic_import) {
         JsInterpCompletion callee = js_interp_eval(frame, (JsAstNode*)call->function);
         if (callee.kind != JS_INTERP_NORMAL) return callee;
         callee_root.set(callee.value);
@@ -1327,6 +1535,22 @@ static JsInterpCompletion js_interp_eval_call(JsInterpFrame* frame, JsCallNode* 
             value_root.set(js_make_string(resolved));
         }
         Item result = js_require(value_root.get());
+        return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
+    }
+    if (intrinsic_dynamic_import && js_array_length(arguments_root.get()) >= 1) {
+        value_root.set(js_elements_get_int(arguments_root.get(), 0));
+        if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+        Item string_value = js_to_string(value_root.get());
+        if (item_is_error(string_value)) return js_interp_throw(string_value);
+        String* requested = it2s(string_value);
+        char resolved[512];
+        jm_resolve_module_path(frame->script && frame->script->reference
+            ? frame->script->reference : ".", requested->chars,
+            (int)requested->len, resolved, (int)sizeof(resolved));
+        value_root.set(js_interp_load_es_module(context ? context->runtime : NULL,
+            resolved));
+        Item result = item_is_error(value_root.get()) ? js_promise_reject(value_root.get())
+            : js_promise_resolve(value_root.get());
         return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
     }
     if (super_call) {
@@ -1637,6 +1861,7 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
             // has an entry and therefore follows the regular error path.
             if (!has_arguments_binding && !identifier->entry && !js_global_binding_exists(
                     js_interp_name_key(identifier->name)) &&
+                    !js_interp_import_binding(frame->script, identifier->name) &&
                     !js_eval_local_has_var_binding(
                         js_interp_name_key(identifier->name))) {
                 return js_interp_normal(js_make_string("undefined"));
@@ -1966,7 +2191,7 @@ static JsInterpCompletion js_interp_initialize_scope(JsInterpFrame* frame,
         if (item_is_error(function_root.get())) return js_interp_throw(function_root.get());
         Item stored = js_interp_write_binding(frame, entry, NULL, function_root.get(), true);
         if (item_is_error(stored)) return js_interp_throw(stored);
-        if (entry->scope == frame->script->global_scope) {
+        if (entry->scope == frame->script->global_scope && !frame->script->is_module) {
             js_define_global_function_property(js_interp_name_key(entry->name), function_root.get());
         }
     }
@@ -2208,6 +2433,135 @@ static JsInterpCompletion js_interp_exec_declaration(JsInterpFrame* frame,
     return js_interp_normal(make_js_undefined());
 }
 
+static JsInterpCompletion js_interp_exec_export(JsInterpFrame* frame,
+        JsExportNode* exported) {
+    if (!frame || !exported || !frame->script || !frame->script->is_es_module) {
+        return js_interp_throw(js_throw_syntax_error(
+            js_make_string("export outside module")));
+    }
+    RootFrame roots(5);
+    Rooted<Item> namespace_root(roots, js_get_active_module_namespace());
+    Rooted<Item> value_root(roots, ItemNull);
+    Rooted<Item> source_namespace_root(roots, ItemNull);
+    Rooted<Item> keys_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    if (exported->source) {
+        char resolved[512];
+        jm_resolve_module_path(frame->script->reference, exported->source->chars,
+            (int)exported->source->len, resolved, (int)sizeof(resolved));
+        source_namespace_root.set(js_module_get(js_make_string(resolved)));
+        if (get_type_id(source_namespace_root.get()) == LMD_TYPE_NULL) {
+            return js_interp_throw(js_throw_reference_error(
+                js_make_string("re-exported module is unavailable")));
+        }
+    }
+    JsInterpCompletion completion = js_interp_normal(make_js_undefined());
+    if (exported->declaration) {
+        completion = js_interp_exec(frame, exported->declaration);
+        if (completion.kind != JS_INTERP_NORMAL) return completion;
+        if (!exported->is_default &&
+                (exported->declaration->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
+                 exported->declaration->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+                 exported->declaration->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
+            String* name = exported->declaration->node_type ==
+                    JS_AST_NODE_FUNCTION_DECLARATION
+                ? ((JsFunctionNode*)exported->declaration)->name
+                : ((JsClassNode*)exported->declaration)->name;
+            NameEntry* entry = js_interp_find_binding(frame, name);
+            value_root.set(js_interp_read_binding(frame, entry, name));
+            if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+            Item stored = js_interp_publish_export_value(frame, namespace_root.get(), name,
+                value_root.get());
+            if (item_is_error(stored)) return js_interp_throw(stored);
+        } else if (!exported->is_default &&
+                exported->declaration->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            JsVariableDeclarationNode* declaration =
+                (JsVariableDeclarationNode*)exported->declaration;
+            for (JsAstNode* declarator = (JsAstNode*)declaration->declarations;
+                    declarator; declarator = (JsAstNode*)declarator->next) {
+                JsVariableDeclaratorNode* variable =
+                    (JsVariableDeclaratorNode*)declarator;
+                if (!variable->id || variable->id->node_type != AST_NODE_IDENT) continue;
+                String* name = ((JsIdentifierNode*)variable->id)->name;
+                NameEntry* entry = js_interp_find_binding(frame, name);
+                value_root.set(js_interp_read_binding(frame, entry, name));
+                if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+                Item stored = js_interp_publish_export_value(frame, namespace_root.get(), name,
+                    value_root.get());
+                if (item_is_error(stored)) return js_interp_throw(stored);
+            }
+        }
+    }
+    if (exported->is_star && !exported->is_namespace) {
+        keys_root.set(js_object_keys(source_namespace_root.get()));
+        if (item_is_error(keys_root.get())) return js_interp_throw(keys_root.get());
+        int64_t count = js_array_length(keys_root.get());
+        for (int64_t index = 0; index < count; index++) {
+            key_root.set(js_elements_get_int(keys_root.get(), index));
+            if (item_is_error(key_root.get())) return js_interp_throw(key_root.get());
+            if (get_type_id(key_root.get()) != LMD_TYPE_STRING) continue;
+            String* name = it2s(key_root.get());
+            // Export-star intentionally omits the source module's default.
+            if (js_interp_name_equals(name, "default") ||
+                    js_interp_has_explicit_export(frame->script, name)) continue;
+            if (!js_interp_add_reexport_binding(frame->script, name, name,
+                    exported->source)) {
+                return js_interp_throw(ItemError);
+            }
+            value_root.set(js_get_key_default(source_namespace_root.get(), key_root.get()));
+            if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+            Item stored = js_interp_publish_export_value(frame, namespace_root.get(), name,
+                value_root.get());
+            if (item_is_error(stored)) return js_interp_throw(stored);
+        }
+    }
+    for (JsAstNode* spec = exported->specifiers; spec;
+            spec = (JsAstNode*)spec->next) {
+        JsExportSpecifierNode* item = (JsExportSpecifierNode*)spec;
+        if (exported->is_namespace) {
+            value_root.set(source_namespace_root.get());
+        } else if (exported->source) {
+            value_root.set(js_get_key_default(source_namespace_root.get(),
+                js_interp_name_key(item->local_name)));
+        } else {
+            NameEntry* entry = js_interp_find_binding(frame, item->local_name);
+            value_root.set(js_interp_read_binding(frame, entry, item->local_name));
+        }
+        if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+        Item stored = js_interp_publish_export_value(frame, namespace_root.get(),
+            item->export_name, value_root.get());
+        if (item_is_error(stored)) return js_interp_throw(stored);
+    }
+    if (!exported->is_default) return completion;
+    if (exported->declaration &&
+            (exported->declaration->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
+             exported->declaration->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+             exported->declaration->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
+        String* name = exported->declaration->node_type ==
+                JS_AST_NODE_FUNCTION_DECLARATION
+            ? ((JsFunctionNode*)exported->declaration)->name
+            : ((JsClassNode*)exported->declaration)->name;
+        if (name) {
+            NameEntry* entry = js_interp_find_binding(frame, name);
+            value_root.set(js_interp_read_binding(frame, entry, name));
+        } else {
+            // Anonymous default function declarations are not local module
+            // bindings. Materialize their one exported function identity here.
+            value_root.set(js_interp_make_function(frame,
+                (JsFunctionNode*)exported->declaration));
+            if (!item_is_error(value_root.get())) {
+                js_set_function_name(value_root.get(), js_make_string("default"));
+            }
+        }
+    } else {
+        value_root.set(completion.value);
+    }
+    if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+    Item stored = js_interp_publish_export_value(frame, namespace_root.get(),
+        name_pool_create_len(frame->script->name_pool, "default", 7), value_root.get());
+    return item_is_error(stored) ? js_interp_throw(stored) : completion;
+}
+
 static JsInterpCompletion js_interp_exec_catch(JsInterpFrame* frame,
         JsCatchNode* handler, Item thrown) {
     if (!handler) return js_interp_throw(thrown);
@@ -2245,6 +2599,12 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         // Declaration instantiation created the function before any statement
         // executed. Re-creating it here would change its observable identity.
         return js_interp_normal(make_js_undefined());
+    case JS_AST_NODE_IMPORT_DECLARATION:
+        // Module linking eagerly loads dependencies before body execution.
+        // Reads stay live through the retained namespace binding plan.
+        return js_interp_normal(make_js_undefined());
+    case JS_AST_NODE_EXPORT_DECLARATION:
+        return js_interp_exec_export(frame, (JsExportNode*)node);
     case JS_AST_NODE_CLASS_DECLARATION:
         return js_interp_eval_class(frame, (JsClassNode*)node, true);
     case JS_AST_NODE_WITH_STATEMENT: {
@@ -2560,6 +2920,8 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
     case AST_NODE_IF_EXPR: case AST_NODE_WHILE_STAM: case AST_NODE_DO_WHILE_STAM:
     case AST_NODE_FOR_STAM: case AST_NODE_RETURN_STAM: case AST_NODE_RAISE_STAM:
     case AST_NODE_BREAK_STAM: case AST_NODE_CONTINUE_STAM: case AST_NODE_TRY_STAM:
+    case JS_AST_NODE_IMPORT_DECLARATION: case JS_AST_NODE_EXPORT_DECLARATION:
+    case JS_AST_NODE_IMPORT_SPECIFIER: case JS_AST_NODE_EXPORT_SPECIFIER:
     case JS_AST_NODE_SWITCH_STATEMENT: case JS_AST_NODE_SWITCH_CASE:
     case JS_AST_NODE_TEMPLATE_LITERAL: case JS_AST_NODE_TEMPLATE_ELEMENT:
     case JS_AST_NODE_SPREAD_ELEMENT:
@@ -2599,9 +2961,8 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
         break;
     }
     case AST_NODE_IDENT:
-        // `arguments` and `super` are activation bindings carried by the
-        // shared function/call kernels. Module metadata remains unavailable.
-        if (js_interp_identifier_is(node, "import.meta")) state->supported = false;
+        // `arguments`, `super`, and `import.meta` are activation/module
+        // bindings carried by the shared runtime kernels.
         break;
     case AST_NODE_VARIABLE_DECLARATOR:
         if (!((JsVariableDeclaratorNode*)node)->id ||
@@ -2609,13 +2970,8 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
             state->supported = false;
         }
         break;
-    case AST_NODE_CALL_EXPR: {
-        JsCallNode* call = (JsCallNode*)node;
-        if (js_interp_identifier_is((JsAstNode*)call->function, "import")) {
-            state->supported = false;
-        }
+    case AST_NODE_CALL_EXPR:
         break;
-    }
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR:
         break;
@@ -2747,36 +3103,55 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
             !js_set_active_module_state_id(script->module_state_id)) {
         return ItemError;
     }
+    JsInterpModuleNamespaceScope module_namespace(script);
+    if (script->is_es_module && !module_namespace.active) return ItemError;
     RootFrame roots(3);
-    Rooted<Item> this_root(roots, js_get_global_this());
+    // ES module code has an undefined top-level this; classic scripts keep
+    // the shared realm receiver.
+    Rooted<Item> this_root(roots, script->is_es_module ? make_js_undefined()
+        : js_get_global_this());
     Rooted<Item> new_target_root(roots, js_get_new_target());
     Rooted<Item> home_class_root(roots, ItemNull);
     JsInterpFrame frame = {script, NULL, this_root.home(), new_target_root.home(),
         home_class_root.home(),
         script->strict_mode, NULL, 0};
-    JsInterpCompletion initialized = js_interp_initialize_scope(&frame, script->global_scope);
-    if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
+    if (!script->is_es_module || !script->es_module_scope_initialized) {
+        JsInterpCompletion initialized = js_interp_initialize_scope(&frame,
+            script->global_scope);
+        if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
+    }
     JsInterpCompletion result = js_interp_exec(&frame, (JsAstNode*)script->ast_root);
     return result.kind == JS_INTERP_NORMAL || result.kind == JS_INTERP_RETURN
         ? result.value : result.value;
 }
 
-static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
-        size_t source_length, const char* filename, bool is_module, bool strict,
-        uint64_t* result_home) {
-    if (!runtime || !source) return ItemError;
+static JsScript* js_interp_adopt_source(Runtime* runtime, const char* source,
+        size_t source_length, const char* filename, bool strict) {
+    if (!runtime || !source) return NULL;
     JsTranspiler* transpiler = js_transpiler_create(runtime);
+    if (transpiler && strict) {
+        transpiler->strict_mode = true;
+        transpiler->global_scope->strict = true;
+    }
     if (!transpiler || !js_transpiler_parse(transpiler, source, source_length)) {
         js_transpiler_destroy(transpiler);
-        return ItemError;
+        return NULL;
     }
     JsAstNode* ast = build_js_ast_indexed(transpiler, ts_tree_root_node(transpiler->tree));
     if (!ast || js_check_early_errors(transpiler, ast) > 0) {
         js_transpiler_destroy(transpiler);
-        return ItemError;
+        return NULL;
     }
     JsScript* script = js_script_adopt_transpiler(transpiler, runtime,
         filename ? filename : "<inline-js>");
+    return script;
+}
+
+static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
+        size_t source_length, const char* filename, bool is_module, bool strict,
+        uint64_t* result_home) {
+    JsScript* script = js_interp_adopt_source(runtime, source, source_length,
+        filename, strict);
     if (!script) return ItemError;
     script->is_module = is_module;
     if (strict) script->strict_mode = true;
@@ -2794,4 +3169,229 @@ Item js_interp_execute_module_source(Runtime* runtime, const char* source,
         uint64_t* result_home) {
     return js_interp_execute_source_mode(runtime, source, source_length, filename,
         true, strict, result_home);
+}
+
+static bool js_interp_is_lambda_module_path(const char* filename) {
+    size_t length = filename ? strlen(filename) : 0;
+    return length >= 3 && strcmp(filename + length - 3, ".ls") == 0;
+}
+
+static Item js_interp_load_es_module(Runtime* runtime, const char* filename) {
+    if (!runtime || !filename) return ItemError;
+    Item specifier = js_make_string(filename);
+    Item existing = js_module_get(specifier);
+    if (get_type_id(existing) != LMD_TYPE_NULL) return existing;
+    if (js_interp_is_lambda_module_path(filename)) {
+        // Publish the loading record directly into the shared registry. This
+        // keeps Lambda's compiler and JS linker on one descriptor rather than
+        // registering a temporary JS namespace and replacing it afterward.
+        runtime->js_runtime_used = true;
+        ModuleDescriptor* loading = module_register_loading_with_namespace_ops_for_runtime(
+            runtime, filename, "lambda", NULL);
+        if (!loading) return ItemError;
+        Script* lambda_script = load_script_mir_direct(runtime, filename, NULL, true);
+        ModuleDescriptor* lambda_module = lambda_script
+            ? module_get_for_runtime(runtime, lambda_script->reference) : NULL;
+        if (!lambda_module) {
+            return js_throw_reference_error(js_make_string("Cannot load Lambda module"));
+        }
+        return lambda_module->namespace_obj;
+    }
+    char* source = read_text_file(filename);
+    if (!source) return js_throw_reference_error(js_make_string("Cannot find module"));
+    Item result = js_interp_execute_es_module_source(runtime, source,
+        strlen(source), filename, NULL);
+    mem_free(source);
+    return result;
+}
+
+static Item js_interp_load_static_imports(Runtime* runtime, JsScript* script) {
+    JsProgramNode* program = script && script->ast_root &&
+            script->ast_root->node_type == AST_SCRIPT
+        ? (JsProgramNode*)script->ast_root : NULL;
+    for (JsAstNode* statement = program ? (JsAstNode*)program->body : NULL;
+            statement; statement = (JsAstNode*)statement->next) {
+        String* source = NULL;
+        if (statement->node_type == JS_AST_NODE_IMPORT_DECLARATION) {
+            source = ((JsImportNode*)statement)->source;
+        } else if (statement->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
+            source = ((JsExportNode*)statement)->source;
+        }
+        if (!source) continue;
+        char resolved[512];
+        jm_resolve_module_path(script->reference, source->chars,
+            (int)source->len, resolved, (int)sizeof(resolved));
+        Item namespace_obj = js_interp_load_es_module(runtime, resolved);
+        if (item_is_error(namespace_obj) || get_type_id(namespace_obj) == LMD_TYPE_NULL) {
+            return item_is_error(namespace_obj) ? namespace_obj :
+                js_throw_reference_error(js_make_string("imported module is unavailable"));
+        }
+    }
+    return make_js_undefined();
+}
+
+typedef struct JsInterpStarExportName {
+    String* name;
+    String* source_ref;
+    struct JsInterpStarExportName* next;
+} JsInterpStarExportName;
+
+static Item js_interp_validate_star_exports(Runtime* runtime, JsScript* script) {
+    if (!runtime || !script || !script->pool || !script->name_pool) return ItemError;
+    JsProgramNode* program = script->ast_root && script->ast_root->node_type == AST_SCRIPT
+        ? (JsProgramNode*)script->ast_root : NULL;
+    JsInterpStarExportName* seen = NULL;
+    RootFrame roots(2);
+    Rooted<Item> keys_root(roots, ItemNull);
+    Rooted<Item> key_root(roots, ItemNull);
+    for (JsAstNode* statement = program ? (JsAstNode*)program->body : NULL;
+            statement; statement = (JsAstNode*)statement->next) {
+        if (statement->node_type != JS_AST_NODE_EXPORT_DECLARATION) continue;
+        JsExportNode* exported = (JsExportNode*)statement;
+        if (!exported->is_star || exported->is_namespace || !exported->source) continue;
+        char resolved[512];
+        jm_resolve_module_path(script->reference, exported->source->chars,
+            (int)exported->source->len, resolved, (int)sizeof(resolved));
+        Item namespace_obj = js_module_get(js_make_string(resolved));
+        if (get_type_id(namespace_obj) == LMD_TYPE_NULL) {
+            return js_throw_reference_error(js_make_string("re-exported module is unavailable"));
+        }
+        String* source_ref = name_pool_create_len(script->name_pool, resolved,
+            strlen(resolved));
+        if (!source_ref) return ItemError;
+        keys_root.set(js_object_keys(namespace_obj));
+        if (item_is_error(keys_root.get())) return keys_root.get();
+        int64_t count = js_array_length(keys_root.get());
+        for (int64_t index = 0; index < count; index++) {
+            key_root.set(js_elements_get_int(keys_root.get(), index));
+            if (item_is_error(key_root.get())) return key_root.get();
+            if (get_type_id(key_root.get()) != LMD_TYPE_STRING) continue;
+            String* source_name = it2s(key_root.get());
+            if (js_interp_name_equals(source_name, "default") ||
+                    js_interp_has_explicit_export(script, source_name)) continue;
+            String* name = name_pool_create_len(script->name_pool, source_name->chars,
+                source_name->len);
+            if (!name) return ItemError;
+            for (JsInterpStarExportName* prior = seen; prior; prior = prior->next) {
+                if (!js_interp_name_matches(prior->name, name)) continue;
+                if (!js_interp_name_matches(prior->source_ref, source_ref)) {
+                    return js_throw_syntax_error(js_make_string(
+                        "ambiguous export-star binding"));
+                }
+                name = NULL;
+                break;
+            }
+            if (!name) continue;
+            JsInterpStarExportName* added = (JsInterpStarExportName*)pool_calloc(
+                script->pool, sizeof(JsInterpStarExportName));
+            if (!added) return ItemError;
+            added->name = name;
+            added->source_ref = source_ref;
+            added->next = seen;
+            seen = added;
+        }
+    }
+    return make_js_undefined();
+}
+
+static Item js_interp_instantiate_es_module(Runtime* runtime, JsScript* script) {
+    if (!runtime || !script || !script->is_es_module) return ItemError;
+    if (script->es_module_scope_initialized) return make_js_undefined();
+    JsInterpCurrentFileScope current_file(script->reference);
+    int global_slots = js_interp_scope_slot_count(script->global_scope);
+    JsInterpModuleStateScope module_state;
+    if (!lambda_module_state_prepare(script->module_state_id,
+            (uint32_t)(global_slots > 0 ? global_slots : 1)) ||
+            !js_set_active_module_state_id(script->module_state_id)) {
+        return ItemError;
+    }
+    JsInterpModuleNamespaceScope module_namespace(script);
+    if (!module_namespace.active) return ItemError;
+    RootFrame roots(3);
+    Rooted<Item> this_root(roots, make_js_undefined());
+    Rooted<Item> new_target_root(roots, js_get_new_target());
+    Rooted<Item> home_class_root(roots, ItemNull);
+    JsInterpFrame frame = {script, NULL, this_root.home(), new_target_root.home(),
+        home_class_root.home(), true, NULL, 0};
+    JsInterpCompletion initialized = js_interp_initialize_scope(&frame,
+        script->global_scope);
+    if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
+    // ES declaration instantiation is a one-time state transition. The body
+    // reuses these cells so hoisted function identity survives a cycle.
+    script->es_module_scope_initialized = true;
+    return make_js_undefined();
+}
+
+Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
+        uint64_t* result_home) {
+    (void)result_home;
+    if (!runtime || !script) return ItemError;
+    script->is_module = true;
+    script->is_es_module = true;
+    script->strict_mode = true;
+
+    EvalContext* eval = NULL;
+    bool reusing_context = false;
+    if (!js_prepare_eval_context(runtime, true, &eval, &reusing_context)) return ItemError;
+    (void)eval;
+    // Static import linkage may compile a Lambda dependency. Seal the JS
+    // parser root first so both languages append runtime names through the
+    // canonical dynamic child rather than mutating the frozen static table.
+    if (!js_activate_runtime_name_pool()) return ItemError;
+    // Cross-language namespace construction uses the JS property runtime
+    // during linking, before the AST body reaches js_interp_execute_script().
+    // Give that shared runtime its document/input owner up front.
+    Input* input = Input::create(context->pool);
+    if (!input) return ItemError;
+    js_runtime_set_input(input);
+    // Reject before registration or dependency evaluation. A forced AST run
+    // may not observe an unsupported unit through a dependency side effect.
+    if (!js_interp_script_is_supported(script)) {
+        return js_throw_syntax_error(js_make_string("unsupported AST interpreter module"));
+    }
+    ModuleDescriptor* module = module_get_for_runtime(runtime, script->reference);
+    if (module && (module->initialized || module->loading)) return module->namespace_obj;
+    module = module_register_loading_with_namespace_ops_for_runtime(runtime,
+        script->reference, "js", NULL);
+    if (!module) return ItemError;
+    module->specifier_item = js_make_string(script->reference);
+
+    RootFrame roots(1);
+    Rooted<Item> namespace_root(roots, module->namespace_obj);
+    Item instantiated = js_interp_instantiate_es_module(runtime, script);
+    if (item_is_error(instantiated)) {
+        module->evaluation_error = instantiated;
+        module->loading = false;
+        return instantiated;
+    }
+    Item imports = js_interp_load_static_imports(runtime, script);
+    if (item_is_error(imports)) {
+        module->evaluation_error = imports;
+        module->loading = false;
+        return imports;
+    }
+    Item star_validation = js_interp_validate_star_exports(runtime, script);
+    if (item_is_error(star_validation)) {
+        module->evaluation_error = star_validation;
+        module->loading = false;
+        return star_validation;
+    }
+    Item evaluated = js_interp_execute_script(runtime, script, NULL);
+    if (item_is_error(evaluated)) {
+        module->evaluation_error = evaluated;
+        module->loading = false;
+        return evaluated;
+    }
+    module->namespace_obj = namespace_root.get();
+    module->initialized = true;
+    module->loading = false;
+    return namespace_root.get();
+}
+
+Item js_interp_execute_es_module_source(Runtime* runtime, const char* source,
+        size_t source_length, const char* filename, uint64_t* result_home) {
+    JsScript* script = js_interp_adopt_source(runtime, source, source_length,
+        filename, true);
+    if (!script) return ItemError;
+    return js_interp_execute_es_module_script(runtime, script, result_home);
 }

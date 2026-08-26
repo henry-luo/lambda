@@ -994,6 +994,8 @@ typedef struct AstExportDeclNode : AstNode {
     AstNode* specifiers;
     String* source;
     bool is_default;
+    bool is_star;
+    bool is_namespace;
 } AstExportDeclNode;
 
 typedef struct AstExportSpecifierNode : AstNode {

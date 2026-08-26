@@ -14242,20 +14242,33 @@ JS_FORWARD_LOCAL_RETURN(Item, js_call_entry_generic,
 // The generic entry is the sole ordinary-call semantic authority. Tune7's
 // specialized templates duplicated its rooting, state switching, and restore
 // protocol while the release path did not benefit from the extra entry family.
-// Sole internal Call kernel. Representation-level exotics are resolved here;
-// every LMD_TYPE_FUNC must already own its final protocol entry.
+// Sole internal Call kernel. JavaScript functions own a JsFunction [[Call]]
+// entry; published Lambda functions retain their Core boxed ABI and cross this
+// boundary through its existing dynamic dispatcher.
 static inline Item js_call_value(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted) {
     if (get_type_id(func_item) == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)func_item.function;
+        // The shared module registry publishes Lambda exports as Core Function
+        // values. Do not reinterpret their compact layout as JsFunction; their
+        // boxed ABI performs the required signature and result-home handling.
+        Function* lambda_fn = func_item.function;
+        if (lambda_fn && (lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION ||
+                lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE ||
+                lambda_fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER ||
+                lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED)) {
+            List lambda_args = {.items = args, .length = arg_count};
+            return fn_call_into(lambda_fn, &lambda_args, result_home);
+        }
         if (fn && fn->invoke) {
             return fn->invoke(func_item, this_val, args, arg_count, result_home,
                 args_prerooted);
         }
-        // A published function without [[Call]] is a factory/finalization bug,
-        // not a second dispatch lane (D6.2.2v2).
-        log_error("js-call-value: published function has no call entry");
-        return ItemError;
+        if (fn && fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) {
+            log_error("js-call-value: published JavaScript function has no call entry");
+            return ItemError;
+        }
+        return js_throw_type_error("value is not a callable JavaScript or Lambda function");
     }
     return js_call_function_impl_mode(func_item, this_val, args, arg_count,
         result_home, args_prerooted, (Item){0});

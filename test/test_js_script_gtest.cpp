@@ -147,6 +147,214 @@ TEST(JsInterpreter, UsesSharedCommonJsResolverAndModuleRegistry) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, LinksEsModulesWithLiveRegistryBindings) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char direct_source[] =
+        "export let counter = 40; export function bump() { counter += 1; }";
+    Item direct_namespace = js_interp_execute_es_module_source(&runtime,
+        direct_source, sizeof(direct_source) - 1,
+        "test/js/interp_esm/direct.mjs", NULL);
+    ASSERT_FALSE(item_is_error(direct_namespace));
+    Item direct_bump = js_get_key_default(direct_namespace, js_make_string("bump"));
+    ASSERT_EQ(get_type_id(direct_bump), LMD_TYPE_FUNC);
+    ASSERT_FALSE(item_is_error(js_call_function(direct_bump, make_js_undefined(),
+        NULL, 0)));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(direct_namespace,
+        js_make_string("counter")), flt2it(41.0)).item, b2it(true));
+
+    const char source[] =
+        "import { bump, counter } from './dep.mjs'; "
+        "bump(); export const answer = counter + 1;";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    Item answer = js_get_key_default(namespace_obj, js_make_string("answer"));
+    ASSERT_FALSE(item_is_error(answer));
+    EXPECT_EQ(js_strict_equal(answer, flt2it(42.0)).item, b2it(true));
+    ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/main.mjs"),
+        nullptr);
+    ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/dep.mjs"),
+        nullptr);
+
+    const char global_probe[] = "typeof answer;";
+    Item global_result = js_interp_execute_source(&runtime, global_probe,
+        sizeof(global_probe) - 1, "esm-global-probe.js", NULL);
+    ASSERT_FALSE(item_is_error(global_result));
+    EXPECT_EQ(js_strict_equal(global_result, js_make_string("undefined")).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, SupportsModuleMetadataAndDynamicImports) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char metadata_source[] = "export default import.meta.url;";
+    Item metadata = js_interp_execute_es_module_source(&runtime,
+        metadata_source, sizeof(metadata_source) - 1,
+        "test/js/interp_esm/metadata.mjs", NULL);
+    ASSERT_FALSE(item_is_error(metadata));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(metadata, js_make_string("default")),
+        js_make_string("test/js/interp_esm/metadata.mjs")).item, b2it(true));
+
+    const char source[] =
+        "globalThis.__interp_dynamic_counter = 0; "
+        "import('./dep.mjs').then(function(ns) { "
+        "globalThis.__interp_dynamic_counter = ns.counter; });";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item result = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/dynamic.js", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(result));
+    Item dynamic_value = js_get_key_default(js_get_global_this(),
+        js_make_string("__interp_dynamic_counter"));
+    EXPECT_EQ(js_strict_equal(dynamic_value, flt2it(40.0)).item, b2it(true));
+    ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/dep.mjs"),
+        nullptr);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesLiveBindingsThroughNamedReexports) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "import { bump, liveCounter } from './reexport.mjs'; "
+        "bump(); export default liveCounter;";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/reexport-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
+        js_make_string("default")), flt2it(41.0)).item, b2it(true));
+    ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/reexport.mjs"),
+        nullptr);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesLiveBindingsThroughStarReexports) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "import { bump, counter } from './star.mjs'; "
+        "bump(); export default counter;";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/star-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
+        js_make_string("default")), flt2it(41.0)).item, b2it(true));
+    ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/star.mjs"),
+        nullptr);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ExportsNamespaceObjectsAndAnonymousDefaultFunctions) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char namespace_source[] =
+        "import { dependency } from './namespace.mjs'; "
+        "dependency.bump(); export default dependency.counter;";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_to_mir(&runtime, namespace_source,
+        "test/js/interp_esm/namespace-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
+        js_make_string("default")), flt2it(41.0)).item, b2it(true));
+
+    const char anonymous_source[] = "export default function() { return 42; }";
+    Item anonymous = js_interp_execute_es_module_source(&runtime, anonymous_source,
+        sizeof(anonymous_source) - 1, "test/js/interp_esm/anonymous-default.mjs", NULL);
+    ASSERT_FALSE(item_is_error(anonymous));
+    Item default_function = js_get_key_default(anonymous, js_make_string("default"));
+    ASSERT_FALSE(item_is_error(default_function));
+    Item called = js_call_function(default_function, make_js_undefined(), NULL, 0);
+    ASSERT_FALSE(item_is_error(called));
+    EXPECT_EQ(js_strict_equal(called, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, InstantiatesHoistedExportsBeforeCircularDependencies) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] = "import answer from './circular-a.mjs'; export default answer;";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/circular-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
+        js_make_string("default")), flt2it(42.0)).item, b2it(true));
+    ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/circular-a.mjs"),
+        nullptr);
+    ASSERT_NE(module_get_for_runtime(&runtime, "test/js/interp_esm/circular-b.mjs"),
+        nullptr);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RejectsAmbiguousStarExportsBeforeModuleBodyExecution) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "export * from './duplicate-first.mjs'; "
+        "export * from './duplicate-second.mjs'; "
+        "globalThis.__interp_ambiguous_star_body = true;";
+    Item result = js_interp_execute_es_module_source(&runtime, source,
+        sizeof(source) - 1, "test/js/interp_esm/ambiguous-star.mjs", NULL);
+
+    EXPECT_TRUE(item_is_error(result));
+    EXPECT_EQ(js_has_own_property(js_get_global_this(),
+        js_make_string("__interp_ambiguous_star_body")).item, b2it(false));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ImportsLambdaModulesThroughTheSharedRegistry) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "import { increment } from './lambda_dep.ls'; "
+        "export default increment(41);";
+    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    Item namespace_obj = transpile_js_to_mir(&runtime, source,
+        "test/js/interp_esm/lambda-main.mjs", NULL);
+    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+
+    ASSERT_FALSE(item_is_error(namespace_obj));
+    EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
+        js_make_string("default")), flt2it(42.0)).item, b2it(true));
+    ModuleDescriptor* lambda_module = module_get_for_runtime(&runtime,
+        "test/js/interp_esm/lambda_dep.ls");
+    ASSERT_NE(lambda_module, nullptr);
+    EXPECT_STREQ(lambda_module->source_lang, "lambda");
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ExecutesControlFlowAndPropertyReferences) {
     Runtime runtime = {};
     runtime_init(&runtime);

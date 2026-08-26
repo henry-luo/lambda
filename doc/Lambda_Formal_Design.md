@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.36.0 (2026-08-26)
+**Spec version:** 1.37.0 (2026-08-26)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1155,7 +1155,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   generated `parser.c` remain a reference artifact and are regenerated from
   grammar sources (never hand-edit `parser.c`). Build config generates the
   build files (never hand-edit the Lua). [CGP5, rules 5, 7]
-- **D8.1.3v8*** LambdaJS has an explicit, boxed AST interpreter backend. A
+- **D8.1.3v9*** LambdaJS has an explicit, boxed AST interpreter backend. A
   retained `JsScript : Script` owns its AST/source facts and stable module
   identity; it executes in the same runtime-owned `EvalContext`, GC heap,
   event loop, and module-state registry as Lambda. AST functions are an
@@ -1196,7 +1196,28 @@ loosely across the corpus — context disambiguates, and we live with it.
   module registry. Its synthetic wrapper executes in a private module slab
   and restores the caller's active slab on return, so `module`/`exports` never
   leak into the page global and nested loads retain ordinary cache identity.
-  ES module declaration/linking remains excluded.
+  The admitted synchronous ES-module slice uses the same registry rather than
+  a JS-private cache: a module first publishes its registry-owned namespace
+  placeholder, instantiates hoisted function declarations, then traverses
+  static dependencies and executes its retained `JsScript` in its own shared
+  module slab. It admits default/named/namespace imports; default/named,
+  namespace (`export * as name`), and non-ambiguous star exports; named and
+  star re-exports; `import.meta.url`; and dynamic `import()` as a Promise over
+  that same resolver. Import reads resolve through the retained binding plan
+  on every read, and export writes propagate through the registry, so the
+  admitted named bindings remain live across re-exports and circular function
+  imports. ES top-level `this` is undefined and imports are read-only.
+  A `.ls` target is compiled by Lambda into the same registry descriptor; its
+  public boxed function values retain their `TypeFunc` and cross the ordinary
+  call kernel through Lambda's existing boxed dynamic-call ABI, not through a
+  wrapper heap or a second evaluator. Thus one page/runtime has one
+  `EvalContext`, heap, event-loop owner, module registry, and active module
+  state authority, while Lambda and JavaScript retain separate semantic
+  walkers and activation records. Top-level await, async module evaluation,
+  generators/async functions, ambiguous star-export resolution, shared T0/T1
+  environments, continuations, and AUTO policy remain excluded. The unset
+  backend remains the established MIR policy until the mixed-tier, suspension,
+  and performance gates are complete.
   An AST ordinary function materializes the existing runtime `arguments`
   object in its precisely traced activation environment before evaluating
   parameter defaults. Sloppy functions with simple identifier parameters use
@@ -1207,11 +1228,8 @@ loosely across the corpus — context disambiguates, and we live with it.
   state after the activation has escaped.
   The support admission runs after parse/bind/index but before declarations or
   user code; unsupported syntax raises a JS error in the prepared realm and
-  never replays through MIR. ES modules,
-  generators/async/top-level await, and T0/T1 promotion remain
-  excluded. The unset backend remains the established MIR policy until the
-  mixed-tier ABI, suspension, and performance gates are complete. [D1.3,
-  D1.5, D1.7, D6.2.2v2, D6.2.3v2, D8.2.4, D8.4.1v2, D8.4.3v2, JSI1–JSI13]
+  never replays through MIR. [D1.3, D1.5, D1.7, D5.4.1, D6.2.2v2, D6.2.3v2,
+  D8.2.4, D8.4.1v2, D8.4.3v2, JSI1–JSI13]
 
 ### D8.2 Unified AST
 
@@ -1415,7 +1433,7 @@ Status of `*`-marked rulings as of 2026-08-24.
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
 | D8.1.1v5 | Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for aggregate/structured signatures, mutable/index writes, object-field identifiers, indirect/`var` calls, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
 | D8.1.2v2 | Decided 2026-08-24 with D8.1.1v4. `grammar-lambda.js` remains the complete Tree-sitter syntax oracle/editor/bindings grammar; `grammar.js` and generated `parser.c` are reference artifacts regenerated by the normal grammar target and are never hand-edited. The production Lambda parser is maintained in `lambda/runtime/parser/` and is built through the generated build configuration. |
-| D8.1.3v8 | Revised 2026-08-26: the LambdaJS AST tier admits the implemented synchronous P3 surface plus direct/indirect eval, `new.target`, public `super`, ordinary/arrow `arguments`, private class elements, and synchronous CommonJS loading. A traced class-private environment retains each evaluated class identity for fields, methods/accessors, static blocks, and nested closures; the existing private-key, field/brand, accessor, and private-`in` kernels remain the semantic authority. AST arrows capture their defining `new.target`, lexical home class, and nearest function `arguments` object; ordinary functions materialize the runtime object in their traced activation before parameter-default evaluation. Sloppy simple parameters use the existing mapped-alias helpers, while strict/non-simple functions use the existing unmapped object and its `callee` policy. Explicit derived constructors use the existing derived-`this` transition, live superclass construct capability, and post-super field initialization; super property reads/writes/calls use the same runtime reference path for classes and object methods. Direct eval delegates only the dynamic source to the established dynamic-code compiler, under the caller's shared EvalContext bridge, interpreter-cell writeback, eval-local var journal, and global lexical-to-slab synchronization; it never falls back or replays the enclosing AST script. AST `require()` uses the existing relative resolver, CJS cache, and runtime module registry; each CJS `JsScript` runs in its own private slab and restores the enclosing active slab after nested execution. `JsScript` remains in the common Runtime catalog and shares the canonical EvalContext/module-state slab with Lambda; AST-body function environments are precisely traced. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR while ES modules, shared T0/T1 environments, continuations, and AUTO policy are pending. Status and focused gates: `vibe/Lambda_Design_JS_Interpreter.md` and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
+| D8.1.3v9 | Revised 2026-08-26: the LambdaJS AST tier now includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, continuations, and AUTO policy remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/Lambda_Design_JS_Interpreter.md` and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.2.1–D8.2.3 | Structural Unified AST convergence is substantially landed for Lambda/JS: common core catalog, node aliases, `FnAnalysis`, and `MirEmitter`; Python remains the guest acceptance test. |
 | D8.2.4–D8.2.6 | Indexed compilation unit, authoritative traversal, typed fact/pass process, and demand-driven full-contract `MirValue` continuation are designed in U27–U32; implementation not started. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |

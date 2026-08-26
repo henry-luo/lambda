@@ -657,6 +657,17 @@ static bool js_ast_interpreter_requested(void) {
         strcmp(backend, "interpreter") == 0);
 }
 
+static bool js_ast_is_es_module(JsAstNode* ast) {
+    JsProgramNode* program = ast && ast->node_type == JS_AST_NODE_PROGRAM
+        ? (JsProgramNode*)ast : NULL;
+    for (JsAstNode* statement = program ? (JsAstNode*)program->body : NULL;
+            statement; statement = (JsAstNode*)statement->next) {
+        if (statement->node_type == JS_AST_NODE_IMPORT_DECLARATION ||
+                statement->node_type == JS_AST_NODE_EXPORT_DECLARATION) return true;
+    }
+    return false;
+}
+
 static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* js_source,
                                                  size_t js_source_len, const char* filename,
                                                  uint64_t* result_home,
@@ -818,7 +829,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         }
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
-        Item result = js_interp_execute_script(runtime, script, result_home);
+        Item result = js_ast_is_es_module(js_ast)
+            ? js_interp_execute_es_module_script(runtime, script, result_home)
+            : js_interp_execute_script(runtime, script, result_home);
         js_mir_finish_script_turn(runtime, result);
         return result;
     }
@@ -2170,8 +2183,12 @@ extern "C" Item js_require(Item specifier) {
             js_cjs_update_cached_default(resolved_spec, module);
         }
     } else {
-        // ESM — transpile as-is
-        ns = transpile_js_module_to_mir(runtime, source, path_buf);
+        // ESM modules use the same retained AST owner and registry under the
+        // forced backend; the default preserves the established MIR path.
+        ns = js_ast_interpreter_requested()
+            ? js_interp_execute_es_module_source(runtime, source, strlen(source),
+                path_buf, NULL)
+            : transpile_js_module_to_mir(runtime, source, path_buf);
         jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
     }

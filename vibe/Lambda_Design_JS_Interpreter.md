@@ -4,14 +4,14 @@
 
 **Status:** PARTIALLY IMPLEMENTED — the explicit synchronous AST backend
 landed on 2026-08-26 and now covers the implemented P2 core plus the P3
-surface listed in §13, including dynamic `eval` through the shared runtime
-bridge. The default remains whole-script MIR; synchronous CommonJS loads use
-the shared registry, while ES modules, mixed
-T0/T1 environment cells, suspension, and AUTO promotion remain planned.
+surface listed in §13, including dynamic `eval`, CommonJS, and the admitted
+synchronous ES-module slice through the shared runtime bridge. The default
+remains whole-script MIR; mixed T0/T1 environment cells, suspension, and AUTO
+promotion remain planned.
 
 **Scope:** LambdaJS only. This document specializes the interpreter direction established by **AI21** and the shared-AST rules **D8.2.1–D8.2.5**. It does not change the Lambda-language T0 semantics, does not extend C2MIR, and does not introduce a bytecode VM.
 
-**Formal authority:** **D1.1–D1.7**, **D5.1.1**, **D5.3.2–D5.3.4**, **D5.4.1**, **D6.2.1–D6.2.4**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v8**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
+**Formal authority:** **D1.1–D1.7**, **D5.1.1**, **D5.3.2–D5.3.4**, **D5.4.1**, **D6.2.1–D6.2.4**, **D7.2.1**, **D8.1.1v5**, **D8.1.3v9**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specification wins on disagreement.
 
 **Related designs:** [`Lambda_Design_Ast_Interpreter.md`](Lambda_Design_Ast_Interpreter.md) (AI1–AI22), [`Lambda_Design_Unified_AST.md`](Lambda_Design_Unified_AST.md) (U1–U36), [`Lambda_Design_Runtime_Error_Handling.md`](Lambda_Design_Runtime_Error_Handling.md), [`Lambda_Design_Stack_Frame_JS.md`](Lambda_Design_Stack_Frame_JS.md), [`doc/dev/js/JS_01_Compilation_Pipeline.md`](../doc/dev/js/JS_01_Compilation_Pipeline.md), [`JS_04_MIR_Lowering.md`](../doc/dev/js/JS_04_MIR_Lowering.md), [`JS_05_Functions_Closures.md`](../doc/dev/js/JS_05_Functions_Closures.md), [`JS_08_Iterators_Generators.md`](../doc/dev/js/JS_08_Iterators_Generators.md), and [`JS_09_Async_Modules.md`](../doc/dev/js/JS_09_Async_Modules.md).
 
@@ -570,7 +570,7 @@ Subsequent interpreted reads and writes consult that journal. At script global
 scope, dynamic eval uses the realm-global path and the walker synchronizes the
 realm lexical table back to the script module slab. This retains one runtime,
 one EvalContext, one global object, and one module registry as required by
-**D8.1.3v8** and **D5.4.1**.
+**D8.1.3v9** and **D5.4.1**.
 
 ### 7.11 Classes
 
@@ -611,8 +611,30 @@ The current T0 admits synchronous CommonJS: its wrapper owns a private
 module slab, resolves literal `require` targets relative to the retained
 `JsScript`, and delegates cache/registry identity to the existing CJS
 runtime. Nested execution restores the caller's active module slab. ES
-modules remain rejected before execution until their import/export live-cell
-plan is implemented.
+modules use the same Runtime module registry, not a JS-private loader. An ES
+`JsScript` registers its namespace placeholder, initializes its hoisted
+function declarations in the module slab, then loads static dependencies and
+executes its body. That ordering lets a circular dependency observe a function
+export without creating a second function identity. Import plans are consulted
+on every read and export writes propagate through the registry, so the
+admitted named/default bindings stay live through named and star re-exports.
+
+The implemented synchronous ES surface is:
+
+- default, named, and namespace imports; default, named, namespace
+  (`export * as name`), and non-ambiguous star exports;
+- named and star re-exports, `import.meta.url`, and dynamic `import()` as a
+  Promise over the same resolver;
+- strict module execution with undefined top-level `this`, read-only imports,
+  and a private module slab that never leaks bindings into the page global;
+- `.ls` imports through the same registry descriptor. Lambda public functions
+  keep their `TypeFunc` metadata and are invoked through the Lambda boxed-call
+  ABI at the common call boundary; no adapter heap, second stack, or second
+  interpreter is introduced.
+
+This is deliberately a synchronous module tier. Top-level await, async module
+evaluation, generators/async functions, and ambiguous star-export resolution
+remain excluded before observable module execution. This matches **D8.1.3v9**.
 
 ---
 
@@ -893,11 +915,11 @@ bindings/parameters, ordinary functions/arrows/constructors, native
 callbacks, structured completions, and precisely traced mutable lexical
 environments. Classes, modules, direct eval, `with`, destructuring/default/
 rest/spread, optional chaining, object methods/accessors, generators, async,
-and top-level await are rejected before declaration instantiation. A forced
-AST request returns the JavaScript rejection error rather than silently
-replaying in MIR; with no selector, existing MIR remains the policy. This is
-the explicit-backend contract of **D8.1.3v8**, preserving **D8.4.3v2** error
-transport and **D1.3** guest semantics.
+and top-level await were rejected before declaration instantiation. P3 adds
+the admitted forms below. A forced AST request returns the JavaScript rejection
+error rather than silently replaying in MIR; with no selector, existing MIR
+remains the policy. This is the explicit-backend contract of **D8.1.3v9**,
+preserving **D8.4.3v2** error transport and **D1.3** guest semantics.
 
 **Gate:** focused ownership, module-state, call/construct, native-callback,
 completion, closure/per-iteration, forced-GC, and pre-execution-rejection
@@ -931,9 +953,14 @@ Implemented:
 - `arguments`: runtime-object materialization before defaults, mapped sloppy
   simple parameters, unmapped strict/non-simple parameters, `callee`, and
   escaped arrow lookup through the captured function environment.
+- synchronous ES modules: registry-owned namespace placeholders, declaration
+  instantiation before dependency traversal, default/named/namespace imports,
+  default/named/namespace/non-ambiguous-star exports, named/star re-exports,
+  `import.meta.url`, dynamic `import()`, live bindings, circular function
+  imports, and `.ls` imports through the shared registry and boxed-call ABI.
 
-Still excluded: ES modules, generators, async, and top-level await.
-These forms fail before observable
+Still excluded: generators, async functions/module evaluation, top-level
+await, and ambiguous star exports. These forms fail before observable
 execution under the forced AST selector.
 
 **Gate:** the committed `test_js_gtest` corpus partition is complete—every discovered row is an exact T0 match or an explicit pre-execution exclusion, with no unclassified or silent fallback rows.
@@ -1133,14 +1160,14 @@ These questions do not reopen the decisions above:
 | ID | Decision | Status |
 |---|---|---|
 | **JSI1** | JavaScript gets a separate semantic walker over the shared AST/runtime substrate | implemented for P2 |
-| **JSI2** | `JsScript` is the retained AST/source/fact/T1-artifact owner | implemented for the AST owner; MIR-fact migration pending |
-| **JSI3** | Binding/strict/TDZ/capture/class/module facts are computed once before backend selection | proposed |
+| **JSI2** | `JsScript` is the retained AST/source/fact/T1-artifact owner | implemented for the AST owner and retained ES import/export plans; MIR-fact migration pending |
+| **JSI3** | Binding/strict/TDZ/capture/class/module facts are computed once before backend selection | partially implemented for AST module binding plans; broader MIR fact migration pending |
 | **JSI4** | T0 is boxed-only | implemented for P2 |
 | **JSI5** | Frames use existing precise root/number side stacks only | implemented for P2 |
 | **JSI6** | ECMAScript references are explicit interpreter records | implemented for identifier/member, update, delete, optional, and `with` P3 forms |
 | **JSI7** | JavaScript uses structured NORMAL/RETURN/THROW/BREAK/CONTINUE completions | implemented for P2 plus labels/IteratorClose in P3 |
 | **JSI8** | ERROR-tagged helper returns become explicit THROW completions in the immediate frame | implemented for P2 |
-| **JSI9** | `fn->invoke`/`fn->construct` remain the sole call/construct authorities | implemented for P2 |
+| **JSI9** | `fn->invoke`/`fn->construct` remain the sole JS call/construct authorities | implemented; the shared kernel also recognizes published Lambda boxed-call values |
 | **JSI10** | No JavaScript AST/property inline caches | confirmed by D8.4.1v2 |
 | **JSI11** | Unsupported scripts fall back only before execution and are counted | implemented as forced-backend rejection; AUTO fallback pending |
 | **JSI12** | T0 and T1 capturable bindings share environment cells | proposed |
@@ -1160,7 +1187,7 @@ These questions do not reopen the decisions above:
 ## 18. Adoption Requirements
 
 This proposal's P2 implementation authority is now recorded by
-**D6.2.3v2**, **D8.1.3v8**, and
+**D6.2.3v2**, **D8.1.3v9**, and
 [`vibe/impl/Lambda_Impl_JS_Interpreter.md`](impl/Lambda_Impl_JS_Interpreter.md).
 The following requirements remain for later phases:
 
