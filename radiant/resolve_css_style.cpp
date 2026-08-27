@@ -3626,6 +3626,29 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
             }
             break;
         }
+        case CSS_UNIT_LH: {
+            // CSS Values 4 §6.1.1: `lh` is the computed line-height of the
+            // element whose length is being resolved.
+            DomElement* owner = lycon->view && lycon->view->is_element()
+                ? lycon->view->as_element() : nullptr;
+            const CssValue* line_height = owner && owner->blk
+                ? owner->block()->line_height : nullptr;
+            float target_font_size = lycon->font.style &&
+                lycon->font.style->font_size > 0.0f
+                ? lycon->font.style->font_size : lycon->font.current_font_size;
+            if (target_font_size <= 0.0f) target_font_size = 16.0f;
+            if (line_height) {
+                result = num * layout_resolve_line_height_value(
+                    lycon, line_height, owner, target_font_size);
+            } else {
+                CssValue normal_value = {};
+                normal_value.type = CSS_VALUE_TYPE_KEYWORD;
+                normal_value.data.keyword = CSS_VALUE_NORMAL;
+                result = num * layout_resolve_line_height_value(
+                    lycon, &normal_value, owner, target_font_size);
+            }
+            break;
+        }
         default:
             result = num;  // fallback: assume pixels for unknown units
             break;

@@ -485,6 +485,7 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_NAV_DOWN,
     CSS_PROPERTY_NAV_LEFT,
     CSS_PROPERTY_APPEARANCE,
+    CSS_PROPERTY_FIELD_SIZING,
     CSS_PROPERTY_USER_SELECT,
 
     // Paged Media Properties

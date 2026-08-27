@@ -938,6 +938,9 @@ inline bool dom_option_is_selected(DomElement* option) {
     return option->has_attribute("selected");
 }
 
+// Return an option's text label with HTML ASCII whitespace collapsed and trimmed.
+void dom_option_text_normalized(DomElement* option, StrBuf* out);
+
 // ============================================================================
 // DomElement ↔ Element conversion (Phase 1: Unified DOM Tree)
 // ============================================================================

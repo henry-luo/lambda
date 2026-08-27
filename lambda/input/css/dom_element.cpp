@@ -18,6 +18,7 @@
 #include "../../../lib/arena.h"
 #include "../../../lib/memtrack.h"
 #include "../../lambda-data.hpp"  // For get_type_id, and proper type definitions
+#include "../../core/well_known_markup_names.h"
 #include "../../core/mark_reader.hpp"  // For ElementReader
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
@@ -44,6 +45,43 @@ bool dom_subtree_contains_node(DomNode* root, DomNode* target) {
         if (dom_subtree_contains_node(child, target)) return true;
     }
     return false;
+}
+
+static void dom_option_collect_normalized_text(DomNode* node, StrBuf* out,
+                                                bool* previous_whitespace) {
+    if (!node || !out || !previous_whitespace) return;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (!text || !text->text) return;
+        for (size_t offset = 0; offset < text->length; offset++) {
+            char c = text->text[offset];
+            bool whitespace = c == ' ' || c == '\t' || c == '\n' ||
+                c == '\r' || c == '\f';
+            if (whitespace) {
+                if (!*previous_whitespace) strbuf_append_char(out, ' ');
+                *previous_whitespace = true;
+            } else {
+                strbuf_append_char(out, c);
+                *previous_whitespace = false;
+            }
+        }
+        return;
+    }
+    if (!node->is_element()) return;
+    DomElement* element = node->as_element();
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        dom_option_collect_normalized_text(child, out, previous_whitespace);
+    }
+}
+
+void dom_option_text_normalized(DomElement* option, StrBuf* out) {
+    if (!option || option->tag() != MARKUP_NAME_OPTION || !out) return;
+    bool previous_whitespace = true;
+    dom_option_collect_normalized_text(option->first_child, out,
+                                       &previous_whitespace);
+    while (out->length > 0 && out->str[out->length - 1] == ' ') {
+        out->str[--out->length] = '\0';
+    }
 }
 
 // Runtime-cleanup hook: the full runtime layer (lambda/runner.cpp's

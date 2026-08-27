@@ -2447,7 +2447,16 @@ namespace FormDefaults {
     constexpr float TEXT_PADDING_H = 2.0f;
     constexpr float TEXT_PADDING_V = 1.0f;
     constexpr float TEXT_BORDER = 2.0f;
-    constexpr float TEXT_SIZE_CONTENT_GUTTER_H = 8.0f;
+    constexpr float COLOR_BORDER = 1.0f;
+    // Form layout stores intrinsic content-box dimensions; derive this from
+    // the UA border-box metric instead of duplicating a second width constant.
+    constexpr float TEXT_CONTENT_WIDTH = TEXT_WIDTH -
+        2.0f * (TEXT_PADDING_H + TEXT_BORDER);
+    // Native datetime-local fields grow when seconds or fractional seconds
+    // become editable; these are content-box metrics for the Chromium UA.
+    constexpr float DATETIME_LOCAL_CONTENT_WIDTH = 207.0f;
+    constexpr float DATETIME_LOCAL_SECONDS_CONTENT_WIDTH = 233.0f;
+    constexpr float DATETIME_LOCAL_MILLISECONDS_CONTENT_WIDTH = 267.0f;
     constexpr int   TEXT_SIZE_CHARS = 20;  // default size attribute
 
     // Checkbox/Radio: square controls
@@ -2501,13 +2510,10 @@ namespace FormDefaults {
     constexpr float RANGE_TRACK_HEIGHT = 5.0f;
     constexpr float RANGE_THUMB_SIZE = 13.0f;
 
-    // Meter: Chrome default 80x16
-    constexpr float METER_WIDTH = 80.0f;
-    constexpr float METER_HEIGHT = 16.0f;
-
-    // Progress: Chrome default 160x16
-    constexpr float PROGRESS_WIDTH = 160.0f;
-    constexpr float PROGRESS_HEIGHT = 16.0f;
+    // HTML Rendering §15.5.14–15.5.15: native meter/progress dimensions are em-based.
+    constexpr float METER_INLINE_SIZE_EM = 5.0f;
+    constexpr float PROGRESS_INLINE_SIZE_EM = 10.0f;
+    constexpr float FORM_WIDGET_BLOCK_SIZE_EM = 1.0f;
 
     // Fieldset
     constexpr float FIELDSET_PADDING = 10.0f;

@@ -317,6 +317,50 @@ static int font_get_handle_platform_metrics(FontHandle* handle,
         out_ascent, out_descent, out_line_height);
 }
 
+float font_get_max_char_width(FontHandle* handle) {
+    if (!handle) return 0.0f;
+
+    const FontMetrics* metrics = font_get_metrics(handle);
+    float average = metrics ? metrics->average_char_width : 0.0f;
+
+#ifdef __APPLE__
+    // Blink's macOS font data uses the larger of the average width and the
+    // platform ascent as its maximum character-width contribution.
+    float ascent = 0.0f;
+    float descent = 0.0f;
+    float line_height = 0.0f;
+    if (font_get_handle_platform_metrics(handle, &ascent, &descent, &line_height)) {
+        return ascent > average ? ascent : average;
+    }
+#endif
+
+    if (handle->tables) {
+        HeadTable* head = font_tables_get_head(handle->tables);
+        if (head && head->units_per_em > 0) {
+            float scale = handle->size_px / (float)head->units_per_em * handle->bitmap_scale;
+            float bounds_width = (float)(head->x_max - head->x_min) * scale;
+            return bounds_width > average ? bounds_width : average;
+        }
+    }
+    return average;
+}
+
+float font_get_text_control_avg_char_width(FontHandle* handle) {
+    if (!handle) return 0.0f;
+
+#ifdef __APPLE__
+    // Blink derives the macOS text-control average from the primary font's
+    // x-glyph instead of trusting the OS/2 average-width field.
+    GlyphInfo x_glyph = font_get_glyph(handle, 'x');
+    if (x_glyph.id != 0 && x_glyph.advance_x > 0.0f) {
+        return x_glyph.advance_x;
+    }
+#endif
+
+    const FontMetrics* metrics = font_get_metrics(handle);
+    return metrics ? metrics->average_char_width : 0.0f;
+}
+
 /**
  * Calculate normal CSS line-height following Chrome/Blink exactly.
  *

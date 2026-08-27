@@ -402,6 +402,9 @@ typedef struct IntrinsicSize {
 
 IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
 IntrinsicSize layout_measure_form_control(LayoutContext* lycon, ViewBlock* block, AvailableSpace space);
+void layout_form_control(LayoutContext* lycon, ViewBlock* block);
+float form_control_em_size(LayoutContext* lycon, ViewBlock* block, float em);
+void layout_refresh_html_em_replaced_size(LayoutContext* lycon, DomElement* element);
 float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arrow);
 float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
                                       bool use_min_content);
@@ -4107,6 +4110,7 @@ float layout_br_line_box_extent(LayoutContext* lycon, struct FontHandle* handle)
 bool layout_quirky_container_ignores_child_margin_bottom(
     LayoutContext* lycon, ViewBlock* container, ViewBlock* child);
 bool layout_element_was_inline(DomElement* element, bool include_replaced = true);
+bool layout_object_uses_default_size(DomElement* element);
 bool layout_element_is_replaced(DomElement* element);
 
 struct LayoutBorderSpacingValue {

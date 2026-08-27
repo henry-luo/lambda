@@ -72,11 +72,15 @@ IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, Av
             if (width <= 0.0f) width = 300.0f;
             if (height <= 0.0f) height = 54.0f;
         } else if (tag == MARKUP_NAME_METER) {
-            if (width <= 0.0f) width = FormDefaults::METER_WIDTH;
-            if (height <= 0.0f) height = FormDefaults::METER_HEIGHT;
+            if (width <= 0.0f) width = form_control_em_size(
+                lycon, block, FormDefaults::METER_INLINE_SIZE_EM);
+            if (height <= 0.0f) height = form_control_em_size(
+                lycon, block, FormDefaults::FORM_WIDGET_BLOCK_SIZE_EM);
         } else if (tag == MARKUP_NAME_PROGRESS) {
-            if (width <= 0.0f) width = FormDefaults::PROGRESS_WIDTH;
-            if (height <= 0.0f) height = FormDefaults::PROGRESS_HEIGHT;
+            if (width <= 0.0f) width = form_control_em_size(
+                lycon, block, FormDefaults::PROGRESS_INLINE_SIZE_EM);
+            if (height <= 0.0f) height = form_control_em_size(
+                lycon, block, FormDefaults::FORM_WIDGET_BLOCK_SIZE_EM);
         }
     }
     return layout_measure_flat_size(lycon, block, space, width, height, "REPLACED_MEASURE");

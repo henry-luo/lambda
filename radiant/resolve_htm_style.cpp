@@ -232,6 +232,30 @@ static void apply_html_fixed_replaced_size(LayoutContext* lycon, ViewBlock* bloc
     block->blk->given_height = lycon->block.given_height = height;
 }
 
+void layout_refresh_html_em_replaced_size(LayoutContext* lycon, DomElement* element) {
+    if (!lycon || !element) return;
+    if (element->tag() != MARKUP_NAME_METER &&
+        element->tag() != MARKUP_NAME_PROGRESS) return;
+
+    ViewBlock* block = lam::unsafe_view_block_api_span(
+        lam::view_require_element(static_cast<View*>(element)));
+    if (!block || !block->blk) return;
+
+    bool has_width = layout_specified_physical_size_declaration(element, true) != nullptr;
+    bool has_height = layout_specified_physical_size_declaration(element, false) != nullptr;
+    if (!has_width) {
+        float em = element->tag() == MARKUP_NAME_METER
+            ? FormDefaults::METER_INLINE_SIZE_EM
+            : FormDefaults::PROGRESS_INLINE_SIZE_EM;
+        block->blk->given_width = lycon->block.given_width =
+            form_control_em_size(lycon, block, em);
+    }
+    if (!has_height) {
+        block->blk->given_height = lycon->block.given_height =
+            form_control_em_size(lycon, block, FormDefaults::FORM_WIDGET_BLOCK_SIZE_EM);
+    }
+}
+
 static void apply_html_context_default_size(LayoutContext* lycon, float width, float height) {
     lycon->block.given_width = width;
     lycon->block.given_height = height;
@@ -1308,6 +1332,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->ensure_block(lycon);
         block->blk->text_align = CSS_VALUE_CENTER;
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
+        // HTML Rendering gives buttons a normal line-height, preventing an
+        // inherited author line-height from inflating their anonymous content box.
+        block->blk->line_height = css_value_create_keyword(
+            lycon->doc->view_tree->prop_pool, "normal");
         // Chrome UA: font-size 13.3333px, font-family Arial for form controls
         apply_html_form_control_font(lycon, block);
         apply_html_button_box_defaults(lycon, block);
@@ -1449,14 +1477,17 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
                 break;
             }
-            block->form->intrinsic_width = FormDefaults::TEXT_WIDTH;
+            block->form->intrinsic_width = FormDefaults::TEXT_CONTENT_WIDTH;
             // Content-area height: TEXT_HEIGHT (21 border-box) minus default border+padding.
             // Chrome uses fixed 21px border-box for all text inputs regardless of font-size.
             block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT
                 - 2 * (FormDefaults::TEXT_BORDER + FormDefaults::TEXT_PADDING_V);
         block->ensure_boundary(lycon);
             Color text_border_color = (Color){ .r=118, .g=118, .b=118, .a=255 };
-            apply_html_uniform_border(lycon, block, FormDefaults::TEXT_BORDER, CSS_VALUE_SOLID,
+            const char* input_type = block->form->input_type;
+            float border_width = input_type && strcmp(input_type, "color") == 0
+                ? FormDefaults::COLOR_BORDER : FormDefaults::TEXT_BORDER;
+            apply_html_uniform_border(lycon, block, border_width, CSS_VALUE_SOLID,
                 &text_border_color);
             // Chrome UA: date/time inputs have padding=0; text-like inputs have padding=1
             {
@@ -1498,7 +1529,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 option_count++;
             }
             block->form->option_count = option_count;
-            int init_index = (selected_idx >= 0) ? selected_idx : (option_count > 0 ? 0 : -1);
+            bool is_multiple = block->has_attribute("multiple");
+            int init_index = (selected_idx >= 0) ? selected_idx :
+                (is_multiple ? -1 : (option_count > 0 ? 0 : -1));
             DocState* state = lycon && lycon->doc ? (DocState*)lycon->doc->state : nullptr;
             form_control_set_selected_index(state, (View*)block, init_index);
         }
@@ -1580,6 +1613,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->ensure_block(lycon);
+        // HTML form controls use their UA normal line-height unless authored CSS overrides it.
+        block->blk->line_height = css_value_create_keyword(
+            lycon->doc->view_tree->prop_pool, "normal");
         apply_html_textarea_font(lycon, block);
         // html rendering defaults textarea overflow to auto; baseline synthesis
         // needs the used overflow state, not only the serialized computed value.
@@ -1600,14 +1636,16 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     }
     case MARKUP_NAME_METER:
-        // Meter: inline-block replaced element, Chrome default 80x16.
+        // Native meter sizing follows the HTML em-based default.
         apply_html_fixed_replaced_size(lycon, block,
-            FormDefaults::METER_WIDTH, FormDefaults::METER_HEIGHT);
+            form_control_em_size(lycon, block, FormDefaults::METER_INLINE_SIZE_EM),
+            form_control_em_size(lycon, block, FormDefaults::FORM_WIDGET_BLOCK_SIZE_EM));
         break;
     case MARKUP_NAME_PROGRESS:
-        // Progress: inline-block replaced element, Chrome default 160x16.
+        // Native progress sizing follows the HTML em-based default.
         apply_html_fixed_replaced_size(lycon, block,
-            FormDefaults::PROGRESS_WIDTH, FormDefaults::PROGRESS_HEIGHT);
+            form_control_em_size(lycon, block, FormDefaults::PROGRESS_INLINE_SIZE_EM),
+            form_control_em_size(lycon, block, FormDefaults::FORM_WIDGET_BLOCK_SIZE_EM));
         break;
     case MARKUP_NAME_OPTION:
     case MARKUP_NAME_OPTGROUP: {

@@ -1748,6 +1748,27 @@ static bool flex_item_has_explicit_size_in_axis(ViewElement* item, bool horizont
     return block->blk && layout_axis_given_size(block->block(), selected.axis) >= 0.0f;
 }
 
+static float flex_form_intrinsic_size(ViewElement* item,
+                                      FlexContainerLayout* flex_layout,
+                                      bool horizontal) {
+    if (!item || !item->form) return 0.0f;
+
+    float size = horizontal ? item->form->intrinsic_width : item->form->intrinsic_height;
+    // Textarea intrinsic height depends on the resolved line-height, and a
+    // button's vertical fallback must not reuse its horizontal text width.
+    // Horizontal buttons retain their authored-child text measurement path.
+    bool needs_measured_intrinsic = item->tag() == MARKUP_NAME_TEXTAREA ||
+        (item->tag() == MARKUP_NAME_BUTTON && !horizontal);
+    if (!needs_measured_intrinsic) return size;
+    if (!flex_layout || !flex_layout->lycon) return size;
+
+    ViewBlock* block = lam::view_as_block(item);
+    IntrinsicSize measured = layout_measure_form_control(
+        flex_layout->lycon, block, flex_layout->lycon->available_space);
+    float measured_size = horizontal ? measured.max_width : measured.max_height;
+    return measured_size > 0.0f ? measured_size : size;
+}
+
 float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) {
     bool is_horizontal = is_main_axis_horizontal(flex_layout);
     bool is_content_basis = flex_item_has_content_flex_basis(item);
@@ -1786,7 +1807,7 @@ float calculate_flex_basis(ViewElement* item, FlexContainerLayout* flex_layout) 
         }
 
         LayoutAxisRefs main(item, is_horizontal);
-        float basis = main.form_size();
+        float basis = flex_form_intrinsic_size(item, flex_layout, is_horizontal);
 
         if (basis <= 0 && item->tag() == MARKUP_NAME_BUTTON && flex_layout && flex_layout->lycon) {
             IntrinsicSizes sizes = layout_measure_intrinsic_widths(
@@ -2196,7 +2217,8 @@ float apply_flex_constraint(
         if (explicit_min >= 0.0f) {
             min_size = explicit_min;
         } else if (is_main_axis && item->form) {
-            float intrinsic_min = selected.form_size();
+            float intrinsic_min = flex_form_intrinsic_size(
+                item, flex_layout, axis_is_horizontal);
             if (intrinsic_min > 0.0f) {
                 min_size = intrinsic_min;
                 min_size += layout_boundary_padding_border_axis(item->bound, axis_is_horizontal);
