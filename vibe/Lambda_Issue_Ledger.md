@@ -284,6 +284,29 @@ annotation and parameter positions, both tiers) and
 half of **SO9** and the `&`/`!`-unimplemented warning in the string-pattern
 design record.
 
+<a id="lr02-14"></a>**LR02-14 · Keyword-as-name handling is a patchwork; S16.10 rules it · OPEN**
+Ruled 2026-08-27 as **S16.10** (spec v16.0.0; deliberation and probe table in
+`Lambda_Design_Syntax.md` §7.24): keywords never name bindings — the whole
+lexer keyword table, E201 at the declaration site, no quoted escape — while
+map keys, element tags, attribute names, and `.`-member steps admit keywords.
+Divergences to fix:
+
+1. `import edit: …` parses and **every use** fails (`expected a type
+   pattern` — the `edit` declaration keyword captures the statement);
+   `import 'edit': …` parses and creates an **unreachable binding**
+   (`'edit'.x` is silently null). Both must become E201 at the import line.
+2. `let if = 1` parses; every use fails (`expected an expression`).
+3. **`let type = 1` parses and `type` then silently reads the base type** —
+   a silent wrong answer, the priority defect of the cluster.
+4. `<if a:1, "x">` is rejected (`expected an element tag`) but is legal
+   under S16.10.2 — the tag position must accept keyword words.
+5. E201 covers only `last` and must extend to the whole table, in the C
+   parser and the Tree-sitter reference grammar alike.
+
+Migration: ~55 keyword-named bindings in `test/` + `lambda/` (offset 12,
+group 9, state 8, to 5, by 4, …; breakdown in §7.24); 0 keyword import
+aliases.
+
 ---
 
 ## 3. Value & type model (LR_03)

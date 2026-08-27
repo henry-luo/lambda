@@ -1,5 +1,7 @@
 # Radiant — Events & Input Dispatch
 
+> **Last verified against tree:** 2026-07-15 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the interaction *input* half of Radiant: the single funnel `handle_event()` that takes platform input, hit-tests it against the layout view tree, builds a root→target view stack, and fires DOM-style events out to three consumers at once — native default actions, the Lambda/JS handler bridge, and the editing controllers. It covers the `RdtEvent` union and `EventContext` record, the hit-test recursion, mouse/keyboard/IME/scroll/context-menu input, the deterministic `event_sim` replay harness that drives the *same* funnel, and the event-state JSONL log. Timing and animation (the render loop, frame clock, `@keyframes`) are a separate concern documented in [RAD_16 — Animation & Frame Scheduling](RAD_16_Animation_Frame_Scheduling.md).
 >
 > **Primary sources:** `radiant/event.hpp` (event, input-context, logging, context-menu, and scrolling declarations), `radiant/event.cpp` (`handle_event`, targeting, and dispatch), `radiant/event_sim.{cpp,hpp}` (JSON-driven replay/test harness), `radiant/event_state_log.cpp` (JSONL log + `JsonWriter`), `radiant/context_menu.cpp`, `radiant/scroller.cpp`, `radiant/ime_mac.mm`, and `radiant/ime_win.cpp`.

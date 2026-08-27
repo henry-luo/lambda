@@ -1,5 +1,7 @@
 # Lambda Script — Developer Guide
 
+> **Last verified against tree:** 2026-08-23 *(initial stamp from git history)*
+
 This guide is for developers working on the **Lambda and Radiant C++ runtime engine** itself — building the compiler, modifying the parser, extending the JIT backend, and developing the layout engine.
 
 It is **not** a guide for writing Lambda Script programs. For the Lambda language reference and scripting documentation, see the [Language Reference](../Lambda_Reference.md) and other docs under `doc/`.

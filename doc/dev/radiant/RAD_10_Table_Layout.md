@@ -1,5 +1,7 @@
 # Radiant — Table Layout
 
+> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's CSS 2.1 §17 table formatting context: how a `<table>` DOM subtree is normalized into a well-formed grid, how the transient `TableMetadata` scratch grid holds all mutable column/row state while the view nodes stay field-free, and how the single mega-function `table_auto_layout` runs the auto/fixed width-distribution algorithm, colspan/rowspan resolution, border-collapse conflict resolution, row heights with baseline vertical-align, and caption placement.
 >
 > **Primary sources:** `radiant/layout_table.cpp` (the ~9945-line engine: `layout_table_content`, `build_table_tree`, `analyze_table_structure`, `table_auto_layout`), `radiant/layout.hpp` (public entry + helper decls), `radiant/layout.hpp` / `layout_table_metadata.cpp` (the scratch-arena `TableMetadata` grid + audited factory), `radiant/layout.hpp` / `layout_table_caption.cpp` (post-width caption re-layout). Structs `TableProp`/`ViewTable`/`ViewTableRowGroup`/`ViewTableRow`/`TableCellProp`/`ViewTableCell`/`CollapsedBorder` live in `radiant/view.hpp`.

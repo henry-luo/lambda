@@ -290,6 +290,7 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | [Developer Guide](doc/dev/Developer_Guide.md)         | Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT                 |
 | [Formal Design](doc/Lambda_Formal_Design.md)          | Normative design/implementation specification — D-numbered rulings for the core runtime and Jube hosting; the design authority when docs or implementation disagree |
+| [Documentation Convention](doc/Doc_Convention.md)     | How Lambda documentation is organized — document tiers, authority order, and style conventions |
 | [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                                |
 | [Lambda Runtime](doc/dev/Lamdba_Runtime.md)           | Runtime internals and architecture                                                     |
 | [Lambda Core Runtime Design](doc/dev/lambda/LR_00_Overview.md) | Detailed design of the core runtime — compilation pipeline, value & type model, the C and MIR-Direct transpilers, MIR JIT, memory & GC, builtins, error handling, Mark API, and the procedural runtime |

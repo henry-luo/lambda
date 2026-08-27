@@ -1,5 +1,7 @@
 # LambdaJS — MIR Lowering, Code Generation & Exceptions
 
+> **Last verified against tree:** 2026-08-18 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the phase-2/3 lowering mechanics: how typed AST nodes become MIR instructions, the boxed-Item-by-default emission model and its native INT/FLOAT fast paths, boxing/unboxing tag arithmetic, condition lowering and the comparison `_raw` facades, short-circuit operators, constant folding and dead-branch elimination, call emission, the in-band Item exception model (JIT try/catch/finally, signal-based stack overflow), and dynamic code (`eval` / `Function`).
 >
 > **Primary sources:** `lambda/js/js_mir_expression_lowering.cpp` (`jm_transpile_binary`, `jm_transpile_unary`, `jm_transpile_call`, `jm_transpile_condition`, `jm_try_fold_const`), `lambda/js/js_mir_statement_lowering.cpp` (`jm_transpile_if`, loops, try/catch/finally, `jm_emit_error_lane_propagate_check`, `jm_branch_dead_safe`), `lambda/js/js_mir_calls_boxing_types.cpp` (`jm_ensure_import`, `jm_call_*`, boxing/unboxing, `jm_emit_is_truthy`), `lambda/js/js_mir_eval_lowering.cpp` (`js_builtin_eval`, `new Function`), `lambda/js/js_mir_completion.cpp` (abrupt completions), `lambda/js/js_runtime_state.cpp` (`js_throw_value` / `js_error_lane_payload`), `lambda/lambda-stack.cpp` (stack-overflow guard).

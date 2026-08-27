@@ -1,5 +1,7 @@
 # LambdaBash Runtime — Design Proposal
 
+> **Last verified against tree:** 2026-03-26 *(initial stamp from git history)*
+
 ## Overview
 
 LambdaBash is a proposed embedded Bash engine for the Lambda runtime. Following the same architecture as LambdaJS and LambdaPy, it would compile Bash scripts to native machine code through the Tree-sitter → AST → MIR JIT pipeline, reusing Lambda's type system, memory management, and shared runtime infrastructure. Bash programs would execute within the same `Item`-based runtime as Lambda, JS, and Python scripts.

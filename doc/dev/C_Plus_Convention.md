@@ -1,5 +1,7 @@
 # C+ Coding Convention
 
+> **Last verified against tree:** 2026-07-18 *(initial stamp from git history)*
+
 Lambda adopts a **C+** coding convention — a pragmatic subset of C++ that enhances C with selected C++ features while preserving C's simplicity, control, and ABI compatibility.
 
 The guiding philosophy: **use C++ where it makes C better, but never surrender control over memory, error flow, or binary layout.**

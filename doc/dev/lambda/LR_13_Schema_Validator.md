@@ -1,5 +1,7 @@
 # Lambda Runtime — Schema Validator
 
+> **Last verified against tree:** 2026-08-24 *(initial stamp from git history)*
+
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the schema validator: how a Lambda `type` definition becomes a validation schema, how a runtime `Item` is checked against it, the per-kind validation dispatch (primitives, maps/elements, arrays, occurrence, union/reference, regex patterns), the error-collection and reporting layer, and the "did you mean" suggestion machinery. It also documents a significant structural fact — the validator runs on the runtime `Type*` family, while the parallel `TypeSchema`/`Schema*` model and its builder are dead code.
 >
 > **Primary sources:** `lambda/validator/validator.hpp` / `validator_internal.hpp` (the `SchemaValidator` class, `ValidationResult`/`ValidationError`, options), `lambda/validator/validate.cpp` (the core `validate_against_type` dispatch), `lambda/validator/validate_pattern.cpp` (occurrence + union + regex), `lambda/validator/doc_validator.cpp` (`SchemaValidator::load_schema`, document validation), `lambda/validator/ast_validate.cpp` (CLI driver + `.ls` syntactic validation), `lambda/validator/error_reporting.cpp`, `lambda/validator/suggestions.cpp`, `lambda/validator/validate_helpers.cpp`, plus `lambda/schema_ast.hpp` and `lambda/schema_builder.cpp` (the parallel, unused schema model).

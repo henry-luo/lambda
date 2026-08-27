@@ -1,5 +1,7 @@
 # Lambda Runtime — Parsing & AST Construction
 
+> **Last verified against tree:** 2026-08-25 *(initial stamp from git history)*
+
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the front end: how the first-party C lexer and hybrid recursive-descent + Pratt parser reduce source directly to a typed AST. The Tree-sitter grammar is retained only as an isolated syntax-reference verifier. This document owns the direct reduction dispatch, shared AST construction seams, concrete node hierarchy, build-time (forward, local, structural) type inference, and scope / namespace / closure-capture machinery. It does *not* own the `Type*` objects it stamps onto nodes — those belong to [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md); nor the backends that consume the AST — [LR_06](LR_06_C_Transpiler.md) and [LR_07](LR_07_MIR_Transpiler_JIT.md).
 >
 > **Primary sources:** `lambda/runtime/parser/lambda_lexer.c`, `lambda/runtime/parser/lambda_parser.c`, `lambda/runtime/ast_build.hpp`, `lambda/runtime/build_ast.cpp` (direct sink plus shared constructors), `lambda/runtime/parse.c` (direct parser translation unit), `lambda/tree-sitter-lambda/grammar.js` (the isolated reference grammar), `test/lambda_parser_poc_diff.c` (CST differential verifier), `lambda/runtime/ast.hpp` (the `AstNode` hierarchy + scope/closure model), and `lambda/runtime/emit_ast_dump.cpp` (a read-only structural AST-dump consumer).
