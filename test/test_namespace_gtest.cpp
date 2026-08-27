@@ -17,10 +17,12 @@
 #include "../lambda/lambda.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/core/name_pool.hpp"
+#include "../lambda/core/print.h"
 #include "../lambda/core/shape_pool.hpp"
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 #include "../lib/log.h"
+#include "../lib/strbuf.h"
 #include "../lib/url.h"
 #include "../lib/test_utils.h"
 #include <cstring>
@@ -798,4 +800,19 @@ TEST_F(NamespaceTest, ShapePoolCollisionDoesNotAliasDifferentFieldNames) {
     ShapeEntry* empty_shape_again = shape_pool_get_map_shape(
         input->shape_pool, empty_name, field_types, 1);
     EXPECT_EQ(empty_shape_again, empty_shape);
+}
+
+TEST_F(NamespaceTest, PrintCollectionEscapesStringContents) {
+    MarkBuilder builder(input);
+    Item values = builder.array()
+        .append(builder.createStringItem("a\"b"))
+        .append(builder.createStringItem("c\\d"))
+        .final();
+    StrBuf* output = strbuf_new();
+
+    ASSERT_NE(output, nullptr);
+    print_item(output, values, 0, nullptr);
+    EXPECT_STREQ(output->str, "[\"a\\\"b\", \"c\\\\d\"]");
+
+    strbuf_free(output);
 }

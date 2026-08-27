@@ -1513,6 +1513,9 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 typedef struct MulticolFlowItem {
     ViewBlock* block;
     float height;
+    // balancing may include overflowing descendants without enlarging a
+    // zero-height wrapper's own fragment box.
+    float balance_height;
     float content_height;
     float margin_before;
     float margin_after;
@@ -1621,6 +1624,7 @@ typedef struct ColumnGroup {
     ViewBlock* container;
     ColumnFragment* fragments;
     int fragment_count;
+    int logical_fragment_count;
     int column_count;
     float column_width;
     float column_gap;
@@ -1638,6 +1642,7 @@ typedef struct FragmentedFlowCursor {
     float block_offset;
     float pending_margin_after;
     bool has_item_in_fragment;
+    ColumnFragment virtual_fragment;
 } FragmentedFlowCursor;
 // A normalized projection avoids separate fragment-index math in text and
 // block paths; both must clamp negative offsets and use the same row pitch.
@@ -3198,6 +3203,7 @@ void layout_refresh_anonymous_table_fixup_inheritance(LayoutContext* lycon,
                                                        const FontProp* inherited_font = nullptr);
 bool is_table_internal_display(CssEnum display);
 bool layout_element_is_anonymous_table_fixup(const struct DomElement* element);
+bool layout_view_uses_table_grid_coordinates(View* view);
 void layout_unwrap_anonymous_table_fixups_for_dom_mutation(struct DomElement* parent);
 void layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(struct DomElement* root);
 

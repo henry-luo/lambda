@@ -313,14 +313,46 @@ LambdaError* err_create_heap(LambdaErrorCode code, const char* message, SourceLo
     return err_init(error, code, message, location, true);
 }
 
+static char* err_format_message(const char* format, va_list args) {
+    if (!format) return NULL;
+
+    va_list measure_args;
+    va_copy(measure_args, args);
+    int required = vsnprintf(NULL, 0, format, measure_args);
+    va_end(measure_args);
+    if (required < 0) return NULL;
+
+    size_t capacity = (size_t)required + 1;
+    if (capacity == 0) return NULL;
+    char* message = (char*)mem_alloc(capacity, MEM_CAT_SYSTEM);
+    if (!message) return NULL;
+
+    va_list write_args;
+    va_copy(write_args, args);
+    int written = vsnprintf(message, capacity, format, write_args);
+    va_end(write_args);
+    if (written != required) {
+        mem_free(message);
+        return NULL;
+    }
+    return message;
+}
+
+LambdaError* err_createfv(LambdaErrorCode code, SourceLocation* location,
+                          const char* format, va_list args) {
+    char* message = err_format_message(format, args);
+    if (!message) return NULL;
+    LambdaError* error = err_create(code, message, location);
+    mem_free(message);
+    return error;
+}
+
 LambdaError* err_createf(LambdaErrorCode code, SourceLocation* location, const char* format, ...) {
-    char buffer[1024];
     va_list args;
     va_start(args, format);
-    vsnprintf(buffer, sizeof(buffer), format, args);
+    LambdaError* error = err_createfv(code, location, format, args);
     va_end(args);
-    
-    return err_create(code, buffer, location);
+    return error;
 }
 
 LambdaError* err_create_simple(LambdaErrorCode code, const char* message) {

@@ -1,1 +1,1 @@
-[null, 'lane', null, "b'\xCAFE'"]
+[null, 'lane', null, "b'\\xCAFE'"]
