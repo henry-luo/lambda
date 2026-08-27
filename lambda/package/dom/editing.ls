@@ -154,7 +154,7 @@ pub pn commit(elem) {
 // `multiline` comes from the calling template rather than a primitive: the
 // package already matches <input> and <textarea> separately, so the element
 // pattern that selected this handler is exactly the question being asked.
-pub pn apply(elem, evt, multiline) {
+pub pn apply_fn(elem, evt, multiline) {
     let t = evt.input_type;
     let s = radiant.selection_start(elem);
     let e = radiant.selection_end(elem);

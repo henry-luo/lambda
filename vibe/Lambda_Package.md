@@ -14,6 +14,53 @@ Lambda's module system allows scripts to import functions and variables from oth
 
 ---
 
+## 1b. The `lambda.*` namespace (decided 2026-08-27, user)
+
+Ratified as **S17.2.1/S17.2.2** (semantics v16.2.0) and **D7.2.4** (design
+v1.38.0); closes **SO37**.
+
+**The question.** S12.3.7 made sys-func shadowing user-first, which left no
+way to reach a shadowed builtin — deferred as SO37 with the direction fixed:
+"it rides the module system as a prelude import, not new syntax."
+
+**The scheme.** `lambda.*` becomes the one root for everything Lambda ships:
+
+| Tier | Path | Notes |
+|---|---|---|
+| System functions | `lambda.sys.*` | prelude-imported unqualified; qualified form is the shadow escape |
+| Built-in modules | `lambda.math`, `lambda.io` | bare `import math` is an alias for `import lambda.math` |
+| Shipped packages | `lambda.editor`, `lambda.graph`, … | the former `package` level is dropped |
+| Document packages | `lambda.doc.*` | where the math typesetting package moves |
+
+**Why `lambda.sys.*` over the alternatives.** `sys.*`, `lang.*` and
+`sys.func.*` were considered. Plain `lambda.*` for the functions themselves
+was ruled out because that root is already the package tree (`import
+lambda.package.editor.mod_doc`), so `lambda.len` would mix builtins with
+shipped packages and a future `lambda.len.*` package would collide.
+`sys.func.*` pre-pays for a collision the conventions avoid — adjacent
+facilities get their own modules (`math`, `io`) rather than becoming `sys`
+members. `lambda.sys.*` keeps one root, matches the established terminology
+(`doc/Lambda_Sys_Func.md`, spec §S17, `is_sys_func_name` in the runtime), and
+extends the module machinery that `math`/`io` already use.
+
+**The `math` collision, and its resolution.** Shortening `lambda.package.math`
+to `lambda.math` collided with the built-in math module: the shipped package
+is the LaTeX math *typesetting* library (`lambda/package/math/` — boxes,
+atoms, CSS), while built-in `math` is `sqrt`/`pi`. Ruled: the typesetting
+package moves to **`lambda.doc.math`**, leaving `lambda.math` for the
+built-in module. Hence D7.2.4's rule that a path names exactly one thing.
+
+**Reserved root.** `lambda` may not name a binding (S16.10.1v2), so the
+escape cannot itself be shadowed — the failure mode Python accepts with a
+shadowable `builtins`. This costs one reserved word and makes `let lambda =
+…` an E201.
+
+**Not needed for the reserved core.** `int`, `string`, `type` are base-type
+words already barred from binding names, so they can never be shadowed and
+never need qualification.
+
+---
+
 ## 2. Syntax
 
 Defined in `lambda/tree-sitter-lambda/grammar.js`:

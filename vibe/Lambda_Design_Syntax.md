@@ -34,7 +34,7 @@ S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
 S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
 §7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
 S16.9.4, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7,
-§7.24 → S16.10.
+§7.24 → S16.10, §7.25 → S12.3.7.
 **Not ratified into S16 (process, not syntax):** ledger 18 (authority order)
 and 32 (two parsers, §4.4) stay here. A future formal syntax document is
 tracked as `SO35`.
@@ -1465,6 +1465,19 @@ for scalars".
     subscripts stay expression space (`last` keeps S7.2.2). Migration ~55
     corpus bindings; probes, capture analysis, and rejected alternatives
     in §7.24.
+40. *(ratified 2026-08-27 as S12.3.7, spec v16.1.0)* **Sys-func shadowing
+    is user-first, module-lexical, with a mandatory warning.** A module's
+    `fn`/`pn` or value binding matching a sys-func name shadows it for that
+    module/script only, statically — never globally (no JS-style prototype
+    mutation); `pub` export extends it to importers through the explicit
+    import only. Every shadowing draws a compile warning. Non-callable
+    shadows give the not-callable error, never builtin fallback; the
+    reserved core (keywords + base-type words) is un-shadowable via
+    S16.10.1. Key ground: forward compatibility — a new sys func must never
+    change an existing program. Alternative (collision = compile error)
+    rejected: maximum silent-capture protection, but it freezes the stdlib
+    namespace. Builtin-access spelling deferred (SO37). Full argument
+    in §7.25.
 
 **Open** *(O1 and O2 resolved above — decided points 13–14)***:**
 
@@ -2608,6 +2621,40 @@ fail-at-use traps above, and the worse silent-misread for `let type`.
    `a["type"]` is a string key and `last` keeps its S7.2.2 subscript
    meaning; nothing changes there.
 
+**Clarification: which names in a declaration are bindings** (added
+2026-08-27, user; spec S16.10.2). The bar applies to the *declared name*,
+never to the members a declaration introduces:
+
+```lambda
+type T {           // T IS a binding — S16.10.1v2 applies
+  a: int,          // a is NOT a binding — a data name (field)
+  order: int,      // …so a keyword field is fine
+  fn f() { … }     // f is NOT a binding either — a data name (method)
+  fn state() => a  // …and a keyword method name is fine
+}
+```
+
+Only `T` is spoken bare in expression position, so only `T` can be captured
+by a keyword construct. Fields and methods alike are reached through a
+receiver — `x.a`, `x.f()` — which is sigil-guarded by the leading `.`
+(S16.10.3), so no capture is possible and the S16.10.1v2 argument simply
+does not apply to them. Two consequences worth stating:
+
+- **A method is never a shadow.** S12.3.7 governs module-level bindings; an
+  object method named `sum` does not shadow the system function, it is
+  reached only as `x.sum()`. (S12.3.3 already rules that a receiver member
+  wins over a method-eligible builtin at such a call.)
+- **Renaming a method is an API change**, not a local edit: its call sites
+  are `.name(` spellings that no binding-rename pass will touch.
+
+Implementation anchor: `push_name` gates the E201 bar on
+`ast_node_declares_binding`, which excludes `AST_NODE_KEY_EXPR` — the scope
+entries object-type fields and methods register for bare-field resolution
+inside the type body. This was found the hard way: the first migration pass
+renamed `fn state()` in `test/lambda/proc/object_direct_access.ls` while its
+`tog.state()` call sites kept the old spelling, and the method silently
+resolved to nothing (booleans printed as empty strings).
+
 **Rejected alternatives.** (a) *Quoting as the binding escape*
 (`import 'edit':` + `'edit'.x`) — breaches S2.4.3's symbol/name
 separation, and today's behavior shows the failure shape: a silently
@@ -2624,6 +2671,75 @@ others 1); 0 keyword import aliases. Enforcement must land in the C parser
 and the reference grammar, and E201 must extend from `last` to the whole
 table. Tracked as LR02-14 in the issue ledger; the `let type` silent
 misread is the priority defect.
+
+### 7.25 Sys-func shadowing: user-first, module-lexical (decided 2026-08-27)
+
+May a user definition override a system function? Probes (2026-08-27,
+debug build) showed the territory was **undefined and crashing**, not
+merely unruled: `fn sum(a) => 99` then `sum([1,2,3])` compiles, executes on
+the interpreter tier, prints **no result**, and dies at teardown (ASan
+dealloc failure); `fn len(s) => -1` and `fn min(a,b) => "mine"` likewise.
+Unshadowed calls (`sum(x) + len(x)` → 9) are fine. So no de facto behavior
+existed to preserve — LR02-15 tracks the crash.
+
+**The ruling (user, 2026-08-27; ratified as S12.3.7, spec v16.1.0):
+user-first shadowing, module-lexical, with a warning.**
+
+1. A module-level `fn`/`pn` **or value binding** whose name matches a
+   system function shadows it for every call site **in that module/script
+   only**, resolved statically. Resolution is never global — unlike JS
+   prototype/global mutation, no other module's `sum` changes.
+2. **Every such shadowing draws a compile (syntax) warning** — accidents
+   surface, intent is permitted. This is normative, not an optional lint.
+3. A shadowing definition is an ordinary definition: **`pub` exports it
+   like any other**, and it then extends to the importing script through
+   the explicit import — propagation is by export/import only, never
+   ambient.
+4. Uniform with value bindings: `let sum = 5` shadows too (a name binds to
+   exactly one thing, S12.3.6); `sum(x)` is then the ordinary not-callable
+   type error — **never a silent fallback to the builtin**.
+5. The effect bit follows the actual callee (S12.1): shadowing `pn print`
+   with an `fn` yields an fn, checked as such.
+6. The reserved core is un-shadowable **for free** via S16.10.1 (§7.24):
+   keywords and base-type words cannot be binding names, so `int()`,
+   `string()`, `float()`, `type()` stay intrinsic. Two tiers fall out of
+   existing rulings: a reserved core that can never be rebound, and an
+   open library namespace that is user-first.
+
+**Grounds, in decision order:**
+
+1. **Forward compatibility is the key issue** (user). Under user-first
+   resolution, adding a NEW sys func never changes the meaning of an
+   existing program — the user's same-named definition keeps winning. Under
+   sys-func-first or collision-error, every stdlib addition is a breaking
+   change for someone. Lambda's sys-func surface is deliberately still
+   growing (RF-series, S14.2 verbs and window functions), so this is the
+   rule that lets the library grow without MAJOR events.
+2. **Symmetry with S12.3.3**: member calls already resolve receiver-first,
+   with the same rationale — every builtin name would otherwise be a
+   latent trap in user code.
+3. **S1.11 references agree**: ECMAScript and Python both allow user
+   definitions to shadow builtins.
+4. **Zero cost, unlike JS**: no eval (S1.8), no reference cells or
+   monkey-patching (S9.1), static modules — so "is this name bound in this
+   module?" is decidable in `build_ast` per call site. Calls to unshadowed
+   builtins keep their intrinsic fast paths exactly; one resolution point
+   keeps both execution tiers in agreement.
+
+**Rejected alternative — collision = compile error.** It buys **maximum
+protection against silent capture**: a user redefining `len` with different
+semantics silently changes distant code in the same module, and a hard
+duplicate-definition error makes that impossible. But it freezes the stdlib
+namespace — every future sys-func name would collide with someone's
+existing definition, so the protection is bought at the price of the
+forward-compatibility property in ground 1, which is the key issue. The
+mandatory warning (point 2) recovers most of the silent-capture protection
+at none of the evolution cost.
+
+**Deliberately deferred**: a spelling to reach a shadowed builtin from
+inside the shadowing module (Python's `builtins.len`; ECMAScript has none
+and survives). If ever demanded it rides the module system as a prelude
+import, not new syntax — recorded as SO37.
 
 ---
 

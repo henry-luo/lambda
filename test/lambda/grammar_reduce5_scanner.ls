@@ -5,8 +5,8 @@ fn raised_ok() int^error { 2 }
 fn division_ok() float { 1.0 / float(2) }
 fn leading_dot_float_ok() float { .123 }
 fn member_ok() int {
-    let state = {moves: 7}
-    state.moves
+    let st = {moves: 7}
+    st.moves
 }
 fn pipe_ok() string {
     let parts = ["a", "b"]

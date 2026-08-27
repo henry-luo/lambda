@@ -23,8 +23,8 @@ import .mod_geom
 //   args = {drawing_path, layer_index (default 0), shape}
 // ---------------------------------------------------------------------------
 
-pub fn cmd_insert_shape(state, args) {
-  let drawing = node_at(state.doc, args.drawing_path)
+pub fn cmd_insert_shape(st, args) {
+  let drawing = node_at(st.doc, args.drawing_path)
   if (drawing == null or not is_node(drawing) or drawing.tag != 'drawing') { null }
   else {
     let layer_idx = if (args.layer_index == null) { 0 } else { args.layer_index }
@@ -35,7 +35,7 @@ pub fn cmd_insert_shape(state, args) {
       else {
         let layer_path = [*args.drawing_path, layer_idx]
         let insert_at = len(layer.content)
-        tx_step(tx_begin(state.doc, state.selection),
+        tx_step(tx_begin(st.doc, st.selection),
                 step_replace(layer_path, insert_at, insert_at, [args.shape]))
       }
     }
@@ -68,11 +68,11 @@ fn move_at(tx, paths, dx, dy, i, n) {
   else { move_at(move_one(tx, paths[i], dx, dy), paths, dx, dy, i + 1, n) }
 }
 
-pub fn cmd_move_shapes(state, args) {
+pub fn cmd_move_shapes(st, args) {
   if (len(args.shape_paths) == 0) { null }
   else if (args.dx == 0.0 and args.dy == 0.0) { null }
   else {
-    let tx = move_at(tx_begin(state.doc, state.selection),
+    let tx = move_at(tx_begin(st.doc, st.selection),
                      args.shape_paths, args.dx, args.dy, 0, len(args.shape_paths))
     if (len(tx.steps) == 0) { null } else { tx }
   }
@@ -92,11 +92,11 @@ fn resize_step(tx, p, name, val) {
   }
 }
 
-pub fn cmd_resize_shape(state, args) {
-  let n = node_at(state.doc, args.shape_path)
+pub fn cmd_resize_shape(st, args) {
+  let n = node_at(st.doc, args.shape_path)
   if (n == null or not is_node(n)) { null }
   else {
-    let tx0 = tx_begin(state.doc, state.selection)
+    let tx0 = tx_begin(st.doc, st.selection)
     let tx1 = resize_step(tx0, args.shape_path, 'x', args.x)
     let tx2 = resize_step(tx1, args.shape_path, 'y', args.y)
     let tx3 = resize_step(tx2, args.shape_path, 'width', args.width)
@@ -109,17 +109,17 @@ pub fn cmd_resize_shape(state, args) {
 // cmd_rotate_shape / cmd_set_shape_attr
 // ---------------------------------------------------------------------------
 
-pub fn cmd_rotate_shape(state, shape_path, angle_deg) {
-  let n = node_at(state.doc, shape_path)
+pub fn cmd_rotate_shape(st, shape_path, angle_deg) {
+  let n = node_at(st.doc, shape_path)
   if (n == null or not is_node(n)) { null }
   else if (get_shape_attr_number(n, 'rotate', 0.0) == angle_deg) { null }
-  else { tx_step(tx_begin(state.doc, state.selection), step_set_attr(shape_path, 'rotate', angle_deg)) }
+  else { tx_step(tx_begin(st.doc, st.selection), step_set_attr(shape_path, 'rotate', angle_deg)) }
 }
 
-pub fn cmd_set_shape_attr(state, shape_path, name, value) {
-  let n = node_at(state.doc, shape_path)
+pub fn cmd_set_shape_attr(st, shape_path, name, value) {
+  let n = node_at(st.doc, shape_path)
   if (n == null or not is_node(n)) { null }
-  else { tx_step(tx_begin(state.doc, state.selection), step_set_attr(shape_path, name, value)) }
+  else { tx_step(tx_begin(st.doc, st.selection), step_set_attr(shape_path, name, value)) }
 }
 
 // ---------------------------------------------------------------------------
@@ -167,12 +167,12 @@ fn delete_at(tx, paths, i, n) {
   }
 }
 
-pub fn cmd_delete_shapes(state, shape_paths) {
+pub fn cmd_delete_shapes(st, shape_paths) {
   if (len(shape_paths) == 0) { null }
   else {
     let uniq = unique_paths_at(shape_paths, 0, len(shape_paths), [])
     let sorted = sort_desc_at(uniq, 0, len(uniq), [])
-    let tx = delete_at(tx_begin(state.doc, state.selection), sorted, 0, len(sorted))
+    let tx = delete_at(tx_begin(st.doc, st.selection), sorted, 0, len(sorted))
     if (len(tx.steps) == 0) { null } else { tx }
   }
 }
@@ -181,18 +181,18 @@ pub fn cmd_delete_shapes(state, shape_paths) {
 // cmd_bring_to_front / cmd_send_to_back — reorder z within the parent
 // ---------------------------------------------------------------------------
 
-pub fn cmd_bring_to_front(state, shape_path) {
-  let n = node_at(state.doc, shape_path)
+pub fn cmd_bring_to_front(st, shape_path) {
+  let n = node_at(st.doc, shape_path)
   if (n == null or not is_node(n)) { null }
   else {
     let parent = parent_path(shape_path)
-    let parent_node = node_at(state.doc, parent)
+    let parent_node = node_at(st.doc, parent)
     if (parent_node == null or not is_node(parent_node)) { null }
     else {
       let idx = last_index(shape_path)
       if (idx < 0 or idx == len(parent_node.content) - 1) { null }
       else {
-        let tx0 = tx_begin(state.doc, state.selection)
+        let tx0 = tx_begin(st.doc, st.selection)
         let tx1 = tx_step(tx0, step_replace(parent, idx, idx + 1, []))
         let end_idx = len(parent_node.content) - 1
         tx_step(tx1, step_replace(parent, end_idx, end_idx, [n]))
@@ -201,18 +201,18 @@ pub fn cmd_bring_to_front(state, shape_path) {
   }
 }
 
-pub fn cmd_send_to_back(state, shape_path) {
-  let n = node_at(state.doc, shape_path)
+pub fn cmd_send_to_back(st, shape_path) {
+  let n = node_at(st.doc, shape_path)
   if (n == null or not is_node(n)) { null }
   else {
     let parent = parent_path(shape_path)
-    let parent_node = node_at(state.doc, parent)
+    let parent_node = node_at(st.doc, parent)
     if (parent_node == null or not is_node(parent_node)) { null }
     else {
       let idx = last_index(shape_path)
       if (idx < 0 or idx == 0) { null }
       else {
-        let tx0 = tx_begin(state.doc, state.selection)
+        let tx0 = tx_begin(st.doc, st.selection)
         let tx1 = tx_step(tx0, step_replace(parent, idx, idx + 1, []))
         tx_step(tx1, step_replace(parent, 0, 0, [n]))
       }

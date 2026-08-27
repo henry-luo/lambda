@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 16.0.0 (2026-08-27)
+**Spec version:** 16.2.1 (2026-08-27)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -996,12 +996,18 @@ construct; `let` is final.* [C4]
 
 ### S9.3 Construction captures values
 
-- **S9.3.1** Placing a value into a container captures it **by value** at
+- **S9.3.1*** Placing a value into a container captures it **by value** at
   every constructor and insertion point — literals, field/index writes,
   `push`/`splice`. After construction, container and source are independent.
   A corollary of "values never alias", and what makes cycles
   unconstructible. Porting hazard (silent): *fill-after-storing* leaves the
   stored copy empty — fill before storing, or read-modify-write. [C4]
+
+*Replacement idiom for reference sharing — the **handle store**: one container
+owns each record, every other reference is a key into it, the store travels as
+one `var` parameter. Identity that aliasing supplied implicitly becomes data.
+Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
+[`Lambda_Procedural.md`](Lambda_Procedural.md).*
 
 ---
 
@@ -1264,6 +1270,25 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   keying is a dispatch optimization, never a language rule — builtins are not
   source-overloadable either. Full rationale in
   [TS-8](../vibe/Lambda_Issue_Ledger.md). [S1.11, TS-8]
+
+- **S12.3.7*** **User definitions shadow system functions — user-first,
+  module-lexical, warned.** A module-level `fn`/`pn` or value binding whose
+  name matches a system function shadows it for every call site **in that
+  module/script only**, resolved statically; resolution is never global
+  (no JS-style prototype or global mutation). Every such shadowing draws a
+  **compile warning**. A shadowing definition exports like any other:
+  `pub` extends it to an importing script through the explicit import,
+  never ambiently. A non-callable shadow (`let sum = 5`) makes `sum(x)` the
+  ordinary not-callable error — never a fallback to the builtin; the effect
+  bit follows the actual callee (S12.1). The reserved core stays intrinsic
+  by S16.10.1: keywords and base-type words cannot be binding names, so
+  `int()`, `string()`, `type()` are un-shadowable. *User-first is the
+  forward-compatibility rule: a new sys func never changes an existing
+  program.* The alternative — collision as a compile error — was rejected:
+  maximum silent-capture protection, but it freezes the stdlib namespace;
+  the warning recovers the protection (argument in Design_Syntax §7.25).
+  Reaching a shadowed builtin from inside the shadowing module is
+  deliberately unspecified (SO37). [S1.11, S12.3.3, Design_Syntax §7.25]
 
 ### S12.4 Resources
 
@@ -1740,7 +1765,9 @@ below by its section.
   keyword constructs begin, so a keyword binding cannot be read everywhere a
   binding must be readable. **There is no quoted escape**: `import
   'edit': …` is rejected too — at a use site `'edit'.x` is a symbol member
-  expression, and symbols never implicitly read bindings (S2.4.3).
+  expression, and symbols never implicitly read bindings (S2.4.3). The
+  namespace root **`lambda` is reserved on the same terms**, so the
+  `lambda.sys.*` escape of S17.2.2 can never itself be shadowed.
   [Design_Syntax §7.24]
 - **S16.10.2*** **Data names admit keywords.** Container name positions —
   map keys, element tags, and attribute names — accept keywords:
@@ -1749,7 +1776,16 @@ below by its section.
   no keyword construct can begin there and no capture arises. Advisory, not
   enforced: prefer the quoted-symbol spelling (`<'if' …>`, `{'type': 1}`)
   where a bare keyword would read as its construct; quoted-symbol tags
-  remain general grammar orthogonality (S15.1). [Design_Syntax §7.24]
+  remain general grammar orthogonality (S15.1).
+
+  **A declaration's own name is a binding; the members it introduces are
+  not** — and this covers **methods as well as fields**. In
+  `type T { a: int, fn f() {} }`, only `T` is a binding and takes
+  S16.10.1v2's bar; `a` and `f` are data names, so both may be keywords, and
+  both are reached through a receiver (`x.a`, `x.f()`) under S16.10.3 rather
+  than spoken bare. A method is therefore never a shadow of anything
+  (S12.3.7 governs module bindings only), and renaming one is an API change
+  to its call sites. [Design_Syntax §7.24]
 - **S16.10.3*** **Member steps admit keywords.** After `.`, a keyword is an
   ordinary member name: `m.type`, `x.if`, `v.int` read data members —
   including in line-start member continuation (S16.2.4v2). Subscripts are
@@ -1784,6 +1820,24 @@ governs how an under-determined case here is resolved.
   Deliberation in the
   [C18 record](../vibe/Lambda_Semantics_Formal2.md). [S1.11, LR09-8]
 
+### S17.2 The system-function namespace
+
+- **S17.2.1*** **System functions live at `lambda.sys.*`, and the prelude
+  imports them unqualified.** `len`, `sum`, `print` and their siblings are
+  members of one built-in module; an implicit prelude import makes them
+  available with no qualification, so ordinary code is unchanged. The
+  qualified spelling addresses the same registry row — there is one owner of
+  the builtin name list, not a parallel table. [D7.2.4]
+- **S17.2.2*** **`lambda.sys.f` is the escape from a shadow.** Where a module
+  shadows a system function under S12.3.7, the qualified spelling still
+  reaches the builtin: `let sum = 5` leaves `lambda.sys.sum(xs)` working.
+  This closes SO37 and needs no new syntax — it is an ordinary member access
+  on an imported module (S12.3.3). The **`lambda` namespace root is
+  reserved**: it may not name a binding (S16.10.1v2), so the escape can
+  never itself be captured — unlike Python's shadowable `builtins`.
+  Qualification is unnecessary for the reserved core (`int`, `string`,
+  `type`), which S16.10.1v2 already makes un-shadowable. [S12.3.7, D7.2.4]
+
 ---
 
 ## Appendix A — Implementation Footnotes
@@ -1816,7 +1870,8 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S8.2.1v2, S8.2.2v2, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains, including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. Specialized editor/host access sites still need the same audit. Empty-string map keys are now semantically valid, but their known JSON round-trip corruption remains to be fixed. `at` membership now conforms: `1 at [10,20,30]` is false, matching S8.2.2v2 (this row previously recorded it as still true). |
 | S8.1.3 | **Conformant as of 2026-08-24.** The paired `at` form bound both names to the key (a silent wrong answer); fixed in `build_ast`, one fix covering both tiers. Full record: [LR02-R9](../vibe/Lambda_Issue_Ledger.md). |
 | S8.3.2 | Streams (and hence stream `len`) not implemented. |
-| S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap). Stage 2 pending: `var`-param grammar + exclusivity checks (all four faces), capture-assignment compile errors, view-borrow confinement, module-`var` rule, snapshot iteration. |
+| S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap). Stage 2 pending: `var`-param grammar + exclusivity checks (all four faces), capture-assignment compile errors, view-borrow confinement, module-`var` rule, snapshot iteration. `var` params parse and mutate the caller's value today, but a *plain* param does so too — the snapshot half of S9.1.3 is unenforced, so the annotation is currently documentation rather than a gate. |
+| S9.3.1 | **Not implemented** (probed 2026-08-27, both tiers). Insertion aliases instead of copying, at every point the ruling names: array element store (`arr[0] = t; t.n = 55` → `arr[0].n == 55`), array literal (`[u]`), map field store (`a.peer = b`), and map literal (`{peer: c}`). Binding copy (S9.1.2) is the only half that landed, which is why the aliasing is easy to miss — `var b = a` copies while `xs[0] = a` does not. Cycles are therefore constructible today, so `==`/print/serialize are not total over reachable state in the way S9.1.5 assumes. Full record: [LR12-9](../vibe/Lambda_Issue_Ledger.md#lr12-9). |
 | S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
 | S11.1.1 | Array-pattern composition unbuilt; `is [T]` inline parse crash open. |
 | S11.2.3 | Match exhaustiveness checking unverified in the implementation. |
@@ -1835,6 +1890,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S16.6.8, S16.6.9 | **Conformant as of 2026-08-24** (`E312` in `build_ast` per S16.6.5; C 152/152, Tree-sitter 135/135, baseline 3868/3868). Classifier subtleties (three-way recursive `ast_branch_kind`, NEUTRAL empty branch) and migration: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep) and §6 point 38 addendum. |
 | S16.8.4, S16.8.8, S16.9.2, S16.9.4 | Not probed against the implementation; the `*` is precautionary, not a known defect. S16.8.1–S16.8.3, S16.8.5–S16.8.7, S16.9.1, S16.9.3 were spot-checked conformant on 2026-08-22 and ship unmarked — including the S16.9.3 element boundary-comma biconditional in all four of its cases. |
 | S16.9.5 | **Parsing conformant as of 2026-08-25; the field/value distinction is not yet represented.** Residue: the marker wraps the field type in `OPERATOR_OPTIONAL` — the same representation `a: T?` produces — so the two spellings this ruling calls *distinct* are indistinguishable downstream until `ShapeEntry` carries a field-level flag; independently, the declaration binding checker treats an optional field as required for both spellings (`error[E205]`, pre-existing). History: [Design_Syntax §4.5](../vibe/Lambda_Design_Syntax.md) (2026-08-24 sweep). |
+| S12.3.7 | **Ruled 2026-08-27, not implemented — currently a crash.** `fn sum(a) => 99` plus a call executes the interpreter tier with no printed result and dies at teardown (ASan dealloc, debug build); `len`/`min` shadows likewise. Needs one resolution point in `build_ast` (both tiers) plus the shadow warning. Tracked as [LR02-15](../vibe/Lambda_Issue_Ledger.md). |
 | S16.10 | **Ruled 2026-08-27, largely not implemented.** Current divergences: element tags reject keywords (`<if a:1>` errors, legal under S16.10.2); `import edit:` parses and every use fails; `import 'edit':` parses and creates an unreachable binding (use is silently null); `let if = 1` parses and uses fail; `let type = 1` parses and `type` silently reads the base type — the silent misread is the priority defect. E201 exists for `last` only and must extend to the whole table, in the C parser and the reference grammar. Migration: ~55 keyword-named corpus bindings (breakdown in [Design_Syntax §7.24](../vibe/Lambda_Design_Syntax.md)). Tracked as [LR02-14](../vibe/Lambda_Issue_Ledger.md). |
 | int v5 (S4.1) | Substantially landed (lane, encoding, saturation, printing, goldens). Residue: `INT64_ERROR` collides with `INT_LANE_INF` (pre-cutover gate unsatisfied); ELEM_INT SIMD kernels partly gated; nullable lane (`INT_LANE_NULL`) partial; `IntLane`/ValueRep typing of the four i64 meanings pending (known silent bug class). |
 
@@ -1899,6 +1955,8 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 
 **Surface syntax**
 - **SO35** A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics are argued together, and one source beats two. If the grammar surface outgrows a section, extract S16 into a formal syntax spec and leave pointers — not a second, competing statement. [Design_Syntax]
+- **SO37** *(closed 2026-08-27 — ruled in as S17.2.1/S17.2.2: `lambda.sys.*`
+  with a reserved `lambda` root.)*
 - **SO36** Whether a `pn` call may appear nested inside an expression
   (`(pn_func(), 123)`, `if (exists(path)) …`), or only as a bare statement /
   the whole RHS of a binding — the A-normal-form effect-sequencing
@@ -1919,7 +1977,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S6 ordering | C11, C11.4, C11.5 | `Lambda_Semantics_Formal2.md` |
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | S8 membership | C5.3a, C5.3b; §8.0–8.3 records | `Lambda_Semantics_Formal2.md` |
-| S9 mutability | C4, C4.2a/b/c, C4.3, C5.3b, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md` |
+| S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md` |
 | S10 operators | C6, C6.2–C6.4, C10; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Path.md` |
 | S11 types | C7, C8.5c; TE-1–TE-18 | ibid.; `Lambda_Design_Type_Enforcement.md` |
 | S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19 | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |

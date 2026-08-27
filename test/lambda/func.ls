@@ -39,8 +39,8 @@ let greet = (name: string) => "Hello, " ++ name
 greet("world");
 
 // anonymous function as argument (higher-order)
-fn apply(f, x) => f(x)
-apply((x) => x * 10, 3);
+fn apply_fn(f, x) => f(x)
+apply_fn((x) => x * 10, 3);
 
 let t = string
 t;  "abc" is t;  123 is t;  true is string;

@@ -255,7 +255,7 @@ fn view_values(value) => [
     ["container", "containerViews"], ["component", "componentViews"],
     ["filtered", "filteredViews"], ["custom", "customViews"],
     ["dynamic", "dynamicViews"], ["deployment", "deploymentViews"]
-  ], view in values(value, kind_and_field[1])) {kind: kind_and_field[0], value: view}
+  ], vw in values(value, kind_and_field[1])) {kind: kind_and_field[0], value: vw}
 ]
 
 fn view_by_key(value, key) => first([
@@ -337,19 +337,19 @@ fn canonical_view_values(workspace) {
 }
 
 fn canonical_views(workspace, records) => sort([
-  for (view in canonical_view_values(workspace), let graph = structurizr.project(workspace, view.key),
-    let scope = by_raw_id(records, model.optional(view, "scope")),
-    let environment = by_raw_id(records, model.optional(view, "environment"))) [
-    string(view.key), string(view.kind), if (scope == null) null else scope.key,
-    if (environment == null) model.optional(view, "environment") else environment.name,
-    model.optional(view, "direction"),
-    model.optional(view, "rank-sep"), model.optional(view, "node-sep"),
+  for (vw in canonical_view_values(workspace), let graph = structurizr.project(workspace, vw.key),
+    let scope = by_raw_id(records, model.optional(vw, "scope")),
+    let environment = by_raw_id(records, model.optional(vw, "environment"))) [
+    string(vw.key), string(vw.kind), if (scope == null) null else scope.key,
+    if (environment == null) model.optional(vw, "environment") else environment.name,
+    model.optional(vw, "direction"),
+    model.optional(vw, "rank-sep"), model.optional(vw, "node-sep"),
     sort([*[
       for (node in model.nodes(graph), let target = by_raw_id(records, node.id))
         if (target == null) string(node.id) else target.key
     ], *[
       for (group in model.subgraphs(graph), let target = by_raw_id(records, group.id)
-        where string(view.kind) == "deployment" and target != null) target.key
+        where string(vw.kind) == "deployment" and target != null) target.key
     ]]),
     sort([for (edge in model.edges(graph), let source = by_raw_id(records, edge.from),
       let destination = by_raw_id(records, edge.to)) {
@@ -357,7 +357,7 @@ fn canonical_views(workspace, records) => sort([
       destination: if (destination == null) string(edge.to) else destination.key,
       description: either(model.optional(edge, "interaction-label"), model.optional(edge, "label")),
       technology: model.optional(edge, "technology"),
-      order: if (string(view.kind) == "dynamic") model.optional(edge, "order") else null
+      order: if (string(vw.kind) == "dynamic") model.optional(edge, "order") else null
     }])
   ]
 ])

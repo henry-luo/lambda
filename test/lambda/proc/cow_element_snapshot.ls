@@ -1,6 +1,6 @@
 // A shallow element detach must retain COW ownership for nested child edits.
 
-pn edit_first(var doc: element) {
+pn edit_first(var doc: el) {
     doc[0][0][0] = "published"
     doc[0][0].revision = 1
 }

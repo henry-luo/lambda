@@ -1407,9 +1407,9 @@ pn rng_new() {
     pool[pptr] = bxor(pool[pptr], band(shr(ts, 16), 0xFF)); pptr = pptr + 1
     pool[pptr] = bxor(pool[pptr], band(shr(ts, 24), 0xFF)); pptr = pptr + 1
 
-    var state = arc4_new()
-    arc4_init(state, pool)
-    return state
+    var st = arc4_new()
+    arc4_init(st, pool)
+    return st
 }
 
 // ================= PKCS#1 v1.5 Padding =================

@@ -10,23 +10,23 @@ pn random_next(seed_arr) {
     return s
 }
 
-pn build_tree_depth(state, depth, seed_arr) {
-    state.count = state.count + 1
+pn build_tree_depth(st, depth, seed_arr) {
+    st.count = st.count + 1
     if (depth == 1) {
         return fill((random_next(seed_arr) % 10) + 1, 0)
     }
     var arr = fill(4, null)
     for i in 0 to 3 {
-        arr[i] = build_tree_depth(state, depth - 1, seed_arr)
+        arr[i] = build_tree_depth(st, depth - 1, seed_arr)
     }
     return arr
 }
 
 pn benchmark() {
     var seed_arr = [74755]
-    let state = {count: 0}
-    build_tree_depth(state, 7, seed_arr)
-    return state.count
+    let st = {count: 0}
+    build_tree_depth(st, 7, seed_arr)
+    return st.count
 }
 
 pn main() {

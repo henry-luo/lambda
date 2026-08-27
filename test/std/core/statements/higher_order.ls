@@ -2,9 +2,9 @@
 // Layer: 2 | Category: statement | Covers: functions as args, returning fns, composition
 
 // ===== Function as argument =====
-fn apply(f, x) => f(x)
-apply(fn(x) => x * 2, 5)
-apply(fn(x) => x & "!", "hello")
+fn apply_fn(f, x) => f(x)
+apply_fn(fn(x) => x * 2, 5)
+apply_fn(fn(x) => x & "!", "hello")
 
 // ===== Function returning function =====
 fn make_pow(exp: int) => fn(base: int) => base ** exp
@@ -26,7 +26,7 @@ double_inc(5)
 double_inc(10)
 
 // ===== Pipeline of functions =====
-fn pipeline(fns: list, value) {
+fn pipeline(fns: lst, value) {
     fns |> reduce(fn(acc, f) => f(acc), value)
 }
 pipeline([fn(x) => x + 1, fn(x) => x * 2, fn(x) => x - 3], 5)

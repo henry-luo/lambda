@@ -9,10 +9,10 @@ pn id(value) {
     return value
 }
 
-pn apply(f, value) {
+pn apply_fn(f, value) {
     return f(value)
 }
 
 pn main() {
-    print(string(apply(id, pending_item(7i64))) ++ "\n")
+    print(string(apply_fn(id, pending_item(7i64))) ++ "\n")
 }

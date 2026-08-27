@@ -2110,7 +2110,19 @@ bool is_type_keyword(StrView name) {
 }
 
 bool is_reserved_identifier_keyword(StrView name) {
-    return strview_equal(&name, "last");
+    // S16.10.1v2: only capture-real words are barred — those that can begin a
+    // construct, so a binding of that name could not be read back where the
+    // construct starts. Before this bar, `let type = 1` silently read the base
+    // type and `let if = 1` failed at every use. Clause words and infix word
+    // operators stay legal; the lexer owns the classification.
+    return lambda_lexer_word_bars_binding(name.str, name.length);
+}
+
+// S16.10.2 keeps data names open, so only true binding declarations are
+// checked. Object-type field entries reach `push_name` as scope helpers for
+// bare-field resolution, not as bindings, and `{type: int}` must stay legal.
+static bool ast_node_declares_binding(AstNode* node) {
+    return node && node->node_type != AST_NODE_KEY_EXPR;
 }
 
 // lookup a name in the current scope only (not in parent scopes)
@@ -2132,10 +2144,23 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     log_debug("pushing name %.*s, %p", (int)node->name->len, node->name->chars, node->type);
 
     StrView name_view = {node->name->chars, node->name->len};
-    if (is_reserved_identifier_keyword(name_view)) {
+    if (ast_node_declares_binding((AstNode*)node) &&
+            is_reserved_identifier_keyword(name_view)) {
         int line = (int)ast_node_start_point(tp, node).row + 1;
-        // c15 reserves last globally so it cannot escape its two grammar homes via declarations.
+        // S16.10.1: keywords never name bindings; no quoted escape exists,
+        // since a quoted use site is a symbol and symbols never implicitly
+        // read bindings (S2.4.3). `last` was the original single case.
         record_type_error(tp, line, "Error: '%.*s' is a reserved keyword and cannot be used as a name",
+            (int)name_view.length, name_view.str);
+    }
+    // S12.3.7: a user binding shadows a same-named system function for this
+    // module only. Legal and forward-compatible (a new sys func must never
+    // change an existing program), but always warned so accidents surface.
+    else if (ast_node_declares_binding((AstNode*)node) && !import &&
+            is_sys_func_name(name_view.str, (int)name_view.length)) {
+        log_warn("lambda_shadow_lint: line %d: '%.*s' shadows a system function in this module; "
+            "calls here resolve to your definition",
+            (int)ast_node_start_point(tp, node).row + 1,
             (int)name_view.length, name_view.str);
     }
 
@@ -8106,9 +8131,11 @@ AstNode* build_call_node_from_parts(Transpiler* tp, SourceSpan span,
     } else if (effective && effective->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)effective;
         name = (StrView){ident->name->chars, ident->name->len};
-        bool user_function = ident->entry && ident->entry->node &&
-            (ident->entry->node->node_type == AST_NODE_FUNC ||
-             ident->entry->node->node_type == AST_NODE_PROC);
+        // S12.3.7: ANY module binding shadows the sys func, not just a
+        // callable one. Testing for FUNC/PROC alone let `let sum = 5` fall
+        // through to the builtin, so `sum([1,2])` silently returned 3
+        // instead of the not-callable error the binding demands.
+        bool user_function = ident->entry && ident->entry->node;
         if (!user_function) info = get_sys_func_info(&name, lookup_arg_count);
         if (!info && !user_function) {
             // Qualified imports are resolved above; bare calls need the same

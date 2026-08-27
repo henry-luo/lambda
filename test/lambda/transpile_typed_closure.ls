@@ -79,8 +79,8 @@ fn make_linear(slope: int, intercept: int) {
 // ============================================
 
 fn make_mixed(a: int, b) {
-    fn apply(x: int) => a * x + b
-    apply
+    fn apply_fn(x: int) => a * x + b
+    apply_fn
 }
 
 "7. Mixed typed/untyped captures";

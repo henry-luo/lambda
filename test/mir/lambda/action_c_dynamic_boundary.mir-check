@@ -15,7 +15,7 @@
       ]
     },
     {
-      "in_func": "_apply_#",
+      "in_func": "_apply_fn_#",
       "expect": [
         "fn_call1_into"
       ]

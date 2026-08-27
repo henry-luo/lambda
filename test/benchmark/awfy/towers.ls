@@ -16,21 +16,21 @@ pn pop_disk_from(piles, tops, pile) {
     return disk_size
 }
 
-pn move_top_disk(piles, tops, state, from_pile, to_pile) {
+pn move_top_disk(piles, tops, st, from_pile, to_pile) {
     let disk = pop_disk_from(piles, tops, from_pile)
     push_disk(piles, tops, disk, to_pile)
-    state.moves = state.moves + 1
+    st.moves = st.moves + 1
 }
 
-pn move_disks(piles, tops, state, disks, from_pile, to_pile) {
+pn move_disks(piles, tops, st, disks, from_pile, to_pile) {
     if (disks == 1) {
-        move_top_disk(piles, tops, state, from_pile, to_pile)
+        move_top_disk(piles, tops, st, from_pile, to_pile)
         return 0
     }
     var other_pile = (3 - from_pile) - to_pile
-    move_disks(piles, tops, state, disks - 1, from_pile, other_pile)
-    move_top_disk(piles, tops, state, from_pile, to_pile)
-    move_disks(piles, tops, state, disks - 1, other_pile, to_pile)
+    move_disks(piles, tops, st, disks - 1, from_pile, other_pile)
+    move_top_disk(piles, tops, st, from_pile, to_pile)
+    move_disks(piles, tops, st, disks - 1, other_pile, to_pile)
 }
 
 pn benchmark() {
@@ -43,9 +43,9 @@ pn benchmark() {
         push_disk(piles, tops, i, 0)
         i = i - 1
     }
-    let state = {moves: 0}
-    move_disks(piles, tops, state, 13, 0, 1)
-    return state.moves
+    let st = {moves: 0}
+    move_disks(piles, tops, st, 13, 0, 1)
+    return st.moves
 }
 
 pn main() {

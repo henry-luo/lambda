@@ -90,17 +90,17 @@ pn MixColumns(s) {
 }
 
 // w is flat: w[(rnd*4+c)*4+r]
-pn AddRoundKey(state, w, rnd: int) {
+pn AddRoundKey(st, w, rnd: int) {
     var r: int = 0
     while (r < 4) {
         var c: int = 0
         while (c < 4) {
-            state[r + c * 4] = bxor(state[r + c * 4], w[(rnd * 4 + c) * 4 + r])
+            st[r + c * 4] = bxor(st[r + c * 4], w[(rnd * 4 + c) * 4 + r])
             c = c + 1
         }
         r = r + 1
     }
-    return state
+    return st
 }
 
 // Main Cipher function [§5.1]
@@ -109,30 +109,30 @@ pn AesCipher(input, w) {
     var Nr = int(len(w) / 16) - 1
 
     // State is flat: state[row + col*4] (column-major to match AES spec)
-    var state = fill(16, 0)
+    var st = fill(16, 0)
     var i: int = 0
     while (i < 16) {
         // input is in column-major order: input[row + col*4]
-        state[i] = input[i]
+        st[i] = input[i]
         i = i + 1
     }
 
-    state = AddRoundKey(state, w, 0)
+    st = AddRoundKey(st, w, 0)
 
     var round: int = 1
     while (round < Nr) {
-        state = SubBytes(state)
-        state = ShiftRows(state)
-        state = MixColumns(state)
-        state = AddRoundKey(state, w, round)
+        st = SubBytes(st)
+        st = ShiftRows(st)
+        st = MixColumns(st)
+        st = AddRoundKey(st, w, round)
         round = round + 1
     }
 
-    state = SubBytes(state)
-    state = ShiftRows(state)
-    state = AddRoundKey(state, w, Nr)
+    st = SubBytes(st)
+    st = ShiftRows(st)
+    st = AddRoundKey(st, w, Nr)
 
-    return state
+    return st
 }
 
 // Key Expansion [§5.2] - returns flat array (total_words * 4 bytes)

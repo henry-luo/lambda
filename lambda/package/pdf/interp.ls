@@ -552,8 +552,8 @@ fn _is_tf_name(op_record) {
         and (op_record.operands[0].kind == "name"))
 }
 
-fn _list_contains(list, name) {
-    let hits = (for (s in list where s == name) s);
+fn _list_contains(lst, name) {
+    let hits = (for (s in lst where s == name) s);
     (len(hits) >= 1)
 }
 
