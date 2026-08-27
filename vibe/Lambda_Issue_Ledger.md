@@ -68,8 +68,8 @@ Counts:
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 7 | 0 | 2 | 9 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
-| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 7 | 1 | 7 | 15 |
-| **Total** | | **95** | **11** | **50** | **156** |
+| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 8 | 15 |
+| **Total** | | **94** | **11** | **51** | **156** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -1152,13 +1152,20 @@ Regression: `NamespaceTest.ShapePoolCollisionDoesNotAliasDifferentFieldNames`
 uses the supported `NULL`-name normalization collision and verifies that
 different shapes remain distinct while identical shapes are still reused.
 
-<a id="lint-e1"></a>**Lint E1 · Unchecked allocation dereference in `build_ast.cpp`, now invisible to cppcheck · OPEN**
-`impl/Lambda_Issues4_Lint (retired).md` E1. Four sites allocate and dereference without a NULL
-check: `build_ast.cpp:3080` (`hex_str`) and `:970`, `:3445`, `:3531`
-(`num_str`) — each does `p = (char*)mem_alloc(n + 1, MEM_CAT_AST); memcpy(p, …);
-p[n] = '\0';`. `mem_alloc` returns NULL for a zero size, under the
-`memtrack_fault_should_fail()` injection hook, and on a failed `malloc`, so this
-is reachable rather than theoretical.
+<a id="lint-e1"></a>**Lint E1 · Unchecked allocation dereference in `build_ast.cpp`, now invisible to cppcheck · RESOLVED 2026-08-27**
+`impl/Lambda_Issues4_Lint (retired).md` E1. The root cause was seven literal
+source-copy sites treating the custom `mem_alloc` contract as non-fallible:
+the four manual copies listed by the retired lint entry plus three
+`strview_to_cstr` callers. `mem_alloc` returns NULL under the
+`memtrack_fault_should_fail()` injection hook and on a failed `malloc`, so
+each unchecked copy was reachable rather than theoretical.
+
+The sites now share `ast_copy_source_text`, which checks the allocation,
+records `ERR_OUT_OF_MEMORY` (`E309`) against the literal span, and returns
+`TYPE_ERROR`/a failed static-literal probe before the buffer is read. This
+follows the checked allocation contract in **D4.2.1v3** and the allocation
+failure handoff in **D4.2.2v2**. The consolidation removes the duplicated
+copy-and-terminate code; no new data structure or design ruling was added.
 
 Worth recording separately: the migration from `malloc` to `mem_alloc`
 **silenced the static analyser without fixing the code**. cppcheck originally
@@ -1166,6 +1173,11 @@ flagged this as `nullPointerArithmeticOutOfMemory`; a 2026-08-25 re-run reports
 nothing here, because it does not model the custom allocator. The report's own
 suggested remedy — use an allocator that cannot return NULL — was only half
 applied.
+
+Regression: `AstBuildAllocationTest.SizedLiteralCopyFailureDoesNotCrash`
+arms `memtrack_fault_inject(0)` and verifies direct AST construction reports
+the allocation error without crashing. The focused error suite passes 120/120
+and `make test-lambda-baseline` passes 3976/3976.
 
 <a id="i8-consoleesc"></a>**Issues8 · Console formatter does not escape quotes or backslashes inside collections · RESOLVED 2026-08-27**
 Printing a collection rendered member strings through raw `%s`/`%.*s` paths in
@@ -1185,7 +1197,7 @@ Regression: `NamespaceTest.PrintCollectionEscapesStringContents` verifies quote
 and backslash escaping directly through `print_item`. The 42 affected golden
 outputs were regenerated from the corrected printer. Focused namespace tests,
 the direct Lambda suite (784/784), and `make test-lambda-baseline` pass
-3975/3975.
+3976/3976.
 
 <a id="i8-genafterlet"></a>**Issues8 · A comprehension generator may not follow a `let` clause · OPEN (design question, not a defect)**
 Clause order is fixed: **all generators, then all `let`s**. Measured
@@ -1940,7 +1952,7 @@ signature routing key, and retains element names as cache identity metadata.
 This prevents a colliding signature from reusing a shape with different field
 names, types, offsets, flags, or element identity. The focused regression is
 `NamespaceTest.ShapePoolCollisionDoesNotAliasDifferentFieldNames`; the full
-namespace suite passes 39/39 and `make test-lambda-baseline` passes 3975/3975.
+namespace suite passes 39/39 and `make test-lambda-baseline` passes 3976/3976.
 
 <a id="i8-consoleesc-r"></a>**Issues8 · Console formatter does not escape quotes or backslashes inside collections · RESOLVED 2026-08-27**
 The collection printer's Item and legacy TypedItem string/symbol branches used
@@ -1952,7 +1964,19 @@ already serialized string; no new data structure or design ruling was needed.
 
 Regression: `NamespaceTest.PrintCollectionEscapesStringContents` covers quote
 and backslash members. The 42 affected golden outputs were regenerated from
-the fixed printer, and `make test-lambda-baseline` passes 3975/3975.
+the fixed printer, and `make test-lambda-baseline` passes 3976/3976.
+
+<a id="lint-e1-r"></a>**Lint E1 · Unchecked allocation dereference in `build_ast.cpp` · RESOLVED 2026-08-27**
+The custom `mem_alloc` calls and `strview_to_cstr` literal copies were
+fallible, but their callers read the returned buffers before checking them.
+`ast_copy_source_text` now centralizes the seven literal source-copy sites,
+reports `E309`, and returns the existing `TYPE_ERROR` recovery value. This
+keeps the literal path aligned with **D4.2.1v3** and **D4.2.2v2** without
+introducing a new data structure or design rule.
+
+Regression: `AstBuildAllocationTest.SizedLiteralCopyFailureDoesNotCrash`.
+The focused error suite passes 120/120 and `make test-lambda-baseline` passes
+3976/3976.
 
 ---
 

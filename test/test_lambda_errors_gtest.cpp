@@ -10,9 +10,12 @@
 
 #include <gtest/gtest.h>
 #include "../lambda/runtime/lambda-error.h"
+#include "../lambda/runtime/ast_build.hpp"
 #include "../lambda/runtime/type_contract.hpp"
 #include "../lambda/lambda-data.hpp"
+#include "../lambda/input/input.hpp"
 #include "../lib/arraylist.h"
+#include "../lib/memtrack.h"
 #include "../lib/mempool.h"
 #include "../lib/shell.h"
 #include <string>
@@ -483,6 +486,42 @@ TEST_F(ErrorCreationTest, CreateErrorWithLocation) {
     EXPECT_STREQ(error->location.file, "test.ls");
 
     err_free(error);
+}
+
+TEST(AstBuildAllocationTest, SizedLiteralCopyFailureDoesNotCrash) {
+    const char source[] = "1i8";
+    Pool* pool = pool_create_sized(64 * 1024);
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+
+    Transpiler tp = {};
+    tp.source = source;
+    tp.pool = pool;
+    tp.arena = input->arena;
+    tp.name_pool = input->name_pool;
+    tp.type_list = input->type_list;
+    tp.root = input->root;
+    tp.const_list = arraylist_new(16);
+    tp.current_scope = (NameScope*)pool_calloc(pool, sizeof(NameScope));
+    tp.max_errors = 10;
+    ASSERT_NE(tp.const_list, nullptr);
+    ASSERT_NE(tp.current_scope, nullptr);
+
+    AstScript* root = nullptr;
+    LambdaParseError parse_error = {};
+    memtrack_fault_inject(0);
+    LambdaParseStatus status = lambda_rd_build_ast(&tp, source,
+        sizeof(source) - 1, &root, &parse_error);
+    memtrack_fault_clear();
+
+    EXPECT_EQ(status, LAMBDA_PARSE_OK);
+    EXPECT_NE(root, nullptr);
+    EXPECT_GT(tp.error_count, 0);
+
+    arraylist_free(tp.const_list);
+    arraylist_free(input->type_list);
+    pool_destroy(pool);
 }
 
 TEST_F(ErrorCreationTest, CreateFormattedError) {
