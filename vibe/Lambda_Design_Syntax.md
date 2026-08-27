@@ -2665,6 +2665,57 @@ ruling removes. (c) *Banning keywords in data names too* (quote-everything)
 — forces quoting onto the most common data idioms (`type:`, `class:`,
 ingested JSON/HTML keys) for zero disambiguation gain.
 
+**Why clause words are not banned: it is the same forward-compatibility
+argument as sys-func shadowing (§7.25 / S12.3.7).** Both rulings protect the
+same property — *a later addition to the language or its library must never
+change the meaning of an existing program*. S12.3.7 gets it for the library by
+resolving user-first: adding a new sys func cannot capture a name a script
+already defines. Keeping clause words bindable gets it for the grammar: when a
+new for-clause, handler clause, or query clause is introduced, its word does
+not collide with bindings that already exist, because clause words never
+competed with bindings in the first place — the enclosing construct claims the
+word positionally and the binding keeps the name everywhere else.
+
+Banning them would have inverted this. Every future clause word would be a
+breaking change for whoever had already written `let offset = 5` or
+`let into = x`, and the language would face the same freeze that
+collision-as-error would have imposed on the stdlib namespace — the
+alternative §7.25 rejected for exactly this reason. So the two rulings are one
+policy applied to the two namespaces a program draws on: **positional
+constructs and user names occupy different spaces, and growth in either must
+not evict the other.** Only capture-real words — those that would make an
+existing binding *unreadable* — are worth the bar, which is why the criterion
+narrowed to them and no further.
+
+**Refinement, 2026-08-27 (user): continuation words move to allowed, and the
+clause reading takes priority.** `else`, `case`, `default` and `on` were
+barred in the first cut, but S16.2.2v2 already classifies `else case default`
+as tokens that *can only continue* — by the capture criterion they were never
+capture-real. They are now legal binding names, joined by `on` (a join clause
+and an in-view handler head; in both the enclosing construct is already
+expecting the word). The enabling rule the user stated: **grammar-wise the
+clause word has higher priority than a binding name** — where both readings
+fit, the enclosing `if`/`match`/`for`/view claims its clause word before any
+expression is parsed, so the two coexist rather than competing.
+
+Implementation note worth keeping: allowing the word in
+`lambda_lexer_word_bars_binding` was only half the job. `else`/`case`/
+`default` were not in `token_is_identifier_like`, so the declaration was
+accepted and **every use failed to parse** — the exact accept-then-fail trap
+this ruling exists to remove. Both halves must move together: a word legal as
+a binding must also read as one in expression position.
+
+`state` did **not** move, though the criterion alone would allow it (it is a
+view-*signature* clause, accepted after the return type, so it never leads a
+statement). It is reserved for a possible future standalone word —
+`expr is state`, `expr in state`, `expr at state` — on the principle that a
+word cannot be reclaimed once programs bind it. That makes `state` and
+`lambda` the two words barred by reservation rather than capture.
+
+**The two lists are enumerated in Appendix K**, verified against the running
+engine — K.1 barred (60 words), K.2 allowed (28), K.3 what the bar does not
+reach.
+
 **Migration and status.** 55 keyword-named bindings in `test/` + `lambda/`
 (offset 12, group 9, state 8, to 5, by 4, range/order/list/div/desc 2 each,
 others 1); 0 keyword import aliases. Enforcement must land in the C parser
@@ -2794,3 +2845,100 @@ mistake, making `if (c) {a: 1}` a syntax error and prescribing
 `if (c) ({a: 1})` as the repair. Any occurrence of that repair anywhere in
 the tree is Option 2 residue — the parens are unnecessary. The C parser
 still implements the erratum for the paren-head spelling (spec Appendix A).
+
+---
+
+## Appendix K — Keyword reference: which words may name a binding
+
+Generated from the ruling in **§7.24 / S16.10.1v2** and **verified against the
+running engine** on 2026-08-27 (each word compiled as `let <word> = 1`; the
+classifier is `lambda_lexer_word_bars_binding` in
+`lambda/runtime/parser/lambda_lexer.c`). Update this table whenever the
+keyword table changes.
+
+The dividing test: a word is **barred** when it is *capture-real* — it can
+BEGIN a construct, so a binding of that name could not be read back where the
+construct starts. A word is **allowed** when it only ever appears after
+something else.
+
+### K.1 Barred from binding names (60)
+
+Using one is `error[E201]` at the declaration site. This covers `let`/`var`
+names, parameters, `fn`/`pn`/`type`/`view` declaration names, and import
+aliases — with **no quoted escape** (§7.24 rule 1).
+
+| Group | Words |
+|---|---|
+| Declaration & statement keywords (21) | `let` `pub` `var` `type` `fn` `pn` `view` `edit` `state` `if` `match` `for` `while` `break` `continue` `return` `raise` `import` `apply` `not` `last` |
+| Base-type names (35) | `null` `any` `bool` `int` `integer` `float` `f64` `f32` `f16` `complex` `decimal` `number` `datetime` `date` `time` `binary` `range` `list` `array` `map` `element` `entity` `object` `function` `error` `string` `symbol` `i8` `i16` `i32` `i64` `u8` `u16` `u32` `u64` |
+| Named values (4) | `true` `false` `inf` `nan` |
+
+**`int64` is not on this list and is not a type.** `i64` is the one surface
+spelling (S2.1.1); `int64` is a concept name that the parser answers with
+`error[E204]: unknown type 'int64'; did you mean 'i64'?`, and `type()` now
+reports `i64` per S2.1.2's *aliases in, canon out*. `uint64` was already gone
+the same way. Because `int64` still lexes as a base-type word to power that
+suggestion, it also remains unusable as a binding name.
+
+`not` belongs here despite being an operator: it is **prefix**, so it can lead
+an expression, which is exactly the capture test.
+
+Two words are barred by **reservation rather than capture**, and are the only
+entries here that a reader cannot derive from the criterion:
+
+- **`state`** is a view-*signature* clause (`view int state count: 0 { … }`,
+  accepted right after the return type), so it never leads a statement and by
+  the criterion alone would be legal. It is held back deliberately: `state`
+  may become a standalone word — `expr is state`, `expr in state`,
+  `expr at state` — and a word cannot be reclaimed once programs bind it.
+- **`lambda`** is the namespace root (S17.2.2), reserved so the
+  `lambda.sys.*` shadow escape can never itself be captured. *(Not yet
+  enforced — item 2 of LR02-16.)* The base-type group is what
+makes `let type = 1` and `let int = 1` errors rather than the silent
+misreads they were before this ruling — both used to parse and then read the
+base type at the use site.
+
+### K.2 Allowed as binding names (28)
+
+Legal, and legal to shadow: these words carry no capture hazard because they
+never lead.
+
+| Group | Words |
+|---|---|
+| Clause words (11) — only meaningful inside a `for` header | `order` `by` `group` `into` `limit` `offset` `asc` `desc` `where` `that` `as` |
+| Infix word operators (13) — each takes a left operand | `and` `or` `to` `is` `in` `at` `div` `eq` `ne` `lt` `le` `ge` `gt` |
+| Continuation-only words (4) — claimed by an enclosing `if`/`match`/view | `else` `case` `default` `on` |
+
+This group is why `let offset = 5` and `fn f(limit)` have always worked, and
+keeping them legal is what held the S16.10.1v2 migration to ~52 corpus files
+instead of 332.
+
+**The clause reading has priority.** `else` `case` `default` `on` are legal
+binding names *and* keep their clause meaning: an enclosing `if`, `match`,
+`for`, or view body claims the word before an expression is parsed, so both
+readings coexist in one expression. Verified —
+`let case = 2` with `match 7 { case int: case + 1 default: 0 }` yields `3`
+(arm keyword, then binding), and `let default = 4` with
+`if (false) 1 else default` yields `4` (clause `else`, then binding
+`default`). A word allowed here must also *read* as a name in expression
+position; accepting a declaration whose every use fails is the defect
+S16.10.1v2 removes.
+
+**Caveat, unrelated to this ruling:** a legal binding may still be unreadable
+at a **line start**, because most of these words are S16.2.2v2 continuation
+tokens. `let at = 4` is fine, but a following line beginning with `at`
+continues the previous expression; read it inline (`let y = at + 1`).
+
+### K.3 Not covered by the bar
+
+- **Data names are unaffected** (S16.10.2): map keys, element tags, and
+  attribute names admit every word in K.1 — `{type: 1}`, `<if a:1, "x">`,
+  `<div class:"a">`. So do member steps after `.` (S16.10.3).
+- **Declaration members are data names, not bindings**: in
+  `type T { a: int, fn f() {} }` only `T` is a binding; fields *and* methods
+  may use any word in K.1 (see §7.24's clarification).
+- **`lambda` is reserved by S17.2.2 but not yet enforced** — it still tests
+  as allowed. Adding it is item 2 of LR02-16; it protects the
+  `lambda.sys.*` shadow escape from being captured. `sys` is deliberately
+  *not* reserved: system functions live under `lambda.sys.*`, not a bare
+  `sys` root.

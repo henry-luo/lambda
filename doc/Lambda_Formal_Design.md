@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.38.0 (2026-08-27)
+**Spec version:** 1.38.1 (2026-08-27)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -209,7 +209,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   never escape into an Item, container, or guest bridge. (Supersedes the
   C16-era G0 "int's native representation is the double" ruling.)
   [Int_Type §5.1]
-- **D2.2.3** Wide scalars (`int64`, `uint64`, cold doubles) have **no
+- **D2.2.3** Wide scalars (`i64`, `u64`, cold doubles) have **no
   inline form at any magnitude** (no value-dependent representation
   branches) and follow the scalar-home ownership taxonomy (§D5.2);
   `DTIME` is object-backed — GC-owned when dynamic, Input-arena when
@@ -238,7 +238,7 @@ language-visible counterparts are the semantics spec's SI ledger.
 - **D2.4.1*** Four facts, four authorities: semantic contract → AST
   `Type*`; planned representation → lowering analysis; emitted
   representation + provenance → `MirValue`; physical register class →
-  `MirValue.mir_type`. Under v5, boxed Item / int lane / Lambda `int64` /
+  `MirValue.mir_type`. Under v5, boxed Item / int lane / Lambda `i64` /
   machine quantity all share `MIR_T_I64`, so `MIR_reg_type()` probing is
   banned in expression lowering (named physical-layer helpers only).
   [Lane §1–§4]
@@ -519,7 +519,7 @@ that carries them.
 - **D3.4.5** Shape transitions obey the **map-layout invariant**: the
   exact runtime shape always describes the stored bytes. Type-compatible
   writes stay on the direct path (same type; `int → float`;
-  `int ↔ int64`); an incompatible write rebuilds the shape and repacks —
+  `int ↔ i64`); an incompatible write rebuilds the shape and repacks —
   transactionally, so on failure nothing changes (semantics S11.4.1).
   `let`-bound containers never transition (immutable); only
   `var`/procedural code can, and an annotated root must keep conforming.

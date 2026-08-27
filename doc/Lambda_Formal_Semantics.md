@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 16.2.1 (2026-08-27)
+**Spec version:** 18.0.1 (2026-08-27)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -175,8 +175,8 @@ harnesses.
 
 ### S2.1 Types
 
-- **S2.1.1** Scalars: `null`, `bool`, `int`, `integer`, `int64`/`i64`,
-  `uint64`/`u64`, sized ints `i8 i16 i32 u8 u16 u32`, `f16 f32`, `float`/`f64`,
+- **S2.1.1** Scalars: `null`, `bool`, `int`, `integer`, `i64`, `u64`,
+  sized ints `i8 i16 i32 u8 u16 u32`, `f16 f32`, `float`/`f64`,
   `decimal`, `string`, `symbol` (with `path` as a special symbol), `binary`,
   `datetime` (with `date`/`time` sub-kinds). Containers: `range`, `list`,
   `array` (transparently unboxed numeric variants), `map`, `element` (a list of
@@ -314,8 +314,8 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
   element is nan. Intermediate excursions do not saturate (reassociation must
   not change the answer). Arithmetic sys funcs returning int stay total
   (`sum` overflow → `inf`, never an error). [v5 §5.2]
-- **S4.1.4** `int ∥ int64`: poison has no `int64` home; every finite int is an
-  int64 value. Narrowing into `int` is band-membership — former sparse
+- **S4.1.4** `int ∥ i64`: poison has no `i64` home; every finite int is an
+  `i64` value. Narrowing into `int` is band-membership — former sparse
   representables (`2⁵⁴`) are admission errors, *loud where v4 was quietly
   non-contiguous*. [v5 §5.5]
 - **S4.1.5** Machine ints are Go-aligned: runtime overflow wraps
@@ -351,14 +351,14 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
   always (including integer-valued `100m`); fractional `n` is a compile error
   pointing at `m`. The retired uppercase `N` suffix is not in the grammar. [C13]
 - **S4.3.4** **Data cannot be rejected**: input parsers place integer tokens in
-  the smallest exact home — `int` if in band, else `int64`, else `decimal` —
+  the smallest exact home — `int` if in band, else `i64`, else `decimal` —
   never silently in float. *Literals are strict; data always fits.* [C3, C16]
 
 ### S4.4 Promotion lattice
 
 - **S4.4.1** One subsumption principle: `T1 ⊑ T2` iff every T1 value embeds
-  **exactly** into T2. Chains: `i8 ⊑ i16 ⊑ i32 ⊑ int ⊑ int64 ⊑ integer ⊑
-  decimal` (with `int ∥ int64` per S4.1.4 — finite ints embed, poison does
+  **exactly** into T2. Chains: `i8 ⊑ i16 ⊑ i32 ⊑ int ⊑ i64 ⊑ integer ⊑
+  decimal` (with `int ∥ i64` per S4.1.4 — finite ints embed, poison does
   not); `u8 ⊑ u16 ⊑ u32 ⊑ int`; `f16 ⊑ f32 ⊑ float ⊑ decimal`;
   `int ⊑ float`. Never `i* ⊑ u*`; same width never fits its float. [NM §3.4]
 - **S4.4.2** Meets are **type-directed, never magnitude-directed**:
@@ -428,7 +428,7 @@ working default idiom and `a div b or 0` is not. [C14c, C17]
 - **S4.9.1** Numeric FFI is **type-directed, never value-directed** — one rule
   per type, per direction; no rule consults magnitude. Lambda `int` → JS
   `number` (exact always: int53 ⊂ exact doubles); JS number → Lambda `float`,
-  always; BigInt ⇄ `integer` losslessly; `int64`/`u64` → BigInt; a guest
+  always; BigInt ⇄ `integer` losslessly; `i64`/`u64` → BigInt; a guest
   whose numeric type is IEEE double maps to `float`, never `int`. Poison
   crosses as itself. [NM §5, v5 §5.6]
 
@@ -1754,20 +1754,36 @@ below by its section.
 
 ### S16.10 Keywords as names
 
-- **S16.10.1*** **Keywords never name bindings.** Every word in the lexer
-  keyword table — statement and clause keywords (`view`, `edit`, `state`,
-  `order`, `last`, … are all reserved), word operators, base-type words, and
-  the named values — is rejected as a binding name: `let`/`var` names,
-  parameters, `fn`/`pn`/`type`/`view` declaration names, and import aliases
-  (`import edit: …` declares a binding and is rejected). The rejection is a
-  compile error at the declaration site (E201, which `last` already
-  receives). A binding name is re-spoken in expression positions where
-  keyword constructs begin, so a keyword binding cannot be read everywhere a
-  binding must be readable. **There is no quoted escape**: `import
-  'edit': …` is rejected too — at a use site `'edit'.x` is a symbol member
-  expression, and symbols never implicitly read bindings (S2.4.3). The
-  namespace root **`lambda` is reserved on the same terms**, so the
-  `lambda.sys.*` escape of S17.2.2 can never itself be shadowed.
+- **S16.10.1v2*** **Keywords never name bindings — where they could
+  capture.** A word is barred as a binding name when it can **begin a
+  construct**: declaration and statement keywords (`let` `var` `fn` `pn`
+  `type` `view` `edit` `if` `for` `while` `match` `return` `import` `apply`
+  `not` `last`, …), base-type words, and the named values. The bar covers
+  `let`/`var` names, parameters, `fn`/`pn`/`type`/`view` declaration names,
+  and import aliases (`import edit: …` declares a binding and is rejected);
+  the rejection is a compile error at the declaration site (E201). Words
+  that can never begin a construct stay **legal** as binding names:
+  for-header clause words (`order` `by` `group` `into` `limit` `offset`
+  `asc` `desc` `where` `that` `as`), infix word operators (`and` `or` `to`
+  `is` `in` `at` `div` `eq` `ne` `lt` `le` `ge` `gt`), and the
+  continuation-only words `else` `case` `default` (S16.2.2v2) together with
+  `on`. **Where both readings fit, the clause wins** — an enclosing `if`,
+  `match`, `for`, or view claims its clause word before an expression is
+  parsed, so `let default = 4` then `if (false) 1 else default` reads the
+  clause `else` and the binding `default`. A word legal as a binding must
+  also **read** as one in expression position: accepting a declaration whose
+  every use fails is the defect this ruling exists to remove. *Leaving clause
+  words bindable is the same forward-compatibility rule S12.3.7 applies to the
+  library: a new clause word must not capture a name existing programs already
+  bind, just as a new sys func must not.* **There is no
+  quoted escape**: `import 'edit': …` is rejected too — at a use site
+  `'edit'.x` is a symbol member expression, and symbols never implicitly
+  read bindings (S2.4.3). Two words are barred by **reservation rather than
+  capture**: `state`, a view-signature clause today but held for a possible
+  standalone word (`expr is state`), and the namespace root `lambda`, so the
+  `lambda.sys.*` escape of S17.2.2 can never itself be shadowed. The barred
+  and allowed words are enumerated in
+  [Design_Syntax Appendix K](../vibe/Lambda_Design_Syntax.md).
   [Design_Syntax §7.24]
 - **S16.10.2*** **Data names admit keywords.** Container name positions —
   map keys, element tags, and attribute names — accept keywords:
