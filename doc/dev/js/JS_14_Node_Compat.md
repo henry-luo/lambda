@@ -1,5 +1,7 @@
 # LambdaJS — Node.js Compatibility Layer
 
+> **Last verified against tree:** 2026-08-21 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the Node.js compatibility layer: how a module specifier becomes a namespace object (built-in dispatch and `node:`/bare/relative resolution), and the per-module implementations with their actual backing and gaps. The former embedded npm client is retained below as historical reference only; it is not linked into `lambda.exe`.
 >
 > **Primary sources:** `lambda/js/js_runtime.cpp` (`js_module_get`, `js_module_register`, the `JsModule` cache, inline stub modules), `lambda/js/js_mir_entrypoints_require.cpp` (`js_require`, `js_dynamic_import`, `js_is_cjs_file`, `js_wrap_cjs_source`), `lambda/js/js_mir_module_batch_lowering.cpp` (`jm_resolve_module_path`), and the per-module files `js_fs.cpp` … `js_assert.cpp`.

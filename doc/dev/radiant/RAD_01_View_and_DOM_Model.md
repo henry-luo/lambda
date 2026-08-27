@@ -1,5 +1,7 @@
 # Radiant — View & DOM Model
 
+> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the single most load-bearing decision in Radiant: there is no separate layout "view tree" — a parsed DOM node *is* its own view. It describes the unified `DomNode`/`View` representation, the method-only view-wrapper hierarchy, how layout "builds" the view tree by tagging nodes in place, the two-tier arena+pool memory model, incremental relayout, and the source-position bridge that anchors the rich-text editor.
 >
 > **Primary sources:** `lambda/input/css/dom_node.hpp` / `dom_element.hpp` (the base structs that carry every view field), `radiant/view.hpp` (the `View*` wrapper classes + `ViewTree`), `radiant/view_pool.cpp` (in-place tagging, property allocation, teardown, retained reset), `lib/tagged.hpp` (`namespace lam` cast helpers), `radiant/render.hpp` (ownership-tracked pointer retention), `radiant/event.hpp` / `source_pos_bridge.cpp` (DOM↔source mapping), `radiant/layout.cpp` (`layout_flow_node`, view-tree creation).

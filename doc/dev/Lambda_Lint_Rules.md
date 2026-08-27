@@ -1,5 +1,7 @@
 # Lambda Lint — Operational Reference
 
+> **Last verified against tree:** 2026-06-22 *(initial stamp from git history)*
+
 This document describes the lint stack as it ships today: how `make lint`
 works, how to read its findings, and what each rule checks. For the design
 rationale and proposal history, see [`vibe/Lambda_Lint.md`](../../vibe/Lambda_Lint.md).

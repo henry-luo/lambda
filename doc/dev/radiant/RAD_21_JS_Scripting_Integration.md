@@ -1,5 +1,7 @@
 # Radiant — JS Scripting Integration
 
+> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the Radiant-side driver that runs a page's `<script>` elements: how `execute_document_scripts` walks the parsed HTML tree, concatenates a browser-global preamble (window/document/XHR/WebSocket stubs) with inline, external, and onload sources, and transpiles them to MIR through the LambdaJS engine — all under an `alarm` + `sigsetjmp` + SIGSEGV/SIGBUS watchdog — with the unified `DomElement*` tree as the DOM context. It also covers how the retained JS runtime is stashed on `DomDocument` and reused by `collect_and_compile_event_handlers` to compile `on<type>` inline handlers, and how the loader now runs CSS cascade before scripts and recascades after script mutations.
 >
 > **Primary sources:** `radiant/radiant.hpp` + `radiant/script_runner.cpp` (`execute_document_scripts`, `execute_document_script_tasks_postdom`, `append_browser_document_preamble`, `collect_and_compile_event_handlers`, the watchdog handlers), `radiant/cmd_layout.cpp` (the cascade → scripts → optional recascade load pipeline), `lambda/input/css/dom_element.hpp` (the retained-runtime fields on `DomDocument`). The DOM/CSSOM binding surface it drives lives in `lambda/js/` and is documented in [JS_13 — Web-Platform DOM, CSSOM, Events & Fetch](../js/JS_13_Web_DOM.md).

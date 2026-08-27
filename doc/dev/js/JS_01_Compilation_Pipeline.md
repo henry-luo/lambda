@@ -1,5 +1,7 @@
 # LambdaJS — Compilation Pipeline & Phase Model
 
+> **Last verified against tree:** 2026-07-15 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how a JavaScript source file becomes executing native code (or interpreted MIR): the entry points, the per-compile transpiler state, the multi-phase compile, the interpreter-vs-JIT decision, and MIR symbol resolution.
 >
 > **Primary sources:** `lambda/js/js_mir_entrypoints_require.cpp`, `lambda/js/js_mir_module_batch_lowering.cpp` (`transpile_js_mir_ast`), `lambda/js/js_mir_context.hpp` / `js_mir_internal.hpp` (`JsMirTranspiler`), `lambda/js/transpile_js_mir.cpp` (globals anchor), `lambda/mir.c` + `lambda/sys_func_registry.c` (import resolution), `lambda/main.cpp` (CLI dispatch).

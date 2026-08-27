@@ -1,5 +1,7 @@
 # Radiant — CSS Style Resolution & Computed Style
 
+> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the *used/computed value* step of CSS: how the already-parsed, already-cascaded style for an element is turned into concrete floats, colors, and enums stored directly on the view node's property structs. It draws the seam between Radiant and the CSS engine in `lambda/input/css/` (which owns parsing, specificity, and the cascade), describes the two-pass font-first resolution and the ~248-case property switch, the value resolvers for lengths/colors/`var()`, the imperative UA-default and HTML-presentational-attribute pass, and the memory-safety helpers that keep shorthand expansion sound.
 >
 > **Primary sources:** `radiant/resolve_css_style.cpp` (the property resolver — the largest file in the repo at ~13.9k lines), `radiant/resolve_htm_style.cpp` (UA defaults + legacy HTML attributes), `radiant/view.hpp` (shorthand scratch declarations), `radiant/css_animation.cpp` (animation-longhand consumption), `radiant/render.hpp` (owned-pointer retention), the computed-style prop structs in `radiant/view.hpp` (`FontProp`/`InlineProp`/`BoundaryProp`/`BlockProp`/`PositionProp`/`FlexProp`), and the seam types in `lambda/input/css/css_style_node.hpp` / `css_style.hpp`. Caller order lives in `radiant/layout.cpp`.

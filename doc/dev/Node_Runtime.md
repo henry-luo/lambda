@@ -1,5 +1,7 @@
 # Lambda Node.js Runtime — Design Document
 
+> **Last verified against tree:** 2026-08-21 *(initial stamp from git history)*
+
 ## Overview
 
 Lambda includes a Node.js compatibility layer that enables running Node.js-style JavaScript programs within the LambdaJS engine. This covers three areas:

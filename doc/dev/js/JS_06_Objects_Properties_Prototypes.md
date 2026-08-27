@@ -1,5 +1,7 @@
 # LambdaJS — Objects, Properties & Prototypes
 
+> **Last verified against tree:** 2026-08-13 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how JS objects are represented (Lambda `Map` + `TypeMap` shape), how property attributes are stored, the `[[Get]]`/`[[Set]]` dispatch pipelines, `Object.defineProperty`, the prototype chain, realm-local intrinsic properties, symbol-keyed properties, and constructor shape pre-allocation.
 >
 > **Primary sources:** `lambda/js/js_object_meta.{h,cpp}` (immutable class/family metadata and the `JsPropertyOps` table), `lambda/js/js_props.{h,cpp}` (ordinary kernels), `lambda/js/js_property_attrs.{h,cpp}` (shape-flag descriptors, accessor pairs, shape clone), `lambda/js/js_class.h` (class identity helpers), `lambda/lambda-data.hpp` / `lambda.h` (`Map`, `TypeMap`, `ShapeEntry`, `Container`, physical `MapKind`), `lambda/js/js_runtime.cpp` (`js_property_get`/`js_property_set`/prototype walk), `lambda/js/js_globals.cpp` (`Object.defineProperty`), and `js_runtime_builtin_registry.cpp` (intrinsic target/binding installation).

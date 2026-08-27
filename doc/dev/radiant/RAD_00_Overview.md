@@ -1,5 +1,7 @@
 # Radiant Engine — Design Overview
 
+> **Last verified against tree:** 2026-07-15 *(initial stamp from git history)*
+
 > **The index and architectural summary for the Radiant detailed-design set.** Radiant is Lambda's HTML/CSS layout, rendering, and interaction engine — the subsystem that turns a parsed document into a laid-out, painted, and (optionally) interactive page. It shares the Lambda runtime (the `Item` value model, GC, MIR JIT, `MarkBuilder`, and the input parsers/formatters) rather than bridging to it, and it hosts the LambdaJS engine for page scripting.
 > **Audience:** engine developers. **Scope:** everything under `radiant/` — the view/DOM model, CSS computed-style resolution, the layout engine (block, inline/text, flex, grid, table, positioned, intrinsic sizing), the rendering pipeline (paint IR, display list, painters, raster/PDF/SVG export), vector graphics, and the interaction layers (events, animation, editing, forms, interaction state, the application shell, JS scripting, media, and embedded webview). **Convention:** the detailed docs cite `file:line` + symbol names; line numbers drift, so confirm against the symbol. This document supersedes `doc/dev/Radiant_Layout_Design.md` and `doc/dev/Radiant_View_Design.md`, whose content has been absorbed and reorganized into the set below.
 

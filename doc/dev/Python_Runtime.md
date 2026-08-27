@@ -1,5 +1,7 @@
 # LambdaPy Runtime — Design Document
 
+> **Last verified against tree:** 2026-07-20 *(initial stamp from git history)*
+
 > **Updated 2026-07-20.** LambdaPy uses the shared MIR frame/rooting API,
 > recovery checkpoints, traced closure and generator environments, scalar-home
 > return adoption, and a checked thread-local argument stack. Its builder emits

@@ -1,5 +1,7 @@
 # Lambda Runtime — Strings, Symbols & Vectors
 
+> **Last verified against tree:** 2026-08-24 *(initial stamp from git history)*
+
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers two value families that live "next to" the numeric tower: UTF-8 **strings and symbols** (their flexible-array layout, three-tier allocation, `is_ascii` fast indexing, utf8proc normalization, and casefold-then-`memcmp` comparison), and the **`ArrayNum`** numeric-array / vector machine (the union-aliased storage, the 15 element types, the auto-vectorized contiguous kernels, NumPy-style N-D broadcasting, mutable views, and the image-processing toolkit built on top).
 >
 > **Primary sources:** `lambda/utf_string.cpp`/`utf_string.h` (utf8proc normalization + Unicode comparison), `lambda/lambda-vector.cpp` (the entire `ArrayNum` engine — kernels, broadcasting, views, image ops), `lambda/lambda.h` (the `String`/`Symbol`/`ArrayNum`/`ArrayNumShape` C structs, `ELEM_*` enum, `ELEM_TYPE_SIZE`), `lambda/lambda.hpp` (the C++ `ArrayNum` struct + `get_elem_type`/`set_elem_type`), `lambda/lambda-eval.cpp` (`array_num_eq`, scalar string comparison), `lambda/lambda-data-runtime.cpp` (`array_num_new`, `array_num_get`).

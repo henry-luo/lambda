@@ -1,5 +1,7 @@
 # Radiant — Animation & Frame Scheduling
 
+> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the *timing half* of Radiant: the cross-platform `RadiantFrameClock` vsync wake source, the `window.cpp` render loop it paces, the generic `AnimationScheduler`/`TimingFunction`/`AnimationInstance` engine, the CSS `@keyframes` runtime (`KeyframeRegistry`, per-frame keyframe sampling into in-place view mutations and dirty rects), and the video-frame wake path. The threading contract is the load-bearing idea: the native clock only *wakes* the loop; every animation sample and every mutation runs on the UI thread.
 >
 > **Primary sources:** `radiant/radiant.hpp` + `radiant/frame_clock.cpp` (`RadiantFrameClock`, native vsync thread, timeout policy), `radiant/view.hpp` + `radiant/animation.cpp` (`AnimationScheduler`, `AnimationInstance`, `TimingFunction`), `radiant/view.hpp` + `radiant/css_animation.cpp` (`KeyframeRegistry`, `CssKeyframes`, keyframe sampling, style-resolution wiring), `radiant/render.hpp` + `radiant/video_frame_wake.cpp` (video wake), `radiant/window.cpp` (`view_frame_clock` main loop, `view_wake_glfw`, `view_next_wait_timeout`).

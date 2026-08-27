@@ -1,5 +1,7 @@
 # Radiant — Flexbox Layout
 
+> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's CSS Flexbox Level 1 implementation for `display:flex`/`inline-flex` containers (and, by reuse, for grid items). It explains why the implementation is split across three large files as a *pipeline*, not three rival implementations; the multi-pass rationale forced by the chicken-and-egg dependency between item sizing and content layout; the numbered ten-phase core algorithm with its faithful §9.7 grow/shrink resolution loop; the two caches that keep re-measurement affordable; and the alignment seam shared with grid.
 >
 > **Primary sources:** `radiant/layout.hpp` (the public flex surface, shared alignment declarations, and `MAX_FLEX_DEPTH`), `radiant/layout_flex.cpp` (the ~6.1k-line core: `layout_flex_container`, the phase pipeline, `resolve_flexible_lengths`, sizing/alignment primitives), `radiant/layout_flex_measurement.cpp` (PASS 1 content measurement + the measurement cache), `radiant/layout_flex_multipass.cpp` (the orchestrator: entry, pass sequencing, nested content, absolute children, auto margins), `radiant/layout_alignment.cpp` (shared alignment mechanics), and `radiant/view.hpp` (`FlexProp`, `FlexItemProp`).

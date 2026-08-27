@@ -1,5 +1,7 @@
 # Radiant — Form Controls & Text-Control Editing
 
+> **Last verified against tree:** 2026-08-25 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's HTML form controls (`<input>`, `<textarea>`, `<select>`, `<button>`) as replaced elements with UA-chrome layout and rendering, and — critically — the **native** text-control editing engine that still applies value mutations in C++. [RAD_18 — Editing, Selection & DOM Ranges](RAD_18_Editing_Selection_Ranges.md) documents the registered contenteditable action gate; form controls remain a distinct value-store action between their cancelable `beforeinput` and non-cancelable post-mutation `input` notifications.
 >
 > **Primary sources:** `radiant/view.hpp` (the form-control model), `radiant/event.hpp` (text-control and text-edit declarations), `radiant/layout_form.cpp` (intrinsic sizing), `radiant/render_form.cpp` (control painting and overlays), `radiant/text_edit.cpp` (editing, undo/redo, IME, validation, and ARIA), and `radiant/text_control.cpp` (UTF-8↔UTF-16 value/selection IDL and projection sync).

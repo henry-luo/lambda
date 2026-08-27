@@ -1,5 +1,7 @@
 # Radiant — Box Model, Containing Blocks & the Layout Cache
 
+> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document describes the shared *sizing-services* layer that sits beneath every layout mode: the CSS box-model math (content/padding/border/margin edges, `box-sizing`, border-box↔content-box conversion, min/max clamping); the Taffy-style `RunMode`/`SizingMode` and Ladybird-style `AvailableSpace` that unify real layout with side-effect-free measurement; the 9-slot per-element `LayoutCache` and its keying/invalidation; the `LayoutMeasureScope` snapshot/restore that makes a measurement pass leave no trace; containing-block resolution and percentage resolution; the alignment/axis helpers shared by flex and grid; and the callback-based absolutely-positioned-children driver that block, flex, and grid all reuse.
 >
 > **Primary sources:** `radiant/layout.hpp` / `layout_box.cpp` (`BoxMetrics`, box conversions, min/max clamp), `radiant/layout.hpp` (`AvailableSize`/`AvailableSpace`), `radiant/layout.hpp` (`RunMode`/`SizingMode`/`LayoutOutput`), `radiant/layout.hpp` (9-slot `LayoutCache`), `radiant/layout.hpp` / `layout_pass.cpp` (`LayoutMeasureScope`, cache wiring), `radiant/layout.hpp` / `layout_measure.cpp` (`layout_measure_intrinsic`), `radiant/layout.hpp` / `layout_containing_block.cpp`, `radiant/layout.hpp`, `radiant/layout.hpp` / `layout_alignment.cpp`, `radiant/layout.hpp` / `layout_abs_children.cpp`.

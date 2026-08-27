@@ -1,5 +1,7 @@
 # Lambda Runtime — Runtime Builtins & System Functions
 
+> **Last verified against tree:** 2026-08-25 *(initial stamp from git history)*
+
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the runtime **support library** that JIT-produced native code calls into, and the system-function registry that wires script-level builtins to that library. It frames the central architectural fact — Lambda is **JIT-only**, with no tree-walking interpreter — and then maps the C-ABI surface: the thread-local `EvalContext`, the `fn_*` comparison/indexing/string/datetime/error helpers in `lambda-eval.cpp`, the `GUARD_ERROR*` error-propagation discipline, and the static `sys_func_defs[]` table that serves simultaneously as AST metadata and as the JIT import map.
 >
 > **Primary sources:** `lambda/lambda-eval.cpp` (the `fn_*` runtime support library: comparison, indexing/member access, `fn_len`, string ops, datetime constructors, `fn_call`/`fn_input`, `fn_error`/`set_runtime_error`), `lambda/sys_func_registry.c` + `lambda/sys_func_registry.h` (the `SysFuncInfo` struct and the `sys_func_defs[]`/`jit_runtime_imports[]` tables), `lambda/lambda-data.hpp` (`EvalContext`), `lambda/lambda.hpp` (`GUARD_ERROR*`), `lambda/build_ast.cpp` (registry consumption at AST-build time), `lambda/mir.c` (registry consumption at JIT time), `lambda/lambda-proc.cpp` (procedural `pn_*` I/O builtins, owned in detail by LR_12).
