@@ -1478,6 +1478,34 @@ extern "C" uint64_t radiant_splice_epoch(void) { return g_radiant_splice_epoch; 
 // caret. Events are deliberately not fired here — this runs inside beforeinput,
 // and the engine dispatches `input` after the applier returns, exactly as it
 // does for its own splice.
+// F2b/#4: the password reveal window. Which control reveals, what gets revealed
+// and when are the template's call; this only converts the codepoint range it
+// names into the byte window the renderer masks against. An empty or inverted
+// range clears, which is how the template says "mask everything".
+RADIANT_C_API Item fn_radiant_set_password_reveal(Item node_item, Item start_item,
+                                                  Item end_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_PASSWORD_REVEAL", &elem);
+    if (!state || !elem || !tc_is_text_control(elem)) return (Item){.item = b2it(0)};
+    uint32_t len = 0;
+    const char* buf = radiant_tc_buffer(elem, &len);
+    if (!buf) return (Item){.item = b2it(0)};
+
+    int64_t cp_start = it2l(start_item), cp_end = it2l(end_item);
+    if (cp_start < 0) cp_start = 0;
+    if (cp_end <= cp_start) {
+        form_control_password_reveal_clear(state, (View*)elem);
+        return (Item){.item = b2it(1)};
+    }
+    size_t b_start = str_utf8_char_to_byte(buf, len, (size_t)cp_start);
+    size_t b_end = str_utf8_char_to_byte(buf, len, (size_t)cp_end);
+    if (b_start == STR_NPOS || b_start > len) b_start = len;
+    if (b_end == STR_NPOS || b_end > len) b_end = len;
+    form_control_password_reveal_set(state, (View*)elem,
+                                     (uint32_t)b_start, (uint32_t)b_end);
+    return (Item){.item = b2it(1)};
+}
+
 RADIANT_C_API Item fn_radiant_replace_range(Item node_item, Item start_item,
                                             Item end_item, Item text_item) {
     DomElement* elem = nullptr;
@@ -2008,6 +2036,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_set_selection(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_selection},
     {"replace_range", "fn(node: dom_node, start: int, end: int, text: string) -> bool", (fn_ptr)fn_radiant_replace_range, JUBE_FN_NONE,
      "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
+    {"set_password_reveal", "fn(node: dom_node, start: int, end: int) -> bool", (fn_ptr)fn_radiant_set_password_reveal, JUBE_FN_NONE,
+     "Item fn_radiant_set_password_reveal(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_password_reveal},
     {"ime_preedit", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_ime_preedit, JUBE_FN_NONE,
      "Item fn_radiant_ime_preedit(Item node)", (fn_ptr)fn_radiant_ime_preedit},
     {"set_ime_preedit", "fn(node: dom_node, text: any, caret: int) -> bool", (fn_ptr)fn_radiant_set_ime_preedit, JUBE_FN_NONE,

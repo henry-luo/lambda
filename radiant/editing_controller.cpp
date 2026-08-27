@@ -504,15 +504,12 @@ static bool editing_controller_password_reveal_tick(DocState* state,
     DomElement* elem = lam::dom_require_element(focused);
     if (!tc_is_text_control(elem) || !elem->form ||
         !elem->form->input_type ||
-        strcmp(elem->form->input_type, "password") != 0 ||
-        !elem->form->password_reveal_active) {
+        strcmp(elem->form->input_type, "password") != 0) {
         return false;
     }
-
-    elem->form->password_reveal_elapsed += delta;
-    if (elem->form->password_reveal_elapsed < 1.0) return false;
-
-    te_password_reveal_clear(elem);
+    // The hold is a frame timer, so it stays native; the window it counts down
+    // now lives in the state store, where a view-pool churn cannot drop it.
+    if (!form_control_password_reveal_tick(state, focused, delta)) return false;
     doc_state_request_repaint(state);
     return true;
 }
@@ -525,7 +522,7 @@ static bool editing_controller_password_reveal_active_for_focus(DocState* state)
     return tc_is_text_control(elem) && elem->form &&
         elem->form->input_type &&
         strcmp(elem->form->input_type, "password") == 0 &&
-        elem->form->password_reveal_active != 0;
+        form_control_password_reveal_get(state, focused, nullptr, nullptr);
 }
 
 bool editing_controller_drag_autoscroll(EventContext* evcon,

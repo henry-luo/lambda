@@ -4312,18 +4312,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             DocState* state = (DocState*)doc->state;
-            form_control_set_selected_index(state, static_cast<View*>(select), match_index);
-            // user-like select changes must notify JS with selectedness already
-            // mirrored into js_dom; otherwise onchange sees the stale value.
+            // Resolving which option matches is the harness's job; committing it
+            // is not. This dispatches the same `optioncommit` the pointer and
+            // keyboard paths use, and the template both selects the option and
+            // closes the dropdown, so no explicit close is needed here.
             radiant_dispatch_event_sim_select_change(uicon, static_cast<View*>(select),
                                                      match_index);
-            if (state) {
-                // Close dropdown if open
-                if (state->open_dropdown == select_view) {
-                    doc_state_close_dropdown(state, static_cast<View*>(select));
-                }
-                doc_state_request_repaint(state);
-            }
+            if (state) doc_state_request_repaint(state);
             log_info("event_sim: select_option - selected index %d", match_index);
             break;
         }
@@ -4668,7 +4663,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            bool actual_active = dom_elem->form->password_reveal_active != 0;
+            DocState* reveal_state = (DocState*)uicon->document->state;
+            uint32_t actual_reveal_start = 0, actual_reveal_end = 0;
+            bool actual_active = form_control_password_reveal_get(
+                reveal_state, elem, &actual_reveal_start, &actual_reveal_end);
             bool passed = true;
             if (actual_active != ev->expected_password_reveal_active) {
                 log_error("event_sim: assert_password_reveal FAIL - active expected %s, got %s",
@@ -4677,17 +4675,17 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 passed = false;
             }
             if (ev->expected_char_offset >= 0 &&
-                dom_elem->form->password_reveal_start != (uint32_t)ev->expected_char_offset) {
+                actual_reveal_start != (uint32_t)ev->expected_char_offset) {
                 log_error("event_sim: assert_password_reveal FAIL - start expected %d, got %u",
                           ev->expected_char_offset,
-                          dom_elem->form->password_reveal_start);
+                          actual_reveal_start);
                 passed = false;
             }
             if (ev->expected_selection_end >= 0 &&
-                dom_elem->form->password_reveal_end != (uint32_t)ev->expected_selection_end) {
+                actual_reveal_end != (uint32_t)ev->expected_selection_end) {
                 log_error("event_sim: assert_password_reveal FAIL - end expected %d, got %u",
                           ev->expected_selection_end,
-                          dom_elem->form->password_reveal_end);
+                          actual_reveal_end);
                 passed = false;
             }
             if (passed) {

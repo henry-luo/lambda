@@ -3363,6 +3363,49 @@ void form_control_history_set(DocState* state, View* view, void* history) {
     if (view_state) view_state->data.form.history = history;
 }
 
+bool form_control_password_reveal_get(DocState* state, View* view,
+                                      uint32_t* out_start, uint32_t* out_end) {
+    ViewState* vs = form_view_state_get(state, view);
+    if (!vs || !vs->data.form.password_reveal_active) return false;
+    if (out_start) *out_start = vs->data.form.password_reveal_start;
+    if (out_end) *out_end = vs->data.form.password_reveal_end;
+    return true;
+}
+
+void form_control_password_reveal_set(DocState* state, View* view,
+                                      uint32_t start, uint32_t end) {
+    ViewState* vs = form_view_state_get_or_create(state, view, form_prop_for_view(view));
+    if (!vs) return;
+    vs->data.form.password_reveal_start = start;
+    vs->data.form.password_reveal_end = end;
+    vs->data.form.password_reveal_active = start < end ? 1 : 0;
+    vs->data.form.password_reveal_elapsed = 0.0;
+}
+
+bool form_control_password_reveal_clear(DocState* state, View* view) {
+    ViewState* vs = form_view_state_get(state, view);
+    if (!vs) return false;
+    bool changed = vs->data.form.password_reveal_active != 0 ||
+                   vs->data.form.password_reveal_start != vs->data.form.password_reveal_end;
+    vs->data.form.password_reveal_active = 0;
+    vs->data.form.password_reveal_start = 0;
+    vs->data.form.password_reveal_end = 0;
+    vs->data.form.password_reveal_elapsed = 0.0;
+    return changed;
+}
+
+// Advance the reveal timer; true once the window has expired and been cleared.
+// The one-second hold is the only piece of the policy that stays native: it is a
+// frame-driven timer, and waking a template per frame to count it down would
+// cost more than the decision is worth.
+bool form_control_password_reveal_tick(DocState* state, View* view, double delta) {
+    ViewState* vs = form_view_state_get(state, view);
+    if (!vs || !vs->data.form.password_reveal_active) return false;
+    vs->data.form.password_reveal_elapsed += delta;
+    if (vs->data.form.password_reveal_elapsed < 1.0) return false;
+    return form_control_password_reveal_clear(state, view);
+}
+
 // F8/ES19: the behavior-init bit. Read is create-free — no ViewState means the
 // control has never been inited, which is exactly the answer wanted.
 bool form_control_behavior_inited(DocState* state, View* view) {

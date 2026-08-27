@@ -1,0 +1,157 @@
+{
+  "html": "test/lambda/ui/dom_pkg_select.ls",
+  "description": "F2b: the <select> behavior template commits the clicked option and closes the dropdown",
+  "events": [
+    {
+      "type": "log",
+      "message": "=== select option commit from the Lambda behavior template ==="
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": ".sel"
+      },
+      "equals": "a"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".sel"
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": ".sel"
+      },
+      "open_dropdown": true
+    },
+    {
+      "type": "log",
+      "message": "--- dropdown open; click the second option (offset lands in row 1) ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".sel",
+        "offset_x": 20,
+        "offset_y": 40
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "log",
+      "message": "--- template committed the choice and closed the dropdown ---"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": ".sel"
+      },
+      "equals": "b"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": ".sel"
+      },
+      "open_dropdown": false
+    },
+    {
+      "type": "log",
+      "message": "--- keyboard commit: reopen, move the hover up, Enter ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".sel"
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": ".sel"
+      },
+      "open_dropdown": true
+    },
+    {
+      "type": "key_press",
+      "key": "up"
+    },
+    {
+      "type": "key_press",
+      "key": "enter"
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "log",
+      "message": "--- Enter commits through the same template handler as the click ---"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": ".sel"
+      },
+      "equals": "a"
+    },
+    {
+      "type": "assert_state_store",
+      "target": {
+        "selector": ".sel"
+      },
+      "open_dropdown": false
+    },
+    {
+      "type": "log",
+      "message": "--- select_option resolves the match, the template commits it ---"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": ".sel"
+      },
+      "value": "b"
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": ".sel"
+      },
+      "equals": "b"
+    },
+    {
+      "type": "log",
+      "message": "--- and by label, back to the first option ---"
+    },
+    {
+      "type": "select_option",
+      "target": {
+        "selector": ".sel"
+      },
+      "label": "Apple"
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": ".sel"
+      },
+      "equals": "a"
+    }
+  ]
+}
