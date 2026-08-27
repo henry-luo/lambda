@@ -1468,7 +1468,7 @@ static void js_interp_eval_bind_scope(JsInterpFrame* frame, NameScope* scope,
         Item key = js_interp_name_key(entry->name);
         Item value = js_interp_binding_raw_value(frame, entry);
         if (global_lexical) {
-            js_eval_global_lexical_bind(key, value);
+            js_eval_global_lexical_bind(key, value, entry->is_const ? 1 : 0);
         } else {
             js_eval_env_bind(key, value);
         }
@@ -1512,9 +1512,9 @@ static Item js_interp_eval_writeback_scope(JsInterpFrame* frame,
         Rooted<Item> global_root(roots, js_get_global_this());
         // Global direct eval updates the realm lexical record. Function-scope
         // eval instead updates its temporary own-property bridge.
-        Rooted<Item> value_root(roots, lexical_only
-            ? js_get_global_property(key)
-            : js_get_key_default(global_root.get(), key));
+        // the bridge property is the eval result; resolving through the realm
+        // lexical record would mask it with the caller's pre-eval value
+        Rooted<Item> value_root(roots, js_get_key_default(global_root.get(), key));
         if (item_is_error(value_root.get())) return value_root.get();
         Item written = js_interp_write_binding(frame, entry, entry->name,
             value_root.get(), false);

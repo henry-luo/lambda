@@ -770,6 +770,7 @@ struct JsEvalBridgeState {
     Item global_lexical_keys[JS_EVAL_ENV_BIND_MAX] = {};
     Item global_lexical_old_values[JS_EVAL_ENV_BIND_MAX] = {};
     bool global_lexical_had_own[JS_EVAL_ENV_BIND_MAX] = {};
+    bool global_lexical_immutable[JS_EVAL_ENV_BIND_MAX] = {};
     int global_lexical_count = 0;
     int global_lexical_frame_marks[JS_EVAL_ENV_FRAME_MAX] = {};
     int global_lexical_frame_depth = 0;

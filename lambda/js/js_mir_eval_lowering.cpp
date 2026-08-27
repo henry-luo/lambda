@@ -1615,7 +1615,9 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         // runtime its caller can carry interpreter-owned lexical/private
         // state which that function cannot capture; use the direct-program
         // evaluator, which preserves the active eval bridge instead.
-        bool skip_expr_form = !is_direct_eval || js_ast_interpreter_requested();
+        bool ast_execution_active = js_ast_interpreter_requested() ||
+            js_runtime_state.ast_interpreter.execution_depth > 0;
+        bool skip_expr_form = !is_direct_eval || ast_execution_active;
         const char* s = code_str->chars;
         size_t slen = code_str->len;
         // Skip leading whitespace

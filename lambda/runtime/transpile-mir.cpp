@@ -28941,6 +28941,8 @@ static void* interp_worker_entry(void* opaque) {
     if (!eval_context_shutdown(eval)) {
         log_error("interp-worker: failed to release evaluator context");
     }
+    // the worker owns a thread-local alternate signal stack until it exits
+    lambda_stack_cleanup();
     return NULL;
 }
 
