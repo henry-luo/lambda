@@ -136,6 +136,12 @@ static const char* const error_expected_relative_import_component = "expected a 
 static const char* const error_expected_import_module = "expected an import module";
 static const char* const error_expected_import_component = "expected an import component";
 static const char* const error_pub_declaration = "'pub' modifies a declaration; write 'pub let'";
+// S16.10.1: an import alias is a binding, so it takes no keyword and no
+// quoted spelling — a quoted use site would be a symbol, which never reads a
+// binding (S2.4.3). Rejecting here reports the import line itself instead of
+// letting every later use fail.
+static const char* const error_import_alias_reserved =
+    "an import alias must be a plain identifier, not a keyword or quoted symbol";
 static const char* const error_statement_relation_parentheses = "comparison requires parentheses at statement scope";
 static const char* const error_trailing_statement_separator = "trailing ';' is not a statement separator";
 static const char* const error_empty_statement_between_separators = "empty statement between ';' separators";
@@ -394,12 +400,19 @@ static bool token_is_identifier(LambdaTokenKind kind) {
     return kind == LAMBDA_TOK_IDENTIFIER;
 }
 
+// S16.10.2: data-name positions admit every keyword spelling. Both the key
+// and element-name predicates derive from this one set so a tag, an
+// attribute, and a map key can never drift apart as keywords are added.
+static bool token_is_name_word(LambdaTokenKind kind) {
+    return token_is_identifier_like(kind) || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_PUB || kind == LAMBDA_TOK_VAR || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_WHILE || kind == LAMBDA_TOK_BREAK || kind == LAMBDA_TOK_CONTINUE || kind == LAMBDA_TOK_RETURN || kind == LAMBDA_TOK_RAISE || kind == LAMBDA_TOK_IMPORT;
+}
+
 static bool token_is_key(LambdaTokenKind kind) {
-    return token_is_identifier_like(kind) || kind == LAMBDA_TOK_SYMBOL || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE || kind == LAMBDA_TOK_LET || kind == LAMBDA_TOK_PUB || kind == LAMBDA_TOK_VAR || kind == LAMBDA_TOK_FN || kind == LAMBDA_TOK_PN || kind == LAMBDA_TOK_IF || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_MATCH || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_LAST || kind == LAMBDA_TOK_FOR || kind == LAMBDA_TOK_WHILE || kind == LAMBDA_TOK_BREAK || kind == LAMBDA_TOK_CONTINUE || kind == LAMBDA_TOK_RETURN || kind == LAMBDA_TOK_RAISE || kind == LAMBDA_TOK_IMPORT || kind == LAMBDA_TOK_STAR;
+    return token_is_name_word(kind) || kind == LAMBDA_TOK_SYMBOL || kind == LAMBDA_TOK_STAR;
 }
 
 static bool token_is_element_name(LambdaTokenKind kind) {
-    return token_is_identifier_like(kind) || kind == LAMBDA_TOK_SYMBOL || kind == LAMBDA_TOK_BASE_TYPE || kind == LAMBDA_TOK_TYPE;
+    return token_is_name_word(kind) || kind == LAMBDA_TOK_SYMBOL;
 }
 
 static bool token_is_literal(LambdaTokenKind kind) {
@@ -1826,6 +1839,19 @@ static LambdaParseValue parse_statement(LambdaRdParser* parser) {
         do {
             LambdaToken alias = {0};
             if (token_is_key(parser->current.kind) && parser->next.kind == LAMBDA_TOK_COLON) {
+                // S16.10.1v2: the alias is a binding, so a capture-real word
+                // is out; a quoted symbol is out too, since a symbol never
+                // reads a binding at the use site (S2.4.3).
+                size_t alias_len = parser->current.span.end_byte -
+                    parser->current.span.start_byte;
+                if (parser->current.kind == LAMBDA_TOK_SYMBOL ||
+                        (parser->current.span.start_byte < parser->lexer.length &&
+                         lambda_lexer_word_bars_binding(
+                             parser->lexer.source + parser->current.span.start_byte,
+                             alias_len))) {
+                    return parser_fail(parser, error_import_alias_reserved,
+                        LAMBDA_TOK_IDENTIFIER);
+                }
                 alias = parser->current;
                 parser_advance(parser);
                 parser_advance(parser);

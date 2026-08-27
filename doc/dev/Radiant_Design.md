@@ -1,5 +1,7 @@
 # Radiant Engine — Design Summary
 
+> **Last verified against tree:** 2026-07-15 *(initial stamp from git history)*
+
 > **One document engine, from source to pixels to interaction.** Radiant is Lambda's HTML/CSS layout, rendering, and interaction engine — a full document-presentation and browser engine (~198k LOC under `radiant/`), not just a layout box. Its defining idea: a parsed DOM node **is** its own layout view (no parallel tree), and it runs on the **shared Lambda runtime** (the tagged `Item` value model, the GC, the MIR JIT, `MarkBuilder`, and the input parsers) rather than bridging to it, hosting the LambdaJS engine for page scripts. This document is the concise map of that design — for developers, and for loading into AI-model context. Full details live in the **[RAD_00 detailed-design set](radiant/RAD_00_Overview.md)** (RAD_01–RAD_22); the runtime it sits on is in **[LR_00 (Lambda core)](lambda/LR_00_Overview.md)** and **[JS_00 (LambdaJS)](js/JS_00_Overview.md)**.
 
 ---

@@ -14,14 +14,15 @@ This document covers Lambda's procedural programming features — mutable state,
 1. [Overview](#overview)
 2. [Variable Declaration (`var`)](#variable-declaration-var)
 3. [Assignment Statement](#assignment-statement)
-4. [While Loop](#while-loop)
-5. [Break and Continue](#break-and-continue)
-6. [Early Return](#early-return)
-7. [File Output Operators](#file-output-operators)
-8. [I/O Module](#io-module)
-9. [Procedural Functions (`pn`)](#procedural-functions-pn)
-10. [Concurrency](#concurrency)
-11. [Procedural vs Functional](#procedural-vs-functional)
+4. [Sharing Mutable State](#sharing-mutable-state)
+5. [While Loop](#while-loop)
+6. [Break and Continue](#break-and-continue)
+7. [Early Return](#early-return)
+8. [File Output Operators](#file-output-operators)
+9. [I/O Module](#io-module)
+10. [Procedural Functions (`pn`)](#procedural-functions-pn)
+11. [Concurrency](#concurrency)
+12. [Procedural vs Functional](#procedural-vs-functional)
 
 ---
 
@@ -262,6 +263,127 @@ Elements support both attribute mutation (via dot notation) and child mutation (
 | Map field | `obj.key = val` | Shape metadata auto-rebuilt |
 | Element attr | `elem.attr = val` | Attribute updated in shape |
 | Element child | `elem[i] = val` | Child replaced at index |
+
+---
+
+## Sharing Mutable State
+
+If you are coming from JavaScript, Python, Java, or Ruby, this is the one section of this document you cannot skip. In those languages a variable holds a *reference*: two names can point at one object, and a change through either is visible through both. **Lambda does not work that way.** Containers are values — binding, assigning, and storing all copy, observably (`S9.1.2`, `S9.3.1`). Mutation never travels.
+
+### Values Are Copied, Not Shared
+
+```lambda
+pn main() {
+    var task  = {id: 0, ticks: 0}
+    var queue = task          // a second value, not a second view
+    queue.ticks = 1
+    print("task.ticks  = " ++ task.ticks ++ "\n")
+    print("queue.ticks = " ++ queue.ticks ++ "\n")
+}
+```
+
+```
+task.ticks  = 0
+queue.ticks = 1
+```
+
+In JavaScript both lines would print `1`. In Lambda `queue` was an independent value from the moment it was bound, so writing through it cannot reach `task`. This is deliberate: it is what makes `let` genuinely final (`S9.1.1`) and what lets you reason about a `pn` locally.
+
+### The Two-Owner Problem
+
+The rule bites when a program legitimately needs **two places to see the same mutable record**. A task scheduler is the classic case — a task belongs to a linked run-list *and* to an id-indexed lookup table, and code reached from either must see the same task:
+
+```lambda
+// this does NOT do what a JS programmer expects
+pn add_task(sched, table, id: int) {
+    var tcb = {id: id, link: sched.head, ticks: 0}
+    sched.head = tcb          // copy #1
+    table[id]  = tcb          // copy #2 — independent of copy #1
+}
+```
+
+`sched.head` and `table[id]` are now two unrelated records that happen to have equal contents. Ticking the one in the table leaves the one in the run-list untouched, and the program silently computes the wrong answer.
+
+### Handles Into a Single Store
+
+The fix is a single rule:
+
+> **When two places need to see the same mutable thing, the thing gets one owner and everyone else holds a key.**
+
+Give every record exactly one home — a store — and let every other reference be an **id into that store** rather than a copy of the record. The identity that a reference used to supply implicitly now lives in the data, where you can see it, print it, and save it.
+
+```lambda
+type Task = {id: int, next: int, ticks: int}
+
+// the store is the single owner; `next` is a handle, not a Task
+pn add_task(var store, id: int, next: int) {
+    store[id] = {id: id, next: next, ticks: 0}
+}
+
+pn tick(var store, id: int) {
+    store[id].ticks = store[id].ticks + 1
+}
+
+pn main() {
+    var store = fill(3, null)
+    add_task(store, 0, 1)
+    add_task(store, 1, 2)
+    add_task(store, 2, 0)     // a ring: 0 → 1 → 2 → 0
+
+    var cur = 0               // hold the key, not the Task
+    var n = 0
+    while (n < 7) {
+        tick(store, cur)
+        var t = store[cur]
+        cur = t.next
+        n = n + 1
+    }
+
+    var a = store[0]
+    var b = store[1]
+    var c = store[2]
+    print("ticks = " ++ a.ticks ++ ", " ++ b.ticks ++ ", " ++ c.ticks ++ "\n")
+}
+```
+
+```
+ticks = 3, 2, 2
+```
+
+Three things make this work:
+
+- **One owner.** Every `Task` lives in `store` and nowhere else. There is no second copy to fall out of step.
+- **Handles instead of pointers.** `next` is an `int`. So would be a `link`, a `queue` head, or a parent reference. Use a sentinel (`-1`, or `null` in an untyped store) for "none".
+- **One mutation root.** The store travels as a `var` parameter, so every procedure that changes state says so in its signature, and there is only ever one thing to pass.
+
+If you need to mutate a record in several steps, read it, change it, and put it back:
+
+```lambda
+pn retire(var store, id: int) {
+    var t = store[id]
+    t.ticks = 0
+    t.next  = -1
+    store[id] = t         // the write-back is what makes it stick
+}
+```
+
+Forgetting the write-back is the one new mistake this style introduces — the compiler cannot catch it, because mutating a local copy is perfectly legal.
+
+### When You Need a Store — and When You Don't
+
+A store costs an indirection on every access, so use it only for the shape that needs it.
+
+| Situation | Approach |
+|-----------|----------|
+| A record with two or more independent mutable observers | **Store + handles** |
+| A graph with cycles (rings, doubly-linked lists, parent pointers) | **Store + handles** — cyclic *values* cannot be built at all |
+| A tree or nested map mutated only from its root | Plain nested assignment: `doc.body.items[0].text = "hi"` |
+| A record owned by exactly one container | Plain value semantics — no store needed |
+| A value a procedure must modify for its caller | A `var` parameter: `pn f(var xs) { xs[0] = 1 }` |
+
+This is not a Lambda quirk. Arena-plus-index is how the same programs are written in Rust without `Rc<RefCell<_>>`, in entity-component-system game engines, and in Swift with structs. What you get in exchange is worth the indirection: because your state is a flat table rather than a cyclic object graph, it stays comparable with `==`, printable, and serializable at any point — you can dump the whole scheduler to JSON mid-run, which a graph of mutable references can never do.
+
+> **Implementation status.** Copy-on-assignment for bindings is enforced today, and the examples above run as shown. Two parts of the model are still landing: storing a value *into* a container does not yet take its own copy (`S9.3.1`), and a plain (non-`var`) parameter can still be mutated by its callee instead of receiving a snapshot (`S9.1.3`). Write the code as the rules describe it — annotate `var` wherever a procedure is meant to change its caller's value, and do not rely on a store aliasing anything — and it will keep working as those checks arrive. Tracked as `LR12-9`.
 
 ---
 

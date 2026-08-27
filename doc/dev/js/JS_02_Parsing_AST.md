@@ -1,5 +1,7 @@
 # LambdaJS — Parsing, AST & Front-End Validation
 
+> **Last verified against tree:** 2026-06-16 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the front end of the engine: how JS source becomes a Tree-sitter CST, how `build_js_ast.cpp` lowers that CST into a typed `JsAstNode` tree, how lexical scope is resolved during construction, how the early-error validator enforces the spec's parse-time `SyntaxError`/`ReferenceError` rules, and how strict mode is detected. The MIR lowering that consumes the AST is in [JS_04 — MIR Lowering](JS_04_MIR_Lowering.md); where this front end sits in the overall flow is in [JS_01 — Compilation Pipeline](JS_01_Compilation_Pipeline.md).
 >
 > **Primary sources:** `lambda/js/js_ast.hpp` (`JsAstNode` hierarchy, `JsAstNodeType`, `JsOperator`), `lambda/js/build_js_ast.cpp` (CST→AST builder), `lambda/js/js_scope.cpp` (parser lifecycle, source normalization, scope management), `lambda/js/js_early_errors.cpp` (static semantic validation), `lambda/js/js_print.cpp` (debug AST dumper), `lambda/js/js_transpiler.hpp` (`JsTranspiler`, `JsScope`, `JsVarKind`, `JsScopeType`). The grammar is `lambda/tree-sitter-javascript/` with auto-generated `parser.c`.

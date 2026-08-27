@@ -10,9 +10,9 @@ pn main() {
     print(arr)
 
     // ===== Array append =====
-    var list = [1, 2, 3]
-    list = [*list, 4]
-    print(list)
+    var lst = [1, 2, 3]
+    lst = [*lst, 4]
+    print(lst)
 
     // ===== Map field assignment =====
     var obj = {name: "Alice", age: 30}

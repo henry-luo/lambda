@@ -1,5 +1,7 @@
 # LambdaJS — Standard Built-in Library
 
+> **Last verified against tree:** 2026-08-13 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document is the catalog of standard built-in objects and their semantics: the spec-table built-in registry, Object/Reflect, the Symbol builtin and well-known symbols, JSON, Math/Number, Date, String prototype methods (survey), the Map/Set/WeakMap/WeakSet collection family, Proxy & Reflect, BigInt, the global functions, template literals, and `globalThis`.
 >
 > **Primary sources:** `lambda/js/js_builtin_catalog.def` (single target/binding/global catalog), `lambda/js/js_builtin_catalog.hpp` (typed generated records), `lambda/js/js_runtime_builtin_registry.cpp` (validation, realm identity, installation), `lambda/js/js_globals.cpp` (Object/JSON/Symbol/Date/globalThis/global functions/template raw), `lambda/js/js_runtime.cpp` (typed intrinsic bodies, collections, Proxy traps, Math/JSON object getters, `$262`, WeakRef), `lambda/js/js_coerce.cpp` (`ToPrimitive`).

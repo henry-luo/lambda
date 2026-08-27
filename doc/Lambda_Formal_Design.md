@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.37.0 (2026-08-26)
+**Spec version:** 1.38.0 (2026-08-27)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1018,6 +1018,18 @@ loosely across the corpus — context disambiguates, and we live with it.
 - **D7.2.3** Imported packages are cached in-process (L1, D8.5.1) and
   distribute as **source** (D1.7); compiled artifacts are derived local
   caches only.
+- **D7.2.4*** **`lambda.*` is the one root for everything Lambda ships**, and
+  the root name is reserved (S16.10.1v2). Three tiers live under it:
+  **`lambda.sys.*`** — the runtime's own system functions, prelude-imported
+  unqualified (S17.2.1); **`lambda.<module>`** — built-in modules, with the
+  bare spelling as an alias, so `import math` ≡ `import lambda.math`; and
+  **`lambda.<package>`** — shipped script packages, which drop the former
+  `package` level (`lambda.package.editor` → `lambda.editor`). Document-
+  processing packages group under **`lambda.doc.*`**, which is where the math
+  typesetting package moves (`lambda.package.math` → `lambda.doc.math`),
+  keeping `lambda.math` for the built-in math module. A package path names
+  exactly one thing: no path may be both a built-in module and a shipped
+  package. [S17.2.1, S17.2.2, S16.10.1v2]
 
 ### D7.3 Jube modules: the module system
 

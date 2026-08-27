@@ -34,8 +34,8 @@ greet("Lambda");
 [1, 2, 3, 4] |> reduce((acc, x) => acc + x)
 
 // ===== Arrow as argument =====
-fn apply(f, x) => f(x)
-apply((x) => x * 10, 5)
+fn apply_fn(f, x) => f(x)
+apply_fn((x) => x * 10, 5)
 
 // ===== Nested arrows =====
 let make_adder = (n) => (x) => x + n

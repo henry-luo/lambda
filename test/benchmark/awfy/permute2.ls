@@ -9,15 +9,15 @@ pn swap(var v: int[], i: int, j: int) any {
     v[j] = tmp
 }
 
-pn permute(var state: PState, var v: int[], n: int) any {
-    state.count = state.count + 1
+pn permute(var st: PState, var v: int[], n: int) any {
+    st.count = st.count + 1
     if (n != 0) {
         var n1: int = n - 1
-        permute(state, v, n1)
+        permute(st, v, n1)
         var i: int = n1
         while (i >= 0) {
             swap(v, n1, i)
-            permute(state, v, n1)
+            permute(st, v, n1)
             swap(v, n1, i)
             i = i - 1
         }
@@ -25,10 +25,10 @@ pn permute(var state: PState, var v: int[], n: int) any {
 }
 
 pn benchmark() int {
-    var state: PState = {count: 0}
+    var st: PState = {count: 0}
     var v:int[] = fill(6, 0)
-    permute(state, v, 6)
-    return state.count
+    permute(st, v, 6)
+    return st.count
 }
 
 pn main() {

@@ -15,10 +15,10 @@ pn create_node(key, value) {
 // u32 arithmetic intentionally wraps like the original 32-bit PRNG.
 // The PRNG and tree are explicit inout values; ordinary parameters are
 // snapshots under COW and would lose the state update that makes keys unique.
-pn next_random(var state) {
-    var s: u32 = state.seed
+pn next_random(var st) {
+    var s: u32 = st.seed
     s = s * 1103515245u32 + 12345u32
-    state.seed = int(s)
+    st.seed = int(s)
     return float(s) / 4294967296.0
 }
 

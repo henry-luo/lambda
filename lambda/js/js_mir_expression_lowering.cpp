@@ -4248,7 +4248,15 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     if (mt->is_eval_direct) {
                         MIR_reg_t eval_key = jm_box_property_name_literal(mt,
                             id->name->chars, id->name->len);
-                        MIR_reg_t has_bridge = jm_callr_1(mt, "js_eval_env_has_binding", MIR_T_I64, eval_key);
+                        MIR_reg_t has_env_bridge = jm_callr_1(mt,
+                            "js_eval_env_has_binding", MIR_T_I64, eval_key);
+                        MIR_reg_t has_global_lexical_bridge = jm_callr_1(mt,
+                            "js_eval_global_lexical_has_binding", MIR_T_I64, eval_key);
+                        MIR_reg_t has_bridge = jm_new_reg(mt, "eval_bridge", MIR_T_I64);
+                        // direct eval uses an environment bridge for function
+                        // locals and a global-lexical bridge at script scope
+                        jm_emit_reg_binary(mt, MIR_OR, has_bridge,
+                            has_env_bridge, has_global_lexical_bridge);
                         MIR_label_t module_store = jm_new_label(mt);
                         MIR_label_t store_done = jm_new_label(mt);
                         MIR_reg_t store_result = jm_new_reg(mt, "eval_mva_res", MIR_T_I64);

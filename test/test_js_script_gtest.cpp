@@ -857,7 +857,7 @@ TEST(JsInterpreter, RejectsUnsupportedFormsBeforeExecution) {
     Runtime runtime = {};
     runtime_init(&runtime);
 
-    const char source[] = "let sideEffect = 0; async function work() { return sideEffect; } sideEffect;";
+    const char source[] = "let sideEffect = 0; async function* work() { yield sideEffect; } sideEffect;";
     Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
         "unsupported-async.js", NULL);
 

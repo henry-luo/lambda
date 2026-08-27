@@ -1,5 +1,7 @@
 # LambdaJS — Performance & Optimization
 
+> **Last verified against tree:** 2026-08-16 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document is the cross-cutting performance catalog. It records the optimizations that exist in the engine today (each grounded in code with a `file:line` anchor), summarizes the benchmark findings from the development tuning logs, and points to the sibling doc that *owns* each mechanism in full detail. It does not re-derive any mechanism — for the how, follow the link.
 >
 > **Primary sources (mechanisms):** `lambda/js/js_runtime_function.cpp` (transient args stack), `lambda/js/js_mir_expression_lowering.cpp` (constant folding, native arithmetic, const-bound dispatch), `lambda/js/js_mir_calls_boxing_types.cpp` (boxing/native predicates), `lambda/js/js_mir_function_collection_class_inference.cpp` (dual-version inference), `lambda/js/js_runtime.cpp` (`js_map_get_fast`, `js_get_shaped_slot`, shape cache, regex cursor), `lambda/lambda-data.hpp` (`TypeMap` hash + `slot_entries`), `lambda/js/js_mir_entrypoints_require.cpp` (interpreter-vs-JIT selection), `lambda/js/js_typed_array.cpp` (raw bulk paths), `lambda/js/js_globals.cpp` (ASCII interning), `lambda/sys_func_registry.c` (import table).

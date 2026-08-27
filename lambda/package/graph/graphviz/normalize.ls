@@ -74,41 +74,41 @@ fn replace_scope(scopes, value) => [
   for (entry in scopes) if (entry.id == value.id) value else entry
 ]
 
-fn add_diagnostic(state, value) =>
-  {*:state, diagnostics: [*state.diagnostics, value]}
+fn add_diagnostic(st, value) =>
+  {*:st, diagnostics: [*st.diagnostics, value]}
 
-fn append_scope_properties(state, scope, properties) {
-  if (scope == "root") { {*:state, graph_properties: [*state.graph_properties, *properties]} }
+fn append_scope_properties(st, scope, properties) {
+  if (scope == "root") { {*:st, graph_properties: [*st.graph_properties, *properties]} }
   else {
-    let current = scope_at(state.scopes, scope);
-    if (current == null) state
-    else { {*:state, scopes: replace_scope(state.scopes,
+    let current = scope_at(st.scopes, scope);
+    if (current == null) st
+    else { {*:st, scopes: replace_scope(st.scopes,
       {*:current, properties: [*current.properties, *properties]})} }
   }
 }
 
-fn set_scope_members(state, scope, members) {
-  let current = scope_at(state.scopes, scope);
-  if (current == null) state
-  else { {*:state, scopes: replace_scope(state.scopes,
+fn set_scope_members(st, scope, members) {
+  let current = scope_at(st.scopes, scope);
+  if (current == null) st
+  else { {*:st, scopes: replace_scope(st.scopes,
     {*:current, members: unique([*current.members, *members])})} }
 }
 
-fn ensure_node(state, id, source, defaults, direct, owner, explicit) {
-  let current = node_at(state.nodes, id);
+fn ensure_node(st, id, source, defaults, direct, owner, explicit) {
+  let current = node_at(st.nodes, id);
   if (current == null) {
     let value = {
       id: id, source: source, source_kind: source["source-kind"],
       properties: [*defaults, *direct], owner: owner
     };
-    {*:state, nodes: [*state.nodes, value]}
+    {*:st, nodes: [*st.nodes, value]}
   }
   else {
     // DOT defaults apply only when a node identity is first materialized.
     let value = {*:current,
       properties: if (explicit) [*current.properties, *direct] else current.properties,
       owner: if (explicit and owner != null and current.owner == null) owner else current.owner};
-    {*:state, nodes: replace_node(state.nodes, value)}
+    {*:st, nodes: replace_node(st.nodes, value)}
   }
 }
 
@@ -128,19 +128,19 @@ fn edge_source_attrs(statement, segment, expansion, count) => {
   'source-expansion-count': count
 }
 
-fn edge_operator_diagnostic(state, statement, operator, directed) {
+fn edge_operator_diagnostic(st, statement, operator, directed) {
   let expected = if (directed) "->" else "--";
-  if (operator == null or operator == expected) state
-  else add_diagnostic(state, diagnostic.for_value(
+  if (operator == null or operator == expected) st
+  else add_diagnostic(st, diagnostic.for_value(
     "graph.graphviz.edge-operator", "error",
     (if (directed) "Directed" else "Undirected") ++
       " DOT graph requires '" ++ expected ++ "' edges",
     "edge:" ++ statement_id(statement), statement))
 }
 
-fn add_edge(state, statement, segment, expansion, count, from, to,
+fn add_edge(st, statement, segment, expansion, count, from, to,
     defaults, direct, directed, strict, operator) {
-  let checked = edge_operator_diagnostic(state, statement, operator, directed);
+  let checked = edge_operator_diagnostic(st, statement, operator, directed);
   if (checked.expansion_count >= MAX_EXPANDED_EDGES) {
     if (checked.expansion_count == MAX_EXPANDED_EDGES)
       add_diagnostic(checked, diagnostic.for_value(
@@ -174,20 +174,20 @@ fn add_edge(state, statement, segment, expansion, count, from, to,
   }
 }
 
-fn add_pairs(pairs, i, state, statement, segment, defaults, direct,
+fn add_pairs(pairs, i, st, statement, segment, defaults, direct,
     directed, strict, operator) {
-  if (i >= len(pairs)) state
+  if (i >= len(pairs)) st
   else add_pairs(pairs, i + 1,
-    add_edge(state, statement, segment, i, len(pairs), pairs[i][0], pairs[i][1],
+    add_edge(st, statement, segment, i, len(pairs), pairs[i][0], pairs[i][1],
       defaults, direct, directed, strict, operator),
     statement, segment, defaults, direct, directed, strict, operator)
 }
 
-fn expand_segments(groups, i, state, statement, defaults, direct, directed, strict) {
-  if (i >= len(groups)) state
+fn expand_segments(groups, i, st, statement, defaults, direct, directed, strict) {
+  if (i >= len(groups)) st
   else {
     let pairs = [for (from in groups[i - 1].values, to in groups[i].values) [from, to]];
-    let next = add_pairs(pairs, 0, state, statement, i - 1, defaults, direct,
+    let next = add_pairs(pairs, 0, st, statement, i - 1, defaults, direct,
       directed, strict, groups[i].operator);
     expand_segments(groups, i + 1, next, statement, defaults, direct, directed, strict)
   }
@@ -196,27 +196,27 @@ fn expand_segments(groups, i, state, statement, defaults, direct, directed, stri
 pub fn valid_compass(value) => value == null or
   contains(["n", "ne", "e", "se", "s", "sw", "w", "nw", "c", "_"], lower(value))
 
-fn endpoint_compass_diagnostic(state, endpoint) {
-  if (valid_compass(endpoint.compass)) state
-  else add_diagnostic(state, diagnostic.for_value(
+fn endpoint_compass_diagnostic(st, endpoint) {
+  if (valid_compass(endpoint.compass)) st
+  else add_diagnostic(st, diagnostic.for_value(
     "graph.graphviz.invalid-compass", "error",
     "Invalid DOT compass point '" ++ string(endpoint.compass) ++ "'",
     "endpoint:" ++ string(endpoint.id), endpoint))
 }
 
-fn endpoint_values(endpoint, state, env, scope, owner, directed, strict) {
+fn endpoint_values(endpoint, st, env, scope, owner, directed, strict) {
   if (endpoint.kind == "node") {
     let id = string(endpoint.id);
     let next = endpoint_compass_diagnostic(
-      ensure_node(state, id, endpoint, env.node, [], owner, false), endpoint);
+      ensure_node(st, id, endpoint, env.node, [], owner, false), endpoint);
     {state: next, values: [{id: id, port: endpoint.port, compass: endpoint.compass}],
       members: [id]}
   }
   else {
     let nested = first(children(endpoint, "subgraph"));
-    if (nested == null) { {state: state, values: [], members: []} }
+    if (nested == null) { {state: st, values: [], members: []} }
     else {
-      let result = walk_subgraph(nested, state, env, scope, owner, directed, strict);
+      let result = walk_subgraph(nested, st, env, scope, owner, directed, strict);
       {state: result.state,
         values: [for (id in result.members) {id: id, port: null, compass: null}],
         members: result.members}
@@ -224,20 +224,20 @@ fn endpoint_values(endpoint, state, env, scope, owner, directed, strict) {
   }
 }
 
-fn endpoint_groups(endpoints, i, state, env, scope, owner, directed, strict, groups, members) {
-  if (i >= len(endpoints)) { {state: state, groups: groups, members: unique(members)} }
+fn endpoint_groups(endpoints, i, st, env, scope, owner, directed, strict, groups, members) {
+  if (i >= len(endpoints)) { {state: st, groups: groups, members: unique(members)} }
   else {
     let endpoint = endpoints[i];
-    let result = endpoint_values(endpoint, state, env, scope, owner, directed, strict);
+    let result = endpoint_values(endpoint, st, env, scope, owner, directed, strict);
     let group = {values: result.values, operator: endpoint.operator};
     endpoint_groups(endpoints, i + 1, result.state, env, scope, owner, directed, strict,
       [*groups, group], [*members, *result.members])
   }
 }
 
-fn edge_statement(value, state, env, scope, owner, directed, strict) {
+fn edge_statement(value, st, env, scope, owner, directed, strict) {
   let endpoints = children(value, "dot-endpoint");
-  let grouped = endpoint_groups(endpoints, 0, state, env, scope, owner,
+  let grouped = endpoint_groups(endpoints, 0, st, env, scope, owner,
     directed, strict, [], []);
   let direct = property_entries(value, "direct", scope);
   {
@@ -251,7 +251,7 @@ fn edge_statement(value, state, env, scope, owner, directed, strict) {
 
 fn scope_role(id) => if (starts_with(lower(id), "cluster")) "cluster" else "scope"
 
-fn walk_statement(value, state, env, scope, owner, directed, strict) {
+fn walk_statement(value, st, env, scope, owner, directed, strict) {
   let tag = model.tag(value);
   if (tag == "dot-attr-statement") {
     let target = string(value["target-kind"]);
@@ -260,43 +260,43 @@ fn walk_statement(value, state, env, scope, owner, directed, strict) {
     let next_env = if (target == "node") { {*:env, node: [*env.node, *properties]} }
       else if (target == "edge") { {*:env, edge: [*env.edge, *properties]} }
       else { {*:env, graph: [*env.graph, *properties]} };
-    {state: if (target == "graph") append_scope_properties(state, scope, properties) else state,
+    {state: if (target == "graph") append_scope_properties(st, scope, properties) else st,
       env: next_env, members: []}
   }
   else if (tag == "dot-assignment") {
     let property = assignment_entry(value, scope);
-    {state: append_scope_properties(state, scope, [property]),
+    {state: append_scope_properties(st, scope, [property]),
       env: {*:env, graph: [*env.graph, property]}, members: []}
   }
   else if (tag == "node") {
     let id = string(value.id);
     let direct = property_entries(value, "direct", scope);
-    {state: ensure_node(state, id, value, env.node, direct, owner, true),
+    {state: ensure_node(st, id, value, env.node, direct, owner, true),
       env: env, members: [id]}
   }
   else if (tag == "dot-edge-statement") {
-    let result = edge_statement(value, state, env, scope, owner, directed, strict);
+    let result = edge_statement(value, st, env, scope, owner, directed, strict);
     {state: result.state, env: env, members: result.members}
   }
   else if (tag == "subgraph") {
-    let result = walk_subgraph(value, state, env, scope, owner, directed, strict);
+    let result = walk_subgraph(value, st, env, scope, owner, directed, strict);
     {state: result.state, env: env, members: result.members}
   }
-  else { {state: state, env: env, members: []} }
+  else { {state: st, env: env, members: []} }
 }
 
-fn walk_at(items, i, state, env, scope, owner, directed, strict, members) {
+fn walk_at(items, i, st, env, scope, owner, directed, strict, members) {
   if (i >= len(items)) {
-    {state: set_scope_members(state, scope, members), members: unique(members)}
+    {state: set_scope_members(st, scope, members), members: unique(members)}
   }
   else {
-    let result = walk_statement(items[i], state, env, scope, owner, directed, strict);
+    let result = walk_statement(items[i], st, env, scope, owner, directed, strict);
     walk_at(items, i + 1, result.state, result.env, scope, owner, directed, strict,
       [*members, *result.members])
   }
 }
 
-fn walk_subgraph(value, state, env, parent_scope, parent_owner, directed, strict) {
+fn walk_subgraph(value, st, env, parent_scope, parent_owner, directed, strict) {
   let id = string(value.id);
   let role = scope_role(id);
   let owner = if (role == "cluster") id else parent_owner;
@@ -304,7 +304,7 @@ fn walk_subgraph(value, state, env, parent_scope, parent_owner, directed, strict
     id: id, role: role, parent_scope: parent_scope, parent_owner: parent_owner,
     owner: owner, source: value, properties: inherited_properties(env.graph), members: []
   };
-  let opened = {*:state, scopes: [*state.scopes, scope]};
+  let opened = {*:st, scopes: [*st.scopes, scope]};
   walk_at(model.element_children(value), 0, opened, env, id, owner, directed, strict, [])
 }
 
@@ -443,8 +443,8 @@ fn rank_diagnostic(scope, entry) =>
     "Unsupported DOT rank constraint '" ++ entry.value ++ "'",
     "subgraph:" ++ scope.id ++ ".rank", entry.source)]
 
-fn rank_diagnostics(state) => [
-  for (scope in state.scopes,
+fn rank_diagnostics(st) => [
+  for (scope in st.scopes,
     value in rank_diagnostic(scope, local_scope_property(scope, "rank"))) value
 ]
 
@@ -455,9 +455,9 @@ fn engine_diagnostic(source, layout) =>
     "Graphviz layout engine '" ++ layout ++ "' is not implemented",
     "graph.layout", source)]
 
-fn engine_diagnostics(source, state) =>
+fn engine_diagnostics(source, st) =>
   // Missing dynamic graph properties mean no engine diagnostic, not a failed graph.
-  engine_diagnostic(source, attributes.value(state.graph_properties, "layout")) or []
+  engine_diagnostic(source, attributes.value(st.graph_properties, "layout")) or []
 
 fn ordering_diagnostic(entry, context) =>
   if (entry == null or attributes.ordering(entry.value) != null) []
@@ -466,20 +466,20 @@ fn ordering_diagnostic(entry, context) =>
     "Unsupported DOT ordering mode '" ++ entry.value ++ "'",
     context, entry.source)]
 
-fn ordering_diagnostics(state) => [
-  *ordering_diagnostic(attributes.last_entry(state.graph_properties, "ordering"),
+fn ordering_diagnostics(st) => [
+  *ordering_diagnostic(attributes.last_entry(st.graph_properties, "ordering"),
     "graph.ordering"),
-  for (node in state.nodes,
+  for (node in st.nodes,
     value in ordering_diagnostic(attributes.last_entry(node.properties, "ordering"),
       "node:" ++ node.id ++ ".ordering")) value
 ]
 
-fn colorscheme_diagnostics(state) {
+fn colorscheme_diagnostics(st) {
   let properties = [
-    *state.graph_properties,
-    for (node in state.nodes, entry in node.properties) entry,
-    for (edge in state.edges, entry in edge.properties) entry,
-    for (scope in state.scopes, entry in scope.properties) entry
+    *st.graph_properties,
+    for (node in st.nodes, entry in node.properties) entry,
+    for (edge in st.edges, entry in edge.properties) entry,
+    for (scope in st.scopes, entry in scope.properties) entry
   ];
   [for (entry in properties
     where lower(entry.name) == "colorscheme" and not colors.supported_scheme(entry.value))
@@ -493,10 +493,10 @@ fn cluster_exists(scopes, id) => len([
   for (scope in scopes where scope.role == "cluster" and scope.id == id) scope
 ]) > 0
 
-fn compound_reference_diagnostics(state) => [
-  for (edge in state.edges, name in ["lhead", "ltail"],
+fn compound_reference_diagnostics(st) => [
+  for (edge in st.edges, name in ["lhead", "ltail"],
     let entry = attributes.last_entry(edge.properties, name)
-    where entry != null and not cluster_exists(state.scopes, string(entry.value)))
+    where entry != null and not cluster_exists(st.scopes, string(entry.value)))
     diagnostic.for_value(
       "graph.graphviz.unresolved-compound-cluster", "error",
       "DOT " ++ name ++ " references unknown cluster '" ++ string(entry.value) ++ "'",
@@ -513,13 +513,13 @@ fn owner_in_cluster(scopes, owner, cluster_id, stack) {
   }
 }
 
-fn compound_membership_diagnostics(state) => [
-  for (edge in state.edges,
+fn compound_membership_diagnostics(st) => [
+  for (edge in st.edges,
     endpoint in [{name: "lhead", node: edge.to}, {name: "ltail", node: edge.from}],
     let entry = attributes.last_entry(edge.properties, endpoint.name),
-    let node = node_at(state.nodes, endpoint.node)
-    where entry != null and node != null and cluster_exists(state.scopes, string(entry.value)) and
-      not owner_in_cluster(state.scopes, node.owner, string(entry.value), []))
+    let node = node_at(st.nodes, endpoint.node)
+    where entry != null and node != null and cluster_exists(st.scopes, string(entry.value)) and
+      not owner_in_cluster(st.scopes, node.owner, string(entry.value), []))
     diagnostic.for_value(
       "graph.graphviz.compound-endpoint-outside-cluster", "error",
       "DOT " ++ endpoint.name ++ " cluster '" ++ string(entry.value) ++
@@ -527,16 +527,16 @@ fn compound_membership_diagnostics(state) => [
       "edge:" ++ edge.id ++ "." ++ endpoint.name, entry.source)
 ]
 
-fn semantic_diagnostics(source, state) {
-  let splines = attributes.value(state.graph_properties, "splines");
+fn semantic_diagnostics(source, st) {
+  let splines = attributes.value(st.graph_properties, "splines");
   let supported_route = splines == null or attributes.route_mode(splines) != null;
   [
-    *rank_diagnostics(state), *engine_diagnostics(source, state),
-    *colorscheme_diagnostics(state),
-    *ordering_diagnostics(state),
-    *compound_reference_diagnostics(state),
-    *compound_membership_diagnostics(state),
-    for (edge in state.edges, name in ["arrowhead", "arrowtail"],
+    *rank_diagnostics(st), *engine_diagnostics(source, st),
+    *colorscheme_diagnostics(st),
+    *ordering_diagnostics(st),
+    *compound_reference_diagnostics(st),
+    *compound_membership_diagnostics(st),
+    for (edge in st.edges, name in ["arrowhead", "arrowtail"],
       let entry = attributes.last_entry(edge.properties, name)
       where entry != null and not markers.supported(entry.value))
       diagnostic.for_value(
@@ -573,7 +573,7 @@ fn edge_annotations(entry, graph_id) {
   ]
 }
 
-fn cluster_element(scope, state, graph_id) {
+fn cluster_element(scope, st, graph_id) {
   let known = attributes.canonical("cluster", scope.properties);
   <subgraph id: scope.id, role: scope.role, 'parent-scope': scope.parent_scope,
     label: labels.graph(known.label, graph_id), 'label-format': known["label-format"],
@@ -586,10 +586,10 @@ fn cluster_element(scope, state, graph_id) {
     'source-line': scope.source["source-line"], 'source-column': scope.source["source-column"],
     let properties = properties_element(scope.properties)
     if (properties != null) { properties }
-    for (entry in state.nodes where entry.owner == scope.id) node_element(entry, graph_id)
-    for (nested in state.scopes
+    for (entry in st.nodes where entry.owner == scope.id) node_element(entry, graph_id)
+    for (nested in st.scopes
       where nested.role == "cluster" and nested.parent_owner == scope.id)
-      cluster_element(nested, state, graph_id)
+      cluster_element(nested, st, graph_id)
     for (id in scope.members) member_element(id)
   >
 }
@@ -604,8 +604,8 @@ fn scope_element(scope) {
   >
 }
 
-fn canonical_graph(source, state) {
-  let known = attributes.canonical("graph", state.graph_properties);
+fn canonical_graph(source, st) {
+  let known = attributes.canonical("graph", st.graph_properties);
   <graph id: source.id, flavor: "dot", version: source.version,
     layout: if (known.layout != null) known.layout else "dot",
     directed: source.directed, strict: source.strict, 'ir-stage': "canonical",
@@ -621,28 +621,28 @@ fn canonical_graph(source, state) {
     'label-format': known["label-format"],
     'source-start': source["source-start"], 'source-end': source["source-end"],
     'source-line': source["source-line"], 'source-column': source["source-column"],
-    let properties = properties_element(state.graph_properties)
+    let properties = properties_element(st.graph_properties)
     if (properties != null) { properties }
-    let constraints = constraints_element(state.scopes)
+    let constraints = constraints_element(st.scopes)
     if (constraints != null) { constraints }
-    for (entry in state.nodes,
+    for (entry in st.nodes,
       let interaction = interaction_element(entry.id,
         attributes.canonical("node", entry.properties))
       where interaction != null) interaction
-    for (entry in state.edges,
+    for (entry in st.edges,
       let interaction = interaction_element(entry.id,
         attributes.canonical("edge", entry.properties))
       where interaction != null) interaction
-    for (entry in state.nodes, annotation in node_annotations(entry, string(source.id))
+    for (entry in st.nodes, annotation in node_annotations(entry, string(source.id))
       where annotation != null) annotation
-    for (entry in state.edges, annotation in edge_annotations(entry, string(source.id))
+    for (entry in st.edges, annotation in edge_annotations(entry, string(source.id))
       where annotation != null) annotation
-    for (entry in state.nodes where entry.owner == null) node_element(entry, string(source.id))
-    for (scope in state.scopes
+    for (entry in st.nodes where entry.owner == null) node_element(entry, string(source.id))
+    for (scope in st.scopes
       where scope.role == "cluster" and scope.parent_owner == null)
-      cluster_element(scope, state, string(source.id))
-    for (scope in state.scopes where scope.role == "scope") scope_element(scope)
-    for (entry in state.edges) edge_element(entry, string(source.id))
+      cluster_element(scope, st, string(source.id))
+    for (scope in st.scopes where scope.role == "scope") scope_element(scope)
+    for (entry in st.edges) edge_element(entry, string(source.id))
     for (child in model.element_children(source) where model.tag(child) == "diagnostics") child
   >
 }

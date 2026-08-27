@@ -1,5 +1,7 @@
 # LambdaJS — Classes
 
+> **Last verified against tree:** 2026-08-13 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the class layer that LambdaJS builds *on top of* the ordinary object/property/prototype machinery: how a `class` declaration is collected into a `JsClassEntry` at compile time, how the constructor's `this.prop =` writes drive shape pre-allocation, how methods land on the prototype (vs. static methods on the class object), how `super()`/`super.method()` and `new.target` are wired, how private `#` members are mangled and brand-checked, and how a handful of builtins are subclassable.
 >
 > **Object representation, property attributes, `[[Get]]`/`[[Set]]`, the prototype walk, and shape pre-allocation storage are owned by [JS_06 — Objects, Properties & Prototypes](JS_06_Objects_Properties_Prototypes.md); this document links to JS_06 rather than restating those mechanics.** A source class constructor is a `JsFunction` with explicit call/construct capability; its instance prototype and fields are ordinary shaped objects with immutable metadata under **D3.4.7**.

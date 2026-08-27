@@ -91,9 +91,9 @@ type DateRange {
     end: int
     that start <= end
 }
-let range = <DateRange start: 1, end: 10>
-range.start
-range.end
+let rng = <DateRange start: 1, end: 10>
+rng.start
+rng.end
 
 // ===== Mutation methods =====
 type Counter {

@@ -224,6 +224,36 @@ static LambdaTokenKind lexer_keyword_kind(const char* source, size_t start, size
     return LAMBDA_TOK_IDENTIFIER;
 }
 
+// S16.10.1v2: a word is barred from binding names when it is *capture-real* —
+// it can begin a construct, so a binding of that name could not be read back
+// where the construct starts. Clause words (`group`, `limit`, `order`, …) and
+// the infix word operators only ever appear after something else, so a
+// binding named for one is readable everywhere and stays legal; that is why
+// `let offset = 5` then `offset + 1` has always worked. Classified here so
+// the keyword table keeps one owner.
+bool lambda_lexer_word_bars_binding(const char* text, size_t length) {
+    if (!text || length == 0) return false;
+    switch (lexer_keyword_kind(text, 0, length)) {
+    case LAMBDA_TOK_IDENTIFIER:
+    // clause words — meaningful only inside a for-header, never statement-leading
+    case LAMBDA_TOK_ORDER: case LAMBDA_TOK_BY: case LAMBDA_TOK_GROUP:
+    case LAMBDA_TOK_INTO: case LAMBDA_TOK_LIMIT: case LAMBDA_TOK_OFFSET:
+    case LAMBDA_TOK_ASC: case LAMBDA_TOK_DESC: case LAMBDA_TOK_AS:
+    case LAMBDA_TOK_WHERE: case LAMBDA_TOK_THAT:
+    // infix word operators — they take a left operand, so they never lead
+    case LAMBDA_TOK_AND: case LAMBDA_TOK_OR: case LAMBDA_TOK_TO:
+    case LAMBDA_TOK_IS: case LAMBDA_TOK_IN: case LAMBDA_TOK_AT:
+    case LAMBDA_TOK_DIV: case LAMBDA_TOK_EQ_WORD: case LAMBDA_TOK_NE_WORD:
+    case LAMBDA_TOK_LT_WORD: case LAMBDA_TOK_LE_WORD: case LAMBDA_TOK_GE_WORD:
+    case LAMBDA_TOK_GT_WORD:
+        return false;
+    default:
+        // declaration/statement keywords, base-type words, and named values:
+        // `let type = 1` silently read the base type before this bar existed.
+        return true;
+    }
+}
+
 static bool lexer_scan_quoted(LambdaLexer* lexer, char quote, bool allow_newline) {
     lexer_advance_byte(lexer);
     bool any = false;

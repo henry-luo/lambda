@@ -50,13 +50,13 @@ let MIN_CONTENT_LENGTH = 25;
 let MIN_PARAGRAPH_LENGTH = 25;
 
 // Score an element based on its characteristics
-fn score_element(element) {
-    if (not element) { return 0 }
+fn score_element(el) {
+    if (not el) { return 0 }
     
     let score = 0;
-    let tag_name = if (element.tag) element.tag else "";
-    let class_attr = if (element.class) element.class else "";
-    let id_attr = if (element.id) element.id else "";
+    let tag_name = if (el.tag) el.tag else "";
+    let class_attr = if (el.class) el.class else "";
+    let id_attr = if (el.id) el.id else "";
     
     // Base score by tag type
     if (tag_name == "article") { score = score + 25 }
@@ -99,22 +99,22 @@ fn score_element(element) {
 }
 
 // Extract text content from element, including nested elements
-fn extract_text_content(element) {
-    if (not element) { return "" }
+fn extract_text_content(el) {
+    if (not el) { return "" }
     
-    if (element.type == "text") {
-        return element.text
+    if (el.type == "text") {
+        return el.text
     }
     
     let text = "";
-    if (element.children) {
-        for child in element.children {
+    if (el.children) {
+        for child in el.children {
             text = text + extract_text_content(child)
         }
     }
     
     // Add space after block elements
-    if (element.tag in ["p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article"]) {
+    if (el.tag in ["p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article"]) {
         text = text + " "
     }
     
@@ -128,15 +128,15 @@ fn count_words(text) {
 }
 
 // Check if element contains substantial content
-fn has_substantial_content(element) {
-    let text = extract_text_content(element);
+fn has_substantial_content(el) {
+    let text = extract_text_content(el);
     let word_count = count_words(text);
     
     // Must have minimum word count
     if (word_count < 10) { return false }
     
     // Must have reasonable text-to-link ratio
-    let links = count_links(element);
+    let links = count_links(el);
     let link_ratio = if (word_count > 0) links / word_count else 1;
     
     // Reject if too many links relative to content
@@ -146,14 +146,14 @@ fn has_substantial_content(element) {
 }
 
 // Count number of links in element
-fn count_links(element) {
-    if (not element) { return 0 }
+fn count_links(el) {
+    if (not el) { return 0 }
     
     let count = 0;
-    if (element.tag == "a") { count = count + 1 }
+    if (el.tag == "a") { count = count + 1 }
     
-    if (element.children) {
-        for child in element.children {
+    if (el.children) {
+        for child in el.children {
             count = count + count_links(child)
         }
     }
@@ -165,32 +165,32 @@ fn count_links(element) {
 fn find_content_candidates(parsed_html) {
     let candidates = [];
     
-    fn traverse_element(element) {
-        if (not element) { return }
+    fn traverse_element(el) {
+        if (not el) { return }
         
         // Score this element
-        let score = score_element(element);
+        let score = score_element(el);
         
         // Check if it has substantial content
-        if (has_substantial_content(element)) {
-            let text_content = extract_text_content(element);
+        if (has_substantial_content(el)) {
+            let text_content = extract_text_content(el);
             let word_count = count_words(text_content);
             
             // Boost score based on content length
             score = score + min(word_count / 10, 50);
             
             candidates.push({
-                element: element,
+                element: el,
                 score: score,
                 text_content: text_content,
                 word_count: word_count,
-                tag: if (element.tag) element.tag else "unknown"
+                tag: if (el.tag) el.tag else "unknown"
             })
         }
         
         // Recursively process children
-        if (element.children) {
-            for child in element.children {
+        if (el.children) {
+            for child in el.children {
                 traverse_element(child)
             }
         }
@@ -202,23 +202,23 @@ fn find_content_candidates(parsed_html) {
 
 // Extract title from HTML
 fn extract_title(parsed_html) {
-    fn find_title(element) {
-        if (not element) { return null }
+    fn find_title(el) {
+        if (not el) { return null }
         
         // Look for <title> tag in <head>
-        if (element.tag == "title") {
-            return extract_text_content(element).trim()
+        if (el.tag == "title") {
+            return extract_text_content(el).trim()
         }
         
         // Look for main heading
-        if (element.tag == "h1") {
-            let text = extract_text_content(element).trim();
+        if (el.tag == "h1") {
+            let text = extract_text_content(el).trim();
             if (text.length > 10) { return text }
         }
         
         // Recursively search children
-        if (element.children) {
-            for child in element.children {
+        if (el.children) {
+            for child in el.children {
                 let title = find_title(child);
                 if (title) { return title }
             }
@@ -230,37 +230,37 @@ fn extract_title(parsed_html) {
     find_title(parsed_html)
 }
 
-fn find_metadata(element) {
+fn find_metadata(el) {
     // Look for meta tags
-    if (element.tag == "meta") {
-        if (element.name == "author") {
-            metadata.author = element.content
+    if (el.tag == "meta") {
+        if (el.name == "author") {
+            metadata.author = el.content
         }
-        else if (element.name == "description") {
-            metadata.description = element.content
+        else if (el.name == "description") {
+            metadata.description = el.content
         }
-        else if (element.name == "date" or element.property == "article:published_time") {
-            metadata.date = element.content
+        else if (el.name == "date" or el.property == "article:published_time") {
+            metadata.date = el.content
         }
     }
     
     // Look for time elements
-    if (element.tag == "time") {
-        let datetime = if (element.datetime) element.datetime else extract_text_content(element);
-        if (not metadata.date) { metadata.date = datetime }
+    if (el.tag == "time") {
+        let dt = if (el.datetime) el.datetime else extract_text_content(el);
+        if (not metadata.date) { metadata.date = dt }
     }
     
     // Look for byline patterns
-    if (element.class and element.class.contains("byline")) {
-        let text = extract_text_content(element);
+    if (el.class and el.class.contains("byline")) {
+        let text = extract_text_content(el);
         if (text.contains("By ") and not metadata.author) {
             metadata.author = text.replace("By ", "").trim()
         }
     }
     
     // Recursively search children
-    if (element.children) {
-        for child in element.children {
+    if (el.children) {
+        for child in el.children {
             find_metadata(child)
         }
     }
@@ -279,15 +279,15 @@ fn extract_metadata(parsed_html) {
 }
 
 // Clean up the selected content by removing unwanted elements
-fn clean_content(element) {
-    if (not element) { return null }
+fn clean_content(el) {
+    if (not el) { return null }
     
     // Skip elements that are likely not content
-    if (element.tag in NEGATIVE_TAGS) { return null }
+    if (el.tag in NEGATIVE_TAGS) { return null }
     
-    let tag = if (element.tag) element.tag else "";
-    let class_attr = if (element.class) element.class else "";
-    let id_attr = if (element.id) element.id else "";
+    let tag = if (el.tag) el.tag else "";
+    let class_attr = if (el.class) el.class else "";
+    let id_attr = if (el.id) el.id else "";
     
     // Skip based on class/ID patterns
     let combined_attrs = (class_attr + " " + id_attr).lower();
@@ -296,15 +296,15 @@ fn clean_content(element) {
     }
     
     // For text nodes, return as-is if long enough
-    if (element.type == "text") {
-        let text = element.text.trim();
-        return if (text.length >= MIN_PARAGRAPH_LENGTH) element else null
+    if (el.type == "text") {
+        let text = el.text.trim();
+        return if (text.length >= MIN_PARAGRAPH_LENGTH) el else null
     }
     
     // Clean children recursively
     let cleaned_children = [];
-    if (element.children) {
-        for child in element.children {
+    if (el.children) {
+        for child in el.children {
             let cleaned = clean_content(child);
             if (cleaned) { cleaned_children.push(cleaned) }
         }
@@ -314,11 +314,11 @@ fn clean_content(element) {
     if (cleaned_children.length > 0 or tag in CONTENT_TAGS) {
         {
             tag: tag,
-            class: element.class,
-            id: element.id,
+            class: el.class,
+            id: el.id,
             children: cleaned_children,
-            type: element.type,
-            text: if (element.text) element.text else null
+            type: el.type,
+            text: if (el.text) el.text else null
         }
     } else {
         null

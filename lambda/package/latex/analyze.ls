@@ -18,7 +18,7 @@ fn add_entry(entries, k, v) {
 // ============================================================
 
 pub fn analyze(ast) {
-    let state = {
+    let st = {
         docclass: "article",
         title: null,
         title_el: null,
@@ -51,7 +51,7 @@ pub fn analyze(ast) {
         env_context: "section",
         env_context_num: ""
     }
-    let result = walk_node(ast, state)
+    let result = walk_node(ast, st)
     // return clean DocInfo (drop internal counters)
     // keep entry arrays — render pass will use lookup functions
     {
@@ -82,80 +82,80 @@ pub fn analyze(ast) {
 // Tree walk
 // ============================================================
 
-fn walk_node(node, state) {
-    if (node == null) state
-    else if (node is element) walk_element(node, state)
-    else state
+fn walk_node(node, st) {
+    if (node == null) st
+    else if (node is element) walk_element(node, st)
+    else st
 }
 
-fn walk_element(el, state) {
+fn walk_element(el, st) {
     let tag = name(el)
     match tag {
         // ---- preamble ----
-        case 'documentclass': walk_documentclass(el, state)
-        case 'title': walk_title(el, state)
-        case 'author': walk_author(el, state)
-        case 'date': walk_date(el, state)
+        case 'documentclass': walk_documentclass(el, st)
+        case 'title': walk_title(el, st)
+        case 'author': walk_author(el, st)
+        case 'date': walk_date(el, st)
 
         // ---- sections ----
-        case 'part': walk_heading(el, state, "part", 0)
-        case 'chapter': walk_heading(el, state, "chapter", 1)
-        case 'section': walk_heading(el, state, "section", 2)
-        case 'subsection': walk_heading(el, state, "subsection", 3)
-        case 'subsubsection': walk_heading(el, state, "subsubsection", 4)
-        case 'paragraph_command': walk_heading(el, state, "paragraph", 5)
-        case 'subparagraph': walk_heading(el, state, "paragraph", 6)
+        case 'part': walk_heading(el, st, "part", 0)
+        case 'chapter': walk_heading(el, st, "chapter", 1)
+        case 'section': walk_heading(el, st, "section", 2)
+        case 'subsection': walk_heading(el, st, "subsection", 3)
+        case 'subsubsection': walk_heading(el, st, "subsubsection", 4)
+        case 'paragraph_command': walk_heading(el, st, "paragraph", 5)
+        case 'subparagraph': walk_heading(el, st, "paragraph", 6)
 
         // ---- figures ----
-        case 'figure': walk_figure(el, state)
+        case 'figure': walk_figure(el, st)
 
         // ---- tables ----
-        case 'table': walk_table(el, state)
+        case 'table': walk_table(el, st)
 
         // ---- labels (inside anything) ----
-        case 'label': walk_label(el, state)
+        case 'label': walk_label(el, st)
 
         // ---- footnotes ----
-        case 'footnote': walk_footnote(el, state)
+        case 'footnote': walk_footnote(el, st)
 
         // ---- equations ----
-        case 'equation': walk_equation(el, state)
+        case 'equation': walk_equation(el, st)
 
         // ---- theorem-like environments ----
         // check custom \newtheorem defs first (for shared counters, starred variants)
-        case 'theorem': walk_theorem_like(el, state, "theorem")
-        case 'lemma': walk_theorem_like(el, state, "lemma")
-        case 'corollary': walk_theorem_like(el, state, "corollary")
-        case 'proposition': walk_theorem_like(el, state, "proposition")
-        case 'definition': walk_theorem_like(el, state, "definition")
-        case 'example': walk_theorem_like(el, state, "example")
-        case 'remark': walk_theorem_like(el, state, "remark")
+        case 'theorem': walk_theorem_like(el, st, "theorem")
+        case 'lemma': walk_theorem_like(el, st, "lemma")
+        case 'corollary': walk_theorem_like(el, st, "corollary")
+        case 'proposition': walk_theorem_like(el, st, "proposition")
+        case 'definition': walk_theorem_like(el, st, "definition")
+        case 'example': walk_theorem_like(el, st, "example")
+        case 'remark': walk_theorem_like(el, st, "remark")
 
         // ---- bibliography ----
-        case 'thebibliography': walk_bibliography(el, state)
-        case 'bibitem': walk_bibitem(el, state)
+        case 'thebibliography': walk_bibliography(el, st)
+        case 'bibitem': walk_bibitem(el, st)
 
         // ---- appendix & counters ----
-        case 'appendix': walk_appendix(el, state)
-        case 'setcounter': walk_setcounter(el, state)
+        case 'appendix': walk_appendix(el, st)
+        case 'setcounter': walk_setcounter(el, st)
 
         // ---- color definitions ----
-        case 'definecolor': walk_definecolor(el, state)
+        case 'definecolor': walk_definecolor(el, st)
 
         // ---- \newtheorem definitions ----
-        case 'newtheorem': walk_newtheorem(el, state)
-        case 'newtheorem*': walk_newtheorem_star(el, state)
+        case 'newtheorem': walk_newtheorem(el, st)
+        case 'newtheorem*': walk_newtheorem_star(el, st)
 
         // ---- everything else: check custom theorem defs, then walk children ----
-        default: walk_default(el, tag, state)
+        default: walk_default(el, tag, st)
     }
 }
 
-fn walk_children(el, i, n, state) {
-    if i >= n { state }
+fn walk_children(el, i, n, st) {
+    if i >= n { st }
     else {
         let child = el[i]
-        let new_state = walk_node(child, state)
+        let new_state = walk_node(child, st)
         walk_children(el, i + 1, n, new_state)
     }
 }
@@ -164,37 +164,37 @@ fn walk_children(el, i, n, state) {
 // Preamble extraction
 // ============================================================
 
-fn walk_documentclass(el, state) {
+fn walk_documentclass(el, st) {
     let cls = trim(util.text_of(el))
-    if cls != "" { {*:state, docclass: cls} }
-    else { state }
+    if cls != "" { {*:st, docclass: cls} }
+    else { st }
 }
 
-fn walk_title(el, state) {
+fn walk_title(el, st) {
     let t = util.rich_text_of(el)
-    {*:state, title: t, title_el: el}
+    {*:st, title: t, title_el: el}
 }
 
-fn walk_author(el, state) {
+fn walk_author(el, st) {
     let a = util.rich_text_of(el)
-    {*:state, author: a, author_el: el}
+    {*:st, author: a, author_el: el}
 }
 
-fn walk_date(el, state) {
+fn walk_date(el, st) {
     let d = util.rich_text_of(el)
-    {*:state, date: d, date_el: el}
+    {*:st, date: d, date_el: el}
 }
 
 // ============================================================
 // Section headings
 // ============================================================
 
-fn walk_heading(el, state, counter_name, html_level) {
-    let new_counters = step_counter(state.counters, counter_name)
+fn walk_heading(el, st, counter_name, html_level) {
+    let new_counters = step_counter(st.counters, counter_name)
     // determine numbering depth for this counter
     let counter_depth = counter_name_to_depth(counter_name)
-    let sec_num = if (counter_depth <= state.secnumdepth)
-        compute_section_num(new_counters, counter_name, state.docclass, state.in_appendix)
+    let sec_num = if (counter_depth <= st.secnumdepth)
+        compute_section_num(new_counters, counter_name, st.docclass, st.in_appendix)
     else null
 
     // extract title text
@@ -203,22 +203,22 @@ fn walk_heading(el, state, counter_name, html_level) {
     let base_slug = util.slugify(title_text)
 
     // deduplicate slug
-    let slug_info = make_unique_slug(base_slug, state.slug_counts)
+    let slug_info = make_unique_slug(base_slug, st.slug_counts)
     let slug = slug_info.slug
     let new_slug_counts = slug_info.counts
 
     // record heading
     let entry = {level: html_level, number: sec_num, text: title_text, id: slug}
-    let new_heading_nums = add_entry(state.heading_nums, slug, sec_num)
-    let new_headings = state.headings ++ [entry]
+    let new_heading_nums = add_entry(st.heading_nums, slug, sec_num)
+    let new_headings = st.headings ++ [entry]
     let sec_num_str = sec_num_to_str(sec_num)
 
     let new_state = {
-        *:state,
+        *:st,
         counters: new_counters,
         headings: new_headings,
         heading_nums: new_heading_nums,
-        heading_titles: add_entry(state.heading_titles, counter_name ++ ":" ++ sec_num_str, title_text),
+        heading_titles: add_entry(st.heading_titles, counter_name ++ ":" ++ sec_num_str, title_text),
         slug_counts: new_slug_counts,
         env_context: counter_name,
         env_context_num: sec_num_str
@@ -256,52 +256,52 @@ fn compute_section_num(counters, counter_name, docclass, in_appendix) {
 // Figures, tables, equations
 // ============================================================
 
-fn walk_figure(el, state) {
-    let new_counters = step_counter(state.counters, "figure")
+fn walk_figure(el, st) {
+    let new_counters = step_counter(st.counters, "figure")
     let fig_num = new_counters.figure
     let fig_text = trim(util.text_of(el))
     let entry = {number: fig_num, content: fig_text}
-    let new_figures = state.figures ++ [entry]
-    let new_state = {*:state, counters: new_counters, figures: new_figures,
+    let new_figures = st.figures ++ [entry]
+    let new_state = {*:st, counters: new_counters, figures: new_figures,
         env_context: "figure", env_context_num: string(fig_num)}
     walk_children(el, 0, len(el), new_state)
 }
 
-fn walk_table(el, state) {
-    let new_counters = step_counter(state.counters, "table")
+fn walk_table(el, st) {
+    let new_counters = step_counter(st.counters, "table")
     let tab_num = new_counters.table
     let tab_text = trim(util.text_of(el))
     let entry = {number: tab_num, content: tab_text}
-    let new_tables = state.tables ++ [entry]
-    let new_state = {*:state, counters: new_counters, tables: new_tables,
+    let new_tables = st.tables ++ [entry]
+    let new_state = {*:st, counters: new_counters, tables: new_tables,
         env_context: "table", env_context_num: string(tab_num)}
     walk_children(el, 0, len(el), new_state)
 }
 
-fn walk_equation(el, state) {
-    let new_counters = step_counter(state.counters, "equation")
+fn walk_equation(el, st) {
+    let new_counters = step_counter(st.counters, "equation")
     let eq_num = new_counters.equation
-    let new_state = {*:state, counters: new_counters,
+    let new_state = {*:st, counters: new_counters,
         env_context: "equation", env_context_num: string(eq_num)}
     walk_children(el, 0, len(el), new_state)
 }
 
-fn walk_numbered_env(el, state, env_type) {
-    let new_counters = step_counter(state.counters, env_type)
+fn walk_numbered_env(el, st, env_type) {
+    let new_counters = step_counter(st.counters, env_type)
     let env_num = get_env_counter(new_counters, env_type)
     let env_text = trim(util.text_of(el))
     let entry = make_thm_entry(env_type, env_num, env_text)
-    let new_theorems = state.theorems ++ [entry]
-    let new_state = {*:state, counters: new_counters, theorems: new_theorems,
+    let new_theorems = st.theorems ++ [entry]
+    let new_state = {*:st, counters: new_counters, theorems: new_theorems,
         env_context: env_type, env_context_num: string(env_num)}
     walk_children(el, 0, len(el), new_state)
 }
 
 // route theorem-like env through custom defs if available, else default numbered
-fn walk_theorem_like(el, state, env_type) {
-    let thm_def = util.lookup(state.theorem_defs, env_type)
-    if (thm_def != null) { walk_custom_theorem(el, state, thm_def) }
-    else { walk_numbered_env(el, state, env_type) }
+fn walk_theorem_like(el, st, env_type) {
+    let thm_def = util.lookup(st.theorem_defs, env_type)
+    if (thm_def != null) { walk_custom_theorem(el, st, thm_def) }
+    else { walk_numbered_env(el, st, env_type) }
 }
 
 fn make_thm_entry(k, n, c) {
@@ -312,16 +312,16 @@ fn make_thm_entry(k, n, c) {
 // Bibliography
 // ============================================================
 
-fn walk_bibliography(el, state) {
-    walk_children(el, 0, len(el), state)
+fn walk_bibliography(el, st) {
+    walk_children(el, 0, len(el), st)
 }
 
-fn walk_bibitem(el, state) {
+fn walk_bibitem(el, st) {
     let bib_key = trim(util.text_of(el))
-    let bib_num = len(state.bibitems) + 1
+    let bib_num = len(st.bibitems) + 1
     let entry = make_bib_entry(bib_key, bib_num)
-    let new_bibitems = state.bibitems ++ [entry]
-    {*:state, bibitems: new_bibitems}
+    let new_bibitems = st.bibitems ++ [entry]
+    {*:st, bibitems: new_bibitems}
 }
 
 fn make_bib_entry(k, n) {
@@ -332,13 +332,13 @@ fn make_bib_entry(k, n) {
 // Appendix & counter commands
 // ============================================================
 
-fn walk_appendix(el, state) {
+fn walk_appendix(el, st) {
     // reset section counter and switch to appendix mode
-    let new_counters = {*:state.counters, section: 0, subsection: 0, subsubsection: 0}
-    {*:state, in_appendix: true, counters: new_counters}
+    let new_counters = {*:st.counters, section: 0, subsection: 0, subsubsection: 0}
+    {*:st, in_appendix: true, counters: new_counters}
 }
 
-fn walk_setcounter(el, state) {
+fn walk_setcounter(el, st) {
     // children: [counter_name_text, value_text]
     let n = len(el)
     if (n >= 2) {
@@ -346,14 +346,14 @@ fn walk_setcounter(el, state) {
         let cval = trim(string(el[1]))
         let val = int(cval)
         if (cname == "secnumdepth" and val != null) {
-            {*:state, secnumdepth: val}
+            {*:st, secnumdepth: val}
         }
-        else { state }
+        else { st }
     }
-    else { state }
+    else { st }
 }
 
-fn walk_definecolor(el, state) {
+fn walk_definecolor(el, st) {
     // children: [name, model, spec]
     let n = len(el)
     if (n >= 3) {
@@ -361,10 +361,10 @@ fn walk_definecolor(el, state) {
         let model = trim(string(el[1]))
         let spec = trim(string(el[2]))
         let css = parse_color_model(model, spec)
-        let new_colors = add_entry(state.custom_colors, cname, css)
-        {*:state, custom_colors: new_colors}
+        let new_colors = add_entry(st.custom_colors, cname, css)
+        {*:st, custom_colors: new_colors}
     }
-    else { state }
+    else { st }
 }
 
 fn parse_color_model(model, spec) {
@@ -405,19 +405,19 @@ fn parse_gray(spec) {
 // \newtheorem{name}{Label}       → independent counter
 // \newtheorem{name}[counter]{Label} → shared counter with existing type
 // \newtheorem*{name}{Label}      → unnumbered (star variant)
-fn walk_newtheorem(el, state) {
+fn walk_newtheorem(el, st) {
     let n = len(el)
-    if (n < 2) state
-    else build_newtheorem_def(el, state, n, true)
+    if (n < 2) st
+    else build_newtheorem_def(el, st, n, true)
 }
 
-fn walk_newtheorem_star(el, state) {
+fn walk_newtheorem_star(el, st) {
     let n = len(el)
-    if (n < 2) state
-    else build_newtheorem_def(el, state, n, false)
+    if (n < 2) st
+    else build_newtheorem_def(el, st, n, false)
 }
 
-fn build_newtheorem_def(el, state, n, is_numbered) {
+fn build_newtheorem_def(el, st, n, is_numbered) {
     let env_name = get_newthm_child_text(el, 0)
     // clean star suffix if present (some parsers may include it)
     let clean_name = if (ends_with(env_name, "*")) slice(env_name, 0, len(env_name) - 1)
@@ -436,12 +436,12 @@ fn build_newtheorem_def(el, state, n, is_numbered) {
         shared_counter: shared_counter,
         numbered: is_numbered
     }
-    let new_defs = add_entry(state.theorem_defs, clean_name, def)
+    let new_defs = add_entry(st.theorem_defs, clean_name, def)
     // add counter for this theorem type if not shared and not unnumbered
     let is_unnumbered = is_numbered == false
-    let new_custom_counters = if (is_unnumbered or shared_counter != null) state.custom_counters
-                      else add_entry(state.custom_counters, clean_name, 0)
-    {*:state, theorem_defs: new_defs, custom_counters: new_custom_counters}
+    let new_custom_counters = if (is_unnumbered or shared_counter != null) st.custom_counters
+                      else add_entry(st.custom_counters, clean_name, 0)
+    {*:st, theorem_defs: new_defs, custom_counters: new_custom_counters}
 }
 
 fn get_newthm_child_text(el, idx) {
@@ -455,57 +455,57 @@ fn get_newthm_child_text(el, idx) {
 // Default handler: check custom theorem defs
 // ============================================================
 
-fn walk_default(el, tag, state) {
+fn walk_default(el, tag, st) {
     let tag_str = string(tag)
-    let thm_def = util.lookup(state.theorem_defs, tag_str)
-    if (thm_def != null) { walk_custom_theorem(el, state, thm_def) }
-    else { walk_children(el, 0, len(el), state) }
+    let thm_def = util.lookup(st.theorem_defs, tag_str)
+    if (thm_def != null) { walk_custom_theorem(el, st, thm_def) }
+    else { walk_children(el, 0, len(el), st) }
 }
 
-fn walk_custom_theorem(el, state, thm_def) {
+fn walk_custom_theorem(el, st, thm_def) {
     if (thm_def.numbered == false) {
         // unnumbered: just walk children
-        let new_state = {*:state, env_context: thm_def.env_name, env_context_num: ""}
+        let new_state = {*:st, env_context: thm_def.env_name, env_context_num: ""}
         walk_children(el, 0, len(el), new_state)
     } else {
-        walk_custom_theorem_numbered(el, state, thm_def)
+        walk_custom_theorem_numbered(el, st, thm_def)
     }
 }
 
-fn walk_custom_theorem_numbered(el, state, thm_def) {
+fn walk_custom_theorem_numbered(el, st, thm_def) {
     // determine which counter to step
     let counter_name = if (thm_def.shared_counter != null) thm_def.shared_counter
                        else thm_def.env_name
     // step the counter
-    let stepped = step_and_get(state, counter_name)
+    let stepped = step_and_get(st, counter_name)
     let env_num = stepped.num
     let new_counters = stepped.counters
     let new_custom_counters = stepped.custom_counters
     let env_text = trim(util.text_of(el))
     let entry = make_thm_entry(thm_def.env_name, env_num, env_text)
-    let new_theorems = state.theorems ++ [entry]
-    let new_state = {*:state, counters: new_counters, custom_counters: new_custom_counters,
+    let new_theorems = st.theorems ++ [entry]
+    let new_state = {*:st, counters: new_counters, custom_counters: new_custom_counters,
         theorems: new_theorems,
         env_context: thm_def.env_name, env_context_num: string(env_num)}
     walk_children(el, 0, len(el), new_state)
 }
 
 // step the appropriate counter and return {num, counters, custom_counters}
-fn step_and_get(state, counter_name) {
-    if (is_fixed_counter(counter_name)) step_and_get_fixed(state, counter_name)
-    else step_and_get_custom(state, counter_name)
+fn step_and_get(st, counter_name) {
+    if (is_fixed_counter(counter_name)) step_and_get_fixed(st, counter_name)
+    else step_and_get_custom(st, counter_name)
 }
 
-fn step_and_get_fixed(state, counter_name) {
-    let new_counters = step_counter(state.counters, counter_name)
+fn step_and_get_fixed(st, counter_name) {
+    let new_counters = step_counter(st.counters, counter_name)
     let num = get_fixed_counter(new_counters, counter_name)
-    {num: num, counters: new_counters, custom_counters: state.custom_counters}
+    {num: num, counters: new_counters, custom_counters: st.custom_counters}
 }
 
-fn step_and_get_custom(state, counter_name) {
-    let new_cc = step_custom_counter(state.custom_counters, counter_name)
+fn step_and_get_custom(st, counter_name) {
+    let new_cc = step_custom_counter(st.custom_counters, counter_name)
     let num = get_custom_counter_val(new_cc, counter_name)
-    {num: num, counters: state.counters, custom_counters: new_cc}
+    {num: num, counters: st.counters, custom_counters: new_cc}
 }
 
 fn is_fixed_counter(counter_name) {
@@ -563,36 +563,36 @@ fn get_env_counter(counters, env_type) {
 // Labels
 // ============================================================
 
-fn walk_label(el, state) {
+fn walk_label(el, st) {
     let label_name = trim(util.text_of(el))
-    let c = state.counters
+    let c = st.counters
     // use env_context to determine what we're labeling
-    let label_type = state.env_context
-    let label_number = state.env_context_num
+    let label_type = st.env_context
+    let label_number = st.env_context_num
     let label_id = util.slugify(label_name)
     // also store the heading title for \nameref
     let heading_key = label_type ++ ":" ++ label_number
-    let label_title = util.lookup(state.heading_titles, heading_key)
+    let label_title = util.lookup(st.heading_titles, heading_key)
 
     let entry = {type: label_type, number: label_number, id: label_id, title: label_title}
-    let new_labels = add_entry(state.labels, label_name, entry)
-    {*:state, labels: new_labels}
+    let new_labels = add_entry(st.labels, label_name, entry)
+    {*:st, labels: new_labels}
 }
 
 // ============================================================
 // Footnotes
 // ============================================================
 
-fn walk_footnote(el, state) {
-    let new_counters = step_counter(state.counters, "footnote")
+fn walk_footnote(el, st) {
+    let new_counters = step_counter(st.counters, "footnote")
     let fn_num = new_counters.footnote
     // key by content text for lookup in pass 2
     let content_text = trim(util.text_of(el))
     let fn_key = util.slugify(content_text)
     let entry = {number: fn_num, node: el}
-    let new_fn_map = add_entry(state.footnote_map, fn_key, entry)
-    let new_footnotes = state.footnotes ++ [entry]
-    {*:state, counters: new_counters, footnote_map: new_fn_map, footnotes: new_footnotes}
+    let new_fn_map = add_entry(st.footnote_map, fn_key, entry)
+    let new_footnotes = st.footnotes ++ [entry]
+    {*:st, counters: new_counters, footnote_map: new_fn_map, footnotes: new_footnotes}
 }
 
 // ============================================================

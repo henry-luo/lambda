@@ -1,5 +1,7 @@
 # Lambda Core Runtime — Design Overview
 
+> **Last verified against tree:** 2026-08-24 *(initial stamp from git history)*
+
 > **This is the index and architecture map for the Lambda core-runtime detailed-design set.** It covers what the runtime is, how a script becomes running native code, how the codebase is organized into subsystems, the design themes that recur across them, and a synthesized view of the runtime's maturity and known-issue clusters. Each subsystem has its own document, linked in [§4](#4-the-document-set).
 >
 > **Scope:** the Lambda *core language runtime* — the value model, parser/AST, the MIR Direct code-generation backend and JIT, memory and GC, the numeric/string/vector machinery, the runtime builtins, error handling, the Mark data API, the procedural runtime, and the schema validator. Out of scope (their own subsystems): the input parsers and output formatters (`lambda/input/`, `lambda/format/`), the embedded JavaScript engine (`lambda/js/`, see [doc/dev/js/](../js/JS_00_Overview.md)), the polyglot Jube runtimes (`bash/`, `py/`, `rb/`), and the Radiant layout engine (`radiant/`).

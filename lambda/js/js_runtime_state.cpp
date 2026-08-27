@@ -458,6 +458,7 @@ void js_eval_state_reset(JsEvalState* state) {
     memset(bridge->env_from_journal, 0, sizeof(bridge->env_from_journal));
     memset(bridge->env_frame_marks, 0, sizeof(bridge->env_frame_marks));
     memset(bridge->global_lexical_had_own, 0, sizeof(bridge->global_lexical_had_own));
+    memset(bridge->global_lexical_immutable, 0, sizeof(bridge->global_lexical_immutable));
     memset(bridge->global_lexical_frame_marks, 0, sizeof(bridge->global_lexical_frame_marks));
     memset(bridge->private_frame_marks, 0, sizeof(bridge->private_frame_marks));
     bridge->env_count = 0;

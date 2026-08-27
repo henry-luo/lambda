@@ -93,14 +93,14 @@ on init(evt)  { validate.revalidate(~) aria.reflect(~) }
 on input(evt) { validate.revalidate(~) aria.reflect(~) }
 on blur(evt)  { validate.revalidate(~) aria.reflect(~) }
 on commit(evt) { editing.commit(~) }
-on beforeinput(evt) { editing.apply(~, evt, false) }
+on beforeinput(evt) { editing.apply_fn(~, evt, false) }
 
 view <textarea> state valid, invalid {}
 on init(evt)  { validate.revalidate(~) aria.reflect(~) }
 on input(evt) { validate.revalidate(~) aria.reflect(~) }
 on blur(evt)  { validate.revalidate(~) aria.reflect(~) }
 on commit(evt) { editing.commit(~) }
-on beforeinput(evt) { editing.apply(~, evt, true) }
+on beforeinput(evt) { editing.apply_fn(~, evt, true) }
 
 // <input type=range> has no activation template yet; it is here for the ARIA
 // value mirrors, which are the last thing native's reflection still owned.

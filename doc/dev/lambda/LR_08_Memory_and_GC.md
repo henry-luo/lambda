@@ -1,5 +1,7 @@
 # Lambda Runtime — Memory Management & Garbage Collection
 
+> **Last verified against tree:** 2026-08-24 *(initial stamp from git history)*
+
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers how the runtime allocates and reclaims memory: the dual-zone non-moving mark-and-sweep collector in `lib/gc/`, the glue in `lambda-mem.cpp` that drives it, the exact root set (registered slots/ranges and the execution root side-stack), the precise per-`TypeId` heap tracing, the collected data nursery, the raw number execution side-stack, the three-tier string allocation strategy, the name- and shape-interning pools, the memory-context registry, and the signal-based C-stack-overflow guard.
 >
 > **Primary sources:** `lib/gc/gc_heap.c`/`.h` (the collector engine: collect, mark, compact, sweep, allocators, root registries), `lib/gc/gc_object_zone.h` (the non-moving size-class allocator), `lambda/lambda-mem.cpp` (allocation entry points, `heap_gc_collect`, execution side-stack binding, numeric boxing), `lambda/name_pool.cpp`/`.hpp` (identifier interning), `lambda/shape_pool.cpp`/`.hpp` (map/element shape dedup), `lambda/mem_factory_rt.cpp`/`.h` (allocator registry), `lambda/lambda-stack.cpp`/`.h` (stack-overflow guard), `lib/mempool.h` (backing `Pool`/`Arena`).

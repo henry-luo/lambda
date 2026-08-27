@@ -66,10 +66,10 @@ Counts:
 | LR_09 | Runtime builtins | 7 | 0 | 3 | 10 |
 | LR_10 | Error handling | 5 | 1 | 2 | 8 |
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
-| LR_12 | Procedural runtime | 6 | 0 | 2 | 8 |
+| LR_12 | Procedural runtime | 7 | 0 | 2 | 9 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 9 | 1 | 5 | 15 |
-| **Total** | | **96** | **11** | **48** | **155** |
+| **Total** | | **97** | **11** | **48** | **156** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -283,6 +283,63 @@ annotation and parameter positions, both tiers) and
 `NegativeScriptTest.TypeSetOperatorContractIsNamed`. Closes the implementation
 half of **SO9** and the `&`/`!`-unimplemented warning in the string-pattern
 design record.
+
+<a id="lr02-14"></a>**LR02-14 · Keyword-as-name handling is a patchwork; S16.10 rules it · OPEN**
+Ruled 2026-08-27 as **S16.10** (spec v16.0.0; deliberation and probe table in
+`Lambda_Design_Syntax.md` §7.24): keywords never name bindings — the whole
+lexer keyword table, E201 at the declaration site, no quoted escape — while
+map keys, element tags, attribute names, and `.`-member steps admit keywords.
+Divergences to fix:
+
+1. `import edit: …` parses and **every use** fails (`expected a type
+   pattern` — the `edit` declaration keyword captures the statement);
+   `import 'edit': …` parses and creates an **unreachable binding**
+   (`'edit'.x` is silently null). Both must become E201 at the import line.
+2. `let if = 1` parses; every use fails (`expected an expression`).
+3. **`let type = 1` parses and `type` then silently reads the base type** —
+   a silent wrong answer, the priority defect of the cluster.
+4. `<if a:1, "x">` is rejected (`expected an element tag`) but is legal
+   under S16.10.2 — the tag position must accept keyword words.
+5. E201 covers only `last` and must extend to the whole table, in the C
+   parser and the Tree-sitter reference grammar alike.
+
+Migration: ~55 keyword-named bindings in `test/` + `lambda/` (offset 12,
+group 9, state 8, to 5, by 4, …; breakdown in §7.24); 0 keyword import
+aliases.
+
+<a id="lr02-15"></a>**LR02-15 · Sys-func shadowing crashes; S12.3.7 rules it user-first · OPEN**
+Probes 2026-08-27 (debug build): `fn sum(a) => 99` then `sum([1,2,3])`
+compiles, executes on the interpreter tier, prints **no result**, and dies at
+teardown (ASan dealloc failure); `fn len` / `fn min` shadows likewise;
+unshadowed `sum(x) + len(x)` is fine. Ruled 2026-08-27 as **S12.3.7** (spec
+v16.1.0; deliberation in `Lambda_Design_Syntax.md` §7.25): user-first,
+module-lexical shadowing with a mandatory compile warning; `pub` export
+extends to importers through the explicit import only; a non-callable shadow
+is the not-callable error, never builtin fallback; keywords/base-type words
+stay un-shadowable (S16.10.1). Implementation: one resolution point in
+`build_ast` covering both tiers ("is this name module-bound?" before builtin
+registry lookup), the shadow warning, and a regression test for the
+crash shape.
+
+<a id="lr02-16"></a>**LR02-16 · `lambda.*` namespace not implemented · OPEN**
+Ruled 2026-08-27 as **S17.2.1/S17.2.2** (semantics v16.2.0) and **D7.2.4**
+(design v1.38.0); deliberation in `vibe/Lambda_Package.md` §1b. Work items:
+
+1. **`lambda.sys.*`** — expose the sys-func registry as a built-in module so
+   `lambda.sys.sum(xs)` resolves to the same row the prelude provides
+   unqualified. This is what makes a shadowed builtin reachable (S12.3.7).
+2. **Reserve the `lambda` root** — add it to the capture-real bar in
+   `lambda_lexer_word_bars_binding` so `let lambda = …` is E201 and the
+   escape can never be shadowed.
+3. **Shorten package paths** — `lambda.package.<name>` → `lambda.<name>`
+   across ~541 import sites plus the `lambda/package/` directory layout;
+   built-in module aliasing so `import math` ≡ `import lambda.math`.
+4. **Move the typesetting package** — `lambda.package.math` →
+   `lambda.doc.math`, freeing `lambda.math` for the built-in module. Its
+   corpus lives under `test/lambda/math/`.
+
+Sequencing note: item 2 is a one-line change but adds a reserved word, so it
+rides the same migration pass as [LR02-14](#lr02-14).
 
 ---
 
@@ -834,6 +891,45 @@ Declared `extern bool g_dry_run` (`lambda/lambda.h:63`), set once from the CLI
 single non-thread-local flag: concurrent compilation/execution that wants
 per-run dry-run semantics has no per-context override. Cross-link: RG1–RG14 in
 [Runtime globals audit].
+
+<a id="lr12-9"></a>**LR12-9 · Construction/insertion aliases instead of capturing by value (`S9.3.1`) · OPEN**
+Probed 2026-08-27 on `ba7ce817c`, interpreter and `LAMBDA_TIER=jit` alike.
+`S9.3.1` rules that placing a value into a container captures it **by value** at
+every constructor and insertion point; none of them do:
+
+| Probe | Result | Ruled |
+|---|---|---|
+| `var t={n:1}; arr[0]=t; t.n=55; arr[0].n` | `55` | `1` |
+| `var u={n:1}; var lit=[u]; u.n=66; lit[0].n` | `66` | `1` |
+| `var b={n:1}; a.peer=b; b.n=99; a.peer.n` | `99` | `1` |
+| `var c={n:1}; var d={peer:c}; c.n=77; d.peer.n` | `77` | `1` |
+
+Binding copy (`S9.1.2`) *is* enforced — `var b = a; b.n=99` leaves `a.n==1` —
+which is exactly what makes this hard to see: copy-on-bind works, so the model
+looks live until a value goes into a container. The spec carried `S9.3.1`
+**unmarked** (i.e. believed implemented) until this pass; now `*` with an
+Appendix A row.
+
+Two consequences beyond the direct violation. Cycles are constructible today:
+`var a={name:"a",peer:null}; var b={name:"b",peer:a}; a.peer=b` builds a real
+cycle, proved by `a.peer.peer.name = "MUTATED"` changing `a.name` — the path
+walks back to `a` itself. `print(a)` on that two-node graph emits 40,002 bytes,
+terminating on a depth cap rather than on structure. So the totality `S9.1.5`
+derives from "cycles are unconstructible" does not hold of reachable state. And
+the benchmark corpus depends on the defect: `test/benchmark/{awfy,jetstream}/richards2.ls`
+require `sched.tl` and `task_table[identity]` to observe one TCB, and compute
+their expected `qpc=2322 / hc=928` only under aliasing. Fixing `S9.3.1` breaks
+those scripts, which is the migration `C4.3` accepted; the sanctioned rewrite is
+the handle store (`C4.2e`, [`doc/Lambda_Procedural.md`](../doc/Lambda_Procedural.md)
+§"Sharing Mutable State"). `test/benchmark/awfy/richards3.ls` is that rewrite,
+already landed and passing with identical counts on both tiers — so this fix has
+a ready-made conformance fixture: `richards3.ls` must keep passing when `S9.3.1`
+lands, and `richards2.ls` is expected to stop.
+
+Sequence with COW Stage 2 (`S9.1.3` snapshot params, listed in the same
+Appendix A row) — the two share the insertion/argument copy path, and landing
+one without the other leaves a half-aliasing model that is harder to reason
+about than either endpoint.
 
 <a id="lr12-7"></a>**LR12-7 · The procedural surface is thin and ad hoc · OPEN**
 IO procedures are a hand-curated set in one file with bespoke validation per

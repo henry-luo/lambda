@@ -1,5 +1,7 @@
 # Radiant — Layout Driver, Block Layout & Block Formatting Context
 
+> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the control-flow spine of Radiant's layout engine: the top-level driver (`layout_html_doc` → `layout_html_root` → recursive `layout_flow_node`) that dispatches every DOM node by its computed `display`, the four-function block-layout pipeline (`layout_block` → `layout_block_content` → `layout_block_inner_content` → `finalize_block_flow`), the unified `BlockContext` struct that fuses block layout state, the Block Formatting Context (BFC) hierarchy, and float management into one object, and the `LayoutContext` state that is threaded through every other layout module. It also covers CSS 2.1 §9.5 float avoidance, margin collapsing, the RAII context scopes that guarantee restore on early return, and the fuzzer-hardening guards.
 >
 > **Primary sources:** `radiant/layout.hpp` (`LayoutContext`, `BlockContext`, `Linebox`, `FloatBox`, run modes, guards, and debug declarations), `radiant/layout.cpp` (`layout_html_doc`/`layout_html_root`/`layout_flow_node`/`layout_init`), `radiant/layout_block.cpp` (the block pipeline + margin collapse, ~9000 lines), `radiant/block_context.cpp` (BFC establishment + float lists), `radiant/layout_pass.cpp` (measurement scopes + cache wrappers), and `radiant/layout_debug.cpp` (debug/profiling).

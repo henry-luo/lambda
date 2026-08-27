@@ -1,5 +1,7 @@
 # Radiant — Positioned, Floats, Multi-column, Lists & Counters
 
+> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the "other" layout modes that hang off the block/BFC driver: CSS positioning (relative, sticky, absolute, fixed) and its containing-block resolution; floats and `clear`; the generic absolute-child driver shared by block, flex and grid; the deliberately simplified post-flow multi-column fragmentation; and the coupled list-marker + counter engine (including list-style-type numeral formatting). These modes all read and mutate the same in-place view tree described in [RAD_01](RAD_01_View_and_DOM_Model.md) and share the `BlockContext`/float machinery of [RAD_03](RAD_03_Layout_Driver_Block_BFC.md).
 >
 > **Primary sources:** `radiant/layout.hpp` (all declarations and shared layout state), `radiant/layout_positioned.cpp` (relative/sticky/absolute/fixed positioning and floats), `radiant/layout_abs_children.cpp` (the shared abs-child driver), `radiant/layout_multicol.cpp` (fragmentation/balancing), `radiant/layout_list.cpp` + `radiant/render_list.cpp` (markers), `radiant/layout_counters.cpp` (counter engine + numeral formatting), and `radiant/block_context.cpp` (float-list management).

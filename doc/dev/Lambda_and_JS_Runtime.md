@@ -1,5 +1,7 @@
 # Lambda & LambdaJS Runtime — Combined Design Summary
 
+> **Last verified against tree:** 2026-08-23 *(initial stamp from git history)*
+
 > **One runtime, two languages.** Lambda Script (pure-functional, `.ls`) and LambdaJS (the embedded JavaScript engine, `.js`) are not two VMs with a bridge — they are two front-ends over a **single shared substrate**: the same tagged `Item` value, the same GC heap and pools, the same MIR JIT, the same input parsers/formatters, and the same Radiant DOM. They interop at runtime with **zero marshalling**: a value produced by one is directly readable by the other. This document is the concise map of that design — for developers, and for loading into AI-model context. Details live in the two detailed-design sets: **[LR_00 (Lambda core)](lambda/LR_00_Overview.md)** and **[JS_00 (LambdaJS)](js/JS_00_Overview.md)**.
 
 ---

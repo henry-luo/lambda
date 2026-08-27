@@ -1,5 +1,7 @@
 # LambdaJS — Iterators, Generators & Destructuring
 
+> **Last verified against tree:** 2026-08-13 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the iteration protocol (`GetIterator`/`IteratorStep`/`IteratorClose` and the done sentinel), the lightweight fast-path iterators for arrays/strings/typed-arrays, how `for-of`/`for-in` compile (with per-iteration bindings and IteratorClose), the two-function generator state-machine transform (`yield`, `yield*`), and array/object destructuring with spread/rest.
 >
 > **Primary sources:** `lambda/js/js_runtime.cpp` (iterator + generator runtime), `lambda/js/js_mir_iterator.cpp` (MIR iterator helpers), `lambda/js/js_mir_function_class_lowering.cpp` (generator state-machine emission), `lambda/js/js_mir_statement_lowering.cpp` (`for-of`/`for-in`), `lambda/js/js_mir_expression_lowering.cpp` (`yield`, destructuring, spread), `lambda/js/js_mir_completion.cpp` (abrupt completions), `lambda/js/js_mir_analysis.cpp` (yield counting, spill slots).

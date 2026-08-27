@@ -5,12 +5,12 @@
 fn make_calculator(base) {
     let multiplier = 10
     fn calc(op) {
-        fn apply(x) {
+        fn apply_fn(x) {
             if (op == "add") x + base
             else if (op == "mul") x * base * multiplier
             else x
         }
-        apply
+        apply_fn
     }
     calc
 }

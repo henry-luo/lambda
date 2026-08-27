@@ -268,19 +268,19 @@ fn test_flow_element_management() {
     let flow_engine = text_flow_create(ctx)
     
     // Test flow element creation and management
-    let element = flow_element_create(ctx, FLOW_ELEMENT_TEXT)
-    assert(element != null, "Flow element should be created")
-    assert(element.type == FLOW_ELEMENT_TEXT, "Element type should be set correctly")
+    let el = flow_element_create(ctx, FLOW_ELEMENT_TEXT)
+    assert(el != null, "Flow element should be created")
+    assert(el.type == FLOW_ELEMENT_TEXT, "Element type should be set correctly")
     
     // Test adding element to flow
-    flow_add_element(flow_engine, element)
+    flow_add_element(flow_engine, el)
     assert(flow_engine.element_count == 1, "Element should be added to flow")
     
     // Test element removal
-    flow_remove_element(flow_engine, element)
+    flow_remove_element(flow_engine, el)
     assert(flow_engine.element_count == 0, "Element should be removed from flow")
     
-    flow_element_destroy(element)
+    flow_element_destroy(el)
     text_flow_destroy(flow_engine)
     destroy_context(ctx)
 }

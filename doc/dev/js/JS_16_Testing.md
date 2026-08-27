@@ -1,5 +1,7 @@
 # LambdaJS — Testing & Conformance Infrastructure
 
+> **Last verified against tree:** 2026-08-18 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how LambdaJS conformance and unit tests run: the test262 batch runner (GTest orchestrator → `posix_spawn` worker pool → persistent hot-reload process → wire protocol), batch execution phases and slowest-first dispatch, the three-layer crash recovery, batch-state reset, baseline management, the async/`$DONE` runner, diagnose mode, the Node.js official-test harness and shims, and the GTest unit suites.
 >
 > **Primary sources:** `test/test_js_test262_gtest.cpp` (orchestrator), `lambda/main.cpp` (`js-test-batch` worker + crash recovery), `lambda/js/js_runtime_state.cpp` (`js_batch_reset`/`js_batch_reset_to`), `utils/js_object_census.py` (Tune6 object-architecture ratchet), `test/test_node_gtest.cpp` + `lambda/js/test_shim/` (Node harness), `test/test_js_gtest.cpp`, `test/test_js_coerce_gtest.cpp`, `test/test_js_bt_regex_gtest.cpp`, `test/test_jsx_roundtrip{,_new}_gtest.cpp`, `test/test_js_transpile_timing_gtest.cpp`, baseline data under `test/js262/`.

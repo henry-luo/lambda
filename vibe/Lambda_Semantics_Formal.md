@@ -974,6 +974,93 @@ implementation constraint:
   borrow write into storage a value param still shares — the exact bug class
   exclusivity exists to prevent. Record as a fixture when `var` params land.
 
+#### C4.2e Clarification: the handle-store idiom — what replaces aliasing (2026-08-27)
+
+Designer follow-up, raised against a real program (`test/benchmark/*/richards2.ls`):
+under value binding, how does one write the shape where *two places must see the
+same mutable record*? Richards is the canonical case —
+
+```lambda
+pn create_task(sched, task_table, identity, ...) any {
+    var tcb = create_tcb(sched.tl, identity, ...)
+    sched.tl = tcb              // the scheduler's task list
+    task_table[identity] = tcb  // the id-indexed table
+}
+```
+
+— where the scheduler chain and the lookup table must observe one TCB, and every
+task function mutates it through whichever handle it happens to hold.
+
+**The answer: handles into a single owned store.** State it as a rule of thumb,
+because this is the question every developer arriving from a reference-semantic
+language asks first:
+
+> *When two places need to see the same mutable thing, the thing gets one owner
+> and everyone else holds a key.*
+
+Mechanically, for the Richards shape: one container owns every record
+(`store` indexed by task id); every field that used to hold a *pointer* holds an
+*id* instead (`link: int`, `queue: int`, with a sentinel for "none"); mutation
+goes through the owner (`store[id].field = v`, or read-modify-write); and the
+store travels as a single `var` parameter — one borrow, one mutation root, so
+S9.1.3's exclusivity check is trivially satisfied at every call site.
+
+**Why this is the model's answer and not a workaround.** Three points, worth
+recording because "value semantics can't express shared mutable graphs" is the
+natural — and wrong — conclusion a reader draws from C4:
+
+1. **Aliasing was doing two jobs at once**: supplying *identity* (which record is
+   this?) and supplying *mutation reach* (who can change it?). Value semantics
+   keeps the second through the owner and asks the program to spell the first.
+   The spelling is nearly always already there — Richards's `identity` field *is*
+   the key; the JS original uses pointer identity in a domain that has a perfectly
+   good natural key, which is precisely the substitution that hides the sharing.
+2. **What the program gets back** is the whole of §S9.1.5 and §S9.3.1: because the
+   graph is a flat table of records plus integer keys rather than a cyclic value,
+   `==` stays total, ordering stays total, and the state is printable and
+   serializable at any moment. A genuinely cyclic object graph is none of those
+   things. Debuggability and persistence are not incidental here — they are what
+   the ban on cycles was purchased for.
+3. **It is the standard answer**, not a Lambda peculiarity: arena-plus-index is
+   how the same graph is written in Rust without `Rc<RefCell<_>>`, in ECS engines,
+   in Hylo, and in Swift-with-structs. The Richards/DeltaBlue/Havlak family ports
+   this way in every one of them.
+
+**Costs, honestly.** One indirection per access (`store[id]` where a pointer
+deref used to be — a bounds-checked array read, and with a typed store a
+byte-offset load in the JIT); manual slot liveness, since nothing reclaims an id
+(a stale id reads `null` under S5's total reads rather than dangling, which
+degrades the failure mode from memory-unsafety to absence); and a rewrite that is
+mechanical but not local, because every pointer-valued field changes type.
+
+**Scope — when it is *not* needed.** Only a record with two genuinely independent
+mutable observers needs a store. A tree or DAG mutated only from its root, a
+record owned by exactly one container, and a value threaded through calls are all
+served by plain value semantics plus a `var` parameter. Reaching for a store by
+reflex reproduces the indirection cost with none of the benefit.
+
+**Relationship to open items.** Path writes (`store[id].ticks = ...`) are the
+ergonomic surface this idiom leans on; their general form is **SO14**
+(nested-mutation ergonomics), still open. The idiom does not depend on SO14's
+outcome — read-modify-write always expresses it — but SO14 decides how much
+ceremony it costs.
+
+**Worked proof.** `test/benchmark/awfy/richards3.ls` is the full value-semantics
+port of `richards2.ls` under this idiom — one `w` world value owning
+`tasks`/`datas`/`pkts`, ids everywhere a pointer used to be, `w` as the single
+`var` parameter. It reproduces the benchmark's `qpc=2322 / hc=928` exactly, on
+both the interpreter and `LAMBDA_TIER=jit`, which settles the "can value
+semantics even express this?" question with a program rather than an argument.
+The rewrite was mechanical and cost roughly 40 lines. (Its *cost* is not yet
+measured: the only figures taken so far are debug-build and under load, so they
+are not reportable under CLAUDE.md rule 10.)
+
+**Teaching duty.** Recorded in [`doc/Lambda_Procedural.md`](../doc/Lambda_Procedural.md)
+§"Sharing Mutable State", with a runnable example, because this is the first wall
+a JS/Python-trained developer hits and C4.3 already accepted "users must learn
+that mutation does not travel" as a cost. A cost accepted is a cost that has to
+be taught.
+
 #### C4.3 Costs accepted (recorded to avoid relitigation)
 
 - **Migration**: `pn` code mutating through un-annotated params or `let`/`var`
