@@ -2558,10 +2558,10 @@ fn sqrt_geom(body_box, context) {
         else lc0
     // setTop on the surd sign (only applied when |t| > 0.01, per Box.setTop)
     let t = surd.h - inner_h - lc
-    let apply = abs(t) > 0.01
+    let apply_flag = abs(t) > 0.01
     let body_h = inner_h + lc
-    let delim_h = if (apply) body_h else surd.h
-    let delim_d = if (apply) (surd_total - body_h) else surd.d
+    let delim_h = if (apply_flag) body_h else surd.h
+    let delim_d = if (apply_flag) (surd_total - body_h) else surd.d
     let result_h = max(delim_h, body_h)
     let result_d = max(delim_d, inner_d)
     // pstrut = max(maxFontSize, child heights) + 2; an empty body has no
@@ -2580,7 +2580,7 @@ fn sqrt_geom(body_box, context) {
         body_height: util.ceil_em2(inner_h + inner_d),
         body_top: util.ceil_em2(0.0 - pstrut),
         line_top: util.ceil_em2(0.0 - pstrut - (body_h - 2.0 * rule_width)),
-        sign_top: if (apply) util.ceil_em2(t) else null,
+        sign_top: if (apply_flag) util.ceil_em2(t) else null,
         pstrut: util.ceil_em2(pstrut),
         line_height: util.ceil_em2(rule_width),
         sign_class: surd.cls,
@@ -3419,7 +3419,7 @@ fn next_spacing_prev_type(prev_type, current) {
     if (current.type == "skip") prev_type else current.type
 }
 
-// apply inter-atom spacing between boxes
+// apply_flag inter-atom spacing between boxes
 fn apply_spacing(boxes, context) {
     let filtered = (for (b in boxes where b != null) b)
     if (len(filtered) <= 1) filtered

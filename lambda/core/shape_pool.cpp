@@ -3,7 +3,6 @@
 #include "../../lib/log.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/string.h"
-#include "../../lib/hashmap_helpers.h"
 #include "../../lib/ref_counted_pool.hpp"
 #include <string.h>
 
@@ -19,8 +18,49 @@ typedef struct ShapePoolEntry {
     CachedShape* cached;
 } ShapePoolEntry;
 
-HASHMAP_DEFINE_FIELD3_KEY(shape_entry, ShapePoolEntry,
-    signature.hash, signature.length, signature.byte_size)
+static uint64_t shape_entry_hash(const void* item, uint64_t seed0, uint64_t seed1) {
+    const ShapePoolEntry* entry = (const ShapePoolEntry*)item;
+    uint64_t hash = hashmap_murmur(&entry->signature.hash,
+        sizeof(entry->signature.hash), seed0, seed1);
+    hash ^= hashmap_murmur(&entry->signature.length,
+        sizeof(entry->signature.length), seed0, seed1) * 0x9e3779b97f4a7c15ULL;
+    hash ^= hashmap_murmur(&entry->signature.byte_size,
+        sizeof(entry->signature.byte_size), seed0, seed1) * 0x517cc1b727220a95ULL;
+    return hash;
+}
+
+static int shape_entry_cmp(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const ShapePoolEntry* entry_a = (const ShapePoolEntry*)a;
+    const ShapePoolEntry* entry_b = (const ShapePoolEntry*)b;
+    if (entry_a->signature.hash != entry_b->signature.hash ||
+            entry_a->signature.length != entry_b->signature.length ||
+            entry_a->signature.byte_size != entry_b->signature.byte_size) {
+        return 1;
+    }
+
+    // The signature is only the routing key. The stored shape is the
+    // authoritative identity confirmation for hash collisions.
+    if (!entry_a->cached || !entry_b->cached) {
+        return entry_a->cached == entry_b->cached ? 0 : 1;
+    }
+    if (entry_a->cached->is_element != entry_b->cached->is_element) return 1;
+    if (entry_a->cached->is_element) {
+        const char* element_name_a = entry_a->cached->element_name;
+        const char* element_name_b = entry_b->cached->element_name;
+        if (!element_name_a || !element_name_b) {
+            if (element_name_a != element_name_b) return 1;
+        } else if (strcmp(element_name_a, element_name_b) != 0) {
+            return 1;
+        }
+    }
+    return shape_pool_shapes_equal(entry_a->cached->shape, entry_b->cached->shape) ? 0 : 1;
+}
+
+static struct hashmap* shape_entry_new(size_t capacity) {
+    return hashmap_new(sizeof(ShapePoolEntry), capacity, 0, 0,
+        shape_entry_hash, shape_entry_cmp, NULL, NULL);
+}
 
 // ========== Signature Calculation ==========
 
@@ -105,7 +145,28 @@ void shape_pool_release(ShapePool* pool) {
 
 // ========== Shape Creation ==========
 
-static ShapeEntry* create_shape_chain(Arena* arena, const char** field_names, 
+static void initialize_shape_entry(ShapeEntry* entry, StrView* name_view,
+    const char* name, TypeId field_type, int64_t byte_offset, ShapeEntry* next) {
+    if (name) {
+        name_view->str = name;
+        name_view->length = strlen(name);
+        entry->name = name_view;
+    } else {
+        entry->name = NULL;
+    }
+    entry->name_hash = entry->name
+        ? typemap_name_hash(entry->name->str, (int)entry->name->length) : 0;
+    entry->name_id = NAME_ID_NONE;
+    entry->key_kind = NAME_KEY_STRING;
+    entry->type = type_info[field_type].type;
+    entry->byte_offset = byte_offset;
+    entry->next = next;
+    entry->ns = NULL;
+    entry->default_value = NULL;
+    entry->flags = 0;
+}
+
+static ShapeEntry* create_shape_chain(Arena* arena, const char** field_names,
     TypeId* field_types, size_t field_count) {
     if (field_count == 0) return NULL;
     
@@ -123,23 +184,11 @@ static ShapeEntry* create_shape_chain(Arena* arena, const char** field_names,
             return NULL;
         }
         
-        // Setup embedded StrView
-        StrView* nv = (StrView*)((char*)entry + sizeof(ShapeEntry));
-        if (name) {
-            nv->str = name;
-            nv->length = strlen(name);
-        } else {
-            nv = NULL;
-        }
-        entry->name = nv;
-        entry->name_hash = nv ? typemap_name_hash(nv->str, (int)nv->length) : 0;
-        entry->name_id = NAME_ID_NONE;
-        entry->key_kind = NAME_KEY_STRING;
-        entry->type = type_info[field_types[i]].type;
-        entry->byte_offset = byte_offset;
-        entry->next = NULL;
-        entry->ns = NULL;
-        entry->default_value = NULL;
+        // Setup embedded StrView and the common identity fields once for both
+        // permanent chains and stack-only lookup probes.
+        StrView* nv = name
+            ? (StrView*)((char*)entry + sizeof(ShapeEntry)) : NULL;
+        initialize_shape_entry(entry, nv, name, field_types[i], byte_offset, NULL);
         
         if (!first) first = entry;
         if (prev) prev->next = entry;
@@ -150,26 +199,40 @@ static ShapeEntry* create_shape_chain(Arena* arena, const char** field_names,
     return first;
 }
 
-static CachedShape* lookup_cached_shape(
-    ShapePool* pool,
-    ShapeSignature* signature
-) {
-    // Try current pool
-    ShapePoolEntry search_entry = {*signature, NULL};
-    const ShapePoolEntry* found = (const ShapePoolEntry*)hashmap_get(
-        pool->shapes, &search_entry
-    );
-    
-    if (found) {
-        log_debug("Shape found in current pool: hash=%lx", signature->hash);
-        return found->cached;
+static CachedShape* lookup_cached_shape(ShapePool* pool, ShapeSignature* signature,
+    const char** field_names, TypeId* field_types, size_t field_count,
+    bool is_element, const char* element_name) {
+    // Build a non-owning probe so duplicate lookups do not consume arena space.
+    ShapeEntry* probe_shape = NULL;
+    if (field_count > 0) {
+        ShapeEntry* probe_entries = LAMBDA_ALLOCA(field_count, ShapeEntry);
+        StrView* probe_names = LAMBDA_ALLOCA(field_count, StrView);
+        int64_t byte_offset = 0;
+        for (size_t i = 0; i < field_count; i++) {
+            const char* name = field_names[i];
+            StrView* name_view = name ? &probe_names[i] : NULL;
+            initialize_shape_entry(&probe_entries[i], name_view, name,
+                field_types[i], byte_offset, i + 1 < field_count
+                    ? &probe_entries[i + 1] : NULL);
+            byte_offset += type_info[field_types[i]].byte_size;
+        }
+        probe_shape = probe_entries;
     }
-    
-    // Try parent pool
-    if (pool->parent) {
-        return lookup_cached_shape(pool->parent, signature);
+
+    CachedShape probe_cached = {};
+    probe_cached.shape = probe_shape;
+    probe_cached.is_element = is_element;
+    probe_cached.element_name = element_name;
+    ShapePoolEntry search_entry = {*signature, &probe_cached};
+
+    for (ShapePool* current = pool; current; current = current->parent) {
+        const ShapePoolEntry* found = (const ShapePoolEntry*)hashmap_get(
+            current->shapes, &search_entry);
+        if (found) {
+            log_debug("Shape found in current pool: hash=%lx", signature->hash);
+            return found->cached;
+        }
     }
-    
     return NULL;
 }
 
@@ -188,7 +251,8 @@ ShapeEntry* shape_pool_get_map_shape(ShapePool* pool, const char** field_names,
     ShapeSignature signature = create_signature(field_names, field_types, field_count);
     
     // Lookup existing shape
-    CachedShape* cached = lookup_cached_shape(pool, &signature);
+    CachedShape* cached = lookup_cached_shape(pool, &signature,
+        field_names, field_types, field_count, false, NULL);
     if (cached) {
         log_debug("Reusing cached shape: hash=%lx, length=%u", 
             signature.hash, signature.length);
@@ -212,6 +276,7 @@ ShapeEntry* shape_pool_get_map_shape(ShapePool* pool, const char** field_names,
     new_cached->last = last;
     new_cached->ref_count = 0;
     new_cached->is_element = false;
+    new_cached->element_name = NULL;
     
     // Store in hashmap
     ShapePoolEntry entry = {signature, new_cached};
@@ -267,7 +332,8 @@ ShapeEntry* shape_pool_get_element_shape(
     ShapeSignature signature = create_signature(sig_names, sig_types, signature_count);
     
     // Lookup existing shape
-    CachedShape* cached = lookup_cached_shape(pool, &signature);
+    CachedShape* cached = lookup_cached_shape(pool, &signature,
+        attr_names, attr_types, attr_count, true, element_name);
     if (cached) {
         log_debug("Reusing cached element shape: hash=%lx, element=%s", 
             signature.hash, element_name);
@@ -296,6 +362,7 @@ ShapeEntry* shape_pool_get_element_shape(
     new_cached->last = last;
     new_cached->ref_count = 0;
     new_cached->is_element = true;
+    new_cached->element_name = element_name;
     
     // Store in hashmap
     ShapePoolEntry entry = {signature, new_cached};

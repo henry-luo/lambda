@@ -80,6 +80,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_repl_gtest \
 	test_lambda_proc_gtest \
 	test_js_gtest \
+	test_js_script_gtest \
 	test_js_opt_gtest \
 	test_lambda_opt_gtest \
 	test_js_test262_gtest \
@@ -3718,7 +3719,16 @@ compare-layout: build
 devtool:
 	@echo "🚀 Launching DevTool..."
 	@if [ -d "utils/devtool" ]; then \
-		cd utils/devtool && npm run electron:dev; \
+		cd utils/devtool && \
+		if [ ! -x node_modules/.bin/concurrently ] || \
+		   [ ! -x node_modules/.bin/wait-on ] || \
+		   [ ! -x node_modules/.bin/cross-env ] || \
+		   [ ! -x node_modules/.bin/electron ] || \
+		   [ ! -x node_modules/.bin/vite ]; then \
+			echo "📦 Installing DevTool dependencies..."; \
+			npm install --no-audit --no-fund; \
+		fi && \
+		npm run electron:dev; \
 	else \
 		echo "❌ Error: DevTool not found at utils/devtool"; \
 		exit 1; \

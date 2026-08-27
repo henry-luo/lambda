@@ -14508,7 +14508,9 @@ extern "C" Item js_get_global_property(Item key) {
         Item result = js_with_scope_lookup(key, &found, false);
         if (found) return result;
     }
-    Item lex = js_global_lexical_get_or_fallback(key, ItemError);
+    Item lex = js_eval_global_lexical_get_or_fallback(key, ItemError);
+    if (lex.item != ItemError.item) return lex;
+    lex = js_global_lexical_get_or_fallback(key, ItemError);
     if (lex.item != ItemError.item) return lex;
     Item global = js_get_global_this();
     Item result = js_get_key_default(global, key);
@@ -14516,7 +14518,9 @@ extern "C" Item js_get_global_property(Item key) {
 }
 
 static Item js_get_global_property_strict_without_with(Item key) {
-    Item lex = js_global_lexical_get_or_fallback(key, ItemError);
+    Item lex = js_eval_global_lexical_get_or_fallback(key, ItemError);
+    if (lex.item != ItemError.item) return lex;
+    lex = js_global_lexical_get_or_fallback(key, ItemError);
     if (lex.item != ItemError.item) return lex;
     Item global = js_get_global_this();
     Item result = js_get_key_default(global, key);
@@ -14640,7 +14644,9 @@ static Item js_set_global_property_impl(Item key, Item value, bool strict) {
         }
     }
     js_last_with_binding_valid = false;
-    JS_ASSIGN_OR_RETURN(lexical_result, js_global_lexical_set_if_exists(key, value));
+    JS_ASSIGN_OR_RETURN(lexical_result, js_eval_global_lexical_set_if_exists(key, value));
+    if (it2b(lexical_result)) return js_status_ok();
+    JS_ASSIGN_OR_RETURN_INTO(lexical_result, js_global_lexical_set_if_exists(key, value));
     if (it2b(lexical_result)) return js_status_ok();
     Item global = js_get_global_this();
     JS_ASSIGN_OR_RETURN(global_in, js_in(key, global));
@@ -15107,13 +15113,20 @@ extern "C" Item js_eval_local_get_binding_or_fallback(Item key, Item fallback) {
     return idx >= 0 ? js_eval_local.values[idx] : fallback;
 }
 
+extern "C" int64_t js_eval_local_has_var_binding(Item key) {
+    return js_eval_local_find_binding(key) >= 0 ? 1 : 0;
+}
+
 extern "C" void js_eval_local_export_var(Item key, Item value) {
-    if (js_eval_env_frame_depth <= 0 || js_eval_local_frame_depth <= 0) return;
+    if (js_eval_local_frame_depth <= 0) return;
     int idx = js_eval_local_find_binding(key);
     if (idx >= 0) {
+        // A direct eval-created var outlives the temporary global bridge. Its
+        // owning function can keep assigning it after the bridge is popped.
         js_eval_local.values[idx] = value;
         return;
     }
+    if (js_eval_env_frame_depth <= 0) return;
     if (js_eval_local_binding_count >= JS_EVAL_LOCAL_BIND_MAX) {
         log_error("js-eval-local: binding stack overflow");
         return;
@@ -15207,7 +15220,8 @@ extern "C" void js_eval_env_bind(Item key, Item value) {
         &js_eval_bridge.env_old_value_roots, "env");
 }
 
-extern "C" void js_eval_global_lexical_bind(Item key, Item value) {
+extern "C" void js_eval_global_lexical_bind(Item key, Item value, int64_t immutable) {
+    int binding_count = js_eval_global_lexical_binding_count;
     js_eval_bridge_bind(key, value, &js_eval_global_lexical_frame_depth,
         &js_eval_global_lexical_binding_count,
         js_eval_bridge.global_lexical_keys,
@@ -15215,6 +15229,9 @@ extern "C" void js_eval_global_lexical_bind(Item key, Item value) {
         js_eval_bridge.global_lexical_old_values, NULL,
         &js_eval_bridge.global_lexical_key_roots,
         &js_eval_bridge.global_lexical_old_value_roots, "global-lexical");
+    if (js_eval_global_lexical_binding_count > binding_count) {
+        js_eval_bridge.global_lexical_immutable[binding_count] = immutable != 0;
+    }
 }
 
 extern "C" int64_t js_eval_env_has_binding(Item key) {
@@ -15224,6 +15241,43 @@ extern "C" int64_t js_eval_env_has_binding(Item key) {
         if (js_with_binding_key_same(js_eval_bridge.env_keys[i], key)) return 1;
     }
     return 0;
+}
+
+static int js_eval_global_lexical_find_binding(Item key) {
+    if (js_eval_global_lexical_frame_depth <= 0) return -1;
+    int frame_start = js_eval_global_lexical_frame_stack[
+        js_eval_global_lexical_frame_depth - 1];
+    for (int i = js_eval_global_lexical_binding_count - 1;
+            i >= frame_start; i--) {
+        if (js_with_binding_key_same(js_eval_bridge.global_lexical_keys[i], key)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+extern "C" int64_t js_eval_global_lexical_has_binding(Item key) {
+    return js_eval_global_lexical_find_binding(key) >= 0 ? 1 : 0;
+}
+
+extern "C" Item js_eval_global_lexical_get_or_fallback(Item key, Item fallback) {
+    int binding_idx = js_eval_global_lexical_find_binding(key);
+    if (binding_idx < 0) return fallback;
+    return js_get_key_default(js_get_global_this(),
+        js_eval_bridge.global_lexical_keys[binding_idx]);
+}
+
+extern "C" Item js_eval_global_lexical_set_if_exists(Item key, Item value) {
+    int binding_idx = js_eval_global_lexical_find_binding(key);
+    if (binding_idx < 0) return (Item){.item = b2it(false)};
+    if (js_eval_bridge.global_lexical_immutable[binding_idx]) {
+        return js_throw_type_error("Assignment to constant variable");
+    }
+    Item global = js_get_global_this();
+    Item set_result = js_set_key_default(global,
+        js_eval_bridge.global_lexical_keys[binding_idx], value);
+    if (item_is_error(set_result)) return set_result;
+    return (Item){.item = b2it(true)};
 }
 
 JS_FORWARD_EXPRESSION(int64_t, js_eval_env_is_active, (void), js_eval_env_frame_depth > 0 ? 1 : 0)

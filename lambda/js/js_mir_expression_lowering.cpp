@@ -459,7 +459,7 @@ static void jm_restore_closure_tracker_snapshot(JsMirTranspiler* mt,
     }
 }
 
-static bool jm_is_proto_literal_key(JsAstNode* key) {
+bool js_ast_is_proto_literal_key(JsAstNode* key) {
     if (!key) return false;
     if (key->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)key;
@@ -731,8 +731,10 @@ static String* jm_resolve_private_name(JsMirTranspiler* mt, JsAstNode* access_no
     if (best) return jm_class_private_name(mt, best, name);
     Item eval_resolved = js_eval_private_resolve((Item){.item = s2it(name)});
     if (get_type_id(eval_resolved) == LMD_TYPE_STRING) {
-        String* resolved_name = it2s(eval_resolved);
-        return name_pool_create_len(mt->tp->name_pool, resolved_name->chars, (int)resolved_name->len);
+        // Keep the source spelling through lowering. The runtime resolves it
+        // against the bridged private environment, preserving the private
+        // access path instead of mistaking an identity key for a public name.
+        return name;
     }
     return jm_class_private_name(mt, mt->current_class, name);
 }
@@ -4246,7 +4248,15 @@ MIR_reg_t jm_transpile_assignment(JsMirTranspiler* mt, JsAssignmentNode* asgn) {
                     if (mt->is_eval_direct) {
                         MIR_reg_t eval_key = jm_box_property_name_literal(mt,
                             id->name->chars, id->name->len);
-                        MIR_reg_t has_bridge = jm_callr_1(mt, "js_eval_env_has_binding", MIR_T_I64, eval_key);
+                        MIR_reg_t has_env_bridge = jm_callr_1(mt,
+                            "js_eval_env_has_binding", MIR_T_I64, eval_key);
+                        MIR_reg_t has_global_lexical_bridge = jm_callr_1(mt,
+                            "js_eval_global_lexical_has_binding", MIR_T_I64, eval_key);
+                        MIR_reg_t has_bridge = jm_new_reg(mt, "eval_bridge", MIR_T_I64);
+                        // direct eval uses an environment bridge for function
+                        // locals and a global-lexical bridge at script scope
+                        jm_emit_reg_binary(mt, MIR_OR, has_bridge,
+                            has_env_bridge, has_global_lexical_bridge);
                         MIR_label_t module_store = jm_new_label(mt);
                         MIR_label_t store_done = jm_new_label(mt);
                         MIR_reg_t store_result = jm_new_reg(mt, "eval_mva_res", MIR_T_I64);
@@ -6533,7 +6543,7 @@ MIR_reg_t jm_transpile_object(JsMirTranspiler* mt, JsObjectNode* obj) {
             if (!p->computed && !p->method && !p->is_getter && !p->is_setter &&
                 !p->shorthand &&
                 p->key && p->value && p->key != p->value) {
-                is_proto_literal = jm_is_proto_literal_key(p->key);
+                is_proto_literal = js_ast_is_proto_literal_key(p->key);
             }
             // function name inference from object property key
             if (!is_proto_literal && p->value &&

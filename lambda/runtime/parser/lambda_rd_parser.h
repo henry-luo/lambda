@@ -329,6 +329,10 @@ typedef struct LambdaParseSink {
 
 void lambda_lexer_init(LambdaLexer* lexer, const char* source, size_t length);
 LambdaToken lambda_lexer_next(LambdaLexer* lexer);
+// true when the word may not name a binding: a declaration/statement keyword,
+// a base-type name, or a named value. Clause words and infix word operators
+// are capture-safe and return false. See S16.10.1v2.
+bool lambda_lexer_word_bars_binding(const char* text, size_t length);
 const char* lambda_token_kind_name(LambdaTokenKind kind);
 
 // This entry point is implemented by the recursive-descent/Pratt core and is

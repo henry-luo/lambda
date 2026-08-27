@@ -1014,7 +1014,7 @@ static RadiantLayoutResource* radiant_layout_resource_for_document(
     RadiantLayoutResource* resource = (RadiantLayoutResource*)mem_calloc(
         1, sizeof(RadiantLayoutResource), MEM_CAT_LAYOUT);
     if (!resource) return nullptr;
-    if (ui_context_init(&resource->ui_context, true) != 0) {
+    if (ui_context_init(&resource->ui_context, true, 1.0f) != 0) {
         log_error("JUBE_RADIANT_%s: failed to initialize retained UI context", func_name);
         mem_free(resource);
         return nullptr;
@@ -1478,6 +1478,104 @@ extern "C" uint64_t radiant_splice_epoch(void) { return g_radiant_splice_epoch; 
 // caret. Events are deliberately not fired here — this runs inside beforeinput,
 // and the engine dispatches `input` after the applier returns, exactly as it
 // does for its own splice.
+// F9: the caret-operation waist. The template names a WHATWG operation; native
+// resolves where it lands and performs it after the dispatch returns. Reported
+// through an epoch for the same reason `request_change` is — a primitive has no
+// EventContext, and moving the caret dispatches events that need one.
+extern "C" void radiant_caret_operation_request(const char* operation, bool extend);
+
+extern "C" int editing_controller_caret_surface_kind(DocState* state);
+
+// Which surface the caret sits in. Resolving it is mechanism; what a key means
+// there is policy, and the two surfaces genuinely differ — a single-line input
+// has no vertical motion, a rich surface has no value boundary.
+RADIANT_C_API Item fn_radiant_caret_surface(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "CARET_SURFACE", &elem);
+    if (!state) return ItemNull;
+    int kind = editing_controller_caret_surface_kind(state);
+    if (kind == 1) return radiant_string_item("text");
+    if (kind == 2) return radiant_string_item("rich");
+    return ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_caret_operation(Item node_item, Item op_item,
+                                              Item extend_item) {
+    const char* op = fn_to_cstr(op_item);
+    if (!op || !*op) return (Item){.item = b2it(0)};
+    radiant_caret_operation_request(op, is_truthy(extend_item));
+    return (Item){.item = b2it(1)};
+}
+
+// F10: the context-menu waist. The template names the target and the enable
+// mask; the popup position comes from the right click native already resolved,
+// so physical pixels never reach policy.
+RADIANT_C_API Item fn_radiant_open_context_menu(Item node_item, Item mask_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "OPEN_CONTEXT_MENU", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    int64_t mask = it2l(mask_item);
+    if (mask < 0) mask = 0;
+    bool ok = context_menu_open_pending(state, (View*)elem, (uint32_t)mask);
+    return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_close_context_menu(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "CLOSE_CONTEXT_MENU", &elem);
+    if (!state) return (Item){.item = b2it(0)};
+    context_menu_close(state);
+    return (Item){.item = b2it(1)};
+}
+
+// The element the in-flight right click landed on, or the target of an already
+// open menu. Resolving the hit is mechanism; deciding what it deserves is not.
+RADIANT_C_API Item fn_radiant_context_menu_target(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "CONTEXT_MENU_TARGET", &elem);
+    if (!state) return ItemNull;
+    View* target = state->pending_context_menu_target
+        ? state->pending_context_menu_target : state->context_menu_target;
+    if (!target || !target->is_element()) return ItemNull;
+    return radiant_dom_wrap_node((void*)target);   // View is the DomNode
+}
+
+// Clipboard text, for the paste enable rule. Read-only: the clipboard write
+// side stays native with the cut/copy execution.
+RADIANT_C_API Item fn_radiant_clipboard_text() {
+    const char* clip = clipboard_get_text();
+    if (!clip || !*clip) return ItemNull;
+    return radiant_string_item(clip);
+}
+
+// F2b/#4: the password reveal window. Which control reveals, what gets revealed
+// and when are the template's call; this only converts the codepoint range it
+// names into the byte window the renderer masks against. An empty or inverted
+// range clears, which is how the template says "mask everything".
+RADIANT_C_API Item fn_radiant_set_password_reveal(Item node_item, Item start_item,
+                                                  Item end_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_PASSWORD_REVEAL", &elem);
+    if (!state || !elem || !tc_is_text_control(elem)) return (Item){.item = b2it(0)};
+    uint32_t len = 0;
+    const char* buf = radiant_tc_buffer(elem, &len);
+    if (!buf) return (Item){.item = b2it(0)};
+
+    int64_t cp_start = it2l(start_item), cp_end = it2l(end_item);
+    if (cp_start < 0) cp_start = 0;
+    if (cp_end <= cp_start) {
+        form_control_password_reveal_clear(state, (View*)elem);
+        return (Item){.item = b2it(1)};
+    }
+    size_t b_start = str_utf8_char_to_byte(buf, len, (size_t)cp_start);
+    size_t b_end = str_utf8_char_to_byte(buf, len, (size_t)cp_end);
+    if (b_start == STR_NPOS || b_start > len) b_start = len;
+    if (b_end == STR_NPOS || b_end > len) b_end = len;
+    form_control_password_reveal_set(state, (View*)elem,
+                                     (uint32_t)b_start, (uint32_t)b_end);
+    return (Item){.item = b2it(1)};
+}
+
 RADIANT_C_API Item fn_radiant_replace_range(Item node_item, Item start_item,
                                             Item end_item, Item text_item) {
     DomElement* elem = nullptr;
@@ -1652,7 +1750,7 @@ RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item h
     if (!doc) return ItemNull;
 
     UiContext uicon = {};
-    if (ui_context_init(&uicon, true) != 0) {
+    if (ui_context_init(&uicon, true, 1.0f) != 0) {
         log_error("JUBE_RADIANT_RENDER_SVG: failed to initialize headless UI context");
         free_document(doc);
         return ItemNull;
@@ -2008,6 +2106,20 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_set_selection(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_selection},
     {"replace_range", "fn(node: dom_node, start: int, end: int, text: string) -> bool", (fn_ptr)fn_radiant_replace_range, JUBE_FN_NONE,
      "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
+    {"set_password_reveal", "fn(node: dom_node, start: int, end: int) -> bool", (fn_ptr)fn_radiant_set_password_reveal, JUBE_FN_NONE,
+     "Item fn_radiant_set_password_reveal(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_password_reveal},
+    {"caret_surface", "fn(node: dom_node) -> string|null", (fn_ptr)fn_radiant_caret_surface, JUBE_FN_NONE,
+     "Item fn_radiant_caret_surface(Item node)", (fn_ptr)fn_radiant_caret_surface},
+    {"caret_operation", "fn(node: dom_node, operation: string, extend: bool) -> bool", (fn_ptr)fn_radiant_caret_operation, JUBE_FN_NONE,
+     "Item fn_radiant_caret_operation(Item node, Item operation, Item extend)", (fn_ptr)fn_radiant_caret_operation},
+    {"open_context_menu", "fn(node: dom_node, enabled_mask: int) -> bool", (fn_ptr)fn_radiant_open_context_menu, JUBE_FN_NONE,
+     "Item fn_radiant_open_context_menu(Item node, Item enabled_mask)", (fn_ptr)fn_radiant_open_context_menu},
+    {"close_context_menu", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_close_context_menu, JUBE_FN_NONE,
+     "Item fn_radiant_close_context_menu(Item node)", (fn_ptr)fn_radiant_close_context_menu},
+    {"context_menu_target", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_context_menu_target, JUBE_FN_NONE,
+     "Item fn_radiant_context_menu_target(Item node)", (fn_ptr)fn_radiant_context_menu_target},
+    {"clipboard_text", "fn() -> string|null", (fn_ptr)fn_radiant_clipboard_text, JUBE_FN_NONE,
+     "Item fn_radiant_clipboard_text()", (fn_ptr)fn_radiant_clipboard_text},
     {"ime_preedit", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_ime_preedit, JUBE_FN_NONE,
      "Item fn_radiant_ime_preedit(Item node)", (fn_ptr)fn_radiant_ime_preedit},
     {"set_ime_preedit", "fn(node: dom_node, text: any, caret: int) -> bool", (fn_ptr)fn_radiant_set_ime_preedit, JUBE_FN_NONE,

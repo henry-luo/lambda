@@ -1,5 +1,7 @@
 # LambdaJS — TypedArrays, Binary Data & Atomics
 
+> **Last verified against tree:** 2026-08-13 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the twelve TypedArray element types, `ArrayBuffer`/`SharedArrayBuffer` (including resizable buffers and `transfer`), `DataView`, `Atomics` with its cooperative waiter simulation, and the Node `Buffer` subclass. It describes how each is represented as a Lambda `Map` fronting a native struct, how typed-array element storage is unified with Lambda's `ArrayNum` numeric-array core via an external view, and how the exotic gate routes string-keyed access.
 >
 > **Primary sources:** `lambda/js/js_typed_array.{h,cpp}` (`JsTypedArray`/`JsArrayBuffer`/`JsDataView`/`JsAtomicsWaiter`, metadata-qualified constructors, ArrayNum-routed element and bulk paths, Atomics), `lambda/js/js_object_meta.{h,cpp}` (TypedArray/ArrayBuffer/DataView metadata and ops), `lambda/lambda-data-runtime.cpp` (`array_num_new_external_view`, the `array_num_*` element/bulk kernels), `lambda/js/js_runtime.cpp` (the property kernel, direct TypedArray call/construct bodies, species create, `$262.agent`), `lambda/js/js_runtime_value.cpp` (`js_ta_key_canonical_numeric`, `js_ta_numeric_index_valid`), `lambda/lambda-mem.cpp` (GC trace/finalizers), `lambda/js/js_mir_expression_lowering.cpp` (JIT inline fast paths), `lambda/js/js_builtin_catalog.def` / `js_runtime_builtin_registry.cpp` (intrinsic target and binding specs), and `lambda/js/js_buffer.cpp` (Node `Buffer`).

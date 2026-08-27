@@ -641,6 +641,12 @@ static void state_dump_emit_doc_attrs(DumpBuildContext* ctx, ElementBuilder& doc
         state_dump_node_ref((const DomNode*)state->context_menu_target, ref, sizeof(ref));
         map.put("target", ref);
         if (state->context_menu_hover != -1) map.put("hover", (int64_t)state->context_menu_hover);
+        // F10: the enable mask is the template's decision about this menu, so it
+        // belongs in the dump. Without it the policy that moved to Lambda has no
+        // observable surface — a mask stuck at zero looked identical to a
+        // correct one, which is how the first attempt at covering it passed
+        // vacuously.
+        map.put("enabled", (int64_t)state->context_menu_enabled_mask);
         doc.attr("context_menu", map.final());
     }
     if (state_dump_float_changed(state->scroll_x) || state_dump_float_changed(state->scroll_y)) {
@@ -3363,6 +3369,76 @@ void form_control_history_set(DocState* state, View* view, void* history) {
     if (view_state) view_state->data.form.history = history;
 }
 
+bool form_control_password_reveal_get(DocState* state, View* view,
+                                      uint32_t* out_start, uint32_t* out_end) {
+    ViewState* vs = form_view_state_get(state, view);
+    if (!vs || !vs->data.form.password_reveal_active) return false;
+    if (out_start) *out_start = vs->data.form.password_reveal_start;
+    if (out_end) *out_end = vs->data.form.password_reveal_end;
+    return true;
+}
+
+void form_control_password_reveal_set(DocState* state, View* view,
+                                      uint32_t start, uint32_t end) {
+    ViewState* vs = form_view_state_get_or_create(state, view, form_prop_for_view(view));
+    if (!vs) return;
+    vs->data.form.password_reveal_start = start;
+    vs->data.form.password_reveal_end = end;
+    vs->data.form.password_reveal_active = start < end ? 1 : 0;
+    vs->data.form.password_reveal_elapsed = 0.0;
+}
+
+bool form_control_password_reveal_clear(DocState* state, View* view) {
+    ViewState* vs = form_view_state_get(state, view);
+    if (!vs) return false;
+    bool changed = vs->data.form.password_reveal_active != 0 ||
+                   vs->data.form.password_reveal_start != vs->data.form.password_reveal_end;
+    vs->data.form.password_reveal_active = 0;
+    vs->data.form.password_reveal_start = 0;
+    vs->data.form.password_reveal_end = 0;
+    vs->data.form.password_reveal_elapsed = 0.0;
+    return changed;
+}
+
+// Advance the reveal timer; true once the window has expired and been cleared.
+// The one-second hold is the only piece of the policy that stays native: it is a
+// frame-driven timer, and waking a template per frame to count it down would
+// cost more than the decision is worth.
+bool form_control_password_reveal_tick(DocState* state, View* view, double delta) {
+    ViewState* vs = form_view_state_get(state, view);
+    if (!vs || !vs->data.form.password_reveal_active) return false;
+    vs->data.form.password_reveal_elapsed += delta;
+    if (vs->data.form.password_reveal_elapsed < 1.0) return false;
+    return form_control_password_reveal_clear(state, view);
+}
+
+// F8/ES19: the behavior-init bit. Read is create-free — no ViewState means the
+// control has never been inited, which is exactly the answer wanted.
+bool form_control_behavior_inited(DocState* state, View* view) {
+    ViewState* view_state = form_view_state_get(state, view);
+    return view_state ? view_state->flags.behavior_inited != 0 : false;
+}
+
+void form_control_set_behavior_inited(DocState* state, View* view, bool inited) {
+    ViewState* view_state = form_view_state_get_or_create(state, view,
+                                                          form_prop_for_view(view));
+    if (view_state) view_state->flags.behavior_inited = inited ? 1 : 0;
+}
+
+// Re-arm a control for the next init phase. This is how programmatic mutation
+// re-derives validity: `el.value = ...` and attribute writes fire no `input`
+// event, so nothing else in the package would revalidate them. Clearing the bit
+// makes the next phase re-run `init`, which is the same work by the same path
+// rather than a second reflection route (ES16's mistake).
+void form_control_invalidate_behavior_init(DocState* state, View* view) {
+    if (!state || !view) return;
+    ViewState* view_state = form_view_state_get(state, view);
+    if (!view_state || !view_state->flags.behavior_inited) return;
+    view_state->flags.behavior_inited = 0;
+    DomElement* elem = view->is_element() ? lam::dom_require_element(view) : nullptr;
+    if (elem && elem->doc) elem->doc->behavior_init_pending = true;
+}
+
 static bool form_view_is_text_control(View* view) {
     if (!view || !view->is_element()) return false;
     DomElement* elem = lam::dom_require_element(view);
@@ -5379,7 +5455,14 @@ void visited_links_add(VisitedLinks* visited, const char* url) {
 // Keep new rich editing mutations on state_store_set_selection() or editing
 // transactions so boundary ownership stays canonical.
 
+// F9: any caret write that is not a vertical step retargets the column. Placed
+// here, at the store's own entry points, so no caller can forget it.
+static void caret_goal_invalidate(DocState* state) {
+    if (state) state->caret_goal_valid = false;
+}
+
 void state_store_caret_collapse_to_view_offset(DocState* state, View* view, int char_offset) {
+    caret_goal_invalidate(state);
     log_debug("CARET_SET called: state=%p view=%p offset=%d", state, view, char_offset);
     if (!state) return;
 
@@ -5827,6 +5910,7 @@ typedef struct CaretNavigationPosition {
 } CaretNavigationPosition;
 
 void state_store_caret_move(DocState* state, int delta) {
+    caret_goal_invalidate(state);
     CaretNavigationPosition position = {};
     if (!state || !caret_get_position(state, &position.view, &position.char_offset)) {
         log_debug("caret_move: no canonical caret position state=%p", state);
@@ -6030,6 +6114,7 @@ static TextRect* caret_rect_at_offset(TextRect* rect, int offset,
 }
 
 void state_store_caret_move_to_boundary(DocState* state, int where) {
+    caret_goal_invalidate(state);
     CaretNavigationPosition position = {};
     if (!state || !caret_get_position(state, &position.view, &position.char_offset)) return;
     CaretNavigationPosition* caret = &position;
@@ -6417,6 +6502,10 @@ void state_store_caret_move_line(DocState* state, int delta, struct UiContext* u
     if (state->selection_presentation) {
         position.x = state->selection_presentation->caret_x;
     }
+    // The one caret mover that does not invalidate the column: it targets the
+    // remembered one, and the first vertical step of a run establishes it.
+    if (state->caret_goal_valid) position.x = state->caret_goal_x;
+    else { state->caret_goal_x = position.x; state->caret_goal_valid = true; }
     CaretNavigationPosition* caret = &position;
     View* view = caret->view;
 
@@ -6458,6 +6547,7 @@ void state_store_caret_move_line(DocState* state, int delta, struct UiContext* u
 }
 
 void state_store_caret_clear(DocState* state) {
+    caret_goal_invalidate(state);
     if (!state) return;
 
     const char* exc = NULL;

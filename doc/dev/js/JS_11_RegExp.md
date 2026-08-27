@@ -1,5 +1,7 @@
 # LambdaJS — RegExp Engine
 
+> **Last verified against tree:** 2026-08-25 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how JS regular expressions are compiled and matched: the `JsRegexData` storage, the three matching back-ends (plain RE2, RE2 + a post-filter wrapper, and a spec backtracking engine) and how a pattern is routed between them, the JS→RE2 transpilation and post-filter pipeline, named groups and `\u` escapes, `/d` match indices and `/v` set operations, the ES §22.2.2 backtracking matcher, the generated Unicode property tables, pattern caching, and the Annex B static properties (`$1`–`$9`).
 >
 > **Primary sources:** `lambda/js/js_regex_wrapper.{h,cpp}` (RE2 wrapper, `JsRegexCompiled`, post-filters, JS→RE2 rewrite, `/v` class rewrite), `lambda/js/js_regexp_compile.{h,cpp}` (flag/named-group frontend, named-backref + property-escape rewrites), `lambda/js/js_bt_regex.{h,cpp}` (backtracking matcher), `lambda/js/js_runtime.cpp` (`JsRegexData`, `js_create_regex`, `js_regex_exec`/`test`, `@@replace`/`@@match`/`@@split`, routing, lastIndex), `lambda/js/js_runtime_state.hpp` (`JsRegexpLastMatch`), the generated `*.inc` property tables.

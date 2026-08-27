@@ -14,7 +14,7 @@ let mixed_array = [1, "two", 3.0];
 let record = {name: "Lambda", version: 1, active: true};
 
 // Range
-let range = 1 to 100;
+let rng = 1 to 100;
 
 // DateTime
 let date_value = t'2025-01-24';

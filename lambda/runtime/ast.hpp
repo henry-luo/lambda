@@ -609,6 +609,9 @@ struct Script : Input {
     bool cache_cross_lang_tainted;  // true when the import subtree contains a cross-language module
     const char* source;
     LangProfile* profile;       // dormant Phase-1 language profile hook table
+    // A hosted-language owner may release only its extension facts here. The
+    // common Script fields remain owned by runtime_free_script().
+    void (*destroy_extension)(Script* script);
     time_t src_mtime;           // file timestamp captured when loaded
     off_t src_size;             // file size captured when loaded
     // AST-specific fields (beyond Input)

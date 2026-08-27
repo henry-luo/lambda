@@ -168,47 +168,47 @@ pub fn collab_state(doc, version, selection) =>
   {kind: 'collab_state', base_doc: doc, doc: doc, version: version,
    unconfirmed: [], selection: selection, dropped: 0}
 
-pub fn collab_local_step(state, step, selection_after) {
-  let doc_after = step_apply(step, state.doc)
+pub fn collab_local_step(st, step, selection_after) {
+  let doc_after = step_apply(step, st.doc)
   let sel_after = if (selection_after == null) {
-    mapping_map_selection(mapping_from([step]), state.selection)
+    mapping_map_selection(mapping_from([step]), st.selection)
   } else { selection_after }
-  {kind: 'collab_state', base_doc: state.base_doc, doc: doc_after, version: state.version,
-   unconfirmed: [*state.unconfirmed, step], selection: sel_after, dropped: state.dropped}
+  {kind: 'collab_state', base_doc: st.base_doc, doc: doc_after, version: st.version,
+   unconfirmed: [*st.unconfirmed, step], selection: sel_after, dropped: st.dropped}
 }
 
-fn ack_count(state, count) =>
+fn ack_count(st, count) =>
   if (count < 0) { 0 }
-  else if (count > len(state.unconfirmed)) { len(state.unconfirmed) }
+  else if (count > len(st.unconfirmed)) { len(st.unconfirmed) }
   else { count }
 
-pub fn collab_ack(state, count, version) {
-  let n = ack_count(state, count)
-  let acked = list_take(state.unconfirmed, n)
-  let pending = list_drop(state.unconfirmed, n)
-  let new_base = apply_steps(state.base_doc, acked)
-  {kind: 'collab_state', base_doc: new_base, doc: state.doc, version: version,
-   unconfirmed: pending, selection: state.selection, dropped: state.dropped}
+pub fn collab_ack(st, count, version) {
+  let n = ack_count(st, count)
+  let acked = list_take(st.unconfirmed, n)
+  let pending = list_drop(st.unconfirmed, n)
+  let new_base = apply_steps(st.base_doc, acked)
+  {kind: 'collab_state', base_doc: new_base, doc: st.doc, version: version,
+   unconfirmed: pending, selection: st.selection, dropped: st.dropped}
 }
 
-pub fn collab_receive_remote(state, remote_steps, remote_version) {
+pub fn collab_receive_remote(st, remote_steps, remote_version) {
   let remote_mapping = mapping_from(remote_steps)
-  let rebased = rebase_steps(state.unconfirmed, remote_steps)
-  let remote_doc = apply_steps(state.base_doc, remote_steps)
+  let rebased = rebase_steps(st.unconfirmed, remote_steps)
+  let remote_doc = apply_steps(st.base_doc, remote_steps)
   let doc_after = apply_steps(remote_doc, rebased.kept)
   {kind: 'collab_state', base_doc: remote_doc, doc: doc_after, version: remote_version,
    unconfirmed: rebased.kept,
-   selection: mapping_map_selection(remote_mapping, state.selection),
-   dropped: state.dropped + rebased.dropped}
+   selection: mapping_map_selection(remote_mapping, st.selection),
+   dropped: st.dropped + rebased.dropped}
 }
 
 // ---------------------------------------------------------------------------
 // Collab packets — transport-neutral wire messages
 // ---------------------------------------------------------------------------
 
-pub fn collab_local_packet(state, client_id) =>
-  {kind: 'collab_local_steps', client_id: client_id, base_version: state.version,
-   steps: steps_serialize(state.unconfirmed)}
+pub fn collab_local_packet(st, client_id) =>
+  {kind: 'collab_local_steps', client_id: client_id, base_version: st.version,
+   steps: steps_serialize(st.unconfirmed)}
 
 pub fn collab_remote_packet(version, steps) =>
   {kind: 'collab_remote_steps', version: version, steps: steps_serialize(steps)}
@@ -216,16 +216,16 @@ pub fn collab_remote_packet(version, steps) =>
 pub fn collab_ack_packet(version, count) =>
   {kind: 'collab_ack', version: version, count: count}
 
-pub fn collab_apply_remote_packet(state, packet) =>
-  collab_receive_remote(state, steps_deserialize(packet.steps), packet.version)
+pub fn collab_apply_remote_packet(st, packet) =>
+  collab_receive_remote(st, steps_deserialize(packet.steps), packet.version)
 
-pub fn collab_apply_ack_packet(state, packet) =>
-  collab_ack(state, packet.count, packet.version)
+pub fn collab_apply_ack_packet(st, packet) =>
+  collab_ack(st, packet.count, packet.version)
 
-pub fn collab_apply_packet(state, packet) {
-  if (packet.kind == 'collab_remote_steps') { collab_apply_remote_packet(state, packet) }
-  else if (packet.kind == 'collab_ack') { collab_apply_ack_packet(state, packet) }
-  else { state }
+pub fn collab_apply_packet(st, packet) {
+  if (packet.kind == 'collab_remote_steps') { collab_apply_remote_packet(st, packet) }
+  else if (packet.kind == 'collab_ack') { collab_apply_ack_packet(st, packet) }
+  else { st }
 }
 
 // ---------------------------------------------------------------------------

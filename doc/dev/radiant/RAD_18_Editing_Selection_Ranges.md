@@ -1,5 +1,7 @@
 # Radiant — Editing, Selection & DOM Ranges
 
+> **Last verified against tree:** 2026-07-30 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's WHATWG-aligned editing model as it sits over the shared DOM/view tree ([RAD_01](RAD_01_View_and_DOM_Model.md)): the spec-conformant `DomRange`/`DomSelection` primitives, live-range mutation envelopes, the `inputType` intent taxonomy, and the one registered-action gate for `contenteditable`. It also covers caret/selection geometry and hit-testing, and the pluggable clipboard store. The native form-control editing path is a sibling subject — see [RAD_19](RAD_19_Form_Controls.md).
 >
 > **Primary sources:** `radiant/event.hpp` / `dom_range.cpp` (`DomBoundary`/`DomRange`/`DomSelection`, mutation envelopes, `Selection.modify`, extract/clone/surround, stringification), `radiant/editing.cpp` (surface classification), `radiant/editing_dispatch.cpp` (prepared transaction and notification/action/notification gate), `radiant/editing_action_registry.cpp` (per-document action registry), `radiant/editing_dom_handler.cpp` (narrow DOM action), `radiant/editing_template_handler.cpp` (template adapter), `radiant/editing_host.cpp` (canonical host recognition), and `radiant/editing_target_range.cpp` (immutable `InputEvent` target ranges).

@@ -2118,9 +2118,9 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Collection records retain AST/name pointers and generated code can retain
     // metadata derived from them, so allocate them with the transpiler pools.
     mt->func_entries = (JsFuncCollected*)pool_calloc(
-        mt->tp->ast_pool, (size_t)mt->func_capacity * sizeof(JsFuncCollected));
+        mt->tp->pool, (size_t)mt->func_capacity * sizeof(JsFuncCollected));
     mt->class_entries = (JsClassEntry*)pool_calloc(
-        mt->tp->ast_pool, (size_t)mt->class_capacity * sizeof(JsClassEntry));
+        mt->tp->pool, (size_t)mt->class_capacity * sizeof(JsClassEntry));
     if ((mt->func_capacity && !mt->func_entries) ||
         (mt->class_capacity && !mt->class_entries)) {
         log_error("js-mir: failed to allocate exact function/class metadata");
@@ -2145,9 +2145,9 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         int cap = 1;
         while (cap < mt->func_count * 2) cap <<= 1;
         mt->func_index_nodes = (JsFunctionNode**)pool_calloc(
-            mt->tp->ast_pool, (size_t)cap * sizeof(JsFunctionNode*));
+            mt->tp->pool, (size_t)cap * sizeof(JsFunctionNode*));
         mt->func_index_ids = (int*)pool_calloc(
-            mt->tp->ast_pool, (size_t)cap * sizeof(int));
+            mt->tp->pool, (size_t)cap * sizeof(int));
         mt->func_index_capacity = cap;
         if (!mt->func_index_nodes || !mt->func_index_ids) {
             log_error("js-mir: failed to allocate function identity index");
@@ -4488,7 +4488,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         public_entry->param_count = physical_param_count + 1;
         if (physical_param_count > 0) {
             public_entry->params = (FnParamAnalysis*)pool_calloc(
-                mt->tp->ast_pool, sizeof(FnParamAnalysis) * (size_t)physical_param_count);
+                mt->tp->pool, sizeof(FnParamAnalysis) * (size_t)physical_param_count);
             for (int p = 0; p < physical_param_count; p++) {
                 bool env = env_param_count && p == 0;
                 // the conditional mixes an enum constant with TypeId; make the ABI-width field explicit for Clang.
@@ -4515,7 +4515,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         body->param_count = physical_param_count;
         if (physical_param_count > 0) {
             body->params = (FnParamAnalysis*)pool_calloc(
-            mt->tp->ast_pool, sizeof(FnParamAnalysis) * (size_t)physical_param_count);
+            mt->tp->pool, sizeof(FnParamAnalysis) * (size_t)physical_param_count);
             for (int p = 0; p < physical_param_count; p++) {
                 bool env = env_param_count && p == 0;
                 TypeId param_type = env ? (TypeId)LMD_TYPE_ANY :
@@ -4538,7 +4538,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
             native->param_count = fc->param_count;
             if (fc->param_count > 0) {
                 native->params = (FnParamAnalysis*)pool_calloc(
-                    mt->tp->ast_pool, sizeof(FnParamAnalysis) * (size_t)fc->param_count);
+                    mt->tp->pool, sizeof(FnParamAnalysis) * (size_t)fc->param_count);
                 for (int p = 0; p < fc->param_count; p++) {
                     TypeId param_type = jm_param_type(fc, p);
                     ValueRep rep = param_type == LMD_TYPE_FLOAT

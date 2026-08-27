@@ -201,9 +201,9 @@ fn relationship_diagnostics(elements, relationships) => [
   for (entry in relationships, value in relationship_diagnostic(elements, entry)) value
 ]
 
-fn view_scope_valid(elements, view) {
-  let kind = string(view.kind);
-  let scope = graph_model.optional(view, "scope");
+fn view_scope_valid(elements, vw) {
+  let kind = string(vw.kind);
+  let scope = graph_model.optional(vw, "scope");
   let target = if (scope == null or string(scope) == "*") { null }
     else { element_by_id(elements, scope) };
   if (contains(["systemLandscape", "custom", "filtered"], kind)) { true }
@@ -214,7 +214,7 @@ fn view_scope_valid(elements, view) {
     (target != null and logical_kind(string(target.kind)))
   }
   else if (kind == "deployment") {
-    let environments = reference_entries(elements, view.environment);
+    let environments = reference_entries(elements, vw.environment);
     (string(scope) == "*" or
       (target != null and string(target.kind) == "software-system")) and
       len([for (entry in environments
@@ -225,30 +225,30 @@ fn view_scope_valid(elements, view) {
 
 fn view_diagnostics(elements, views) => [
   *duplicate_diagnostics(views, "view", "key", "structurizr.duplicate-view-key"),
-  for (view in views, value in if (not view_scope_valid(elements, view)) { [
+  for (vw in views, value in if (not view_scope_valid(elements, vw)) { [
     diagnostic.for_value("structurizr.invalid-view-scope", "error",
-      "View '" ++ string(view.key) ++ "' has an invalid scope",
-      "view:" ++ string(view.key) ++ ".scope", view)
-  ] } else if (string(view.kind) == "filtered" and len([
-    for (base in views where string(base.key) == string(view["base-key"]) and
+      "View '" ++ string(vw.key) ++ "' has an invalid scope",
+      "view:" ++ string(vw.key) ++ ".scope", vw)
+  ] } else if (string(vw.kind) == "filtered" and len([
+    for (base in views where string(base.key) == string(vw["base-key"]) and
       not contains(["filtered", "dynamic", "deployment"], string(base.kind))) base
   ]) != 1) { [
     diagnostic.for_value("structurizr.invalid-view-scope", "error",
-      "Filtered view '" ++ string(view.key) ++ "' has an invalid base view",
-      "view:" ++ string(view.key) ++ ".base-key", view)
-  ] } else if (string(view.kind) == "image") { [
+      "Filtered view '" ++ string(vw.key) ++ "' has an invalid base view",
+      "view:" ++ string(vw.key) ++ ".base-key", vw)
+  ] } else if (string(vw.kind) == "image") { [
     diagnostic.for_value("structurizr.unsupported-view", "warning",
-      "Image views are preserved but not rendered", "view:" ++ string(view.key), view)
+      "Image views are preserved but not rendered", "view:" ++ string(vw.key), vw)
   ] } else { [] }) value
 ]
 
 fn expression_diagnostics(views) => [
-  for (view in views, rule_kind in ["include", "exclude"],
-    i, rule in children(view, rule_kind), let found = expression.validate(rule.expression)
+  for (vw in views, rule_kind in ["include", "exclude"],
+    i, rule in children(vw, rule_kind), let found = expression.validate(rule.expression)
     where found != null)
     diagnostic.for_value(found.code,
       if (found.code == "structurizr.invalid-expression") "error" else "warning", found.message,
-      "view:" ++ string(view.key) ++ "." ++ rule_kind ++ "[" ++ string(i) ++ "]", rule)
+      "view:" ++ string(vw.key) ++ "." ++ rule_kind ++ "[" ++ string(i) ++ "]", rule)
 ]
 
 fn style_diagnostics(workspace) => [

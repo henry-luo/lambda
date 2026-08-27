@@ -60,9 +60,9 @@ pn packet_add_to(packet, queue) any {
     return queue
 }
 
-pn create_tcb(link, id: int, priority: int, queue, state: int, fn_id: int) any {
+pn create_tcb(link, id: int, priority: int, queue, st: int, fn_id: int) any {
     var tcb = {link: link, id: id, priority: priority, queue: queue,
-            state: state, fn_id: fn_id,
+            state: st, fn_id: fn_id,
             v1: 0, v2: 0, work_in: null, dev_in: null}
     return tcb
 }
@@ -83,8 +83,8 @@ pn create_scheduler() any {
     return sched
 }
 
-pn scheduler_add_task(sched, blocks, id: int, pri: int, queue, state: int, fn_id: int) any {
-    var tcb = create_tcb(sched.task_list, id, pri, queue, state, fn_id)
+pn scheduler_add_task(sched, blocks, id: int, pri: int, queue, st: int, fn_id: int) any {
+    var tcb = create_tcb(sched.task_list, id, pri, queue, st, fn_id)
     sched.task_list = tcb
     blocks[id] = tcb
     sched.current_tcb = tcb

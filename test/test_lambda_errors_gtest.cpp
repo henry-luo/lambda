@@ -1229,6 +1229,11 @@ TEST_F(NegativeScriptTest, SemanticError_EnforcingCallNeedsImmediateAcknowledgme
         "handle with 'risky(...) ^ { ... }'");
 }
 
+TEST_F(NegativeScriptTest, SemanticError_DynamicProcedureCallFromFunction) {
+    ExpectErrorMessage("test/lambda/negative/semantic/dynamic_call_proc_in_fn.ls",
+        "call: cannot call a procedure (pn) from a function (fn)");
+}
+
 TEST_F(NegativeScriptTest, SemanticError_ArityMismatch) {
     ExpectErrorWithoutCrash("test/lambda/negative/semantic/arity_mismatch.ls");
 }
@@ -1398,6 +1403,46 @@ TEST_F(NegativeScriptTest, IOError_FileNotFound) {
 
 TEST_F(NegativeScriptTest, IOError_ParseError) {
     ExpectErrorWithoutCrash("test/lambda/negative/io/parse_error.ls");
+}
+
+//==============================================================================
+// Keyword-as-name rulings (S16.10) and sys-func shadowing (S12.3.7)
+//==============================================================================
+
+// S16.10.1v2: construct-leading words are rejected as binding names at the
+// DECLARATION site. Before this, `let type = 1` parsed and `type` then read
+// the base type — a silent wrong answer.
+TEST_F(NegativeScriptTest, KeywordBarredAsBindingName) {
+    ExpectErrorMessage("test/lambda/negative/semantic/keyword_binding_barred.ls",
+                       "is a reserved keyword and cannot be used as a name");
+}
+
+// An import alias is a binding, so it takes the same bar; the old behaviour
+// accepted the import and failed at every use.
+TEST_F(NegativeScriptTest, KeywordImportAliasRejected) {
+    ExpectErrorMessage("test/lambda/negative/semantic/keyword_import_alias.ls",
+                       "an import alias must be a plain identifier");
+}
+
+// There is no quoted escape: `import 'edit':` previously created a binding
+// that no use site could reach (symbols never implicitly read bindings).
+TEST_F(NegativeScriptTest, KeywordImportAliasQuotedRejected) {
+    ExpectErrorMessage("test/lambda/negative/semantic/keyword_import_alias_quoted.ls",
+                       "an import alias must be a plain identifier");
+}
+
+// S12.3.7: a non-callable shadow raises the ordinary not-callable error and
+// must never fall back to the shadowed builtin (this returned 3 before).
+TEST_F(NegativeScriptTest, SysFuncShadowNonCallableDoesNotFallBack) {
+    // The runtime's "call target is not a function" goes to the log, which
+    // this harness does not capture, so assert the claim itself: the call
+    // fails, and it does NOT quietly yield the builtin `sum([1,2])` == 3.
+    ScriptResult result = run_lambda_script(
+        "test/lambda/negative/semantic/sysfunc_shadow_not_callable.ls");
+    EXPECT_NE(result.exit_code, 0) << "expected the non-callable shadow to fail";
+    EXPECT_EQ(result.output.find("3"), std::string::npos)
+        << "a non-callable shadow must not fall back to the builtin\nOutput: "
+        << result.output;
 }
 
 //==============================================================================

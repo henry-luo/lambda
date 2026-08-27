@@ -1,4 +1,5 @@
 #include "view.hpp"
+#include "layout.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lib/log.h"
 
@@ -111,6 +112,25 @@ static CssDeclaration* computed_decl(DomElement* element, CssPropertyCode id, in
     return declaration;
 }
 
+static const CssValue* computed_spacing_side_value(DomElement* element,
+                                                   CssPropertyCode id,
+                                                   int pseudo_type,
+                                                   CssDeclaration** declaration) {
+    if (!element || pseudo_type != 0 || !declaration) return nullptr;
+    bool margin = id >= CSS_PROPERTY_MARGIN_TOP && id <= CSS_PROPERTY_MARGIN_LEFT;
+    bool padding = id >= CSS_PROPERTY_PADDING_TOP && id <= CSS_PROPERTY_PADDING_LEFT;
+    if (!margin && !padding) return nullptr;
+
+    CssDeclaration* shorthand = computed_decl(
+        element, margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING, pseudo_type);
+    if (!shorthand || !shorthand->value ||
+        (*declaration && css_declaration_cascade_compare(shorthand, *declaration) <= 0)) {
+        return nullptr;
+    }
+    *declaration = shorthand;
+    return css_box_shorthand_side_value(shorthand->value, radiant_css_box_side(id));
+}
+
 static bool format_decl_color(DomElement* element, const CssValue* value,
                               char* out, size_t out_size) {
     if (!value) return false;
@@ -173,6 +193,11 @@ static bool serialize_decl_recursive(DomElement* element, CssPropertyCode id,
     if (!element || depth > 16) return false;
     CssDeclaration* declaration = computed_decl(element, id, pseudo_type);
     const CssValue* value = declaration ? declaration->value : nullptr;
+    // The specified-style tree keeps shorthands intact for CSSOM mutation.
+    // Resolve their winning physical component before serializing a longhand.
+    const CssValue* shorthand_value = computed_spacing_side_value(
+        element, id, pseudo_type, &declaration);
+    if (shorthand_value) value = shorthand_value;
     if (value && value->type == CSS_VALUE_TYPE_KEYWORD) {
         CssEnum keyword = value->data.keyword;
         if (keyword == CSS_VALUE_INHERIT ||
@@ -529,7 +554,12 @@ const CssPropAccessor* css_prop_accessors(size_t* count) {
 
 bool dom_ensure_computed(DomElement* element, bool needs_used_value) {
     if (!element || !element->doc) return false;
-    bool dirty = needs_used_value || element->layout_dirty;
+    // A clean committed ViewTree already owns the used values. Re-reading a
+    // used-value property must not discard that snapshot and fall back to the
+    // unexpanded declaration tree (for example, `padding: 4px`).
+    bool missing_used_value_snapshot = needs_used_value &&
+        (!element->doc->view_tree || !element->doc->view_tree->root);
+    bool dirty = missing_used_value_snapshot || element->layout_dirty;
     for (DomNode* node = element; node && !dirty; node = node->parent) {
         if (node->layout_dirty || (node->is_element() &&
             (!node->as_element()->styles_resolved() ||

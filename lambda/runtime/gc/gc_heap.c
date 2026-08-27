@@ -9,6 +9,7 @@
  * Data zone buffers of surviving objects are compacted to tenured data zone.
  */
 #include "gc_heap.h"
+#include "../../js/js_interp_env.h"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
 #include "../../../lib/mem_factory.h"
@@ -465,6 +466,10 @@ gc_heap_t* gc_heap_create(void) {
         gc->root_slot_capacity = 0;
     }
 
+    gc->object_roots = NULL;
+    gc->object_root_count = 0;
+    gc->object_root_capacity = 0;
+
     gc->weak_slots = NULL;
     gc->weak_slot_count = 0;
     gc->weak_slot_capacity = 0;
@@ -487,6 +492,7 @@ gc_heap_t* gc_heap_create(void) {
 
     // collection trigger
     gc->gc_threshold = GC_DATA_ZONE_THRESHOLD;
+    gc->object_threshold = GC_OBJECT_HEAP_THRESHOLD;
     gc->collecting = 0;
     gc->collect_callback = NULL;
 
@@ -514,7 +520,8 @@ gc_heap_t* gc_heap_create(void) {
         log_debug("gc_heap_create: initial bump block %zu bytes", first_block->size);
     }
 
-    log_debug("gc_heap_create: dual-zone GC heap created (threshold=%zu)", gc->gc_threshold);
+    log_debug("gc_heap_create: GC heap created (data_threshold=%zu object_threshold=%zu)",
+              gc->gc_threshold, gc->object_threshold);
     return gc;
 }
 
@@ -551,6 +558,11 @@ void gc_heap_destroy(gc_heap_t* gc) {
     if (gc->root_ranges) {
         mem_free(gc->root_ranges);
         gc->root_ranges = NULL;
+    }
+
+    if (gc->object_roots) {
+        mem_free(gc->object_roots);
+        gc->object_roots = NULL;
     }
 
 
@@ -623,6 +635,25 @@ void gc_heap_destroy(gc_heap_t* gc) {
 // Allocation
 // ============================================================================
 
+static void gc_heap_rebase_object_threshold(gc_heap_t* gc) {
+    if (!gc) return;
+    size_t live = gc->total_allocated;
+    size_t next = live > SIZE_MAX / 2 ? SIZE_MAX : live * 2;
+    gc->object_threshold = next > GC_OBJECT_HEAP_THRESHOLD
+        ? next : GC_OBJECT_HEAP_THRESHOLD;
+}
+
+static void gc_heap_maybe_collect_object_pressure(gc_heap_t* gc, const char* site) {
+    if (!gc || gc->collecting || gc->defer_collection_depth > 0 ||
+            !gc->collect_callback || gc->total_allocated < gc->object_threshold) {
+        return;
+    }
+    log_debug("gc-object-pressure: allocated=%zu threshold=%zu site=%s",
+              gc->total_allocated, gc->object_threshold, site ? site : "unknown");
+    gc->collect_callback();
+    gc_heap_rebase_object_threshold(gc);
+}
+
 int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {
     if (!gc || gc->collecting || gc->defer_collection_depth > 0 || !gc->collect_callback ||
             (gc->force_collect_interval == 0 &&
@@ -652,6 +683,7 @@ int gc_heap_maybe_force_collect(gc_heap_t* gc, const char* site) {
         (unsigned)gc->force_random_one_in,
         site ? site : "unknown");
     gc->collect_callback();
+    gc_heap_rebase_object_threshold(gc);
     return 1;
 }
 
@@ -663,7 +695,9 @@ void* gc_heap_alloc(gc_heap_t* gc, size_t size, uint16_t type_tag) {
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_alloc");
     gc_assert_allocation_allowed(gc, "gc_heap_alloc");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_heap_maybe_force_collect(gc, "gc_heap_alloc");
+    if (!gc_heap_maybe_force_collect(gc, "gc_heap_alloc")) {
+        gc_heap_maybe_collect_object_pressure(gc, "gc_heap_alloc");
+    }
 
     // try object zone first (for objects up to GC_LARGE_OBJECT_THRESHOLD)
     void* ptr = gc_object_zone_alloc(gc->object_zone, size, type_tag, &gc->all_objects);
@@ -716,7 +750,9 @@ void* gc_heap_calloc_class(gc_heap_t* gc, size_t size, uint16_t type_tag, int cl
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_calloc_class");
     gc_assert_allocation_allowed(gc, "gc_heap_calloc_class");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_heap_maybe_force_collect(gc, "gc_heap_calloc_class");
+    if (!gc_heap_maybe_force_collect(gc, "gc_heap_calloc_class")) {
+        gc_heap_maybe_collect_object_pressure(gc, "gc_heap_calloc_class");
+    }
     // Fast path: skip gc_heap_alloc → gc_object_zone_alloc class_index lookup.
     // The class index is pre-computed by the JIT at compile time.
     void* ptr = gc_object_zone_alloc_class(gc->object_zone, cls, size, type_tag,
@@ -736,7 +772,9 @@ void* gc_heap_bump_alloc(gc_heap_t* gc, size_t slot_size, size_t alloc_size,
     gc_reject_scalar_object_allocation(type_tag, "gc_heap_bump_alloc");
     gc_assert_allocation_allowed(gc, "gc_heap_bump_alloc");
     gc_note_scalar_tag_allocation(type_tag);
-    gc_heap_maybe_force_collect(gc, "gc_heap_bump_alloc");
+    if (!gc_heap_maybe_force_collect(gc, "gc_heap_bump_alloc")) {
+        gc_heap_maybe_collect_object_pressure(gc, "gc_heap_bump_alloc");
+    }
     // ---- Fast path: try free list first (recycling after GC) ----
     gc_header_t* free_hdr = gc->object_zone->free_lists[cls];
     if (free_hdr) {
@@ -927,6 +965,49 @@ void gc_unregister_root(gc_heap_t* gc, uint64_t* slot) {
             log_debug("gc_unregister_root: removed slot %p (total: %d)", (void*)slot, gc->root_slot_count);
             return;
         }
+    }
+}
+
+int gc_try_register_object_root(gc_heap_t* gc, void* object) {
+    if (!gc || !object) return 0;
+    for (int i = 0; i < gc->object_root_count; i++) {
+        if (gc->object_roots[i].object == object) {
+            gc->object_roots[i].ref_count++;
+            return 1;
+        }
+    }
+    if (gc->object_root_count >= gc->object_root_capacity) {
+        int new_cap = gc->object_root_capacity ? gc->object_root_capacity * 2
+            : GC_ROOT_SLOTS_INITIAL;
+        gc_object_root_t* roots = (gc_object_root_t*)mem_realloc(
+            gc->object_roots, (size_t)new_cap * sizeof(gc_object_root_t),
+            MEM_CAT_CONTAINER);
+        if (!roots) {
+            log_error("gc-object-root: realloc failed for %d roots", new_cap);
+            return 0;
+        }
+        gc->object_roots = roots;
+        gc->object_root_capacity = new_cap;
+    }
+    gc->object_roots[gc->object_root_count].object = object;
+    gc->object_roots[gc->object_root_count].ref_count = 1;
+    gc->object_root_count++;
+    return 1;
+}
+
+void gc_unregister_object_root(gc_heap_t* gc, void* object) {
+    if (!gc || !object) return;
+    for (int i = 0; i < gc->object_root_count; i++) {
+        if (gc->object_roots[i].object != object) continue;
+        if (gc->object_roots[i].ref_count > 1) {
+            gc->object_roots[i].ref_count--;
+            return;
+        }
+        for (int j = i; j < gc->object_root_count - 1; j++) {
+            gc->object_roots[j] = gc->object_roots[j + 1];
+        }
+        gc->object_root_count--;
+        return;
     }
 }
 
@@ -1490,6 +1571,17 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         // Item slots; tracing it as Items would retain arbitrary bit patterns.
         size_t count = header->alloc_size / (2 * sizeof(uint64_t));
         for (size_t i = 0; i < count; i++) gc_mark_item(gc, items[i]);
+        break;
+    }
+    case GC_TYPE_JS_INTERP_ENV: {
+        JsInterpEnv* env = (JsInterpEnv*)obj;
+        if (env->outer) gc_mark_object_ptr(gc, env->outer);
+        gc_mark_item(gc, env->arguments_object);
+        gc_mark_item(gc, env->private_home_class);
+        gc_mark_item(gc, env->private_bindings);
+        for (uint32_t i = 0; i < env->slot_count; i++) {
+            gc_mark_item(gc, env->slots[i]);
+        }
         break;
     }
     // types with no outgoing Item pointers — nothing to trace
@@ -2183,6 +2275,12 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
     for (int i = 0; i < gc->root_slot_count; i++) {
         if (gc->root_slots[i]) {
             gc_mark_item(gc, *gc->root_slots[i]);
+        }
+    }
+
+    for (int i = 0; i < gc->object_root_count; i++) {
+        if (gc->object_roots[i].object) {
+            gc_mark_object_ptr(gc, gc->object_roots[i].object);
         }
     }
 

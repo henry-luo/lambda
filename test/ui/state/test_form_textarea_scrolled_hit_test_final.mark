@@ -20,9 +20,35 @@
     <body index: 2, flags: ['hover', 'focus-within']
       <div index: 23, flags: ['hover', 'focus-within']
         <div index: 5, flags: ['hover', 'focus-within']
+          <input index: 1, flags: ['valid']>
+          <input index: 3, flags: ['valid']>
           <textarea index: 5, flags: ['hover', 'focus', 'focus-within', 'valid'], form: {
               sel: [5, 5]
             }>>>
       <div index: 27
         <div index: 5
-          <input index: 5, flags: ['placeholder-shown', 'valid']>>>>>>
+          <input index: 5, flags: ['placeholder-shown', 'valid']>>>
+      <div index: 31
+        <div index: 5
+          <div index: 1
+            <input index: 3, flags: ['valid']>>
+          <div index: 5
+            <div index: 3
+              <input index: 3, flags: ['valid']>>>>>
+      <div index: 35
+        <div index: 5
+          <div index: 3
+            <input index: 1, flags: ['valid']>
+            <input index: 3, flags: ['valid']>>>>
+      <div index: 39
+        <div index: 5
+          <input index: 1, flags: ['valid']>
+          <input index: 3, flags: ['valid']>>>
+      <div index: 47
+        <div index: 5
+          <textarea index: 1, flags: ['valid']>>>
+      <div index: 51
+        <div index: 5
+          <input index: 1, flags: ['valid']>
+          <input index: 3, flags: ['valid']>
+          <input index: 5, flags: ['valid']>>>>>>

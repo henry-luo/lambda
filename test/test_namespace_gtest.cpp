@@ -287,6 +287,25 @@ TEST_F(NamespaceTest, Target_NotEqualDifferentUrl) {
     target_free(t2);
 }
 
+// Equal hashes are only a fast-path candidate; normalized target content is
+// the identity and must reject a forced collision.
+TEST_F(NamespaceTest, Target_HashCollisionIsNotEqual) {
+    MarkBuilder builder(input);
+    Item str1 = builder.createStringItem("https://example.com/ns1");
+    Item str2 = builder.createStringItem("https://example.com/ns2");
+
+    Target* t1 = item_to_target(str1.item, nullptr);
+    Target* t2 = item_to_target(str2.item, nullptr);
+    ASSERT_NE(t1, nullptr);
+    ASSERT_NE(t2, nullptr);
+    t2->url_hash = t1->url_hash;
+
+    EXPECT_FALSE(target_equal(t1, t2));
+
+    target_free(t1);
+    target_free(t2);
+}
+
 // target_equal with NULL arguments
 TEST_F(NamespaceTest, Target_EqualNull) {
     // both null → equal (same pointer shortcut)
@@ -754,4 +773,29 @@ TEST_F(NamespaceTest, TagMacros_NullPtrs) {
 
     EXPECT_EQ(get_type_id(str_null), LMD_TYPE_NULL);
     EXPECT_EQ(get_type_id(sym_null), LMD_TYPE_NULL);
+}
+
+// A null field name is normalized to an empty hash key for nested-map support,
+// but the two shape entries remain structurally different.
+TEST_F(NamespaceTest, ShapePoolCollisionDoesNotAliasDifferentFieldNames) {
+    ASSERT_NE(input, nullptr);
+    ASSERT_NE(input->shape_pool, nullptr);
+
+    const char* null_name[] = {nullptr};
+    const char* empty_name[] = {""};
+    TypeId field_types[] = {LMD_TYPE_INT};
+
+    ShapeEntry* null_shape = shape_pool_get_map_shape(
+        input->shape_pool, null_name, field_types, 1);
+    ShapeEntry* empty_shape = shape_pool_get_map_shape(
+        input->shape_pool, empty_name, field_types, 1);
+
+    ASSERT_NE(null_shape, nullptr);
+    ASSERT_NE(empty_shape, nullptr);
+    EXPECT_NE(null_shape, empty_shape);
+    EXPECT_FALSE(shape_pool_shapes_equal(null_shape, empty_shape));
+
+    ShapeEntry* empty_shape_again = shape_pool_get_map_shape(
+        input->shape_pool, empty_name, field_types, 1);
+    EXPECT_EQ(empty_shape_again, empty_shape);
 }

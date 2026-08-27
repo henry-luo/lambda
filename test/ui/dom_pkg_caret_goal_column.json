@@ -1,0 +1,98 @@
+{
+  "html": "test/ui/dom_pkg_caret_goal_column.html",
+  "description": "F9: vertical caret motion keeps its goal column across a short line, and any other caret write retargets it",
+  "events": [
+    {
+      "type": "log",
+      "message": "=== goal column across a short intervening line ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "text": "dddd"
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#p1"
+      },
+      "char_offset": 15
+    },
+    {
+      "type": "key_press",
+      "key": "Down"
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "log",
+      "message": "--- the short line clamps the caret to its own length ---"
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#p2"
+      },
+      "char_offset": 2
+    },
+    {
+      "type": "key_press",
+      "key": "Down"
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "log",
+      "message": "--- but the column returns on the next long line, not 2 ---"
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#p3"
+      },
+      "char_offset": 15
+    },
+    {
+      "type": "log",
+      "message": "=== a click retargets the column: the old goal must not survive ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#p1"
+      },
+      "offset_x": 60,
+      "offset_y": 8
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "key_press",
+      "key": "Down"
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "key_press",
+      "key": "Down"
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_caret",
+      "target": {
+        "selector": "#p3"
+      },
+      "char_offset": 21
+    }
+  ]
+}

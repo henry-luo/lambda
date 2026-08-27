@@ -20,6 +20,8 @@ extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_history_reset(void);
 extern "C" void js_xhr_reset(void);
 extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
+struct JsGeneratorStateRecord;
+void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
 
 extern "C" void js_reset_buffer_module(void);
 extern "C" void js_readline_reset(void);
@@ -249,6 +251,10 @@ void js_runtime_state_destroy_context(void) {
     jm_compile_recovery_state_destroy_context(runtime_context->js_state);
     js_runtime_prototype_snapshot_destroy_context(runtime_context->js_state);
     js_runtime_regex_cache_destroy_context(runtime_context->js_state);
+    for (int i = 0; i < runtime_context->js_state->generator_count; i++) {
+        js_interp_generator_clear_continuations(
+            &runtime_context->js_state->generators[i]);
+    }
     if (runtime_context->js_state->operations.symbol_registry) {
         hashmap_free(runtime_context->js_state->operations.symbol_registry);
     }
@@ -452,6 +458,7 @@ void js_eval_state_reset(JsEvalState* state) {
     memset(bridge->env_from_journal, 0, sizeof(bridge->env_from_journal));
     memset(bridge->env_frame_marks, 0, sizeof(bridge->env_frame_marks));
     memset(bridge->global_lexical_had_own, 0, sizeof(bridge->global_lexical_had_own));
+    memset(bridge->global_lexical_immutable, 0, sizeof(bridge->global_lexical_immutable));
     memset(bridge->global_lexical_frame_marks, 0, sizeof(bridge->global_lexical_frame_marks));
     memset(bridge->private_frame_marks, 0, sizeof(bridge->private_frame_marks));
     bridge->env_count = 0;
@@ -671,8 +678,8 @@ static Item js_eval_source_stack_string(Item error_name, Item message) {
 }
 
 extern "C" Item* js_ensure_active_module_vars(void) {
-    if (context && context->active_js_module_state) {
-        return context->active_js_module_state->vars;
+    if (context && context->active_module_state) {
+        return context->active_module_state->vars;
     }
     uint32_t module_id = 0;
     if (!context || !lambda_module_state_reserve(
@@ -685,14 +692,14 @@ extern "C" Item* js_ensure_active_module_vars(void) {
         log_error("js-module-vars: reserved module state has no variable slab");
         return NULL;
     }
-    context->active_js_module_state = state;
+    context->active_module_state = state;
     return state->vars;
 }
 
 extern "C" Item** js_active_module_vars_slot(void) {
-    if (!context || !context->active_js_module_state) js_ensure_active_module_vars();
-    if (!context || !context->active_js_module_state) return NULL;
-    return &context->active_js_module_state->vars;
+    if (!context || !context->active_module_state) js_ensure_active_module_vars();
+    if (!context || !context->active_module_state) return NULL;
+    return &context->active_module_state->vars;
 }
 
 // Forward declaration for regex compilation cache reset (defined near JsRegexData)
@@ -828,19 +835,19 @@ extern "C" Item js_to_property_key(Item key) {
 // js_define_accessor_partial without ever materializing a __get_/__set_ marker key.
 
 extern "C" void js_set_module_var(int index, Item value) {
-    if (index >= 0 && context && context->active_js_module_state &&
-            index < (int)context->active_js_module_state->var_count) {
+    if (index >= 0 && context && context->active_module_state &&
+            index < (int)context->active_module_state->var_count) {
         // D5.3: module variables outlive the current MIR frame, so a scalar
         // home returned by a call must be copied into the module state's
         // persistent payload instead of retaining the frame-owned pointer.
-        lambda_module_var_store(context->active_js_module_state,
+        lambda_module_var_store(context->active_module_state,
             (uint32_t)index, value);
     }
 }
 
 extern "C" Item js_get_module_var(int index) {
-    if (index >= 0 && context && context->active_js_module_state &&
-            index < (int)context->active_js_module_state->var_count) {
+    if (index >= 0 && context && context->active_module_state &&
+            index < (int)context->active_module_state->var_count) {
         return js_active_module_vars[index];
     }
     return ItemNull;
@@ -849,7 +856,7 @@ extern "C" Item js_get_module_var(int index) {
 extern "C" void js_reset_module_vars() {
     Item* vars = js_ensure_active_module_vars();
     if (!vars) return;
-    memset(vars, 0, context->active_js_module_state->var_count * sizeof(Item));
+    memset(vars, 0, context->active_module_state->var_count * sizeof(Item));
     js_module_var_count = 0;
 }
 
@@ -868,15 +875,15 @@ extern "C" bool js_activate_module_state(uint32_t var_count) {
 }
 
 extern "C" bool js_ensure_active_module_var_capacity(uint32_t required_var_count) {
-    if (!context || !context->active_js_module_state) {
+    if (!context || !context->active_module_state) {
         log_error("js-module-vars: no active slab while growing to %u",
                   required_var_count);
         return false;
     }
-    if (!lambda_active_js_module_state_ensure_vars(required_var_count)) {
+    if (!lambda_active_module_state_ensure_vars(required_var_count)) {
         log_error("js-module-vars: failed to grow slab %u from %u to %u",
-                  context->active_js_module_state->module_id,
-                  context->active_js_module_state->var_count,
+                  context->active_module_state->module_id,
+                  context->active_module_state->var_count,
                   required_var_count);
         return false;
     }
@@ -884,8 +891,8 @@ extern "C" bool js_ensure_active_module_var_capacity(uint32_t required_var_count
 }
 
 JS_FORWARD_EXPRESSION(uint32_t, js_get_active_module_state_id, (void),
-    context && context->active_js_module_state
-        ? context->active_js_module_state->module_id : UINT32_MAX)
+    context && context->active_module_state
+        ? context->active_module_state->module_id : UINT32_MAX)
 
 static LambdaModuleState* js_module_state_at(uint32_t module_state_id) {
     if (!context || module_state_id == UINT32_MAX ||
@@ -896,16 +903,16 @@ static LambdaModuleState* js_module_state_at(uint32_t module_state_id) {
 extern "C" bool js_set_active_module_state_id(uint32_t module_state_id) {
     LambdaModuleState* state = js_module_state_at(module_state_id);
     if (!state || !state->vars) return false;
-    context->active_js_module_state = state;
+    context->active_module_state = state;
     return true;
 }
 JS_FORWARD_EXPRESSION(bool, js_module_state_is_available, (uint32_t module_state_id), (context && module_state_id != UINT32_MAX && module_state_id < context->module_state_capacity && context->module_states[module_state_id] && context->module_states[module_state_id]->vars))
 
 JS_FORWARD_EXPRESSION(uint64_t, js_active_module_name_id, (uint32_t index),
-    !context || !context->active_js_module_state ||
-            index >= context->active_js_module_state->property_key_count ||
-            !context->active_js_module_state->property_keys ? NAME_ID_NONE
-        : context->active_js_module_state->property_keys[index])
+    !context || !context->active_module_state ||
+            index >= context->active_module_state->property_key_count ||
+            !context->active_module_state->property_keys ? NAME_ID_NONE
+        : context->active_module_state->property_keys[index])
 
 extern "C" Item js_active_module_name_item(uint32_t module_name_index,
         NameId direct_name_id) {
@@ -917,8 +924,8 @@ extern "C" Item js_active_module_name_item(uint32_t module_name_index,
 }
 
 JS_FORWARD_EXPRESSION(uint32_t, js_active_module_name_count, (void),
-    context && context->active_js_module_state
-        ? context->active_js_module_state->property_key_count : 0)
+    context && context->active_module_state
+        ? context->active_module_state->property_key_count : 0)
 JS_FORWARD_EXPRESSION(uint32_t, js_get_batch_preamble_var_count, (void),
     js_runtime_state.batch_preamble_var_count)
 
@@ -1151,7 +1158,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // it: harness closures intentionally keep that owner, while the old batch
     // path copied this prefix into a separate static test slab before each
     // script. Keep the same isolation using a reusable context-owned slab.
-    LambdaModuleState* preamble_state = context ? context->active_js_module_state : NULL;
+    LambdaModuleState* preamble_state = context ? context->active_module_state : NULL;
     uint32_t preamble_state_id = js_get_active_module_state_id();
     if (!preamble_state || preamble_state_id == UINT32_MAX) return;
     if (checkpoint_var_count < 0) checkpoint_var_count = 0;
@@ -1179,7 +1186,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
         memcpy(vars, preamble_state->vars, (size_t)checkpoint_var_count * sizeof(Item));
     }
     // zero out test-owned bindings beyond the copied harness prefix
-    int active_count = (int)context->active_js_module_state->var_count;
+    int active_count = (int)context->active_module_state->var_count;
     for (int i = checkpoint_var_count; i < active_count; i++) {
         vars[i] = (Item){0};
     }
@@ -1857,6 +1864,24 @@ extern "C" Item js_build_arguments_object() {
     // Arguments construction allocates descriptors after creating the array;
     // every intermediate must remain precisely rooted until publication.
     return arr_root.get();
+}
+
+extern "C" Item js_build_arguments_object_for_call(Item* args, int argc,
+        int64_t is_strict, Item callee) {
+    Item* saved_args = js_pending_call_args;
+    int saved_argc = js_pending_call_argc;
+    int saved_strict = js_pending_args_is_strict;
+    Item saved_callee = js_pending_args_callee;
+    js_pending_call_args = args;
+    js_pending_call_argc = argc;
+    js_pending_args_is_strict = (int)is_strict;
+    js_pending_args_callee = callee;
+    Item result = js_build_arguments_object();
+    js_pending_call_args = saved_args;
+    js_pending_call_argc = saved_argc;
+    js_pending_args_is_strict = saved_strict;
+    js_pending_args_callee = saved_callee;
+    return result;
 }
 
 extern TypeMap EmptyMap;

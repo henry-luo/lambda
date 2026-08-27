@@ -8,9 +8,35 @@ extern "C" {
 #endif
 
 // Forward declarations
+typedef struct JsScript JsScript;
 typedef struct JsTranspiler JsTranspiler;
 typedef NameScope JsScope;
 struct hashmap;
+
+// Import/export plans retain only AST/name-pool data. The actual namespace
+// Items stay rooted by the single runtime module registry.
+typedef struct JsInterpImportBinding {
+    String* local_name;
+    String* source;
+    String* export_name;
+    bool namespace_import;
+    struct JsInterpImportBinding* next;
+} JsInterpImportBinding;
+
+typedef struct JsInterpExportBinding {
+    String* local_name;
+    String* export_name;
+    // Non-null for `export { local as exported } from source` and export-star
+    // entries; source writes propagate through the same module registry.
+    String* source;
+    // `export * as ns from source` exposes source's namespace object itself,
+    // rather than one of its named live bindings.
+    bool namespace_export;
+    // Star entries are synthesized only after the target namespace has been
+    // linked. This distinguishes them from explicit named re-exports.
+    bool star_export;
+    struct JsInterpExportBinding* next;
+} JsInterpExportBinding;
 
 // JavaScript variable declaration types
 typedef enum JsVarKind {
@@ -27,24 +53,36 @@ typedef enum JsScopeType {
     JS_SCOPE_MODULE
 } JsScopeType;
 
-// JavaScript transpiler context
-typedef struct JsTranspiler {
-    // Core transpiler components
-    Pool* ast_pool;                 // AST memory pool
-    NamePool* name_pool;            // String interning pool
-    const char* source;             // JavaScript source code
-    size_t source_length;           // Source code length
-    char* normalized_source;        // Owned parse buffer when source normalization is applied
-    LangProfile* profile;           // dormant Phase-1 language profile hook table
-    AstIndex ast_index;             // shared dense identity/index table for post-CST passes
-    struct hashmap* scope_lookup_cache; // immutable post-build (scope,name) binding cache
-    
-    // Scoping and symbol management
-    JsScope* current_scope;         // Current lexical scope
-    JsScope* global_scope;          // Global scope
-    
-    // Compilation state
-    bool strict_mode;               // Global strict mode
+// JsScript retains the JavaScript-specific semantic facts over the common
+// Script owner. The base owns source, Input allocation, profile, AST/index,
+// module identity, interpreter plan/slab, imports, debug state, and MIR
+// artifacts; do not mirror those fields here.
+struct JsScript : Script {
+    size_t source_length;           // source byte count; adopted Script owns source bytes
+    JsScope* global_scope;          // JS global/module lexical scope root
+    struct hashmap* scope_lookup_cache; // post-build (scope,name) binding facts
+    bool strict_mode;               // JS script/function strictness default
+    // Module top levels use a private module slab. CJS remains non-strict,
+    // while ES modules set both this bit and strict_mode.
+    bool is_module;
+    bool is_es_module;
+    // ES declaration instantiation happens before recursive dependency
+    // evaluation so circular imports observe hoisted function exports.
+    bool es_module_scope_initialized;
+    bool strict_js;                 // true = reject TS syntax (pure JS mode)
+    bool emit_runtime_checks;       // TS development-mode assertion emission
+    struct hashmap* type_registry; // TS name → Type* facts for this JS/TS unit
+    JsInterpImportBinding* interp_imports;
+    JsInterpExportBinding* interp_exports;
+};
+
+// JsTranspiler is an ephemeral builder extending the retained JsScript prefix.
+// Its tail contains only parser, diagnostics, and current-build state; adoption
+// moves the prefix into a runtime-owned JsScript before destroying this tail.
+struct JsTranspiler : JsScript {
+    char* normalized_source;        // owned parse buffer when normalization applies
+
+    // Current-build state
     int function_counter;           // Counter for anonymous functions
     int temp_var_counter;           // Counter for temporary variables
     int label_counter;              // Counter for labels
@@ -67,17 +105,10 @@ typedef struct JsTranspiler {
     // Tree-sitter integration
     TSParser* parser;               // Tree-sitter parser
     TSTree* tree;                   // Parse tree
-    
+
     // Runtime integration
-    Runtime* runtime;               // Lambda runtime context
-
-    // Unified JS/TS mode flags
-    bool strict_js;                 // true = reject TS syntax (pure JS mode), false = allow TS
-    bool emit_runtime_checks;       // emit ts_assert_type/ts_check_shape calls (TS dev mode)
-
-    // Type registry: name → Type* (TS interfaces, aliases, enums)
-    struct hashmap* type_registry;
-} JsTranspiler;
+    Runtime* runtime;               // builder's borrowed runtime
+};
 
 // JavaScript type mapping functions
 Type* js_type_to_lambda_type(JsTranspiler* tp, JsAstNode* node);
@@ -109,6 +140,9 @@ static inline int js_index_compiler_pass(void* opaque) {
 static inline JsAstNode* build_js_ast_indexed(JsTranspiler* tp, TSNode root) {
     JsAstNode* ast = build_js_ast(tp, root);
     if (!ast) return NULL;
+    // The shared Script owner is the AST lifetime authority after adoption.
+    // Publish the root before post-build passes attach indexed facts to it.
+    tp->ast_root = (AstNode*)ast;
     js_report_any_census(tp);
     js_scope_lookup_cache_enable(tp);
     JsAstIndexPassContext pass_context = {tp, ast};
@@ -161,6 +195,11 @@ bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length);
 int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
                                   int64_t* out_col, char* out_message,
                                   int64_t out_message_size);
+JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
+                                     const char* reference);
+static inline JsScript* js_script_from_script(Script* script) {
+    return script && script->profile == &js_profile ? (JsScript*)script : NULL;
+}
 #ifdef __cplusplus
 }
 #endif
@@ -304,8 +343,8 @@ Item js_unsigned_right_shift(Item left, Item right);
 // Unary operators
 Item js_unary_plus(Item operand);
 Item js_unary_minus(Item operand);
-Item js_increment(Item operand, bool prefix);
-Item js_decrement(Item operand, bool prefix);
+Item js_increment(Item operand);
+Item js_decrement(Item operand);
 
 // Type conversion functions
 Item js_to_primitive(Item value, const char* hint);

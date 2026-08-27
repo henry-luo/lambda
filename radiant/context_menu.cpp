@@ -38,44 +38,37 @@ static DomElement* ctx_menu_target_elem(DocState* state) {
     return tc_is_text_control(e) ? e : nullptr;
 }
 
-static bool ctx_menu_has_selection(DocState* state, DomElement* elem) {
-    if (!elem || !elem->form) return false;
-    uint32_t start = 0, end = 0;
-    form_control_get_selection(state, static_cast<View*>(elem), &start, &end, NULL);
-    return start != end;
-}
-
+// F10: a mask read, not a decision. The five enable rules — selection
+// non-empty, not readonly, clipboard non-empty, value non-empty, not disabled —
+// are policy and now live in the dom package's `<body>` template, which computes
+// them once at open time. Render calls this per item while painting, which is
+// exactly why the answer has to be cached rather than evaluated on demand.
 bool context_menu_item_enabled(DocState* state, int item) {
-    DomElement* elem = ctx_menu_target_elem(state);
-    if (!elem || !elem->form) return false;
-    bool readonly = form_control_is_readonly(state, static_cast<View*>(elem));
-    bool disabled = form_control_is_disabled(state, static_cast<View*>(elem));
-    if (disabled) return false;
-    bool has_sel  = ctx_menu_has_selection(state, elem);
-    bool has_val  = elem->form->current_value_len > 0;
-    const char* clip = clipboard_get_text();
-    bool has_clip = clip && *clip;
-
-    switch (item) {
-        case CTX_MENU_CUT:        return has_sel && !readonly;
-        case CTX_MENU_COPY:       return has_sel;
-        case CTX_MENU_PASTE:      return has_clip && !readonly;
-        case CTX_MENU_DELETE:     return has_sel && !readonly;
-        case CTX_MENU_SELECT_ALL: return has_val;
-        default: return false;
-    }
+    if (!state || item < 0 || item >= CTX_MENU_ITEM_COUNT) return false;
+    return (state->context_menu_enabled_mask & (1u << item)) != 0;
 }
 
 void context_menu_open(DocState* state, View* target, float x, float y) {
     if (!state || !target) return;
     if (!target->is_element()) return;
-    DomElement* e = lam::dom_require_element(target);
-    if (!tc_is_text_control(e)) return;
 
     // Width/height are nominal CSS-px values; render scales them.
     doc_state_open_context_menu(state, target, x, y,
         CTX_MENU_WIDTH, CTX_MENU_ITEM_HEIGHT * CTX_MENU_ITEM_COUNT);
     log_debug("context_menu_open at (%.1f, %.1f)", x, y);
+}
+
+// F10: the template's open call. The `tc_is_text_control` gate that used to sit
+// in context_menu_open is gone — which target deserves a menu is policy, and the
+// template asks that question itself. That also lifts a real restriction for
+// free: the menu could never appear on contenteditable or a plain document
+// selection while the gate was native.
+bool context_menu_open_pending(DocState* state, View* target, uint32_t enabled_mask) {
+    if (!state || !target || !state->pending_context_menu_target) return false;
+    context_menu_open(state, target, state->pending_context_menu_x,
+                      state->pending_context_menu_y);
+    state->context_menu_enabled_mask = enabled_mask;
+    return state->context_menu_target != nullptr;
 }
 
 void context_menu_close(DocState* state) {

@@ -1,5 +1,7 @@
 # LambdaJS — Web Platform: DOM, CSSOM, Events & Fetch
 
+> **Last verified against tree:** 2026-08-14 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the Web-platform host objects: the DOM bridge to Radiant's `DomNode`/`DomElement` tree, element/document API dispatch, CSS selector queries and layout-metric reads, the 3-phase event system, the CSSOM, OffscreenCanvas text measurement, XHR/fetch/FormData/clipboard, and Selection/Range.
 >
 > **Primary sources:** `lambda/js/js_dom.{h,cpp}` (DOM wrap/unwrap, element & document dispatch, layout metrics, computed style, classList/dataset), `lambda/js/js_dom_events.{h,cpp}` (EventTarget, listener storage, dispatch), `lambda/js/js_cssom.{h,cpp}` (CSSOM wrappers, CSS namespace), `lambda/js/js_canvas.cpp` (OffscreenCanvas/`measureText`), `lambda/js/js_xhr.{h,cpp}`, `lambda/js/js_fetch.cpp`, `lambda/js/js_formdata.cpp`, `lambda/js/js_clipboard.cpp`, `lambda/js/js_dom_selection.{h,cpp}`, and `lambda/js/js_object_meta.{h,cpp}` (host metadata/ops bridge). The property kernel is in `lambda/js/js_runtime.cpp`.

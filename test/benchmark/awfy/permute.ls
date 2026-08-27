@@ -8,15 +8,15 @@ pn swap(v, i, j) {
     v[j] = tmp
 }
 
-pn permute(state, v, n) {
-    state.count = state.count + 1
+pn permute(st, v, n) {
+    st.count = st.count + 1
     if (n != 0) {
         var n1 = n - 1
-        permute(state, v, n1)
+        permute(st, v, n1)
         var i = n1
         while (i >= 0) {
             swap(v, n1, i)
-            permute(state, v, n1)
+            permute(st, v, n1)
             swap(v, n1, i)
             i = i - 1
         }
@@ -24,10 +24,10 @@ pn permute(state, v, n) {
 }
 
 pn benchmark() {
-    let state = {count: 0}
+    let st = {count: 0}
     var v = fill(6, 0)
-    permute(state, v, 6)
-    return state.count
+    permute(st, v, 6)
+    return st.count
 }
 
 pn main() {

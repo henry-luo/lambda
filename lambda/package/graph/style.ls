@@ -135,42 +135,42 @@ fn contains_digit(text, i) {
   else contains_digit(text, i + 1)
 }
 
-fn apply_declaration(state, property, value) {
+fn apply_declaration(st, property, value) {
   let key = lower(trim(property));
   let text = trim(value);
   if ((key == "fill" or key == "background" or key == "background-color") and valid_color(text)) {
-    {*:state, fill: text}
+    {*:st, fill: text}
   }
   else if ((key == "stroke" or key == "border-color") and valid_color(text)) {
-    {*:state, stroke: text}
+    {*:st, stroke: text}
   }
-  else if (key == "color" and valid_color(text)) { {*:state, color: text} }
+  else if (key == "color" and valid_color(text)) { {*:st, color: text} }
   else if (key == "stroke-width" or key == "border-width") {
     let value = safe_width(text);
-    if (value != null) { {*:state, stroke_width: value} } else state
+    if (value != null) { {*:st, stroke_width: value} } else st
   }
   else if (key == "font-size" or key == "width" or key == "height") {
     let value = safe_width(text);
-    if (value == null or value <= 0.0) state
-    else if (key == "font-size") {*:state, font_size: value}
-    else if (key == "width") {*:state, width: value}
-    else {*:state, height: value}
+    if (value == null or value <= 0.0) st
+    else if (key == "font-size") {*:st, font_size: value}
+    else if (key == "width") {*:st, width: value}
+    else {*:st, height: value}
   }
   else if (key == "opacity") {
     let value = safe_opacity(text);
-    if (value != null) { {*:state, opacity: value} } else state
+    if (value != null) { {*:st, opacity: value} } else st
   }
-  else if (key == "stroke-dasharray" and valid_dash_array(text)) { {*:state, dash_array: text} }
-  else state
+  else if (key == "stroke-dasharray" and valid_dash_array(text)) { {*:st, dash_array: text} }
+  else st
 }
 
-fn parse_declarations(parts, i, state) {
-  if (i >= len(parts)) state
+fn parse_declarations(parts, i, st) {
+  if (i >= len(parts)) st
   else {
     let declaration = trim(parts[i]);
     let colon = index_of(declaration, ":");
-    let next = if (colon == null or colon <= 0) state
-      else apply_declaration(state, slice(declaration, 0, colon),
+    let next = if (colon == null or colon <= 0) st
+      else apply_declaration(st, slice(declaration, 0, colon),
         slice(declaration, colon + 1, len(declaration)));
     parse_declarations(parts, i + 1, next)
   }

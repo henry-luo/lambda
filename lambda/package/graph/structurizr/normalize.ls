@@ -211,7 +211,7 @@ fn unknown_archetype(name, target_kind, value) => diagnostic.for_value(
     message: "Unknown Structurizr archetype", path: null, source: null
   }
 
-fn append_relation(state, value, parent_identifier, definitions) {
+fn append_relation(st, value, parent_identifier, definitions) {
   // both relationship endpoints may use the scoped `this` identifier.
   let from = if (string(value.from) == "this") parent_identifier else string(value.from);
   let to = if (string(value.to) == "this") parent_identifier else string(value.to);
@@ -233,17 +233,17 @@ fn append_relation(state, value, parent_identifier, definitions) {
     source: value
   };
   let missing = graph_model.optional(value, "archetype") != null and definition == null;
-  {*:state, relationships: [*state.relationships, relation],
-    diagnostics: if (missing) [*state.diagnostics,
-      unknown_archetype(value.archetype, "relationship", value)] else state.diagnostics}
+  {*:st, relationships: [*st.relationships, relation],
+    diagnostics: if (missing) [*st.diagnostics,
+      unknown_archetype(value.archetype, "relationship", value)] else st.diagnostics}
 }
 
 fn joined_group(parent_group, name, separator) =>
   if (parent_group == null) name else parent_group ++ separator ++ name
 
 fn walk_values(values, index, parent, parent_identifier, parent_kind, group_name,
-    group_separator, inherited_groups, hierarchical, definitions, state) {
-  if (index >= len(values)) state
+    group_separator, inherited_groups, hierarchical, definitions, st) {
+  if (index >= len(values)) st
   else {
     let value = values[index];
     let tag = graph_model.tag(value);
@@ -251,11 +251,11 @@ fn walk_values(values, index, parent, parent_identifier, parent_kind, group_name
       string(value.keyword) == "deploymentGroup" and
       graph_model.optional(value, "identifier") == null and
       parent_kind == "deployment-node";
-    let next = if (group_assignment) state
+    let next = if (group_assignment) st
     else if (is_c4_declaration(value, definitions)) {
       let entry = element_value(value, parent, parent_identifier, group_name,
         inherited_groups, hierarchical, definitions);
-      let added = {*:state, elements: [*state.elements, entry]};
+      let added = {*:st, elements: [*st.elements, entry]};
       if (entry.kind == "group")
         walk_values(children(value), 0, parent, parent_identifier, parent_kind,
           joined_group(group_name, entry.name, group_separator), group_separator,
@@ -264,13 +264,13 @@ fn walk_values(values, index, parent, parent_identifier, parent_kind, group_name
         group_name, group_separator, entry.deployment_groups, hierarchical, definitions, added)
     }
     else if (tag == "relationship")
-      append_relation(state, value, parent_identifier, definitions)
-    else if (tag == "archetypes") state
+      append_relation(st, value, parent_identifier, definitions)
+    else if (tag == "archetypes") st
     else if (tag == "statement" and graph_model.optional(value, "identifier") != null)
-      {*:state, diagnostics: [*state.diagnostics,
+      {*:st, diagnostics: [*st.diagnostics,
         unknown_archetype(value.keyword, "element", value)]}
     else walk_values(children(value), 0, parent, parent_identifier, parent_kind,
-      group_name, group_separator, inherited_groups, hierarchical, definitions, state);
+      group_name, group_separator, inherited_groups, hierarchical, definitions, st);
     walk_values(values, index + 1, parent, parent_identifier, parent_kind, group_name,
       group_separator, inherited_groups, hierarchical, definitions, next)
   }
@@ -369,35 +369,35 @@ fn interaction_by_ref(value, relationships, key, sequence, parallel_group) {
   }
 }
 
-fn interaction_values_at(values, index, elements, relationships, key, state,
+fn interaction_values_at(values, index, elements, relationships, key, st,
     forced_order = null, parallel_group = null) {
-  if (index >= len(values)) state
+  if (index >= len(values)) st
   else {
     let value = values[index];
     let tag = graph_model.tag(value);
     let next = if (tag == "relationship") {
       let item = interaction(value, elements, relationships, key,
-        if (forced_order != null) forced_order else state.next_order, parallel_group);
-      {items: [*state.items, item], next_order:
-        if (forced_order != null) state.next_order else state.next_order + 1}
+        if (forced_order != null) forced_order else st.next_order, parallel_group);
+      {items: [*st.items, item], next_order:
+        if (forced_order != null) st.next_order else st.next_order + 1}
     }
     else if (tag == "statement") {
       let item = interaction_by_ref(value, relationships, key,
-        if (forced_order != null) forced_order else state.next_order, parallel_group);
-      if (item == null) state
-      else {items: [*state.items, item], next_order:
-        if (forced_order != null) state.next_order else state.next_order + 1}
+        if (forced_order != null) forced_order else st.next_order, parallel_group);
+      if (item == null) st
+      else {items: [*st.items, item], next_order:
+        if (forced_order != null) st.next_order else st.next_order + 1}
     }
     else if (tag == "parallel") {
       let group_id = if (parallel_group != null) parallel_group
         else key ++ ":parallel@" ++ source_identity(value);
-      let block_order = if (forced_order != null) forced_order else state.next_order;
+      let block_order = if (forced_order != null) forced_order else st.next_order;
       let nested = interaction_values_at(children(value), 0, elements, relationships,
-        key, state, block_order, group_id);
+        key, st, block_order, group_id);
       {items: nested.items, next_order:
-        if (forced_order != null) state.next_order else state.next_order + 1}
+        if (forced_order != null) st.next_order else st.next_order + 1}
     }
-    else state;
+    else st;
     interaction_values_at(values, index + 1, elements, relationships, key,
       next, forced_order, parallel_group)
   }

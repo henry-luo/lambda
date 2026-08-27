@@ -278,7 +278,7 @@ int view_lambda_script_source_in_window_with_events(const char* script_name,
                                                     const char* event_file,
                                                     bool headless);
 int view_doc_in_window(const char* doc_file);
-int ui_context_init(UiContext* uicon, bool headless);
+int ui_context_init(UiContext* uicon, bool headless, float requested_pixel_ratio);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void ui_context_cleanup(UiContext* uicon);
 void free_document(DomDocument* doc);

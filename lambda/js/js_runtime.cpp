@@ -27,6 +27,12 @@
 #include "../../lib/utf.h"
 #include <stdarg.h>
 
+struct JsGeneratorStateRecord;
+struct gc_heap;
+void js_interp_generator_trace_continuations(JsGeneratorStateRecord* state,
+                                             struct gc_heap* gc);
+void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
+
 // Shared formatting buffer for the throw-with-format helpers. JS error
 // messages are bounded by construction; truncation is preferable to a heap
 // allocation on a path that is already unwinding.
@@ -2418,8 +2424,8 @@ extern "C" void js_set_class_instance_field_metadata_name_id_range(
     uint64_t method_mask) {
     if ((get_type_id(class_item) != LMD_TYPE_MAP &&
             get_type_id(class_item) != LMD_TYPE_FUNC) || index < 0 || count <= 0 ||
-            !context || !context->active_js_module_state) return;
-    LambdaModuleState* state = context->active_js_module_state;
+            !context || !context->active_module_state) return;
+    LambdaModuleState* state = context->active_module_state;
     if (!state->property_keys || module_name_base > state->property_key_count ||
             (uint32_t)count > state->property_key_count - module_name_base) return;
     RootFrame roots(4);
@@ -2477,6 +2483,17 @@ extern "C" void js_set_class_instance_field_metadata_key(
     Array* keys = NULL;
     if (js_class_instance_field_metadata_array(class_item, "__if_keys__", 11,
             index, &keys)) keys->items[index] = key;
+}
+
+extern "C" void js_set_class_instance_field_metadata_private_method(
+        Item class_item, int index) {
+    Array* kinds = NULL;
+    if (js_class_instance_field_metadata_array(class_item, "__if_kinds__", 12,
+            index, &kinds)) {
+        // A method has no value slot, but its declaration installs the class
+        // brand before every instance field initializer runs.
+        kinds->items[index] = (Item){.item = i2it(1)};
+    }
 }
 
 static Item js_init_class_instance_field(Item callee, Item object, Item field_key,
@@ -5338,6 +5355,9 @@ extern "C" Item js_get_key_core(Item object, Item key,
         TypeId key_tid = get_type_id(key);
         if (key_tid == LMD_TYPE_INT || key_tid == LMD_TYPE_FLOAT) {
             key = js_to_string(key);
+            // js_to_string may allocate; keep the converted key in the exact
+            // root slot before any subsequent property initialization allocates.
+            key_root.set(key);
         }
         JsFunction* fn = (JsFunction*)object.function;
         if (get_type_id(key) == LMD_TYPE_STRING) {
@@ -5463,8 +5483,9 @@ extern "C" Item js_get_key_core(Item object, Item key,
                             // ES spec 23.1.3.34: Array.prototype[@@unscopables]
                             // {writable:false, enumerable:false, configurable:true}
                             // Value: object with boolean true for each scoped-out method
-                            Item unscopal_val = js_new_object();
-                            js_set_prototype(unscopal_val, ItemNull);
+                            RootFrame unscopables_roots(1);
+                            Rooted<Item> unscopal_root(unscopables_roots, js_new_object());
+                            js_set_prototype(unscopal_root.get(), ItemNull);
                             static const char* unscopal_keys[] = {
                                 "at", "copyWithin", "entries", "fill", "find", "findIndex",
                                 "findLast", "findLastIndex", "flat", "flatMap", "includes",
@@ -5472,28 +5493,39 @@ extern "C" Item js_get_key_core(Item object, Item key,
                             };
                             for (int ui = 0; unscopal_keys[ui]; ui++) {
                                 Item uk = (Item){.item = s2it(heap_create_name(unscopal_keys[ui], strlen(unscopal_keys[ui])))};
-                                js_set_key_default(unscopal_val, uk, (Item){.item = b2it(true)});
+                                js_set_key_default(unscopal_root.get(), uk, (Item){.item = b2it(true)});
                             }
                             js_define_data_prop_key(fn->prototype, js_well_known_symbol_key(11),
-                                unscopal_val, JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE);
+                                unscopal_root.get(), JS_PROTO_PROP_NON_ENUMERABLE | JS_PROTO_PROP_NON_WRITABLE);
                         }
                         // Annex B Object.prototype.__proto__ accessor.
                         if (nl == 6 && strncmp(nm, "Object", 6) == 0) {
-                            Item proto_desc = js_new_object();
-                            Item get_key = (Item){.item = s2it(heap_create_name("get", 3))};
-                            Item set_key = (Item){.item = s2it(heap_create_name("set", 3))};
-                            Item enum_key = (Item){.item = s2it(heap_create_name("enumerable", 10))};
-                            Item conf_key = (Item){.item = s2it(heap_create_name("configurable", 12))};
-                            Item get_fn = js_intrinsic_binding_get(
-                                JS_BUILTIN_OWNER_OBJECT_PROTO_GETTER_INTERNAL, "__proto__", 9);
-                            Item set_fn = js_intrinsic_binding_get(
-                                JS_BUILTIN_OWNER_OBJECT_PROTO_SETTER_INTERNAL, "__proto__", 9);
-                            js_set_key_default(proto_desc, get_key, get_fn);
-                            js_set_key_default(proto_desc, set_key, set_fn);
-                            js_set_key_default(proto_desc, enum_key, (Item){.item = ITEM_FALSE});
-                            js_set_key_default(proto_desc, conf_key, (Item){.item = ITEM_TRUE});
-                            Item proto_key = (Item){.item = s2it(heap_create_name("__proto__", 9))};
-                            js_object_define_property(fn->prototype, proto_key, proto_desc);
+                            // Descriptor construction performs several allocating
+                            // property writes; keep every intermediate value rooted
+                            // until DefineProperty observes the complete descriptor.
+                            RootFrame descriptor_roots(8);
+                            Rooted<Item> proto_desc_root(descriptor_roots, js_new_object());
+                            Rooted<Item> get_key_root(descriptor_roots,
+                                (Item){.item = s2it(heap_create_name("get", 3))});
+                            Rooted<Item> set_key_root(descriptor_roots,
+                                (Item){.item = s2it(heap_create_name("set", 3))});
+                            Rooted<Item> enum_key_root(descriptor_roots,
+                                (Item){.item = s2it(heap_create_name("enumerable", 10))});
+                            Rooted<Item> conf_key_root(descriptor_roots,
+                                (Item){.item = s2it(heap_create_name("configurable", 12))});
+                            Rooted<Item> get_fn_root(descriptor_roots,
+                                js_intrinsic_binding_get(
+                                    JS_BUILTIN_OWNER_OBJECT_PROTO_GETTER_INTERNAL, "__proto__", 9));
+                            Rooted<Item> set_fn_root(descriptor_roots,
+                                js_intrinsic_binding_get(
+                                    JS_BUILTIN_OWNER_OBJECT_PROTO_SETTER_INTERNAL, "__proto__", 9));
+                            Rooted<Item> proto_key_root(descriptor_roots,
+                                (Item){.item = s2it(heap_create_name("__proto__", 9))});
+                            js_set_key_default(proto_desc_root.get(), get_key_root.get(), get_fn_root.get());
+                            js_set_key_default(proto_desc_root.get(), set_key_root.get(), set_fn_root.get());
+                            js_set_key_default(proto_desc_root.get(), enum_key_root.get(), (Item){.item = ITEM_FALSE});
+                            js_set_key_default(proto_desc_root.get(), conf_key_root.get(), (Item){.item = ITEM_TRUE});
+                            js_object_define_property(fn->prototype, proto_key_root.get(), proto_desc_root.get());
                         }
                         // v18g: For error constructors, set name and message on prototype
                         bool is_error = js_intrinsic_is_error_name(nm, nl);
@@ -9565,6 +9597,7 @@ static Item js_promise_invoke_then(Item promise, Item on_fulfilled, Item on_reje
 static Item js_promise_with_resolvers_for_constructor(Item constructor);
 extern "C" Item js_promise_async_function_start(void);
 extern "C" Item js_promise_async_function_finish(Item promise, Item result, int64_t had_exception);
+extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state, Item input);
 
 // Compiled JS wrappers use a fixed MIR signature, so the dynamic dispatcher
 // must materialize each supported arity as an exact C++ function-pointer type.
@@ -9768,6 +9801,15 @@ Item js_intrinsic_global_print_body(Item callee, Item this_value, Item* args,
 static Item js_invoke_fn_raw(JsFunction* fn, Item* args, int arg_count,
         uint64_t* scalar_result_home) {
 
+    if (fn->body_kind == JS_FUNCTION_BODY_AST) {
+        if (fn->flags & JS_FUNC_FLAG_GENERATOR) {
+            extern Item js_interp_create_generator(JsFunction*, Item*, int);
+            return js_interp_create_generator(fn, args, arg_count);
+        }
+        extern Item js_interp_call_function(JsFunction*, Item*, int, uint64_t*);
+        return js_interp_call_function(fn, args, arg_count, scalar_result_home);
+    }
+
     if (fn->native_call && fn->native_policy == JS_NATIVE_CALL_BODY) {
         return fn->native_call((Item){.function = (Function*)fn},
             js_current_this, args, arg_count, scalar_result_home);
@@ -9904,6 +9946,11 @@ static Item js_invoke_fn_raw_or_async(JsFunction* fn, Item* args, int arg_count,
         !(fn->flags & JS_FUNC_FLAG_GENERATOR);
     if (!legacy_async) {
         return js_invoke_fn_raw(fn, args, arg_count, scalar_result_home);
+    }
+
+    if (fn->body_kind == JS_FUNCTION_BODY_AST) {
+        extern Item js_interp_start_async_function(JsFunction*, Item*, int);
+        return js_interp_start_async_function(fn, args, arg_count);
     }
 
     // no-await async functions lower to a direct Promise.resolve return, so the
@@ -14085,7 +14132,8 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         uses_local_result_home = true;
     }
 
-    if (!fn || (!fn->func_ptr && !fn->native_call)) {
+    if (!fn || (!fn->func_ptr && !fn->native_call &&
+            fn->body_kind != JS_FUNCTION_BODY_AST)) {
         log_error("js_call_function: null function pointer");
         return ItemNull;
     }
@@ -14225,20 +14273,33 @@ JS_FORWARD_LOCAL_RETURN(Item, js_call_entry_generic,
 // The generic entry is the sole ordinary-call semantic authority. Tune7's
 // specialized templates duplicated its rooting, state switching, and restore
 // protocol while the release path did not benefit from the extra entry family.
-// Sole internal Call kernel. Representation-level exotics are resolved here;
-// every LMD_TYPE_FUNC must already own its final protocol entry.
+// Sole internal Call kernel. JavaScript functions own a JsFunction [[Call]]
+// entry; published Lambda functions retain their Core boxed ABI and cross this
+// boundary through its existing dynamic dispatcher.
 static inline Item js_call_value(Item func_item, Item this_val, Item* args,
         int arg_count, uint64_t* result_home, bool args_prerooted) {
     if (get_type_id(func_item) == LMD_TYPE_FUNC) {
         JsFunction* fn = (JsFunction*)func_item.function;
+        // The shared module registry publishes Lambda exports as Core Function
+        // values. Do not reinterpret their compact layout as JsFunction; their
+        // boxed ABI performs the required signature and result-home handling.
+        Function* lambda_fn = func_item.function;
+        if (lambda_fn && (lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION ||
+                lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE ||
+                lambda_fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER ||
+                lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED)) {
+            List lambda_args = {.items = args, .length = arg_count};
+            return fn_call_into(lambda_fn, &lambda_args, result_home);
+        }
         if (fn && fn->invoke) {
             return fn->invoke(func_item, this_val, args, arg_count, result_home,
                 args_prerooted);
         }
-        // A published function without [[Call]] is a factory/finalization bug,
-        // not a second dispatch lane (D6.2.2v2).
-        log_error("js-call-value: published function has no call entry");
-        return ItemError;
+        if (fn && fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) {
+            log_error("js-call-value: published JavaScript function has no call entry");
+            return ItemError;
+        }
+        return js_throw_type_error("value is not a callable JavaScript or Lambda function");
     }
     return js_call_function_impl_mode(func_item, this_val, args, arg_count,
         result_home, args_prerooted, (Item){0});
@@ -25540,6 +25601,20 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
     }
     // concat - returns new array that is the concatenation
     if (operation == JS_ARRAY_INTRINSIC_CONCAT) {
+        // A sparse concat can perform millions of property probes. Keep the
+        // receiver, actuals, result, and current operands in exact homes so
+        // object-allocation safepoints cannot reclaim a partially built array.
+        RootFrame concat_roots(4);
+        Rooted<Item> receiver_root(concat_roots, arr);
+        Rooted<Item> result_root(concat_roots, ItemNull);
+        Rooted<Item> element_root(concat_roots, ItemNull);
+        Rooted<Item> sub_element_root(concat_roots, ItemNull);
+        RootSpan concat_arg_roots(argc > 0 ? (size_t)argc : 0);
+        Item* concat_args = argc > 0 ? js_root_span_items(concat_arg_roots) : NULL;
+        if ((argc > 0 && (!concat_args || !concat_arg_roots.valid())) ||
+                !concat_roots.valid()) return ItemError;
+        for (int index = 0; index < argc; index++) concat_args[index] = args[index];
+        arr = receiver_root.get();
         const int64_t MAX_SAFE_LEN = 9007199254740991LL; // 2^53 - 1
         Item spread_key = js_well_known_symbol_key(12);
         Item spread_symbol = (Item){.item = i2it(-(int64_t)(12 + JS_SYMBOL_BASE))};
@@ -25571,12 +25646,16 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
             return ItemNull;
         };
 
-        JS_ASSIGN_OR_RETURN(result, js_array_species_create(arr, 0));
+        Item result = js_array_species_create(receiver_root.get(), 0);
+        if (item_is_error(result)) return result;
+        result_root.set(result);
 
         int64_t n = 0;
         int item_count = argc + 1;
         for (int item_index = 0; item_index < item_count; item_index++) {
-            Item element = (item_index == 0) ? arr : args[item_index - 1];
+            element_root.set(item_index == 0 ? receiver_root.get()
+                : concat_args[item_index - 1]);
+            Item element = element_root.get();
             bool spreadable = false;
             JS_ASSIGN_OR_RETURN(spread_status, is_concat_spreadable(element, &spreadable));
             if (spreadable) {
@@ -25585,15 +25664,18 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
                 if (n > MAX_SAFE_LEN - len) {
                     return js_throw_type_error("Array.prototype.concat: resulting array length exceeds 2^53 - 1");
                 }
-                if (js_array_concat_try_append_typed_array(result, &n, element, len)) {
+                if (js_array_concat_try_append_typed_array(result_root.get(), &n,
+                        element_root.get(), len)) {
                     continue;
                 }
                 for (int64_t k = 0; k < len; k++) {
                     Item idx_key = js_array_index_key(k);
-                    JS_ASSIGN_OR_RETURN(has, js_has_property_status(element, idx_key));
+                    JS_ASSIGN_OR_RETURN(has, js_has_property_status(element_root.get(), idx_key));
                     if (js_is_truthy(has)) {
-                        JS_ASSIGN_OR_RETURN(sub_element, js_get_key_default(element, idx_key));
-                        JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, n, sub_element));
+                        sub_element_root.set(js_get_key_default(element_root.get(), idx_key));
+                        if (item_is_error(sub_element_root.get())) return sub_element_root.get();
+                        JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(
+                            result_root.get(), n, sub_element_root.get()));
                     }
                     n++;
                 }
@@ -25601,13 +25683,15 @@ static Item js_array_intrinsic_algorithm_impl(Item arr,
                 if (n >= MAX_SAFE_LEN) {
                     return js_throw_type_error("Array.prototype.concat: resulting array length exceeds 2^53 - 1");
                 }
-                JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(result, n, element));
+                JS_ASSIGN_OR_RETURN(create_result, js_create_data_property_or_throw(
+                    result_root.get(), n, element_root.get()));
                 n++;
             }
         }
 
-        JS_ASSIGN_OR_RETURN(set_length, js_elements_set_length_throw_status(result, len_key, n));
-        return result;
+        JS_ASSIGN_OR_RETURN(set_length, js_elements_set_length_throw_status(
+            result_root.get(), len_key, n));
+        return result_root.get();
     }
     // find
     if (operation == JS_ARRAY_INTRINSIC_FIND) {
@@ -27529,10 +27613,21 @@ extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
     if (js_generators[idx].env) gc_mark_object_ptr(gc, js_generators[idx].env);
     gc_mark_item(gc, js_generators[idx].private_home_class.item);
     gc_mark_item(gc, js_generators[idx].delegate.item);
+    gc_mark_item(gc, js_generators[idx].ast_function.item);
+    gc_mark_item(gc, js_generators[idx].ast_arguments.item);
+    gc_mark_item(gc, js_generators[idx].ast_this.item);
+    gc_mark_item(gc, js_generators[idx].ast_pending_resume_input.item);
+    if (js_generators[idx].ast_function_env) {
+        gc_mark_object_ptr(gc, js_generators[idx].ast_function_env);
+    }
+    if (js_generators[idx].ast_body_env) {
+        gc_mark_object_ptr(gc, js_generators[idx].ast_body_env);
+    }
+    js_interp_generator_trace_continuations(&js_generators[idx], gc);
 }
 
 // Helper: create {value, done} iterator result object
-static Item js_make_iter_result(Item value, bool done) {
+extern "C" Item js_make_iter_result(Item value, bool done) {
     JS_ROOTS(roots, value_root, value, result_root, js_new_object());
     String* val_key = heap_create_name("value", 5);
     String* done_key = heap_create_name("done", 4);
@@ -27662,7 +27757,7 @@ extern "C" Item js_get_generator_shared_proto(bool is_async) {
 }
 
 static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
-        int is_async) {
+        int is_async, Item ast_function, Item ast_arguments, Item ast_this) {
     Context* runtime = (Context*)context;
     if (!runtime) {
         log_error("js-generator: state machine missing context owner");
@@ -27697,6 +27792,7 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
         idx = js_generator_count++;
     }
     JsGenerator* gen = &js_generators[idx];
+    js_interp_generator_clear_continuations(gen);
     gen->type_id = LMD_TYPE_MAP;
     gen->runtime_context = runtime;
     gen->state_fn = func_ptr;
@@ -27715,6 +27811,18 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     gen->delegate = ItemNull;
     gen->delegate_resume = -1;
     gen->delegate_idx = 0;
+    gen->ast_function = ast_function;
+    gen->ast_arguments = ast_arguments;
+    gen->ast_this = ast_this;
+    gen->ast_function_env = NULL;
+    gen->ast_body_env = NULL;
+    gen->ast_yield_skip = 0;
+    gen->ast_loop_continuations = NULL;
+    gen->ast_list_continuation = NULL;
+    gen->ast_resumable_loop_active = false;
+    gen->ast_pending_resume_yield = 0;
+    gen->ast_pending_resume_input = ItemNull;
+    gen->ast_initialized = false;
 
     TypeMap* generator_type = js_object_type_for_class(JS_CLASS_GENERATOR);
     JsGeneratorMapCarrier* carrier = (JsGeneratorMapCarrier*)heap_calloc(
@@ -27748,6 +27856,8 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
             js_set_prototype(obj_root.get(), proto_root.get());
         }
     }
+    if (get_type_id(ast_function) == LMD_TYPE_FUNC) return obj_root.get();
+
     // ES spec: Eagerly execute state 0 (parameter binding / FunctionDeclarationInstantiation).
     // The state machine emits an implicit yield after param destructuring. Running state 0
     // here ensures destructuring errors throw synchronously at call time, not on .next().
@@ -27783,11 +27893,19 @@ extern "C" Item js_generator_create_mir(void* func_ptr, Item* env,
         log_error("js-generator: state machine missing context owner");
         return ItemError;
     }
-    return js_generator_create_current(func_ptr, env, env_size, is_async);
+    return js_generator_create_current(func_ptr, env, env_size, is_async,
+        ItemNull, ItemNull, ItemNull);
 }
 
 JS_FORWARD_ITEM(js_generator_create, (void* func_ptr, Item* env, int env_size, int is_async),
-    js_generator_create_current, (func_ptr, env, env_size, is_async))
+    js_generator_create_current, (func_ptr, env, env_size, is_async,
+        ItemNull, ItemNull, ItemNull))
+
+extern "C" Item js_generator_create_ast(Item function, Item arguments,
+        Item this_value, int is_async) {
+    return js_generator_create_current(NULL, NULL, 0, is_async, function,
+        arguments, this_value);
+}
 
 static JsGenerator* js_get_generator(Item gen_obj) {
     if (!js_object_has_class(gen_obj, JS_CLASS_GENERATOR)) return NULL;
@@ -27980,6 +28098,20 @@ extern "C" Item js_generator_next(Item generator, Item input) {
 
     gen->started = true;
     gen->executing = true;
+
+    if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
+        extern Item js_interp_resume_generator(Item, JsGeneratorStateRecord*, Item);
+        Item result = js_interp_resume_generator(generator_root.get(), gen,
+            input_root.get());
+        gen->executing = false;
+        if (item_is_error(result)) {
+            gen->done = true;
+            gen->state = -1;
+            js_interp_generator_clear_continuations(gen);
+            return is_async ? js_promise_reject(js_error_lane_payload(result)) : result;
+        }
+        return is_async ? js_promise_resolve(result) : result;
+    }
 
     // If we have an active delegate (from yield*), advance it by one
     // iterator result. Delegates can be infinite; do not drain them here.
@@ -28218,6 +28350,11 @@ extern "C" Item js_generator_return(Item generator, Item value) {
             gen->state = -1;
             Item result = js_make_iter_result(value, true);
             return is_async ? js_promise_resolve(result) : result;
+        }
+        if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC && !gen->done) {
+            // The AST interpreter represents return as the same resumable
+            // completion as throw, including a finally block that yields.
+            return js_generator_next(generator, js_gen_return_signal(value));
         }
         if (gen->env && gen->env_size > 0) {
             int active_slot = gen->env_size - 1;
@@ -30869,6 +31006,68 @@ extern "C" Item js_await_sync(Item value) {
     return make_js_undefined();
 }
 
+static Item js_await_incremental_mark(Item marker, Item fulfilled, Item value) {
+    js_set_key_default(marker, js_name_item("done", 4), (Item){.item = ITEM_TRUE});
+    js_set_key_default(marker, js_name_item("fulfilled", 9), fulfilled);
+    js_set_key_default(marker, js_name_item("value", 5), value);
+    return value;
+}
+
+// AST execution does not yet suspend its native activation, but it must still
+// preserve the shared microtask order while it resolves a local await.  Its
+// marker is registered as a real promise reaction, so the AST frame resumes
+// at the same FIFO point as a compiled async continuation.
+extern "C" Item js_await_sync_incremental(Item value) {
+    RootFrame roots(7);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> promise_root(roots, ItemNull);
+    Rooted<Item> marker_root(roots, ItemNull);
+    Rooted<Item> base_root(roots, ItemNull);
+    Rooted<Item> fulfilled_root(roots, ItemNull);
+    Rooted<Item> rejected_root(roots, ItemNull);
+    Rooted<Item> continuation_root(roots, ItemNull);
+    JsPromise* promise = js_get_promise(value_root.get());
+    if (!promise && js_is_object_value(value_root.get())) {
+        promise_root.set(js_promise_resolve(value_root.get()));
+        if (item_is_error(promise_root.get())) return promise_root.get();
+        promise = js_get_promise(promise_root.get());
+    }
+    if (!promise) {
+        // Awaiting a scalar still gives older queued jobs one observable turn.
+        (void)js_microtask_step();
+        return value_root.get();
+    }
+    if (promise_root.get().item == ItemNull.item) {
+        promise_root.set(value_root.get());
+        promise = js_get_promise(promise_root.get());
+    }
+    if (!promise) return ItemError;
+
+    marker_root.set(js_new_object());
+    base_root.set(js_new_native_function(js_await_incremental_mark));
+    Item fulfilled_args[2] = {marker_root.get(), (Item){.item = ITEM_TRUE}};
+    Item rejected_args[2] = {marker_root.get(), (Item){.item = ITEM_FALSE}};
+    fulfilled_root.set(js_bind_function(base_root.get(), ItemNull, fulfilled_args, 2));
+    rejected_root.set(js_bind_function(base_root.get(), ItemNull, rejected_args, 2));
+    continuation_root.set(js_promise_then(promise_root.get(), fulfilled_root.get(),
+        rejected_root.get()));
+    if (item_is_error(continuation_root.get())) return continuation_root.get();
+
+    while (!js_is_truthy(js_get_key_default(marker_root.get(),
+                js_name_item("done", 4))) && js_microtask_pending_count() > 0) {
+        Item step = js_microtask_step();
+        if (item_is_error(step)) return step;
+    }
+    if (!js_is_truthy(js_get_key_default(marker_root.get(), js_name_item("done", 4)))) {
+        // Timers and cross-runtime work retain the bounded fallback used by
+        // the normal await path, without widening a local microtask drain.
+        return js_await_sync(promise_root.get());
+    }
+    Item fulfilled = js_get_key_default(marker_root.get(), js_name_item("fulfilled", 9));
+    Item result = js_get_key_default(marker_root.get(), js_name_item("value", 5));
+    return js_is_truthy(fulfilled) ? result : js_throw_value(result);
+}
+
 // ============================================================
 // Phase 6: Async/Await Full State Machine Runtime
 // ============================================================
@@ -30894,6 +31093,11 @@ static void js_async_register_roots_once() {
         // generated wrapper returns, so the fixed context table must root it.
         heap_register_gc_root((uint64_t*)&js_async_contexts[i].env);
         heap_register_gc_root(&js_async_contexts[i].this_val.item);
+        heap_register_gc_root(&js_async_contexts[i].ast_function.item);
+        heap_register_gc_root(&js_async_contexts[i].ast_arguments.item);
+        heap_register_gc_root(&js_async_contexts[i].ast_await_values.item);
+        heap_register_gc_root((uint64_t*)&js_async_contexts[i].ast_function_env);
+        heap_register_gc_root((uint64_t*)&js_async_contexts[i].ast_body_env);
         // The promise carrier is a GC VMap now; retaining only the native
         // context record would let a suspended async function lose its owner.
         heap_register_gc_root(&js_async_contexts[i].promise.item);
@@ -30977,8 +31181,12 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
         js_set_active_module_state_id(ctx->module_state_id);
     }
     js_current_this = ctx->this_val;
-    result_root.set(js_invoke_mir_state(
-        ctx->state_fn, ctx->env, input_root.get(), state));
+    if (get_type_id(ctx->ast_function) == LMD_TYPE_FUNC) {
+        result_root.set(js_interp_resume_async(ctx, input_root.get()));
+    } else {
+        result_root.set(js_invoke_mir_state(
+            ctx->state_fn, ctx->env, input_root.get(), state));
+    }
     js_current_this = prev_this;
     if (switched_module_state) {
         js_set_active_module_state_id(prev_module_state_id);
@@ -31060,7 +31268,7 @@ static Item js_async_reject_handler(Item ctx_idx_item, Item reason) {
 
 // Create an async context: allocates promise, returns context index
 static Item js_async_context_create_current(void* fn_ptr, Item* env,
-        int64_t env_size, Item this_val) {
+        int64_t env_size, Item this_val, Item ast_function, Item ast_arguments) {
     Context* runtime = (Context*)context;
     if (!runtime) {
         log_error("js-async: state machine missing context owner");
@@ -31083,6 +31291,16 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     ctx->state = 0;
     ctx->this_val = this_val;
     ctx->module_state_id = js_get_active_module_state_id();
+    ctx->ast_function = ast_function;
+    ctx->ast_arguments = ast_arguments;
+    ctx->ast_function_env = NULL;
+    ctx->ast_body_env = NULL;
+    ctx->ast_resume_statement = NULL;
+    ctx->ast_await_values = get_type_id(ast_function) == LMD_TYPE_FUNC
+        ? js_array_new(0) : ItemNull;
+    if (item_is_error(ctx->ast_await_values)) return ctx->ast_await_values;
+    ctx->ast_await_skip = 0;
+    ctx->ast_initialized = false;
 
     // Create a pending promise for this async function's result
     JsPromise* p = js_alloc_promise();
@@ -31100,11 +31318,19 @@ extern "C" Item js_async_context_create_mir(void* fn_ptr, Item* env,
         log_error("js-async: state machine missing context owner");
         return ItemError;
     }
-    return js_async_context_create_current(fn_ptr, env, env_size, this_val);
+    return js_async_context_create_current(fn_ptr, env, env_size, this_val,
+        ItemNull, ItemNull);
 }
 
 JS_FORWARD_ITEM(js_async_context_create, (void* fn_ptr, Item* env, int64_t env_size, Item this_val),
-    js_async_context_create_current, (fn_ptr, env, env_size, this_val))
+    js_async_context_create_current, (fn_ptr, env, env_size, this_val,
+        ItemNull, ItemNull))
+
+extern "C" Item js_async_context_create_ast(Item function, Item arguments,
+        Item this_val) {
+    return js_async_context_create_current(NULL, NULL, 0, this_val, function,
+        arguments);
+}
 
 // Start execution of an async state machine (initial call at state 0)
 extern "C" Item js_async_start(Item ctx_idx_item) {
@@ -37037,6 +37263,9 @@ extern "C" bool js_is_set_instance(Item obj) {
 void js_deep_batch_reset() {
     // generators, queue owners, and async contexts contain Items from the old
     // heap; GC-owned Promise carriers are reclaimed with that heap.
+    for (int i = 0; i < js_generator_count; i++) {
+        js_interp_generator_clear_continuations(&js_generators[i]);
+    }
     memset(js_generators, 0, sizeof(js_generators));
     js_generator_count = 0;
     js_runtime_state.promises.pending_count = 0;

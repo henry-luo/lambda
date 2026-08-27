@@ -1,5 +1,7 @@
 # Radiant — Media & Embedded Webview
 
+> **Last verified against tree:** 2026-07-14 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the two subsystems that push *external* content into a Radiant document: animated media (GIF, Lottie, video) and native embedded web views (`<webview>`). Their code lives in separate files but they are the same design: content that Radiant does not lay out or paint itself is decoded/rendered by an outside engine into an `ImageSurface`, then composited into the window surface at a layout-computed rect. Both share the `#ifdef`-selected mac/linux/stub platform-abstraction pattern and the same main-loop dirty-poll/wake hooks. This doc describes that unifying pattern, each media player, the placeholder-plus-post-composite render split, and the webview child-window/layer modes.
 >
 > **Primary sources:** media — `radiant/render.hpp` + `radiant/gif_player.cpp`, `radiant/render.hpp` + `radiant/lottie_player.cpp`, `radiant/rdt_video.h` + `radiant/rdt_video_avf.mm` + `radiant/rdt_video_stub.cpp`, `radiant/render.hpp` + `radiant/render_media.cpp`, `radiant/render.hpp` + `radiant/render_video.cpp`, `radiant/image_surface_generation.cpp`, `radiant/render.hpp` + `radiant/video_frame_wake.cpp`; webview — `radiant/radiant.hpp`, `radiant/webview_manager.cpp`, `radiant/webview_child_{mac.mm,linux.cpp,stub.cpp}`, `radiant/webview_layer_{mac.mm,linux.cpp,stub.cpp}`, `radiant/webview_handle_{mac,linux}.h`.

@@ -18,8 +18,8 @@ greet("World")
 let double = (x: int) => x * 2
 double(10)
 
-fn apply(f, x: int) => f(x)
-apply((x) => x + 100, 5)
+fn apply_fn(f, x: int) => f(x)
+apply_fn((x) => x + 100, 5)
 
 fn make_adder(n: int) => (x: int) => x + n
 let add10 = make_adder(10)

@@ -121,11 +121,11 @@ pn test_preserves_number_contract() {
 
 // Test 12: a boxed system conversion must remain boxed at a shaped int write.
 pn test_u32_to_int_map_assignment() {
-    var state = {seed: 49734321}
-    var next: u32 = state.seed
+    var st = {seed: 49734321}
+    var next: u32 = st.seed
     next = next * 1103515245u32 + 12345u32
-    state.seed = int(next)
-    print(state.seed)
+    st.seed = int(next)
+    print(st.seed)
     print("\n")
 }
 

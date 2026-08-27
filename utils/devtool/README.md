@@ -23,7 +23,7 @@ Electron-based development tool for testing and debugging Lambda HTML/CSS layout
 
 ## Installation
 
-From the `utils/layout-devtool` directory:
+From the `utils/devtool` directory:
 
 ```bash
 npm install

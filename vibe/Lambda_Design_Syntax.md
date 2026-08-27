@@ -6,6 +6,8 @@
 mark; see Appendix A for the per-ruling conformance list. §7 audit rulings
 (points 19–31, 33) decided 2026-08-21; §7.13 fully resolved; §7.14
 (closed-tail juxtaposition) and §7.15 (relative path `\.a.b`) decided.
+2026-08-27: handler-arm brace placement reaffirmed with rationale (§5.9,
+ledger 16; spec v15.2.1 records it in S16.4.3).
 
 > **The body states current rulings only.** Superseded wording has been
 > moved out to **Appendix S — Superseded Rulings**, struck through and
@@ -31,7 +33,8 @@ S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
 §5.1–§5.6 → S16.6.1–S16.6.5, §7.1–§7.2 → S16.8.1–S16.8.2, §7.3–§7.5 →
 S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
 §7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
-S16.9.4, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7.
+S16.9.4, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v2, §7.23 → S16.7,
+§7.24 → S16.10, §7.25 → S12.3.7.
 **Not ratified into S16 (process, not syntax):** ledger 18 (authority order)
 and 32 (two parsers, §4.4) stay here. A future formal syntax document is
 tracked as `SO35`.
@@ -818,6 +821,51 @@ element divider (`else <g;`), which §7.11 replaced with the boundary comma.
 The package library is therefore part of the migration surface, not just
 `test/`.
 
+**2026-08-24 conformance sweep** (details moved here from the spec's
+Appendix A; the spec rows now carry status + pointer only):
+
+- *S16.1–S16.6 harness*: `test/c_s16_conformance.sh` 123/123 against the
+  production C parser, `test/ts_s16_conformance.sh` 118/118 against the
+  reference grammar. Both defects the spec row previously named are fixed:
+  `return` ⏎ *value* now returns the value (S16.2.5), and the type scanners
+  no longer continue on a line-start `!` (S16.2.3). The harness is a case
+  sample, not a proof, so the `*` marks stand. Residue tracked as O3 (the
+  `!` fix for the four sibling Tree-sitter scanners) and §7.17 (the comment
+  vs line-start guard, Tree-sitter only, benign); the O4 user-facing doc
+  sweep found 60 of 172 `lambda` code blocks in `Lambda_Expr_Stam.md`,
+  `Lambda_Reference.md`, `Lambda_Cheatsheet.md`, and `Lambda_Func.md` no
+  longer parsing.
+- *Points 35–36 (S16.6.6/7) enforcement*: C parser rejects every unbraced
+  control-statement body with a repair-naming diagnostic;
+  `parse_function_declaration` rejects `pn ... =>` outright (closing a §4.4
+  divergence where the C parser was the outlier — 1 doc site migrated, 0
+  test/std uses). A misfiring `runner.cpp` heuristic that rewrote
+  arrow-body errors into the element-ambiguity diagnosis (the `>` of `=>`
+  matched its relation walk-back) was guarded. Verified C 140/140,
+  Tree-sitter 135/135 on identical case sets; the 700-file `.ls` corpus
+  cross-check showed zero movement (76 pre-existing failures before and
+  after).
+- *Points 37–38 (S16.6.8/9) enforcement*: `build_ast` semantic analysis
+  per §5.6, reported as `E312` — `reject_procedural_block_operand` guards
+  tuple/list/array elements, call arguments, binary operands and `=>`
+  bodies; `validate_match_branch_homogeneity` /
+  `validate_if_branch_homogeneity` enforce point 38. Classification is the
+  shared three-way recursive `ast_branch_kind` (see the point-38 addendum
+  in §6 for the two shapes a top-level-only first cut over-rejected).
+  Migration cost as predicted: 1 doc example (`default: null` beside
+  control arms became `default { }`), 0 test/corpus changes. Verified C
+  152/152 (E312 detection added — semantic, not parse, rejections),
+  Tree-sitter 135/135, `make test-lambda-baseline` 3868/3868; C-suite only
+  by design, the reference grammar has no semantic tier.
+- *§7.22 (S16.9.5) `a?: T` marker*: the 2026-08-22 spot-check that first
+  cleared the ruling was wrong — the marker parsed only on parameters, and
+  both a map-type field and an element attribute were rejected with
+  `error[E103]`. Both now parse (`parse_type_pattern.cpp`, one shared
+  marker helper for the map-field and element-attribute sites), the
+  validator honours the marker, and `test/validator_test_data/maps.ls` no
+  longer errors against itself; covered by
+  `test/lambda/optional_field_marker.ls`. Residue stays in the spec row.
+
 ---
 
 ---
@@ -1012,6 +1060,34 @@ ratify them. The three rules below are the ruling.
    (§7.11); map-*type* patterns `{a: int}` live in scanner-owned type
    space, untouched.
 
+**Why handler arms are rule 3, not rule 1 (reaffirmed 2026-08-27, user).**
+The question was raised whether `expr ^ { ... } ~ { ... }` should move to
+the interior-decides group, since semantically it branches exactly like
+`if`/`else` and its arms produce values. Ruled no — the line between
+rule 1 and rule 3 is a decidable test, not taste:
+
+- **Rule 1 positions all have a bare-expression second form** —
+  `if (c) expr else expr`, `case int: expr`, `() => expr`. The body slot
+  is a general expression position; braces written there are ordinary
+  expressions, so interior must decide.
+- **Handler arms have no such form and cannot get one**: `^` is postfix
+  propagation, and under §3.3/§3.6 an expression may continue after it —
+  `f()^ + 1` propagates, then adds. An unbraced arm `expr ^ arm_expr` is
+  therefore grammatically unreachable; the same-line `{` (§3.6, S16.2.6)
+  is the *sole* discriminator between propagation and handling. A brace
+  that carries that grammar burden is structural by construction, like
+  `fn`'s body brace and `case T { ... }`'s arm brace — not like `if`'s.
+- The `while` value-use argument does **not** apply here — handler arms
+  do produce values (`let v = expr ^ { null }`; the `~` arm is the value
+  branch). The placement rests on the structural argument alone.
+- Cost accepted: a map-valued arm needs the generic block-expression
+  escape, `expr ^ { {retries: 3} }`. The handler is the one rule-3 entry
+  with no dedicated expression escape; if map/expression-valued arms ever
+  prove common, the consistent fix is to add one in the family of `fn`'s
+  `=>` — not to flip the brace reading, which would also drag `^ {}`
+  (the natural acknowledge-and-swallow statement handler) into rule 2's
+  context-tie machinery.
+
 **Consequences ruled in:**
 
 - **Block expressions exist** (Rust-style): `{statements}` is legal in any
@@ -1193,7 +1269,14 @@ for scalars".
     escapes, no arrow blocks)~~ — **OBSOLETE**. Option 2 was ratified into
     the spec by mistake as S16.4.1 and corrected on 2026-08-22 to
     S16.4.1v2 + S16.4.2 + S16.4.3 (spec v10.0.0); see the erratum in the
-    header and §5.9.
+    header and §5.9. Reaffirmed 2026-08-27: handler arms
+    (`^ { ... }`, `~ { ... }`) stay always-block — considered and
+    rejected moving them to interior-decides. The dividing test: interior
+    decides where a bare-expression second form exists; the brace is
+    structural where it is mandatory. Handlers have no unbraced form —
+    `expr ^ expr` is already propagate-then-continue (`f()^ + 1`), so the
+    same-line `{` is the sole propagation-vs-handler discriminator (§5.9
+    rationale block; spec v15.2.1).
 17. Inside element scope (attribute values and bare content expressions),
     `<` `>` `<=` `>=` are not operators: `>` always terminates, `<` always
     opens a child element. Comparisons there use parenthesized islands
@@ -1320,7 +1403,9 @@ for scalars".
     (`case T: { return x }` is legal). Decisive ground: the greedy return
     (S16.2.5) makes the C-family unbraced guard a silent-swallow trap —
     `if (c) return` ⏎ `cleanup()` would parse as `return cleanup()`, running
-    cleanup only on the guard path and returning its value. Cost accepted:
+    cleanup only on the guard path and returning its value. Second ground:
+    the paren/bare split (§5.1–§5.2) *is* the expression/statement split,
+    which a statement body in the paren spelling would dissolve. Cost accepted:
     C-family developers will miss the non-braced form. Both front ends
     enforce it: the C parser by a direct check at each body site, the
     reference grammar by a zero-width `_expr_body_start` scanner guard
@@ -1367,12 +1452,44 @@ for scalars".
     over-rejects a branch that merely wraps a nested control `if`, and an
     EMPTY branch is NEUTRAL — it commits to neither side and pairs with
     both, which is what `} else if (c) { } else {` relies on.
+39. *(ratified 2026-08-27 as S16.10, spec v16.0.0)* **Keywords never name
+    bindings; data names admit keywords.** The whole lexer keyword table is
+    rejected as any binding name — `let`/`var`, parameters, `fn`/`pn`/
+    `type`/`view` names, import aliases — with the declaration-site E201
+    that `last` already gets; **no quoted escape** (a quoted use site is a
+    symbol member and symbols never implicitly read bindings, S2.4.3). Map
+    keys, element tags, and attribute names admit keywords — `<if a:1>`
+    becomes legal (the bare-tag rejection was implementation, not a
+    ruling); the quoted-symbol spelling is advised where a bare keyword
+    confuses. Member access after `.` admits keywords (`m.type`, `x.if`);
+    subscripts stay expression space (`last` keeps S7.2.2). Migration ~55
+    corpus bindings; probes, capture analysis, and rejected alternatives
+    in §7.24.
+40. *(ratified 2026-08-27 as S12.3.7, spec v16.1.0)* **Sys-func shadowing
+    is user-first, module-lexical, with a mandatory warning.** A module's
+    `fn`/`pn` or value binding matching a sys-func name shadows it for that
+    module/script only, statically — never globally (no JS-style prototype
+    mutation); `pub` export extends it to importers through the explicit
+    import only. Every shadowing draws a compile warning. Non-callable
+    shadows give the not-callable error, never builtin fallback; the
+    reserved core (keywords + base-type words) is un-shadowable via
+    S16.10.1. Key ground: forward compatibility — a new sys func must never
+    change an existing program. Alternative (collision = compile error)
+    rejected: maximum silent-capture protection, but it freezes the stdlib
+    namespace. Builtin-access spelling deferred (SO37). Full argument
+    in §7.25.
 
 **Open** *(O1 and O2 resolved above — decided points 13–14)***:**
 
 - **O5: pn calls in expressions** — A-normal-form effect sequencing,
   recorded as SO36 in the formal spec; an S12 question, not an S16 one.
-  Needs its own cost survey (`if (exists(p))` and friends break under it).
+  Deliberately split off from points 37–38 and left open: it is **less
+  severe** than the branching statements those rulings bar, because a pn
+  call still produces a value — the enclosing expression evaluates rather
+  than evaporating; the cost is only effects and their ordering embedded in
+  expression evaluation. Adopting it would outlaw shipped idioms
+  (`if (exists(p)) …`, `let config = if exists(p) { input(p, 'json') }
+  else {…}`), so it needs its own cost survey.
 - **O3: scanner-owned type tokens** *(audited 2026-08-21; reduced to one
   conformance fix)*. Multi-line type patterns live inside
   `type_pattern_token` et al., where `src/scanner.c` — not the statement
@@ -2445,6 +2562,236 @@ Verified at top level and in element position: `"a" ⏎ "b" ⏎ "c"` → `"abc"`
 `[1, null, 2]` → `[1, null, 2]`. S16.7.1–S16.7.3 are therefore ratified
 **unmarked**, unlike the rest of S16.
 
+### 7.24 Keywords as names: bindings never, data names yes (decided 2026-08-27)
+
+Keyword handling was a patchwork — the same word accepted in one name
+position, rejected in the next, and silently misread in a third. Probe
+evidence (2026-08-27, C parser, debug build):
+
+| Probe | Behavior |
+|---|---|
+| `{type: 1, in: 2}` … `m.type + m.in` | works → `3` |
+| `{if: 1}` … `x.if` | works → `1` |
+| `<div if:1, "t">` … `v.if`; `<div int:1, "t">` … `v.int` | work |
+| `<if a:1, "x">` | rejected: *expected an element tag* |
+| `<'if' a:1, "x">` … `v.a` | works → `1` |
+| `import edit: .lib.mod` … `edit.x` | import parses; **every use fails** *expected a type pattern* — the `edit` declaration keyword captures the statement |
+| `import 'edit': .lib.mod` … `'edit'.x` | parses; use **silently yields null** — an unreachable binding |
+| `let if = 1` … `if` | let parses; use fails *expected an expression* |
+| `let type = 1` … `type` | parses; `type` **silently reads the base type** and prints `type` — a silent wrong answer |
+| `let last = 3` | `error[E201]: 'last' is a reserved keyword …` at the declaration — the correct model, applied to exactly one keyword |
+| `let order = 5; order + 1`; `let state = 1` | work today — but capture contexts exist (a `state` read inside a `view`, `order` in for-clause space) |
+
+**The dividing principle.** A keyword can safely serve as a name exactly
+where **both the defining occurrence and every use are sigil-guarded** —
+after `{` `<` `,` before `:`, or after `.` — positions where no keyword
+construct can begin, so no capture is possible. Map keys, attribute names,
+and `.`-member steps pass on both sides. Binding names fail structurally: a
+binding is re-spoken at statement-leading and expression positions where
+keyword constructs begin, so a keyword binding can never be read everywhere
+a binding must be readable — hence the accept-at-declaration /
+fail-at-use traps above, and the worse silent-misread for `let type`.
+
+**The four rulings (user, 2026-08-27; ratified as S16.10, spec v16.0.0):**
+
+1. **Bindings ban the entire lexer keyword table** — statement and clause
+   keywords (`view`, `edit`, `state`, `order`, `last`, … are all reserved),
+   word operators, base-type words, and the named values — as `let`/`var`
+   names, parameters, `fn`/`pn`/`type`/`view` declaration names. The error
+   is E201 at the declaration site, extending the mechanism `last` already
+   has. **No quoted escape for bindings**: a binding name used in an
+   expression cannot be told apart from a `'symbol'` — symbols never
+   implicitly read bindings (S2.4.3) — so no spelling makes a keyword
+   binding readable. One-line teachable: *keywords never name bindings.*
+2. **An import alias is a binding** and follows rule 1: `import edit: …`
+   and `import 'edit': …` are both rejected at the import line; the repair
+   is choosing a different alias. (Corpus: 0 keyword import aliases.)
+3. **Data-container names admit keywords** — map keys, element tags, and
+   attribute names: `{type: 1}`, `<div class:"a">`, and **`<if a:1, "x">`
+   becomes legal** (the current bare-tag rejection was implementation, not
+   a ruling — no prior point banned it, and S15.1's own observation that
+   HTML has a real `<var>` requires keyword tags for ingested markup to
+   round-trip as source). Advisory, not enforced: prefer the quoted-symbol
+   spelling (`<'if' …>`, `{'type': 1}`) where a bare keyword would read as
+   its construct.
+4. **Keywords in member access are ordinary names**: after `.`, `m.type`
+   and `x.if` read data members (composing with S16.2.4v2 member
+   continuation, whose post-dot word must be read as a name regardless of
+   its keyword kind). Subscripts are *expression* space, not name space —
+   `a["type"]` is a string key and `last` keeps its S7.2.2 subscript
+   meaning; nothing changes there.
+
+**Clarification: which names in a declaration are bindings** (added
+2026-08-27, user; spec S16.10.2). The bar applies to the *declared name*,
+never to the members a declaration introduces:
+
+```lambda
+type T {           // T IS a binding — S16.10.1v2 applies
+  a: int,          // a is NOT a binding — a data name (field)
+  order: int,      // …so a keyword field is fine
+  fn f() { … }     // f is NOT a binding either — a data name (method)
+  fn state() => a  // …and a keyword method name is fine
+}
+```
+
+Only `T` is spoken bare in expression position, so only `T` can be captured
+by a keyword construct. Fields and methods alike are reached through a
+receiver — `x.a`, `x.f()` — which is sigil-guarded by the leading `.`
+(S16.10.3), so no capture is possible and the S16.10.1v2 argument simply
+does not apply to them. Two consequences worth stating:
+
+- **A method is never a shadow.** S12.3.7 governs module-level bindings; an
+  object method named `sum` does not shadow the system function, it is
+  reached only as `x.sum()`. (S12.3.3 already rules that a receiver member
+  wins over a method-eligible builtin at such a call.)
+- **Renaming a method is an API change**, not a local edit: its call sites
+  are `.name(` spellings that no binding-rename pass will touch.
+
+Implementation anchor: `push_name` gates the E201 bar on
+`ast_node_declares_binding`, which excludes `AST_NODE_KEY_EXPR` — the scope
+entries object-type fields and methods register for bare-field resolution
+inside the type body. This was found the hard way: the first migration pass
+renamed `fn state()` in `test/lambda/proc/object_direct_access.ls` while its
+`tog.state()` call sites kept the old spelling, and the method silently
+resolved to nothing (booleans printed as empty strings).
+
+**Rejected alternatives.** (a) *Quoting as the binding escape*
+(`import 'edit':` + `'edit'.x`) — breaches S2.4.3's symbol/name
+separation, and today's behavior shows the failure shape: a silently
+unreachable binding. (b) *Per-keyword contextual carve-outs* (keep
+`order`/`state` bindable since they work today) — they work only until the
+capture context is entered; per-context carve-outs are the fragility this
+ruling removes. (c) *Banning keywords in data names too* (quote-everything)
+— forces quoting onto the most common data idioms (`type:`, `class:`,
+ingested JSON/HTML keys) for zero disambiguation gain.
+
+**Why clause words are not banned: it is the same forward-compatibility
+argument as sys-func shadowing (§7.25 / S12.3.7).** Both rulings protect the
+same property — *a later addition to the language or its library must never
+change the meaning of an existing program*. S12.3.7 gets it for the library by
+resolving user-first: adding a new sys func cannot capture a name a script
+already defines. Keeping clause words bindable gets it for the grammar: when a
+new for-clause, handler clause, or query clause is introduced, its word does
+not collide with bindings that already exist, because clause words never
+competed with bindings in the first place — the enclosing construct claims the
+word positionally and the binding keeps the name everywhere else.
+
+Banning them would have inverted this. Every future clause word would be a
+breaking change for whoever had already written `let offset = 5` or
+`let into = x`, and the language would face the same freeze that
+collision-as-error would have imposed on the stdlib namespace — the
+alternative §7.25 rejected for exactly this reason. So the two rulings are one
+policy applied to the two namespaces a program draws on: **positional
+constructs and user names occupy different spaces, and growth in either must
+not evict the other.** Only capture-real words — those that would make an
+existing binding *unreadable* — are worth the bar, which is why the criterion
+narrowed to them and no further.
+
+**Refinement, 2026-08-27 (user): continuation words move to allowed, and the
+clause reading takes priority.** `else`, `case`, `default` and `on` were
+barred in the first cut, but S16.2.2v2 already classifies `else case default`
+as tokens that *can only continue* — by the capture criterion they were never
+capture-real. They are now legal binding names, joined by `on` (a join clause
+and an in-view handler head; in both the enclosing construct is already
+expecting the word). The enabling rule the user stated: **grammar-wise the
+clause word has higher priority than a binding name** — where both readings
+fit, the enclosing `if`/`match`/`for`/view claims its clause word before any
+expression is parsed, so the two coexist rather than competing.
+
+Implementation note worth keeping: allowing the word in
+`lambda_lexer_word_bars_binding` was only half the job. `else`/`case`/
+`default` were not in `token_is_identifier_like`, so the declaration was
+accepted and **every use failed to parse** — the exact accept-then-fail trap
+this ruling exists to remove. Both halves must move together: a word legal as
+a binding must also read as one in expression position.
+
+`state` did **not** move, though the criterion alone would allow it (it is a
+view-*signature* clause, accepted after the return type, so it never leads a
+statement). It is reserved for a possible future standalone word —
+`expr is state`, `expr in state`, `expr at state` — on the principle that a
+word cannot be reclaimed once programs bind it. That makes `state` and
+`lambda` the two words barred by reservation rather than capture.
+
+**The two lists are enumerated in Appendix K**, verified against the running
+engine — K.1 barred (60 words), K.2 allowed (28), K.3 what the bar does not
+reach.
+
+**Migration and status.** 55 keyword-named bindings in `test/` + `lambda/`
+(offset 12, group 9, state 8, to 5, by 4, range/order/list/div/desc 2 each,
+others 1); 0 keyword import aliases. Enforcement must land in the C parser
+and the reference grammar, and E201 must extend from `last` to the whole
+table. Tracked as LR02-14 in the issue ledger; the `let type` silent
+misread is the priority defect.
+
+### 7.25 Sys-func shadowing: user-first, module-lexical (decided 2026-08-27)
+
+May a user definition override a system function? Probes (2026-08-27,
+debug build) showed the territory was **undefined and crashing**, not
+merely unruled: `fn sum(a) => 99` then `sum([1,2,3])` compiles, executes on
+the interpreter tier, prints **no result**, and dies at teardown (ASan
+dealloc failure); `fn len(s) => -1` and `fn min(a,b) => "mine"` likewise.
+Unshadowed calls (`sum(x) + len(x)` → 9) are fine. So no de facto behavior
+existed to preserve — LR02-15 tracks the crash.
+
+**The ruling (user, 2026-08-27; ratified as S12.3.7, spec v16.1.0):
+user-first shadowing, module-lexical, with a warning.**
+
+1. A module-level `fn`/`pn` **or value binding** whose name matches a
+   system function shadows it for every call site **in that module/script
+   only**, resolved statically. Resolution is never global — unlike JS
+   prototype/global mutation, no other module's `sum` changes.
+2. **Every such shadowing draws a compile (syntax) warning** — accidents
+   surface, intent is permitted. This is normative, not an optional lint.
+3. A shadowing definition is an ordinary definition: **`pub` exports it
+   like any other**, and it then extends to the importing script through
+   the explicit import — propagation is by export/import only, never
+   ambient.
+4. Uniform with value bindings: `let sum = 5` shadows too (a name binds to
+   exactly one thing, S12.3.6); `sum(x)` is then the ordinary not-callable
+   type error — **never a silent fallback to the builtin**.
+5. The effect bit follows the actual callee (S12.1): shadowing `pn print`
+   with an `fn` yields an fn, checked as such.
+6. The reserved core is un-shadowable **for free** via S16.10.1 (§7.24):
+   keywords and base-type words cannot be binding names, so `int()`,
+   `string()`, `float()`, `type()` stay intrinsic. Two tiers fall out of
+   existing rulings: a reserved core that can never be rebound, and an
+   open library namespace that is user-first.
+
+**Grounds, in decision order:**
+
+1. **Forward compatibility is the key issue** (user). Under user-first
+   resolution, adding a NEW sys func never changes the meaning of an
+   existing program — the user's same-named definition keeps winning. Under
+   sys-func-first or collision-error, every stdlib addition is a breaking
+   change for someone. Lambda's sys-func surface is deliberately still
+   growing (RF-series, S14.2 verbs and window functions), so this is the
+   rule that lets the library grow without MAJOR events.
+2. **Symmetry with S12.3.3**: member calls already resolve receiver-first,
+   with the same rationale — every builtin name would otherwise be a
+   latent trap in user code.
+3. **S1.11 references agree**: ECMAScript and Python both allow user
+   definitions to shadow builtins.
+4. **Zero cost, unlike JS**: no eval (S1.8), no reference cells or
+   monkey-patching (S9.1), static modules — so "is this name bound in this
+   module?" is decidable in `build_ast` per call site. Calls to unshadowed
+   builtins keep their intrinsic fast paths exactly; one resolution point
+   keeps both execution tiers in agreement.
+
+**Rejected alternative — collision = compile error.** It buys **maximum
+protection against silent capture**: a user redefining `len` with different
+semantics silently changes distant code in the same module, and a hard
+duplicate-definition error makes that impossible. But it freezes the stdlib
+namespace — every future sys-func name would collide with someone's
+existing definition, so the protection is bought at the price of the
+forward-compatibility property in ground 1, which is the key issue. The
+mandatory warning (point 2) recovers most of the silent-capture protection
+at none of the evolution cost.
+
+**Deliberately deferred**: a spelling to reach a shadowed builtin from
+inside the shadowing module (Python's `builtins.len`; ECMAScript has none
+and survives). If ever demanded it rides the module system as a prelude
+import, not new syntax — recorded as SO37.
+
 ---
 
 ## Appendix S — Superseded Rulings
@@ -2498,3 +2845,100 @@ mistake, making `if (c) {a: 1}` a syntax error and prescribing
 `if (c) ({a: 1})` as the repair. Any occurrence of that repair anywhere in
 the tree is Option 2 residue — the parens are unnecessary. The C parser
 still implements the erratum for the paren-head spelling (spec Appendix A).
+
+---
+
+## Appendix K — Keyword reference: which words may name a binding
+
+Generated from the ruling in **§7.24 / S16.10.1v2** and **verified against the
+running engine** on 2026-08-27 (each word compiled as `let <word> = 1`; the
+classifier is `lambda_lexer_word_bars_binding` in
+`lambda/runtime/parser/lambda_lexer.c`). Update this table whenever the
+keyword table changes.
+
+The dividing test: a word is **barred** when it is *capture-real* — it can
+BEGIN a construct, so a binding of that name could not be read back where the
+construct starts. A word is **allowed** when it only ever appears after
+something else.
+
+### K.1 Barred from binding names (60)
+
+Using one is `error[E201]` at the declaration site. This covers `let`/`var`
+names, parameters, `fn`/`pn`/`type`/`view` declaration names, and import
+aliases — with **no quoted escape** (§7.24 rule 1).
+
+| Group | Words |
+|---|---|
+| Declaration & statement keywords (21) | `let` `pub` `var` `type` `fn` `pn` `view` `edit` `state` `if` `match` `for` `while` `break` `continue` `return` `raise` `import` `apply` `not` `last` |
+| Base-type names (35) | `null` `any` `bool` `int` `integer` `float` `f64` `f32` `f16` `complex` `decimal` `number` `datetime` `date` `time` `binary` `range` `list` `array` `map` `element` `entity` `object` `function` `error` `string` `symbol` `i8` `i16` `i32` `i64` `u8` `u16` `u32` `u64` |
+| Named values (4) | `true` `false` `inf` `nan` |
+
+**`int64` is not on this list and is not a type.** `i64` is the one surface
+spelling (S2.1.1); `int64` is a concept name that the parser answers with
+`error[E204]: unknown type 'int64'; did you mean 'i64'?`, and `type()` now
+reports `i64` per S2.1.2's *aliases in, canon out*. `uint64` was already gone
+the same way. Because `int64` still lexes as a base-type word to power that
+suggestion, it also remains unusable as a binding name.
+
+`not` belongs here despite being an operator: it is **prefix**, so it can lead
+an expression, which is exactly the capture test.
+
+Two words are barred by **reservation rather than capture**, and are the only
+entries here that a reader cannot derive from the criterion:
+
+- **`state`** is a view-*signature* clause (`view int state count: 0 { … }`,
+  accepted right after the return type), so it never leads a statement and by
+  the criterion alone would be legal. It is held back deliberately: `state`
+  may become a standalone word — `expr is state`, `expr in state`,
+  `expr at state` — and a word cannot be reclaimed once programs bind it.
+- **`lambda`** is the namespace root (S17.2.2), reserved so the
+  `lambda.sys.*` shadow escape can never itself be captured. *(Not yet
+  enforced — item 2 of LR02-16.)* The base-type group is what
+makes `let type = 1` and `let int = 1` errors rather than the silent
+misreads they were before this ruling — both used to parse and then read the
+base type at the use site.
+
+### K.2 Allowed as binding names (28)
+
+Legal, and legal to shadow: these words carry no capture hazard because they
+never lead.
+
+| Group | Words |
+|---|---|
+| Clause words (11) — only meaningful inside a `for` header | `order` `by` `group` `into` `limit` `offset` `asc` `desc` `where` `that` `as` |
+| Infix word operators (13) — each takes a left operand | `and` `or` `to` `is` `in` `at` `div` `eq` `ne` `lt` `le` `ge` `gt` |
+| Continuation-only words (4) — claimed by an enclosing `if`/`match`/view | `else` `case` `default` `on` |
+
+This group is why `let offset = 5` and `fn f(limit)` have always worked, and
+keeping them legal is what held the S16.10.1v2 migration to ~52 corpus files
+instead of 332.
+
+**The clause reading has priority.** `else` `case` `default` `on` are legal
+binding names *and* keep their clause meaning: an enclosing `if`, `match`,
+`for`, or view body claims the word before an expression is parsed, so both
+readings coexist in one expression. Verified —
+`let case = 2` with `match 7 { case int: case + 1 default: 0 }` yields `3`
+(arm keyword, then binding), and `let default = 4` with
+`if (false) 1 else default` yields `4` (clause `else`, then binding
+`default`). A word allowed here must also *read* as a name in expression
+position; accepting a declaration whose every use fails is the defect
+S16.10.1v2 removes.
+
+**Caveat, unrelated to this ruling:** a legal binding may still be unreadable
+at a **line start**, because most of these words are S16.2.2v2 continuation
+tokens. `let at = 4` is fine, but a following line beginning with `at`
+continues the previous expression; read it inline (`let y = at + 1`).
+
+### K.3 Not covered by the bar
+
+- **Data names are unaffected** (S16.10.2): map keys, element tags, and
+  attribute names admit every word in K.1 — `{type: 1}`, `<if a:1, "x">`,
+  `<div class:"a">`. So do member steps after `.` (S16.10.3).
+- **Declaration members are data names, not bindings**: in
+  `type T { a: int, fn f() {} }` only `T` is a binding; fields *and* methods
+  may use any word in K.1 (see §7.24's clarification).
+- **`lambda` is reserved by S17.2.2 but not yet enforced** — it still tests
+  as allowed. Adding it is item 2 of LR02-16; it protects the
+  `lambda.sys.*` shadow escape from being captured. `sys` is deliberately
+  *not* reserved: system functions live under `lambda.sys.*`, not a bare
+  `sys` root.

@@ -163,7 +163,7 @@ static void js_document_session_init(JsDocumentSession* session) {
 
 static bool js_document_session_start(JsDocumentSession* session, DomDocument* dom_doc) {
     if (!session || !dom_doc) return false;
-    if (ui_context_init(&session->uicon, true) != 0) {
+    if (ui_context_init(&session->uicon, true, 1.0f) != 0) {
         log_error("[JS-DOM-LAYOUT] failed to initialize headless UI context");
         return false;
     }
@@ -261,7 +261,54 @@ static bool js_batch_document_start(Runtime* runtime, JsBatchDocument* job,
 }
 
 #if !defined(_WIN32)
-static const size_t JS_CLI_STACK_SIZE = 256 * 1024 * 1024;
+static const size_t JS_EXECUTION_STACK_SIZE = 256 * 1024 * 1024;
+
+static int lambda_main_impl(int argc, char* argv[]);
+
+// js-test-batch keeps its recovery jump buffers on the executing thread. Run
+// the entire command, not an individual source evaluation, on one large stack
+// so recursive AST calls recover on the same thread that installed the guard.
+static __thread bool js_batch_execution_stack_active = false;
+
+struct JsBatchStackArgs {
+    int argc;
+    char** argv;
+    int result;
+};
+
+static void* js_batch_run_on_stack_thread(void* opaque) {
+    JsBatchStackArgs* args = (JsBatchStackArgs*)opaque;
+    if (!args) return NULL;
+    js_batch_execution_stack_active = true;
+    args->result = lambda_main_impl(args->argc, args->argv);
+    return NULL;
+}
+
+static int js_batch_run_with_execution_stack(int argc, char* argv[]) {
+    JsBatchStackArgs args = {argc, argv, 1};
+    pthread_attr_t attr;
+    if (pthread_attr_init(&attr) != 0) {
+        log_error("js-batch-stack: pthread_attr_init failed");
+        return lambda_main_impl(argc, argv);
+    }
+    if (pthread_attr_setstacksize(&attr, JS_EXECUTION_STACK_SIZE) != 0) {
+        log_error("js-batch-stack: pthread_attr_setstacksize failed");
+        pthread_attr_destroy(&attr);
+        return lambda_main_impl(argc, argv);
+    }
+    pthread_t thread;
+    int create_rc = pthread_create(&thread, &attr, js_batch_run_on_stack_thread, &args);
+    pthread_attr_destroy(&attr);
+    if (create_rc != 0) {
+        log_error("js-batch-stack: pthread_create failed");
+        return lambda_main_impl(argc, argv);
+    }
+    if (pthread_join(thread, NULL) != 0) {
+        log_error("js-batch-stack: pthread_join failed");
+        return 1;
+    }
+    return args.result;
+}
 
 struct JsCliRunArgs {
     Runtime* runtime;
@@ -290,6 +337,8 @@ static void* js_cli_run_on_stack_thread(void* arg) {
         run_args->runtime, run_args->source, run_args->source_len, run_args->filename,
         run_args->result_home);
     if (eval_context->js_state) js_runtime_state_shutdown(eval_context);
+    // Restore this worker's host signal stack before pthread teardown.
+    lambda_stack_cleanup();
     // The large-stack worker is an eval-thread lifetime boundary. Cleanup
     // starts only after join, when the caller acquires the same owner.
     eval_context_shutdown(eval_context);
@@ -313,7 +362,7 @@ static Item js_cli_transpile_with_execution_stack(
         log_error("js-cli-stack: pthread_attr_init failed");
         return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
     }
-    if (pthread_attr_setstacksize(&attr, JS_CLI_STACK_SIZE) != 0) {
+    if (pthread_attr_setstacksize(&attr, JS_EXECUTION_STACK_SIZE) != 0) {
         log_error("js-cli-stack: pthread_attr_setstacksize failed");
         pthread_attr_destroy(&attr);
         return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
@@ -1087,6 +1136,51 @@ static char* build_pdf_to_html_bridge_script(const char* pdf_file, const char* o
     return script_buf;
 }
 
+static char* build_latex_to_html_bridge_script(const char* latex_file,
+                                               bool full_document,
+                                               const char* font_option,
+                                               const char* log_prefix) {
+    char* escaped_latex = lambda_string_literal_escape(latex_file);
+    if (!escaped_latex) {
+        log_error("[%s] LaTeX package: failed to escape input path", log_prefix);
+        return nullptr;
+    }
+
+    const char* standalone = full_document ? "true" : "false";
+    const char* font = font_option ? font_option : "default";
+    bool has_options = full_document || font_option;
+    const char* format = has_options ?
+        "import latex: .lambda.package.latex.latex\n"
+        "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
+        "latex.render_to_html(ast, {standalone: %s, font_option: \"%s\"})\n" :
+        "import latex: .lambda.package.latex.latex\n"
+        "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
+        "latex.render_to_html(ast, null)\n";
+    int needed = has_options
+        ? snprintf(nullptr, 0, format, escaped_latex, standalone, font)
+        : snprintf(nullptr, 0, format, escaped_latex);
+    if (needed <= 0) {
+        mem_free(escaped_latex);
+        log_error("[%s] LaTeX package: failed to size bridge script", log_prefix);
+        return nullptr;
+    }
+
+    char* script_buf = (char*)mem_alloc((size_t)needed + 1, MEM_CAT_TEMP);
+    if (!script_buf) {
+        mem_free(escaped_latex);
+        log_error("[%s] LaTeX package: failed to allocate bridge script", log_prefix);
+        return nullptr;
+    }
+    if (has_options) {
+        snprintf(script_buf, (size_t)needed + 1, format,
+            escaped_latex, standalone, font);
+    } else {
+        snprintf(script_buf, (size_t)needed + 1, format, escaped_latex);
+    }
+    mem_free(escaped_latex);
+    return script_buf;
+}
+
 static bool write_pdf_to_html_bridge_script(const char* pdf_file, const char* tmp_script_path,
                                             const char* opts_expr, const char* log_prefix) {
     char* script_buf = build_pdf_to_html_bridge_script(pdf_file, opts_expr, log_prefix);
@@ -1443,27 +1537,13 @@ int exec_convert(int argc, char* argv[]) {
                 }
             } else if (is_latex_input) {
                 printf("Using Lambda LaTeX package pipeline\n");
-
-                // Build a Lambda script that imports the LaTeX package
-                // and renders the file to HTML
-                char script_buf[4096];
-                const char* standalone_opt = ", null";
-                char options_buf[128];
-                if (full_document || font_option) {
-                    snprintf(options_buf, sizeof(options_buf),
-                             ", {standalone: %s, font_option: \"%s\"}",
-                             full_document ? "true" : "false",
-                             font_option ? font_option : "default");
-                    standalone_opt = options_buf;
+                char* script_buf = build_latex_to_html_bridge_script(
+                    input_file, full_document, font_option, "convert");
+                if (script_buf) {
+                    full_doc_output = exec_convert_lambda_html(
+                        script_buf, "convert_latex_bridge");
+                    mem_free(script_buf);
                 }
-                snprintf(script_buf, sizeof(script_buf),
-                    "import latex: .lambda.package.latex.latex\n"
-                    "let ast = input(\"%s\", {type: \"latex\"}) ^ { null }\n"
-                    "latex.render_to_html(ast%s)\n",
-                    input_file, standalone_opt);
-
-                full_doc_output = exec_convert_lambda_html(
-                    script_buf, "convert_latex_bridge");
                 if (!full_doc_output) {
                     printf("Error: Lambda LaTeX package - HTML rendering failed\n");
                     LambdaError* last_error = get_persistent_last_error();
@@ -1997,7 +2077,7 @@ static bool apply_common_mir_option(const char* arg, Runtime* runtime) {
     return false;
 }
 
-int main(int argc, char *argv[]) {
+static int lambda_main_impl(int argc, char *argv[]) {
 #ifdef _WIN32
     // Set console to UTF-8 for proper Unicode display on Windows
     SetConsoleOutputCP(CP_UTF8);
@@ -4154,10 +4234,11 @@ int main(int argc, char *argv[]) {
         // allocation and can safely siglongjmp back to the recovery point.
         static char alt_stack_mem[131072];  // 128KB generous alt stack
         stack_t alt_stack;
+        stack_t previous_alt_stack;
         alt_stack.ss_sp = alt_stack_mem;
         alt_stack.ss_size = sizeof(alt_stack_mem);
         alt_stack.ss_flags = 0;
-        sigaltstack(&alt_stack, NULL);
+        sigaltstack(&alt_stack, &previous_alt_stack);
 #endif
 
         // Set up a persistent EvalContext with pre-initialized heap (hot reload mode).
@@ -4744,6 +4825,10 @@ int main(int argc, char *argv[]) {
         sigaction(SIGBUS, &old_bus_sa, NULL);
         sigaction(SIGABRT, &old_abrt_sa, NULL);
         sigaction(SIGTRAP, &old_trap_sa, NULL);
+        // An execution-stack worker must restore ASan's alternate stack before
+        // pthread teardown; retaining the batch stack makes its interceptor
+        // attempt to unmap static storage as a dynamic signal stack.
+        sigaltstack(&previous_alt_stack, NULL);
 #endif
 
         // Diagnostic: log if the batch exited the while loop unexpectedly
@@ -4965,6 +5050,16 @@ int main(int argc, char *argv[]) {
     // memtrack_shutdown runs in lambda_main_finish after normal cleanup.
 
     return lambda_main_finish(ret_code);
+}
+
+int main(int argc, char* argv[]) {
+#if !defined(_WIN32)
+    if (argc >= 2 && strcmp(argv[1], "js-test-batch") == 0 &&
+            !js_batch_execution_stack_active) {
+        return js_batch_run_with_execution_stack(argc, argv);
+    }
+#endif
+    return lambda_main_impl(argc, argv);
 }
 #if defined(_WIN32)
 // Windows PE executables do not publish their host symbols by default; the

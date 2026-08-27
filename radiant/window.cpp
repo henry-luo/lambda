@@ -37,7 +37,7 @@ extern "C" {
 }
 
 extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc);
-extern "C" void radiant_drain_behavior_attach(void);
+void radiant_run_behavior_init(DomDocument* doc);
 extern "C" void js_batch_reset(void);
 extern "C" void js_dom_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
@@ -441,16 +441,13 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     if (doc->root) {
         layout_html_doc(&ui_context, doc, false);
     }
+    // ES19: the init phase sits between layout and render. Positioned, not
+    // gated on paint — the render below may be skipped, the init may not be.
+    radiant_run_behavior_init(doc);
     // render html doc
     if (doc && doc->view_tree) {
         log_debug("html version: %d", doc->view_tree->html_version);
         render_html_doc(&ui_context, doc->view_tree, NULL);
-        // Controls initialize lazily during render (tc_ensure_init), so their
-        // queued `init` turn runs here, after paint, at a quiescent point. The
-        // batch layout/render path never comes through window.cpp, which is
-        // what makes this drain safe where the layout-commit one was not
-        // (ESO33).
-        radiant_drain_behavior_attach();
     }
     return doc;
 }
@@ -850,18 +847,15 @@ void render(GLFWwindow* window) {
         log_debug("Incremental reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
 
+    // ES19: init before the repaint test, not inside it — a control added by a
+    // reflow that produced no dirty region still owes its `init` turn.
+    radiant_run_behavior_init(ui_context.document);
     // rerender if the document is dirty or needs repaint (e.g., caret changed)
     if (ui_context.document && ui_context.document->state &&
         (ui_context.document->state->is_dirty ||
          (ui_context.document->state->needs_repaint &&
           dirty_has_regions(&ui_context.document->state->dirty_tracker)))) {
         render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
-        // Controls initialize lazily during render (tc_ensure_init), so their
-        // queued `init` turn runs here, after paint, at a quiescent point. The
-        // batch layout/render path never comes through window.cpp, which is
-        // what makes this drain safe where the layout-commit one was not
-        // (ESO33).
-        radiant_drain_behavior_attach();
         // Phase 19: clear dirty tracker after render (for caret-only repaints)
         doc_state_clear_render_flags(ui_context.document->state);
     } else if (ui_context.document && ui_context.document->state) {
@@ -948,7 +942,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, source: %s, event_file: %s, headless: %d",
              doc_file ? doc_file : "NULL", doc_source ? "memory" : "file",
              event_file ? event_file : "NULL", headless);
-    ui_context_init(&ui_context, headless);
+    ui_context_init(&ui_context, headless, 0.0f);
     ui_context.event_log_enabled = enable_event_log;
     ui_context.state_dump_enabled = enable_state_dump;
 
@@ -1211,15 +1205,10 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         }
         log_notice("view: layout complete, rendering...");
         // Render document
+        radiant_run_behavior_init(doc);   // ES19: layout -> init -> render
         if (doc && doc->view_tree) {
             log_mem_stage("before-render");
             render_html_doc(&ui_context, doc->view_tree, NULL);
-        // Controls initialize lazily during render (tc_ensure_init), so their
-        // queued `init` turn runs here, after paint, at a quiescent point. The
-        // batch layout/render path never comes through window.cpp, which is
-        // what makes this drain safe where the layout-commit one was not
-        // (ESO33).
-        radiant_drain_behavior_attach();
             log_mem_stage("after-render");
         }
         log_notice("view: render complete");

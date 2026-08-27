@@ -5291,7 +5291,7 @@ int cmd_layout(int argc, char** argv) {
     UiContext ui_context;
     memset(&ui_context, 0, sizeof(UiContext));
 
-    if (ui_context_init(&ui_context, true) != 0) {
+    if (ui_context_init(&ui_context, true, 1.0f) != 0) {
         log_error("Failed to initialize UI context");
         return 1;
     }

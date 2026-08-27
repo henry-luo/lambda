@@ -555,15 +555,17 @@ static int count_elements_by_selector(DomDocument* doc, const char* selector_tex
 // Get absolute position center of an element
 static void get_element_center_abs(View* view, float* cx, float* cy) {
     if (!view) { *cx = 0; *cy = 0; return; }
-    float abs_x = 0, abs_y = 0;
-    View* current = view;
-    while (current) {
-        abs_x += current->x;
-        abs_y += current->y;
-        current = static_cast<View*>(current->parent);
-    }
-    *cx = abs_x + view->width / 2;
-    *cy = abs_y + view->height / 2;
+    // Same geometry the rect helper reports. This was left on the old
+    // parent-chain sum when get_element_rect_abs moved to visual bounds, so a
+    // click aimed at a selector could land somewhere else entirely — an inline
+    // control inside a label picked up ancestor offsets that are not part of
+    // its box. `input#radio-b` resolved to x=212 against a real box at x≈108,
+    // landing on the container div, and the harness's fallback toggle then hid
+    // the miss by synthesizing the activation.
+    float x, y, w, h;
+    view_get_visual_bounds(view, &x, &y, &w, &h);
+    *cx = x + w / 2;
+    *cy = y + h / 2;
 }
 
 // Get element absolute bounding rect (x, y, width, height)
@@ -905,37 +907,6 @@ static bool sim_is_checkbox_or_radio(View* view) {
     if (elem->tag() != MARKUP_NAME_INPUT) return false;
     const char* type = elem->get_attribute("type");
     return type && (strcmp(type, "checkbox") == 0 || strcmp(type, "radio") == 0);
-}
-
-// writer-backed toggle of checkbox/radio state for selector-resolved controls.
-// Used when event simulator clicks a selector-resolved form control.
-static void sim_toggle_checkbox_radio(View* input, DocState* state) {
-    if (!input || !input->is_element()) return;
-    ViewElement* elem = lam::view_require_element(input);
-    const char* type = elem->get_attribute("type");
-    if (!type) return;
-
-    if (strcmp(type, "checkbox") == 0) {
-        bool is_checked = form_control_get_checked(state, input);
-        bool new_state = !is_checked;
-        form_control_set_checked(state, input, new_state);
-        log_info("event_sim: toggled checkbox to %s", new_state ? "checked" : "unchecked");
-    }
-    else if (strcmp(type, "radio") == 0) {
-        bool is_checked = form_control_get_checked(state, input);
-        if (!is_checked) {
-            // Uncheck other radios in the same group
-            const char* name = elem->get_attribute("name");
-            if (name) {
-                View* root = input;
-                while (root->parent) root = root->parent;
-                radiant_uncheck_radio_group(root, name, input, state, false);
-            }
-            // Check this radio
-            form_control_set_checked(state, input, true);
-            log_info("event_sim: checked radio button");
-        }
-    }
 }
 
 // Extract visible text from a view tree recursively
@@ -4142,21 +4113,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         // ===== High-level actions =====
 
         case SIM_EVENT_CLICK: {
-            // For selector-targeted checkbox/radio, check state before click
-            // to detect if the coordinate-based click already handled the toggle
-            View* form_elem = nullptr;
-            bool was_checked = false;
-            if (ev->target_selector) {
-                DomDocument* doc = uicon->document;
-                form_elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
-                if (form_elem && sim_is_checkbox_or_radio(form_elem)) {
-                    DocState* state = doc ? (DocState*)doc->state : nullptr;
-                    was_checked = state_get_pseudo_state(state, form_elem, PSEUDO_STATE_CHECKED);
-                } else {
-                    form_elem = nullptr;
-                }
-            }
-
             int x, y;
             if (!resolve_target(ev, uicon->document, &x, &y)) break;
             log_info("event_sim: click at (%d, %d) button=%d", x, y, ev->button);
@@ -4164,26 +4120,14 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
 
-            // If the coordinate click didn't toggle the checkbox/radio, do it directly
-            if (form_elem) {
-                DocState* state = (DocState*)uicon->document->state;
-                bool is_checked_now = state_get_pseudo_state(state, form_elem, PSEUDO_STATE_CHECKED);
-                if (is_checked_now == was_checked) {
-                    bool has_inline_click_handler = false;
-                    if (form_elem->is_element()) {
-                        DomElement* elem = lam::dom_require_element(form_elem);
-                        has_inline_click_handler = elem->has_attribute("onclick");
-                    }
-                    // State didn't change — coordinate click may have missed the
-                    // element. Do not synthesize a fallback toggle when an inline
-                    // click handler is present; `return false` intentionally keeps
-                    // checkbox/radio state unchanged.
-                    if (!has_inline_click_handler && state &&
-                        !state_get_pseudo_state(state, form_elem, PSEUDO_STATE_DISABLED)) {
-                        sim_toggle_checkbox_radio(form_elem, state);
-                    }
-                }
-            }
+            // No fallback toggle here. The harness used to synthesize the
+            // activation when a click left checkedness unchanged, on the theory
+            // that the coordinate must have missed — but "unchanged" is
+            // ambiguous between a missed coordinate, a legitimately prevented
+            // default (ESO26), and the activation simply not working. It turned
+            // failing tests green, and hid a real coordinate bug on
+            // `input#radio-b` for as long as it existed. A click that changes
+            // nothing is now a test failure, which is what it always was.
             break;
         }
 
@@ -4298,14 +4242,29 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             DocState* state = (DocState*)doc->state;
             bool is_checked = state_get_pseudo_state(state, elem, PSEUDO_STATE_CHECKED);
-            if (is_checked != ev->expected_checked) {
-                if (state && !state_get_pseudo_state(state, elem, PSEUDO_STATE_DISABLED)) {
-                    sim_toggle_checkbox_radio(elem, state);
-                    log_info("event_sim: check - toggled to %s", ev->expected_checked ? "checked" : "unchecked");
-                }
-            } else {
+            if (is_checked == ev->expected_checked) {
                 log_info("event_sim: check - already %s, no action needed", is_checked ? "checked" : "unchecked");
+                break;
             }
+            if (state && state_get_pseudo_state(state, elem, PSEUDO_STATE_DISABLED)) {
+                log_info("event_sim: check - target disabled, no action taken");
+                break;
+            }
+            // `check` reaches the desired state by clicking, not by writing
+            // checkedness behind the engine's back. The behavior template owns
+            // activation and, for radio, the group-exclusivity walk (F1); a
+            // harness that wrote the state directly carried a second copy of
+            // that policy which no test could see diverge. Semantics are
+            // unchanged — this is still "ensure state X", it just gets there the
+            // way a user would. A radio cannot be unchecked by clicking, which
+            // the direct writer could not do either.
+            int cx, cy;
+            if (!resolve_target(ev, doc, &cx, &cy)) break;
+            log_info("event_sim: check - clicking (%d, %d) to reach %s", cx, cy,
+                     ev->expected_checked ? "checked" : "unchecked");
+            sim_mouse_move(uicon, cx, cy);
+            sim_mouse_button(uicon, cx, cy, ev->button, ev->mods, true);
+            sim_mouse_button(uicon, cx, cy, ev->button, ev->mods, false);
             break;
         }
 
@@ -4353,18 +4312,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             DocState* state = (DocState*)doc->state;
-            form_control_set_selected_index(state, static_cast<View*>(select), match_index);
-            // user-like select changes must notify JS with selectedness already
-            // mirrored into js_dom; otherwise onchange sees the stale value.
+            // Resolving which option matches is the harness's job; committing it
+            // is not. This dispatches the same `optioncommit` the pointer and
+            // keyboard paths use, and the template both selects the option and
+            // closes the dropdown, so no explicit close is needed here.
             radiant_dispatch_event_sim_select_change(uicon, static_cast<View*>(select),
                                                      match_index);
-            if (state) {
-                // Close dropdown if open
-                if (state->open_dropdown == select_view) {
-                    doc_state_close_dropdown(state, static_cast<View*>(select));
-                }
-                doc_state_request_repaint(state);
-            }
+            if (state) doc_state_request_repaint(state);
             log_info("event_sim: select_option - selected index %d", match_index);
             break;
         }
@@ -4709,7 +4663,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            bool actual_active = dom_elem->form->password_reveal_active != 0;
+            DocState* reveal_state = (DocState*)uicon->document->state;
+            uint32_t actual_reveal_start = 0, actual_reveal_end = 0;
+            bool actual_active = form_control_password_reveal_get(
+                reveal_state, elem, &actual_reveal_start, &actual_reveal_end);
             bool passed = true;
             if (actual_active != ev->expected_password_reveal_active) {
                 log_error("event_sim: assert_password_reveal FAIL - active expected %s, got %s",
@@ -4718,17 +4675,17 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 passed = false;
             }
             if (ev->expected_char_offset >= 0 &&
-                dom_elem->form->password_reveal_start != (uint32_t)ev->expected_char_offset) {
+                actual_reveal_start != (uint32_t)ev->expected_char_offset) {
                 log_error("event_sim: assert_password_reveal FAIL - start expected %d, got %u",
                           ev->expected_char_offset,
-                          dom_elem->form->password_reveal_start);
+                          actual_reveal_start);
                 passed = false;
             }
             if (ev->expected_selection_end >= 0 &&
-                dom_elem->form->password_reveal_end != (uint32_t)ev->expected_selection_end) {
+                actual_reveal_end != (uint32_t)ev->expected_selection_end) {
                 log_error("event_sim: assert_password_reveal FAIL - end expected %d, got %u",
                           ev->expected_selection_end,
-                          dom_elem->form->password_reveal_end);
+                          actual_reveal_end);
                 passed = false;
             }
             if (passed) {

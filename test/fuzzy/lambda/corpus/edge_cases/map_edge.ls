@@ -50,7 +50,7 @@ let access3 = value_types.arr_val[0]
 let access4 = value_types.fn_val(10)
 
 // Nested maps with arrays
-let complex = {
+let cplx = {
     users: [
         {name: "Alice", age: 30, tags: ["admin", "user"]},
         {name: "Bob", age: 25, tags: ["user"]}
@@ -64,9 +64,9 @@ let complex = {
     }
 }
 
-let test1 = complex.users[0].name
-let test2 = complex.settings.notifications.email
-let test3 = len(complex.users[1].tags)
+let test1 = cplx.users[0].name
+let test2 = cplx.settings.notifications.email
+let test3 = len(cplx.users[1].tags)
 
 // Map with function values
 let ops = {

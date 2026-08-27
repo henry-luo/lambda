@@ -247,6 +247,9 @@ typedef struct {
     float e31, e32, e33;   // row 3: 0, 0, 1
 } RdtMatrix;
 
+// Per-view CSS transform matrix, for painted bounds and for hit-testing.
+bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
+
 static inline RdtMatrix rdt_matrix_identity(void) {
     RdtMatrix m = { 1, 0, 0,  0, 1, 0,  0, 0, 1 };
     return m;
@@ -2651,10 +2654,6 @@ struct FormControlProp {
     float    scroll_y;
     float    caret_blink_t;
     uint8_t  caret_on : 1;
-    uint8_t  password_reveal_active : 1;
-    uint32_t password_reveal_start;
-    uint32_t password_reveal_end;
-    double   password_reveal_elapsed;
 
 
     // FormControlProp is a POD (no C++ ctor/dtor) per the C+ convention; use
@@ -3224,7 +3223,7 @@ typedef struct UiContext {
                             // operations use the in-process ClipboardStore only and do NOT touch
                             // the OS pasteboard via GLFW (avoids cross-process races in tests).
 
-    int init(bool headless);
+    int init(bool headless, float requested_pixel_ratio = 0.0f);
     void create_surface(int pixel_width, int pixel_height);
     void destroy_document();
     void destroy();

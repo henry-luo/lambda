@@ -1,5 +1,7 @@
 # Lambda Runtime — Numbers, Decimal & DateTime
 
+> **Last verified against tree:** 2026-08-24 *(initial stamp from git history)*
+
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the semantic numeric tower, the shared type-directed classifier, sized-machine arithmetic, flex-`int` overflow, decimal/`integer` arithmetic backed by **libmpdec**, and owner-backed `DateTime`. It owns the *operations*; physical representation is owned by [LR_03 — Value & Type Model](LR_03_Value_and_Type_Model.md). The normative rules are [Lambda Formal Semantics §4](../../Lambda_Formal_Semantics.md#4-numerics) and `vibe/Lambda_Semantics_Number_Model.md`; `vibe/impl/Lambda_Impl_Numbers.md` records the completed 2026-07-20 realignment.
 >
 > **Primary sources:** `lambda/lambda-number.hpp` (shared numeric kinds, operation families, joins, sized-lane selection, overflow policy), `lambda/lambda-number-types.hpp` and `lambda/lambda-number-runtime.hpp` (static/runtime adapters), `lambda/lambda-eval-num.cpp` (the `fn_*` execution paths and conversions), `lambda/lambda-decimal.cpp` + `lambda/lambda-decimal.hpp` (all decimal/BigInt via mpdecimal), and `lib/datetime.h` / `lib/datetime.c`, `lambda/lambda-eval.cpp`, and `lambda/mark_builder.cpp` (dynamic-GC and static-arena datetime construction and operations).

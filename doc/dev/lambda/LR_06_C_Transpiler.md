@@ -1,5 +1,7 @@
 # Lambda Runtime — The C Transpiler (legacy C2MIR backend)
 
+> **Last verified against tree:** 2026-08-24 *(initial stamp from git history)*
+
 > **Part of the [Lambda core-runtime detailed-design set](LR_00_Overview.md).** This document covers the **legacy code-generation backend**: how the typed AST is lowered to **C source text** that is then handed to an embedded C compiler (c2mir) to produce MIR IR, which the JIT generator turns into native code. It owns the `Transpiler` struct and its `StrBuf` emission model, the per-node `transpile_*` family, the generated-C naming conventions, the `TypeBoxInfo` box/unbox table, the `lambda-embed.h` header-prepend trick, the `define_func`/`define_func_boxed` wrappers, the `_store_i64`/`_store_f64` SSA-reorder workaround, the `is_idiv_expr` unbox case, and the call-site parameter inference. The *default* backend — AST lowered directly to MIR with no C text — is a separate document, [LR_07 — The MIR Direct Transpiler & JIT](LR_07_MIR_Transpiler_JIT.md); this doc deliberately contrasts with it rather than repeating it.
 >
 > **Historical primary sources:** the former `lambda/runtime/transpile.cpp`, `transpile-call.cpp`, `lambda-embed.h`, and `jit_compile_to_mir` entry in `mir.c` (all removed). `lambda/transpile_shared.cpp` remains only for active MIR Direct helpers.

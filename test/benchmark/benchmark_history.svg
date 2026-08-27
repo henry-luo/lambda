@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="900" viewBox="0 0 1360 900" role="img" aria-labelledby="chart-title chart-desc">
+  <title id="chart-title">Lambda Benchmark History: Geometric Mean versus Node.js</title>
+  <desc id="chart-desc">Line chart of benchmark-session geometric means relative to Node.js from Result through Result35, omitting partial Results5 through Result8 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.</desc>
+  <metadata id="benchmark-history-data"><![CDATA[{"metric":"geometric mean of engine time divided by Node.js time","y_scale":"log10, 0.1x to 100x","session_labels":["Result","Result2","Result3","Result4","Result9","Result10","Result11","Result12","Result13","Result14","Result15","Result16","Result17","Result18","Result19","Result20","Result21","Result22","Result23","Result24","Result25","Result26","Result27","Result28","Result29","Result30","Result31","Result32","Result33","Result34","Result35"],"omitted_sessions":["Result5","Result6","Result7","Result8"],"month_groups":[{"label":"Feb 26","start":"Result","end":"Result"},{"label":"Mar 26","start":"Result2","end":"Result4"},{"label":"Jun 26","start":"Result9","end":"Result9"},{"label":"Jul 26","start":"Result10","end":"Result18"},{"label":"Aug 26","start":"Result19","end":"Result35"}],"series":{"Lambda untyped":[null,null,null,null,null,null,null,null,null,null,null,6.16,2.65,2.55,4.49,4.26,3.17,2.75,2.7,2.65,2.32,2.25,2.14,1.97,1.84,1.96,1.95,1.81,1.41,1.35,1.26],"Lambda typed":[null,0.83,1.14,1.05,4.31,8.6,4.28,3.01,2.94,2.9,2.92,2.31,1.91,1.87,3.19,4.07,2.85,2.27,1.91,1.68,1.32,1.26,1.26,1.07,0.99,1.06,1.04,0.85,0.83,0.8,0.73],"LambdaJS":[null,0.5,8.78,7.93,13.1,20.1,21.1,15.1,15.4,14.9,13.8,13.2,13.5,13.6,22.2,24.2,15.5,15.3,15.4,15.5,16,16,16.1,16.7,45.8,30.2,30.4,31.5,30.8,30.6,30.8],"QuickJS":[null,5.92,7.98,7.98,7.58,7.74,7.1,7,7.45,7.28,7.39,7.38,7.37,7.44,6.92,7.28,7.26,7.23,7.2,7.22,7.3,7.25,7.23,7.38,6.9,7.37,7.44,7.37,7.38,7.32,7.37],"Python":[null,null,13.1,13.1,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],"Go":[null,null,null,null,null,null,null,null,null,null,null,null,null,0.2,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],"Node.js":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],"C2MIR":[null,null,null,null,null,null,null,null,null,null,null,null,null,0.18,null,null,0.18,0.17,0.17,null,0.15,0.15,0.15,0.16,0.14,0.16,0.16,0.16,0.16,0.15,0.16]},"sources":{"Result2":"Overall_Result2.md (Overall raw for Lambda typed/QuickJS; LambdaJS geo recomputed from displayed timing tables)","Result3":"Overall_Result3.md (MIR Overall dedup; LambdaJS and Python geo means recomputed from displayed timing tables)","Result4":"Overall_Result4.md (MIR Overall dedup; LambdaJS and Python geo means recomputed from displayed timing tables)","Result9_to_35":"Overall_Result9.md through Overall_Result35.md (default Overall/Overall dedup rows)"},"interpretation":"Single-MIR sessions without a typed/untyped split are plotted as Lambda typed. Results5-8 are partial tests and are omitted from the axis. The C2MIR series begins at Result18 because Results2-4 use Lambda scripts through the C2MIR transpiler, while Result18 onward reports native C benchmark ports. Python is reported in Results3-4; Go is reported in Result18. Node.js is the 1.0x reference line.","title":"Lambda Benchmark History","description":"Line chart of benchmark-session geometric means relative to Node.js from Result through Result35, omitting partial Results5 through Result8 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.","session_dates":{"Result":"2026-02-21","Result2":"2026-03-07","Result3":"2026-03-09","Result4":"2026-03-19","Result9":"2026-06-27","Result10":"2026-07-22","Result11":"2026-07-24","Result12":"2026-07-24","Result13":"2026-07-26","Result14":"2026-07-26","Result15":"2026-07-27","Result16":"2026-07-28","Result17":"2026-07-29","Result18":"2026-07-29","Result19":"2026-08-05","Result20":"2026-08-05","Result21":"2026-08-05","Result22":"2026-08-06","Result23":"2026-08-06","Result24":"2026-08-07","Result25":"2026-08-07","Result26":"2026-08-08","Result27":"2026-08-08","Result28":"2026-08-10","Result29":"2026-08-13","Result30":"2026-08-16","Result31":"2026-08-17","Result32":"2026-08-17","Result33":"2026-08-18","Result34":"2026-08-21","Result35":"2026-08-26"},"layout":{"width":1360,"height":900,"card_x":44,"card_y":22,"card_width":1250,"card_height":870,"plot_x_min":105,"plot_x_max":1520,"plot_y_min":150,"plot_y_max":735,"x_transform_anchor":84,"x_transform_scale":0.82,"x_tick_label_y":753,"x_tick_label_angle":58,"month_label_y":171,"x_axis_label_x":681.37,"x_axis_label_y":805,"y_axis_label_x":24,"y_axis_label_y":442.5,"y_ticks":[100,50,20,10,5,2,1,0.5,0.2,0.1]},"legend_items":[{"key":"Lambda untyped","x":84},{"key":"Lambda typed","x":278},{"key":"LambdaJS","x":465},{"key":"QuickJS","x":628},{"key":"Python","x":760},{"key":"Go","x":878},{"key":"Node.js","x":965},{"key":"C2MIR","x":1080}],"series_style":{"Lambda untyped":{"color":"#2563eb","stroke_width":3,"show_points":true},"Lambda typed":{"color":"#7c3aed","stroke_width":3,"show_points":true},"LambdaJS":{"color":"#dc2626","stroke_width":3,"show_points":true},"QuickJS":{"color":"#fbbd00","stroke_width":3,"show_points":true},"Python":{"color":"#c026d3","stroke_width":3,"show_points":true},"Go":{"color":"#0891b2","stroke_width":3,"show_points":true},"Node.js":{"color":"#64748b","stroke_width":2.2,"dasharray":"8 6","show_points":false},"C2MIR":{"color":"#16a34a","stroke_width":3,"show_points":true}},"inline_labels":{"Lambda untyped":{"x":1100,"y":461},"Lambda typed":{"x":525,"y":430},"LambdaJS":{"x":820,"y":264},"QuickJS":{"x":850,"y":363},"Python":{"x":205,"y":313},"Go":{"x":735,"y":668},"Node.js":{"x":790,"y":532},"C2MIR":{"x":1110,"y":690}},"dividers":[{"after":"Result15","before":"Result16","label":"typed split"},{"after":"Result17","before":"Result18","label":"native C2MIR transition"}],"c2mir_gap_bridges":[{"from":"Result18","to":"Result21","note":"missing Results19–20"},{"from":"Result23","to":"Result25","note":"missing Result24"}],"notes":["Results5–8 were partial tests and are omitted from the x-axis.","Single-MIR sessions without a typed/untyped split are assigned to Lambda typed. Missing common-engine measurements are intentionally shown as gaps.","C2MIR starts at Result18: earlier C2MIR values were Lambda scripts through the transpiler; later values are native C benchmark ports.","Python points are available in Results3–4; Go is available in Result18. Vertical dividers mark the typed split and native-C2MIR transition."]}]]></metadata>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <rect width="1360" height="900" fill="#ffffff"/>
+  <rect x="44" y="22" width="1250" height="870" rx="12" fill="#ffffff" filter="url(#shadow)"/>
+  <text x="84" y="51" fill="#0f172a" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="26" font-weight="700">Lambda Benchmark History</text>
+  <text x="84" y="75" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="14">Geometric mean of engine time / Node.js time · lower than 1.0× is faster</text>
+  <line x1="84.00" y1="132" x2="114.00" y2="132" stroke="#2563eb" stroke-width="3.5" stroke-linecap="round"/>
+  <text x="124.00" y="137" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">Lambda untyped</text>
+  <line x1="278.00" y1="132" x2="308.00" y2="132" stroke="#7c3aed" stroke-width="3.5" stroke-linecap="round"/>
+  <text x="318.00" y="137" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">Lambda typed</text>
+  <line x1="465.00" y1="132" x2="495.00" y2="132" stroke="#dc2626" stroke-width="3.5" stroke-linecap="round"/>
+  <text x="505.00" y="137" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">LambdaJS</text>
+  <line x1="628.00" y1="132" x2="658.00" y2="132" stroke="#fbbd00" stroke-width="3.5" stroke-linecap="round"/>
+  <text x="668.00" y="137" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">QuickJS</text>
+  <line x1="760.00" y1="132" x2="790.00" y2="132" stroke="#c026d3" stroke-width="3.5" stroke-linecap="round"/>
+  <text x="800.00" y="137" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">Python</text>
+  <line x1="878.00" y1="132" x2="908.00" y2="132" stroke="#0891b2" stroke-width="3.5" stroke-linecap="round"/>
+  <text x="918.00" y="137" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">Go</text>
+  <line x1="965.00" y1="132" x2="995.00" y2="132" stroke="#64748b" stroke-width="3.5" stroke-dasharray="8 6" stroke-linecap="round"/>
+  <text x="1005.00" y="137" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">Node.js</text>
+  <line x1="1080.00" y1="132" x2="1110.00" y2="132" stroke="#16a34a" stroke-width="3.5" stroke-linecap="round"/>
+  <text x="1120.00" y="137" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="13">C2MIR</text>
+  <g transform="translate(84 0) scale(0.82 1) translate(-84 0)" aria-label="Packed session axis and data">
+  <line x1="105.00" y1="150.00" x2="1520.00" y2="150.00" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="91" y="154.00" text-anchor="end" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">100×</text>
+  <line x1="105.00" y1="208.70" x2="1520.00" y2="208.70" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="91" y="212.70" text-anchor="end" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">50×</text>
+  <line x1="105.00" y1="286.30" x2="1520.00" y2="286.30" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="91" y="290.30" text-anchor="end" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">20×</text>
+  <line x1="105.00" y1="345.00" x2="1520.00" y2="345.00" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="91" y="349.00" text-anchor="end" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">10×</text>
+  <line x1="105.00" y1="403.70" x2="1520.00" y2="403.70" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="91" y="407.70" text-anchor="end" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">5×</text>
+  <line x1="105.00" y1="481.30" x2="1520.00" y2="481.30" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="91" y="485.30" text-anchor="end" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">2×</text>
+  <line x1="105.00" y1="540.00" x2="1520.00" y2="540.00" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="91" y="544.00" text-anchor="end" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">1×</text>
+  <line x1="105.00" y1="598.70" x2="1520.00" y2="598.70" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="91" y="602.70" text-anchor="end" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">0.5×</text>
+  <line x1="105.00" y1="676.30" x2="1520.00" y2="676.30" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="91" y="680.30" text-anchor="end" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">0.2×</text>
+  <line x1="105.00" y1="735.00" x2="1520.00" y2="735.00" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="91" y="739.00" text-anchor="end" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="12">0.1×</text>
+  <line x1="105.00" y1="150.00" x2="105.00" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="105.00" y1="735.00" x2="105.00" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="152.17" y1="735.00" x2="152.17" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="199.33" y1="735.00" x2="199.33" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="246.50" y1="735.00" x2="246.50" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="293.67" y1="150.00" x2="293.67" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="293.67" y1="735.00" x2="293.67" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="340.83" y1="735.00" x2="340.83" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="388.00" y1="735.00" x2="388.00" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="435.17" y1="735.00" x2="435.17" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="482.33" y1="735.00" x2="482.33" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="529.50" y1="150.00" x2="529.50" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="529.50" y1="735.00" x2="529.50" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="576.67" y1="735.00" x2="576.67" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="623.83" y1="735.00" x2="623.83" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="671.00" y1="735.00" x2="671.00" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="718.17" y1="735.00" x2="718.17" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="765.33" y1="150.00" x2="765.33" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="765.33" y1="735.00" x2="765.33" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="812.50" y1="735.00" x2="812.50" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="859.67" y1="735.00" x2="859.67" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="906.83" y1="735.00" x2="906.83" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="954.00" y1="735.00" x2="954.00" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1001.17" y1="150.00" x2="1001.17" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="1001.17" y1="735.00" x2="1001.17" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1048.33" y1="735.00" x2="1048.33" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1095.50" y1="735.00" x2="1095.50" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1142.67" y1="735.00" x2="1142.67" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1189.83" y1="735.00" x2="1189.83" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1237.00" y1="150.00" x2="1237.00" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="1237.00" y1="735.00" x2="1237.00" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1284.17" y1="735.00" x2="1284.17" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1331.33" y1="735.00" x2="1331.33" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1378.50" y1="735.00" x2="1378.50" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1425.67" y1="735.00" x2="1425.67" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1472.83" y1="150.00" x2="1472.83" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="1472.83" y1="735.00" x2="1472.83" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="1520.00" y1="150.00" x2="1520.00" y2="735.00" stroke="#f1f5f9" stroke-width="1"/>
+  <line x1="1520.00" y1="735.00" x2="1520.00" y2="741.00" stroke="#94a3b8" stroke-width="1"/>
+  <line x1="105.00" y1="735.00" x2="1520.00" y2="735.00" stroke="#64748b" stroke-width="1.2"/>
+  <line x1="105.00" y1="150.00" x2="105.00" y2="735.00" stroke="#64748b" stroke-width="1.2"/>
+  <line x1="600.25" y1="150.00" x2="600.25" y2="735.00" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 5"/>
+  <line x1="694.58" y1="150.00" x2="694.58" y2="735.00" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="3 5"/>
+  <text transform="translate(105.00 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result</text>
+  <text transform="translate(152.17 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result2</text>
+  <text transform="translate(199.33 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result3</text>
+  <text transform="translate(246.50 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result4</text>
+  <text transform="translate(293.67 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result9</text>
+  <text transform="translate(340.83 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result10</text>
+  <text transform="translate(388.00 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result11</text>
+  <text transform="translate(435.17 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result12</text>
+  <text transform="translate(482.33 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result13</text>
+  <text transform="translate(529.50 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result14</text>
+  <text transform="translate(576.67 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result15</text>
+  <text transform="translate(623.83 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result16</text>
+  <text transform="translate(671.00 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result17</text>
+  <text transform="translate(718.17 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result18</text>
+  <text transform="translate(765.33 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result19</text>
+  <text transform="translate(812.50 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result20</text>
+  <text transform="translate(859.67 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result21</text>
+  <text transform="translate(906.83 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result22</text>
+  <text transform="translate(954.00 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result23</text>
+  <text transform="translate(1001.17 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result24</text>
+  <text transform="translate(1048.33 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result25</text>
+  <text transform="translate(1095.50 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result26</text>
+  <text transform="translate(1142.67 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result27</text>
+  <text transform="translate(1189.83 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result28</text>
+  <text transform="translate(1237.00 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result29</text>
+  <text transform="translate(1284.17 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result30</text>
+  <text transform="translate(1331.33 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result31</text>
+  <text transform="translate(1378.50 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result32</text>
+  <text transform="translate(1425.67 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result33</text>
+  <text transform="translate(1472.83 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result34</text>
+  <text transform="translate(1520.00 753) rotate(58)" text-anchor="start" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="10">Result35</text>
+  </g>
+  <text x="681.37" y="805" text-anchor="middle" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="14" font-weight="600">Benchmark session</text>
+  <text transform="translate(24 442.5) rotate(-90)" text-anchor="middle" fill="#334155" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="14" font-weight="600">Geometric mean over Node.js (×)</text>
+  <g transform="translate(84 0) scale(0.82 1) translate(-84 0)" aria-label="Packed benchmark data">
+  <g aria-label="Session creation month">
+    <line x1="105.00" y1="150.00" x2="105.00" y2="735.00" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 5"><title>Result · Feb 26</title></line>
+    <text x="812.50" y="171" text-anchor="middle" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Session month</text>
+    <text x="105.00" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Feb 26</text>
+    <text x="199.33" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Mar 26</text>
+    <text x="293.67" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Jun 26</text>
+    <text x="529.50" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Jul 26</text>
+    <text x="1142.67" y="171" text-anchor="middle" fill="#475569" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600">Aug 26</text>
+  </g>
+  <path d="M 623.83,386.03 L 671.00,457.47 L 718.17,460.72 L 765.33,412.81 L 812.50,417.27 L 859.67,442.29 L 906.83,454.33 L 954.00,455.88 L 1001.17,457.47 L 1048.33,468.73 L 1095.50,471.32 L 1142.67,475.57 L 1189.83,482.58 L 1237.00,488.36 L 1284.17,483.01 L 1331.33,483.44 L 1378.50,489.75 L 1425.67,510.90 L 1472.83,514.58 L 1520.00,520.43" fill="none" stroke="#2563eb" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>Lambda untyped</title></path>
+  <path d="M 152.17,555.78 L 199.33,528.90 L 246.50,535.87 L 293.67,416.28 L 340.83,357.77 L 388.00,416.87 L 435.17,446.68 L 482.33,448.67 L 529.50,449.83 L 576.67,449.25 L 623.83,469.10 L 671.00,485.20 L 718.17,486.99 L 765.33,441.76 L 812.50,421.13 L 859.67,451.31 L 906.83,470.57 L 954.00,485.20 L 1001.17,496.06 L 1048.33,516.49 L 1095.50,520.43 L 1142.67,520.43 L 1189.83,534.27 L 1237.00,540.85 L 1284.17,535.07 L 1331.33,536.68 L 1378.50,553.76 L 1425.67,555.78 L 1472.83,558.90 L 1520.00,566.65" fill="none" stroke="#7c3aed" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>Lambda typed</title></path>
+  <path d="M 152.17,598.70 L 199.33,356.02 L 246.50,364.64 L 293.67,322.13 L 340.83,285.88 L 388.00,281.76 L 435.17,310.10 L 482.33,308.43 L 529.50,311.23 L 576.67,317.72 L 623.83,321.49 L 671.00,319.58 L 718.17,318.96 L 765.33,277.46 L 812.50,270.16 L 859.67,307.89 L 906.83,308.99 L 954.00,308.43 L 1001.17,307.89 L 1048.33,305.20 L 1095.50,305.20 L 1142.67,304.67 L 1189.83,301.57 L 1237.00,216.13 L 1284.17,251.40 L 1331.33,250.84 L 1378.50,247.83 L 1425.67,249.73 L 1472.83,250.28 L 1520.00,249.73" fill="none" stroke="#dc2626" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>LambdaJS</title></path>
+  <path d="M 152.17,389.40 L 199.33,364.11 L 246.50,364.11 L 293.67,368.46 L 340.83,366.70 L 388.00,374.00 L 435.17,375.21 L 482.33,369.93 L 529.50,371.88 L 576.67,370.61 L 623.83,370.73 L 671.00,370.84 L 718.17,370.04 L 765.33,376.18 L 812.50,371.88 L 859.67,372.12 L 906.83,372.47 L 954.00,372.82 L 1001.17,372.59 L 1048.33,371.65 L 1095.50,372.23 L 1142.67,372.47 L 1189.83,370.73 L 1237.00,376.42 L 1284.17,370.84 L 1331.33,370.04 L 1378.50,370.84 L 1425.67,370.73 L 1472.83,371.42 L 1520.00,370.84" fill="none" stroke="#fbbd00" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>QuickJS</title></path>
+  <path d="M 199.33,322.13 L 246.50,322.13" fill="none" stroke="#c026d3" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>Python</title></path>
+  <path d="M 105.00,540.00 L 152.17,540.00 L 199.33,540.00 L 246.50,540.00 L 293.67,540.00 L 340.83,540.00 L 388.00,540.00 L 435.17,540.00 L 482.33,540.00 L 529.50,540.00 L 576.67,540.00 L 623.83,540.00 L 671.00,540.00 L 718.17,540.00 L 765.33,540.00 L 812.50,540.00 L 859.67,540.00 L 906.83,540.00 L 954.00,540.00 L 1001.17,540.00 L 1048.33,540.00 L 1095.50,540.00 L 1142.67,540.00 L 1189.83,540.00 L 1237.00,540.00 L 1284.17,540.00 L 1331.33,540.00 L 1378.50,540.00 L 1425.67,540.00 L 1472.83,540.00 L 1520.00,540.00" fill="none" stroke="#64748b" stroke-width="2.2" stroke-dasharray="8 6" stroke-linejoin="round" stroke-linecap="round"><title>Node.js</title></path>
+  <path d="M 859.67,685.22 L 906.83,690.06 L 954.00,690.06" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR</title></path>
+  <path d="M 1048.33,700.66 L 1095.50,700.66 L 1142.67,700.66 L 1189.83,695.20 L 1237.00,706.51 L 1284.17,695.20 L 1331.33,695.20 L 1378.50,695.20 L 1425.67,695.20 L 1472.83,700.66 L 1520.00,695.20" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR</title></path>
+  <path d="M 718.17,685.22 L 859.67,685.22" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR · missing Results19–20</title></path>
+  <path d="M 954.00,690.06 L 1048.33,700.66" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"><title>C2MIR · missing Result24</title></path>
+  <g aria-label="Inline series labels" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11" font-weight="600" paint-order="stroke" stroke="#ffffff" stroke-width="4" stroke-linejoin="round">
+    <text x="1100" y="461" fill="#2563eb">Lambda untyped</text>
+    <text x="525" y="430" fill="#7c3aed">Lambda typed</text>
+    <text x="820" y="264" fill="#dc2626">LambdaJS</text>
+    <text x="850" y="363" fill="#fbbd00">QuickJS</text>
+    <text x="205" y="313" fill="#c026d3">Python</text>
+    <text x="735" y="668" fill="#0891b2">Go</text>
+    <text x="790" y="532" fill="#64748b">Node.js</text>
+    <text x="1110" y="690" fill="#16a34a">C2MIR</text>
+  </g>
+  <circle cx="623.83" cy="386.03" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result16: 6.16×</title></circle>
+  <circle cx="671.00" cy="457.47" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result17: 2.65×</title></circle>
+  <circle cx="718.17" cy="460.72" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result18: 2.55×</title></circle>
+  <circle cx="765.33" cy="412.81" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result19: 4.49×</title></circle>
+  <circle cx="812.50" cy="417.27" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result20: 4.26×</title></circle>
+  <circle cx="859.67" cy="442.29" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result21: 3.17×</title></circle>
+  <circle cx="906.83" cy="454.33" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result22: 2.75×</title></circle>
+  <circle cx="954.00" cy="455.88" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result23: 2.70×</title></circle>
+  <circle cx="1001.17" cy="457.47" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result24: 2.65×</title></circle>
+  <circle cx="1048.33" cy="468.73" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result25: 2.32×</title></circle>
+  <circle cx="1095.50" cy="471.32" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result26: 2.25×</title></circle>
+  <circle cx="1142.67" cy="475.57" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result27: 2.14×</title></circle>
+  <circle cx="1189.83" cy="482.58" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result28: 1.97×</title></circle>
+  <circle cx="1237.00" cy="488.36" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result29: 1.84×</title></circle>
+  <circle cx="1284.17" cy="483.01" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result30: 1.96×</title></circle>
+  <circle cx="1331.33" cy="483.44" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result31: 1.95×</title></circle>
+  <circle cx="1378.50" cy="489.75" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result32: 1.81×</title></circle>
+  <circle cx="1425.67" cy="510.90" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result33: 1.41×</title></circle>
+  <circle cx="1472.83" cy="514.58" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result34: 1.35×</title></circle>
+  <circle cx="1520.00" cy="520.43" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2"><title>Lambda untyped · Result35: 1.26×</title></circle>
+  <circle cx="152.17" cy="555.78" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result2: 0.83×</title></circle>
+  <circle cx="199.33" cy="528.90" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result3: 1.14×</title></circle>
+  <circle cx="246.50" cy="535.87" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result4: 1.05×</title></circle>
+  <circle cx="293.67" cy="416.28" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result9: 4.31×</title></circle>
+  <circle cx="340.83" cy="357.77" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result10: 8.60×</title></circle>
+  <circle cx="388.00" cy="416.87" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result11: 4.28×</title></circle>
+  <circle cx="435.17" cy="446.68" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result12: 3.01×</title></circle>
+  <circle cx="482.33" cy="448.67" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result13: 2.94×</title></circle>
+  <circle cx="529.50" cy="449.83" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result14: 2.90×</title></circle>
+  <circle cx="576.67" cy="449.25" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result15: 2.92×</title></circle>
+  <circle cx="623.83" cy="469.10" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result16: 2.31×</title></circle>
+  <circle cx="671.00" cy="485.20" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result17: 1.91×</title></circle>
+  <circle cx="718.17" cy="486.99" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result18: 1.87×</title></circle>
+  <circle cx="765.33" cy="441.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result19: 3.19×</title></circle>
+  <circle cx="812.50" cy="421.13" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result20: 4.07×</title></circle>
+  <circle cx="859.67" cy="451.31" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result21: 2.85×</title></circle>
+  <circle cx="906.83" cy="470.57" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result22: 2.27×</title></circle>
+  <circle cx="954.00" cy="485.20" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result23: 1.91×</title></circle>
+  <circle cx="1001.17" cy="496.06" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result24: 1.68×</title></circle>
+  <circle cx="1048.33" cy="516.49" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result25: 1.32×</title></circle>
+  <circle cx="1095.50" cy="520.43" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result26: 1.26×</title></circle>
+  <circle cx="1142.67" cy="520.43" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result27: 1.26×</title></circle>
+  <circle cx="1189.83" cy="534.27" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result28: 1.07×</title></circle>
+  <circle cx="1237.00" cy="540.85" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result29: 0.99×</title></circle>
+  <circle cx="1284.17" cy="535.07" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result30: 1.06×</title></circle>
+  <circle cx="1331.33" cy="536.68" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result31: 1.04×</title></circle>
+  <circle cx="1378.50" cy="553.76" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result32: 0.85×</title></circle>
+  <circle cx="1425.67" cy="555.78" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result33: 0.83×</title></circle>
+  <circle cx="1472.83" cy="558.90" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result34: 0.80×</title></circle>
+  <circle cx="1520.00" cy="566.65" r="3.5" fill="#ffffff" stroke="#7c3aed" stroke-width="2"><title>Lambda typed · Result35: 0.73×</title></circle>
+  <circle cx="152.17" cy="598.70" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result2: 0.50×</title></circle>
+  <circle cx="199.33" cy="356.02" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result3: 8.78×</title></circle>
+  <circle cx="246.50" cy="364.64" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result4: 7.93×</title></circle>
+  <circle cx="293.67" cy="322.13" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result9: 13.10×</title></circle>
+  <circle cx="340.83" cy="285.88" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result10: 20.10×</title></circle>
+  <circle cx="388.00" cy="281.76" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result11: 21.10×</title></circle>
+  <circle cx="435.17" cy="310.10" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result12: 15.10×</title></circle>
+  <circle cx="482.33" cy="308.43" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result13: 15.40×</title></circle>
+  <circle cx="529.50" cy="311.23" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result14: 14.90×</title></circle>
+  <circle cx="576.67" cy="317.72" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result15: 13.80×</title></circle>
+  <circle cx="623.83" cy="321.49" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result16: 13.20×</title></circle>
+  <circle cx="671.00" cy="319.58" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result17: 13.50×</title></circle>
+  <circle cx="718.17" cy="318.96" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result18: 13.60×</title></circle>
+  <circle cx="765.33" cy="277.46" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result19: 22.20×</title></circle>
+  <circle cx="812.50" cy="270.16" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result20: 24.20×</title></circle>
+  <circle cx="859.67" cy="307.89" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result21: 15.50×</title></circle>
+  <circle cx="906.83" cy="308.99" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result22: 15.30×</title></circle>
+  <circle cx="954.00" cy="308.43" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result23: 15.40×</title></circle>
+  <circle cx="1001.17" cy="307.89" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result24: 15.50×</title></circle>
+  <circle cx="1048.33" cy="305.20" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result25: 16.00×</title></circle>
+  <circle cx="1095.50" cy="305.20" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result26: 16.00×</title></circle>
+  <circle cx="1142.67" cy="304.67" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result27: 16.10×</title></circle>
+  <circle cx="1189.83" cy="301.57" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result28: 16.70×</title></circle>
+  <circle cx="1237.00" cy="216.13" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result29: 45.80×</title></circle>
+  <circle cx="1284.17" cy="251.40" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result30: 30.20×</title></circle>
+  <circle cx="1331.33" cy="250.84" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result31: 30.40×</title></circle>
+  <circle cx="1378.50" cy="247.83" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result32: 31.50×</title></circle>
+  <circle cx="1425.67" cy="249.73" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result33: 30.80×</title></circle>
+  <circle cx="1472.83" cy="250.28" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result34: 30.60×</title></circle>
+  <circle cx="1520.00" cy="249.73" r="3.5" fill="#ffffff" stroke="#dc2626" stroke-width="2"><title>LambdaJS · Result35: 30.80×</title></circle>
+  <circle cx="152.17" cy="389.40" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result2: 5.92×</title></circle>
+  <circle cx="199.33" cy="364.11" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result3: 7.98×</title></circle>
+  <circle cx="246.50" cy="364.11" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result4: 7.98×</title></circle>
+  <circle cx="293.67" cy="368.46" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result9: 7.58×</title></circle>
+  <circle cx="340.83" cy="366.70" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result10: 7.74×</title></circle>
+  <circle cx="388.00" cy="374.00" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result11: 7.10×</title></circle>
+  <circle cx="435.17" cy="375.21" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result12: 7.00×</title></circle>
+  <circle cx="482.33" cy="369.93" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result13: 7.45×</title></circle>
+  <circle cx="529.50" cy="371.88" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result14: 7.28×</title></circle>
+  <circle cx="576.67" cy="370.61" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result15: 7.39×</title></circle>
+  <circle cx="623.83" cy="370.73" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result16: 7.38×</title></circle>
+  <circle cx="671.00" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result17: 7.37×</title></circle>
+  <circle cx="718.17" cy="370.04" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result18: 7.44×</title></circle>
+  <circle cx="765.33" cy="376.18" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result19: 6.92×</title></circle>
+  <circle cx="812.50" cy="371.88" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result20: 7.28×</title></circle>
+  <circle cx="859.67" cy="372.12" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result21: 7.26×</title></circle>
+  <circle cx="906.83" cy="372.47" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result22: 7.23×</title></circle>
+  <circle cx="954.00" cy="372.82" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result23: 7.20×</title></circle>
+  <circle cx="1001.17" cy="372.59" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result24: 7.22×</title></circle>
+  <circle cx="1048.33" cy="371.65" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result25: 7.30×</title></circle>
+  <circle cx="1095.50" cy="372.23" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result26: 7.25×</title></circle>
+  <circle cx="1142.67" cy="372.47" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result27: 7.23×</title></circle>
+  <circle cx="1189.83" cy="370.73" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result28: 7.38×</title></circle>
+  <circle cx="1237.00" cy="376.42" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result29: 6.90×</title></circle>
+  <circle cx="1284.17" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result30: 7.37×</title></circle>
+  <circle cx="1331.33" cy="370.04" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result31: 7.44×</title></circle>
+  <circle cx="1378.50" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result32: 7.37×</title></circle>
+  <circle cx="1425.67" cy="370.73" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result33: 7.38×</title></circle>
+  <circle cx="1472.83" cy="371.42" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result34: 7.32×</title></circle>
+  <circle cx="1520.00" cy="370.84" r="3.5" fill="#ffffff" stroke="#fbbd00" stroke-width="2"><title>QuickJS · Result35: 7.37×</title></circle>
+  <circle cx="199.33" cy="322.13" r="3.5" fill="#ffffff" stroke="#c026d3" stroke-width="2"><title>Python · Result3: 13.10×</title></circle>
+  <circle cx="246.50" cy="322.13" r="3.5" fill="#ffffff" stroke="#c026d3" stroke-width="2"><title>Python · Result4: 13.10×</title></circle>
+  <circle cx="718.17" cy="676.30" r="3.5" fill="#ffffff" stroke="#0891b2" stroke-width="2"><title>Go · Result18: 0.20×</title></circle>
+  <circle cx="718.17" cy="685.22" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result18: 0.18×</title></circle>
+  <circle cx="859.67" cy="685.22" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result21: 0.18×</title></circle>
+  <circle cx="906.83" cy="690.06" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result22: 0.17×</title></circle>
+  <circle cx="954.00" cy="690.06" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result23: 0.17×</title></circle>
+  <circle cx="1048.33" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result25: 0.15×</title></circle>
+  <circle cx="1095.50" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result26: 0.15×</title></circle>
+  <circle cx="1142.67" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result27: 0.15×</title></circle>
+  <circle cx="1189.83" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result28: 0.16×</title></circle>
+  <circle cx="1237.00" cy="706.51" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result29: 0.14×</title></circle>
+  <circle cx="1284.17" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result30: 0.16×</title></circle>
+  <circle cx="1331.33" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result31: 0.16×</title></circle>
+  <circle cx="1378.50" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result32: 0.16×</title></circle>
+  <circle cx="1425.67" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result33: 0.16×</title></circle>
+  <circle cx="1472.83" cy="700.66" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result34: 0.15×</title></circle>
+  <circle cx="1520.00" cy="695.20" r="3.5" fill="#ffffff" stroke="#16a34a" stroke-width="2"><title>C2MIR · Result35: 0.16×</title></circle>
+  </g>
+  <text x="84" y="825" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11">Results5–8 were partial tests and are omitted from the x-axis.</text>
+  <text x="84" y="844" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11">Single-MIR sessions without a typed/untyped split are assigned to Lambda typed. Missing common-engine measurements are intentionally shown as gaps.</text>
+  <text x="84" y="863" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11">C2MIR starts at Result18: earlier C2MIR values were Lambda scripts through the transpiler; later values are native C benchmark ports.</text>
+  <text x="84" y="882" fill="#64748b" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="11">Python points are available in Results3–4; Go is available in Result18. Vertical dividers mark the typed split and native-C2MIR transition.</text>
+</svg>

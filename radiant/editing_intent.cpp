@@ -20,7 +20,8 @@ InputIntent::InputIntent()
       composition_caret(0),
       history_value(nullptr),
       history_sel_start(0),
-      history_sel_end(0) {}
+      history_sel_end(0),
+      option_index(-1) {}
 
 InputIntent::~InputIntent() {
     // paste/drop intents may own payload copies; scope cleanup keeps every
@@ -47,6 +48,7 @@ bool input_intent_clone(const InputIntent* source, InputIntent* destination) {
     destination->mods = source->mods;
     destination->is_composing = source->is_composing;
     destination->composition_caret = source->composition_caret;
+    destination->option_index = source->option_index;
     if (source->data) {
         destination->owned_data = mem_strdup(source->data, MEM_CAT_TEMP);
         if (!destination->owned_data) goto fail;

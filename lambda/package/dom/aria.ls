@@ -24,8 +24,8 @@ fn set_if_changed(elem, name, want) {
 }
 
 // Present-or-absent mirrors: the attribute carries meaning only when true.
-fn flag(elem, name, on) {
-    set_if_changed(elem, name, if (on) "true" else null)
+fn flag(elem, name, present) {
+    set_if_changed(elem, name, if (present) "true" else null)
 }
 
 pub pn reflect(elem) {

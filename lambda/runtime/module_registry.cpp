@@ -399,6 +399,10 @@ Item module_build_lambda_namespace(void* script_ptr) {
                     Rooted<Item> function_root(export_roots,
                         (Item){.function = fn});
                     if (uses_public_wrapper) {
+                        // The JavaScript call membrane enters through Lambda's
+                        // dynamic boxed ABI, which needs the defining signature
+                        // for required/optional argument adaptation.
+                        lambda_function_set_type(fn, fn_type);
                         // Published MIR wrappers require the defining context;
                         // their v3 companion lane is not a caller-home ABI.
                         lambda_function_mark_mir_context_abi(fn);

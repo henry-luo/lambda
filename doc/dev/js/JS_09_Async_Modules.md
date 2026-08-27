@@ -1,5 +1,7 @@
 # LambdaJS — Async, Promises, Event Loop & Modules
 
+> **Last verified against tree:** 2026-08-13 *(initial stamp from git history)*
+
 > **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the asynchronous half of the runtime: the `JsPromise` record and resolution procedure, the microtask/job queue, the libuv event loop and its drain ordering, async functions and `await` (built on the generator state machine), the ES-module system (load/link/eval, top-level await, dynamic `import()`), CommonJS `require`, and the module-variable lifecycle.
 >
 > **Primary sources:** `lambda/js/js_runtime.cpp` (`JsPromise`, resolution procedure, combinators, async state-machine driver, `JsModule` + TLA), `lambda/js/js_event_loop.{h,cpp}` (libuv loop, microtask ring, timers, bounded drain), `lambda/js/js_job_queue.{h,cpp}` (PromiseJob routing), `lambda/js/js_mir_function_class_lowering.cpp` (async lowering, phase 6), `lambda/js/js_mir_module_batch_lowering.cpp` (`transpile_js_module_to_mir`, `jm_load_imports`, body split), `lambda/js/js_mir_entrypoints_require.cpp` (`js_require`, `js_dynamic_import`, CJS wrap), `lambda/js/js_runtime_state.cpp` (module-var storage).

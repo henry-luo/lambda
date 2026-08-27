@@ -22,7 +22,7 @@ let mixed = [
 ]
 
 // Arrays of maps of arrays
-let complex = [
+let cplx = [
     {data: [1, 2, 3], meta: {tags: ["a", "b"], count: 2}},
     {data: [4, 5, 6], meta: {tags: ["c", "d"], count: 2}}
 ]

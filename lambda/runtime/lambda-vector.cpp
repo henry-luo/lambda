@@ -1922,7 +1922,7 @@ typedef Item (*PipeMapFn)(Item item, Item index);
 
 // helper: create an Item from an integer index
 static Item index_to_item(int64_t index) {
-    return { .item = i2it((int)index) };
+    return { .item = i2it(index) };
 }
 
 static Item fn_pipe_collect(Item collection, PipeMapFn transform, bool filter) {

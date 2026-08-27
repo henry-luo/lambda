@@ -41,7 +41,7 @@ operations |> filter((op) => op is AddOp) |> map(evaluate)
 operations |> filter((op) => op is MulOp) |> map(evaluate)
 
 // ===== Chain operations =====
-fn chain_ops(value: int, ops: list) {
+fn chain_ops(value: int, ops: lst) {
     ops |> reduce(fn(acc, op) => match op {
         case 'add': acc + 1
         case 'double': acc * 2

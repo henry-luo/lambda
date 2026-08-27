@@ -1,4 +1,5 @@
 #include "js_mir_internal.hpp"
+#include "js_interp.hpp"
 #include "js_runtime_state.hpp"
 #include "../jube/jube_registry.h"
 #include "../module/node_core/node_runtime_state.hpp"
@@ -134,7 +135,7 @@ static bool js_compiled_name_table_inherits_preamble(
 }
 
 bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
-    if (!context || !context->active_js_module_state) return false;
+    if (!context || !context->active_module_state) return false;
     bool inherits_preamble = js_compiled_name_table_inherits_preamble(mt);
     const PropertyKeySpec* inherited_specs = inherits_preamble
         ? g_jm_preamble_in->module_property_specs : NULL;
@@ -151,7 +152,7 @@ bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
         uint32_t active_names = js_active_module_name_count();
         if (active_names == 0 && inherited > 0 &&
                 !lambda_module_state_link_property_keys(
-                    context->active_js_module_state->module_id,
+                    context->active_module_state->module_id,
                     inherited_specs, inherited, inherited_bytes)) {
             return false;
         }
@@ -169,7 +170,7 @@ bool js_link_compiled_name_table(const JsMirTranspiler* mt) {
             inherited_bytes, mt ? mt->module_name_specs : NULL, &image,
             &image_count, &image_bytes)) return false;
     bool linked = lambda_module_state_link_property_keys(
-        context->active_js_module_state->module_id, image, image_count,
+        context->active_module_state->module_id, image, image_count,
         image_bytes);
     mem_free(image);
     if (!linked) return false;
@@ -203,7 +204,7 @@ bool js_prelink_compiled_name_table(const JsMirTranspiler* mt) {
 }
 
 bool js_append_compiled_name_table(const JsMirTranspiler* mt) {
-    if (!context || !context->active_js_module_state) return false;
+    if (!context || !context->active_module_state) return false;
     PropertyKeySpec* image = NULL;
     uint32_t count = 0;
     uint32_t bytes = 0;
@@ -212,7 +213,7 @@ bool js_append_compiled_name_table(const JsMirTranspiler* mt) {
         return false;
     }
     bool linked = lambda_module_state_append_property_keys(
-        context->active_js_module_state->module_id, image, count, bytes);
+        context->active_module_state->module_id, image, count, bytes);
     mem_free(image);
     return linked;
 }
@@ -360,7 +361,7 @@ Item js_mir_compile_unit_fail(MIR_context_t ctx,
     return (Item){.item = ITEM_ERROR};
 }
 
-static bool js_mir_prepare_eval_context(Runtime* runtime,
+extern "C" bool js_prepare_eval_context(Runtime* runtime,
         bool initialize_thread, EvalContext** out_context,
         bool* out_reusing_context) {
     if (!out_context || !out_reusing_context) return false;
@@ -408,7 +409,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     // to another owner after this call.
     EvalContext* js_context = NULL;
     bool reusing_context = false;
-    if (!js_mir_prepare_eval_context(runtime, true, &js_context, &reusing_context)) {
+    if (!js_prepare_eval_context(runtime, true, &js_context, &reusing_context)) {
         return (Item){.item = ITEM_ERROR};
     }
 
@@ -650,6 +651,23 @@ static size_t js_commonjs_injection_offset(const char* source, size_t source_len
     return i;
 }
 
+bool js_ast_interpreter_requested(void) {
+    const char* backend = getenv("JS_EXECUTION_BACKEND");
+    return backend && (strcmp(backend, "ast") == 0 ||
+        strcmp(backend, "interpreter") == 0);
+}
+
+static bool js_ast_is_es_module(JsAstNode* ast) {
+    JsProgramNode* program = ast && ast->node_type == JS_AST_NODE_PROGRAM
+        ? (JsProgramNode*)ast : NULL;
+    for (JsAstNode* statement = program ? (JsAstNode*)program->body : NULL;
+            statement; statement = (JsAstNode*)statement->next) {
+        if (statement->node_type == JS_AST_NODE_IMPORT_DECLARATION ||
+                statement->node_type == JS_AST_NODE_EXPORT_DECLARATION) return true;
+    }
+    return false;
+}
+
 static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* js_source,
                                                  size_t js_source_len, const char* filename,
                                                  uint64_t* result_home,
@@ -797,11 +815,35 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
     g_last_js_mir_phase_timing.early_us = js_mir_phase_now_us() - phase_start;
 
+    if (js_ast_interpreter_requested()) {
+        // The AST tier owns the retained JsScript, but uses the same source
+        // parse, early-error pass, Runtime catalog, and EvalContext setup as
+        // the MIR tier. Unsupported syntax is a deterministic admission
+        // error; this explicit selector never silently falls back to MIR.
+        jm_clear_active_js_transpile(tp, NULL, NULL);
+        JsScript* script = js_script_adopt_transpiler(tp, runtime, filename);
+        if (!script) {
+            jm_clear_active_js_transpile(NULL, NULL, owned_source);
+            mem_free(owned_source);
+            return ItemError;
+        }
+        jm_clear_active_js_transpile(NULL, NULL, owned_source);
+        mem_free(owned_source);
+        Item result = js_ast_is_es_module(js_ast)
+            ? js_interp_execute_es_module_script(runtime, script, result_home)
+            : js_interp_execute_script(runtime, script, result_home);
+        js_mir_finish_script_turn(runtime, result);
+        // AST direct eval can schedule callbacks backed by deferred MIR code.
+        // Drain the script turn before matching the JIT fresh-turn cleanup.
+        if (!js_batch_execution_mode) jm_cleanup_deferred_mir();
+        return result;
+    }
+
     // Set up the canonical evaluation context early so module objects and
     // deferred callbacks share one lifetime owner.
     EvalContext* js_context = NULL;
     bool reusing_context = false;
-    if (!js_mir_prepare_eval_context(runtime, false, &js_context, &reusing_context)) {
+    if (!js_prepare_eval_context(runtime, false, &js_context, &reusing_context)) {
         log_error("js-mir: Runtime context differs from eval-thread owner");
         return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
             runtime, NULL, true);
@@ -2001,7 +2043,8 @@ static void js_cjs_note_child(Item child_filename, Item child_exports) {
     js_array_push(children, child);
 }
 
-char* js_wrap_cjs_source(const char* source, const char* filename) {
+static char* js_wrap_cjs_source_with_suffix(const char* source,
+        const char* filename, const char* suffix) {
     char filename_buf[2048];
     snprintf(filename_buf, sizeof(filename_buf), "%s", filename);
     js_normalize_path_separators(filename_buf);
@@ -2016,7 +2059,7 @@ char* js_wrap_cjs_source(const char* source, const char* filename) {
     //        var module = __cjs_module__;
     //        var __filename = "..."; var __dirname = "...";
     //        <original source>
-    //        export default __cjs_module__.exports;
+    //        <caller-provided module completion>
     const char* prefix_fmt =
         "var __cjs_module__ = {exports: {}};\n"
         "var exports = __cjs_module__.exports;\n"
@@ -2024,11 +2067,6 @@ char* js_wrap_cjs_source(const char* source, const char* filename) {
         "var __filename = \"%s\";\n"
         "var __dirname = \"%.*s\";\n"
         "__lambda_cjs_enter(__cjs_module__, __filename);\n";
-    const char* suffix =
-        "\n__lambda_cjs_complete(__cjs_module__);\n"
-        "__lambda_cjs_leave(__cjs_module__);\n"
-        "export default __cjs_module__.exports;\n";
-
     size_t src_len = strlen(source);
     size_t prefix_size = strlen(prefix_fmt) + strlen(filename_buf) + dir_len + 64;
     size_t total = prefix_size + src_len + strlen(suffix) + 1;
@@ -2039,6 +2077,22 @@ char* js_wrap_cjs_source(const char* source, const char* filename) {
     offset += (int)src_len;
     snprintf(wrapped + offset, total - (size_t)offset, "%s", suffix);
     return wrapped;
+}
+
+char* js_wrap_cjs_source(const char* source, const char* filename) {
+    return js_wrap_cjs_source_with_suffix(source, filename,
+        "\n__lambda_cjs_complete(__cjs_module__);\n"
+        "__lambda_cjs_leave(__cjs_module__);\n"
+        "export default __cjs_module__.exports;\n");
+}
+
+static char* js_wrap_cjs_source_for_ast(const char* source, const char* filename) {
+    // The AST backend returns the completed exports expression directly; it
+    // must not inject ESM syntax merely to project CommonJS's default value.
+    return js_wrap_cjs_source_with_suffix(source, filename,
+        "\n__lambda_cjs_complete(__cjs_module__);\n"
+        "__lambda_cjs_leave(__cjs_module__);\n"
+        "__cjs_module__.exports;\n");
 }
 
 extern "C" Item js_require(Item specifier) {
@@ -2109,11 +2163,16 @@ extern "C" Item js_require(Item specifier) {
     Item ns;
     if (js_is_cjs_file(path_buf)) {
         // Wrap CJS source with module/exports globals
-        char* wrapped = js_wrap_cjs_source(source, path_buf);
+        char* wrapped = js_ast_interpreter_requested()
+            ? js_wrap_cjs_source_for_ast(source, path_buf)
+            : js_wrap_cjs_source(source, path_buf);
         jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
         jm_track_active_js_transpile(NULL, NULL, wrapped);
-        ns = transpile_js_module_to_mir(runtime, wrapped, path_buf);
+        ns = js_ast_interpreter_requested()
+            ? js_interp_execute_module_source(runtime, wrapped, strlen(wrapped),
+                path_buf, false, NULL)
+            : transpile_js_module_to_mir(runtime, wrapped, path_buf);
         if (item_is_error(ns)) {
             // A synthetic JS try block changes a CJS file's top-level lexical
             // bindings into block bindings; close metadata here on abrupt exit
@@ -2122,9 +2181,17 @@ extern "C" Item js_require(Item specifier) {
         }
         jm_clear_active_js_transpile(NULL, NULL, wrapped);
         mem_free(wrapped);
+        if (!item_is_error(ns)) {
+            Item module = js_cjs_find_module(resolved_spec);
+            js_cjs_update_cached_default(resolved_spec, module);
+        }
     } else {
-        // ESM — transpile as-is
-        ns = transpile_js_module_to_mir(runtime, source, path_buf);
+        // ESM modules use the same retained AST owner and registry under the
+        // forced backend; the default preserves the established MIR path.
+        ns = js_ast_interpreter_requested()
+            ? js_interp_execute_es_module_source(runtime, source, strlen(source),
+                path_buf, NULL)
+            : transpile_js_module_to_mir(runtime, source, path_buf);
         jm_clear_active_js_transpile(NULL, NULL, source);
         mem_free(source);
     }

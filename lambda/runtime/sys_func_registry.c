@@ -274,13 +274,12 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, C_ARG_ITEM, "fn_int", FPTR(fn_int), NULL, NULL, false, 0,
      false, &TYPE_NUMBER, true},
 
-    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false,
-     C_RET_INT64, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
-     false, &TYPE_INT64, true},
-    // `i64` is the defined type spelling (S16.8.3 / the sized-int family), and
-    // every sibling — i8/i16/i32/u8/u16/u32/u64/f32 — is callable as a
-    // conversion. i64 was the one gap: it maps to LMD_TYPE_INT64 rather than the
-    // NUM_SIZED family that makes the others callable, so it needs this row.
+    // `i64` is the one surface spelling of this type (S2.1.1): the former
+    // `int64` conversion row was dropped with the `int64` type spelling, so
+    // the annotation and the conversion agree on one name. Every sibling —
+    // i8/i16/i32/u8/u16/u32/u64/f32 — is callable as a conversion; i64 maps
+    // to LMD_TYPE_INT64 rather than the NUM_SIZED family that makes the
+    // others callable, so it needs this explicit row.
     {SYSFUNC_INT64, "i64", 1, &TYPE_INT64, false, false, true, LMD_TYPE_ANY, false,
      C_RET_INT64, C_ARG_ITEM, "fn_int64", FPTR(fn_int64), NULL, NULL, false, 0,
      false, &TYPE_INT64, true},
@@ -404,13 +403,15 @@ SysFuncInfo sys_func_defs[] = {
     // push(arr, val) — append to a growable generic array in place (amortized O(1)).
     // Procedural: mutates arr and returns it. Replaces chunked-vector + .sz workarounds.
     {SYSPROC_PUSH, "push", 2, &TYPE_ANY, true, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_push", FPTR(pn_push), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_push", FPTR(pn_push), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_ANY, /* may_error */ true},
 
     // splice(arr, start, count) — remove `count` elements at `start` from a growable
     // generic array, in place (shift the tail down, shrink length). Procedural: mutates
     // arr and returns it. Enables pop/dequeue/middle-removal without a chunked + .sz wrapper.
     {SYSPROC_SPLICE, "splice", 3, &TYPE_ANY, true, false, true, LMD_TYPE_ANY, false,
-     C_RET_ITEM, C_ARG_ITEM, "pn_splice", FPTR(pn_splice), NULL, NULL, false, 0},
+     C_RET_ITEM, C_ARG_ITEM, "pn_splice", FPTR(pn_splice), NULL, NULL, false, 0,
+     /* is_async */ false, /* success */ &TYPE_ANY, /* may_error */ true},
 
     // image stencil engine (windowed neighbourhood ops over ArrayNum)
     {SYSFUNC_CONVOLVE, "convolve", 2, &TYPE_ANY, false, false, true, LMD_TYPE_ANY, false,
@@ -2661,6 +2662,9 @@ JitImport jit_runtime_imports[] = {
     {"js_eval_env_bridge_journal_vars", FPTR(js_eval_env_bridge_journal_vars), JIT_IMPORT_VOID_PRESERVES},
     {"js_eval_global_lexical_bind", FPTR(js_eval_global_lexical_bind), JIT_IMPORT_VOID_PRESERVES},
     {"js_eval_env_has_binding", FPTR(js_eval_env_has_binding), JIT_IMPORT_RAW_SCALAR_PRESERVES},
+    {"js_eval_global_lexical_has_binding", FPTR(js_eval_global_lexical_has_binding), JIT_IMPORT_RAW_SCALAR_PRESERVES},
+    {"js_eval_global_lexical_get_or_fallback", FPTR(js_eval_global_lexical_get_or_fallback)},
+    {"js_eval_global_lexical_set_if_exists", FPTR(js_eval_global_lexical_set_if_exists)},
     {"js_eval_env_is_active", FPTR(js_eval_env_is_active), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_eval_env_track_global_binding", FPTR(js_eval_env_track_global_binding), JIT_IMPORT_VOID_PRESERVES},
     {"js_eval_env_pop_frame", FPTR(js_eval_env_pop_frame), JIT_IMPORT_VOID_PRESERVES},

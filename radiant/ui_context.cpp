@@ -74,16 +74,16 @@ void UiContext::create_surface(int pixel_width, int pixel_height) {
     }
 }
 
-int ui_context_init(UiContext* uicon, bool headless) {
+int ui_context_init(UiContext* uicon, bool headless, float requested_pixel_ratio) {
     radiant_register_css_counter_hooks();
     radiant_register_css_symbol_hook();
     radiant_register_resource_processor();
     radiant_register_event_hooks();
     if (!uicon) return EXIT_FAILURE;
-    return uicon->init(headless);
+    return uicon->init(headless, requested_pixel_ratio);
 }
 
-int UiContext::init(bool next_headless) {
+int UiContext::init(bool next_headless, float requested_pixel_ratio) {
     memset(this, 0, sizeof(UiContext));
     last_click_time = -1.0;
     last_click_button = -1;
@@ -128,7 +128,8 @@ int UiContext::init(bool next_headless) {
             window = NULL;
             log_info("Running in headless mode (windowless)");
         }
-        pixel_ratio = 1.0;  // Default pixel ratio for headless
+        // pass the export ratio into font initialization before handles are resolved.
+        pixel_ratio = requested_pixel_ratio > 0.0f ? requested_pixel_ratio : 1.0f;
         this->window_width = window_width;
         this->window_height = window_height;
         viewport_width = window_width;   // CSS pixels
@@ -296,10 +297,6 @@ static void destroy_dom_owned_embed_images(DomNode* node) {
 
 void free_document(DomDocument* doc) {
     if (!doc) return;
-
-    // queued behavior attaches hold raw View* into this document; drop them
-    // while the views are still alive, or the next drain derefs freed memory
-    radiant_behavior_attach_purge_doc(doc);
 
     // Module-owned DOM wrappers are non-owning; unroot wrappers before the
     // document arena destroys the native nodes they point at.

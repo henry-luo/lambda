@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.28.0 (2026-08-25)
+**Spec version:** 1.38.1 (2026-08-27)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -209,7 +209,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   never escape into an Item, container, or guest bridge. (Supersedes the
   C16-era G0 "int's native representation is the double" ruling.)
   [Int_Type §5.1]
-- **D2.2.3** Wide scalars (`int64`, `uint64`, cold doubles) have **no
+- **D2.2.3** Wide scalars (`i64`, `u64`, cold doubles) have **no
   inline form at any magnitude** (no value-dependent representation
   branches) and follow the scalar-home ownership taxonomy (§D5.2);
   `DTIME` is object-backed — GC-owned when dynamic, Input-arena when
@@ -238,7 +238,7 @@ language-visible counterparts are the semantics spec's SI ledger.
 - **D2.4.1*** Four facts, four authorities: semantic contract → AST
   `Type*`; planned representation → lowering analysis; emitted
   representation + provenance → `MirValue`; physical register class →
-  `MirValue.mir_type`. Under v5, boxed Item / int lane / Lambda `int64` /
+  `MirValue.mir_type`. Under v5, boxed Item / int lane / Lambda `i64` /
   machine quantity all share `MIR_T_I64`, so `MIR_reg_type()` probing is
   banned in expression lowering (named physical-layer helpers only).
   [Lane §1–§4]
@@ -519,7 +519,7 @@ that carries them.
 - **D3.4.5** Shape transitions obey the **map-layout invariant**: the
   exact runtime shape always describes the stored bytes. Type-compatible
   writes stay on the direct path (same type; `int → float`;
-  `int ↔ int64`); an incompatible write rebuilds the shape and repacks —
+  `int ↔ i64`); an incompatible write rebuilds the shape and repacks —
   transactionally, so on failure nothing changes (semantics S11.4.1).
   `let`-bound containers never transition (immutable); only
   `var`/procedural code can, and an annotated root must keep conforming.
@@ -918,11 +918,14 @@ that carries them.
   backstop; adapter spans are dynamically sized, precisely rooted, and
   LIFO-destroyed. Dynamic calls with named arguments and dynamic calls to
   `var`/inout signatures remain rejected. [Function_Arg, LC call-ABI; JC1–JC4]
-- **D6.2.3** Closures are **immutable values**: captures snapshot at
-  creation and are stored as `Item`s in the env, unboxed on access;
-  assignment — including interior mutation — through a captured name is a
-  compile error (semantics S9.1.4). State never lives inside a function
-  value. [C4, Box_Unbox]
+- **D6.2.3v2** Lambda-language closures are **immutable values**: captures
+  snapshot at creation and are stored as `Item`s in the env, unboxed on
+  access; assignment — including interior mutation — through a captured name
+  is a compile error (semantics S9.1.4). State never lives inside a Lambda
+  function value. Under the guest-semantic boundary of **D1.3**, this does
+  not prescribe capture semantics for a hosted profile: LambdaJS captures
+  lexical bindings by reference through its own precisely traced environment
+  records. [C4, Box_Unbox, JSI5]
 - **D6.2.4** The closure env is precisely traced (`closure_field_count`);
   wide scalars live in the env's tail region (SF18). Closures are
   **boxed-only** in the dual-func plan — the most valuable future
@@ -1015,6 +1018,18 @@ loosely across the corpus — context disambiguates, and we live with it.
 - **D7.2.3** Imported packages are cached in-process (L1, D8.5.1) and
   distribute as **source** (D1.7); compiled artifacts are derived local
   caches only.
+- **D7.2.4*** **`lambda.*` is the one root for everything Lambda ships**, and
+  the root name is reserved (S16.10.1v2). Three tiers live under it:
+  **`lambda.sys.*`** — the runtime's own system functions, prelude-imported
+  unqualified (S17.2.1); **`lambda.<module>`** — built-in modules, with the
+  bare spelling as an alias, so `import math` ≡ `import lambda.math`; and
+  **`lambda.<package>`** — shipped script packages, which drop the former
+  `package` level (`lambda.package.editor` → `lambda.editor`). Document-
+  processing packages group under **`lambda.doc.*`**, which is where the math
+  typesetting package moves (`lambda.package.math` → `lambda.doc.math`),
+  keeping `lambda.math` for the built-in math module. A package path names
+  exactly one thing: no path may be both a built-in module and a shipped
+  package. [S17.2.1, S17.2.2, S16.10.1v2]
 
 ### D7.3 Jube modules: the module system
 
@@ -1152,6 +1167,81 @@ loosely across the corpus — context disambiguates, and we live with it.
   generated `parser.c` remain a reference artifact and are regenerated from
   grammar sources (never hand-edit `parser.c`). Build config generates the
   build files (never hand-edit the Lua). [CGP5, rules 5, 7]
+- **D8.1.3v9*** LambdaJS has an explicit, boxed AST interpreter backend. A
+  retained `JsScript : Script` owns its AST/source facts and stable module
+  identity; it executes in the same runtime-owned `EvalContext`, GC heap,
+  event loop, and module-state registry as Lambda. AST functions are an
+  explicit `JsFunction` body kind behind the ordinary `fn->invoke` and
+  `fn->construct` capabilities, not a second call dispatcher. The current
+  synchronous slice uses JavaScript completion kinds and the existing JS
+  property/call kernels; lexical environments are precisely traced records
+  whose mutable cells are captured by reference. The admitted synchronous
+  surface includes patterns/defaults/rest/spread, sync iteration with
+  IteratorClose, switch/labels, optional/logical assignment, regex/template/
+  tagged-template expressions, object environments, and class
+  methods/accessors/fields/static blocks plus implicit and explicit derived
+  construction.
+  All semantic operations route through the existing JS property, iterator,
+  class, and call kernels. Direct and indirect `eval` calls are admitted, as
+  is `new.target`, including lexical capture by an AST arrow function.
+  `super()` and `super` property references use the existing lexical home
+  class, derived-`this` binding, field-initialization, and construct helpers;
+  this includes class and object methods, accessors, statics, and AST arrows.
+  Private fields, methods/accessors, static private elements, and private
+  brand checks resolve a class-owned identity key through the existing private
+  runtime. Class evaluation installs that key's owner in a traced lexical
+  environment; member bodies, field initializers, static blocks, and nested
+  closures retain it. Instance private methods publish the existing metadata
+  brand record before field initializers; every get/set/in operation routes to
+  the existing private property and brand kernels. Direct eval projects each
+  retained source-name/identity-key pair into the existing eval-private frame
+  for parse/lowering, then removes that frame with the ordinary eval bridge.
+  Direct eval enters the existing dynamic-code compilation service as a
+  deliberate language boundary, after the AST caller has installed the same
+  `EvalContext` bridge: interpreted function cells are projected and written
+  back, eval-created `var` bindings live in that activation's shared journal,
+  and script-global lexical changes are synchronized from the realm table to
+  the script slab. This is neither an unsupported-unit fallback nor a replay
+  of the enclosing script. `JS_EXECUTION_BACKEND=ast` forces this backend.
+  A synchronous CommonJS `require()` resolves literal targets against the
+  owning `JsScript`, then enters the existing CJS resolver, cache, and runtime
+  module registry. Its synthetic wrapper executes in a private module slab
+  and restores the caller's active slab on return, so `module`/`exports` never
+  leak into the page global and nested loads retain ordinary cache identity.
+  The admitted synchronous ES-module slice uses the same registry rather than
+  a JS-private cache: a module first publishes its registry-owned namespace
+  placeholder, instantiates hoisted function declarations, then traverses
+  static dependencies and executes its retained `JsScript` in its own shared
+  module slab. It admits default/named/namespace imports; default/named,
+  namespace (`export * as name`), and non-ambiguous star exports; named and
+  star re-exports; `import.meta.url`; and dynamic `import()` as a Promise over
+  that same resolver. Import reads resolve through the retained binding plan
+  on every read, and export writes propagate through the registry, so the
+  admitted named bindings remain live across re-exports and circular function
+  imports. ES top-level `this` is undefined and imports are read-only.
+  A `.ls` target is compiled by Lambda into the same registry descriptor; its
+  public boxed function values retain their `TypeFunc` and cross the ordinary
+  call kernel through Lambda's existing boxed dynamic-call ABI, not through a
+  wrapper heap or a second evaluator. Thus one page/runtime has one
+  `EvalContext`, heap, event-loop owner, module registry, and active module
+  state authority, while Lambda and JavaScript retain separate semantic
+  walkers and activation records. Top-level await, async module evaluation,
+  generators/async functions, ambiguous star-export resolution, shared T0/T1
+  environments, continuations, and AUTO policy remain excluded. The unset
+  backend remains the established MIR policy until the mixed-tier, suspension,
+  and performance gates are complete.
+  An AST ordinary function materializes the existing runtime `arguments`
+  object in its precisely traced activation environment before evaluating
+  parameter defaults. Sloppy functions with simple identifier parameters use
+  the runtime's mapped aliases for parameter reads and writes; strict or
+  non-simple functions use its unmapped object. An AST arrow resolves
+  `arguments` through its retained outer function environment. This retains
+  existing `arguments.callee` policy and never reads mutable ambient call
+  state after the activation has escaped.
+  The support admission runs after parse/bind/index but before declarations or
+  user code; unsupported syntax raises a JS error in the prepared realm and
+  never replays through MIR. [D1.3, D1.5, D1.7, D5.4.1, D6.2.2v2, D6.2.3v2,
+  D8.2.4, D8.4.1v2, D8.4.3v2, JSI1–JSI13]
 
 ### D8.2 Unified AST
 
@@ -1355,6 +1445,7 @@ Status of `*`-marked rulings as of 2026-08-24.
 | D7.5.2 | Central IO API direction adopted; surface not extracted (`js_fs`/`js_os`/`js_net` raw-IO violations are the burn-down list); `dynamic_lookup` laxity is acknowledged debt. |
 | D8.1.1v5 | Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for aggregate/structured signatures, mutable/index writes, object-field identifiers, indirect/`var` calls, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
 | D8.1.2v2 | Decided 2026-08-24 with D8.1.1v4. `grammar-lambda.js` remains the complete Tree-sitter syntax oracle/editor/bindings grammar; `grammar.js` and generated `parser.c` are reference artifacts regenerated by the normal grammar target and are never hand-edited. The production Lambda parser is maintained in `lambda/runtime/parser/` and is built through the generated build configuration. |
+| D8.1.3v9 | Revised 2026-08-26: the LambdaJS AST tier now includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, continuations, and AUTO policy remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/Lambda_Design_JS_Interpreter.md` and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.2.1–D8.2.3 | Structural Unified AST convergence is substantially landed for Lambda/JS: common core catalog, node aliases, `FnAnalysis`, and `MirEmitter`; Python remains the guest acceptance test. |
 | D8.2.4–D8.2.6 | Indexed compilation unit, authoritative traversal, typed fact/pass process, and demand-driven full-contract `MirValue` continuation are designed in U27–U32; implementation not started. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
@@ -1518,13 +1609,13 @@ Numbered `DO#` (design-open); each links to its record.
 | D5.2, D2.7.2, D8.4.2 | RV1–RV16 (+ RV3a, RV10a, RV14a), RVO1–RVO11 | `Lambda_Design_Compiling_Return_Value.md` |
 | D5.4 | RG0–RG14, MT2 contract | `Lambda_Design_Runtime_Globals.md` |
 | D6.1 | U14, U26; Features §3.6; NM §6.2; Lang_Hosting §7.1; IEH §5.3; REH-D6–REH-D12 | `Lambda_Semantics_Features.md`, `Lambda_Design_Native_Module.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md`, `Lambda_Design_Runtime_Error_Handling.md` |
-| D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md` |
+| D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12; JSI5 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md`, `Lambda_Design_JS_Interpreter.md` |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
 | D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md` |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
-| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12 | `Lambda_Design_Unified_AST.md`, `vibe/impl/Lambda_Impl_Tune_Ast.md`, `Lambda_Design_Ast_Interpreter.md` |
+| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12; JSI1–JSI13 | `Lambda_Design_Unified_AST.md`, `vibe/impl/Lambda_Impl_Tune_Ast.md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1 + call-ABI notes; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md` |

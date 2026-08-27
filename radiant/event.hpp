@@ -60,9 +60,12 @@ struct EventContext;
 bool radiant_behavior_claims_event(struct EventContext* evcon, View* target,
                                    const char* event_name);
 
-// Drop queued behavior attaches belonging to a document being freed; call
-// while its views are still alive (top of free_document).
-void radiant_behavior_attach_purge_doc(struct DomDocument* doc);
+// F8/ES19: the behavior init phase. Runs between layout and rendering, and is
+// positioned rather than gated on paint — a headless run that never renders
+// still inits its controls, while `lambda.exe layout` stops before the phase
+// and so keeps batch output free of handler side effects. Self-gating on
+// DomDocument::behavior_init_pending, so calling it on a quiet document is free.
+void radiant_run_behavior_init(struct DomDocument* doc);
 #endif
 
 typedef enum  {
@@ -187,9 +190,6 @@ typedef union RdtEvent {
 #ifndef RADIANT_EVENT_CORE_ONLY
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 #endif
-
-void radiant_uncheck_radio_group(DomNode* root, const char* name, DomNode* exclude,
-                                 DocState* state, bool sync_pseudo);
 
 #ifndef RADIANT_EVENT_CORE_ONLY
 
@@ -449,6 +449,11 @@ typedef struct InputIntent {
     const char* history_value;
     uint32_t history_sel_start;   // codepoints, like every Lambda-facing offset
     uint32_t history_sel_end;
+    // F2b: the option a click landed on inside an open <select> dropdown. The
+    // overlay is not a DOM element, so the index cannot be derived from a
+    // target; native computes it from the dropdown geometry and hands it over.
+    // -1 for every other intent.
+    int option_index;
 } InputIntent;
 
 typedef InputIntent EditingIntent;
@@ -1432,10 +1437,14 @@ struct EditingControllerHooks {
     void* user;
 };
 
-bool editing_controller_handle_rich_navigation(EventContext* evcon,
-                                               DocState* state,
-                                               const KeyEvent* key_event,
-                                               const EditingControllerHooks* hooks);
+// F9: the rich half of the caret waist. `_caret_surface_kind` reports which
+// surface the caret sits in (0 none, 1 text control, 2 rich) so the template can
+// decide what a key means there; `_apply_caret_operation` performs the named
+// operation it chose.
+extern "C" int editing_controller_caret_surface_kind(DocState* state);
+bool editing_controller_apply_caret_operation(EventContext* evcon, DocState* state,
+                                              const EditingControllerHooks* hooks,
+                                              const char* op, bool extend);
 
 bool editing_controller_dispatch_history(EventContext* evcon,
                                          const EditingSurface* surface,
@@ -1814,6 +1823,18 @@ extern "C" void tc_history_guard_enter(DocState* state);
 extern "C" void tc_history_guard_exit(DocState* state);
 
 // The undo ring, stored on the form ViewState in the State Store (ESO43).
+bool form_control_behavior_inited(DocState* state, View* view);
+void form_control_set_behavior_inited(DocState* state, View* view, bool inited);
+void form_control_invalidate_behavior_init(DocState* state, View* view);
+// F2b/#4: the password reveal window (bytes into the live value). Policy — what
+// to reveal and when — belongs to the behavior template; storage, the elapse
+// tick and the masked paint stay native.
+bool form_control_password_reveal_get(DocState* state, View* view,
+                                      uint32_t* out_start, uint32_t* out_end);
+void form_control_password_reveal_set(DocState* state, View* view,
+                                      uint32_t start, uint32_t end);
+bool form_control_password_reveal_clear(DocState* state, View* view);
+bool form_control_password_reveal_tick(DocState* state, View* view, double delta);
 void* form_control_history_get(DocState* state, View* view);
 void form_control_history_set(DocState* state, View* view, void* history);
 
@@ -2092,6 +2113,10 @@ bool context_menu_contains(DocState* state, float x, float y);
 // (Cut/Copy/Delete need a non-empty selection; Paste needs clipboard text).
 bool context_menu_item_enabled(DocState* state, int item);
 
+// F10: open at the position recorded for the in-flight right click, with the
+// template's enable mask. Returns false when no right click is pending.
+bool context_menu_open_pending(DocState* state, View* target, uint32_t enabled_mask);
+
 // Render the popup overlay. Called from render.cpp after the dropdown
 // overlay so it appears on top.
 void context_menu_render(RenderContext* rdcon, DocState* state);
@@ -2249,7 +2274,13 @@ typedef struct ViewState {
         uint8_t hovered : 1;
         uint8_t active : 1;
         uint8_t focused : 1;
-        uint8_t reserved : 5;
+        // F8/ES19: this control has had its behavior `init` turn. Lives here
+        // rather than on FormControlProp because ViewState is keyed by the
+        // stable view id and survives both relayout and the prop release that
+        // `reset_retained` performs — a bit on the prop would re-arm every pass
+        // and re-fire init forever.
+        uint8_t behavior_inited : 1;
+        uint8_t reserved : 4;
     } flags;
     union {
         struct {
@@ -2292,6 +2323,15 @@ typedef struct ViewState {
             // released and rebuilt as views churn — history has to outlive that
             // (ESO43). Released by view_state_release_form_payload.
             void* history;
+            // F2b/#4: the password reveal window, in bytes into current_value.
+            // Here rather than on FormControlProp for the ESO43 reason — the
+            // prop is released and rebuilt as views churn, and a reveal that
+            // vanished mid-keystroke would unmask the character early.
+            uint32_t password_reveal_start;
+            uint32_t password_reveal_end;
+            double   password_reveal_elapsed;
+            uint8_t  password_reveal_active : 1;
+            uint8_t  password_reserved : 7;
         } form;
     } data;
 } ViewState;
@@ -2565,6 +2605,30 @@ typedef struct DocState {
     float context_menu_width;
     float context_menu_height;
     int   context_menu_hover;      // -1 = none
+    // F10: the enable decision, computed once by the `<body>` behavior template
+    // when the menu opens and cached as a bitmask over CtxMenuItem. Caching is
+    // correct here and not the staleness ES16 warned about: the menu is modal,
+    // so nothing it depends on can change while it is up. It also keeps Lambda
+    // out of the paint pass, which reads this mask to grey items out — the
+    // quiescence rule F8 was built around.
+    uint32_t context_menu_enabled_mask;
+    // F9: the goal column for vertical caret motion. Document-scoped because the
+    // caret is. Without it, Up/Down through a short line ratchets the caret
+    // leftwards and never recovers the column it started from.
+    //
+    // The invalidation rule is placed at the caret write choke points rather
+    // than at their callers: every state_store_caret_* entry point clears it
+    // except state_store_caret_move_line, which is the only one that preserves
+    // and re-uses it. That is what makes a mouse click or a typed character
+    // invalidate the column without either of them having to know it exists.
+    float caret_goal_x;
+    bool  caret_goal_valid;
+    // Where the in-flight right click landed, recorded immediately before the
+    // `contextmenu` dispatch so `radiant.open_context_menu` can position the
+    // popup. Physical pixels deliberately never cross into policy.
+    View* pending_context_menu_target;
+    float pending_context_menu_x;
+    float pending_context_menu_y;
     
     // Document-level states
     float scroll_x, scroll_y;      // document scroll position

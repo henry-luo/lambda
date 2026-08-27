@@ -519,7 +519,7 @@ let tx_html_heading_split = cmd_split_block(html_heading_state)
 // chain — first non-null wins
 // ---------------------------------------------------------------------------
 fn never(_)  => null
-fn always(state) => cmd_insert_text(state, "X")
+fn always(st) => cmd_insert_text(st, "X")
 let tx_chain = chain(s0, [never, always, never])
 "chain doc:"; doc_text(tx_chain.doc_after) == "HelloX, world.Second."
 

@@ -1,5 +1,7 @@
 # Radiant — Fonts
 
+> **Last verified against tree:** 2026-08-25 *(initial stamp from git history)*
+
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers the font layer as seen from Radiant. Its single most important message is a boundary: the real font engine — glyph rasterization, `cmap` lookup, GPOS/`kern` kerning, per-codepoint fallback, the glyph cache, WOFF2 decode, and COLR/CBDT color-emoji handling — is **not** in `radiant/`. It lives in the unified module under `lib/font/` (~30 files). Radiant's `font.cpp` and `font_face.cpp` are a thin CSS→engine bridge: they map a CSS-resolved `FontProp` to the engine's `FontStyleDesc`, resolve and cache the `FontHandle`, parse and register `@font-face` descriptors, and copy engine metrics back onto the `FontProp`. Everything typographic below the handle is the engine's concern.
 >
 > **Primary sources:** `radiant/view.hpp` (font and `@font-face` declarations), `radiant/font.cpp` (`setup_font`, handle caching, metric population), `radiant/font_face.cpp` (`@font-face` parse + `register_font_face` bridge), `radiant/ui_context.cpp` (`FontContext` creation), and — for the boundary — the engine surface in `lib/font/font.h`.

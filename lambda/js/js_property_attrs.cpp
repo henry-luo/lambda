@@ -715,6 +715,12 @@ extern "C" Item js_define_accessor_partial(Item obj, Item name, Item fn,
     obj = obj_root.get();
     name = name_root.get();
     fn = fn_root.get();
+    // AST class/object evaluation enters this shared chokepoint directly,
+    // unlike MIR's wrapper. Canonicalize here so computed Symbols retain their
+    // internal identity record instead of being silently ignored.
+    JS_ASSIGN_OR_RETURN(key_result, js_to_property_key(name));
+    name_root.set(key_result);
+    name = name_root.get();
     if (get_type_id(name) != LMD_TYPE_STRING) return js_status_ok();
     String* ns = it2s(name);
     if (!ns) return js_status_ok();

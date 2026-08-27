@@ -1,5 +1,7 @@
 # Make Targets Guide
 
+> **Last verified against tree:** 2026-08-23 *(initial stamp from git history)*
+
 Complete reference for all `make` targets in the Lambda project.
 
 Run `make help` for a quick summary, or see below for full details.

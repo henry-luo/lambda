@@ -1,5 +1,7 @@
 # LambdaJS Runtime — Design Overview
 
+> **Last verified against tree:** 2026-08-13 *(initial stamp from git history)*
+
 > **The index and architectural summary for the LambdaJS detailed-design set.** LambdaJS is Lambda's embedded JavaScript engine: it compiles JavaScript to MIR and runs it inside the same `Item`/GC runtime as Lambda scripts, so JS values, the garbage collector, the MIR JIT, the input parsers/formatters, and the Radiant HTML/CSS layout engine are all shared rather than bridged.
 > **Audience:** engine developers. **Scope:** everything under `lambda/js/` (engine, language, standard library, RegExp, typed arrays, async/modules, Web/DOM, Node.js compatibility) plus the test infrastructure. **Convention:** the detailed docs cite `file:line` + symbol names; line numbers drift, so confirm against the symbol. This document supersedes the older `doc/dev/JS_Runtime.md` and `doc/dev/JS_Runtime_Detailed.md`, whose content has been absorbed and reorganized into the set below.
 

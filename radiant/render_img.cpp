@@ -219,13 +219,9 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 
     // Initialize UI context in headless mode
     UiContext ui_context;
-    if (ui_context_init(&ui_context, true) != 0) {
+    if (ui_context_init(&ui_context, true, pixel_ratio) != 0) {
         return 1;
     }
-
-    // Set pixel_ratio for HiDPI font rendering (crisp text)
-    // This ensures fonts are loaded at the correct physical size
-    ui_context.pixel_ratio = pixel_ratio;
 
     // Create a surface for rendering with total_scale dimensions (physical pixels)
     int surface_width = (int)(layout_width * total_scale);
@@ -364,12 +360,9 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
 
     // Initialize UI context in headless mode
     UiContext ui_context;
-    if (ui_context_init(&ui_context, true) != 0) {
+    if (ui_context_init(&ui_context, true, pixel_ratio) != 0) {
         return 1;
     }
-
-    // Set pixel_ratio for HiDPI font rendering
-    ui_context.pixel_ratio = pixel_ratio;
 
     // Calculate physical output dimensions (CSS pixels * total_scale)
     int output_width = (int)(viewport_width * total_scale);
@@ -631,7 +624,7 @@ int cmd_render_batch(int argc, char** argv) {
     // initialize UI context once
     UiContext ui_context;
     memset(&ui_context, 0, sizeof(UiContext));
-    if (ui_context_init(&ui_context, true) != 0) {
+    if (ui_context_init(&ui_context, true, default_pixel_ratio) != 0) {
         fprintf(stderr, "FAIL\t(init)\tFailed to initialize UI context\n");
         return 1;
     }

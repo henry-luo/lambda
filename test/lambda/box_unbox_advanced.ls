@@ -172,8 +172,8 @@ let f = (a: int, b: int) => a + b
 f(5, 3)                          // 8
 
 // Passing function as argument (must use untyped params for dynamic call)
-fn apply(func, a, b) { func(a, b) }
-apply(add_int, 10, 20)           // 30
+fn apply_fn(func, a, b) { func(a, b) }
+apply_fn(add_int, 10, 20)           // 30
 
 //==============================================================================
 // SECTION 12: String type params (no unboxing for strings)
