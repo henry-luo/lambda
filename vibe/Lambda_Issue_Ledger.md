@@ -38,7 +38,7 @@ Every issue below was re-checked against the tree at `c568f0f93`. Three outcomes
 | `Lambda_Issues5 (retired).md` | 7 entries re-tested. **Fixed:** postfix `^` in `let` (#4), chained comparisons (#5), string slicing (#11), `if`-expression value in a `pn` (#15), and §23's inline-`if` attribute value. **By design, not defects:** element-wise list `+` (#1), `let` reassignment rejected in a `pn` (#10). **Still open:** §23's attribute spread → §14. |
 | `Lambda_Issues6 (retired).md` | 5 open entries re-tested. **Fixed:** bare map as an `if` branch (#31, via S16.4.1v2), the paren-comma branch form (#32), multi-line `++` (#33), and non-fatal parse errors (#35 — a malformed file now exits 1). **Not reproduced:** the MIR float-param inference failure (#34); it was "real only" and a synthetic reconstruction runs clean on both tiers. |
 | `Lambda_Issues4_Lint (retired).md` | cppcheck re-run (2.17.1). E1 still stands and is now **invisible to the analyser** after the `malloc`→`mem_alloc` migration → §14. W3 (`alloca`) fixed where reported. Counts elsewhere are historical. |
-| `vibe/impl/*(fixed).md` | Archives spot-checked. `Lambda_Issue_GC_Native_Rooting` genuinely resolved (its 107/244 figure is historical discovery data — a stale memory note quoting it as live was corrected). **`Lambda_Issues0 (fixed).md` is mislabelled**: #9 and #15 are Deferred and five more items have no resolution; #9 re-verified open → §14. |
+| `vibe/impl/*(fixed).md` | Archives spot-checked. `Lambda_Issue_GC_Native_Rooting` genuinely resolved (its 107/244 figure is historical discovery data — a stale memory note quoting it as live was corrected). **`Lambda_Issues0 (fixed).md` is mislabelled**: #9 was deferred there and is now resolved in Appendix A; #15 and five more items remain without resolution. |
 | `Lambda_Issues3 (retired).md` | A test-enhancement proposal, not a defect ledger — and **substantially implemented**: it reported `test/std/core/` missing with 19 tests in `test/std/`; there are now 157, of which 104 sit under `core/` across all four proposed subdirectories (target was 57). |
 
 ### Direct implementation pass — 2026-08-26
@@ -68,8 +68,8 @@ Counts:
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 7 | 0 | 2 | 9 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
-| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 9 | 1 | 5 | 15 |
-| **Total** | | **97** | **11** | **48** | **156** |
+| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 8 | 1 | 6 | 15 |
+| **Total** | | **96** | **11** | **49** | **156** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -1132,7 +1132,7 @@ delegates to the same probe. Verified unchanged: `{key: 1}`, `{'a-b': 2}`,
 `test/std/negative/map_key_double_quoted.ls` +
 `NegativeScriptTest.DoubleQuotedMapKeyNamesTheRule`.
 
-<a id="issues0-9"></a>**Issues0 #9 · ShapePool keys on a hash without comparing field names · OPEN**
+<a id="issues0-9"></a>**Issues0 #9 · ShapePool keys on a hash without comparing field names · RESOLVED 2026-08-27**
 `vibe/impl/Lambda_Issues0 (fixed).md` #9 — deferred there, and the archive's
 `(fixed)` name hides it. `shape_pool.cpp:22` builds the pool key with
 `HASHMAP_DEFINE_FIELD3_KEY(shape_entry, ShapePoolEntry, signature.hash,
@@ -1141,11 +1141,16 @@ hash **and** match on field count and byte size are treated as identical, so one
 map's shape is reused for another and fields are read from the wrong offsets —
 silent data corruption. Low probability, high blast radius.
 
-The notable part: `shape_pool_shapes_equal` (`shape_pool.cpp:316`) already
-implements the exact deep comparison this needs — names, types and byte offsets
-— and has **no callers anywhere in the tree**. Closing this is wiring an
-existing function into the lookup path as a post-hash confirmation, not writing
-new logic.
+The fix keeps the signature as a fast routing key and wires the existing
+`shape_pool_shapes_equal` comparison into the hashmap identity check. Lookup
+uses a stack-only probe, so repeated lookups do not consume arena storage; the
+element name is retained as existing cache metadata so element signatures are
+confirmed as well. This implements the structural identity required by
+**D3.4.2** and exact name identity in **D3.4.4v2**.
+
+Regression: `NamespaceTest.ShapePoolCollisionDoesNotAliasDifferentFieldNames`
+uses the supported `NULL`-name normalization collision and verifies that
+different shapes remain distinct while identical shapes are still reused.
 
 <a id="lint-e1"></a>**Lint E1 · Unchecked allocation dereference in `build_ast.cpp`, now invisible to cppcheck · OPEN**
 `impl/Lambda_Issues4_Lint (retired).md` E1. Four sites allocate and dereference without a NULL
@@ -1911,6 +1916,18 @@ construction, rather than silently copying in the COW path. This enforces
 `S9.1.1` and `S9.1.6`: mutation through a module-level `let` is rejected, while
 the caller must use an allowed mutable owner. A targeted module-let probe now
 raises E211 and the full baseline passes 3914/3914.
+
+---
+
+## A.12 Sibling vibe ledgers
+
+<a id="issues0-r9"></a>**Issues0 #9-R · ShapePool hash collision reused a different shape · RESOLVED 2026-08-27**
+The hashmap now confirms the existing structural shape comparison after the
+signature routing key, and retains element names as cache identity metadata.
+This prevents a colliding signature from reusing a shape with different field
+names, types, offsets, flags, or element identity. The focused regression is
+`NamespaceTest.ShapePoolCollisionDoesNotAliasDifferentFieldNames`; the full
+namespace suite passes 39/39 and `make test-lambda-baseline` passes 3975/3975.
 
 ---
 

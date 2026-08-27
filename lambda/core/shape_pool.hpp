@@ -21,18 +21,19 @@ typedef struct ShapeSignature {
 
 // Cached shape entry - stored in shape pool
 typedef struct CachedShape {
-    ShapeSignature signature;   // Unique identifier
+    ShapeSignature signature;   // Fast routing signature; shape confirms identity
     struct ShapeEntry* shape;   // The actual shape chain
     struct ShapeEntry* last;    // Last entry in chain (for fast append)
     uint32_t ref_count;         // Reference count for lifecycle
     bool is_element;            // true if TypeElmt, false if TypeMap
+    const char* element_name;   // element identity, NULL for map shapes
 } CachedShape;
 
 // Shape pool - manages shape deduplication
 typedef struct ShapePool {
     Pool* pool;                 // Variable memory pool for allocations
     Arena* arena;               // Arena for permanent shape storage
-    struct hashmap* shapes;     // Hashmap: ShapeSignature → CachedShape
+    struct hashmap* shapes;     // Hashmap: signature + shape identity → CachedShape
     struct ShapePool* parent;   // Parent pool for inheritance
     uint32_t ref_count;         // Reference counting
     void* mem_node;             // MemContext registration node (NULL if untracked)

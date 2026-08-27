@@ -774,3 +774,28 @@ TEST_F(NamespaceTest, TagMacros_NullPtrs) {
     EXPECT_EQ(get_type_id(str_null), LMD_TYPE_NULL);
     EXPECT_EQ(get_type_id(sym_null), LMD_TYPE_NULL);
 }
+
+// A null field name is normalized to an empty hash key for nested-map support,
+// but the two shape entries remain structurally different.
+TEST_F(NamespaceTest, ShapePoolCollisionDoesNotAliasDifferentFieldNames) {
+    ASSERT_NE(input, nullptr);
+    ASSERT_NE(input->shape_pool, nullptr);
+
+    const char* null_name[] = {nullptr};
+    const char* empty_name[] = {""};
+    TypeId field_types[] = {LMD_TYPE_INT};
+
+    ShapeEntry* null_shape = shape_pool_get_map_shape(
+        input->shape_pool, null_name, field_types, 1);
+    ShapeEntry* empty_shape = shape_pool_get_map_shape(
+        input->shape_pool, empty_name, field_types, 1);
+
+    ASSERT_NE(null_shape, nullptr);
+    ASSERT_NE(empty_shape, nullptr);
+    EXPECT_NE(null_shape, empty_shape);
+    EXPECT_FALSE(shape_pool_shapes_equal(null_shape, empty_shape));
+
+    ShapeEntry* empty_shape_again = shape_pool_get_map_shape(
+        input->shape_pool, empty_name, field_types, 1);
+    EXPECT_EQ(empty_shape_again, empty_shape);
+}
