@@ -13,6 +13,7 @@
 #include "../lambda/runtime/heap_api.h"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/side_stack.h"
+#include "../lib/memtrack.h"
 
 extern "C" {
 #include "../lambda/runtime/gc/gc_heap.h"
@@ -446,6 +447,19 @@ TEST_F(RuntimeShapeTransition, ArrayNumIntLaneRoundTripsAndWidensSafely) {
     EXPECT_EQ(generic_float->items[0].get_double(), 13.0);
     EXPECT_EQ(generic_float->items[1].get_double(), 11.0);
     EXPECT_EQ(generic_float->items[2].item, b2it(BOOL_TRUE));
+}
+
+TEST_F(RuntimeShapeTransition, LabelStackAllocationFailureReturnsError) {
+    int64_t shape[2] = {1, 1};
+    ArrayNum* mask = array_num_new_ndim(ELEM_INT, 1, 2, shape);
+    ASSERT_NE(mask, nullptr);
+    array_int_set(mask, 0, 1);
+
+    memtrack_fault_inject(0);
+    Item result = fn_label({.array_num = mask});
+    memtrack_fault_clear();
+
+    EXPECT_TRUE(item_is_error(result));
 }
 
 TEST(ItemRepresentation, OwnedTailRelocationRebasesWideScalarItems) {

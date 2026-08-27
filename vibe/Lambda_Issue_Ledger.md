@@ -59,7 +59,7 @@ Counts:
 | LR_02 | Parsing & AST construction | 3 | 4 | 13 | 20 |
 | LR_03 | Value & type model | 6 | 1 | 2 | 9 |
 | LR_04 | Numbers, decimal & datetime | 8 | 0 | 0 | 8 |
-| LR_05 | Strings, symbols & vectors | 6 | 1 | 3 | 10 |
+| LR_05 | Strings, symbols & vectors | 5 | 1 | 4 | 10 |
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 9 | 9 |
 | LR_07 | MIR Direct transpiler & JIT | 13 | 1 | 2 | 16 |
 | LR_08 | Memory management & GC | 10 | 0 | 0 | 10 |
@@ -69,7 +69,7 @@ Counts:
 | LR_12 | Procedural runtime | 7 | 0 | 2 | 9 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 8 | 15 |
-| **Total** | | **94** | **11** | **51** | **156** |
+| **Total** | | **93** | **11** | **52** | **156** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -492,11 +492,21 @@ Unicode collation".
 that governs equality *and* ordering together (SQL/XQuery model) — never a
 change to the core operators.
 
-<a id="lr05-5"></a>**LR05-5 · `fn_label` bypasses the GC with raw `malloc`/`free` · OPEN**
-The flood-fill stack is `malloc`'d at `lambda-vector.cpp:4549` and released with
-`free`, bypassing the runtime mempool/GC — contrary to CLAUDE.md's allocator
-rule. Leak-free on the success path, but untracked memory that would leak if an
-early return were inserted between the two.
+<a id="lr05-5"></a>**LR05-5 · `fn_label` bypasses the runtime allocator with raw `malloc`/`free` · RESOLVED 2026-08-28**
+The flood-fill stack was allocated with raw `malloc` and released with `free`,
+so the operation bypassed the checked `memtrack` allocation contract and its
+failure-injection path. The success path was leak-free, but the temporary
+workspace was outside the runtime's ownership and failure accounting.
+
+The stack now uses the existing `mem_alloc`/`mem_free` pair with
+`MEM_CAT_TEMP`. This implements **D4.2.1v3** and lets allocation failure return
+through the existing `ItemError` path, as required by **D4.2.2v2**. No new
+data structure or design ruling was added.
+
+Regression: `RuntimeShapeTransition.LabelStackAllocationFailureReturnsError`
+arms `memtrack_fault_inject(0)` and verifies that `fn_label` reports the
+workspace allocation failure. The complete representation suite passes 29/29;
+`make test-lambda-baseline` passes 3977/3977.
 
 <a id="lr05-6"></a>**LR05-6 · Fixed-size buffer truncation in stencils · OPEN**
 `STENCIL_MEDIAN_CAP 4096` (`lambda-vector.cpp:4045`) rejects larger median
@@ -1706,6 +1716,14 @@ tag/attribute matching. The dead Item-level wrappers survive as
 lane, so the `~#` value emitted by mapping pipes is not narrowed through a C
 `int`. This preserves the index carrier required by `S10.1.2`; the baseline
 passes 3914/3914.
+
+<a id="lr05-r5"></a>**LR05-R5 · `fn_label` flood-fill workspace bypassed the runtime allocator · RESOLVED 2026-08-28**
+The flood-fill workspace now uses the existing checked `mem_alloc`/`mem_free`
+path with `MEM_CAT_TEMP` instead of raw `malloc`/`free`. This keeps temporary
+allocation failure and ownership tracking aligned with **D4.2.1v3** and
+**D4.2.2v2**. Regression: `RuntimeShapeTransition.LabelStackAllocationFailureReturnsError`;
+the representation suite passes 29/29 and the Lambda baseline passes
+3977/3977.
 
 ## A.5 C transpiler — legacy C2MIR (LR_06)
 

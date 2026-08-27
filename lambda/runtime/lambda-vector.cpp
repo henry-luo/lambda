@@ -10,7 +10,6 @@
 #include "../../lib/image.h"
 #include <cmath>
 #include <cstring>
-#include <cstdlib>
 #include <climits>
 #include <math.h>
 #include <type_traits>
@@ -4544,7 +4543,10 @@ Item fn_label(Item mask_item) {
     // v5: the int lane is i64, so the label workspace is int64 too.
     int64_t* lab = out->items;
     for (int64_t i = 0; i < H * W; i++) lab[i] = 0;
-    int64_t* stack = (int64_t*)malloc(sizeof(int64_t) * (size_t)H * (size_t)W);
+    // Keep temporary workspaces on the runtime allocator so failure injection
+    // and ownership tracking cover the complete operation.
+    int64_t* stack = (int64_t*)mem_alloc(sizeof(int64_t) * (size_t)H * (size_t)W,
+                                         MEM_CAT_TEMP);
     if (!stack) { log_error("label: out of memory"); return ItemError; }
     const int64_t di[4] = { -1, 1, 0, 0 }, dj[4] = { 0, 0, -1, 1 };
     int64_t next = 1;
@@ -4568,7 +4570,7 @@ Item fn_label(Item mask_item) {
             next++;
         }
     }
-    free(stack);
+    mem_free(stack);
     return { .array_num = out };
 }
 
