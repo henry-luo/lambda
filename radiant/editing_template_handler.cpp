@@ -46,13 +46,7 @@ EditingRouteSnapshot editing_route_snapshot(const EditingSurface* surface) {
     return route;
 }
 
-static bool editing_template_action_matches(
-        const EditingPreparedTransaction* prepared, void* user) {
-    (void)user;
-    return prepared && prepared->route.kind == EDITING_ROUTE_RADIANT_TEMPLATE;
-}
-
-static EditingActionOutcome editing_template_action_handle(
+EditingActionOutcome editing_template_action_handle(
         EventContext* evcon, const EditingPreparedTransaction* prepared,
         void* user) {
     (void)user;
@@ -80,16 +74,3 @@ static EditingActionOutcome editing_template_action_handle(
     return outcome;
 }
 
-void editing_template_action_register(DomDocument* document) {
-    if (!document) return;
-    EditingActionRegistration registration = {};
-    registration.handler_id = "radiant-template";
-    registration.route_mask = EDITING_ACTION_ROUTE_RADIANT_TEMPLATE;
-    registration.priority = 0;
-    registration.matches = editing_template_action_matches;
-    registration.handle = editing_template_action_handle;
-    uint64_t registration_id = editing_action_registry_register(document, &registration);
-    if (!registration_id) {
-        log_error("editing_template_action: failed to register radiant-template handler");
-    }
-}

@@ -184,7 +184,12 @@ pub pn apply_fn(elem, evt, multiline) {
     // nothing extra and keeps `input` firing from the one engine path that
     // drives validation. The preedit session itself stays native (ESO21), as
     // does the readonly/disabled rejection in te_ime_commit_prepare.
-    if (t == "insertText" or t == "insertFromPaste" or
+    // `insertFromDrop` joins the list for the same reason the others are on it:
+    // a drop is a range replacement whose text happens to have arrived by
+    // pointer. It owes the identical two rules — the single-line newline policy
+    // and maxlength — and the engine has already moved the selection onto the
+    // drop range before dispatching, so `s`/`e` below are the right offsets.
+    if (t == "insertText" or t == "insertFromPaste" or t == "insertFromDrop" or
             t == "insertFromComposition" or t == "insertReplacementText") {
         // A non-empty selection is replaced rather than inserted beside, which
         // is also what makes typing over a selection collapse it.
@@ -196,8 +201,11 @@ pub pn apply_fn(elem, evt, multiline) {
         reveal_last_typed(elem, s, fitted)
         'prevent-default'
     }
-    else if (t == "deleteByCut") {
+    else if (t == "deleteByCut" or t == "deleteByDrag") {
         // Cut removes the selection; the clipboard write itself is native.
+        // A drag-move removes the source range the same way — the engine has
+        // already put the selection on it — so the two share one branch rather
+        // than growing a second copy of "delete what is selected".
         delete_span(elem, s, e, s)
     }
     else if (t == "deleteContentBackward") {

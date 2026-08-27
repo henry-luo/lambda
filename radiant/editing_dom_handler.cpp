@@ -347,13 +347,7 @@ static EditingActionOutcome editing_dom_handle_composition(
     return outcome;
 }
 
-static bool editing_dom_action_matches(const EditingPreparedTransaction* prepared,
-                                       void* user) {
-    (void)user;
-    return prepared && prepared->route.kind == EDITING_ROUTE_DOM_SCRIPT;
-}
-
-static EditingActionOutcome editing_dom_action_handle(
+EditingActionOutcome editing_dom_action_handle(
         EventContext* evcon, const EditingPreparedTransaction* prepared,
         void* user) {
     (void)user;
@@ -453,19 +447,3 @@ static EditingActionOutcome editing_dom_action_handle(
     return outcome;
 }
 
-void editing_dom_action_register(DomDocument* document) {
-    if (!document) return;
-    EditingActionRegistration registration = {};
-    registration.handler_id = "dom-compat";
-    registration.route_mask = EDITING_ACTION_ROUTE_DOM_SCRIPT;
-    registration.priority = 0;
-    registration.matches = editing_dom_action_matches;
-    registration.handle = editing_dom_action_handle;
-    // Registration is idempotent for a document; callers may prepare several
-    // edits in one event turn without adding competing built-in handlers.
-    EditingActionRegistry* registry = editing_action_registry_get(document);
-    if (!registry) return;
-    if (!editing_action_registry_register(document, &registration)) {
-        log_error("editing_dom_action: failed to register dom-compat handler");
-    }
-}

@@ -3,7 +3,7 @@
   "html": "test/html/index.html",
   "viewport": { "width": 900, "height": 720 },
   "events": [
-    { "type": "click", "target": { "selector": "a", "index": 21 } },
+    { "type": "click", "target": { "selector": "a[href=\"../ui/editing/contenteditable.html\"]" } },
     { "type": "wait", "ms": 100 },
     { "type": "click", "x": 75, "y": 383 },
     { "type": "click", "x": 120, "y": 409 },

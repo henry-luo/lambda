@@ -9,6 +9,7 @@ import aria: lambda.package.dom.aria
 import ime: lambda.package.dom.ime
 import menu: lambda.package.dom.menu
 import caret: lambda.package.dom.caret
+import keymap: lambda.package.dom.keymap
 
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
@@ -53,6 +54,12 @@ on click(evt) {
 // with form control" in state_machine.cpp — form_control_prop_release now
 // closes a dropdown owning the prop being released, the single point that both
 // release paths share (ESO28).
+// One commit path for the pointer, Enter, and the harness's select_option.
+pn commit_option(elem, index) {
+    radiant.set_selected_index(elem, index)
+    radiant.set_dropdown_open(elem, false)
+}
+
 view <select> state dropdown_open {}
 on init(evt) { aria.reflect(~) }
 on click(evt) {
@@ -65,8 +72,21 @@ on click(evt) {
 // template's, so one interaction is no longer split between the two sides.
 on optioncommit(evt) {
     if (evt.option_index == null) { return 'pass' }
-    radiant.set_selected_index(~, evt.option_index)
-    radiant.set_dropdown_open(~, false)
+    commit_option(~, evt.option_index)
+}
+// F11: the keys an open dropdown responds to. Enter reaches the same commit the
+// pointer does — not a second copy of it — which is the point of moving the
+// other three keys here rather than leaving them native alongside it.
+on dropdownkey(evt) {
+    let count = radiant.option_count(~);
+    let hover = radiant.hover_index(~);
+    if (evt.key == "ArrowUp") { if (hover > 0) radiant.set_hover_index(~, hover - 1) else true }
+    else if (evt.key == "ArrowDown") { if (hover < count - 1) radiant.set_hover_index(~, hover + 1) else true }
+    else if (evt.key == "Enter") {
+        if (hover >= 0 and hover < count) { commit_option(~, hover) } else { true }
+    }
+    else if (evt.key == "Escape") { radiant.set_dropdown_open(~, false) }
+    else { 'pass' }
 }
 
 // Constraint validation (F3). There is no native validator behind this any
@@ -120,6 +140,8 @@ on contextmenu(evt) { menu.open_for(~) }
 // F9: keyboard caret navigation. Document-scoped for the same reason — one
 // caret per document, not one per control.
 on caretkey(evt) { caret.navigate(~, evt) }
+// F11: key -> edit intent, one rule set for both surfaces.
+on keyintent(evt) { keymap.resolve(~, evt) }
 on compositionstart(evt)  { ime.begin(~) }
 on compositionupdate(evt) { ime.update(~, evt, null) }
 on compositionend(evt)    { ime.end(~) }
