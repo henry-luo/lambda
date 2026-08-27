@@ -1478,6 +1478,47 @@ extern "C" uint64_t radiant_splice_epoch(void) { return g_radiant_splice_epoch; 
 // caret. Events are deliberately not fired here — this runs inside beforeinput,
 // and the engine dispatches `input` after the applier returns, exactly as it
 // does for its own splice.
+// F10: the context-menu waist. The template names the target and the enable
+// mask; the popup position comes from the right click native already resolved,
+// so physical pixels never reach policy.
+RADIANT_C_API Item fn_radiant_open_context_menu(Item node_item, Item mask_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "OPEN_CONTEXT_MENU", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    int64_t mask = it2l(mask_item);
+    if (mask < 0) mask = 0;
+    bool ok = context_menu_open_pending(state, (View*)elem, (uint32_t)mask);
+    return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_close_context_menu(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "CLOSE_CONTEXT_MENU", &elem);
+    if (!state) return (Item){.item = b2it(0)};
+    context_menu_close(state);
+    return (Item){.item = b2it(1)};
+}
+
+// The element the in-flight right click landed on, or the target of an already
+// open menu. Resolving the hit is mechanism; deciding what it deserves is not.
+RADIANT_C_API Item fn_radiant_context_menu_target(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "CONTEXT_MENU_TARGET", &elem);
+    if (!state) return ItemNull;
+    View* target = state->pending_context_menu_target
+        ? state->pending_context_menu_target : state->context_menu_target;
+    if (!target || !target->is_element()) return ItemNull;
+    return radiant_dom_wrap_node((void*)target);   // View is the DomNode
+}
+
+// Clipboard text, for the paste enable rule. Read-only: the clipboard write
+// side stays native with the cut/copy execution.
+RADIANT_C_API Item fn_radiant_clipboard_text() {
+    const char* clip = clipboard_get_text();
+    if (!clip || !*clip) return ItemNull;
+    return radiant_string_item(clip);
+}
+
 // F2b/#4: the password reveal window. Which control reveals, what gets revealed
 // and when are the template's call; this only converts the codepoint range it
 // names into the byte window the renderer masks against. An empty or inverted
@@ -2038,6 +2079,14 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
     {"set_password_reveal", "fn(node: dom_node, start: int, end: int) -> bool", (fn_ptr)fn_radiant_set_password_reveal, JUBE_FN_NONE,
      "Item fn_radiant_set_password_reveal(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_password_reveal},
+    {"open_context_menu", "fn(node: dom_node, enabled_mask: int) -> bool", (fn_ptr)fn_radiant_open_context_menu, JUBE_FN_NONE,
+     "Item fn_radiant_open_context_menu(Item node, Item enabled_mask)", (fn_ptr)fn_radiant_open_context_menu},
+    {"close_context_menu", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_close_context_menu, JUBE_FN_NONE,
+     "Item fn_radiant_close_context_menu(Item node)", (fn_ptr)fn_radiant_close_context_menu},
+    {"context_menu_target", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_context_menu_target, JUBE_FN_NONE,
+     "Item fn_radiant_context_menu_target(Item node)", (fn_ptr)fn_radiant_context_menu_target},
+    {"clipboard_text", "fn() -> string|null", (fn_ptr)fn_radiant_clipboard_text, JUBE_FN_NONE,
+     "Item fn_radiant_clipboard_text()", (fn_ptr)fn_radiant_clipboard_text},
     {"ime_preedit", "fn(node: dom_node) -> any", (fn_ptr)fn_radiant_ime_preedit, JUBE_FN_NONE,
      "Item fn_radiant_ime_preedit(Item node)", (fn_ptr)fn_radiant_ime_preedit},
     {"set_ime_preedit", "fn(node: dom_node, text: any, caret: int) -> bool", (fn_ptr)fn_radiant_set_ime_preedit, JUBE_FN_NONE,

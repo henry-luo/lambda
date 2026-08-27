@@ -641,6 +641,12 @@ static void state_dump_emit_doc_attrs(DumpBuildContext* ctx, ElementBuilder& doc
         state_dump_node_ref((const DomNode*)state->context_menu_target, ref, sizeof(ref));
         map.put("target", ref);
         if (state->context_menu_hover != -1) map.put("hover", (int64_t)state->context_menu_hover);
+        // F10: the enable mask is the template's decision about this menu, so it
+        // belongs in the dump. Without it the policy that moved to Lambda has no
+        // observable surface — a mask stuck at zero looked identical to a
+        // correct one, which is how the first attempt at covering it passed
+        // vacuously.
+        map.put("enabled", (int64_t)state->context_menu_enabled_mask);
         doc.attr("context_menu", map.final());
     }
     if (state_dump_float_changed(state->scroll_x) || state_dump_float_changed(state->scroll_y)) {
