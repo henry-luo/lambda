@@ -32,7 +32,7 @@
     notes: "City with comma, needs quotes",
     email: "alice@domain.com"
   }, {
-    name: "Charlie "The Great" Wilson",
+    name: "Charlie \"The Great\" Wilson",
     age: "40",
     city: "Chicago",
     salary: "80000",
@@ -56,7 +56,7 @@
     notes: "Missing boolean field",
     email: "maria@example.net"
   }, {
-    name: "Robert "Bob" Smith",
+    name: "Robert \"Bob\" Smith",
     age: "45",
     city: "Dallas, TX",
     salary: "90000",
@@ -69,8 +69,7 @@
     city: "Seattle",
     salary: "70000",
     active: "false",
-    notes: "Line break in notes
-Continues here",
+    notes: "Line break in notes\nContinues here",
     email: "lisa@company.org"
   }, {
     name: "Tom O'Connor",
@@ -86,7 +85,7 @@ Continues here",
     city: "Portland",
     salary: "48000",
     active: "true",
-    notes: "Comma, semicolon; and "quotes" test",
+    notes: "Comma, semicolon; and \"quotes\" test",
     email: "sarah@test.com"
   }, {
     name: "Mike Brown",
@@ -94,7 +93,7 @@ Continues here",
     city: "Denver",
     salary: "62000",
     active: "false",
-    notes: "Tab	character in notes",
+    notes: "Tab\tcharacter in notes",
     email: "mike@example.org"
   }, {
     name: "Emily Davis",
@@ -113,7 +112,7 @@ Continues here",
     notes: "NULL",
     email: "kevin@work.com"
   }, {
-    name: "Amy "Ace" Thompson",
+    name: "Amy \"Ace\" Thompson",
     age: "29",
     city: "Nashville",
     salary: "52000",
@@ -121,12 +120,12 @@ Continues here",
     notes: "Special chars: @#$%^&*()",
     email: "amy@email.org"
   }, {
-    name: "Chris "C.J." Miller",
+    name: "Chris \"C.J.\" Miller",
     age: "36",
     city: "Las Vegas, NV",
     salary: "67000",
     active: "true",
-    notes: "Multiple quotes "test" case",
+    notes: "Multiple quotes \"test\" case",
     email: "chris@test.net"
   }, {
     name: "Zhang, Wei",
@@ -193,14 +192,12 @@ Continues here",
     notes: "Testing long values",
     email: "verylongemail@verylongdomain.com"
   }, {
-    name: "Special,Chars"In,Name",
+    name: "Special,Chars\"In,Name",
     age: "50",
-    city: "City"With"Quotes",
+    city: "City\"With\"Quotes",
     salary: "75000",
     active: "true",
-    notes: "Notes with
-multiple
-lines",
+    notes: "Notes with\nmultiple\nlines",
     email: "special@csv.com"
   }]
 "

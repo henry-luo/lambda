@@ -277,7 +277,6 @@ struct DomDocument {
     // Keep new editing state at the document tail: native/JIT consumers depend
     // on the offsets of the long-lived DOM/JS members above.
     uint64_t mutation_epoch;
-    void* editing_action_registry;
 
     // Document provenance, set by the loader that built this tree. Kept here at
     // the tail (rather than beside html_version) so no existing member offset
@@ -326,8 +325,7 @@ struct DomDocument {
                     pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f),
                     pending_scroll_into_view_target(nullptr),
                     pending_scroll_into_view_target_id(0),
-                    mutation_epoch(0), editing_action_registry(nullptr),
-                    page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
+                    mutation_epoch(0), page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
                     dom_package_loaded(false), owns_script_runtime(false),
                     behavior_init_pending(false) {}
 

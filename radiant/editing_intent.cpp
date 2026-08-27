@@ -170,39 +170,126 @@ bool input_intent_is_dispatchable(InputIntentType type) {
     }
 }
 
-bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* out) {
+
+
+// F11: the inverse of input_intent_type_name, generated from the same rows so
+// the two cannot drift.
+InputIntentType input_intent_type_from_name(const char* name) {
+    if (!name) return INPUT_INTENT_NONE;
+    if (strcmp(name, "insertText") == 0) return INPUT_INTENT_INSERT_TEXT;
+    if (strcmp(name, "insertReplacementText") == 0) return INPUT_INTENT_INSERT_REPLACEMENT_TEXT;
+    if (strcmp(name, "insertParagraph") == 0) return INPUT_INTENT_INSERT_PARAGRAPH;
+    if (strcmp(name, "insertLineBreak") == 0) return INPUT_INTENT_INSERT_LINE_BREAK;
+    if (strcmp(name, "insertHorizontalRule") == 0) return INPUT_INTENT_INSERT_HORIZONTAL_RULE;
+    if (strcmp(name, "insertImage") == 0) return INPUT_INTENT_INSERT_IMAGE;
+    if (strcmp(name, "insertLink") == 0) return INPUT_INTENT_INSERT_LINK;
+    if (strcmp(name, "insertFromPaste") == 0) return INPUT_INTENT_INSERT_FROM_PASTE;
+    if (strcmp(name, "insertFromPasteAsQuotation") == 0) return INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION;
+    if (strcmp(name, "insertFromYank") == 0) return INPUT_INTENT_INSERT_FROM_YANK;
+    if (strcmp(name, "insertFromDrop") == 0) return INPUT_INTENT_INSERT_FROM_DROP;
+    if (strcmp(name, "deleteContentBackward") == 0) return INPUT_INTENT_DELETE_CONTENT_BACKWARD;
+    if (strcmp(name, "deleteContentForward") == 0) return INPUT_INTENT_DELETE_CONTENT_FORWARD;
+    if (strcmp(name, "deleteWordBackward") == 0) return INPUT_INTENT_DELETE_WORD_BACKWARD;
+    if (strcmp(name, "deleteWordForward") == 0) return INPUT_INTENT_DELETE_WORD_FORWARD;
+    if (strcmp(name, "deleteSoftLineBackward") == 0) return INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD;
+    if (strcmp(name, "deleteSoftLineForward") == 0) return INPUT_INTENT_DELETE_SOFT_LINE_FORWARD;
+    if (strcmp(name, "deleteHardLineBackward") == 0) return INPUT_INTENT_DELETE_HARD_LINE_BACKWARD;
+    if (strcmp(name, "deleteHardLineForward") == 0) return INPUT_INTENT_DELETE_HARD_LINE_FORWARD;
+    if (strcmp(name, "deleteByCut") == 0) return INPUT_INTENT_DELETE_BY_CUT;
+    if (strcmp(name, "deleteByDrag") == 0) return INPUT_INTENT_DELETE_BY_DRAG;
+    if (strcmp(name, "compositionStart") == 0) return INPUT_INTENT_COMPOSITION_START;
+    if (strcmp(name, "insertCompositionText") == 0) return INPUT_INTENT_INSERT_COMPOSITION_TEXT;
+    if (strcmp(name, "insertFromComposition") == 0) return INPUT_INTENT_INSERT_FROM_COMPOSITION;
+    if (strcmp(name, "deleteCompositionText") == 0) return INPUT_INTENT_DELETE_COMPOSITION_TEXT;
+    if (strcmp(name, "unlink") == 0) return INPUT_INTENT_FORMAT_UNLINK;
+    if (strcmp(name, "formatBold") == 0) return INPUT_INTENT_FORMAT_BOLD;
+    if (strcmp(name, "formatItalic") == 0) return INPUT_INTENT_FORMAT_ITALIC;
+    if (strcmp(name, "formatUnderline") == 0) return INPUT_INTENT_FORMAT_UNDERLINE;
+    if (strcmp(name, "formatStrikeThrough") == 0) return INPUT_INTENT_FORMAT_STRIKETHROUGH;
+    if (strcmp(name, "formatSubscript") == 0) return INPUT_INTENT_FORMAT_SUBSCRIPT;
+    if (strcmp(name, "formatSuperscript") == 0) return INPUT_INTENT_FORMAT_SUPERSCRIPT;
+    if (strcmp(name, "formatForeColor") == 0) return INPUT_INTENT_FORMAT_FORE_COLOR;
+    if (strcmp(name, "formatBackColor") == 0) return INPUT_INTENT_FORMAT_BACK_COLOR;
+    if (strcmp(name, "formatHiliteColor") == 0) return INPUT_INTENT_FORMAT_HILITE_COLOR;
+    if (strcmp(name, "formatFontName") == 0) return INPUT_INTENT_FORMAT_FONT_NAME;
+    if (strcmp(name, "formatFontSize") == 0) return INPUT_INTENT_FORMAT_FONT_SIZE;
+    if (strcmp(name, "formatRemove") == 0) return INPUT_INTENT_FORMAT_REMOVE;
+    if (strcmp(name, "formatBlock") == 0) return INPUT_INTENT_FORMAT_BLOCK;
+    if (strcmp(name, "formatJustifyLeft") == 0) return INPUT_INTENT_FORMAT_JUSTIFY_LEFT;
+    if (strcmp(name, "formatJustifyCenter") == 0) return INPUT_INTENT_FORMAT_JUSTIFY_CENTER;
+    if (strcmp(name, "formatJustifyRight") == 0) return INPUT_INTENT_FORMAT_JUSTIFY_RIGHT;
+    if (strcmp(name, "formatJustifyFull") == 0) return INPUT_INTENT_FORMAT_JUSTIFY_FULL;
+    if (strcmp(name, "insertOrderedList") == 0) return INPUT_INTENT_FORMAT_ORDERED_LIST;
+    if (strcmp(name, "insertUnorderedList") == 0) return INPUT_INTENT_FORMAT_UNORDERED_LIST;
+    if (strcmp(name, "formatIndent") == 0) return INPUT_INTENT_FORMAT_INDENT;
+    if (strcmp(name, "formatOutdent") == 0) return INPUT_INTENT_FORMAT_OUTDENT;
+    if (strcmp(name, "selectAll") == 0) return INPUT_INTENT_SELECT_ALL;
+    if (strcmp(name, "historyUndo") == 0) return INPUT_INTENT_HISTORY_UNDO;
+    if (strcmp(name, "historyRedo") == 0) return INPUT_INTENT_HISTORY_REDO;
+    return INPUT_INTENT_NONE;
+}
+
+extern "C" bool radiant_dispatch_behavior_key_intent(View* target, const InputIntent* intent);
+extern "C" uint64_t radiant_key_intent_epoch(void);
+extern "C" const char* radiant_key_intent_name(void);
+
+// F11: which key means which edit intent is policy, and it lived here as a
+// twelve-branch table while the text-control path carried its own copy. The
+// table is now one rule set in the dom package; this resolves the name the
+// template returns back to a type and fills the payload, which was never policy.
+//
+// Dispatched from the **caret view**, not from the editing surface. On a
+// template-rendered page `active_surface.view` can hand back a node from a
+// superseded render generation whose parent link has been cleared, and a walk up
+// a detached chain never reaches <body> — it just looks like "no template wanted
+// this event". That silent failure is what sank the first attempt; the caret
+// view is resolved against the live tree.
+bool input_intent_from_key_event(DocState* state, const KeyEvent* key_event,
+                                 InputIntent* out) {
     if (!key_event || !out) return false;
     input_intent_reset(out);
     out->key = key_event->key;
     out->mods = key_event->mods;
+    if (!state) return false;
 
-    bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
-    bool alt = (key_event->mods & RDT_MOD_ALT) != 0;
-    bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
-    bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
-    bool primary = cmd || ctrl;
+    // Dispatched at the document's <body>, not at the caret's element. Both the
+    // editing surface and the caret view can be nodes from a superseded render
+    // generation this early in the keydown — their parent chain dead-ends on a
+    // detached div and never reaches <body>, which reads as "no template wanted
+    // this" rather than as an error. Walking *down* to the body from the
+    // document sidesteps that entirely, and costs nothing in fidelity: this
+    // mapping reads only the key and modifiers, never the target element.
+    DomDocument* doc = state->owner_store ? state->owner_store->document : nullptr;
+    DomNode* root = doc && doc->root ? static_cast<DomNode*>(doc->root) : nullptr;
+    DomElement* body = nullptr;
+    for (DomNode* n = root; n && !body; n = n->next_sibling) {
+        if (n->node_type != DOM_NODE_ELEMENT) continue;
+        DomElement* e = static_cast<DomElement*>(n);
+        if (e->tag() == MARKUP_NAME_BODY) { body = e; break; }
+        for (DomNode* c = e->first_child; c; c = c->next_sibling) {
+            if (c->node_type != DOM_NODE_ELEMENT) continue;
+            DomElement* ce = static_cast<DomElement*>(c);
+            if (ce->tag() == MARKUP_NAME_BODY) { body = ce; break; }
+        }
+    }
+    if (!body) return false;
+    View* dispatch_target = static_cast<View*>(body);
 
-    if (primary && key_event->key == RDT_KEY_Z) {
-        out->type = shift ? INPUT_INTENT_HISTORY_REDO : INPUT_INTENT_HISTORY_UNDO;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_Y) {
-        out->type = INPUT_INTENT_HISTORY_REDO;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_B) {
-        out->type = INPUT_INTENT_FORMAT_BOLD;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_I) {
-        out->type = INPUT_INTENT_FORMAT_ITALIC;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_U) {
-        out->type = INPUT_INTENT_FORMAT_UNDERLINE;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_V) {
+    uint64_t epoch_before = radiant_key_intent_epoch();
+    InputIntent key_carrier;
+    key_carrier.key = key_event->key;
+    key_carrier.mods = key_event->mods;
+    // No EventContext by design: every other behavior hook is a default action
+    // and ES5 suppresses those after preventDefault, but this one is a
+    // *translation* — a JS editor that prevents the keydown still relies on the
+    // intent, and passing evcon here silenced every such editor in the suite.
+    radiant_dispatch_behavior_key_intent(dispatch_target, &key_carrier);
+    if (radiant_key_intent_epoch() == epoch_before) return false;
+
+    InputIntentType type = input_intent_type_from_name(radiant_key_intent_name());
+    if (type == INPUT_INTENT_NONE) return false;
+
+    if (type == INPUT_INTENT_INSERT_FROM_PASTE) {
         const char* html = clipboard_store_read_mime("text/html");
         if (html && html[0]) {
             out->owned_html_data = mem_strdup(html, MEM_CAT_TEMP);
@@ -210,42 +297,12 @@ bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* out) {
         }
         const char* clip = clipboard_get_text();
         if ((!clip || !clip[0]) && (!html || !html[0])) return false;
-        out->type = INPUT_INTENT_INSERT_FROM_PASTE;
         out->owned_data = mem_strdup(clip ? clip : "", MEM_CAT_TEMP);
         out->data = out->owned_data;
         out->data_mime = (out->html_data && out->html_data[0]) ? "text/html" : "text/plain";
-        return true;
     }
-    if (primary && key_event->key == RDT_KEY_X) {
-        out->type = INPUT_INTENT_DELETE_BY_CUT;
-        return true;
-    }
-    if (primary && key_event->key == RDT_KEY_A) {
-        out->type = INPUT_INTENT_SELECT_ALL;
-        return true;
-    }
-    if (key_event->key == RDT_KEY_ENTER) {
-        out->type = shift ? INPUT_INTENT_INSERT_LINE_BREAK : INPUT_INTENT_INSERT_PARAGRAPH;
-        return true;
-    }
-    if (key_event->key == RDT_KEY_TAB) {
-        out->type = shift ? INPUT_INTENT_FORMAT_OUTDENT : INPUT_INTENT_FORMAT_INDENT;
-        return true;
-    }
-    if (key_event->key == RDT_KEY_BACKSPACE) {
-        out->type = cmd ? INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD
-            : (alt || ctrl) ? INPUT_INTENT_DELETE_WORD_BACKWARD
-            : INPUT_INTENT_DELETE_CONTENT_BACKWARD;
-        return true;
-    }
-    if (key_event->key == RDT_KEY_DELETE) {
-        out->type = cmd ? INPUT_INTENT_DELETE_SOFT_LINE_FORWARD
-            : (alt || ctrl) ? INPUT_INTENT_DELETE_WORD_FORWARD
-            : INPUT_INTENT_DELETE_CONTENT_FORWARD;
-        return true;
-    }
-
-    return false;
+    out->type = type;
+    return true;
 }
 
 bool input_intent_from_text_input(uint32_t codepoint, InputIntent* out,

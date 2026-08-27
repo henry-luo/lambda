@@ -462,9 +462,13 @@ void input_intent_dispose(InputIntent* intent);
 bool input_intent_clone(const InputIntent* source, InputIntent* destination);
 
 const char* input_intent_type_name(InputIntentType type);
+InputIntentType input_intent_type_from_name(const char* name);
 bool input_intent_is_dispatchable(InputIntentType type);
 
-bool input_intent_from_key_event(const KeyEvent* key_event, InputIntent* out);
+// F11: the key->intent decision belongs to the <body> template, dispatched from
+// the live caret view. Returns false when no intent applies.
+bool input_intent_from_key_event(DocState* state, const KeyEvent* key_event,
+                                 InputIntent* out);
 bool input_intent_from_text_input(uint32_t codepoint, InputIntent* out,
                                   char* utf8_buf, size_t utf8_buf_size);
 bool input_intent_from_composition_event(const CompositionEvent* comp_event,
@@ -1208,8 +1212,6 @@ struct EditingPreparedTransaction {
     DomNodeRef host_ref;
     uint32_t host_view_id;
     uint64_t mutation_epoch_before_notification;
-    uint64_t registry_generation;
-    uint64_t selected_registration_id;
     const char* selected_handler_id;
 };
 
@@ -1267,51 +1269,13 @@ struct EditingFormNotificationHooks {
     void* user;
 };
 
-typedef bool (*EditingActionMatchesFn)(const EditingPreparedTransaction* prepared,
-                                       void* user);
-typedef EditingActionOutcome (*EditingActionHandleFn)(
-        EventContext* evcon, const EditingPreparedTransaction* prepared,
-        void* user);
-typedef void (*EditingActionDestroyUserFn)(void* user);
-
-struct EditingActionRegistration {
-    uint64_t registration_id;
-    const char* handler_id;
-    uint32_t route_mask;
-    int32_t priority;
-    EditingActionMatchesFn matches;
-    EditingActionHandleFn handle;
-    EditingActionDestroyUserFn destroy_user;
-    void* user;
-    bool tombstoned;
-};
-
-struct EditingActionRegistry;
-struct EditingActionSnapshot {
-    EditingActionRegistry* registry;
-    void* entry;
-    uint64_t registration_id;
-    const char* handler_id;
-};
-
-EditingActionRegistry* editing_action_registry_get(DomDocument* document);
-uint64_t editing_action_registry_register(
-        DomDocument* document, const EditingActionRegistration* registration);
-bool editing_action_registry_unregister(DomDocument* document,
-                                        uint64_t registration_id);
-bool editing_action_registry_select(DomDocument* document,
-                                    const EditingPreparedTransaction* prepared,
-                                    EditingActionSnapshot* out_snapshot,
-                                    bool* out_configuration_error);
-EditingActionOutcome editing_action_snapshot_invoke(
-        EditingActionSnapshot* snapshot, EventContext* evcon,
-        const EditingPreparedTransaction* prepared);
-void editing_action_snapshot_release(EditingActionSnapshot* snapshot);
-uint64_t editing_action_registry_generation(const DomDocument* document);
-
-// Installs the narrow native DOM fallback once per document. It deliberately
-// covers text-only editing; editor-owned structural commands remain PASS.
-void editing_dom_action_register(DomDocument* document);
+// F12: the two editing implementations, called directly by route. They were
+// reached through an EditingActionRegistry until 2026-08-28; see the note at
+// the switch in editing_dispatch.cpp for why that indirection retired.
+EditingActionOutcome editing_dom_action_handle(
+        EventContext* evcon, const EditingPreparedTransaction* prepared, void* user);
+EditingActionOutcome editing_template_action_handle(
+        EventContext* evcon, const EditingPreparedTransaction* prepared, void* user);
 
 typedef bool (*EditingNotifyBeforeinputFn)(
         EventContext* evcon, const EditingPreparedTransaction* prepared,
@@ -1343,7 +1307,6 @@ bool editing_run_contenteditable_transaction(
 // Template routing/action logic is separate from the generic transaction
 // gate. The resolver is read-only and snapshots the owner before beforeinput.
 EditingRouteSnapshot editing_route_snapshot(const EditingSurface* surface);
-void editing_template_action_register(DomDocument* document);
 bool editing_template_invoke_handler(EventContext* evcon, View* target,
                                      const char* event_name,
                                      const InputIntent* intent,

@@ -15,8 +15,7 @@
     single_lf: "a b",
     single_crlf: "a b",
     single_cr: "a b",
-    multi_kept: "a
-b",
+    multi_kept: "a\nb",
     multi_crlf: [97, 10, 98],
     multi_cr: [97, 10, 98]
   }

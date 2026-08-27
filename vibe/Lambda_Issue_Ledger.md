@@ -59,17 +59,17 @@ Counts:
 | LR_02 | Parsing & AST construction | 3 | 4 | 13 | 20 |
 | LR_03 | Value & type model | 6 | 1 | 2 | 9 |
 | LR_04 | Numbers, decimal & datetime | 8 | 0 | 0 | 8 |
-| LR_05 | Strings, symbols & vectors | 6 | 1 | 3 | 10 |
+| LR_05 | Strings, symbols & vectors | 5 | 1 | 4 | 10 |
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 9 | 9 |
 | LR_07 | MIR Direct transpiler & JIT | 13 | 1 | 2 | 16 |
 | LR_08 | Memory management & GC | 10 | 0 | 0 | 10 |
-| LR_09 | Runtime builtins | 7 | 0 | 3 | 10 |
+| LR_09 | Runtime builtins | 6 | 0 | 4 | 10 |
 | LR_10 | Error handling | 5 | 1 | 2 | 8 |
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 7 | 0 | 2 | 9 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
-| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 8 | 1 | 6 | 15 |
-| **Total** | | **96** | **11** | **49** | **156** |
+| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 8 | 15 |
+| **Total** | | **92** | **11** | **53** | **156** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -492,11 +492,21 @@ Unicode collation".
 that governs equality *and* ordering together (SQL/XQuery model) — never a
 change to the core operators.
 
-<a id="lr05-5"></a>**LR05-5 · `fn_label` bypasses the GC with raw `malloc`/`free` · OPEN**
-The flood-fill stack is `malloc`'d at `lambda-vector.cpp:4549` and released with
-`free`, bypassing the runtime mempool/GC — contrary to CLAUDE.md's allocator
-rule. Leak-free on the success path, but untracked memory that would leak if an
-early return were inserted between the two.
+<a id="lr05-5"></a>**LR05-5 · `fn_label` bypasses the runtime allocator with raw `malloc`/`free` · RESOLVED 2026-08-28**
+The flood-fill stack was allocated with raw `malloc` and released with `free`,
+so the operation bypassed the checked `memtrack` allocation contract and its
+failure-injection path. The success path was leak-free, but the temporary
+workspace was outside the runtime's ownership and failure accounting.
+
+The stack now uses the existing `mem_alloc`/`mem_free` pair with
+`MEM_CAT_TEMP`. This implements **D4.2.1v3** and lets allocation failure return
+through the existing `ItemError` path, as required by **D4.2.2v2**. No new
+data structure or design ruling was added.
+
+Regression: `RuntimeShapeTransition.LabelStackAllocationFailureReturnsError`
+arms `memtrack_fault_inject(0)` and verifies that `fn_label` reports the
+workspace allocation failure. The complete representation suite passes 29/29;
+`make test-lambda-baseline` passes 3977/3977.
 
 <a id="lr05-6"></a>**LR05-6 · Fixed-size buffer truncation in stencils · OPEN**
 `STENCIL_MEDIAN_CAP 4096` (`lambda-vector.cpp:4045`) rejects larger median
@@ -740,11 +750,20 @@ they are lowered inline. A `NULL` that *should* have been a real pointer would
 surface only as a JIT import-resolution miss (`mir.c` logs
 `failed to resolve native fn`), not as a build error.
 
-<a id="lr09-6"></a>**LR09-6 · `set_runtime_error` buffer cap · OPEN**
-The message is formatted into a fixed `char message[1024]` stack buffer
-(`lambda-eval.cpp:141`–`147`) and silently truncated; the stack-trace depth is
-hard-coded to 32 frames. Shared with the broader error machinery
-([§10](#10-error-handling-lr_10)).
+<a id="lr09-6"></a>**LR09-6 · `set_runtime_error` message buffer cap · RESOLVED 2026-08-28**
+`set_runtime_error` and `err_createf` formatted into fixed 1024-byte stack
+buffers, silently truncating rich diagnostics. The common formatting path now
+measures the required length and allocates the complete message through the
+existing `memtrack` allocator before creating the error. This satisfies the
+message-bearing error contract in **S7.4.4** and removes the duplicated
+formatting path; no new data structure or design ruling was added.
+
+The separate 32-frame native stack-trace limit remains tracked by
+[LR10-4](#lr10-4).
+
+Regression: `ErrorCreationTest.CreateFormattedErrorPreservesLongMessage`
+verifies the full 1514-byte formatted message. The focused error suite passes
+121/121 and `make test-lambda-baseline` passes 3978/3978.
 
 <a id="lr09-7"></a>**LR09-7 · No tags in source · OPEN (note)**
 The registry caveats carry no `TODO`/`FIXME`/`HACK`; they are discoverable only
@@ -1152,13 +1171,20 @@ Regression: `NamespaceTest.ShapePoolCollisionDoesNotAliasDifferentFieldNames`
 uses the supported `NULL`-name normalization collision and verifies that
 different shapes remain distinct while identical shapes are still reused.
 
-<a id="lint-e1"></a>**Lint E1 · Unchecked allocation dereference in `build_ast.cpp`, now invisible to cppcheck · OPEN**
-`impl/Lambda_Issues4_Lint (retired).md` E1. Four sites allocate and dereference without a NULL
-check: `build_ast.cpp:3080` (`hex_str`) and `:970`, `:3445`, `:3531`
-(`num_str`) — each does `p = (char*)mem_alloc(n + 1, MEM_CAT_AST); memcpy(p, …);
-p[n] = '\0';`. `mem_alloc` returns NULL for a zero size, under the
-`memtrack_fault_should_fail()` injection hook, and on a failed `malloc`, so this
-is reachable rather than theoretical.
+<a id="lint-e1"></a>**Lint E1 · Unchecked allocation dereference in `build_ast.cpp`, now invisible to cppcheck · RESOLVED 2026-08-27**
+`impl/Lambda_Issues4_Lint (retired).md` E1. The root cause was seven literal
+source-copy sites treating the custom `mem_alloc` contract as non-fallible:
+the four manual copies listed by the retired lint entry plus three
+`strview_to_cstr` callers. `mem_alloc` returns NULL under the
+`memtrack_fault_should_fail()` injection hook and on a failed `malloc`, so
+each unchecked copy was reachable rather than theoretical.
+
+The sites now share `ast_copy_source_text`, which checks the allocation,
+records `ERR_OUT_OF_MEMORY` (`E309`) against the literal span, and returns
+`TYPE_ERROR`/a failed static-literal probe before the buffer is read. This
+follows the checked allocation contract in **D4.2.1v3** and the allocation
+failure handoff in **D4.2.2v2**. The consolidation removes the duplicated
+copy-and-terminate code; no new data structure or design ruling was added.
 
 Worth recording separately: the migration from `malloc` to `mem_alloc`
 **silenced the static analyser without fixing the code**. cppcheck originally
@@ -1167,12 +1193,30 @@ nothing here, because it does not model the custom allocator. The report's own
 suggested remedy — use an allocator that cannot return NULL — was only half
 applied.
 
-<a id="i8-consoleesc"></a>**Issues8 · Console formatter does not escape quotes or backslashes inside collections · OPEN**
-Printing a collection renders member strings verbatim:
-`["init: {\"flowchart\": …}", "back\\slash"]` prints as
-`["init: {"flowchart": {"curve": "basis"}}", "back\slash"]`. The inner quotes
-are unescaped and the escaped backslash collapses to one, so the output is
-ambiguous and is not re-readable as Lambda notation.
+Regression: `AstBuildAllocationTest.SizedLiteralCopyFailureDoesNotCrash`
+arms `memtrack_fault_inject(0)` and verifies direct AST construction reports
+the allocation error without crashing. The focused error suite passes 120/120
+and `make test-lambda-baseline` passes 3976/3976.
+
+<a id="i8-consoleesc"></a>**Issues8 · Console formatter does not escape quotes or backslashes inside collections · RESOLVED 2026-08-27**
+Printing a collection rendered member strings through raw `%s`/`%.*s` paths in
+`lambda/core/print.cpp`. That omitted the Lambda escapes for quotes,
+backslashes, and control characters, producing ambiguous output such as
+`["init: {"flowchart": …}", "back\slash"]`.
+
+The fix consolidates the Item and legacy TypedItem string/symbol paths on one
+length-based `print_quoted_text` helper. It emits `\"`, `\\`, `\n`, `\r`,
+`\t`, `\b`, and `\f` for collection members while preserving the existing
+standalone-string display contract, so a serialized string is not escaped a
+second time. No new data structure or design ruling was added; the supported
+escape forms follow the Lambda string grammar; the common forms are documented
+in `doc/Lambda_Data.md`.
+
+Regression: `NamespaceTest.PrintCollectionEscapesStringContents` verifies quote
+and backslash escaping directly through `print_item`. The 42 affected golden
+outputs were regenerated from the corrected printer. Focused namespace tests,
+the direct Lambda suite (784/784), and `make test-lambda-baseline` pass
+3976/3976.
 
 <a id="i8-genafterlet"></a>**Issues8 · A comprehension generator may not follow a `let` clause · OPEN (design question, not a defect)**
 Clause order is fixed: **all generators, then all `let`s**. Measured
@@ -1682,6 +1726,14 @@ lane, so the `~#` value emitted by mapping pipes is not narrowed through a C
 `int`. This preserves the index carrier required by `S10.1.2`; the baseline
 passes 3914/3914.
 
+<a id="lr05-r5"></a>**LR05-R5 · `fn_label` flood-fill workspace bypassed the runtime allocator · RESOLVED 2026-08-28**
+The flood-fill workspace now uses the existing checked `mem_alloc`/`mem_free`
+path with `MEM_CAT_TEMP` instead of raw `malloc`/`free`. This keeps temporary
+allocation failure and ownership tracking aligned with **D4.2.1v3** and
+**D4.2.2v2**. Regression: `RuntimeShapeTransition.LabelStackAllocationFailureReturnsError`;
+the representation suite passes 29/29 and the Lambda baseline passes
+3977/3977.
+
 ## A.5 C transpiler — legacy C2MIR (LR_06)
 
 <a id="lr06-r1"></a><a id="lr06-r1r9"></a>**LR06-R1 … LR06-R9 · All nine issues · RESOLVED (backend deleted)**
@@ -1897,6 +1949,13 @@ textile, wiki) calls `list_push` and merges them. `input-ics.cpp` and
 `input-mark.cpp` use both and so mix the two policies — worth reconciling, along
 with retiring the dead flag.
 
+<a id="lr09-r4"></a>**LR09-R4 · `set_runtime_error` message buffer cap · RESOLVED 2026-08-28**
+`err_createf` and `set_runtime_error` now share the exact-size variadic
+formatter backed by `mem_alloc`, so long diagnostics are not silently
+truncated at 1023 bytes. The 32-frame trace cap is a separate LR10-4
+residue. Regression: `ErrorCreationTest.CreateFormattedErrorPreservesLongMessage`;
+the error suite passes 121/121 and the Lambda baseline passes 3978/3978.
+
 ## A.11 Procedural runtime (LR_12)
 
 <a id="lr12-r2"></a>**LR12-R2 · Mutation builtins swallow type errors · RESOLVED 2026-08-26**
@@ -1927,7 +1986,31 @@ signature routing key, and retains element names as cache identity metadata.
 This prevents a colliding signature from reusing a shape with different field
 names, types, offsets, flags, or element identity. The focused regression is
 `NamespaceTest.ShapePoolCollisionDoesNotAliasDifferentFieldNames`; the full
-namespace suite passes 39/39 and `make test-lambda-baseline` passes 3975/3975.
+namespace suite passes 39/39 and `make test-lambda-baseline` passes 3976/3976.
+
+<a id="i8-consoleesc-r"></a>**Issues8 · Console formatter does not escape quotes or backslashes inside collections · RESOLVED 2026-08-27**
+The collection printer's Item and legacy TypedItem string/symbol branches used
+raw buffer interpolation, so quotes, backslashes, and control characters made
+collection output ambiguous. The shared length-based `print_quoted_text` helper
+now emits the grammar-supported Lambda escapes for collection members. Standalone
+strings retain their existing display behavior to avoid double-escaping an
+already serialized string; no new data structure or design ruling was needed.
+
+Regression: `NamespaceTest.PrintCollectionEscapesStringContents` covers quote
+and backslash members. The 42 affected golden outputs were regenerated from
+the fixed printer, and `make test-lambda-baseline` passes 3976/3976.
+
+<a id="lint-e1-r"></a>**Lint E1 · Unchecked allocation dereference in `build_ast.cpp` · RESOLVED 2026-08-27**
+The custom `mem_alloc` calls and `strview_to_cstr` literal copies were
+fallible, but their callers read the returned buffers before checking them.
+`ast_copy_source_text` now centralizes the seven literal source-copy sites,
+reports `E309`, and returns the existing `TYPE_ERROR` recovery value. This
+keeps the literal path aligned with **D4.2.1v3** and **D4.2.2v2** without
+introducing a new data structure or design rule.
+
+Regression: `AstBuildAllocationTest.SizedLiteralCopyFailureDoesNotCrash`.
+The focused error suite passes 120/120 and `make test-lambda-baseline` passes
+3976/3976.
 
 ---
 

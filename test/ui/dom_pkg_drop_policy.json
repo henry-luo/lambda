@@ -1,0 +1,58 @@
+{
+  "html": "test/ui/test_form_input.html",
+  "description": "Drop into a maxlength-capped input truncates to what fits. Pins the behaviour, not the layer: native and the dom-package applier both enforce it, so this passes either way \u2014 it exists because no other test covered maxlength on a drop at all.",
+  "events": [
+    {
+      "type": "log",
+      "message": "=== drop into a maxlength-capped input ==="
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#name"
+      },
+      "text": "abcdefgh"
+    },
+    {
+      "type": "set_editing_value",
+      "target": {
+        "selector": "#code"
+      },
+      "text": ""
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "log",
+      "message": "--- drag 8 characters into an input capped at 5 ---"
+    },
+    {
+      "type": "editing_text_drag_drop",
+      "target": {
+        "selector": "#name",
+        "start": 0,
+        "end": 8
+      },
+      "to_target": {
+        "selector": "#code",
+        "start": 0,
+        "end": 0
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "log",
+      "message": "--- truncated to what fits, not refused and not overflowed ---"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#code"
+      },
+      "equals": "abcde"
+    }
+  ]
+}

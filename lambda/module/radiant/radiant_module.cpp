@@ -1489,6 +1489,34 @@ extern "C" int editing_controller_caret_surface_kind(DocState* state);
 // Which surface the caret sits in. Resolving it is mechanism; what a key means
 // there is policy, and the two surfaces genuinely differ — a single-line input
 // has no vertical motion, a rich surface has no value boundary.
+// F11: the dropdown's hover cursor — which option is highlighted while the
+// popup is open. Storage and paint stay native; which key moves it does not.
+extern "C" void radiant_key_intent_request(const char* name);
+
+// F11: the template names an edit intent; native resolves it to a type and
+// fills the payload. Epoch-reported, like the caret operation.
+RADIANT_C_API Item fn_radiant_key_intent(Item node_item, Item name_item) {
+    const char* name = fn_to_cstr(name_item);
+    if (!name || !*name) return (Item){.item = b2it(0)};
+    radiant_key_intent_request(name);
+    return (Item){.item = b2it(1)};
+}
+
+RADIANT_C_API Item fn_radiant_hover_index(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "HOVER_INDEX", &elem);
+    if (!state || !elem) return ItemNull;
+    return radiant_int_item((int64_t)form_control_get_hover_index(state, (View*)elem));
+}
+
+RADIANT_C_API Item fn_radiant_set_hover_index(Item node_item, Item index_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "SET_HOVER_INDEX", &elem);
+    if (!state || !elem) return (Item){.item = b2it(0)};
+    form_control_set_hover_index(state, (View*)elem, (int)it2l(index_item));
+    return (Item){.item = b2it(1)};
+}
+
 RADIANT_C_API Item fn_radiant_caret_surface(Item node_item) {
     DomElement* elem = nullptr;
     DocState* state = radiant_state_for_element(node_item, "CARET_SURFACE", &elem);
@@ -2108,6 +2136,12 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
     {"set_password_reveal", "fn(node: dom_node, start: int, end: int) -> bool", (fn_ptr)fn_radiant_set_password_reveal, JUBE_FN_NONE,
      "Item fn_radiant_set_password_reveal(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_password_reveal},
+    {"key_intent", "fn(node: dom_node, name: string) -> bool", (fn_ptr)fn_radiant_key_intent, JUBE_FN_NONE,
+     "Item fn_radiant_key_intent(Item node, Item name)", (fn_ptr)fn_radiant_key_intent},
+    {"hover_index", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_hover_index, JUBE_FN_NONE,
+     "Item fn_radiant_hover_index(Item node)", (fn_ptr)fn_radiant_hover_index},
+    {"set_hover_index", "fn(node: dom_node, index: int) -> bool", (fn_ptr)fn_radiant_set_hover_index, JUBE_FN_NONE,
+     "Item fn_radiant_set_hover_index(Item node, Item index)", (fn_ptr)fn_radiant_set_hover_index},
     {"caret_surface", "fn(node: dom_node) -> string|null", (fn_ptr)fn_radiant_caret_surface, JUBE_FN_NONE,
      "Item fn_radiant_caret_surface(Item node)", (fn_ptr)fn_radiant_caret_surface},
     {"caret_operation", "fn(node: dom_node, operation: string, extend: bool) -> bool", (fn_ptr)fn_radiant_caret_operation, JUBE_FN_NONE,

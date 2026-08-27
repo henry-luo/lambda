@@ -351,9 +351,6 @@ static void editing_log_contenteditable_result(
         jw_kv_str(&w, "route", editing_log_route_name(prepared->route.kind));
         jw_kv_uint(&w, "route_owner_generation",
                    prepared->route.owner_generation);
-        jw_kv_uint(&w, "registry_generation", prepared->registry_generation);
-        jw_kv_uint(&w, "registration_id",
-                   prepared->selected_registration_id);
         jw_kv_str(&w, "action_handler",
                   result->action_handler_id ? result->action_handler_id : "");
         event_state_log_write_node_ref(&w, "host", prepared->host_ref.address);
@@ -530,24 +527,30 @@ bool editing_run_contenteditable_transaction(
     editing_interaction_set_active_surface(state, surface);
     result.prepared = true;
 
-    if (prepared.route.kind == EDITING_ROUTE_DOM_SCRIPT) {
-        editing_dom_action_register(document);
+    // The route was resolved above, and each editing implementation served
+    // exactly one of them, so selection is that route. This used to go through
+    // an EditingActionRegistry: handlers registered with a route mask, a
+    // priority and a `matches()` predicate, and selection took the highest
+    // priority with ties reported as a configuration error. With two
+    // implementations whose predicates were each `route.kind == mine` and whose
+    // priorities were both 0, the arbitration never arbitrated and the
+    // ambiguity path could not fire — it was a two-entry lookup keyed by an
+    // enum the caller was already holding. Restore the registry if a third
+    // implementation ever needs to contest a route.
+    switch (prepared.route.kind) {
+        case EDITING_ROUTE_DOM_SCRIPT:
+            prepared.selected_handler_id = "dom-compat";
+            break;
+        case EDITING_ROUTE_RADIANT_TEMPLATE:
+            prepared.selected_handler_id = "radiant-template";
+            break;
+        default:
+            prepared.selected_handler_id = nullptr;
+            break;
     }
-    prepared.registry_generation = editing_action_registry_generation(document);
-    EditingActionSnapshot action_snapshot = {};
-    bool configuration_error = false;
-    if (editing_action_registry_select(document, &prepared, &action_snapshot,
-                                       &configuration_error)) {
-        prepared.selected_registration_id = action_snapshot.registration_id;
-        prepared.selected_handler_id = action_snapshot.handler_id;
+    if (prepared.selected_handler_id) {
         result.action_selected = true;
-        result.action_handler_id = action_snapshot.handler_id;
-    } else if (configuration_error) {
-        result.failed = true;
-        editing_log_contenteditable_result(evcon, &prepared, &target_status, &result);
-        editing_prepared_transaction_dispose(&prepared);
-        if (out_result) *out_result = result;
-        return true;
+        result.action_handler_id = prepared.selected_handler_id;
     }
 
     EditingTargetRangeScope target_range_scope(evcon, &target_status);
@@ -606,8 +609,17 @@ bool editing_run_contenteditable_transaction(
         // layout pass replaces the old view tree. Its frozen model route is
         // still valid here; DOM actions instead require a live native host.
         result.action_invoked = true;
-        EditingActionOutcome outcome = editing_action_snapshot_invoke(
-            &action_snapshot, evcon, &prepared);
+        EditingActionOutcome outcome = {EDITING_ACTION_ERROR, false, false};
+        switch (prepared.route.kind) {
+            case EDITING_ROUTE_DOM_SCRIPT:
+                outcome = editing_dom_action_handle(evcon, &prepared, nullptr);
+                break;
+            case EDITING_ROUTE_RADIANT_TEMPLATE:
+                outcome = editing_template_action_handle(evcon, &prepared, nullptr);
+                break;
+            default:
+                break;
+        }
         uint64_t mutation_epoch_after_action = js_dom_mutation_epoch(document);
         result.dom_mutated = mutation_epoch_after_action !=
             mutation_epoch_after_notification;
@@ -631,7 +643,6 @@ bool editing_run_contenteditable_transaction(
     }
 
     editing_log_contenteditable_result(evcon, &prepared, &target_status, &result);
-    editing_action_snapshot_release(&action_snapshot);
     editing_prepared_transaction_dispose(&prepared);
     if (out_result) *out_result = result;
     return true;

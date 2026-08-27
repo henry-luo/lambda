@@ -53,6 +53,20 @@ static StrView ast_node_source(Transpiler* tp, const AstNode* node) {
     return source_span_text(tp, span);
 }
 
+// keep fallible literal source copies in one checked path.
+static char* ast_copy_source_text(Transpiler* tp, StrView source,
+        SourceSpan diagnostic_span) {
+    char* copy = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
+    if (!copy) {
+        record_semantic_error_span(tp, diagnostic_span, ERR_OUT_OF_MEMORY,
+            "out of memory while reading literal source");
+        return NULL;
+    }
+    memcpy(copy, source.str, source.length);
+    copy[source.length] = '\0';
+    return copy;
+}
+
 static LambdaSourcePoint ast_node_start_point(Transpiler* tp, const AstNode* node) {
     SourceSpan span = node ? node->source_span : (SourceSpan){0, 0};
     return lambda_source_span_start_point(tp->source, span);
@@ -965,9 +979,8 @@ bool ast_static_literal_item(Transpiler* tp, AstNode* node, Item* out) {
             return true;
         }
         StrView source = ast_node_source(tp, node);
-        char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
-        memcpy(num_str, source.str, source.length);
-        num_str[source.length] = '\0';
+        char* num_str = ast_copy_source_text(tp, source, node->source_span);
+        if (!num_str) return false;
         int64_t value = 0;
         lambda_parse_int_literal(num_str, &value);
         mem_free(num_str);
@@ -3141,13 +3154,13 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
                             }
                         }
                         if (hex_end && hex_end > hex_start) {
-                            int hex_len = hex_end - hex_start;
-                            char* hex_str = (char*)mem_alloc(hex_len + 1, MEM_CAT_AST);
-                            memcpy(hex_str, hex_start, hex_len);
-                            hex_str[hex_len] = '\0';
+                            StrView hex_source = {hex_start,
+                                (size_t)(hex_end - hex_start)};
+                            char* hex_str = ast_copy_source_text(tp, hex_source, span);
+                            if (!hex_str) return &TYPE_ERROR;
                             char* endptr;
                             uint32_t code_point = strtoul(hex_str, &endptr, 16);
-                            if (endptr == hex_str + hex_len && code_point <= 0x10FFFF) {
+                            if (endptr == hex_str + hex_source.length && code_point <= 0x10FFFF) {
                                 // Convert Unicode code point to UTF-8
                                 if (code_point <= 0x7F) {
                                     stringbuf_append_char(str_buf, (char)code_point);
@@ -3283,7 +3296,8 @@ static Type* build_lit_float_from_span(Transpiler* tp, SourceSpan span) {
     // C supports inf and nan
     log_debug("build lit float");
     StrView source = source_span_text(tp, span);
-    char* number_text = strview_to_cstr(&source);
+    char* number_text = ast_copy_source_text(tp, source, span);
+    if (!number_text) return &TYPE_ERROR;
     const char* num_str = number_text;
     // check if there's sign
     bool has_sign = false;
@@ -3374,7 +3388,8 @@ static Type* build_lit_imaginary_from_span(Transpiler* tp,
 static Type* build_lit_decimal_from_span(Transpiler* tp, SourceSpan span) {
     TypeDecimal* item_type = (TypeDecimal*)alloc_type(tp->pool, LMD_TYPE_DECIMAL, sizeof(TypeDecimal));
     StrView num_sv = source_span_text(tp, span);
-    char* num_str = strview_to_cstr(&num_sv);
+    char* num_str = ast_copy_source_text(tp, num_sv, span);
+    if (!num_str) return &TYPE_ERROR;
     char suffix_char = num_sv.str[num_sv.length - 1];
     if (suffix_char == 'N') {
         record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
@@ -3505,9 +3520,8 @@ static uint64_t sized_literal_limit(NumSizedType num_type, bool decimal_literal)
 static Type* build_lit_sized_integer_from_span(Transpiler* tp,
         SourceSpan span) {
     StrView source = source_span_text(tp, span);
-    char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
-    memcpy(num_str, source.str, source.length);
-    num_str[source.length] = '\0';
+    char* num_str = ast_copy_source_text(tp, source, span);
+    if (!num_str) return &TYPE_ERROR;
 
     NumSizedType num_type;
     int suffix_len = parse_sized_int_suffix(num_str, source.length, &num_type);
@@ -3591,9 +3605,8 @@ static Type* build_lit_sized_integer_from_span(Transpiler* tp,
 static Type* build_lit_sized_float_from_span(Transpiler* tp,
         SourceSpan span) {
     StrView source = source_span_text(tp, span);
-    char* num_str = (char*)mem_alloc(source.length + 1, MEM_CAT_AST);
-    memcpy(num_str, source.str, source.length);
-    num_str[source.length] = '\0';
+    char* num_str = ast_copy_source_text(tp, source, span);
+    if (!num_str) return &TYPE_ERROR;
 
     // detect suffix: f16, f32, f64
     NumSizedType num_type = NUM_FLOAT32;  // default
@@ -3653,10 +3666,11 @@ static Type* build_literal_type_from_span(Transpiler* tp,
         return build_lit_named_value_from_span(tp, span);
     case LAMBDA_AST_LITERAL_INTEGER: {
         StrView source = source_span_text(tp, span);
-        char* number = strview_to_cstr(&source);
+        char* number = ast_copy_source_text(tp, source, span);
+        if (!number) return &TYPE_ERROR;
         int64_t value = 0;
-        bool in_band = number && lambda_parse_int_literal(number, &value);
-        if (number) mem_free(number);
+        bool in_band = lambda_parse_int_literal(number, &value);
+        mem_free(number);
         if (in_band) return &LIT_INT;
         record_semantic_error_span(tp, span, ERR_INVALID_NUMBER,
             "integer literal is outside compact int range; use an explicit suffix or decimal literal");

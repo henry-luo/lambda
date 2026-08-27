@@ -1755,7 +1755,12 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
     // F9: a caret-key notification carries no edit intent either — only the key
     // and modifiers the template maps to an operation.
     if (intent && intent->type == INPUT_INTENT_NONE && intent->key != 0) {
-        mb.put("key", key_code_to_name(intent->key));
+        // key_code_to_dom_key, not key_code_to_name: the latter names only the
+        // special keys and returns "" for every letter and digit, so a template
+        // matching on "x" or "z" saw an empty string and silently declined.
+        // Enter and the arrows worked, which is what made the failure look like
+        // a dispatch problem rather than a naming one.
+        mb.put("key", key_code_to_dom_key(intent->key, intent->mods));
         mb.put("shift", (intent->mods & RDT_MOD_SHIFT) != 0);
         mb.put("ctrl",  (intent->mods & RDT_MOD_CTRL)  != 0);
         mb.put("alt",   (intent->mods & RDT_MOD_ALT)   != 0);
@@ -2835,6 +2840,15 @@ extern "C" bool radiant_dispatch_behavior_commit(EventContext* evcon, View* targ
 // is not a DOM element, so no DOM event has fired for the option and there are
 // no JS listeners to preempt. Native resolves which option the pointer landed on
 // (geometry is mechanism) and the template performs the commit.
+// F11: keys an open <select> dropdown responds to. Behavior-only like the
+// others here — the dropdown overlay is not a DOM element, so no DOM key event
+// has fired for it.
+extern "C" bool radiant_dispatch_behavior_dropdown_key(EventContext* evcon,
+                                                       View* target,
+                                                       const InputIntent* intent) {
+    return dispatch_behavior_handler(evcon, target, "dropdownkey", intent, nullptr);
+}
+
 extern "C" bool radiant_dispatch_behavior_option_commit(EventContext* evcon,
                                                         View* target,
                                                         const InputIntent* intent) {
@@ -2857,6 +2871,25 @@ static __thread char s_caret_op_name[32];
 static __thread bool s_caret_op_extend = false;
 
 extern "C" uint64_t radiant_caret_operation_epoch(void) { return s_caret_op_epoch; }
+
+// F11: the key-intent epoch, same pattern as the caret one.
+static __thread uint64_t s_key_intent_epoch = 0;
+static __thread char s_key_intent_name[40];
+extern "C" uint64_t radiant_key_intent_epoch(void) { return s_key_intent_epoch; }
+extern "C" const char* radiant_key_intent_name(void) { return s_key_intent_name; }
+extern "C" void radiant_key_intent_request(const char* name) {
+    if (!name) return;
+    snprintf(s_key_intent_name, sizeof(s_key_intent_name), "%s", name);
+    s_key_intent_epoch++;
+}
+
+// Behavior-only, and deliberately context-free — see the note on the seam in
+// editing_intent.cpp: a translation must still resolve after preventDefault.
+extern "C" bool radiant_dispatch_behavior_key_intent(View* target,
+                                                     const InputIntent* intent) {
+    return dispatch_behavior_handler(nullptr, target, "keyintent", intent, nullptr);
+}
+
 extern "C" const char* radiant_caret_operation_name(void) { return s_caret_op_name; }
 extern "C" bool radiant_caret_operation_extend(void) { return s_caret_op_extend; }
 
@@ -5642,9 +5675,6 @@ static bool dispatch_contenteditable_transaction(EventContext* evcon, View* targ
     }
 
     EditingRouteSnapshot route = editing_route_snapshot(&surface);
-    if (route.kind == EDITING_ROUTE_RADIANT_TEMPLATE) {
-        editing_template_action_register(surface.owner->doc);
-    }
     EditingNotificationHooks notifications = {};
     notifications.dispatch_beforeinput = dispatch_editing_notification_beforeinput;
     notifications.dispatch_input = dispatch_editing_notification_input;
@@ -6921,47 +6951,19 @@ static bool editing_key_may_emit_text(const KeyEvent* key_event) {
     }
 }
 
-static bool handle_dropdown_key(EventContext* evcon, int key) {
+// F11: every key an open dropdown responds to now goes to the template. Enter
+// already committed through `optioncommit`, but Up/Down and Escape did not —
+// one interaction split by key, which is the third time this shape has appeared
+// in this function (mouse commit, then Enter, now its siblings).
+static bool handle_dropdown_key(EventContext* evcon, int key, int mods) {
     DocState* state = nullptr;
     ViewBlock* select = event_open_dropdown_select(evcon, &state);
     if (!select) return false;
-
-    int hover = form_control_get_hover_index(state, static_cast<View*>(select));
-    int count = select->form->option_count;
-
-    switch (key) {
-    case RDT_KEY_UP:
-        if (hover > 0) {
-            form_control_set_hover_index(state, static_cast<View*>(select), hover - 1);
-        }
-        return true;
-
-    case RDT_KEY_DOWN:
-        if (hover < count - 1) {
-            form_control_set_hover_index(state, static_cast<View*>(select), hover + 1);
-        }
-        return true;
-
-    case RDT_KEY_ENTER:
-        if (hover >= 0 && hover < count) {
-            // Same dispatch the mouse path uses. Committing natively here would
-            // split the choice by input modality — an option picked with the
-            // pointer running the template while the same option picked with
-            // Enter ran native — which is the exact contract gap F1b had to fix
-            // for checkbox and radio before their native activation could go.
-            InputIntent intent;
-            intent.option_index = hover;
-            radiant_dispatch_behavior_option_commit(evcon, static_cast<View*>(select),
-                                                    &intent);
-        }
-        return true;
-
-    case RDT_KEY_ESCAPE:
-        doc_state_close_dropdown(state, static_cast<View*>(select));
-        return true;
-    }
-
-    return false;
+    InputIntent intent;
+    intent.key = key;
+    intent.mods = mods;
+    return radiant_dispatch_behavior_dropdown_key(evcon, static_cast<View*>(select),
+                                                  &intent);
 }
 
 /**
@@ -9542,7 +9544,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         // Handle dropdown keyboard navigation first (if dropdown is open)
         if (state->open_dropdown) {
-            if (handle_dropdown_key(&evcon, key_event->key)) {
+            if (handle_dropdown_key(&evcon, key_event->key, key_event->mods)) {
                 evcon.need_repaint = true;
                 break;
             }
@@ -9612,7 +9614,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
             if (!rich_clipboard_shortcut) {
                 InputIntent intent;
-                if (input_intent_from_key_event(key_event, &intent)) {
+                if (input_intent_from_key_event(state, key_event, &intent)) {
                     if (intent.type == INPUT_INTENT_SELECT_ALL) {
                         View* select_target = rich_keyboard_target_from_selection(
                             state, intent_target, nullptr);
@@ -9693,7 +9695,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
                 if (key_event->key == RDT_KEY_V) {
                     InputIntent paste_intent;
-                    if (input_intent_from_key_event(key_event, &paste_intent)) {
+                    if (input_intent_from_key_event(state, key_event, &paste_intent)) {
                         EditingTransactionResult transaction = {};
                         dispatch_contenteditable_transaction(&evcon, intent_target,
                             &paste_intent, &transaction);
@@ -9703,7 +9705,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 } else if (key_event->key == RDT_KEY_X) {
                     copy_current_selection_to_clipboard(state, "rich cut");
                     InputIntent cut_intent;
-                    if (input_intent_from_key_event(key_event, &cut_intent)) {
+                    if (input_intent_from_key_event(state, key_event, &cut_intent)) {
                         EditingTransactionResult transaction = {};
                         dispatch_contenteditable_transaction(&evcon, intent_target,
                             &cut_intent, &transaction);
@@ -9787,7 +9789,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         // text-control path.
         if (!rich_keydown_dispatched) {
             InputIntent intent;
-            if (intent_target && input_intent_from_key_event(key_event, &intent)) {
+            if (intent_target && input_intent_from_key_event(state, key_event, &intent)) {
                 if (intent.type == INPUT_INTENT_SELECT_ALL) {
                     EditingSurface surface;
                     View* rich_select_all_target =
@@ -10354,6 +10356,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 // Non-rich compatibility branch only. Rich/editable mutation
                 // and selection ownership belongs to the intent transaction
                 // path above plus the caretkey template dispatch.
+                //
+                // F11b: deliberately NOT migrated to the <body> template, unlike
+                // every other key table. Reaching a template here would require
+                // the document to own an evaluator, and the only condition that
+                // covers "an ordinary document selection" is "this page has a
+                // caret" — which is nearly every page. The thread holds one
+                // Runtime, so that gate would let a PDF viewer claim it: the
+                // pdf_text_selection_copy fixture drags a selection and presses
+                // Ctrl+C, so it would qualify. EO4 exists to stop exactly that.
+                // These five cases stay native because the cost of reaching
+                // policy is a correctness risk, not because they are mechanism.
                 switch (key_event->key) {
                     case RDT_KEY_A:
                         // Select all (Ctrl+A / Cmd+A)
@@ -10371,26 +10384,35 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         break;
 
                     case RDT_KEY_X:
-                        // Cut selection (Ctrl+X / Cmd+X)
-                        if (ctrl || cmd) {
-                            if (selection_has(state)) {
-                                copy_current_selection_to_clipboard(state, "legacy cut");
-
-                                // TODO: delete selected text
-                                state_store_selection_clear(state);
-                                evcon.need_repaint = true;
-                            }
-                        }
+                        // Cut over non-editable text does nothing at all, which
+                        // is what a browser does: cut is a *mutation*, and there
+                        // is nothing here to mutate. Ctrl+C above is the one
+                        // that copies.
+                        //
+                        // This used to write the selection to the clipboard and
+                        // then drop the highlight, so a cut on a static page
+                        // both claimed to have removed the text and quietly
+                        // overwrote whatever the user had copied earlier —
+                        // losing their clipboard to a keystroke that changed
+                        // nothing on the page.
                         break;
 
+                    // Backspace and Delete do nothing here, and that is the
+                    // finished behaviour rather than a gap. The only content
+                    // that reaches this branch is non-editable document text: a
+                    // caret inside a text control is consumed by the
+                    // text-control block above, which breaks out of the keydown
+                    // entirely, and a caret inside an editing host is excluded
+                    // by `!caret_in_rich_surface`. There is nothing to delete,
+                    // which is also what a browser does with Backspace on a
+                    // static page.
+                    //
+                    // They stay listed rather than falling into `default:` so
+                    // the next reader does not re-add the TODO that stood here.
+                    // What that TODO did do was request a repaint on every
+                    // press — work for a keystroke that changes nothing.
                     case RDT_KEY_BACKSPACE:
-                        // TODO: delete selection or character before caret
-                        evcon.need_repaint = true;
-                        break;
-
                     case RDT_KEY_DELETE:
-                        // TODO: delete selection or character after caret
-                        evcon.need_repaint = true;
                         break;
 
                     default:

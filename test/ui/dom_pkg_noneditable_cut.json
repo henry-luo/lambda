@@ -1,0 +1,20 @@
+{
+  "html": "test/ui/test_keyboard.html",
+  "description": "Ctrl+X over non-editable text removes nothing, so it must neither drop the selection nor touch the clipboard",
+  "events": [
+    {"type": "log", "message": "=== cut over non-editable text ==="},
+    {"type": "log", "message": "--- seed the clipboard with a sentinel the page does not contain ---"},
+    {"type": "paste_text", "target": {"selector": "#p1"}, "text": "CLIPBOARD-SENTINEL"},
+    {"type": "assert_clipboard", "contains": "CLIPBOARD-SENTINEL"},
+    {"type": "click", "target": {"text": "Left aligned"}},
+    {"type": "assert_selection", "is_collapsed": true},
+    {"type": "log", "message": "--- select all, then cut ---"},
+    {"type": "key_combo", "key": "a", "mods_str": "super"},
+    {"type": "assert_selection", "is_collapsed": false},
+    {"type": "key_combo", "key": "x", "mods_str": "super"},
+    {"type": "log", "message": "--- nothing was removed: the selection stands and the clipboard is untouched ---"},
+    {"type": "assert_selection", "is_collapsed": false},
+    {"type": "assert_clipboard", "contains": "CLIPBOARD-SENTINEL"},
+    {"type": "assert_text", "target": {"selector": "#p1"}, "contains": "Left aligned"}
+  ]
+}
