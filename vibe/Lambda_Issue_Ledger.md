@@ -284,7 +284,7 @@ annotation and parameter positions, both tiers) and
 half of **SO9** and the `&`/`!`-unimplemented warning in the string-pattern
 design record.
 
-<a id="lr02-14"></a>**LR02-14 · Keyword-as-name handling is a patchwork; S16.10 rules it · OPEN**
+<a id="lr02-14"></a>**LR02-14 · Keyword-as-name handling is a patchwork; S16.10 rules it · RESOLVED 2026-08-27**
 Ruled 2026-08-27 as **S16.10** (spec v16.0.0; deliberation and probe table in
 `Lambda_Design_Syntax.md` §7.24): keywords never name bindings — the whole
 lexer keyword table, E201 at the declaration site, no quoted escape — while
@@ -307,7 +307,7 @@ Migration: ~55 keyword-named bindings in `test/` + `lambda/` (offset 12,
 group 9, state 8, to 5, by 4, …; breakdown in §7.24); 0 keyword import
 aliases.
 
-<a id="lr02-15"></a>**LR02-15 · Sys-func shadowing crashes; S12.3.7 rules it user-first · OPEN**
+<a id="lr02-15"></a>**LR02-15 · Sys-func shadowing; S12.3.7 rules it user-first · RESOLVED 2026-08-27**
 Probes 2026-08-27 (debug build): `fn sum(a) => 99` then `sum([1,2,3])`
 compiles, executes on the interpreter tier, prints **no result**, and dies at
 teardown (ASan dealloc failure); `fn len` / `fn min` shadows likewise;
@@ -340,6 +340,18 @@ Ruled 2026-08-27 as **S17.2.1/S17.2.2** (semantics v16.2.0) and **D7.2.4**
 
 Sequencing note: item 2 is a one-line change but adds a reserved word, so it
 rides the same migration pass as [LR02-14](#lr02-14).
+
+**LR02-14/15 outcome (2026-08-27).** Both landed; baseline **3966/3966**.
+S16.10.1 was narrowed to **v2** (spec 18.0.0) twice during implementation:
+first from the whole keyword table to *capture-real* words only (the full ban
+cost 332 corpus files and broke public APIs), then again to release
+`else case default on` — S16.2.2v2 already called the first three
+continuation-only, so they were never capture-real. Final counts: 60 barred,
+28 allowed; `state` and `lambda` are barred by **reservation**, not capture.
+Migration was 52 `.ls` files plus one `.mir-check` sidecar. The lasting
+lesson is recorded in §7.24: allowing a word takes **two** changes — the
+lexer bar and `token_is_identifier_like` — or declarations are accepted while
+every use fails to parse.
 
 ---
 

@@ -246,10 +246,20 @@ bool lambda_lexer_word_bars_binding(const char* text, size_t length) {
     case LAMBDA_TOK_DIV: case LAMBDA_TOK_EQ_WORD: case LAMBDA_TOK_NE_WORD:
     case LAMBDA_TOK_LT_WORD: case LAMBDA_TOK_LE_WORD: case LAMBDA_TOK_GE_WORD:
     case LAMBDA_TOK_GT_WORD:
+    // continuation-only words (S16.2.2v2 lists else/case/default as tokens
+    // that can only CONTINUE): they attach to an `if` or a `match` arm list
+    // and never begin a statement. `on` joins them: it heads a join clause
+    // (`c? in src on a == b`) and an in-view handler (`on click(e) {}`), and
+    // in both the enclosing construct is already expecting it, so the clause
+    // reading simply wins over a same-named binding.
+    case LAMBDA_TOK_ELSE: case LAMBDA_TOK_CASE: case LAMBDA_TOK_DEFAULT:
+    case LAMBDA_TOK_ON:
         return false;
     default:
         // declaration/statement keywords, base-type words, and named values:
         // `let type = 1` silently read the base type before this bar existed.
+        // `state` stays barred though it is only a view-signature clause: it
+        // is reserved for a possible standalone word (`expr is state`).
         return true;
     }
 }

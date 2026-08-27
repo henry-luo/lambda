@@ -736,7 +736,7 @@ const char* format_type(Type *type) {
     case LMD_TYPE_INT:
         return "int";
     case LMD_TYPE_INT64:
-        return "int64";
+        return "i64";
     case LMD_TYPE_FLOAT:
         return "float";
     case LMD_TYPE_NUM_SIZED:

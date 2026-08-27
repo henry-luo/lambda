@@ -393,7 +393,12 @@ static bool parser_expect(LambdaRdParser* parser, LambdaTokenKind kind) {
 }
 
 static bool token_is_identifier_like(LambdaTokenKind kind) {
-    return kind == LAMBDA_TOK_IDENTIFIER || kind == LAMBDA_TOK_DIV || kind == LAMBDA_TOK_STATE || kind == LAMBDA_TOK_APPLY || kind == LAMBDA_TOK_VIEW || kind == LAMBDA_TOK_EDIT || kind == LAMBDA_TOK_ON || kind == LAMBDA_TOK_AND || kind == LAMBDA_TOK_OR || kind == LAMBDA_TOK_TO || kind == LAMBDA_TOK_IS || kind == LAMBDA_TOK_IN || kind == LAMBDA_TOK_AT || kind == LAMBDA_TOK_THAT || kind == LAMBDA_TOK_WHERE || kind == LAMBDA_TOK_ORDER || kind == LAMBDA_TOK_BY || kind == LAMBDA_TOK_GROUP || kind == LAMBDA_TOK_INTO || kind == LAMBDA_TOK_LIMIT || kind == LAMBDA_TOK_OFFSET || kind == LAMBDA_TOK_ASC || kind == LAMBDA_TOK_DESC || kind == LAMBDA_TOK_AS || kind == LAMBDA_TOK_EQ_WORD || kind == LAMBDA_TOK_NE_WORD || kind == LAMBDA_TOK_LT_WORD || kind == LAMBDA_TOK_LE_WORD || kind == LAMBDA_TOK_GE_WORD || kind == LAMBDA_TOK_GT_WORD;
+    // S16.10.1v2: a word legal as a binding name must also READ as one in
+    // expression position, or the bar accepts the declaration and fails at
+    // every use. `else`/`case`/`default` are continuation-only (S16.2.2v2),
+    // so the enclosing `if`/`match` claims them before an expression is ever
+    // parsed here — the clause reading keeps priority by construction.
+    return kind == LAMBDA_TOK_IDENTIFIER || kind == LAMBDA_TOK_DIV || kind == LAMBDA_TOK_STATE || kind == LAMBDA_TOK_APPLY || kind == LAMBDA_TOK_ELSE || kind == LAMBDA_TOK_CASE || kind == LAMBDA_TOK_DEFAULT || kind == LAMBDA_TOK_VIEW || kind == LAMBDA_TOK_EDIT || kind == LAMBDA_TOK_ON || kind == LAMBDA_TOK_AND || kind == LAMBDA_TOK_OR || kind == LAMBDA_TOK_TO || kind == LAMBDA_TOK_IS || kind == LAMBDA_TOK_IN || kind == LAMBDA_TOK_AT || kind == LAMBDA_TOK_THAT || kind == LAMBDA_TOK_WHERE || kind == LAMBDA_TOK_ORDER || kind == LAMBDA_TOK_BY || kind == LAMBDA_TOK_GROUP || kind == LAMBDA_TOK_INTO || kind == LAMBDA_TOK_LIMIT || kind == LAMBDA_TOK_OFFSET || kind == LAMBDA_TOK_ASC || kind == LAMBDA_TOK_DESC || kind == LAMBDA_TOK_AS || kind == LAMBDA_TOK_EQ_WORD || kind == LAMBDA_TOK_NE_WORD || kind == LAMBDA_TOK_LT_WORD || kind == LAMBDA_TOK_LE_WORD || kind == LAMBDA_TOK_GE_WORD || kind == LAMBDA_TOK_GT_WORD;
 }
 
 static bool token_is_identifier(LambdaTokenKind kind) {

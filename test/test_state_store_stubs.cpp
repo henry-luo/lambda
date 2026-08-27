@@ -184,8 +184,9 @@ const char* editing_mode_name(EditingMode mode) {
 }
 
 // ESO43 hoisted the undo/redo ring into ViewState, so state_store.cpp frees it
-// on detach/prune/destroy. text_edit.cpp is not part of this target, and the
-// ring is never populated here — nothing in these tests takes an edit.
+// on detach/prune/destroy during form-state destruction. text_edit.cpp is not
+// part of this target, and the ring is never populated here — nothing in these
+// tests takes an edit — but the production-owned symbol must still resolve.
 void te_history_free(EditHistory* h) {
     (void)h;
 }
@@ -223,12 +224,6 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     (void)elem;
     (void)new_val;
     (void)new_len;
-}
-
-void te_history_free(EditHistory* history) {
-    (void)history;
-    // this standalone target never creates editing history; teardown still
-    // needs the production-owned symbol for form-state destruction.
 }
 
 void tc_set_selection_range(DomElement* elem, uint32_t start, uint32_t end,

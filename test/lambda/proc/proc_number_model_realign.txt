@@ -1,6 +1,6 @@
 i8:-128
 i16:2
-int64:2
+i64:2
 u64:2
 int:256
 int:256
@@ -13,5 +13,5 @@ float:3.5
 decimal:3.5
 decimal:3
 int:2
-int64:2
+i64:2
 integer:18446744073709551616

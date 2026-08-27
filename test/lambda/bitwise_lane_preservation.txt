@@ -5,8 +5,8 @@ int
 int
 int
 int
-int64
-int64
+i64
+i64
 u8
 i8
 "=== int shift closes at the int53 boundary ==="
@@ -20,7 +20,7 @@ inf
 int
 "=== i64 shift keeps the wide lane, no promotion ==="
 18014398509481984
-int64
+i64
 "=== shift edge cases ==="
 0
 int

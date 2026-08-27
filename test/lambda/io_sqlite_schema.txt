@@ -27,4 +27,4 @@ true
 type.null
 array
 true
-[string, string, int64, bool]
+[string, string, i64, bool]

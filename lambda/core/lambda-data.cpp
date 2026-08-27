@@ -97,7 +97,10 @@ extern "C" const char* get_type_name(TypeId type_id) {
         case LMD_TYPE_NULL: return "null";
         case LMD_TYPE_BOOL: return "bool";
         case LMD_TYPE_INT: return "int";
-        case LMD_TYPE_INT64: return "int64";
+        // S2.1.1/S2.1.2: `i64` is the one surface spelling; `int64` is a
+        // concept name only (E204 suggests `i64`), so it must never come
+        // back out of type() — aliases in, canon out.
+        case LMD_TYPE_INT64: return "i64";
         case LMD_TYPE_FLOAT: return "float";
         case LMD_TYPE_COMPLEX: return "complex";
         case LMD_TYPE_DECIMAL: return "decimal";
@@ -255,7 +258,7 @@ void init_type_info() {
     type_info[LMD_TYPE_UNDEFINED] = {sizeof(bool), "undefined", &TYPE_UNDEFINED, (Type*)&LIT_TYPE_NULL};  // JS undefined
     type_info[LMD_TYPE_BOOL] = {sizeof(bool), "bool", &TYPE_BOOL, (Type*)&LIT_TYPE_BOOL};
     type_info[LMD_TYPE_INT] = {sizeof(int64_t), "int", &TYPE_INT, (Type*)&LIT_TYPE_INT};  // shaped int fields store one int64 lane word
-    type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "int64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
+    type_info[LMD_TYPE_INT64] = {sizeof(int64_t), "i64", &TYPE_INT64, (Type*)&LIT_TYPE_INT64};
     type_info[LMD_TYPE_FLOAT] = {sizeof(double), "float", &TYPE_FLOAT, (Type*)&LIT_TYPE_FLOAT};
     type_info[LMD_TYPE_COMPLEX] = {sizeof(Complex*), "complex", &TYPE_COMPLEX, (Type*)&LIT_TYPE_COMPLEX};
     type_info[LMD_TYPE_DECIMAL] = {sizeof(void*), "decimal", &TYPE_DECIMAL, (Type*)&LIT_TYPE_DECIMAL};

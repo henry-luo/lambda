@@ -5,9 +5,9 @@ int
 int
 int
 "=== the widening constructor keeps i64 ==="
-int64
+i64
 100000000000000000
-int64
+i64
 "=== length arithmetic stays in the unsized lane ==="
 5
 int
