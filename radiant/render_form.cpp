@@ -1570,6 +1570,7 @@ static void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp
  * Main entry point for rendering form controls.
  * Called from render_block_view when the block owns the form-control role.
  */
+
 void render_form_control(RenderContext* rdcon, ViewBlock* block) {
     if (!block || block->role_kind() != DomElement::ROLE_FORM || !block->form) {
         return;

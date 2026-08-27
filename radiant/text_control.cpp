@@ -44,7 +44,6 @@ static void tc_collect_text(DomNode* n, StrBuf* sb) {
 
 // ---- public: identification --------------------------------------------
 
-extern "C" bool radiant_dispatch_behavior_attach(View* target);
 
 bool tc_is_text_control(DomElement* elem) {
     if (!elem || !elem->tag_name) return false;
@@ -232,12 +231,6 @@ void tc_ensure_init(DomElement* elem) {
     }
     // F4: seed :placeholder-shown after initial value load.
     tc_refresh_placeholder_shown(elem, f);
-
-    // Give the behavior template governing this control its `init` turn — that
-    // is what computes :valid/:invalid, which is no longer native. The attach is
-    // queued and drained after render (ESO33). Nothing seeds :required or
-    // :read-only here any more: they are derived at match time (F3b/ES16).
-    radiant_dispatch_behavior_attach((View*)elem);
 }
 
 // F4 (Radiant_Design_Form_Input.md §3.8): refresh :placeholder-shown bit.
@@ -319,6 +312,12 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
         form_control_sync_text_control_state(state, (View*)elem);
     }
     form_control_sync_text_control_focus_state(state, (View*)elem);
+    // F8/ES19: a programmatic value write fires no `input` event, so nothing in
+    // the package would re-derive validity from it. Re-arm the control for the
+    // next init phase, which re-runs the same `init` handler rather than adding
+    // a second reflection route. Skipped on the initial load, where init has
+    // not run yet and the bit is clear anyway.
+    if (was_initialized) form_control_invalidate_behavior_init(state, (View*)elem);
     // Notify if value-setter caused the selection to move (e.g. previous
     // selection was past the new length and got clamped). Suppress on
     // initial init so parsing-time setup doesn't fire spurious events.

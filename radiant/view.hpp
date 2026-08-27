@@ -247,6 +247,9 @@ typedef struct {
     float e31, e32, e33;   // row 3: 0, 0, 1
 } RdtMatrix;
 
+// Per-view CSS transform matrix, for painted bounds and for hit-testing.
+bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
+
 static inline RdtMatrix rdt_matrix_identity(void) {
     RdtMatrix m = { 1, 0, 0,  0, 1, 0,  0, 0, 1 };
     return m;

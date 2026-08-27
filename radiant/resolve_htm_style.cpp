@@ -60,6 +60,11 @@ static FormControlProp* ensure_form_control_prop(LayoutContext* lycon, ViewBlock
     form_control_prop_init(form);
     form->control_type = control_type;
 
+    // F8/ES19: a control just became live, so the document owes an init phase.
+    // The gate is doc-scoped and the per-control ViewState bit decides who
+    // actually runs, so re-arming on a prop the view pool re-created costs one
+    // walk that finds nothing to do.
+    if (lycon->doc) lycon->doc->behavior_init_pending = true;
     if (out_created) *out_created = true;
     return form;
 }

@@ -1083,9 +1083,44 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     log_leave();
 }
 
+// ESO47: map the hit point into a transformed block's own space.
+//
+// Hit-testing walks layout space and compares against untransformed boxes, so a
+// element moved by `transform` was tested where it was laid out rather than
+// where it is painted — CSS says transforms affect hit-testing, and a user
+// clicks what they see. Rather than touch all ~38 comparison sites, the point
+// itself is mapped once on entering a transformed subtree: every site reads
+// evcon->event.mouse_position, so they all follow.
+//
+// Deliberately limited to pure translations. Their inverse is exact, and they
+// commute, so composing them down a nesting chain needs no ordering argument —
+// which a general inverse would, since the matrices are built in absolute space
+// with absolute origins. Scale and rotation still hit-test untransformed; that
+// is the same behaviour as before this change, not a new gap.
+static bool event_translate_only_transform(View* view, float* out_dx, float* out_dy) {
+    RdtMatrix m;
+    if (!view || !view->is_block()) return false;
+    if (!view_get_transform_matrix(view, &m)) return false;
+    const float eps = 1e-4f;
+    if (fabsf(m.e11 - 1.0f) > eps || fabsf(m.e22 - 1.0f) > eps ||
+        fabsf(m.e12) > eps || fabsf(m.e21) > eps) {
+        return false;   // not a pure translation
+    }
+    *out_dx = m.e13;
+    *out_dy = m.e23;
+    return true;
+}
+
 void target_block_view(EventContext* evcon, ViewBlock* block) {
     log_enter();
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
+    // Undo this block's translation for the duration of the subtree walk.
+    float tdx = 0.0f, tdy = 0.0f;
+    bool translated = event_translate_only_transform(static_cast<View*>(block), &tdx, &tdy);
+    if (translated) {
+        evcon->event.mouse_position.x -= (int)tdx;   // INT_CAST_OK: event coords are integer pixels
+        evcon->event.mouse_position.y -= (int)tdy;   // INT_CAST_OK: event coords are integer pixels
+    }
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
     MousePositionEvent* event = &evcon->event.mouse_position;
     bool pointer_events_none = event_view_pointer_events_none(
@@ -1263,6 +1298,10 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     }
 
     RETURN:
+    if (translated) {
+        evcon->event.mouse_position.x += (int)tdx;   // INT_CAST_OK: event coords are integer pixels
+        evcon->event.mouse_position.y += (int)tdy;   // INT_CAST_OK: event coords are integer pixels
+    }
     // Only restore block position if no target was found
     // When a target is found, keep block at the parent's position for coordinate calculations
     if (!evcon->target) {
@@ -2416,7 +2455,7 @@ static bool event_is_hot_path(const char* event_name) {
 // Loading requires a runtime: a `.ls` page and a script-bearing HTML page both
 // have one, but a script-less HTML page owns none yet (ESO25) and is skipped
 // until runtime-creation ownership is settled.
-static bool radiant_dom_package_ensure(DomDocument* doc) {
+static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr) {
     if (!doc) return false;
     if (doc->dom_package_loaded) {
         return context && template_registry_has_behavior(g_template_registry);
@@ -2449,6 +2488,26 @@ static bool radiant_dom_package_ensure(DomDocument* doc) {
     // radiant_document_ensure_evaluator() — which runs after the loader has
     // executed the page's scripts, so js_has_dom_realm is already settled.
     Runtime* rt = dom_document_script_runtime(doc);
+    if (!rt) {
+        // Create one here after all. EO4 moved creation to setup because at
+        // dispatch time nothing could tell whether JS would start later — but
+        // js_has_dom_realm answers that now, and ensure_evaluator checks it.
+        // The attach drain covers documents whose controls render through it;
+        // a document reached only by a direct event (an iframe navigated to a
+        // form page is the case that exposed this) has no other chance, and
+        // since native activation was deleted the package is the only
+        // implementation there is.
+        // Only for a target the package actually governs. Creating on any
+        // event at all is too eager: a thread holds one Runtime, so a click on
+        // an ordinary link would take it and deny it to a Lambda-script
+        // subdocument — which is exactly how the PDF and Lambda-report iframes
+        // broke when creation was eager at setup.
+        DomElement* te = target && target->is_element() ? target->as_element() : nullptr;
+        if (te && te->form_control()) {
+            radiant_document_ensure_evaluator(doc);
+            rt = dom_document_script_runtime(doc);
+        }
+    }
     if (!rt) {
         log_debug("dom-package: document owns no evaluator; keeping native behavior");
         doc->dom_package_loaded = true;
@@ -2588,7 +2647,7 @@ bool radiant_behavior_claims_event(EventContext* evcon, View* target,
     }
     // ensure() binds (and if needed creates) the document's evaluator, so a
     // script-less page must not be rejected for having no context yet
-    if (!radiant_dom_package_ensure(doc)) return false;
+    if (!radiant_dom_package_ensure(doc, target)) return false;
     return behavior_match_walk(target, event_name, nullptr, nullptr) != nullptr;
 }
 
@@ -2615,7 +2674,7 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
         // then only a template that explicitly declares it (checked by the match)
         if (!doc || !doc->dom_package_loaded || !context) return false;
         if (!template_registry_has_behavior(g_template_registry)) return false;
-    } else if (!radiant_dom_package_ensure(doc)) {
+    } else if (!radiant_dom_package_ensure(doc, target)) {
         // first discrete event on this document loads the UA behavior package
         return false;
     }
@@ -2649,73 +2708,73 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
     return false;
 }
 
-// Attach-time dispatch: a control has become live, so let the behavior template
-// governing it run its `init` handler. This is the moment native validation used
-// (tc_ensure_init) — without it a required-empty field would only become
-// :invalid once the user touched it (ESO31). There is no EventContext here; the
-// handler path derives the document from the element.
-// Controls initialize during layout (tc_ensure_init), and a handler must not
-// run there: ES5 requires handlers to see a quiescent state, and writing state
-// mid-layout leaves a reflow pending inside the pass that is still running.
-// So attach is queued here and drained at the next quiescent point.
-#define RADIANT_ATTACH_QUEUE_CAP 64
-static __thread View* s_attach_queue[RADIANT_ATTACH_QUEUE_CAP];
-static __thread int s_attach_queue_len = 0;
-
-extern "C" bool radiant_dispatch_behavior_attach(View* target) {
-    if (!target) return false;
-    for (int i = 0; i < s_attach_queue_len; i++) {
-        if (s_attach_queue[i] == target) return false;   // already queued
+// F8/ES19: the behavior init phase.
+//
+// `init` is the turn a control gets when it becomes live but no event has fired
+// yet: it seeds derived state (`:valid`/`:invalid` from the constraint
+// attributes, the aria-* mirrors). Without it a `required` field that is empty
+// at load only becomes :invalid once the user touches it (ESO31) — this is the
+// job native `tc_ensure_init` used to own.
+//
+// It is a phase rather than a queue drained from render. Three properties fall
+// out of that, each of which the old attach queue got wrong:
+//   * behavior no longer depends on paint. Every drain used to sit behind
+//     `render_html_doc`, so a run that laid out without painting — headless
+//     event handling, and `lambda.exe layout` — never inited at all.
+//   * nothing outlives the pass that scheduled it, so there is no queue cap, no
+//     silent drop, and no raw View* to purge when a document is freed.
+//   * batch stays free of handler side effects by construction: the layout
+//     command stops before the phase rather than merely failing to reach
+//     window.cpp (ESO33's property, now structural).
+//
+// Iteration is a document-order walk of the view tree, not of the state store.
+// The store has no cheap id->view direction, its hash order is unspecified (and
+// handler writes carry repaint rects that the .mark goldens count), and a
+// handler can insert into the very map an iteration would be holding.
+static void behavior_init_visit(DomNode* node, DocState* state, int* out_count) {
+    if (!node) return;
+    if (node->is_element()) {
+        DomElement* elem = static_cast<DomElement*>(node);
+        View* view = static_cast<View*>(node);
+        if (elem->form_control() && !form_control_behavior_inited(state, view)) {
+            // Give the document its evaluator here rather than at load, so only
+            // a document that actually owns a control the package governs pays
+            // for one. A thread holds a single Runtime, so a document that
+            // creates one it does not need denies it to a Lambda-script
+            // subdocument — which is how a PDF and a Lambda report rendered into
+            // an iframe stopped loading ("eval thread already owns a Runtime").
+            // The walk only reaches form controls, which is the same narrowing
+            // the queue drain applied (EO4).
+            if (elem->doc) radiant_document_ensure_evaluator(elem->doc);
+            // The bit is recorded only when a template actually claimed the
+            // init, because recording it is what creates the control's durable
+            // ViewState. `<button>` is a form control that no template governs;
+            // marking it would mint a FORM_CONTROL state entry purely to say
+            // "nothing to do", which changes the store's shape (the state-machine
+            // tests pin the kind) for no gain. An unclaimed control simply gets
+            // re-offered by the next phase, which is a failed match and nothing
+            // more.
+            if (dispatch_behavior_handler(nullptr, view, "init", nullptr, nullptr)) {
+                form_control_set_behavior_inited(state, view, true);
+                (*out_count)++;
+            }
+        }
+        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            behavior_init_visit(child, state, out_count);
+        }
     }
-    if (s_attach_queue_len >= RADIANT_ATTACH_QUEUE_CAP) {
-        // Dropping is safe rather than silent: the control keeps whatever the
-        // native fallback seeded, and the next event revalidates it anyway.
-        log_debug("behavior-attach: queue full, dropping one control");
-        return false;
-    }
-    s_attach_queue[s_attach_queue_len++] = target;
-    return true;
 }
 
-// Drain the attach queue. Called at the start of event handling, where layout
-// has finished and nothing is mid-pass.
-// A queued attach must never outlive its document: the queue holds raw View*
-// and drains lazily, so a view session that frees one document and loads
-// another would deref freed views at the next drain. Purged here while the
-// views are still alive. (Batch layout/render never drains — no events, no
-// window render path — which is why it needs no purge, and why putting a drain
-// inside that loop was the ESO33 breakage.)
-void radiant_behavior_attach_purge_doc(DomDocument* doc) {
-    if (!doc || s_attach_queue_len <= 0) return;
-    int kept = 0;
-    for (int i = 0; i < s_attach_queue_len; i++) {
-        View* v = s_attach_queue[i];
-        DomElement* e = (v && v->is_element()) ? v->as_element() : nullptr;
-        if (e && e->doc == doc) continue;   // dying document: drop the entry
-        s_attach_queue[kept++] = v;
-    }
-    s_attach_queue_len = kept;
-}
-
-extern "C" void radiant_drain_behavior_attach(void) {
-    if (s_attach_queue_len <= 0) return;
-    int count = s_attach_queue_len;
-    s_attach_queue_len = 0;              // clear first: a handler may attach more
-    for (int i = 0; i < count; i++) {
-        View* v = s_attach_queue[i];
-        // Give the document its evaluator here rather than at load, so only a
-        // document that actually owns a control the package governs pays for
-        // one. A thread holds a single Runtime, so a document that creates one
-        // it does not need denies it to a Lambda-script subdocument — which is
-        // how a PDF and a Lambda report rendered into an iframe stopped loading
-        // ("eval thread already owns a Runtime"). Nothing queues here unless a
-        // control initialized, and this runs after the loader executed the
-        // page's scripts, so js_has_dom_realm is settled exactly as it is at
-        // setup time (EO4's requirement, narrower trigger).
-        DomElement* e = (v && v->is_element()) ? v->as_element() : nullptr;
-        if (e && e->doc) radiant_document_ensure_evaluator(e->doc);
-        dispatch_behavior_handler(nullptr, v, "init", nullptr, nullptr);
-    }
+void radiant_run_behavior_init(DomDocument* doc) {
+    if (!doc || !doc->behavior_init_pending) return;
+    // Cleared up front: a handler may create a control (and re-arm the gate),
+    // and that control belongs to the next phase, not to this walk.
+    doc->behavior_init_pending = false;
+    DocState* state = (DocState*)doc->state;
+    if (!state || !doc->root) return;
+    int count = 0;
+    behavior_init_visit(static_cast<DomNode*>(doc->root), state, &count);
+    if (count > 0) log_debug("behavior-init: inited %d control(s)", count);
 }
 
 // Post-mutation `input` for UA behavior templates. The pre-mutation `input`
@@ -6422,43 +6481,6 @@ static bool is_radio(View* view) {
     return is_input_type(view, "radio");
 }
 
-void radiant_uncheck_radio_group(View* root, const char* name, View* exclude,
-                                 DocState* state, bool sync_pseudo) {
-    if (!root || !name || !state) return;
-
-    View* current = root;
-    while (current) {
-        if (current != exclude && is_radio(current)) {
-            ViewElement* elem = lam::view_require_element(current);
-            const char* elem_name = elem->get_attribute("name");
-            if (elem_name && strcmp(elem_name, name) == 0 &&
-                form_control_get_checked(state, current)) {
-                form_control_uncheck_radio_group_peer(state, current);
-                if (sync_pseudo) {
-                    sync_pseudo_state(current, PSEUDO_STATE_CHECKED, false);
-                }
-                log_debug("uncheck_radio_group: unchecked radio name=%s", elem_name);
-            }
-        }
-
-        if (current->is_element()) {
-            ViewElement* ce = lam::view_require_element(current);
-            if (ce->first_child) {
-                current = static_cast<View*>(ce->first_child);
-                continue;
-            }
-        }
-        if (current->next()) {
-            current = current->next();
-            continue;
-        }
-        current = current->parent;
-        while (current && !current->next()) {
-            current = current->parent;
-        }
-        if (current) current = current->next();
-    }
-}
 
 /**
  * Find the associated checkbox/radio input for a target element.
@@ -6573,12 +6595,6 @@ static View* find_checkbox_radio_input(View* target) {
     return nullptr;
 }
 
-static void dispatch_checkbox_radio_change(EventContext* evcon, View* input) {
-    // Associated-label activation is implemented by Radiant after the label's
-    // click dispatch, so it must publish the control events explicitly.
-    radiant_dispatch_simple_event(evcon, input, "input", true, false);
-    radiant_dispatch_simple_event(evcon, input, "change", true, false);
-}
 
 static bool click_target_is_disabled_control(DocState* state, View* target) {
     for (View* current = target; current; current = current->parent) {
@@ -6591,102 +6607,12 @@ static bool click_target_is_disabled_control(DocState* state, View* target) {
     return false;
 }
 
-/**
- * Toggle checkbox or radio button state on click
- * @return true if the click was handled (element was checkbox/radio)
- */
-static bool handle_checkbox_radio_click(EventContext* evcon, View* target) {
-    // Find the actual checkbox/radio input (may be target or associated via label)
-    View* input = find_checkbox_radio_input(target);
-    if (!input) return false;
-
-    DocState* state = event_context_target_state(evcon);
-    if (!state) return false;
-
-    ViewElement* elem = lam::view_require_element(input);
-
-    // Check if disabled
-    if (state_get_pseudo_state(state, input, PSEUDO_STATE_DISABLED)) {
-        log_debug("handle_checkbox_radio_click: element is disabled");
-        return false;
-    }
-
-    if (is_checkbox(input)) {
-        // Toggle checkbox state
-        bool is_checked = state_get_pseudo_state(state, input, PSEUDO_STATE_CHECKED);
-        bool new_state = !is_checked;
-
-        form_control_set_checked(state, input, new_state);
-        sync_pseudo_state(input, PSEUDO_STATE_CHECKED, new_state);
-
-        dispatch_checkbox_radio_change(evcon, input);
-
-        log_debug("handle_checkbox_radio_click: input->is_block()=%d view_type=%d", input->is_block(), input->view_type);
-
-        log_debug("handle_checkbox_radio_click: toggled checkbox to %s", new_state ? "checked" : "unchecked");
-        doc_state_request_repaint(state);
-        evcon->need_repaint = true;
-        return true;
-    }
-
-    if (is_radio(input)) {
-        // Radio button: only allow checking, not unchecking by click
-        // Also need to uncheck other radio buttons in the same name group
-        bool is_checked = state_get_pseudo_state(state, input, PSEUDO_STATE_CHECKED);
-
-        if (!is_checked) {
-            // Uncheck other radio buttons in the same group
-            const char* name = elem->get_attribute("name");
-            if (name) {
-                // Find the document root
-                View* root = input;
-                while (root->parent) {
-                    root = root->parent;
-                }
-                radiant_uncheck_radio_group(root, name, input, state, true);
-            }
-
-            // Check this radio button through centralized writer API.
-            form_control_set_checked(state, input, true);
-            sync_pseudo_state(input, PSEUDO_STATE_CHECKED, true);
-            dispatch_checkbox_radio_change(evcon, input);
-
-            log_debug("handle_checkbox_radio_click: checked radio name=%s", name ? name : "(none)");
-            doc_state_request_repaint(state);
-            evcon->need_repaint = true;
-        }
-        return true;
-    }
-
-    return false;
-}
 
 // ============================================================================
 // Select Dropdown Handling
 // ============================================================================
 
-/**
- * Check if an element is a select dropdown
- */
-static bool is_select(View* view) {
-    if (!view || !view->is_element()) return false;
-    ViewElement* elem = lam::view_require_element(view);
-    return elem->tag() == MARKUP_NAME_SELECT;
-}
 
-/**
- * Find the select element from a click target (may be inside the select)
- */
-static View* find_select_element(View* target) {
-    if (!target) return nullptr;
-
-    View* current = target;
-    while (current) {
-        if (is_select(current)) return current;
-        current = current->parent;
-    }
-    return nullptr;
-}
 
 /**
  * Calculate dropdown popup dimensions
@@ -6732,41 +6658,6 @@ static void select_open_dropdown(DocState* state, View* select_view, float scale
     calculate_dropdown_dimensions(select, state, scale);
 }
 
-static bool handle_select_click(EventContext* evcon, View* target) {
-    log_debug("handle_select_click: target=%p, target_tag=%d", (void*)target,
-        (target && target->is_element()) ? (lam::view_require_element(target))->tag() : -1);
-
-    View* select_view = find_select_element(target);
-    log_debug("handle_select_click: select_view=%p", (void*)select_view);
-    if (!select_view) return false;
-
-    DocState* state = event_context_target_state(evcon);
-    if (!state) return false;
-
-    ViewBlock* select = lam::view_require_block(select_view);
-    bool disabled = !select->form || form_control_is_disabled(state, static_cast<View*>(select));
-    log_debug("handle_select_click: select->form=%p, disabled=%d",
-        (void*)select->form, disabled ? 1 : 0);
-    if (disabled) return false;
-
-    float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
-
-    if (state->open_dropdown == select_view) {
-        // Close the dropdown
-        log_debug("handle_select_click: closing dropdown");
-        doc_state_close_dropdown(state, static_cast<View*>(select));
-        return true;
-    }
-
-    // Close any other open dropdown first
-    if (state->open_dropdown) {
-        doc_state_close_dropdown(state, state->open_dropdown);
-    }
-
-    // Open this dropdown
-    select_open_dropdown(state, select_view, scale);
-    return true;
-}
 
 static ViewBlock* event_open_dropdown_select(EventContext* evcon,
                                              DocState** out_state) {
@@ -6949,7 +6840,7 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
     // Check if click is on the select itself (toggle handled elsewhere)
     if (mouse_x >= select_abs_x && mouse_x <= select_abs_x + select_w &&
         mouse_y >= select_abs_y && mouse_y <= select_abs_y + select_h) {
-        return;  // Click on select box, let handle_select_click deal with it
+        return;  // Click on the select box itself; the <select> behavior template owns opening/closing it
     }
 
     // Check if click is on dropdown popup
@@ -7903,8 +7794,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     // Controls that initialized during the last layout get their `init` turn
     // here, before this event is processed: layout has finished, so the state
-    // they write lands in a quiescent pass rather than inside one.
-    radiant_drain_behavior_attach();
+    // they write lands in a quiescent pass rather than inside one. This is also
+    // what covers a headless event run that never paints (ES19).
+    radiant_run_behavior_init(doc);
     if (!doc->html_root && !doc->view_tree) {
         log_error("No document content to handle event");
         return;
@@ -9075,20 +8967,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         click_check_radio_changed = false;
                     }
                 }
-                if (evcon.target && !evcon.default_prevented &&
-                    (!js_click_dispatched || (click_check_radio && !click_check_radio_changed)) &&
-                    !radiant_behavior_claims_event(&evcon, evcon.target, "click")) {
-                    // a registered behavior template owns this activation; the
-                    // native path stands down so the two never both toggle
-                    handle_checkbox_radio_click(&evcon, evcon.target);
-                }
 
-                // Handle click on select element to toggle dropdown
-                if (evcon.target && !evcon.default_prevented &&
-                    !radiant_behavior_claims_event(&evcon, evcon.target, "click")) {
-                    // a behavior template owning this click also owns opening
-                    handle_select_click(&evcon, evcon.target);
-                }
 
                 // Handle click on <video> element — play/pause toggle + seek bar
                 if (evcon.target && state && !evcon.default_prevented) {
@@ -9209,7 +9088,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     bool js_did_activation = js_click_dispatched &&
                         click_check_radio && click_check_radio_changed;
                     bool behavior_may_activate = !js_did_activation;
-                    if (dispatch_lambda_handler(&evcon, evcon.target, "click",
+                    // A click on a <label> activates its associated control,
+                    // and `for="id"` is not an ancestor relationship, so the
+                    // behavior walk cannot reach the control on its own. The
+                    // association lookup is mechanism and stays native; what it
+                    // feeds is the template dispatch. Native activation used to
+                    // consume this resolution internally, so deleting it
+                    // silently broke label-activated checkboxes.
+                    View* activation_target = find_checkbox_radio_input(evcon.target);
+                    if (!activation_target) activation_target = evcon.target;
+                    if (dispatch_lambda_handler(&evcon, activation_target, "click",
                                                 nullptr, nullptr,
                                                 behavior_may_activate)) {
                         evcon.need_repaint = true;
@@ -9689,8 +9577,14 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     radiant_dispatch_mouse_event(&evcon, focused, "click",
                         0, 0, 0, 0, false, false, false, false, 1,
                         &js_click_dispatched);
+                    // Keyboard activation goes through the same dispatch the
+                    // mouse path uses, so the behavior template owns it too.
+                    // It used to call the native activation directly and
+                    // without consulting the claim, so a checkbox activated by
+                    // Space ran native while the same checkbox clicked by mouse
+                    // ran the template — benign only because the two agreed.
                     if (!js_click_dispatched && !evcon.default_prevented) {
-                        handle_checkbox_radio_click(&evcon, focused);
+                        dispatch_lambda_handler(&evcon, focused, "click");
                     }
                     handled = true;
                 }
@@ -9709,7 +9603,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 DomElement* delem = lam::dom_require_element(focused);
                 bool disabled = delem->form_control() && form_control_is_disabled(state, static_cast<View*>(delem));
                 if (!disabled) {
-                    handled = handle_select_click(&evcon, focused);
+                    handled = dispatch_lambda_handler(&evcon, focused, "click");
                 }
             }
             if (handled) {

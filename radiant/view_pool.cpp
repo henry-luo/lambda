@@ -1407,6 +1407,14 @@ static float text_rect_client_height(ViewText* text, TextRect* rect) {
     return height;
 }
 
+// Public form of the per-view transform matrix, so hit-testing can map the
+// pointer into a transformed element's space (ESO47) using the same matrix the
+// painted bounds are built from.
+bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix) {
+    if (!out_matrix) return false;
+    return get_transform_matrix_for_view(view, out_matrix);
+}
+
 void view_get_visual_bounds(View* view, float* out_x, float* out_y,
                             float* out_width, float* out_height) {
     if (!view) {

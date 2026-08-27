@@ -300,6 +300,12 @@ struct DomDocument {
     // one. The document then owns that runtime's teardown (ESO25).
     bool owns_script_runtime;
 
+    // F8/ES19: at least one form control in this document may not have had its
+    // behavior `init` turn yet. Set when a control's prop is created during
+    // layout, cleared by the init phase. A pure gate: a document with no form
+    // controls never pays for the walk.
+    bool behavior_init_pending;
+
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -322,7 +328,8 @@ struct DomDocument {
                     pending_scroll_into_view_target_id(0),
                     mutation_epoch(0), editing_action_registry(nullptr),
                     page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
-                    dom_package_loaded(false), owns_script_runtime(false) {}
+                    dom_package_loaded(false), owns_script_runtime(false),
+                    behavior_init_pending(false) {}
 
     bool init(Input* input);
     void destroy();

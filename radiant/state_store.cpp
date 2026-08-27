@@ -3363,6 +3363,33 @@ void form_control_history_set(DocState* state, View* view, void* history) {
     if (view_state) view_state->data.form.history = history;
 }
 
+// F8/ES19: the behavior-init bit. Read is create-free — no ViewState means the
+// control has never been inited, which is exactly the answer wanted.
+bool form_control_behavior_inited(DocState* state, View* view) {
+    ViewState* view_state = form_view_state_get(state, view);
+    return view_state ? view_state->flags.behavior_inited != 0 : false;
+}
+
+void form_control_set_behavior_inited(DocState* state, View* view, bool inited) {
+    ViewState* view_state = form_view_state_get_or_create(state, view,
+                                                          form_prop_for_view(view));
+    if (view_state) view_state->flags.behavior_inited = inited ? 1 : 0;
+}
+
+// Re-arm a control for the next init phase. This is how programmatic mutation
+// re-derives validity: `el.value = ...` and attribute writes fire no `input`
+// event, so nothing else in the package would revalidate them. Clearing the bit
+// makes the next phase re-run `init`, which is the same work by the same path
+// rather than a second reflection route (ES16's mistake).
+void form_control_invalidate_behavior_init(DocState* state, View* view) {
+    if (!state || !view) return;
+    ViewState* view_state = form_view_state_get(state, view);
+    if (!view_state || !view_state->flags.behavior_inited) return;
+    view_state->flags.behavior_inited = 0;
+    DomElement* elem = view->is_element() ? lam::dom_require_element(view) : nullptr;
+    if (elem && elem->doc) elem->doc->behavior_init_pending = true;
+}
+
 static bool form_view_is_text_control(View* view) {
     if (!view || !view->is_element()) return false;
     DomElement* elem = lam::dom_require_element(view);
