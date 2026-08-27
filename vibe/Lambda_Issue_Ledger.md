@@ -68,8 +68,8 @@ Counts:
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 7 | 0 | 2 | 9 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
-| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 8 | 1 | 6 | 15 |
-| **Total** | | **96** | **11** | **49** | **156** |
+| TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 7 | 1 | 7 | 15 |
+| **Total** | | **95** | **11** | **50** | **156** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -1167,12 +1167,25 @@ nothing here, because it does not model the custom allocator. The report's own
 suggested remedy — use an allocator that cannot return NULL — was only half
 applied.
 
-<a id="i8-consoleesc"></a>**Issues8 · Console formatter does not escape quotes or backslashes inside collections · OPEN**
-Printing a collection renders member strings verbatim:
-`["init: {\"flowchart\": …}", "back\\slash"]` prints as
-`["init: {"flowchart": {"curve": "basis"}}", "back\slash"]`. The inner quotes
-are unescaped and the escaped backslash collapses to one, so the output is
-ambiguous and is not re-readable as Lambda notation.
+<a id="i8-consoleesc"></a>**Issues8 · Console formatter does not escape quotes or backslashes inside collections · RESOLVED 2026-08-27**
+Printing a collection rendered member strings through raw `%s`/`%.*s` paths in
+`lambda/core/print.cpp`. That omitted the Lambda escapes for quotes,
+backslashes, and control characters, producing ambiguous output such as
+`["init: {"flowchart": …}", "back\slash"]`.
+
+The fix consolidates the Item and legacy TypedItem string/symbol paths on one
+length-based `print_quoted_text` helper. It emits `\"`, `\\`, `\n`, `\r`,
+`\t`, `\b`, and `\f` for collection members while preserving the existing
+standalone-string display contract, so a serialized string is not escaped a
+second time. No new data structure or design ruling was added; the supported
+escape forms follow the Lambda string grammar; the common forms are documented
+in `doc/Lambda_Data.md`.
+
+Regression: `NamespaceTest.PrintCollectionEscapesStringContents` verifies quote
+and backslash escaping directly through `print_item`. The 42 affected golden
+outputs were regenerated from the corrected printer. Focused namespace tests,
+the direct Lambda suite (784/784), and `make test-lambda-baseline` pass
+3975/3975.
 
 <a id="i8-genafterlet"></a>**Issues8 · A comprehension generator may not follow a `let` clause · OPEN (design question, not a defect)**
 Clause order is fixed: **all generators, then all `let`s**. Measured
@@ -1928,6 +1941,18 @@ This prevents a colliding signature from reusing a shape with different field
 names, types, offsets, flags, or element identity. The focused regression is
 `NamespaceTest.ShapePoolCollisionDoesNotAliasDifferentFieldNames`; the full
 namespace suite passes 39/39 and `make test-lambda-baseline` passes 3975/3975.
+
+<a id="i8-consoleesc-r"></a>**Issues8 · Console formatter does not escape quotes or backslashes inside collections · RESOLVED 2026-08-27**
+The collection printer's Item and legacy TypedItem string/symbol branches used
+raw buffer interpolation, so quotes, backslashes, and control characters made
+collection output ambiguous. The shared length-based `print_quoted_text` helper
+now emits the grammar-supported Lambda escapes for collection members. Standalone
+strings retain their existing display behavior to avoid double-escaping an
+already serialized string; no new data structure or design ruling was needed.
+
+Regression: `NamespaceTest.PrintCollectionEscapesStringContents` covers quote
+and backslash members. The 42 affected golden outputs were regenerated from
+the fixed printer, and `make test-lambda-baseline` passes 3975/3975.
 
 ---
 

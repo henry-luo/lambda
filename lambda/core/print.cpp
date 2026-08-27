@@ -55,18 +55,42 @@ void print_item(StrBuf *strbuf, Item item, int depth, const char* indent);
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth = 0, const char* indent = NULL, bool is_attrs = false);
 
+static void print_quoted_text(StrBuf* strbuf, const char* chars, size_t length,
+                              char quote, bool escape) {
+    // escape collection members without double-escaping standalone display text.
+    strbuf_append_char(strbuf, quote);
+    if (!escape) {
+        strbuf_append_str_n(strbuf, chars, length);
+        strbuf_append_char(strbuf, quote);
+        return;
+    }
+    for (size_t i = 0; i < length; i++) {
+        switch (chars[i]) {
+        case '\\': strbuf_append_str(strbuf, "\\\\"); break;
+        case '\b': strbuf_append_str(strbuf, "\\b"); break;
+        case '\f': strbuf_append_str(strbuf, "\\f"); break;
+        case '\n': strbuf_append_str(strbuf, "\\n"); break;
+        case '\r': strbuf_append_str(strbuf, "\\r"); break;
+        case '\t': strbuf_append_str(strbuf, "\\t"); break;
+        default:
+            if (chars[i] == quote) strbuf_append_char(strbuf, '\\');
+            strbuf_append_char(strbuf, chars[i]);
+            break;
+        }
+    }
+    strbuf_append_char(strbuf, quote);
+}
+
 static void print_range_char(StrBuf* strbuf, int64_t codepoint) {
     char utf8[4];
     size_t length = str_utf8_encode((uint32_t)codepoint, utf8, sizeof(utf8));
     if (length == 0) {
-        strbuf_append_str(strbuf, "\"\"");
+        print_quoted_text(strbuf, "", 0, '"', true);
         return;
     }
     // Boundary libraries share the printer but not the evaluator; render the
     // codepoint directly so char ranges do not introduce an fn_chr link.
-    strbuf_append_char(strbuf, '\"');
-    strbuf_append_str_n(strbuf, utf8, length);
-    strbuf_append_char(strbuf, '\"');
+    print_quoted_text(strbuf, utf8, length, '"', true);
 }
 
 void print_double(StrBuf *strbuf, double num) {
@@ -259,16 +283,18 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, const char* in
         break;
     case LMD_TYPE_STRING:
         if (titem->string) {
-            strbuf_append_format(strbuf, "\"%s\"", titem->string->chars);
+            print_quoted_text(strbuf, titem->string->chars, titem->string->len,
+                '"', depth > 0);
         } else {
-            strbuf_append_str(strbuf, "\"\"");
+            print_quoted_text(strbuf, "", 0, '"', depth > 0);
         }
         break;
     case LMD_TYPE_SYMBOL:
         if (titem->symbol) {
-            strbuf_append_format(strbuf, "'%s'", titem->symbol->chars);
+            print_quoted_text(strbuf, titem->symbol->chars, titem->symbol->len,
+                '\'', depth > 0);
         } else {
-            strbuf_append_str(strbuf, "''");
+            print_quoted_text(strbuf, "", 0, '\'', depth > 0);
         }
         break;
     case LMD_TYPE_BINARY:
@@ -354,36 +380,18 @@ struct PrintItemVisitor {
     void operator()(lam::ItemOf<LMD_TYPE_STRING> item) const {
         String* string = item.ptr();
         if (string) {
-            // Safety check: validate string length before assertion
-            size_t actual_len = strlen(string->chars);
-            if (actual_len != string->len) {
-                log_warn("WARNING: String length mismatch. Expected: %u, Actual: %zu\n", string->len, actual_len);
-                // Use the actual length to prevent crashes
-                strbuf_append_format(strbuf, "\"%.*s\"", (int)actual_len, string->chars);
-            } else {
-                assert(strlen(string->chars) == string->len && "asserting tring length");
-                strbuf_append_format(strbuf, "\"%s\"", string->chars);
-            }
+            print_quoted_text(strbuf, string->chars, string->len, '"', depth > 0);
         } else {
-            strbuf_append_str(strbuf, "\"\"");
+            print_quoted_text(strbuf, "", 0, '"', depth > 0);
         }
     }
 
     void operator()(lam::ItemOf<LMD_TYPE_SYMBOL> item) const {
         Symbol* symbol = item.ptr();
         if (symbol) {
-            // Safety check: validate string length before assertion
-            size_t actual_len = strlen(symbol->chars);
-            if (actual_len != symbol->len) {
-                log_warn("WARNING: Symbol length mismatch. Expected: %u, Actual: %zu\n", symbol->len, actual_len);
-                // Use the actual length to prevent crashes
-                strbuf_append_format(strbuf, "'%.*s'", (int)actual_len, symbol->chars);
-            } else {
-                assert(strlen(symbol->chars) == symbol->len && "asserting symbol length");
-                strbuf_append_format(strbuf, "'%s'", symbol->chars);
-            }
+            print_quoted_text(strbuf, symbol->chars, symbol->len, '\'', depth > 0);
         } else {
-            strbuf_append_str(strbuf, "''");
+            print_quoted_text(strbuf, "", 0, '\'', depth > 0);
         }
     }
 

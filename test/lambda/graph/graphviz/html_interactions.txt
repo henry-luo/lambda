@@ -1,6 +1,6 @@
 {
   valid: true,
-  label: ["<TABLE ALIGN="LEFT"><TR ALIGN="CENTER" VALIGN="BOTTOM"><TD PORT="entry" ALIGN="RIGHT" VALIGN="TOP" COLSPAN="2"><B>Safe</B><SCRIPT>drop()</SCRIPT></TD></TR><TR><TD ROWSPAN="2"><I>Table</I></TD><TD ALIGN="INVALID" COLSPAN="-1">More</TD></TR></TABLE>", "html"],
+  label: ["<TABLE ALIGN=\"LEFT\"><TR ALIGN=\"CENTER\" VALIGN=\"BOTTOM\"><TD PORT=\"entry\" ALIGN=\"RIGHT\" VALIGN=\"TOP\" COLSPAN=\"2\"><B>Safe</B><SCRIPT>drop()</SCRIPT></TD></TR><TR><TD ROWSPAN=\"2\"><I>Table</I></TD><TD ALIGN=\"INVALID\" COLSPAN=\"-1\">More</TD></TR></TABLE>", "html"],
   table: ["table", "left", 2],
   row: ["center", "bottom", "text-align:center;vertical-align:bottom;"],
   cells: [["right", "top", 2, null, "entry", "text-align:right;vertical-align:top;", ["strong"]], [null, null, null, 2], [null, null]],
