@@ -3459,7 +3459,7 @@ bool render_effect_group_finish(RenderEffectGroup* group,
                                 Bound* clip);
 
 // ===== render_export_support.hpp =====
-int ui_context_init(UiContext* uicon, bool headless);
+int ui_context_init(UiContext* uicon, bool headless, float requested_pixel_ratio);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 

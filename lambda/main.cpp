@@ -163,7 +163,7 @@ static void js_document_session_init(JsDocumentSession* session) {
 
 static bool js_document_session_start(JsDocumentSession* session, DomDocument* dom_doc) {
     if (!session || !dom_doc) return false;
-    if (ui_context_init(&session->uicon, true) != 0) {
+    if (ui_context_init(&session->uicon, true, 1.0f) != 0) {
         log_error("[JS-DOM-LAYOUT] failed to initialize headless UI context");
         return false;
     }

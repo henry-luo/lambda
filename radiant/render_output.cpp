@@ -116,7 +116,7 @@ bool render_export_session_begin(RenderExportSession* session, const char* html_
         log_error("[EXPORT_SESSION] Failed to allocate headless UI context");
         return false;
     }
-    if (ui_context_init(session->ui_context, true) != 0) {
+    if (ui_context_init(session->ui_context, true, 1.0f) != 0) {
         log_error("[EXPORT_SESSION] Failed to initialize headless UI context");
         mem_free(session->ui_context);
         session->ui_context = nullptr;

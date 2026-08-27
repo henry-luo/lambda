@@ -3719,7 +3719,16 @@ compare-layout: build
 devtool:
 	@echo "🚀 Launching DevTool..."
 	@if [ -d "utils/devtool" ]; then \
-		cd utils/devtool && npm run electron:dev; \
+		cd utils/devtool && \
+		if [ ! -x node_modules/.bin/concurrently ] || \
+		   [ ! -x node_modules/.bin/wait-on ] || \
+		   [ ! -x node_modules/.bin/cross-env ] || \
+		   [ ! -x node_modules/.bin/electron ] || \
+		   [ ! -x node_modules/.bin/vite ]; then \
+			echo "📦 Installing DevTool dependencies..."; \
+			npm install --no-audit --no-fund; \
+		fi && \
+		npm run electron:dev; \
 	else \
 		echo "❌ Error: DevTool not found at utils/devtool"; \
 		exit 1; \

@@ -3218,7 +3218,7 @@ typedef struct UiContext {
                             // operations use the in-process ClipboardStore only and do NOT touch
                             // the OS pasteboard via GLFW (avoids cross-process races in tests).
 
-    int init(bool headless);
+    int init(bool headless, float requested_pixel_ratio = 0.0f);
     void create_surface(int pixel_width, int pixel_height);
     void destroy_document();
     void destroy();
