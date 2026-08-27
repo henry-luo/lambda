@@ -422,6 +422,48 @@ Batch is confirmed unaffected: `make layout suite=baseline` is 4404/4404 with no
 
 ---
 
+### 3.14 Body-scoped policy: caret navigation and the context menu (proposed)
+
+Two more UA policies bind at `<body>` rather than at a control, for the reason ES18 gave the IME session: the thing being moved has the document's cardinality, not the control's. A document has one caret and at most one open context menu, the same argument that made `DocState::sel` and `open_dropdown` document-scoped.
+
+**Caret navigation (F9, proposed).** The case is not layering, it is **duplication**. The same policy — which key with which modifier moves the caret where — exists twice today, in two vocabularies:
+
+| | Text controls | Contenteditable |
+| --- | --- | --- |
+| Site | `event.cpp` ~9700–9876 (~176 lines) | `editing_controller_handle_rich_navigation`, `editing_controller.cpp:750` (~127 lines) |
+| Keys | Left/Right/Up/Down/Home/End + Alt/Cmd/Ctrl/Shift variants | Left/Right/Up/Down/Home/End |
+| Expressed as | 22 decisions producing 16 WHATWG operation names (`moveWordBackward`, `extendLineStart`, …) | `state_store_caret_move(±1/±10)`, `_move_line`, `_move_to_boundary` |
+
+One `<body>` template replaces both rule sets. A control-bound template could not: it would reach text controls and never contenteditable, which is precisely how the split arose.
+
+The seam is already open and unusually clean — `dispatch_form_navigation` takes the operation **as a string**, and those strings are already the vocabulary the package speaks. The contenteditable side would need the same treatment: express its moves as named operations rather than signed deltas, which is worth doing regardless of who owns the policy.
+
+**The new `<body>` state this needs is the goal column, and it is currently missing.** `state_store_caret_move_line` reads `selection_presentation->caret_x` — the *current* caret x — on every vertical move rather than a remembered column, so Up/Down through a short line loses the column. That is document-scoped state with exactly the IME cardinality argument, and adding it is a bug fix the migration carries rather than a cost it imposes.
+
+**The blocker is the per-event budget, not the design.** This is the hot path — every arrow key — so ESO7 applies. The first slice's real deliverable is the measurement, not the flip.
+
+**Context menu (F10) ✅ landed 2026-08-27.** `radiant/context_menu.cpp` is 272 lines and splits cleanly:
+
+- **Policy, moves:** the item list (Cut / Copy / Paste / Delete / Select All), the five enable rules in `context_menu_item_enabled` (selection non-empty, not readonly, clipboard non-empty, value non-empty, not disabled), and the five exec actions. The exec half is mostly *re-dispatch* rather than new code — `editing.ls` already owns `deleteByCut`, `insertFromPaste` and the delete intents through `beforeinput`, so the template would route menu items into handlers that already exist.
+- **Mechanism, stays:** `context_menu_render`, the hit geometry (`context_menu_contains` / `_hover`), and the `DocState` storage, which is *already* document-scoped (`context_menu_target`, `_x`, `_y`, `_hover`). What is missing is only exposing it as template-visible `<body>` state.
+
+Two things make this the one to do first. It is **not a hot path** — right-click only — so it carries none of F9's budget question. And it closes a real gap for free: `context_menu_open` early-returns unless `tc_is_text_control(e)`, so the menu never appears on contenteditable or on a plain document selection today; a template can lift that restriction without touching C++.
+
+**Order: F10 before F9.** F10 is self-contained, unblocked, and fixes a visible gap; F9 is larger, collapses a genuine duplication, and should be gated on the measurement.
+
+**F10 as landed.** The scope turned out smaller than the survey suggested, because the five commands were *already* package policy — cut, delete, paste and select-all route through `dispatch_form_text_replace` / `_text_paste` / `_select_all`, which fire `beforeinput` and land in `editing.apply`. Only the gate in front of them was still native. What moved is therefore exactly two decisions, both now in `lambda/package/dom/menu.ls` behind `view <body> state ime_composing, context_menu_open`:
+
+- **Which target deserves a menu.** `context_menu_open`'s hard-coded `tc_is_text_control` gate is deleted; `menu.open_for` asks the question instead, so widening it to contenteditable or a document selection is an edit here rather than in C++.
+- **Which items are live.** The five enable rules leave `context_menu_item_enabled`, which becomes a bitmask read. The mask is computed once at open and cached in `DocState::context_menu_enabled_mask`. **Caching is correct here and is not the staleness ES16 warned about**: the menu is modal, so nothing the rules read can change while it is up — and it is what keeps Lambda out of the paint pass, which reads the mask per item. Evaluating rules during render is exactly the quiescence violation F8 exists to prevent.
+
+Physical-pixel coordinates deliberately never reach policy: native resolves the hit target and popup position for the in-flight right click, records both, and `radiant.open_context_menu(node, mask)` places the popup from them. New waist primitives: `open_context_menu`, `close_context_menu`, `context_menu_target`, `clipboard_text` (read-only — the write side stays with cut/copy execution).
+
+Covered by `test/ui/dom_pkg_context_menu.json`: a right click on a text control opens the menu, a right click on a submit button does not, each pinned by a state-dump golden. Verified load-bearing — deleting the handler fails one of the two. **The mask is pinned too, by making it observable rather than by inferring it.** Two attempts to assert it through behaviour failed and are worth recording, because both failure modes are easy to repeat: asserting the clipboard after clicking Copy was **vacuous** (the earlier paste had already left the same text there, so it passed with the mask forced to zero), and the corrected version failed for an unrelated reason — `key_press` takes `mods` as an **int**, not a string array, so `"mods": ["ctrl"]` silently parsed as 0 and Ctrl+A never selected anything. A double click makes the selection through the real path instead.
+
+The fix was to add `enabled` to the `context_menu` entry of the state dump. The mask *is* the template's decision about this menu, so it belongs in the dump; without it a mask stuck at zero was indistinguishable from a correct one. Three scenarios now pin all five rules: caret with no selection in an editable field → **20** (Paste + Select All), a selection → **31** (all five), a selection in a readonly field → **18** (Copy + Select All, the three mutating items suppressed). Forcing `bit()` to return 0 fails 3 of the 4 assertions.
+
+---
+
 ## 4. Initial scope: HTML form states
 
 Phased so each step flips one native default-action class behind its registry claim, gated by `make test-radiant-baseline` + the UI-automation suite (311 event-JSON tests) at 100% of current pass rate.

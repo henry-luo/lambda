@@ -1,0 +1,158 @@
+{
+  "html": "test/ui/test_form_input.html",
+  "description": "F10: the <body> behavior template decides which target gets a context menu",
+  "events": [
+    {
+      "type": "log",
+      "message": "=== context menu opened by the Lambda behavior template ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name"
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "paste_text",
+      "target": {
+        "selector": "#name"
+      },
+      "text": "ctx"
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "log",
+      "message": "--- right-click a text control: the template opens the menu ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name"
+      },
+      "button": 1
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_state_dump",
+      "reference": "test/ui/state/dom_pkg_context_menu_open.mark"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "log",
+      "message": "--- with a selection the mask gains Cut/Copy/Delete ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name"
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#name"
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#name"
+      },
+      "button": 1
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_state_dump",
+      "reference": "test/ui/state/dom_pkg_context_menu_selection.mark"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "log",
+      "message": "--- readonly: the mutating items drop out of the mask ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#readonly-fld"
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "dblclick",
+      "target": {
+        "selector": "#readonly-fld"
+      }
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#readonly-fld"
+      },
+      "button": 1
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_state_dump",
+      "reference": "test/ui/state/dom_pkg_context_menu_readonly.mark"
+    },
+    {
+      "type": "key_press",
+      "key": "escape"
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "log",
+      "message": "--- right-click a submit button: the template declines ---"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#submit-btn"
+      },
+      "button": 1
+    },
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_state_dump",
+      "reference": "test/ui/state/dom_pkg_context_menu_declined.mark"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import validate: lambda.package.dom.validate
 import editing: lambda.package.dom.editing
 import aria: lambda.package.dom.aria
 import ime: lambda.package.dom.ime
+import menu: lambda.package.dom.menu
 
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
@@ -111,7 +112,10 @@ on input(evt) { aria.reflect_range(~) }
 // The composition session, bound to the page rather than to a control (ES18).
 // Composition events bubble from the focused control, so the ancestor walk
 // reaches <body> and this template claims them there.
-view <body> state ime_composing {}
+view <body> state ime_composing, context_menu_open {}
+// F10: the context menu is document-scoped state, the same cardinality argument
+// ES18 made for the IME session — one menu per document, not one per control.
+on contextmenu(evt) { menu.open_for(~) }
 on compositionstart(evt)  { ime.begin(~) }
 on compositionupdate(evt) { ime.update(~, evt, null) }
 on compositionend(evt)    { ime.end(~) }

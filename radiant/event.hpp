@@ -2109,6 +2109,10 @@ bool context_menu_contains(DocState* state, float x, float y);
 // (Cut/Copy/Delete need a non-empty selection; Paste needs clipboard text).
 bool context_menu_item_enabled(DocState* state, int item);
 
+// F10: open at the position recorded for the in-flight right click, with the
+// template's enable mask. Returns false when no right click is pending.
+bool context_menu_open_pending(DocState* state, View* target, uint32_t enabled_mask);
+
 // Render the popup overlay. Called from render.cpp after the dropdown
 // overlay so it appears on top.
 void context_menu_render(RenderContext* rdcon, DocState* state);
@@ -2597,6 +2601,19 @@ typedef struct DocState {
     float context_menu_width;
     float context_menu_height;
     int   context_menu_hover;      // -1 = none
+    // F10: the enable decision, computed once by the `<body>` behavior template
+    // when the menu opens and cached as a bitmask over CtxMenuItem. Caching is
+    // correct here and not the staleness ES16 warned about: the menu is modal,
+    // so nothing it depends on can change while it is up. It also keeps Lambda
+    // out of the paint pass, which reads this mask to grey items out — the
+    // quiescence rule F8 was built around.
+    uint32_t context_menu_enabled_mask;
+    // Where the in-flight right click landed, recorded immediately before the
+    // `contextmenu` dispatch so `radiant.open_context_menu` can position the
+    // popup. Physical pixels deliberately never cross into policy.
+    View* pending_context_menu_target;
+    float pending_context_menu_x;
+    float pending_context_menu_y;
     
     // Document-level states
     float scroll_x, scroll_y;      // document scroll position

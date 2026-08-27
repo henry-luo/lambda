@@ -2818,6 +2818,15 @@ extern "C" bool radiant_dispatch_behavior_option_commit(EventContext* evcon,
     return dispatch_behavior_handler(evcon, target, "optioncommit", intent, nullptr);
 }
 
+// F10: behavior-only, like `commit`, `optioncommit` and the composition hooks —
+// no DOM `contextmenu` event has fired, so there are no JS listeners to preempt.
+// The template decides whether this target gets a menu and computes the enable
+// mask; native supplies only the hit target and the popup position.
+extern "C" bool radiant_dispatch_behavior_context_menu(EventContext* evcon,
+                                                       View* target) {
+    return dispatch_behavior_handler(evcon, target, "contextmenu", nullptr, nullptr);
+}
+
 extern "C" bool radiant_dispatch_behavior_input(EventContext* evcon, View* target) {
     return dispatch_behavior_handler(evcon, target, "input", nullptr, nullptr);
 }
@@ -8362,16 +8371,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // continue with normal handling so the new click still works.
             context_menu_close(state);
         }
-        // Right-click on a text control opens the native context menu.
+        // F10: a right click asks the `<body>` behavior template whether a menu
+        // belongs here and which items are live. Native still resolves the hit
+        // target and the popup position — physical pixels are mechanism and do
+        // not cross into policy — and records both so `radiant.open_context_menu`
+        // can place the popup without the template ever handling coordinates.
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
             btn_event->button == GLFW_MOUSE_BUTTON_RIGHT &&
             state && evcon.target && evcon.target->is_element()) {
-            DomElement* hit = lam::dom_require_element(evcon.target);
-            if (tc_is_text_control(hit)) {
-                context_menu_open(state, evcon.target,
-                    (float)btn_event->x, (float)btn_event->y);
-                break;
-            }
+            state->pending_context_menu_target = evcon.target;
+            state->pending_context_menu_x = (float)btn_event->x;
+            state->pending_context_menu_y = (float)btn_event->y;
+            bool opened = radiant_dispatch_behavior_context_menu(&evcon, evcon.target);
+            state->pending_context_menu_target = nullptr;
+            if (opened && state->context_menu_target) break;
         }
 
         // Update active and focus states
