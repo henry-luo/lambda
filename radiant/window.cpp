@@ -942,7 +942,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, source: %s, event_file: %s, headless: %d",
              doc_file ? doc_file : "NULL", doc_source ? "memory" : "file",
              event_file ? event_file : "NULL", headless);
-    ui_context_init(&ui_context, headless);
+    ui_context_init(&ui_context, headless, 0.0f);
     ui_context.event_log_enabled = enable_event_log;
     ui_context.state_dump_enabled = enable_state_dump;
 

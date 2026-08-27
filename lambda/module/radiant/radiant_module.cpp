@@ -1014,7 +1014,7 @@ static RadiantLayoutResource* radiant_layout_resource_for_document(
     RadiantLayoutResource* resource = (RadiantLayoutResource*)mem_calloc(
         1, sizeof(RadiantLayoutResource), MEM_CAT_LAYOUT);
     if (!resource) return nullptr;
-    if (ui_context_init(&resource->ui_context, true) != 0) {
+    if (ui_context_init(&resource->ui_context, true, 1.0f) != 0) {
         log_error("JUBE_RADIANT_%s: failed to initialize retained UI context", func_name);
         mem_free(resource);
         return nullptr;
@@ -1750,7 +1750,7 @@ RADIANT_C_API Item fn_radiant_render_svg(Item html_item, Item width_item, Item h
     if (!doc) return ItemNull;
 
     UiContext uicon = {};
-    if (ui_context_init(&uicon, true) != 0) {
+    if (ui_context_init(&uicon, true, 1.0f) != 0) {
         log_error("JUBE_RADIANT_RENDER_SVG: failed to initialize headless UI context");
         free_document(doc);
         return ItemNull;
