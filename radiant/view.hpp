@@ -1789,6 +1789,11 @@ typedef struct TableProp {
     uint8_t is_annoy_tr:1;       // whether this element is doubled as an anonymous tr
     uint8_t is_annoy_td:1;       // whether this element is doubled as an anonymous td
     uint8_t is_annoy_colgroup:1; // whether this element is doubled as an anonymous colgroup
+    // vertical table publication keeps logical flow and per-fragment inline
+    // extents separate for the containing multicol fragmentainer.
+    float vertical_flow_extent;
+    float vertical_inline_extent;
+    float vertical_top_caption_extent;
 
 } TableProp;
 

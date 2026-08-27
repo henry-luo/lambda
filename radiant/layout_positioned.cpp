@@ -453,6 +453,15 @@ static ViewBlock* containment_positioning_block(ViewElement* ancestor) {
     return nullptr;
 }
 
+static ViewBlock* transform_positioning_block(ViewElement* ancestor) {
+    if (!ancestor || !ancestor->is_block() || !radiant::has_transform(ancestor)) {
+        return nullptr;
+    }
+    // css transforms: any non-none transform establishes a containing block,
+    // even when its matrix happens to be the identity.
+    return lam::view_require_block(ancestor);
+}
+
 ViewBlock* find_positioned_containing_block(ViewElement* view) {
     for (ViewElement* ancestor = view ? view->parent_view() : nullptr;
          ancestor;
@@ -470,10 +479,13 @@ ViewBlock* find_positioned_containing_block(ViewElement* view) {
                 return ancestor_block;
             }
         }
-        ViewBlock* containing_block = containment_positioning_block(ancestor);
-        if (containing_block) {
-            return containing_block;
-        }
+            ViewBlock* containing_block = transform_positioning_block(ancestor);
+            if (!containing_block) {
+                containing_block = containment_positioning_block(ancestor);
+            }
+            if (containing_block) {
+                return containing_block;
+            }
     }
     return nullptr;
 }
@@ -483,7 +495,9 @@ ViewBlock* find_containing_block(ViewBlock* element, CssEnum position_type) {
         for (ViewElement* ancestor = element ? element->parent_view() : nullptr;
              ancestor;
              ancestor = ancestor->parent_view()) {
-            ViewBlock* containing_block = containment_positioning_block(ancestor);
+            ViewBlock* containing_block = transform_positioning_block(ancestor);
+            if (containing_block) return containing_block;
+            containing_block = containment_positioning_block(ancestor);
             if (containing_block) return containing_block;
         }
         // Fixed positioning falls back to the initial fixed containing block.
@@ -1489,8 +1503,6 @@ void layout_abs_block(LayoutContext* lycon, DomNode *elmt, ViewBlock* block, Blo
             cb->position->last_abs_child = block;
         }
         block->position->next_abs_sibling = nullptr;
-    } else {
-        log_error("Containing block has no position property");
     }
 
     calculate_absolute_position(lycon, block, cb, pa_block, pa_line);
@@ -2110,7 +2122,6 @@ static void finalize_static_positioned_abs_descendant(ViewBlock* block) {
 
     ViewBlock* cb = find_containing_block(block, block->positionp()->position);
     if (!cb) return;
-
     float offset_x = 0;
     float offset_y = 0;
     layout_parent_to_containing_block_offset(block, cb, &offset_x, &offset_y);

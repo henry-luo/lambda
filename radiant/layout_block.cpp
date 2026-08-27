@@ -3530,7 +3530,13 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
                     follows_fragmented_column = true;
                 }
             }
-            if (follows_fragmented_column) {
+            bool child_is_fragmented = child_block->is_element() &&
+                child_block->as_element()->layout_fragments_count() > 1;
+            if (child_is_fragmented) {
+                // css fragmentation: the element's union origin was already
+                // normalized by its fragments; do not add prior block flow.
+                logical_block_offset = max(surrogate_x - content_left, 0.0f);
+            } else if (follows_fragmented_column) {
                 logical_block_offset = max(surrogate_x - content_left, 0.0f);
             } else if (!have_previous_multicol_inline_offset ||
                        fabsf(logical_inline_offset - previous_multicol_inline_offset) > 0.5f) {
@@ -7158,7 +7164,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     bool orthogonal_auto_block_size = lycon->block.given_width < 0.0f &&
         block->is_element() &&
         layout_element_inline_axis_is_vertical(block->as_element()) &&
-        pa_block && pa_block->given_width >= 0.0f &&
+        pa_block &&
+        pa_block->given_width >= 0.0f &&
         layout_inline_box_is_orthogonal_to_parent(block);
     ViewBlock* parent_block = layout_nearest_block_ancestor(block->parent_view());
     bool parent_is_root_element = parent_block && is_root_element_block(parent_block);
@@ -7407,7 +7414,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             // CSS Writing Modes §7.3.2: an orthogonal auto inline-size is
             // fit-content; the parent physical width must not force-fill it.
             content_width = max(fit_border_width - block_box.pad_border_h, 0.0f);
-        } else if (vertical_auto_inline_formatting) {
+        } else if (vertical_auto_inline_formatting &&
+                   !is_multicol_container(block)) {
             content_width = layout_stretch_fit_used_css_size(
                 block, vertical_inline_basis, false);
         }
@@ -7416,7 +7424,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             available_from_parent -= bfc_available_width_reduction;
             bfc_width_was_reduced = true;
         }
-        if (vertical_auto_inline_formatting || orthogonal_auto_inline_size ||
+        if ((vertical_auto_inline_formatting &&
+             !is_multicol_container(block)) || orthogonal_auto_inline_size ||
             orthogonal_auto_block_size) {
             available_from_parent = content_width;
         } else if (block->bound) {
@@ -7428,14 +7437,15 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         // CSS Tables 3: For auto-width tables, max-width is handled by the table
         bool is_auto_width_table = (block->view_type == RDT_VIEW_TABLE) &&
             (!block->blk || block->block()->given_width < 0 || block->block()->given_width_type == CSS_VALUE_AUTO);
-        if (!vertical_auto_inline_formatting && layout_uses_border_box(block)) {
+        if ((!vertical_auto_inline_formatting || is_multicol_container(block)) &&
+            layout_uses_border_box(block)) {
             if (is_auto_width_table) {
                 content_width = layout_floor_min_axis(block, content_width, true);
             } else {
                 content_width = layout_apply_min_max_axis(block, content_width, true, false);
             }
             content_width = layout_content_size_if_border_box(block, content_width, true);
-        } else if (!vertical_auto_inline_formatting) {
+        } else if (!vertical_auto_inline_formatting || is_multicol_container(block)) {
             if (block->bound) {
                 content_width = layout_content_size_from_border_box(block, content_width, true);
             }
