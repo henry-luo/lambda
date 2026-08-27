@@ -63,13 +63,13 @@ Counts:
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 9 | 9 |
 | LR_07 | MIR Direct transpiler & JIT | 13 | 1 | 2 | 16 |
 | LR_08 | Memory management & GC | 10 | 0 | 0 | 10 |
-| LR_09 | Runtime builtins | 7 | 0 | 3 | 10 |
+| LR_09 | Runtime builtins | 6 | 0 | 4 | 10 |
 | LR_10 | Error handling | 5 | 1 | 2 | 8 |
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 7 | 0 | 2 | 9 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 8 | 15 |
-| **Total** | | **93** | **11** | **52** | **156** |
+| **Total** | | **92** | **11** | **53** | **156** |
 
 The 131 total exceeds the 127 items in the source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
@@ -750,11 +750,20 @@ they are lowered inline. A `NULL` that *should* have been a real pointer would
 surface only as a JIT import-resolution miss (`mir.c` logs
 `failed to resolve native fn`), not as a build error.
 
-<a id="lr09-6"></a>**LR09-6 · `set_runtime_error` buffer cap · OPEN**
-The message is formatted into a fixed `char message[1024]` stack buffer
-(`lambda-eval.cpp:141`–`147`) and silently truncated; the stack-trace depth is
-hard-coded to 32 frames. Shared with the broader error machinery
-([§10](#10-error-handling-lr_10)).
+<a id="lr09-6"></a>**LR09-6 · `set_runtime_error` message buffer cap · RESOLVED 2026-08-28**
+`set_runtime_error` and `err_createf` formatted into fixed 1024-byte stack
+buffers, silently truncating rich diagnostics. The common formatting path now
+measures the required length and allocates the complete message through the
+existing `memtrack` allocator before creating the error. This satisfies the
+message-bearing error contract in **S7.4.4** and removes the duplicated
+formatting path; no new data structure or design ruling was added.
+
+The separate 32-frame native stack-trace limit remains tracked by
+[LR10-4](#lr10-4).
+
+Regression: `ErrorCreationTest.CreateFormattedErrorPreservesLongMessage`
+verifies the full 1514-byte formatted message. The focused error suite passes
+121/121 and `make test-lambda-baseline` passes 3978/3978.
 
 <a id="lr09-7"></a>**LR09-7 · No tags in source · OPEN (note)**
 The registry caveats carry no `TODO`/`FIXME`/`HACK`; they are discoverable only
@@ -1939,6 +1948,13 @@ LaTeX may hold consecutive strings, while the markup family (markdown, asciidoc,
 textile, wiki) calls `list_push` and merges them. `input-ics.cpp` and
 `input-mark.cpp` use both and so mix the two policies — worth reconciling, along
 with retiring the dead flag.
+
+<a id="lr09-r4"></a>**LR09-R4 · `set_runtime_error` message buffer cap · RESOLVED 2026-08-28**
+`err_createf` and `set_runtime_error` now share the exact-size variadic
+formatter backed by `mem_alloc`, so long diagnostics are not silently
+truncated at 1023 bytes. The 32-frame trace cap is a separate LR10-4
+residue. Regression: `ErrorCreationTest.CreateFormattedErrorPreservesLongMessage`;
+the error suite passes 121/121 and the Lambda baseline passes 3978/3978.
 
 ## A.11 Procedural runtime (LR_12)
 

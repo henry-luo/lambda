@@ -540,6 +540,24 @@ TEST_F(ErrorCreationTest, CreateFormattedError) {
     err_free(error);
 }
 
+TEST_F(ErrorCreationTest, CreateFormattedErrorPreservesLongMessage) {
+    char detail[1501];
+    memset(detail, 'x', sizeof(detail) - 1);
+    detail[sizeof(detail) - 1] = '\0';
+    SourceLocation loc = {};
+
+    LambdaError* error = err_createf(ERR_RUNTIME_ERROR, &loc,
+        "prefix:%s:suffix", detail);
+
+    ASSERT_NE(error, nullptr);
+    size_t expected_length = strlen("prefix:") + strlen(detail) + strlen(":suffix");
+    EXPECT_EQ(strlen(error->message), expected_length);
+    EXPECT_EQ(error->message[expected_length - strlen(":suffix") - 1], 'x');
+    EXPECT_EQ(strstr(error->message, ":suffix"), error->message + expected_length - strlen(":suffix"));
+
+    err_free(error);
+}
+
 TEST_F(ErrorCreationTest, CreateErrorWithHelp) {
     SourceLocation loc = {
         .file = nullptr,

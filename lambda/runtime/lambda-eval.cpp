@@ -134,6 +134,20 @@ static LambdaError* create_runtime_error(LambdaErrorCode code, const char* messa
     return error;
 }
 
+static LambdaError* create_runtime_errorf(LambdaErrorCode code,
+        const char* format, va_list args) {
+    if (!context) return NULL;
+    SourceLocation loc = {0};
+    if (context->current_file) loc.file = context->current_file;
+    LambdaError* error = err_createfv(code, &loc, format, args);
+    if (!error) {
+        if (lambda_recovery_frame_raise_fault(LAMBDA_FAULT_OUT_OF_MEMORY, code)) return NULL;
+        (void)lambda_recovery_publish_fault_item((Context*)context,
+            LAMBDA_FAULT_OUT_OF_MEMORY, code);
+    }
+    return error;
+}
+
 /**
  * Set a runtime error in the current evaluation context.
  * Captures a stack trace using native frame pointer walking.
@@ -141,13 +155,10 @@ static LambdaError* create_runtime_error(LambdaErrorCode code, const char* messa
 static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     if (!context) return;
 
-    char message[1024];
     va_list args;
     va_start(args, format);
-    vsnprintf(message, sizeof(message), format, args);
+    LambdaError* error = create_runtime_errorf(code, format, args);
     va_end(args);
-
-    LambdaError* error = create_runtime_error(code, message);
     if (!error) return;
 
     // capture native stack trace via FP walking
@@ -159,7 +170,7 @@ static void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     }
     context->last_error = error;
 
-    log_error("runtime error [%d]: %s", code, message);
+    log_error("runtime error [%d]: %s", code, error->message);
 }
 
 static void set_input_parse_error(const char* function_name, Input* input,
