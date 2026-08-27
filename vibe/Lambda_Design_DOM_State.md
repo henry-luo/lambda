@@ -426,7 +426,7 @@ Batch is confirmed unaffected: `make layout suite=baseline` is 4404/4404 with no
 
 Two more UA policies bind at `<body>` rather than at a control, for the reason ES18 gave the IME session: the thing being moved has the document's cardinality, not the control's. A document has one caret and at most one open context menu, the same argument that made `DocState::sel` and `open_dropdown` document-scoped.
 
-**Caret navigation (F9, proposed).** The case is not layering, it is **duplication**. The same policy — which key with which modifier moves the caret where — exists twice today, in two vocabularies:
+**Caret navigation (F9) ✅ landed 2026-08-27 — both surfaces.** The case is not layering, it is **duplication**. The same policy — which key with which modifier moves the caret where — exists twice today, in two vocabularies:
 
 | | Text controls | Contenteditable |
 | --- | --- | --- |
@@ -440,7 +440,29 @@ The seam is already open and unusually clean — `dispatch_form_navigation` take
 
 **The new `<body>` state this needs is the goal column, and it is currently missing.** `state_store_caret_move_line` reads `selection_presentation->caret_x` — the *current* caret x — on every vertical move rather than a remembered column, so Up/Down through a short line loses the column. That is document-scoped state with exactly the IME cardinality argument, and adding it is a bug fix the migration carries rather than a cost it imposes.
 
-**The blocker is the per-event budget, not the design.** This is the hot path — every arrow key — so ESO7 applies. The first slice's real deliverable is the measurement, not the flip.
+**The budget gate was measured before the flip, as this section required.** 1200 alternating Left/Right presses against a fixture, differenced against the same fixture with no keys to cancel process startup: **~217µs per key native, ~238µs with the template in the loop — +21µs, about +10%.** Against a ~30ms key repeat that is not perceptible, so the gate passes. Recording the method as much as the number: measure the delta between two key counts, never a single absolute run, because startup dominates a headless invocation.
+
+**As landed.** Native dispatches a behavior-only `caretkey` carrying the key and modifiers; the template maps it to a WHATWG operation name and calls `radiant.caret_operation(node, op, extend)`. The answer returns through the **epoch pattern `request_change` established** rather than new verdict vocabulary — a primitive holds no `EventContext`, and performing the move dispatches events that need one, so the template records and native reads the epoch after the dispatch returns.
+
+What stayed native is exactly the geometry: `form_caret_operation_destination` resolves where each named operation lands over the live buffer, and the extend-versus-collapse split is unchanged. **92 lines of native decision branches deleted** — alt+Left/Right, Cmd+Left/Right, Up/Down, plain Left/Right and Home/End — with no fallback, matching activation, validation, undo and the option commit. Verified load-bearing: deleting the handler fails 3 existing tests that pass with it.
+
+**The rich half followed, and the duplication is now collapsed.** `editing_controller_handle_rich_navigation` (127 lines of switch) becomes `editing_controller_apply_caret_operation` (93 lines), the contenteditable twin of `form_caret_operation_destination`: the same WHATWG names, resolved against view-tree geometry instead of a buffer. Both surfaces dispatch the same `caretkey` and consult the same rule set. `radiant.caret_surface(node)` reports which surface the caret sits in — resolving that is mechanism, and the two surfaces genuinely differ in two places the template branches on: a single-line `<input>` has no vertical motion (Up/Down collapse to the value ends, as in Chrome) and no document boundary for Cmd+Home/End.
+
+**One behaviour change made deliberately:** word-wise movement now takes Alt *or* Ctrl on both surfaces. Native took only Alt on text controls and only Ctrl on rich surfaces, so each platform's users had word movement on exactly one of the two. Accepting both is the point of merging the rule sets.
+
+**One bug the merge introduced and tests caught:** gating the rich dispatch on `caret_in_rich_surface` was narrower than the handler it replaced, which returned false only for text controls and therefore ran for *any* caret outside one — including a plain document selection. Arrow keys silently stopped collapsing selections on ordinary text until the guard was widened to the surface-kind check. Four caret/selection tests caught it.
+
+Verified load-bearing across both surfaces: deleting the handler fails **8** tests that pass with it. Cost after both halves: **~242µs per key against the ~217µs native baseline (+25µs, ~11%)**.
+
+**The goal column ✅ landed 2026-08-27, on the second attempt.** The first was reverted for being unverifiable, and chasing *why* it was unverifiable turned out to be the valuable part: it uncovered two real defects in the rich half that no existing test could see.
+
+**Defect 1 — the dispatch target was a text node.** The caret usually sits in one, and the behavior walk matches elements, so `caretkey` found no template and silently declined. Arrow keys on a rich surface fell straight through to the pre-existing "rich key fallback fenced" branch and did nothing. Now resolved to the nearest element ancestor before dispatch.
+
+**Defect 2 — a contenteditable-only page never loaded the package.** `radiant_dom_package_ensure` created an evaluator only for a target with a `form_control()`, so a page whose only editable thing is a `contenteditable` div had no evaluator, no package, and — once the native rich handler was deleted — **no caret navigation at all**. The gate now also admits a rich editing surface, which the `<body>` template genuinely governs. Still narrow: an ordinary link click creates nothing, which is what keeps the PDF and Lambda-report iframes safe (EO4). Neither defect was caught by the four passing caret tests, because all four use a fixture that happens to contain form controls.
+
+**The invalidation rule sits at the store's choke points, not at their callers.** Every `state_store_caret_*` entry point clears the goal except `state_store_caret_move_line`, which is the only one that preserves and re-uses it. That is what makes a mouse click or a typed character retarget the column without either of them knowing it exists — and it is the specific hole that sank the first attempt, where clearing lived in the operation executor and a click bypassed it.
+
+Covered by `test/ui/dom_pkg_caret_goal_column.json` on a three-paragraph editing host with a short middle line: click at column 15, Down clamps to 2 on the short line, Down returns to **15** rather than staying at 2; then a click elsewhere retargets to 21 and two Downs land at 21, not the stale 15. Both halves verified load-bearing — stubbing `caret_goal_invalidate` to a no-op fails the clearing assertion.
 
 **Context menu (F10) ✅ landed 2026-08-27.** `radiant/context_menu.cpp` is 272 lines and splits cleanly:
 

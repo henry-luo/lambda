@@ -747,130 +747,96 @@ static void editing_controller_move_to_boundary(
         evcon, state, hooks, caret_view, move_operation);
 }
 
-bool editing_controller_handle_rich_navigation(EventContext* evcon,
-                                               DocState* state,
-                                               const KeyEvent* key_event,
-                                               const EditingControllerHooks* hooks) {
-    if (!evcon || !state || !key_event) return false;
+// F9 (rich half): which surface the caret sits in. Resolving that is mechanism;
+// what a key means on it is not, and the template asks this to decide.
+extern "C" int editing_controller_caret_surface_kind(DocState* state) {
+    View* caret_view = nullptr;
+    int caret_offset = 0;
+    if (!state || !caret_get_position(state, &caret_view, &caret_offset)) return 0;
+    if (!caret_view) return 0;
+    EditingSurface surface;
+    if (editing_surface_from_target(caret_view, &surface) &&
+        editing_surface_is_text_control(&surface)) {
+        return 1;   // text control
+    }
+    return 2;       // contenteditable / rich
+}
 
+// Perform a named caret operation on a rich surface. This is the contenteditable
+// twin of form_caret_operation_destination: the same WHATWG names, resolved
+// against a different geometry. Before F9 the two surfaces did not merely
+// resolve differently — they spoke different vocabularies, one in named
+// operations and one in signed deltas, which is the duplication the phase set
+// out to collapse.
+bool editing_controller_apply_caret_operation(EventContext* evcon, DocState* state,
+                                              const EditingControllerHooks* hooks,
+                                              const char* op, bool extend) {
+    if (!evcon || !state || !op) return false;
     View* caret_view = nullptr;
     int caret_offset = 0;
     if (!caret_get_position(state, &caret_view, &caret_offset)) return false;
     if (!caret_view) return false;
 
-    EditingSurface surface;
-    if (editing_surface_from_target(caret_view, &surface) &&
-        editing_surface_is_text_control(&surface)) {
-        return false;
+    unsigned char* text_data = caret_view->is_text()
+        ? (static_cast<ViewText*>(caret_view))->text_data() : nullptr;
+
+    // Boundary moves share one helper; the -1 marks "not a boundary op".
+    int boundary = -1;
+    if (strcmp(op, "moveLineStart") == 0) boundary = 0;
+    else if (strcmp(op, "moveLineEnd") == 0) boundary = 1;
+    else if (strcmp(op, "moveDocumentStart") == 0) boundary = 2;
+    else if (strcmp(op, "moveDocumentEnd") == 0) boundary = 3;
+    if (boundary >= 0) {
+        char extend_op[40];
+        snprintf(extend_op, sizeof(extend_op), "extend%s", op + 4);
+        editing_controller_move_to_boundary(evcon, state, caret_view, &caret_offset,
+                                            hooks, extend, boundary, extend_op, op);
+        return true;
     }
 
-    bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
-    bool ctrl = (key_event->mods & RDT_MOD_CTRL) != 0;
-    bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
+    bool vertical = strcmp(op, "moveLineBackward") == 0 || strcmp(op, "moveLineForward") == 0;
+    int delta;
+    if (strcmp(op, "moveCharacterBackward") == 0) delta = -1;
+    else if (strcmp(op, "moveCharacterForward") == 0) delta = 1;
+    else if (strcmp(op, "moveWordBackward") == 0) delta = -10;
+    else if (strcmp(op, "moveWordForward") == 0) delta = 10;
+    else if (strcmp(op, "moveLineBackward") == 0) delta = -1;
+    else if (strcmp(op, "moveLineForward") == 0) delta = 1;
+    else return false;
 
-    unsigned char* text_data = nullptr;
-    if (caret_view->is_text()) {
-        text_data = (static_cast<ViewText*>(caret_view))->text_data();
-    }
-
-    switch (key_event->key) {
-        case RDT_KEY_LEFT:
-            if (shift) {
-                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
+    char extend_op[40];
+    snprintf(extend_op, sizeof(extend_op), "extend%s", op + 4);
+    if (extend) {
+        selection_begin_non_pointer_extend(state, caret_view, caret_offset);
+        if (vertical) {
+            state_store_caret_move_line(state, delta, evcon->ui_context);
+            editing_controller_extend_to_moved_caret(evcon, state, caret_view,
+                                                     &caret_offset, hooks, extend_op);
+        } else {
+            // A character step must land on a codepoint boundary; word steps and
+            // everything else go through the caret mover.
+            if (delta == -1 || delta == 1) {
                 int new_offset = text_data
-                    ? utf8_offset_by_chars(text_data, caret_offset, -1)
-                    : caret_offset - 1;
+                    ? utf8_offset_by_chars(text_data, caret_offset, delta)
+                    : caret_offset + delta;
                 state_store_selection_extend_to_offset(state, new_offset);
-                editing_controller_selection_snapshot(evcon, state, hooks,
-                                                      caret_view,
-                                                      "extendBackward");
-                selection_finish_active_gesture(state);
             } else {
-                state_store_selection_clear(state);
-                state_store_caret_move(state, ctrl ? -10 : -1);
-                editing_controller_selection_snapshot(evcon, state, hooks,
-                                                      caret_view,
-                                                      ctrl ? "moveWordBackward"
-                                                           : "moveBackward");
-            }
-            break;
-
-        case RDT_KEY_RIGHT:
-            if (shift) {
-                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
-                int new_offset = text_data
-                    ? utf8_offset_by_chars(text_data, caret_offset, 1)
-                    : caret_offset + 1;
-                state_store_selection_extend_to_offset(state, new_offset);
-                editing_controller_selection_snapshot(evcon, state, hooks,
-                                                      caret_view,
-                                                      "extendForward");
-                selection_finish_active_gesture(state);
-            } else {
-                state_store_selection_clear(state);
-                state_store_caret_move(state, ctrl ? 10 : 1);
-                editing_controller_selection_snapshot(evcon, state, hooks,
-                                                      caret_view,
-                                                      ctrl ? "moveWordForward"
-                                                           : "moveForward");
-            }
-            break;
-
-        case RDT_KEY_UP:
-            if (shift) {
-                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
-                state_store_caret_move_line(state, -1, evcon->ui_context);
+                state_store_caret_move(state, delta);
                 editing_controller_extend_to_moved_caret(evcon, state, caret_view,
-                                                         &caret_offset, hooks,
-                                                         "extendLineBackward");
+                                                         &caret_offset, hooks, extend_op);
                 selection_finish_active_gesture(state);
-            } else {
-                state_store_selection_clear(state);
-                state_store_caret_move_line(state, -1, evcon->ui_context);
-                editing_controller_selection_snapshot(evcon, state, hooks,
-                                                      caret_view,
-                                                      "moveLineBackward");
+                return true;
             }
-            break;
-
-        case RDT_KEY_DOWN:
-            if (shift) {
-                selection_begin_non_pointer_extend(state, caret_view, caret_offset);
-                state_store_caret_move_line(state, 1, evcon->ui_context);
-                editing_controller_extend_to_moved_caret(evcon, state, caret_view,
-                                                         &caret_offset, hooks,
-                                                         "extendLineForward");
-                selection_finish_active_gesture(state);
-            } else {
-                state_store_selection_clear(state);
-                state_store_caret_move_line(state, 1, evcon->ui_context);
-                editing_controller_selection_snapshot(evcon, state, hooks,
-                                                      caret_view,
-                                                      "moveLineForward");
-            }
-            break;
-
-        case RDT_KEY_HOME:
-            editing_controller_move_to_boundary(
-                evcon, state, caret_view, &caret_offset, hooks, shift,
-                cmd ? 2 : 0,
-                cmd ? "extendDocumentStart" : "extendLineStart",
-                cmd ? "moveDocumentStart" : "moveLineStart");
-            break;
-
-        case RDT_KEY_END:
-            editing_controller_move_to_boundary(
-                evcon, state, caret_view, &caret_offset, hooks, shift,
-                cmd ? 3 : 1,
-                cmd ? "extendDocumentEnd" : "extendLineEnd",
-                cmd ? "moveDocumentEnd" : "moveLineEnd");
-            break;
-
-        default:
-            return false;
+            editing_controller_selection_snapshot(evcon, state, hooks, caret_view,
+                                                  extend_op);
+        }
+        selection_finish_active_gesture(state);
+        return true;
     }
 
-    update_caret_visual_position(evcon->ui_context, state);
-    evcon->need_repaint = true;
+    state_store_selection_clear(state);
+    if (vertical) state_store_caret_move_line(state, delta, evcon->ui_context);
+    else state_store_caret_move(state, delta);
+    editing_controller_selection_snapshot(evcon, state, hooks, caret_view, op);
     return true;
 }
