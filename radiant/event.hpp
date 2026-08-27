@@ -449,6 +449,11 @@ typedef struct InputIntent {
     const char* history_value;
     uint32_t history_sel_start;   // codepoints, like every Lambda-facing offset
     uint32_t history_sel_end;
+    // F2b: the option a click landed on inside an open <select> dropdown. The
+    // overlay is not a DOM element, so the index cannot be derived from a
+    // target; native computes it from the dropdown geometry and hands it over.
+    // -1 for every other intent.
+    int option_index;
 } InputIntent;
 
 typedef InputIntent EditingIntent;
@@ -1817,6 +1822,15 @@ extern "C" void tc_history_guard_exit(DocState* state);
 bool form_control_behavior_inited(DocState* state, View* view);
 void form_control_set_behavior_inited(DocState* state, View* view, bool inited);
 void form_control_invalidate_behavior_init(DocState* state, View* view);
+// F2b/#4: the password reveal window (bytes into the live value). Policy — what
+// to reveal and when — belongs to the behavior template; storage, the elapse
+// tick and the masked paint stay native.
+bool form_control_password_reveal_get(DocState* state, View* view,
+                                      uint32_t* out_start, uint32_t* out_end);
+void form_control_password_reveal_set(DocState* state, View* view,
+                                      uint32_t start, uint32_t end);
+bool form_control_password_reveal_clear(DocState* state, View* view);
+bool form_control_password_reveal_tick(DocState* state, View* view, double delta);
 void* form_control_history_get(DocState* state, View* view);
 void form_control_history_set(DocState* state, View* view, void* history);
 
@@ -2301,6 +2315,15 @@ typedef struct ViewState {
             // released and rebuilt as views churn — history has to outlive that
             // (ESO43). Released by view_state_release_form_payload.
             void* history;
+            // F2b/#4: the password reveal window, in bytes into current_value.
+            // Here rather than on FormControlProp for the ESO43 reason — the
+            // prop is released and rebuilt as views churn, and a reveal that
+            // vanished mid-keystroke would unmask the character early.
+            uint32_t password_reveal_start;
+            uint32_t password_reveal_end;
+            double   password_reveal_elapsed;
+            uint8_t  password_reveal_active : 1;
+            uint8_t  password_reserved : 7;
         } form;
     } data;
 } ViewState;

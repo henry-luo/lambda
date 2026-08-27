@@ -58,7 +58,21 @@ pub fn line_end(text, pos) {
 // Every delete is the same shape once its boundary is known: a non-empty
 // selection is removed wholesale, otherwise the span between the caret and the
 // boundary goes. Writing that once beats six near-identical branches.
+// A password control reveals the last character typed into it, then masks it
+// again after a moment. That "reveal the last one" rule is policy and lives
+// here; the one-second hold is a frame timer and the masking itself happens at
+// paint, both of which stay native. An empty range clears, so any edit that
+// inserts nothing — every delete — re-masks.
+pn reveal_last_typed(elem, start, inserted) {
+    if (radiant.attr(elem, "type") != "password") { false }
+    else if (len(inserted) > 0) {
+        radiant.set_password_reveal(elem, start + len(inserted) - 1, start + len(inserted))
+    }
+    else { radiant.set_password_reveal(elem, 0, 0) }
+}
+
 pn delete_span(elem, s, e, target) {
+    reveal_last_typed(elem, s, "")
     if (s != e) {
         radiant.replace_range(elem, s, e, "")
         'prevent-default'
@@ -177,7 +191,9 @@ pub pn apply_fn(elem, evt, multiline) {
         // sanitize before measuring: the newline policy decides what the text
         // *is*, and only then does maxlength decide how much of it fits
         let data = sanitize(if (evt.data == null) "" else evt.data, multiline);
-        radiant.replace_range(elem, s, e, fit(elem, data, len(text), e - s))
+        let fitted = fit(elem, data, len(text), e - s);
+        radiant.replace_range(elem, s, e, fitted)
+        reveal_last_typed(elem, s, fitted)
         'prevent-default'
     }
     else if (t == "deleteByCut") {

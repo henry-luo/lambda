@@ -57,6 +57,15 @@ on click(evt) {
     if (radiant.get_state(~, "disabled")) { return 'pass' }
     radiant.set_dropdown_open(~, not radiant.dropdown_open(~))
 }
+// F2b: the commit half. The dropdown overlay is not a DOM element, so native
+// resolves which option the pointer hit from the popup geometry and hands the
+// index over on a behavior-only `optioncommit`; choosing and closing are the
+// template's, so one interaction is no longer split between the two sides.
+on optioncommit(evt) {
+    if (evt.option_index == null) { return 'pass' }
+    radiant.set_selected_index(~, evt.option_index)
+    radiant.set_dropdown_open(~, false)
+}
 
 // Constraint validation (F3). There is no native validator behind this any
 // more: te_validate is gone, and these handlers are the only thing that writes

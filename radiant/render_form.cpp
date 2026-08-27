@@ -644,9 +644,10 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
         && form->input_type && strcmp(form->input_type, "password") == 0;
     uint32_t password_reveal_start = 0;
     uint32_t password_reveal_end = 0;
-    if (is_password && focused_here && form->password_reveal_active) {
-        password_reveal_start = form->password_reveal_start;
-        password_reveal_end = form->password_reveal_end;
+    if (is_password && focused_here) {
+        DocState* reveal_state = block->doc ? (DocState*)block->doc->state : nullptr;
+        form_control_password_reveal_get(reveal_state, static_cast<View*>(block),
+                                         &password_reveal_start, &password_reveal_end);
     }
     char* mask_buf = nullptr;
     const char* text = src_text;

@@ -2649,10 +2649,6 @@ struct FormControlProp {
     float    scroll_y;
     float    caret_blink_t;
     uint8_t  caret_on : 1;
-    uint8_t  password_reveal_active : 1;
-    uint32_t password_reveal_start;
-    uint32_t password_reveal_end;
-    double   password_reveal_elapsed;
 
 
     // FormControlProp is a POD (no C++ ctor/dtor) per the C+ convention; use

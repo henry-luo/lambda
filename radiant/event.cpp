@@ -1746,6 +1746,12 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
     MapBuilder mb = builder.map();
     mb.put("type", event_name);
 
+    // Emitted outside the intent-type guard: an option commit carries no edit
+    // intent, only the index the geometry resolved.
+    if (intent && intent->option_index >= 0) {
+        mb.put("option_index", (int64_t)intent->option_index);
+    }
+
     if (intent && intent->type != INPUT_INTENT_NONE) {
         const char* input_type = input_intent_type_name(intent->type);
         mb.put("input_type", input_type);
@@ -2795,6 +2801,21 @@ void radiant_run_behavior_init(DomDocument* doc) {
 // always has.
 extern "C" bool radiant_dispatch_behavior_commit(EventContext* evcon, View* target) {
     return dispatch_behavior_handler(evcon, target, "commit", nullptr, nullptr);
+}
+
+// F2b: the commit half of <select> activation. The template already owns
+// opening and closing the dropdown; without this the *choice* stayed native, so
+// one interaction was split down the middle — exactly the asymmetry F1b/F2b
+// removed everywhere else.
+//
+// Behavior-only, like `commit` and the composition events: the dropdown overlay
+// is not a DOM element, so no DOM event has fired for the option and there are
+// no JS listeners to preempt. Native resolves which option the pointer landed on
+// (geometry is mechanism) and the template performs the commit.
+extern "C" bool radiant_dispatch_behavior_option_commit(EventContext* evcon,
+                                                        View* target,
+                                                        const InputIntent* intent) {
+    return dispatch_behavior_handler(evcon, target, "optioncommit", intent, nullptr);
 }
 
 extern "C" bool radiant_dispatch_behavior_input(EventContext* evcon, View* target) {
@@ -6035,6 +6056,17 @@ extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
         event_context_cleanup(&evcon);
         return false;
     }
+    // F2c: the template commits, here as on the pointer and keyboard paths. The
+    // sim used to write selectedness itself, which left a second copy of the
+    // commit policy — including radio-style exclusivity concerns — that no test
+    // could observe diverging from the template's, because the only tests that
+    // exercised it were the ones bypassing the template. Commit before the JS
+    // mirror below, which needs the new value already in place.
+    {
+        InputIntent commit_intent;
+        commit_intent.option_index = selected_index;
+        radiant_dispatch_behavior_option_commit(&evcon, target, &commit_intent);
+    }
     bool prevented = false;
     {
         JsDispatchScope dispatch_scope(&evcon);
@@ -6042,8 +6074,8 @@ extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
             event_context_cleanup(&evcon);
             return false;
         }
-        // event_sim selected the native form control; mirror that into JS DOM
-        // selectedness before firing change so handlers reading target.value see it.
+        // the template has committed selectedness; mirror it into the JS DOM
+        // before firing change so handlers reading target.value see it.
         js_dom_select_set_selected_index_bridge((void*)dom_target,
                                                 (Item){.item = i2it(selected_index)});
         Item target_item = js_dom_wrap_element(dom_target);
@@ -6702,12 +6734,14 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
              option_height, clicked_index, select->form->option_count);
 
     if (clicked_index >= 0 && clicked_index < select->form->option_count) {
-        log_debug("handle_dropdown_option_click: selecting option %d", clicked_index);
-        form_control_set_selected_index(state, static_cast<View*>(select), clicked_index);
-
-        // Close dropdown
-        doc_state_close_dropdown(state, static_cast<View*>(select));
-        return true;
+        log_debug("handle_dropdown_option_click: option %d resolved, dispatching commit", clicked_index);
+        // Geometry resolved the option; the template commits it and closes the
+        // dropdown. No native fallback, matching activation, validation and
+        // undo — an unclaimed <select> simply does not commit.
+        InputIntent intent;
+        intent.option_index = clicked_index;
+        return radiant_dispatch_behavior_option_commit(evcon, static_cast<View*>(select),
+                                                       &intent);
     }
 
     log_debug("handle_dropdown_option_click: clicked_index out of range");
@@ -6797,8 +6831,15 @@ static bool handle_dropdown_key(EventContext* evcon, int key) {
 
     case RDT_KEY_ENTER:
         if (hover >= 0 && hover < count) {
-            form_control_set_selected_index(state, static_cast<View*>(select), hover);
-            doc_state_close_dropdown(state, static_cast<View*>(select));
+            // Same dispatch the mouse path uses. Committing natively here would
+            // split the choice by input modality — an option picked with the
+            // pointer running the template while the same option picked with
+            // Enter ran native — which is the exact contract gap F1b had to fix
+            // for checkbox and radio before their native activation could go.
+            InputIntent intent;
+            intent.option_index = hover;
+            radiant_dispatch_behavior_option_commit(evcon, static_cast<View*>(select),
+                                                    &intent);
         }
         return true;
 
