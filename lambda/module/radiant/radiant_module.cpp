@@ -1478,6 +1478,35 @@ extern "C" uint64_t radiant_splice_epoch(void) { return g_radiant_splice_epoch; 
 // caret. Events are deliberately not fired here — this runs inside beforeinput,
 // and the engine dispatches `input` after the applier returns, exactly as it
 // does for its own splice.
+// F9: the caret-operation waist. The template names a WHATWG operation; native
+// resolves where it lands and performs it after the dispatch returns. Reported
+// through an epoch for the same reason `request_change` is — a primitive has no
+// EventContext, and moving the caret dispatches events that need one.
+extern "C" void radiant_caret_operation_request(const char* operation, bool extend);
+
+extern "C" int editing_controller_caret_surface_kind(DocState* state);
+
+// Which surface the caret sits in. Resolving it is mechanism; what a key means
+// there is policy, and the two surfaces genuinely differ — a single-line input
+// has no vertical motion, a rich surface has no value boundary.
+RADIANT_C_API Item fn_radiant_caret_surface(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "CARET_SURFACE", &elem);
+    if (!state) return ItemNull;
+    int kind = editing_controller_caret_surface_kind(state);
+    if (kind == 1) return radiant_string_item("text");
+    if (kind == 2) return radiant_string_item("rich");
+    return ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_caret_operation(Item node_item, Item op_item,
+                                              Item extend_item) {
+    const char* op = fn_to_cstr(op_item);
+    if (!op || !*op) return (Item){.item = b2it(0)};
+    radiant_caret_operation_request(op, is_truthy(extend_item));
+    return (Item){.item = b2it(1)};
+}
+
 // F10: the context-menu waist. The template names the target and the enable
 // mask; the popup position comes from the right click native already resolved,
 // so physical pixels never reach policy.
@@ -2079,6 +2108,10 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
     {"set_password_reveal", "fn(node: dom_node, start: int, end: int) -> bool", (fn_ptr)fn_radiant_set_password_reveal, JUBE_FN_NONE,
      "Item fn_radiant_set_password_reveal(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_password_reveal},
+    {"caret_surface", "fn(node: dom_node) -> string|null", (fn_ptr)fn_radiant_caret_surface, JUBE_FN_NONE,
+     "Item fn_radiant_caret_surface(Item node)", (fn_ptr)fn_radiant_caret_surface},
+    {"caret_operation", "fn(node: dom_node, operation: string, extend: bool) -> bool", (fn_ptr)fn_radiant_caret_operation, JUBE_FN_NONE,
+     "Item fn_radiant_caret_operation(Item node, Item operation, Item extend)", (fn_ptr)fn_radiant_caret_operation},
     {"open_context_menu", "fn(node: dom_node, enabled_mask: int) -> bool", (fn_ptr)fn_radiant_open_context_menu, JUBE_FN_NONE,
      "Item fn_radiant_open_context_menu(Item node, Item enabled_mask)", (fn_ptr)fn_radiant_open_context_menu},
     {"close_context_menu", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_close_context_menu, JUBE_FN_NONE,

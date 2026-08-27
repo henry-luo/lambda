@@ -1437,10 +1437,14 @@ struct EditingControllerHooks {
     void* user;
 };
 
-bool editing_controller_handle_rich_navigation(EventContext* evcon,
-                                               DocState* state,
-                                               const KeyEvent* key_event,
-                                               const EditingControllerHooks* hooks);
+// F9: the rich half of the caret waist. `_caret_surface_kind` reports which
+// surface the caret sits in (0 none, 1 text control, 2 rich) so the template can
+// decide what a key means there; `_apply_caret_operation` performs the named
+// operation it chose.
+extern "C" int editing_controller_caret_surface_kind(DocState* state);
+bool editing_controller_apply_caret_operation(EventContext* evcon, DocState* state,
+                                              const EditingControllerHooks* hooks,
+                                              const char* op, bool extend);
 
 bool editing_controller_dispatch_history(EventContext* evcon,
                                          const EditingSurface* surface,
@@ -2608,6 +2612,17 @@ typedef struct DocState {
     // out of the paint pass, which reads this mask to grey items out — the
     // quiescence rule F8 was built around.
     uint32_t context_menu_enabled_mask;
+    // F9: the goal column for vertical caret motion. Document-scoped because the
+    // caret is. Without it, Up/Down through a short line ratchets the caret
+    // leftwards and never recovers the column it started from.
+    //
+    // The invalidation rule is placed at the caret write choke points rather
+    // than at their callers: every state_store_caret_* entry point clears it
+    // except state_store_caret_move_line, which is the only one that preserves
+    // and re-uses it. That is what makes a mouse click or a typed character
+    // invalidate the column without either of them having to know it exists.
+    float caret_goal_x;
+    bool  caret_goal_valid;
     // Where the in-flight right click landed, recorded immediately before the
     // `contextmenu` dispatch so `radiant.open_context_menu` can position the
     // popup. Physical pixels deliberately never cross into policy.

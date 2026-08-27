@@ -5455,7 +5455,14 @@ void visited_links_add(VisitedLinks* visited, const char* url) {
 // Keep new rich editing mutations on state_store_set_selection() or editing
 // transactions so boundary ownership stays canonical.
 
+// F9: any caret write that is not a vertical step retargets the column. Placed
+// here, at the store's own entry points, so no caller can forget it.
+static void caret_goal_invalidate(DocState* state) {
+    if (state) state->caret_goal_valid = false;
+}
+
 void state_store_caret_collapse_to_view_offset(DocState* state, View* view, int char_offset) {
+    caret_goal_invalidate(state);
     log_debug("CARET_SET called: state=%p view=%p offset=%d", state, view, char_offset);
     if (!state) return;
 
@@ -5903,6 +5910,7 @@ typedef struct CaretNavigationPosition {
 } CaretNavigationPosition;
 
 void state_store_caret_move(DocState* state, int delta) {
+    caret_goal_invalidate(state);
     CaretNavigationPosition position = {};
     if (!state || !caret_get_position(state, &position.view, &position.char_offset)) {
         log_debug("caret_move: no canonical caret position state=%p", state);
@@ -6106,6 +6114,7 @@ static TextRect* caret_rect_at_offset(TextRect* rect, int offset,
 }
 
 void state_store_caret_move_to_boundary(DocState* state, int where) {
+    caret_goal_invalidate(state);
     CaretNavigationPosition position = {};
     if (!state || !caret_get_position(state, &position.view, &position.char_offset)) return;
     CaretNavigationPosition* caret = &position;
@@ -6493,6 +6502,10 @@ void state_store_caret_move_line(DocState* state, int delta, struct UiContext* u
     if (state->selection_presentation) {
         position.x = state->selection_presentation->caret_x;
     }
+    // The one caret mover that does not invalidate the column: it targets the
+    // remembered one, and the first vertical step of a run establishes it.
+    if (state->caret_goal_valid) position.x = state->caret_goal_x;
+    else { state->caret_goal_x = position.x; state->caret_goal_valid = true; }
     CaretNavigationPosition* caret = &position;
     View* view = caret->view;
 
@@ -6534,6 +6547,7 @@ void state_store_caret_move_line(DocState* state, int delta, struct UiContext* u
 }
 
 void state_store_caret_clear(DocState* state) {
+    caret_goal_invalidate(state);
     if (!state) return;
 
     const char* exc = NULL;

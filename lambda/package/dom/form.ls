@@ -8,6 +8,7 @@ import editing: lambda.package.dom.editing
 import aria: lambda.package.dom.aria
 import ime: lambda.package.dom.ime
 import menu: lambda.package.dom.menu
+import caret: lambda.package.dom.caret
 
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
@@ -116,6 +117,9 @@ view <body> state ime_composing, context_menu_open {}
 // F10: the context menu is document-scoped state, the same cardinality argument
 // ES18 made for the IME session — one menu per document, not one per control.
 on contextmenu(evt) { menu.open_for(~) }
+// F9: keyboard caret navigation. Document-scoped for the same reason — one
+// caret per document, not one per control.
+on caretkey(evt) { caret.navigate(~, evt) }
 on compositionstart(evt)  { ime.begin(~) }
 on compositionupdate(evt) { ime.update(~, evt, null) }
 on compositionend(evt)    { ime.end(~) }

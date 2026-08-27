@@ -1752,6 +1752,16 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         mb.put("option_index", (int64_t)intent->option_index);
     }
 
+    // F9: a caret-key notification carries no edit intent either — only the key
+    // and modifiers the template maps to an operation.
+    if (intent && intent->type == INPUT_INTENT_NONE && intent->key != 0) {
+        mb.put("key", key_code_to_name(intent->key));
+        mb.put("shift", (intent->mods & RDT_MOD_SHIFT) != 0);
+        mb.put("ctrl",  (intent->mods & RDT_MOD_CTRL)  != 0);
+        mb.put("alt",   (intent->mods & RDT_MOD_ALT)   != 0);
+        mb.put("meta",  (intent->mods & RDT_MOD_SUPER) != 0);
+    }
+
     if (intent && intent->type != INPUT_INTENT_NONE) {
         const char* input_type = input_intent_type_name(intent->type);
         mb.put("input_type", input_type);
@@ -2508,8 +2518,21 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         // an ordinary link would take it and deny it to a Lambda-script
         // subdocument — which is exactly how the PDF and Lambda-report iframes
         // broke when creation was eager at setup.
+        // F9 widened this from form controls alone to "a target the package
+        // governs", which now includes a rich editing surface: the <body>
+        // caretkey template owns arrow keys there, so a contenteditable-only
+        // page with no form control anywhere would otherwise never load the
+        // package and would lose caret navigation entirely once the native rich
+        // handler was deleted. Still narrow — an ordinary link click creates
+        // nothing, which is what keeps the PDF and Lambda-report iframes safe.
         DomElement* te = target && target->is_element() ? target->as_element() : nullptr;
-        if (te && te->form_control()) {
+        bool package_governs = te && te->form_control();
+        if (!package_governs && target) {
+            EditingSurface governed_surface;
+            package_governs = editing_surface_from_target(target, &governed_surface) &&
+                              editing_surface_is_rich(&governed_surface);
+        }
+        if (package_governs) {
             radiant_document_ensure_evaluator(doc);
             rt = dom_document_script_runtime(doc);
         }
@@ -2816,6 +2839,87 @@ extern "C" bool radiant_dispatch_behavior_option_commit(EventContext* evcon,
                                                         View* target,
                                                         const InputIntent* intent) {
     return dispatch_behavior_handler(evcon, target, "optioncommit", intent, nullptr);
+}
+
+static void dispatch_form_navigation(EventContext* evcon, DomElement* elem,
+                                     DocState* state, View* target,
+                                     int current_offset, uint32_t destination,
+                                     bool extend, const char* extend_operation,
+                                     const char* move_operation);
+
+// F9: the caret-operation seam. The template names an operation; native
+// computes where that operation lands and performs it. The answer comes back
+// through the epoch pattern `request_change` established rather than through new
+// verdict vocabulary — a primitive has no EventContext, and dispatching the move
+// needs one.
+static __thread uint64_t s_caret_op_epoch = 0;
+static __thread char s_caret_op_name[32];
+static __thread bool s_caret_op_extend = false;
+
+extern "C" uint64_t radiant_caret_operation_epoch(void) { return s_caret_op_epoch; }
+extern "C" const char* radiant_caret_operation_name(void) { return s_caret_op_name; }
+extern "C" bool radiant_caret_operation_extend(void) { return s_caret_op_extend; }
+
+extern "C" void radiant_caret_operation_request(const char* operation, bool extend) {
+    if (!operation) return;
+    snprintf(s_caret_op_name, sizeof(s_caret_op_name), "%s", operation);
+    s_caret_op_extend = extend;
+    s_caret_op_epoch++;
+}
+
+// Where each named operation lands in a single-line text control. This is the
+// whole of what stayed native: the *destination* is geometry over the live
+// buffer, while which key asks for which operation is policy and now lives in
+// the package. Up/Down collapse to line start/end because a single-line <input>
+// has no vertical motion — Chrome does the same.
+static bool form_caret_operation_destination(const char* op, const char* value,
+                                             int value_len, int cur,
+                                             uint32_t* out_dest) {
+    if (!op || !out_dest) return false;
+    if (strcmp(op, "moveCharacterBackward") == 0) {
+        int off = cur > 0 ? cur - 1 : 0;
+        while (off > 0 && value && ((unsigned char)value[off] & 0xC0) == 0x80) off--;
+        *out_dest = (uint32_t)off;
+    } else if (strcmp(op, "moveCharacterForward") == 0) {
+        int off = cur < value_len ? cur + 1 : value_len;
+        while (off < value_len && value && ((unsigned char)value[off] & 0xC0) == 0x80) off++;
+        *out_dest = (uint32_t)off;
+    } else if (strcmp(op, "moveWordBackward") == 0) {
+        *out_dest = te_prev_word_byte(value, (uint32_t)value_len, (uint32_t)cur);
+    } else if (strcmp(op, "moveWordForward") == 0) {
+        *out_dest = te_next_word_byte(value, (uint32_t)value_len, (uint32_t)cur);
+    } else if (strcmp(op, "moveLineStart") == 0) {
+        *out_dest = 0;
+    } else if (strcmp(op, "moveLineEnd") == 0) {
+        *out_dest = (uint32_t)value_len;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+// Perform the operation the template asked for. The extend/collapse split and
+// the WHATWG operation names it reports are unchanged — only who chose the
+// operation moved.
+static bool form_apply_caret_operation(EventContext* evcon, DomElement* elem,
+                                       DocState* state, View* target,
+                                       const char* value, int value_len, int cur) {
+    uint32_t dest = 0;
+    if (!form_caret_operation_destination(s_caret_op_name, value, value_len, cur, &dest)) {
+        return false;
+    }
+    char extend_op[40];
+    snprintf(extend_op, sizeof(extend_op), "extend%s", s_caret_op_name + 4);  // move* -> extend*
+    dispatch_form_navigation(evcon, elem, state, target, cur, dest,
+                             s_caret_op_extend, extend_op, s_caret_op_name);
+    return true;
+}
+
+// F9: behavior-only key notification. Carries the key and modifiers; the
+// template answers by calling `radiant.caret_operation`, which bumps the epoch.
+extern "C" bool radiant_dispatch_behavior_caret_key(EventContext* evcon, View* target,
+                                                    const InputIntent* intent) {
+    return dispatch_behavior_handler(evcon, target, "caretkey", intent, nullptr);
 }
 
 // F10: behavior-only, like `commit`, `optioncommit` and the composition hooks —
@@ -9814,53 +9918,25 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     break;
                 }
 
-                // F3: Alt+Left/Right → word jump using te_prev/next_word_byte
-                // on the live UTF-8 buffer; Shift extends from the current
-                // text-control anchor through the unified selection helper.
-                if (alt && key_event->key == RDT_KEY_LEFT) {
-                    uint32_t new_off = te_prev_word_byte(value, (uint32_t)value_len,
-                                                         (uint32_t)cur);
-                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
-                        cur, new_off, shift, "extendWordBackward", "moveWordBackward");
-                    evcon.need_repaint = true;
-                    break;
+                // F9: ask the <body> template which caret operation this key
+                // means. It answers by calling `radiant.caret_operation`, which
+                // bumps the epoch — a primitive has no EventContext, and
+                // performing the move needs one, so the answer comes back the
+                // way `request_change` reports its own (ESO-epoch pattern).
+                {
+                    uint64_t caret_epoch_before = radiant_caret_operation_epoch();
+                    InputIntent caret_key_intent;
+                    caret_key_intent.key = key_event->key;
+                    caret_key_intent.mods = key_event->mods;
+                    radiant_dispatch_behavior_caret_key(&evcon, focused, &caret_key_intent);
+                    if (radiant_caret_operation_epoch() != caret_epoch_before &&
+                        form_apply_caret_operation(&evcon, focus_elem, state, focused,
+                                                   value, value_len, cur)) {
+                        evcon.need_repaint = true;
+                        break;
+                    }
                 }
-                if (alt && key_event->key == RDT_KEY_RIGHT) {
-                    uint32_t new_off = te_next_word_byte(value, (uint32_t)value_len,
-                                                         (uint32_t)cur);
-                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
-                        cur, new_off, shift, "extendWordForward", "moveWordForward");
-                    evcon.need_repaint = true;
-                    break;
-                }
-                // F3: Cmd+Left == Home, Cmd+Right == End on macOS for
-                // single-line inputs.
-                if (cmd && key_event->key == RDT_KEY_LEFT) {
-                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
-                        cur, 0, shift, "extendLineStart", "moveLineStart");
-                    evcon.need_repaint = true;
-                    break;
-                }
-                if (cmd && key_event->key == RDT_KEY_RIGHT) {
-                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
-                        cur, (uint32_t)value_len, shift, "extendLineEnd", "moveLineEnd");
-                    evcon.need_repaint = true;
-                    break;
-                }
-                // F3: Up/Down in single-line <input> mirrors Chrome —
-                // move caret to start/end of value (no vertical motion).
-                if (key_event->key == RDT_KEY_UP) {
-                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
-                        cur, 0, shift, "extendLineStart", "moveLineStart");
-                    evcon.need_repaint = true;
-                    break;
-                }
-                if (key_event->key == RDT_KEY_DOWN) {
-                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
-                        cur, (uint32_t)value_len, shift, "extendLineEnd", "moveLineEnd");
-                    evcon.need_repaint = true;
-                    break;
-                }
+
                 // F3: Alt+Backspace → delete previous word.
                 //     Cmd+Backspace → delete to start of value.
                 if (dispatch_form_modified_delete_key(
@@ -9869,52 +9945,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     break;
                 }
 
-                if (key_event->key == RDT_KEY_LEFT) {
-                    // move caret left by one UTF-8 character
-                    if (cur > 0 && value) {
-                        int new_off = cur - 1;
-                        // walk back to UTF-8 character boundary
-                        while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
-                            new_off--;
-                        if (shift) {
-                            dispatch_form_selection_extend(&evcon, focus_elem, state,
-                                focused, cur, new_off, "extendCharacterBackward");
-                        } else {
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)new_off, "moveCharacterBackward");
-                        }
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_RIGHT) {
-                    // move caret right by one UTF-8 character
-                    if (cur < value_len && value) {
-                        uint32_t cp;
-                        int bytes = str_utf8_decode(value + cur, (size_t)(value_len - cur), &cp);
-                        if (bytes > 0) {
-                            int new_off = cur + bytes;
-                            if (shift) {
-                                dispatch_form_selection_extend(&evcon, focus_elem, state,
-                                    focused, cur, new_off, "extendCharacterForward");
-                            } else {
-                                dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                    focused, (uint32_t)new_off, "moveCharacterForward");
-                            }
-                        }
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_HOME) {
-                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
-                        cur, 0, shift, "extendLineStart", "moveLineStart");
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_END) {
-                    dispatch_form_navigation(&evcon, focus_elem, state, focused,
-                        cur, (uint32_t)value_len, shift, "extendLineEnd", "moveLineEnd");
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_BACKSPACE) {
+                if (key_event->key == RDT_KEY_BACKSPACE) {
                     dispatch_form_delete_key(&evcon, focus_elem, state, focused,
                         value, value_len, cur, true, had_lambda_keydown,
                         had_keydown_selection, keydown_sel_start,
@@ -10283,12 +10314,46 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 editing_surface_from_target(caret_view, &caret_surface) &&
                 editing_surface_is_rich(&caret_surface);
 
-            if (!editing_controller_handle_rich_navigation(&evcon, state,
-                    key_event, &controller_hooks) &&
-                !caret_in_rich_surface) {
+            // F9: the same `caretkey` seam the text-control path uses. One
+            // template now maps keys to operations for both surfaces; only the
+            // geometry that resolves an operation stays per-surface.
+            bool rich_nav_handled = false;
+            // Gate on "the caret is not in a text control", which is what the
+            // retired handle_rich_navigation actually tested — it ran for any
+            // caret outside a text control, including a plain document
+            // selection, not only inside an editing host. Gating on
+            // caret_in_rich_surface instead silently dropped arrow keys on
+            // ordinary selected text (four caret/selection tests caught it).
+            if (editing_controller_caret_surface_kind(state) == 2) {
+                uint64_t caret_epoch_before = radiant_caret_operation_epoch();
+                InputIntent caret_key_intent;
+                caret_key_intent.key = key_event->key;
+                caret_key_intent.mods = key_event->mods;
+                // The caret usually sits in a text node, and the behavior walk
+                // matches elements — dispatching the text node itself finds no
+                // template and silently declines, which is why arrow keys on a
+                // rich surface reached the "rich key fallback fenced" branch and
+                // did nothing.
+                View* caret_dispatch_target = caret_view;
+                while (caret_dispatch_target && !caret_dispatch_target->is_element()) {
+                    caret_dispatch_target =
+                        static_cast<View*>(static_cast<DomNode*>(caret_dispatch_target)->parent);
+                }
+                if (caret_dispatch_target) {
+                    radiant_dispatch_behavior_caret_key(&evcon, caret_dispatch_target,
+                                                        &caret_key_intent);
+                }
+                if (radiant_caret_operation_epoch() != caret_epoch_before) {
+                    rich_nav_handled = editing_controller_apply_caret_operation(
+                        &evcon, state, &controller_hooks,
+                        radiant_caret_operation_name(),
+                        radiant_caret_operation_extend());
+                }
+            }
+            if (!rich_nav_handled && !caret_in_rich_surface) {
                 // Non-rich compatibility branch only. Rich/editable mutation
                 // and selection ownership belongs to the intent transaction
-                // path above plus editing_controller_handle_rich_navigation().
+                // path above plus the caretkey template dispatch.
                 switch (key_event->key) {
                     case RDT_KEY_A:
                         // Select all (Ctrl+A / Cmd+A)
