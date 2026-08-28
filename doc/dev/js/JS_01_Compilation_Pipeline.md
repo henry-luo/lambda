@@ -19,7 +19,7 @@ LambdaJS reuses Lambda's `Item` value model, GC heap, name pool, module registry
 
 <img alt="Compilation pipeline overview" src="diagram/pipeline_overview.svg" width="318">
 
-Source bytes flow through parse → AST/build-time binding → early-error validation pass → shared AST index → context setup → import resolution → compile-unit opening → multi-phase lowering → link → execution of `js_main` → event-loop drain → result. The ordinary MIR implementation is `transpile_js_to_mir_core_profile_len`; wrappers delegate through `transpile_js_to_mir_core_len`. Ordinary source, pre-built-AST, and ES-module entries share `js_mir_open_compile_unit` for MIR context/transpiler/module ownership; mode-specific module registry/TLA policy and eval/new-Function orchestration remain active consolidation residue under **D8.2.5**.
+Source bytes flow through parse → AST/build-time binding → early-error validation pass → shared AST index → context setup → import resolution → compile-unit opening → multi-phase lowering → link → execution of `js_main` → event-loop drain → result. The ordinary MIR implementation is `transpile_js_to_mir_core_profile_len`; wrappers delegate through `transpile_js_to_mir_core_len`. Ordinary source, pre-built-AST, ES-module, direct-eval, and new-Function entries share `js_mir_open_compile_unit` for MIR context/transpiler/module ownership; mode-specific registry/TLA, lexical/global preamble, and eval module-scope policy remain active consolidation residue under **D8.2.5**.
 
 `JS_EXECUTION_BACKEND=ast` is the explicit fail-closed AST lane under **D8.1.3v9**. It shares the same indexed AST, early errors, `Runtime`/`EvalContext`, heap, module registry, and event-loop host, then enters `js_interp.cpp` rather than MIR lowering. The default remains MIR.
 
@@ -32,7 +32,7 @@ The control/data flow, step by step (CLI `lambda js script.js`):
 5. Set up or **reuse** the `EvalContext` + GC heap + name pool + `Input` (reuse is the batch hot-reload fast path); set the `_lambda_rt` runtime pointer (`:483`–`:519`).
 6. Resolve imports: a fast-path skip unless the source contains `import `, else parallel precompile (`jm_precompile_js_imports`) then serial fallback (`jm_load_imports`) (`:521`).
 7. `js_mir_open_compile_unit` performs `jit_init`, installs the optional batch error handler, calls `jm_create_mir_transpiler`, tracks the active owner, publishes the selected name base, and opens a script or ES-module MIR module (see [§4](#4-the-transpiler-context-jsmirtranspiler)).
-8. The unit's mode-specific preamble/import policy is applied before lowering; module registry/TLA policy and eval/new-Function callers retain their own semantic setup.
+8. The unit's mode-specific preamble/import policy is applied before lowering; module registry/TLA and eval/new-Function scope policies remain in their semantic callers.
 9. **`transpile_js_mir_ast`** count-walks functions/classes, allocates exact metadata, fill-walks them, runs the remaining numbered analysis/lowering phases, and finishes/loads the MIR module (see [§5](#5-compilation-phases)).
 10. Count `total_insns`; apply the interpreter/JIT policy and any opt-downgrade; validate MIR labels; then call **`MIR_link(ctx, interface, import_resolver)`** for eager codegen or MIR-interpreter installation.
 11. `find_func(ctx, "js_main")` → typed `Item (*)(Context*)` (`:747`).
@@ -153,7 +153,7 @@ The fixed function/class arrays and fixed scope/loop/try stacks described by the
 - `CompilerPassManager` and fact bits now cover the JavaScript validate→index slice, but not the full build→bind→validate→index→analysis→lower→link schedule shared with Lambda. **D8.2.5** requires truthful produced facts and one schedule.
 - `MirValue`, demands, provenance, representation conversion, and emitter-owned rooting exist, but `jm_transpile_expression` and the Lambda `transpile_expr` boundary still return `MIR_reg_t`. **D2.4.1–D2.4.3** and **D8.2.6** require the full contract at every core expression boundary.
 - Dynamic `ArrayList` control stacks and exact function/class/member allocation remove the old silent limits. Remaining explicit semantic/optimization capacities include 64 generator resume labels, 512 closure read-back/TDZ entries, and 16 constructor-shape evidence slots; callers fail closed, fall back, or clamp according to the owning feature.
-- Ordinary source, pre-built AST, module, eval/new-Function, and batch/preamble paths still duplicate parts of build/validate/link/cleanup orchestration. Their JavaScript policy differs, but **D8.2.5** requires one lifecycle driver with mode policy as data.
+- Ordinary source, pre-built AST, module, eval/new-Function, and batch/preamble paths now share compile-unit opening, but still duplicate parts of build/validate/link/cleanup orchestration. Their JavaScript policy differs, but **D8.2.5** requires one lifecycle driver with mode policy as data.
 
 Per **D8.4.1v2**, LambdaJS has no property inline cache. `property_name_cache` only reuses MIR registers for immutable module-name-table loads within one generated function; it does not cache receiver/property lookup. `TypeMap` constructor/transition shapes remain ordinary lookup metadata.
 

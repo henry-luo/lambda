@@ -742,7 +742,7 @@ Recommended order:
 
 Mode-specific policy is data on the unit: parse goal, module/eval/preamble flags, backend selection, execution policy, and artifact-retention policy. It is not a copy of the driver.
 
-The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. P3b moves MIR context creation, error-handler installation, transpiler ownership, name-base setup, and module creation into one script-unit opener used by ordinary source and pre-built-AST entry points. P3c extends that opener to ES modules while retaining the module's private zero-based name image and registry/TLA policy. Manual phase timing and cleanup labels remain for the later driver slices.
+The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. P3b moves MIR context creation, error-handler installation, transpiler ownership, name-base setup, and module creation into one script-unit opener used by ordinary source and pre-built-AST entry points. P3c extends that opener to ES modules while retaining the module's private zero-based name image and registry/TLA policy. P3d extends it to direct eval and `new Function` with their compact storage and optimize-level policy. Manual phase timing and cleanup labels remain for the later driver slices.
 
 #### P3a implementation record — truthful JavaScript validation pass, 2026-08-28
 
@@ -830,6 +830,37 @@ make build-test                                      # Errors: 0; Warnings: 36
 ./test/test_js_opt_gtest.exe                         # 19/19 passed
 ./utils/check_ast_tune_loc.sh --base 44b98dcebd19a548a14bbb75785091b545445f00 --cap 310711 --phase-base 79a1f1684
                                                        # candidate 310,524; phase C/C++ 0; source 0
+git diff --check                                     # clean
+```
+
+#### P3d implementation record — direct-eval compile-unit opener, 2026-08-28
+
+**D8.2.5** requires the same lifecycle owner across source forms while keeping
+mode policy explicit. Direct eval and `new Function` now call
+`js_mir_open_compile_unit` with optimize level 0, compact 16/8/8 collection
+capacities, their caller-selected name base, and their dynamic module name.
+The existing lexical/global preamble rules, eval module-scope isolation,
+`new.target` handling, cache behavior, and deferred MIR lifetime remain in
+their callers. Their duplicated MIR context, error-handler, transpiler, and
+module setup is retired; successful deferred paths also clear the active owner
+before destroying the transpiler.
+
+The independent P3d slice is C/C++ `+31/-51 = -20`; all hand source is also
+`+31/-51 = -20`. The phase base is commit `a234a0838`; the governed candidate
+is 310,497 lines, 20 below P3c and 214 below the 310,711-line project anchor.
+
+Focused evidence:
+
+```text
+make build-test                                      # Errors: 0; Warnings: 40
+./test/test_js_gtest.exe --gtest_filter='JavaScriptTests/JsFileTest.Run/eval*'
+                                                       # 2/2 passed
+./test/test_js_opt_gtest.exe --gtest_filter='JsOpt.DynamicFunction*'
+                                                       # 2/2 passed
+./test/test_js_script_gtest.exe --gtest_filter='JsInterpreter.DirectEvalSharesInterpretedFunctionEnvironment'
+                                                       # 1/1 passed
+./utils/check_ast_tune_loc.sh --base 44b98dcebd19a548a14bbb75785091b545445f00 --cap 310711 --phase-base a234a0838
+                                                       # candidate 310,497; phase C/C++ -20; source -20
 git diff --check                                     # clean
 ```
 

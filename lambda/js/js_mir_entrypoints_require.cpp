@@ -404,10 +404,11 @@ extern "C" bool js_prepare_eval_context(Runtime* runtime,
 JsMirTranspiler* js_mir_open_compile_unit(
         JsTranspiler* tp, const char* filename,
         const char* module_name, bool is_module, uint32_t module_name_base,
+        unsigned int optimize_level, bool compact_storage,
         const char* log_prefix, bool install_error_handler,
         MIR_context_t* out_ctx) {
     if (!out_ctx) return NULL;
-    *out_ctx = jit_init(g_js_mir_optimize_level);
+    *out_ctx = jit_init(optimize_level);
     if (!*out_ctx) {
         log_error("%s: MIR context init failed", log_prefix ? log_prefix : "js-mir");
         return NULL;
@@ -415,8 +416,12 @@ JsMirTranspiler* js_mir_open_compile_unit(
     if (install_error_handler && g_batch_mir_error_handler) {
         MIR_set_error_func(*out_ctx, g_batch_mir_error_handler);
     }
-    JsMirTranspiler* mt = jm_create_mir_transpiler(
-        tp, *out_ctx, filename, is_module, 64, 32, 16, log_prefix);
+    int import_capacity = compact_storage ? 16 : 64;
+    int local_func_capacity = compact_storage ? 8 : 32;
+    int var_scope_capacity = compact_storage ? 8 : 16;
+    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, *out_ctx, filename,
+        is_module, import_capacity, local_func_capacity, var_scope_capacity,
+        log_prefix);
     if (!mt) return NULL;
     jm_track_active_js_transpile(NULL, mt, NULL);
     mt->module_name_base = module_name_base;
@@ -443,7 +448,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     MIR_context_t ctx = NULL;
     JsMirTranspiler* mt = js_mir_open_compile_unit(tp, filename,
         "ts_script", false, js_preamble_consumer_name_base(g_jm_preamble_in),
-        "js-mir-ast", false, &ctx);
+        g_js_mir_optimize_level, false, "js-mir-ast", false, &ctx);
     if (!mt) {
         return js_mir_compile_unit_fail(ctx, NULL, tp, NULL,
             runtime, js_context, reusing_context);
@@ -891,7 +896,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     MIR_context_t ctx = NULL;
 
     JsMirTranspiler* mt = js_mir_open_compile_unit(tp, filename, "js_script", false,
-        js_preamble_consumer_name_base(g_jm_preamble_in), "js-mir", true, &ctx);
+        js_preamble_consumer_name_base(g_jm_preamble_in), g_js_mir_optimize_level,
+        false, "js-mir", true, &ctx);
     if (!mt) {
         return js_mir_compile_unit_fail(ctx, NULL, tp, owned_source,
             runtime, js_context, reusing_context);

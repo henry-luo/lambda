@@ -782,28 +782,18 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         return js_throw_syntax_error(js_name_item("Invalid function source", 23));
     }
 
-    // Use optimize level 0 for dynamic code (eval/new Function) — small snippets
-    // don't benefit from optimization but pay the full cost of each pass.
-    MIR_context_t ctx = jit_init(0);
-    if (!ctx) {
-        log_error("js-new-function: MIR context init failed");
-        (void)js_mir_compile_unit_fail(NULL, NULL, tp, source,
-            js_current_runtime(), context, true);
-        return ItemNull;
-    }
-
-    // Install batch error handler if set (prevents exit(1) on MIR errors)
-    if (g_batch_mir_error_handler) {
-        MIR_set_error_func(ctx, g_batch_mir_error_handler);
-    }
-
-    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, "<new Function>", false, 16, 8, 8, "js-new-function");
+    // Use compact storage and optimize level 0 for dynamic code.
+    char module_name[48];
+    snprintf(module_name, sizeof(module_name), "js_dynfunc_%d", js_dynamic_func_counter++);
+    MIR_context_t ctx = NULL;
+    JsMirTranspiler* mt = js_mir_open_compile_unit(tp, "<new Function>",
+        module_name, false, js_active_module_name_count(), 0, true,
+        "js-new-function", true, &ctx);
     if (!mt) {
         (void)js_mir_compile_unit_fail(ctx, NULL, tp, source,
             js_current_runtime(), context, true);
         return ItemNull;
     }
-    mt->module_name_base = js_active_module_name_count();
 
     if (inherit_caller_environment && g_eval_preamble_entries &&
             g_eval_preamble_entry_count > 0) {
@@ -819,10 +809,6 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         // constructor caller's function-local module slots.
         js_install_realm_global_preamble(mt, tp);
     }
-
-    char module_name[48];
-    snprintf(module_name, sizeof(module_name), "js_dynfunc_%d", js_dynamic_func_counter++);
-    mt->module = MIR_new_module(ctx, module_name);
 
     if (!transpile_js_mir_ast(mt, js_ast)) {
         log_error("js-new-function: collection/allocation failed");
@@ -876,6 +862,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
     // Keep the MIR context alive for returned closures; names are already linked
     // to the active module table and no compiler pool crosses this boundary.
+    jm_clear_active_js_transpile(NULL, mt, NULL);
     jm_destroy_mir_transpiler(mt);
     jm_defer_mir_cleanup(ctx);
     // Attach source/name/AST storage to the deferred entry so they are freed
@@ -1800,29 +1787,18 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             }
         }
 
-        // Use optimize level 0 for eval code — small snippets don't benefit
-        // from optimization but pay the full cost of each pass.
-        MIR_context_t eval_ctx = jit_init(0);
-        if (!eval_ctx) {
-            log_error("js-eval: MIR context init failed");
-            (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
-                js_current_runtime(), context, true);
-            return ItemNull;
-        }
-
-        if (g_batch_mir_error_handler) {
-            MIR_set_error_func(eval_ctx, g_batch_mir_error_handler);
-        }
-
-        JsMirTranspiler* mt = jm_create_mir_transpiler(tp, eval_ctx, eval_filename, false, 16, 8, 8, "js-eval");
+        bool js_eval_fresh_module_scope = (eval_flags & 8) != 0 || !is_direct_eval;
+        char module_name[48];
+        snprintf(module_name, sizeof(module_name), "js_eval_%d", js_dynamic_func_counter++);
+        MIR_context_t eval_ctx = NULL;
+        JsMirTranspiler* mt = js_mir_open_compile_unit(tp, eval_filename, module_name,
+            false, js_eval_fresh_module_scope ? 0 : js_active_module_name_count(),
+            0, true, "js-eval", true, &eval_ctx);
         if (!mt) {
             (void)js_mir_compile_unit_fail(eval_ctx, NULL, tp, NULL,
                 js_current_runtime(), context, true);
             return ItemNull;
         }
-        bool js_eval_fresh_module_scope = (eval_flags & 8) != 0 || !is_direct_eval;
-        mt->module_name_base = js_eval_fresh_module_scope
-            ? 0 : js_active_module_name_count();
         // This lowering mode describes eval's global var environment. Indirect
         // eval is global-scope too, so Annex-B declaration lowering must keep
         // its eval export path even though it never inherits caller lexicals.
@@ -1847,10 +1823,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
                 js_install_realm_global_preamble(mt, tp);
             }
         }
-
-        char module_name[48];
-        snprintf(module_name, sizeof(module_name), "js_eval_%d", js_dynamic_func_counter++);
-        mt->module = MIR_new_module(eval_ctx, module_name);
 
         if (!transpile_js_mir_ast(mt, js_ast)) {
             log_error("js-eval: collection/allocation failed");
@@ -1952,6 +1924,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         js_set_direct_new_target(prev_nt);
 
         // Cleanup
+        jm_clear_active_js_transpile(NULL, mt, NULL);
         jm_destroy_mir_transpiler(mt);
         // Defer MIR context cleanup because eval code may return closures whose
         // JIT pointers must remain valid.

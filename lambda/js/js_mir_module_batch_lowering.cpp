@@ -5543,7 +5543,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // makes globalThis member names resolve against the wrong image (D3.4.4v2).
     MIR_context_t ctx = NULL;
     JsMirTranspiler* mt = js_mir_open_compile_unit(tp, filename, "js_module", true,
-        0, "js-mir: module", false, &ctx);
+        0, g_js_mir_optimize_level, false, "js-mir: module", false, &ctx);
     if (!mt) {
         (void)js_mir_compile_unit_fail(ctx, NULL, tp, NULL,
             runtime, context, true);
