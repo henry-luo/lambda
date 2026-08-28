@@ -116,6 +116,8 @@ IntrinsicSizes layout_measure_intrinsic_widths(LayoutContext* lycon, DomElement*
     IntrinsicSizes sizes = {};
     if (!lycon || !element) return sizes;
 
+    // Descendant measurement is observational; restore its layout context and provisional view state.
+    radiant::LayoutMeasureScope measure_scope(lycon, element);
     radiant::LayoutProfileScope profile_scope(lycon, radiant::LAYOUT_PROFILE_INTRINSIC, element);
     sizes = measure_element_intrinsic_widths(lycon, element, content_only);
     return sizes;

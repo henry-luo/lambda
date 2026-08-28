@@ -2896,6 +2896,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // before an anonymous table cell records the element's contribution.
     bool intrinsic_needs_resolved_style =
         intrinsic_tag == MARKUP_NAME_BUTTON || intrinsic_tag == MARKUP_NAME_INPUT ||
+        intrinsic_tag == MARKUP_NAME_FIELDSET || intrinsic_tag == MARKUP_NAME_LEGEND ||
         intrinsic_tag == MARKUP_NAME_UL || intrinsic_tag == MARKUP_NAME_OL ||
         intrinsic_tag == MARKUP_NAME_MENU || intrinsic_tag == MARKUP_NAME_RUBY ||
         intrinsic_tag == MARKUP_NAME_RT || intrinsic_tag == MARKUP_NAME_FIGURE;
