@@ -5270,12 +5270,22 @@ static MIR_reg_t mir_emit_cow_path_key(MirTranspiler* mt, AstNode* segment,
         bool is_member) {
     AstNode* key_node = ast_unwrap_primary(segment);
     if (is_member && key_node && key_node->node_type == AST_NODE_IDENT) {
+        // A nested write re-emits its key every time the statement runs, and
+        // heap_create_symbol does not intern -- that was one GC allocation per
+        // member segment per write, on an otherwise allocation-free store.
+        // Identifier keys already live in the script name pool, so box that
+        // pointer as a STRING immediate: no call, no allocation, one MOV.
+        // The consumers (runtime_named_map_field, fn_index) accept STRING and
+        // SYMBOL keys alike -- this is the same trick the plain member-store
+        // fallback already uses for its `store_key`.
         AstIdentNode* ident = (AstIdentNode*)key_node;
-        MIR_reg_t name = emit_load_string_literal(mt, ident->name->chars);
-        MIR_reg_t symbol = emit_call_2(mt, "heap_create_symbol", MIR_T_P,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, name),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ident->name->len));
-        return emit_box_symbol(mt, symbol);
+        uint64_t key_item = ((uint64_t)LMD_TYPE_STRING << 56) |
+            (uint64_t)(uintptr_t)ident->name;
+        MIR_reg_t key = new_reg(mt, "cow_path_key", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, key),
+            MIR_new_int_op(mt->ctx, (int64_t)key_item)));
+        return key;
     }
     return transpile_box_item(mt, segment);
 }
@@ -5301,6 +5311,32 @@ static void mir_attach_function_type(MirTranspiler* mt, MIR_reg_t function,
         MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)fn_node->type));
 }
 
+// CW25: emit the spine detach for `f(var a.b[i])`. The root is detached and
+// republished first (same as a bare-ident borrow), then cow_path_borrow walks
+// the rest of the path detaching each link, and the callee receives the leaf --
+// already installed in its parent, so its in-place `var` writes reach the
+// caller's container with no post-call writeback.
+static MIR_reg_t mir_emit_cow_path_borrow(MirTranspiler* mt, MirVarEntry* root,
+        const AstCowPath* path) {
+    MIR_reg_t owner = mir_prepare_cow_root(mt, root);
+    MIR_reg_t keys = emit_call_0(mt, "array_plain", MIR_T_P);
+    int keys_root = create_pointer_gc_root_slot(mt, keys);
+    for (int i = 0; i < path->count; i++) {
+        MIR_reg_t key = mir_emit_cow_path_key(mt, path->segment[i], path->is_member[i]);
+        MIR_reg_t live_keys = load_gc_root_slot(mt, keys_root, "borrow_keys");
+        emit_call_void_2(mt, "array_push", MIR_T_P,
+            MIR_new_reg_op(mt->ctx, live_keys),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, key));
+    }
+    MIR_reg_t live_keys = load_gc_root_slot(mt, keys_root, "borrow_keys");
+    MIR_reg_t path_item = emit_box_container(mt, live_keys);
+    MIR_reg_t leaf = emit_call_2(mt, "cow_path_borrow", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, path_item));
+    emit_return_if_item_error(mt, leaf);
+    return leaf;
+}
+
 static MIR_reg_t mir_emit_cow_path_set(MirTranspiler* mt, MirVarEntry* root,
         const AstCowPath* path, AstNode* terminal, bool terminal_is_member,
         MIR_reg_t value) {
@@ -5318,14 +5354,25 @@ static MIR_reg_t mir_emit_cow_path_set(MirTranspiler* mt, MirVarEntry* root,
     }
 
     update_gc_root_slot(mt, root);
-    MIR_reg_t owner = emit_box(mt, root->reg, root->type_id);
-    MIR_reg_t replacement = emit_call_1(mt, "cow_prepare_write", MIR_T_I64,
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, owner));
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-        MIR_new_reg_op(mt->ctx, root->reg), MIR_new_reg_op(mt->ctx, replacement)));
-    root->type_id = LMD_TYPE_ANY;
-    root->mir_type = MIR_T_I64;
-    update_gc_root_slot(mt, root);
+    // NM-O8: leave the ROOT alone when writes through it must reach the caller
+    // -- a `var` parameter's root was already detached at the call site, and a
+    // plain `pn` parameter writes through under the current pn ABI. This is the
+    // same selection the flat store makes with
+    // `is_var_param || is_proc_param` (lambda_array_set_checked_inplace).
+    // Detaching here published the replacement into the callee's own register,
+    // so the caller never saw a nested write. Children are still detached and
+    // reinstalled below either way.
+    bool writes_through_caller = root->is_var_param || root->is_proc_param;
+    if (!writes_through_caller) {
+        MIR_reg_t owner = emit_box(mt, root->reg, root->type_id);
+        MIR_reg_t replacement = emit_call_1(mt, "cow_prepare_write", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, owner));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_reg_op(mt->ctx, root->reg), MIR_new_reg_op(mt->ctx, replacement)));
+        root->type_id = LMD_TYPE_ANY;
+        root->mir_type = MIR_T_I64;
+        update_gc_root_slot(mt, root);
+    }
     int current_root = root->root_slot;
 
     for (int i = 0; i < path->count; i++) {
@@ -5339,6 +5386,15 @@ static MIR_reg_t mir_emit_cow_path_set(MirTranspiler* mt, MirVarEntry* root,
         MIR_reg_t detached = emit_call_1(mt, "cow_prepare_write", MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, child));
         store_gc_root_slot(mt, child_root, detached);
+        // Reinstall only when the child moved. Once the spine is unique --
+        // the steady state of any loop writing through the same path --
+        // cow_prepare_write is the identity, and this store would rewrite the
+        // slot with the value it already holds at the cost of a dynamic shape
+        // lookup per link per write.
+        MIR_label_t l_installed = MIR_new_label(mt->ctx);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+            MIR_new_label_op(mt->ctx, l_installed),
+            MIR_new_reg_op(mt->ctx, detached), MIR_new_reg_op(mt->ctx, child)));
         current = load_gc_root_slot(mt, current_root, "cow_parent");
         key = load_gc_root_slot(mt, key_roots[i], "cow_key");
         detached = load_gc_root_slot(mt, child_root, "cow_child");
@@ -5346,6 +5402,7 @@ static MIR_reg_t mir_emit_cow_path_set(MirTranspiler* mt, MirVarEntry* root,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, current),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, key),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, detached));
+        emit_label(mt, l_installed);
         current_root = child_root;
     }
 
@@ -18317,6 +18374,38 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                     // boxed slow entry remains responsible for open edges.
                     short_circuit_error = false;
                 }
+                // CW25 / S9.2.2: a `var` argument that names a PLACE
+                // (`f(var m.rows[i])`) borrows that place, not merely its root.
+                // Detach the whole spine here, before any arm evaluates the
+                // argument, and pass the detached leaf: it is already installed
+                // in its parent, so the callee's in-place `var` writes land in
+                // the caller's container. Without this the leaf stayed shared
+                // and the callee wrote through to whatever else observed it.
+                //
+                // This must precede the arms because several of them (contract
+                // boundaries, native lanes) re-evaluate the argument expression
+                // themselves and would each need the same treatment.
+                if (cow_capture_enabled() && type_param && type_param->is_var_param &&
+                        resolved_args[i] &&
+                        !mir_direct_root_binding(mt, resolved_args[i])) {
+                    AstCowPath borrow_path = {};
+                    if (ast_collect_cow_path(&borrow_path, resolved_args[i]) &&
+                            borrow_path.count > 0) {
+                        MirVarEntry* place_root =
+                            mir_direct_root_binding(mt, borrow_path.root);
+                        if (place_root && mir_root_may_need_cow(place_root)) {
+                            MIR_reg_t leaf = mir_emit_cow_path_borrow(mt, place_root,
+                                &borrow_path);
+                            arg_root_slots[i] = create_gc_root_slot(mt, leaf);
+                            leaf = load_gc_root_slot(mt, arg_root_slots[i], "borrow_leaf");
+                            arg_ops[i] = MIR_new_reg_op(mt->ctx, leaf);
+                            arg_vars[i] = {MIR_T_I64, "arg", 0};
+                            if (param_iter) param_iter = (AstNamedNode*)param_iter->next;
+                            continue;
+                        }
+                    }
+                }
+
                 bool typed_array_witness_param = native_call &&
                     i < call_nfi->param_count &&
                     (mir_typed_array_witness_mask(call_nfi->fn_node) &

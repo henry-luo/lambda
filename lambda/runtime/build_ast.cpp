@@ -2686,7 +2686,24 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
                     var_arg_roots[var_arg_root_count++] = root->name;
                 }
             }
+            // CW25/E207: a PLACE argument (`f(var m.rows[i])`) carries `any` as
+            // its own node type -- a member/index read does not propagate its
+            // field's declared type onto the expression (TIG1). Comparing that
+            // `any` against an annotated `var` parameter rejected every
+            // annotated path borrow. Resolve the declared type THROUGH the path
+            // first, using the same walker the assignment side already uses for
+            // annotated destinations. This is a resolution, not a relaxation:
+            // an unresolvable path, or one whose declared type does not match,
+            // still reports below. The exact-match rule stays intact because a
+            // callee writes through a borrow and must not see a mismatched
+            // representation.
+            bool var_place_type_matches = false;
             if (!type_exact_match(arg->type, expected_param)) {
+                Type* place_type = declared_compound_destination_type(tp, arg, NULL);
+                var_place_type_matches = place_type &&
+                    type_exact_match(place_type, expected_param);
+            }
+            if (!var_place_type_matches && !type_exact_match(arg->type, expected_param)) {
                 Type* full_type = parameter_boundary_type(expected_param);
                 char expected_name[128];
                 char actual_name[128];
@@ -8610,6 +8627,85 @@ static void direct_validate_mutable_compound(Transpiler* tp,
         (int)root->name->len, root->name->chars);
 }
 
+// CW24 (S9.3.1 / S9.1.2): `var row = m.rows[i]` binds a COPY of a place, so a
+// later `row[y] = v` updates the copy and `m` never changes. Before insertion
+// capture that write happened to alias through and appeared to work; with
+// capture on it silently computes a wrong answer, which is the whole reason the
+// S9.3.1 flip is unsafe without this diagnostic. Reject it at the mutation --
+// that is where the expectation breaks and where the fix goes.
+//
+// Gated on the same switch as capture itself: with the flag off the aliasing
+// behavior is still in force and the write does reach the container, so the
+// error would be false.
+void lambda_ast_mark_place_copy(AstNamedNode* named) {
+    if (!named || !named->entry || !named->as) return;
+    AstNode* init = unwrap_primary_node(named->as);
+    if (!init || (init->node_type != AST_NODE_MEMBER_EXPR &&
+            init->node_type != AST_NODE_INDEX_EXPR)) return;
+    // Only a place rooted at a MUTABLE binding is a lost update. Rooted at a
+    // `let`, nothing could have been written through it anyway (S9.1.1), and
+    // direct_validate_mutable_compound already owns that diagnostic.
+    AstIdentNode* root = compound_root_ident(init);
+    if (!root || !root->entry || !root->entry->is_mutable) return;
+    named->entry->is_place_copy = true;
+    named->entry->place_copy_root = root->name;
+}
+
+// Pending CW24 candidates for the function currently being built. A mutation
+// alone does not decide the diagnostic (see NameEntry::place_copy_written_back),
+// so candidates accumulate here and are judged at FUNCTION_END.
+static NameEntry* g_place_copy_pending = NULL;
+
+static void direct_note_place_copy_mutation(SourceSpan span, AstNode* object) {
+    if (!cow_capture_enabled()) return;
+    AstIdentNode* root = compound_root_ident(object);
+    NameEntry* entry = root ? root->entry : NULL;
+    if (!entry || !entry->is_place_copy || entry->place_copy_mutation_pending) return;
+    entry->place_copy_mutation_pending = true;
+    entry->place_copy_mutation_span = span;
+    entry->place_copy_next = g_place_copy_pending;
+    g_place_copy_pending = entry;
+}
+
+// `<place> = p` puts the copy back where it came from, which makes every
+// earlier mutation of `p` reach the owner. Conservatively, a write-back
+// ANYWHERE clears the candidate: a false negative here costs a missed
+// diagnostic, a false positive would reject the model's own idiom.
+static void direct_note_place_copy_writeback(AstNode* value) {
+    if (!cow_capture_enabled()) return;
+    AstNode* source = unwrap_primary_node(value);
+    if (!source || source->node_type != AST_NODE_IDENT) return;
+    AstIdentNode* ident = (AstIdentNode*)source;
+    if (ident->entry && ident->entry->is_place_copy) {
+        ident->entry->place_copy_written_back = true;
+    }
+}
+
+static void lambda_ast_flush_place_copy_diagnostics(Transpiler* tp) {
+    NameEntry* entry = g_place_copy_pending;
+    g_place_copy_pending = NULL;
+    while (entry) {
+        NameEntry* next = entry->place_copy_next;
+        entry->place_copy_next = NULL;
+        entry->place_copy_mutation_pending = false;
+        if (!entry->place_copy_written_back) {
+            String* origin = entry->place_copy_root;
+            int olen = origin ? (int)origin->len : 1;
+            const char* ochars = origin ? origin->chars : "?";
+            record_semantic_error_span(tp, entry->place_copy_mutation_span,
+                ERR_PLACE_COPY_MUTATED,
+                "writes through '%.*s' do not reach '%.*s': it was bound from a "
+                "member/index read, which copies (S9.1.2). write the path directly "
+                "('%.*s...[key] = value'), pass the place as a `var` argument, or "
+                "store it back ('%.*s... = %.*s').",
+                (int)entry->name->len, entry->name->chars, olen, ochars,
+                olen, ochars, olen, ochars,
+                (int)entry->name->len, entry->name->chars);
+        }
+        entry = next;
+    }
+}
+
 AstNode* build_assignment_statement_from_parts(Transpiler* tp,
         SourceSpan span, AstNode* target, AstNode* value) {
     if (!tp->current_scope || !tp->current_scope->is_proc) {
@@ -8635,6 +8731,8 @@ AstNode* build_assignment_statement_from_parts(Transpiler* tp,
         assignment->left = target;
         assignment->right = value;
         direct_validate_mutable_compound(tp, span, field->object);
+        direct_note_place_copy_mutation(span, field->object);   // CW24
+        direct_note_place_copy_writeback(value);                // CW24
         check_compound_assignment_static_boundary(tp, span, target, value,
             target->node_type == AST_NODE_INDEX_EXPR ? "array element" : "map member");
         return (AstNode*)assignment;
@@ -9484,6 +9582,9 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 analyze_captures(tp, fn, find_global_scope(function_scope->parent));
                 validate_cross_frame_binding_reads(tp, fn);
             }
+            // CW24: the body is complete, so every write-back that could
+            // excuse a place-copy mutation has now been seen.
+            lambda_ast_flush_place_copy_diagnostics(tp);
             return 0;
         }
     }
@@ -9965,6 +10066,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 if (entry) {
                     entry->is_mutable = true;
                     named->entry = entry;
+                    lambda_ast_mark_place_copy(named);  // CW24
                 }
             }
             return direct_ast_value((AstNode*)var);

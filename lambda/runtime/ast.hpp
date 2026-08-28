@@ -241,8 +241,15 @@ static inline bool ast_declared_type_is_open_item(Type* declared) {
         (right && right->type_id == LMD_TYPE_ANY);
 }
 
+// `arg_nodes` (optional) receives the resolved argument node for each `var`
+// parameter, so a caller can tell a PLACE borrow (`f(var m.rows[i])`, CW25)
+// from a bare-binding borrow. A place has no NameEntry of its own, so its
+// `entries` slot stays NULL: there is no binding for the callee-side writeback
+// to publish into, and none is needed -- the leaf is already installed in its
+// parent by the spine detach.
 static inline bool ast_direct_call_var_parameter_entries(AstCallNode* call,
-        const TypeFunc* signature, NameEntry** entries) {
+        const TypeFunc* signature, NameEntry** entries,
+        AstNode** arg_nodes = NULL) {
     AstFuncNode* target = ast_direct_call_function(call);
     if (!target || !signature || !entries || signature->is_variadic ||
             signature->param_count < 0 ||
@@ -260,9 +267,22 @@ static inline bool ast_direct_call_var_parameter_entries(AstCallNode* call,
     const TypeParam* param = signature->param;
     for (int index = 0; index < signature->param_count; index++, param = param->next) {
         entries[index] = NULL;
+        if (arg_nodes) arg_nodes[index] = NULL;
         if (!param || !param->is_var_param) continue;
         AstNode* argument = ast_unwrap_primary(resolved[index]);
-        if (!argument || argument->node_type != AST_NODE_IDENT) return false;
+        if (!argument) return false;
+        if (arg_nodes) arg_nodes[index] = argument;
+        if (argument->node_type != AST_NODE_IDENT) {
+            // CW25: a member/index path is a place borrow. Only shapes the
+            // spine walker can name are admitted; anything else is still
+            // refused so the caller falls back to the ordinary call protocol.
+            AstCowPath probe = {};
+            if (!arg_nodes || !ast_collect_cow_path(&probe, argument) ||
+                    probe.count == 0) {
+                return false;
+            }
+            continue;
+        }
         NameEntry* entry = ((AstIdentNode*)argument)->entry;
         if (!entry || entry->import) return false;
         for (int prior = 0; prior < index; prior++) {

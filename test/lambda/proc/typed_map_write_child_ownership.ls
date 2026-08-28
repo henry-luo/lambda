@@ -23,8 +23,14 @@ pn mk() H {
 }
 
 pn write_a(h: H, v: int) {
+    // Read-modify-write-back (C4.2e). Binding `h.a` binds a COPY under S9.1.2,
+    // so the mutated child is stored back explicitly. What this fixture guards
+    // is unchanged: the element write must survive the transactional field
+    // writes in main() and land in `h`, and a live observer of the root must
+    // still see its own pre-image.
     var la = h.a
     la[0] = v
+    h.a = la
     h.n = h.n + 1
 }
 

@@ -111,23 +111,16 @@ pn arr_get(a, idx: int) any {
     return r
 }
 
-pn arr_set(a, idx: int, val) any {
+pn arr_set(var a, idx: int, val) any {
     var i2: int = int(idx % 32)
     var mid: int = shr(idx, 5)
     var i1: int = int(mid % 16)
     var i0: int = shr(mid, 4)
-    var l0 = (a.l0)
-    var c1 = l0[i0]
-    if (c1 == null) {
-        c1 = null16()
-        l0[i0] = c1
-    }
-    var c2 = c1[i1]
-    if (c2 == null) {
-        c2 = null32()
-        c1[i1] = c2
-    }
-    c2[i2] = val
+    // S9.3.1: binding a trie level and mutating the local writes a copy.
+    // Write the whole path so each store lands in `a` (O(depth), no subtree copy).
+    if (a.l0[i0] == null) { a.l0[i0] = null16() }
+    if (a.l0[i0][i1] == null) { a.l0[i0][i1] = null32() }
+    a.l0[i0][i1][i2] = val
     return 0
 }
 
@@ -138,7 +131,7 @@ pn vec_new() any {
     return []
 }
 
-pn vec_add(v, item) any {
+pn vec_add(var v, item) any {
     push(v, item)
     return 0
 }
@@ -163,7 +156,7 @@ pn rbt_nd(tree, id: int) any {
     return arr_get(tree.nd, id)
 }
 
-pn rbt_mk_node(tree, key: int, val) any {
+pn rbt_mk_node(var tree, key: int, val) any {
     var c: int = (tree.cnt)
     var n = [key, val, NIL, NIL, NIL, RED]
     var nd = (tree.nd)
@@ -173,7 +166,7 @@ pn rbt_mk_node(tree, key: int, val) any {
     return c
 }
 
-pn rbt_left_rotate(tree, xId: int) any {
+pn rbt_left_rotate(var tree, xId: int) any {
     var xn = rbt_nd(tree, xId)
     var yId: int = xn[NR]
     var yn = rbt_nd(tree, yId)
@@ -206,7 +199,7 @@ pn rbt_left_rotate(tree, xId: int) any {
     return yId
 }
 
-pn rbt_right_rotate(tree, yId: int) any {
+pn rbt_right_rotate(var tree, yId: int) any {
     var yn = rbt_nd(tree, yId)
     var xId: int = yn[NL]
     var xn = rbt_nd(tree, xId)
@@ -239,7 +232,7 @@ pn rbt_right_rotate(tree, yId: int) any {
     return xId
 }
 
-pn rbt_put(tree, key: int, value) any {
+pn rbt_put(var tree, key: int, value) any {
     var yId: int = NIL
     var xId: int = (tree.root)
     while (xId != NIL) {
@@ -425,7 +418,7 @@ pn rbt_first(tree) any {
     return r
 }
 
-pn rbt_remove_fixup(tree, xId: int, xParId: int) any {
+pn rbt_remove_fixup(var tree, xId: int, xParId: int) any {
     var rootId: int = (tree.root)
     while (xId != rootId) {
         var xCol: int = BLACK
@@ -588,7 +581,7 @@ pn rbt_remove_fixup(tree, xId: int, xParId: int) any {
     return 0
 }
 
-pn rbt_remove(tree, key: int) any {
+pn rbt_remove(var tree, key: int) any {
     var zId: int = rbt_find_node(tree, key)
     if (zId == NIL) { return null }
     var zn = rbt_nd(tree, zId)

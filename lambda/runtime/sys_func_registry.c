@@ -1958,6 +1958,8 @@ JitImport jit_runtime_imports[] = {
     {"map_set_cow", FPTR(map_set_cow)},
     {"cow_path_set_raw", FPTR(cow_path_set_raw)},
     {"cow_path_set", FPTR(cow_path_set)},
+    {"cow_path_borrow", FPTR(cow_path_borrow)},
+    {"cow_path_set_inplace", FPTR(cow_path_set_inplace)},
     {"pn_push_cow", FPTR(pn_push_cow)},
     {"pn_splice_cow", FPTR(pn_splice_cow)},
 
@@ -1984,6 +1986,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_map_set_checked", FPTR(lambda_map_set_checked)},
     {"lambda_map_set_checked_inplace", FPTR(lambda_map_set_checked_inplace)},
     {"lambda_map_path_set_checked", FPTR(lambda_map_path_set_checked)},
+    {"lambda_map_path_set_checked_inplace", FPTR(lambda_map_path_set_checked_inplace)},
     {"lambda_array_set_checked", FPTR(lambda_array_set_checked)},
     {"lambda_array_set_checked_inplace", FPTR(lambda_array_set_checked_inplace)},
     {"lambda_array_set_checked_lane", FPTR(lambda_array_set_checked_lane)},

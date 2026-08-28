@@ -30,8 +30,7 @@ pn mbrot(matrix, r: float, i: float, step: float, n: int) any {
     while (y >= 0) {
         var x: int = n - 1
         while (x >= 0) {
-            var row = matrix[x]
-            row[y] = count(r, i, step, float(x), float(y))
+            matrix[x][y] = count(r, i, step, float(x), float(y))
             x = x - 1
         }
         y = y - 1

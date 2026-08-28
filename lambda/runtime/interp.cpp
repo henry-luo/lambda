@@ -1506,12 +1506,54 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     }
     if (!injected && ast_type_func_has_var_parameter(direct_signature)) {
         NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-        if (!ast_direct_call_var_parameter_entries(node, direct_signature, borrowed)) {
+        AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+        if (!ast_direct_call_var_parameter_entries(node, direct_signature, borrowed,
+                borrow_args)) {
             log_error("interp: unsupported direct `var` argument layout");
             return ItemError;
         }
         for (int index = 0; index < dispatch_argc; index++) {
             NameEntry* entry = borrowed[index];
+            // CW25 / S9.2.2: `f(var m.rows[i])` borrows a PLACE. Detach the
+            // whole spine and pass the detached leaf; it is already installed
+            // in its parent, so the callee's in-place `var` writes reach the
+            // caller's container and need no writeback binding. Mirrors the
+            // MIR argument-loop hook so the tiers cannot diverge.
+            if (!entry && cow_capture_enabled() && borrow_args[index]) {
+                AstCowPath place = {};
+                if (!ast_collect_cow_path(&place, borrow_args[index]) ||
+                        place.count == 0 || !place.root ||
+                        place.root->node_type != AST_NODE_IDENT) {
+                    continue;
+                }
+                NameEntry* root_entry = ((AstIdentNode*)place.root)->entry;
+                if (!root_entry) continue;
+                Scratch root_slot(f);
+                root_slot.set(interp_read_binding(f, root_entry));
+                if (!is_container_type_id(get_type_id(root_slot.get()))) continue;
+                Item private_root = cow_prepare_write(root_slot.get());
+                if (item_is_error(private_root)) return private_root;
+                root_slot.set(private_root);
+                interp_write_binding(f, root_entry, root_slot.get());
+
+                Scratch path_slot(f);
+                path_slot.set(interp_ptr_item(array_plain()));
+                bool path_ok = true;
+                for (int seg = 0; seg < place.count && path_ok; seg++) {
+                    Scratch key_slot(f);
+                    key_slot.set(interp_eval_cow_path_key(f, place.segment[seg],
+                        place.is_member[seg]));
+                    if (interp_frame_pending(f)) return ItemNull;
+                    Array* keys = (Array*)(uintptr_t)path_slot.get().item;
+                    if (!keys) { path_ok = false; break; }
+                    array_push(keys, key_slot.get());
+                }
+                if (!path_ok) continue;
+                Item leaf = cow_path_borrow(root_slot.get(), path_slot.get());
+                if (item_is_error(leaf)) return leaf;
+                words[index] = leaf.item;
+                continue;
+            }
             Item owner = (Item){.item = words[index]};
             if (!entry || !entry->cow_owned ||
                     !is_container_type_id(get_type_id(owner))) {
@@ -4199,11 +4241,32 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             owner_slot.set(interp_read_binding(f, root));
             // An untyped COW path validates no enclosing contract; a nested
             // typed-map write must validate its rebuilt root before publish.
+            //
+            // NM-O8: a `var` parameter's root was detached by the caller, and a
+            // plain `pn` parameter writes through to the caller under the
+            // current pn ABI -- the same rule the FLAT store above applies via
+            // `is_var_param || is_proc_param`. Without it the nested store
+            // detached the callee's own root and published the replacement
+            // into the callee's binding, so `b.xs[0] = v` was visible inside
+            // the procedure and lost at the caller while `b.cur = v` was not.
+            //
+            // The TYPED arm stays transactional even for those roots: its
+            // publish runs `lambda_type_check` over the whole candidate, which
+            // CONVERTS (a 3.5 admitted into an int field becomes 2). An
+            // in-place write has no candidate to convert, so applying this
+            // there silently skipped the coercion —
+            // proc_type_numeric_structural_admission caught it. Typed nested
+            // writes through a parameter therefore still need the explicit
+            // read-modify-write-back spelling.
+            bool writes_through_caller = root->is_var_param || root->is_proc_param;
             Item replacement = ast_declared_type_is_map(root->declared_type)
                 ? lambda_map_path_set_checked(owner_slot.get(), path_slot.get(),
                     value_slot.get(), root->declared_type,
                     "typed nested map assignment")
-                : cow_path_set(owner_slot.get(), path_slot.get(), value_slot.get());
+                : (writes_through_caller
+                    ? cow_path_set_inplace(owner_slot.get(), path_slot.get(),
+                        value_slot.get())
+                    : cow_path_set(owner_slot.get(), path_slot.get(), value_slot.get()));
             if (item_is_error(replacement)) return replacement;
             interp_write_binding(f, root, replacement);
             return ItemNull;

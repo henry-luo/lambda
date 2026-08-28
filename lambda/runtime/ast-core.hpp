@@ -330,6 +330,23 @@ struct NameEntry {
     // (cow_bind_var). Both tiers decide it with the same rule; the JIT keeps the
     // equivalent on MirVarEntry::cow_owned.
     bool cow_owned;
+    // CW24: this binding was initialized from a *place* -- a member/index read
+    // rooted at a mutable binding -- so under S9.1.2 it holds a COPY. Writes
+    // through it cannot reach the container it was read from. Set at the
+    // declaration, consumed at the mutation site, which is where the
+    // programmer's expectation actually breaks.
+    bool is_place_copy;
+    // The place's root name, kept only to name it in that diagnostic.
+    String* place_copy_root;
+    // Read-modify-WRITE-BACK (`p = w.pkts[i]` ... `w.pkts[i] = p`) is the
+    // sanctioned idiom (C4.2e) and is indistinguishable from the lost-update
+    // bug at the mutation itself -- only the later store tells them apart. So
+    // the mutation is recorded and the diagnostic is deferred to the end of
+    // the enclosing function, by which point a write-back has been seen.
+    bool place_copy_written_back;
+    bool place_copy_mutation_pending;
+    SourceSpan place_copy_mutation_span;
+    NameEntry* place_copy_next;   // intrusive link over pending candidates
     // When this name was hung into the scope by an import, the module that
     // actually declares it. `slot` is then an index into *that* module's slab,
     // not this one's — the two modules' plan passes number their globals
