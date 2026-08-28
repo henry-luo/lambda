@@ -1868,8 +1868,8 @@ static void multicol_viewport_size(LayoutContext* lycon, ViewBlock* multicol, fl
     float viewport_width = 0;
     float viewport_height = 0;
     if (lycon && lycon->ui_context) {
-        viewport_width = lycon->ui_context->viewport_width * lycon->ui_context->pixel_ratio;
-        viewport_height = lycon->ui_context->viewport_height * lycon->ui_context->pixel_ratio;
+        viewport_width = lycon->ui_context->viewport_width;
+        viewport_height = lycon->ui_context->viewport_height;
     }
 
     if ((viewport_width <= 0 || viewport_height <= 0) && multicol) {

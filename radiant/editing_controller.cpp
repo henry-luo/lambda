@@ -689,8 +689,8 @@ bool editing_controller_animation_tick(UiContext* uicon,
     memset(&event, 0, sizeof(event));
     event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
     event.mouse_position.timestamp = timestamp;
-    event.mouse_position.x = (int)state->editing_autoscroll_pointer_x; // INT_CAST_OK: synthetic timer event stores viewport pixel coordinate
-    event.mouse_position.y = (int)state->editing_autoscroll_pointer_y; // INT_CAST_OK: synthetic timer event stores viewport pixel coordinate
+    event.mouse_position.x = state->editing_autoscroll_pointer_x;
+    event.mouse_position.y = state->editing_autoscroll_pointer_y;
 
     EventContext evcon;
     event_context_init(&evcon, uicon, &event);

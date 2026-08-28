@@ -1596,18 +1596,18 @@ static Item js_ctor_mouse_event_with_class(Item type_arg, Item init_arg,
         const char* class_name) {
     JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, class_name));
     stamp_modifiers(ev, init_arg);
-    event_set_int(ev, "screenX", init_int(init_arg, "screenX", 0));
-    event_set_int(ev, "screenY", init_int(init_arg, "screenY", 0));
-    event_set_int(ev, "clientX", init_int(init_arg, "clientX", 0));
-    event_set_int(ev, "clientY", init_int(init_arg, "clientY", 0));
-    event_set_int(ev, "pageX",   init_int(init_arg, "pageX", 0));
-    event_set_int(ev, "pageY",   init_int(init_arg, "pageY", 0));
-    event_set_int(ev, "x",       init_int(init_arg, "clientX", 0));
-    event_set_int(ev, "y",       init_int(init_arg, "clientY", 0));
-    event_set_int(ev, "offsetX", 0);
-    event_set_int(ev, "offsetY", 0);
-    event_set_int(ev, "movementX", init_int(init_arg, "movementX", 0));
-    event_set_int(ev, "movementY", init_int(init_arg, "movementY", 0));
+    event_set_double(ev, "screenX", init_double(init_arg, "screenX", 0.0));
+    event_set_double(ev, "screenY", init_double(init_arg, "screenY", 0.0));
+    event_set_double(ev, "clientX", init_double(init_arg, "clientX", 0.0));
+    event_set_double(ev, "clientY", init_double(init_arg, "clientY", 0.0));
+    event_set_double(ev, "pageX",   init_double(init_arg, "pageX", 0.0));
+    event_set_double(ev, "pageY",   init_double(init_arg, "pageY", 0.0));
+    event_set_double(ev, "x",       init_double(init_arg, "clientX", 0.0));
+    event_set_double(ev, "y",       init_double(init_arg, "clientY", 0.0));
+    event_set_double(ev, "offsetX", 0.0);
+    event_set_double(ev, "offsetY", 0.0);
+    event_set_double(ev, "movementX", init_double(init_arg, "movementX", 0.0));
+    event_set_double(ev, "movementY", init_double(init_arg, "movementY", 0.0));
     event_set_int(ev, "button",  init_int(init_arg, "button", 0));
     event_set_int(ev, "buttons", init_int(init_arg, "buttons", 0));
     event_set_item(ev, "relatedTarget", init_item(init_arg, "relatedTarget"));
@@ -1846,7 +1846,7 @@ static void stamp_modifier_init(Item init, bool ctrl, bool shift, bool alt, bool
 }
 
 extern "C" Item js_create_native_mouse_event(const char* type,
-    int client_x, int client_y,
+    double client_x, double client_y,
     int button, int buttons,
     bool ctrl, bool shift, bool alt, bool meta,
     int detail, Item related_target)
@@ -1856,12 +1856,12 @@ extern "C" Item js_create_native_mouse_event(const char* type,
     event_set_bool(init, "cancelable", true);
     event_set_bool(init, "composed", true);
     event_set_int(init, "detail", detail);
-    event_set_int(init, "clientX", client_x);
-    event_set_int(init, "clientY", client_y);
-    event_set_int(init, "screenX", client_x);
-    event_set_int(init, "screenY", client_y);
-    event_set_int(init, "pageX", client_x);
-    event_set_int(init, "pageY", client_y);
+    event_set_double(init, "clientX", client_x);
+    event_set_double(init, "clientY", client_y);
+    event_set_double(init, "screenX", client_x);
+    event_set_double(init, "screenY", client_y);
+    event_set_double(init, "pageX", client_x);
+    event_set_double(init, "pageY", client_y);
     event_set_int(init, "button", button);
     event_set_int(init, "buttons", buttons);
     stamp_modifier_init(init, ctrl, shift, alt, meta);
@@ -1876,7 +1876,7 @@ extern "C" Item js_create_native_mouse_event(const char* type,
 JS_FORWARD_VOID( js_event_set_timestamp, (Item event, double timestamp_ms), event_set_double, (event, "timeStamp", timestamp_ms))
 
 extern "C" Item js_create_native_pointer_event(const char* type,
-    int client_x, int client_y,
+    double client_x, double client_y,
     int button, int buttons,
     bool ctrl, bool shift, bool alt, bool meta,
     const char* pointer_type, int pointer_id, bool is_primary)
@@ -1885,12 +1885,12 @@ extern "C" Item js_create_native_pointer_event(const char* type,
     event_set_bool(init, "bubbles", true);
     event_set_bool(init, "cancelable", true);
     event_set_bool(init, "composed", true);
-    event_set_int(init, "clientX", client_x);
-    event_set_int(init, "clientY", client_y);
-    event_set_int(init, "screenX", client_x);
-    event_set_int(init, "screenY", client_y);
-    event_set_int(init, "pageX", client_x);
-    event_set_int(init, "pageY", client_y);
+    event_set_double(init, "clientX", client_x);
+    event_set_double(init, "clientY", client_y);
+    event_set_double(init, "screenX", client_x);
+    event_set_double(init, "screenY", client_y);
+    event_set_double(init, "pageX", client_x);
+    event_set_double(init, "pageY", client_y);
     event_set_int(init, "button", button);
     event_set_int(init, "buttons", buttons);
     stamp_modifier_init(init, ctrl, shift, alt, meta);
@@ -1925,7 +1925,7 @@ extern "C" Item js_create_native_css_event(const char* type,
 }
 
 extern "C" Item js_create_native_drag_event(const char* type,
-    int client_x, int client_y, Item data_transfer,
+    double client_x, double client_y, Item data_transfer,
     bool ctrl, bool shift, bool alt, bool meta)
 {
     // DragEvent extends MouseEvent; reuse the MouseEvent ctor for geometry and
@@ -2050,7 +2050,7 @@ extern "C" Item js_create_native_input_event(const char* type,
 }
 
 extern "C" Item js_create_native_wheel_event(const char* type,
-    int client_x, int client_y,
+    double client_x, double client_y,
     double delta_x, double delta_y,
     int buttons,
     bool ctrl, bool shift, bool alt, bool meta)
@@ -2059,10 +2059,10 @@ extern "C" Item js_create_native_wheel_event(const char* type,
     event_set_bool(init, "bubbles", true);
     event_set_bool(init, "cancelable", true);
     event_set_bool(init, "composed", true);
-    event_set_int(init, "clientX", client_x);
-    event_set_int(init, "clientY", client_y);
-    event_set_int(init, "screenX", client_x);
-    event_set_int(init, "screenY", client_y);
+    event_set_double(init, "clientX", client_x);
+    event_set_double(init, "clientY", client_y);
+    event_set_double(init, "screenX", client_x);
+    event_set_double(init, "screenY", client_y);
     event_set_int(init, "buttons", buttons);
     event_set_double(init, "deltaX", delta_x);
     event_set_double(init, "deltaY", delta_y);

@@ -1648,8 +1648,6 @@ typedef struct {
     float v_scroll_position, h_scroll_position;
     float v_min_scroll, h_min_scroll;
     float v_max_scroll, h_max_scroll;
-    float v_handle_y, v_handle_height;
-    float h_handle_x, h_handle_width;
     void reset();
 } ScrollPane;
 
@@ -2577,7 +2575,7 @@ struct FormControlProp {
     int hover_index;            // Index of currently hovered option in dropdown (-1 if none)
     int select_size;            // Visible rows for select listbox (HTML size attr; 0 = not set)
 
-    // Computed intrinsic dimensions (in physical pixels)
+    // Computed intrinsic dimensions in CSS logical pixels.
     float intrinsic_width;
     float intrinsic_height;
 
@@ -3205,7 +3203,9 @@ typedef struct UiContext {
     // image cache
     struct hashmap* image_cache;  // cache for images loaded
 
-    float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
+    float device_scale_x;   // physical framebuffer px per logical window px on X
+    float device_scale_y;   // physical framebuffer px per logical window px on Y
+    float pixel_ratio;      // compatibility scalar after validating X/Y agreement
     DomDocument* document;  // current document
     // Nested iframe layout belongs to this UI/document tree, not to the host
     // thread.  Recursive layout may construct short-lived LayoutContexts.
@@ -3235,6 +3235,12 @@ typedef struct UiContext {
     void destroy();
 } UiContext;
 
+// Publish coherent platform scale metrics. This invalidates physical resources
+// and requests repaint, but does not reflow logical layout.
+bool ui_context_set_device_scale(UiContext* uicon,
+                                 float scale_x,
+                                 float scale_y);
+
 // Loader-time host settings.  They are copied into DomDocument::js before
 // script execution creates its Runtime, so parallel views never share browser
 // clock or host-loop semantics through process-global setup state.
@@ -3254,7 +3260,6 @@ extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 
 typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height,
-                           float pixel_ratio = 1.0f,
                            const DocumentJsHostConfig* js_host_config = nullptr);
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool);

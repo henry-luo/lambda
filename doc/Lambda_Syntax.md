@@ -289,15 +289,23 @@ import svg: 'http://www.w3.org/2000/svg'
 <span>
 ```
 
-Namespaced names are greedy in element name positions (S2.4.3v2). Once the
+Namespaced names are greedy in element name positions (S2.4.3v3). Once the
 parser sees the `ns.name` form, it consumes the complete dotted name before it
 considers element content; whitespace does not disambiguate the two forms.
 Consequently `<svg.rect>` and `<svg .rect>` both name the qualified `svg.rect`
-tag. Use the explicit content separator when a relative path is the child:
+tag. To pass a relative path as the child instead, spell the path `\.rect`
+(S16.9.4) — it needs no separator, because `.rect` can no longer be a path and
+nothing is left to disambiguate:
 
 ```lambda
-<svg; .rect>              // tag svg, relative-path child .rect
+<svg .rect>               // qualified tag svg.rect, no content
+<svg \.rect>              // tag svg, relative-path child \.rect
 ```
+
+The child form takes **no comma**: the attribute/content boundary comma is a
+biconditional (S16.9.3) and this element has no attributes, so `<svg, \.rect>`
+is an error. A comma appears only once attributes are present, as in
+`<svg id: "s", \.rect>`.
 
 ### Namespaced Attributes (Sub-Map Desugaring)
 
@@ -309,11 +317,11 @@ import xlink: 'http://www.w3.org/1999/xlink'
 
 // Dotted syntax (what you write)
 <svg.rect svg.width: 100, svg.height: 50>
-<svg.a xlink.href: "https://example.com"; "Click">
+<svg.a xlink.href: "https://example.com", "Click">
 
 // Desugared form (what actually gets stored)
 // <svg.rect svg: {width: 100, height: 50}>
-// <svg.a xlink: {href: "https://example.com"}; "Click">
+// <svg.a xlink: {href: "https://example.com"}, "Click">
 
 // Mixed namespaced and regular attributes
 <svg.rect id: "myRect", svg.width: 100>
@@ -407,11 +415,11 @@ svg.rect == 'svg.rect'  // false (one has namespace, one doesn't)
 import svg: 'http://www.w3.org/2000/svg'
 import xlink: 'http://www.w3.org/1999/xlink'
 
-let drawing = <svg.svg svg.width: 200, svg.height: 200;
+let drawing = <svg.svg svg.width: 200, svg.height: 200,
     <svg.rect svg.x: 10, svg.y: 10, svg.width: 80, svg.height: 80, fill: "blue">
     <svg.circle svg.cx: 150, svg.cy: 50, svg.r: 40, fill: "red">
-    <svg.a xlink.href: "https://example.com";
-        <svg.text svg.x: 100, svg.y: 150; "Click me">
+    <svg.a xlink.href: "https://example.com",
+        <svg.text svg.x: 100, svg.y: 150, "Click me">
     >
 >
 ```

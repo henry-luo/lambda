@@ -1,6 +1,14 @@
 # Lambda Design: Nested Mutation — Places, Path Borrows, and the Lost-Update Rule
 
-- **Status:** PROPOSED — rev 2, 2026-08-28. Not ratified; no `S#` minted yet.
+- **Status:** PROPOSED — rev 5, 2026-08-28. CW24 and CW25 are implemented
+  (worktree, flag-gated) and CW25's `E207` prerequisite is closed.
+- **Status history:** rev 4, 2026-08-28. CW24 and CW25 are implemented
+  (worktree, flag-gated); rev 4 records that CW25's post-call writeback step
+  proved unnecessary, and that CW25 does unblock the view family.
+- **Status history:** rev 3, 2026-08-28. Rev 3 records what building
+  CW24 corrected: write-back deferral, and a nine- rather than four-script
+  migration (§6.1).
+- **Status history:** rev 2, 2026-08-28. Not ratified; no `S#` minted yet.
   Rev 2 is the simplicity pass: CW27 folded into CW22 as a corollary, and
   **CW26 (`with var`) demoted from a committed ruling to a deferred candidate**
   — the committed surface is now one diagnostic (CW24) plus conformance to
@@ -38,10 +46,22 @@ reason is not performance and not missing syntax. It is this:
 > (the open half of C4.1). So `c = owner[i]` … `c[j] = v` detaches `c` on the
 > first write and the update never reaches `owner`. Nothing reports it.
 
-Measured cost of flipping the flag today: exactly four corpus scripts —
+Cost of flipping the flag, measured by *wrong output*: four corpus scripts —
 `test/lambda/proc/proc_fill_gc_nested.ls` and
 `test/benchmark/awfy/{cd2_orig,deltablue,deltablue2}.ls` — all of them that one
 idiom. They do not crash or error; they compute wrong answers.
+
+**Corrected 2026-08-28 by implementing CW24 (rev 3): the real migration is
+nine scripts, not four.** The four above are where the idiom *already* breaks;
+CW24 additionally rejects five that still work today —
+`proc_markup_mutation`, `proc_param_typed_container_write`,
+`proc_view_mutable`, `typed_map_write_child_ownership`, and `r7rs/mbrot2`.
+They survive because insertion capture only marks *named* inserted values, so
+a container filled with fresh values (`matrix[i] = fill(n, 0)`) still hands
+back a borrowable child. They are not false positives: each binds a place and
+mutates it, which S9.1.2 forbids outright, and they will break the moment
+reads stop borrowing. But it means CW24 is not a four-script migration, and
+the flip is a **nine**-script decision. See §6.1.
 
 This is the shape C4.4 #6 predicted in the abstract ("deep in-place update must
 not degrade into *read a copy, mutate it, discard it*"). What was not predicted
@@ -135,19 +155,28 @@ pn bump(var r: int[]) { r[0] = r[0] + 1 }
 bump(var m.rows[i])
 ```
 
-**CW25 — a path borrow detaches the spine on the way in and writes the leaf
-back on the way out.** Precisely:
+**CW25 — a path borrow detaches the spine on the way in.** Precisely:
 
 1. Evaluate the prefix, applying `cow_prepare_write` at each link and
    installing replacements — the descend half of `cow_path_set`. After this
    the whole spine down to the place is unshared and owned by the root.
-2. Bind the leaf container as the callee's `var` parameter.
-3. On return, install the (possibly replaced) leaf back into its parent slot.
+2. Bind the detached leaf container as the callee's `var` parameter.
 
-Step 3 is required because the callee's own writes may replace the leaf — a
-typed store can rebuild an array's representation, and a shared leaf detaches.
-The current implementation writes back only to the *root binding*, which is
-exactly why the projection case aliases instead of borrowing (§1.1).
+**Rev 4, 2026-08-28 — implemented, and a step fell away.** Rev 1–3 specified a
+third step, "install the leaf back into its parent on return", justified by the
+callee possibly *replacing* the leaf. Building it showed the step is
+unnecessary: both tiers already run the borrow protocol as *detach before the
+call, then let the callee mutate in place*, and `var` parameters are exactly
+the case that uses the **in-place** checked setters (`is_var_param` selects
+`lambda_array_set_checked_inplace`, so a typed store never needs a replacement
+channel). Once the spine is detached, the leaf is unique and already installed
+in its parent, so the callee's writes land in the caller's container directly.
+A path borrow is therefore the ordinary root borrow one level deeper, not a new
+protocol — which is why it needed one new runtime helper and two call-site
+hooks rather than a writeback channel in each tier.
+
+The old implementation detached only the *root binding*, which is exactly why
+the projection case aliased instead of borrowing (§1.1).
 
 **The write-back is a raw store, not a capturing one.** Installing the leaf
 back into its parent looks like an insertion, but S9.3.1 must not re-fire: the
@@ -162,7 +191,25 @@ Exclusivity needs nothing new: COW §11.3 face 3 already reserves the
 Until Stage 2 lands that check, N2 carries the same unchecked-overlap caveat
 as every other borrow (COW §10, Stage 1 risk 5).
 
-**Prerequisite:** the `E207` type gap in §1.1. A `var` parameter demands an
+**The `E207` type gap (§1.1) is closed — rev 5, 2026-08-28.** Annotated path
+borrows (`pn f(var r: any[])` called as `f(m.rows)`) now compile and borrow
+correctly on both tiers.
+
+The fix is a *resolution*, not a relaxation, and that distinction is the whole
+point. The exact-match rule for `var` arguments exists because a callee writes
+through the borrow and must not see a mismatched representation; weakening it
+for places would have been unsound. What was actually wrong is that a place's
+own node type is `any` — a member/index read does not propagate its field's
+declared type onto the expression (TIG1) — so the check was comparing against a
+type nobody had computed. It now resolves the declared type *through the path*
+before reporting, reusing `declared_compound_destination_type`, the walker the
+assignment side already uses for annotated destinations. An unresolvable path,
+or one whose declared type genuinely differs, still reports E207 (verified:
+`var r: int[]` against a declared `any[]` field is still rejected).
+
+Note this closes the gap for *annotated roots* only, which is what the rule
+needs. The general TIG1 carrier-read propagation — making every member read
+carry its field type — remains open and is unaffected. A `var` parameter demands an
 exact type match, and a member read currently types as `any`, so every
 *annotated* path borrow is rejected today. That is the
 `get_effective_type`-vs-`node->type` carrier-read problem tracked as TIG1; N2
@@ -256,7 +303,10 @@ help: or pass the place as a borrow        update_row(var m.rows[i], ...)
 
 This is the ruling that matters, and it is worth being explicit about why:
 
-> **The S9.3.1 flip is gated on CW24 alone, not on CW25 or CW26.**
+> **The S9.3.1 flip is gated on CW24, not on CW26.**
+>
+> *(rev 3: "not on CW25" was too strong — the view family needs CW25 for a
+> legal spelling. See §6.1.)*
 
 The four blocked scripts are dangerous because they silently compute wrong
 answers. A compile error converts them into four mechanical, located fixes. The
@@ -307,6 +357,29 @@ CW26 is out of the committed sequence entirely (deferred, NM-O7); if it is
 ever adopted, it rides the S12.4 resource-scope guard rather than growing its
 own.
 
+### 6.1 What implementing CW24 changed about this plan (rev 3, 2026-08-28)
+
+Two corrections came out of building it, both worth keeping:
+
+1. **Read-modify-write-BACK must not be flagged.** `p = w.pkts[i]` … mutate `p`
+   … `w.pkts[i] = p` is the sanctioned idiom (C4.2e) and is *indistinguishable
+   from the bug at the mutation site* — only the later store separates them.
+   A mutation-site check therefore rejects `awfy/richards3.ls`, the model's own
+   worked example. CW24 must defer to the end of the enclosing function, by
+   which point a write-back has been seen. Implemented that way; `richards3`
+   is clean and still passes.
+2. **The migration is nine scripts, not four** (§1). Five of them work today
+   and are rejected pre-emptively but correctly. One of those five,
+   `proc_view_mutable`, is the more interesting case: it pins `var row = m[1]`
+   as a *write-through view binding*, which **S9.2.2 already forbids** (views
+   are borrows, "legal only in `var`-param position"). So CW24 turns out to
+   enforce part of CW16.3 view-borrow confinement — a Stage-2 item — early and
+   by side effect. That is defensible but was not intended, and it means the
+   view fixtures cannot be migrated until N2/CW25 gives them a legal
+   `var`-position spelling. **CW25 is therefore a prerequisite of the flip
+   after all, for the view family specifically** — a change from §6's claim
+   that CW24 gates it alone.
+
 Independent of both: the A.4 tuning items (interned path keys,
 skip-unchanged reinstall) are small, semantics-free, and worth doing first —
 they cheapen every existing nested write in the corpus, not just the new
@@ -355,6 +428,17 @@ Piece 1 does not depend on 2 or 3. That is the point of §4.2.
   Pick-up trigger: migrated corpus code where threading enclosing locals
   through an extracted `pn`'s parameters (the C4.2a friction) is a repeated,
   demonstrated pain — not a hypothetical one. Adoption is additive.
+- **NM-O8 — Nested path writes through a plain `pn` parameter are not
+  published to the caller**, while flat member writes through the same
+  parameter are (`is_proc_param` selects the in-place checked setter only on
+  the flat path; the nested path takes `cow_path_set` /
+  `lambda_map_path_set_checked`, which publishes a replacement into the
+  callee's own binding). Both tiers agree, so this is a flat-vs-nested
+  inconsistency rather than a tier mismatch. It is what makes `cd2_orig`'s
+  migration cascade into every caller. Fixing it means giving the nested branch
+  the same in-place selection the flat one has — which lands in S9.1.3
+  territory (what a plain parameter *is*), so it should be decided with that
+  ruling rather than ahead of it.
 
 ---
 
@@ -459,8 +543,77 @@ diagnostic's own fixtures.
 | Script | Shape | Fix |
 |---|---|---|
 | `proc/proc_fill_gc_nested.ls` | `c1 = null16(); l0[i0] = c1; c2 = null32(); c1[i1] = c2; c2[i2] = val` | Mutate before storing (fill `c1` then insert), or write the path `l0[i0][i1][i2] = val`. The script is the *fill-after-storing* porting hazard S9.3.1 names by name. |
-| `awfy/deltablue.ls`, `deltablue2.ls` | Constraint/variable records read out of a vector, mutated locally | Handle store (C4.2e), as `richards3.ls` does — or path writes through the owning vector. |
-| `awfy/cd2_orig.ls` | Voxel vectors read, appended, discarded | Read-modify-write; note `cd2_orig` is a **perf control** for the `cd2` comparison, so whether it is migrated or retired is a benchmarking decision, not a correctness one. |
+| `awfy/deltablue2.ls` | Constraint/variable records read out of a vector, mutated locally | **Ported to the C4.2e handle store, 2026-08-28** — passes with the flag on, both tiers, zero `E232`. See §B.1. |
+| `awfy/deltablue.ls` | Same shape, untyped variant | **Ported 2026-08-28**, derived from the `deltablue2` port with the annotations stripped, so the pair still differs only in typing. |
+| `awfy/cd2_orig.ls` | Voxel vectors read, appended, discarded | **Needs a cascading `var`-signature migration** — see §B.1. `cd2_orig` is also a **perf control** for the `cd2` comparison. |
+
+### B.1 Migration outcome, 2026-08-28
+
+**Eight of the nine migrated (six spelling changes plus the deltablue handle-store pair); goldens unchanged in every case, and each passes
+with the flag both on and off.** `r7rs/mbrot2` and `proc_fill_gc_nested` became
+path writes; `proc_view_mutable` became a `var`-parameter borrow (the CW25
+spelling, which is what S9.2.2 says a write-through view is);
+`proc_param_typed_container_write`, `typed_map_write_child_ownership` and
+`proc_markup_mutation` became read-modify-write-back (C4.2e). Flag-on failures
+went 9 → 3.
+
+**The remaining three are a different kind of problem, and stopping was
+deliberate:**
+
+- **`awfy/cd2_orig`** — the trie rewrite alone is not enough. Its mutating
+  helpers take *plain* parameters, and a nested path write through a plain
+  parameter does not reach the caller (see the defect note below), so the
+  migration cascades: `vec_add`, five `rbt_*` helpers, `voxel_hash_xy`, and
+  then every caller up the chain must become `var`. Attempted and reverted; the
+  file is back at its committed state. It is also the *comparable source*
+  control for the `cd2` benchmark, so restructuring it removes the thing it
+  exists to measure.
+- **`awfy/deltablue`, `deltablue2`** — a constraint *graph*: one variable
+  record is observed by many constraints, which is exactly the shape C4.2e says
+  needs a handle store. A mechanical `var x = (c.f); x.m = v` → `c.f.m = v`
+  rewrite fits only 4 of ~12 sites (the rest read the temp repeatedly), and
+  even where it fits it makes each constraint mutate its *own* copy of a shared
+  variable.
+
+  **`deltablue2.ls` has since been ported (2026-08-28)** and passes with the
+  flag on, on both tiers, with zero `E232`. The port follows `richards3`'s
+  idiom: one `w` world owns `w.vars` and `w.cons`, every field that held a
+  Variable (`out`, `v1`, `v2`, `sc`, `off`) holds a variable id, every
+  constraint list and plan holds cids, planner state (`currentMark`,
+  `nextCid`) moved onto the world, and `w` travels as the single `var`
+  parameter. Constraint ids start at 1 so cid 0 remains the "no constraint"
+  sentinel `determinedBy` already used; variable id 0 is legal, so `NO_VAR` is
+  -1. Constraints were given one uniform shape rather than a per-kind shape, so
+  the store stays a single map shape. The two places that mutate a variable's
+  constraint list use read-modify-write-back, since binding
+  `w.vars[vid].constraints` binds a copy.
+
+  Unlike `richards2` → `richards3`, this was done **in place**: the golden is
+  unchanged (`DeltaBlue: PASS`), so the port is behaviour-preserving and there
+  is no reason to keep the aliasing original alongside it.
+
+  **`deltablue.ls` followed (2026-08-28).** The two files are the typed/untyped
+  pair of one program, so rather than porting it independently the ported
+  `deltablue2` was taken as the source and its annotations stripped — the `Vec`
+  alias, the `: Vec` parameters, the `any` returns. They now differ in exactly
+  138 lines, all of them signatures, which is what makes the pair a clean
+  measurement of what the annotations buy. Both pass on both tiers in both flag
+  states with zero `E232`.
+
+**Defect found during the migration (pre-existing, not caused by this work):**
+a nested path write through a *plain* `pn` parameter is not published to the
+caller on either tier, while a *flat* member write through the same parameter
+is (`is_proc_param` selects the in-place checked setter for the flat form
+only). Both tiers agree, so it is not a tier mismatch — it is an inconsistency
+between the flat and nested forms, and it is what forced `cd2_orig`'s cascade.
+Recorded as **NM-O8**.
+
+**Also fixed en route:** T0's scratch planner under-budgeted the nested-path
+assignment branch, which holds value, path, terminal and owner slots live
+across `cow_path_set` while the estimate assumed the flat form's three. The
+symptom was `interp: scratch overflow depth=5 cap=5` and a silently dropped
+write. Reproduced on pristine master with a migrated script, so it predates
+this work.
 
 `awfy/richards3.ls` is the already-landed proof that the target idiom works: it
 passes with `LAMBDA_COW_CAPTURE=1` today.

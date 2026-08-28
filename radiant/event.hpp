@@ -35,10 +35,10 @@ void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value,
     double elapsed_time);
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
-    const char* type, int client_x, int client_y, int button, int buttons,
+    const char* type, double client_x, double client_y, int button, int buttons,
     int mods, const char* pointer_type);
 extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
-    const char* type, int client_x, int client_y, int button, int buttons,
+    const char* type, double client_x, double client_y, int button, int buttons,
     int mods, int detail, double timestamp_ms);
 #endif
 
@@ -94,8 +94,8 @@ typedef struct Event {
 
 // mouse/pointer motion event
 typedef struct MousePositionEvent : Event {
-    int x;      // X coordinate, relative to window
-    int y;      // Y coordinate, relative to window
+    float x;    // logical X coordinate, relative to the top-level viewport
+    float y;    // logical Y coordinate, relative to the top-level viewport
 } MousePositionEvent;
 
 // mouse click events
@@ -1151,6 +1151,13 @@ typedef void (*EditingGeometryRectCb)(float x, float y, float w, float h,
 void editing_boundary_clear(EditingBoundary* out);
 void editing_caret_rect_clear(EditingCaretRect* out);
 
+// Resolve a document's logical viewport origin into the top-level logical
+// viewport. The top-level document itself resolves to (0, 0).
+void radiant_document_viewport_offset(UiContext* uicon,
+                                      DomDocument* target_doc,
+                                      float* out_x,
+                                      float* out_y);
+
 bool editing_geometry_surface_contains_boundary(const EditingSurface* surface,
                                                 const EditingBoundary* boundary);
 
@@ -1948,7 +1955,7 @@ enum CtxMenuItem {
     CTX_MENU_SELECT_ALL = 4,
 };
 
-// Open the menu at the given screen-space (physical px) coordinates,
+// Open the menu at the given top-level logical viewport coordinates,
 // targeting the focused/clicked text control. No-op if `target` is not a
 // text control. Computes width/height and stores hit-test rect in state.
 void context_menu_open(DocState* state, View* target, float x, float y);
@@ -2007,7 +2014,7 @@ void context_menu_render(RenderContext* rdcon, DocState* state);
 
 struct EventContext;
 
-void scroll_config_init(int pixel_ratio);
+void scroll_config_init(void);
 
 void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
@@ -2261,8 +2268,8 @@ typedef struct CursorState {
 typedef struct DragDropState {
     View* source_view;             // the view being dragged
     uint32_t source_node_id;       // stable DOM id for fallback rebind/prune
-    float start_x, start_y;       // mousedown position (physical px)
-    float current_x, current_y;   // current drag position (physical px)
+    float start_x, start_y;       // mousedown position (logical viewport px)
+    float current_x, current_y;   // current drag position (logical viewport px)
     bool active;                   // true after movement exceeds threshold
     bool pending;                  // true between mousedown and threshold check
     View* drop_target;             // current drop target under cursor (has dropzone attr)
@@ -2455,15 +2462,15 @@ typedef struct DocState {
     
     // Dropdown state (for select elements)
     View* open_dropdown;           // currently open select dropdown (null if none)
-    float dropdown_x, dropdown_y;  // dropdown popup position (absolute, in physical pixels)
-    float dropdown_width;          // dropdown popup width
-    float dropdown_height;         // dropdown popup height
+    float dropdown_x, dropdown_y;  // popup origin in the top-level logical viewport
+    float dropdown_width;          // logical popup width
+    float dropdown_height;         // logical popup height
 
     // F8 (Radiant_Design_Form_Input.md §3.10): native context menu for
     // text controls. Owned outside the focus state because right-click
     // can target any element. When `context_menu_target` is non-null the
     // overlay is drawn after the dropdown layer; `context_menu_x/y` is
-    // the popup origin in physical pixels; `context_menu_hover` is the
+    // the popup origin in the top-level logical viewport; `context_menu_hover` is the
     // 0-based index of the highlighted item or -1.
     View* context_menu_target;     // text control the menu acts upon
     float context_menu_x;
@@ -4211,7 +4218,7 @@ typedef struct EventContext {
  * Returns the character offset closest to the click position
  */
 int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
-    TextRect* rect, int mouse_x, int mouse_y);
+    TextRect* rect, float mouse_x, float mouse_y);
 
 void view_to_absolute_position(View* view, float rel_x, float rel_y,
     float iframe_offset_x, float iframe_offset_y,

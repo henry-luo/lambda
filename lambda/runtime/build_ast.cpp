@@ -4776,9 +4776,11 @@ AstNode* build_function_return_contract_node_from_span(Transpiler* tp,
 
 // todo: build reference type
 
-static ShapeEntry* build_map_shape_entry(Transpiler* tp, AstNode* item,
+static ShapeEntry* build_map_shape_entry(Transpiler* tp, TypeMap* owner, AstNode* item,
                                          bool is_spread, bool normalize_type) {
     ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+    // a nameless slot makes owner->length stop counting fields; see TypeMap::has_spread
+    if (is_spread && owner) owner->has_spread = true;
     if (!is_spread) {
         String* pooled_name = ((AstNamedNode*)item)->name;
         StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
@@ -4846,7 +4848,7 @@ AstNode* build_map_from_items(Transpiler* tp, SourceSpan span,
         else { prev_item->next = item; }
         prev_item = item;
 
-        ShapeEntry* shape_entry = build_map_shape_entry(tp, item, is_spread, true);
+        ShapeEntry* shape_entry = build_map_shape_entry(tp, type, item, is_spread, true);
         // Only syntactic type expressions produce a first-class Type* field.
         // Ordinary calls can carry a TypeType-shaped abstract contract while
         // still returning an Item; treating that carrier as `type` makes a
@@ -8423,7 +8425,7 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
                 if (!node->item) node->item = item;
                 else prev->next = item;
                 prev = item;
-                ShapeEntry* shape = build_map_shape_entry(tp, item, spread, false);
+                ShapeEntry* shape = build_map_shape_entry(tp, type, item, spread, false);
                 shape->byte_offset = byte_offset;
                 if (!prev_shape) type->shape = shape;
                 else prev_shape->next = shape;

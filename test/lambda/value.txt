@@ -39,10 +39,10 @@ nan
 <elmt a: 123>
 <elmt
   "text">
-<elmt a: 123
+<elmt a: 123,
   "text"
   111>
-<elmt a: 123, b: 'symbol', c: <d>
+<elmt a: 123, b: 'symbol', c: <d>,
   "text"
   222
   <br>
@@ -62,12 +62,12 @@ nan
   <br>
   <br>
   "test and more text!">
-<body a: 'b', b: 123, c: true
+<body a: 'b', b: 123, c: true,
   123
   "text"
-  <div b: 123, c: true
+  <div b: 123, c: true,
     "test"
-    <span b: 123, c: true
+    <span b: 123, c: true,
       "test"
       123
       "a">

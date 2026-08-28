@@ -209,8 +209,8 @@ void context_menu_render(RenderContext* rdcon, DocState* state) {
     if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->surface) return;
 
     float s = rdcon->scale;
-    float x = state->context_menu_x;
-    float y = state->context_menu_y;
+    float x = state->context_menu_x * s;
+    float y = state->context_menu_y * s;
     float w = state->context_menu_width  * s;
     float ih = CTX_MENU_ITEM_HEIGHT * s;
     float h = state->context_menu_height * s;

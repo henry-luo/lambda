@@ -2257,6 +2257,9 @@ extern "C" {
     bool path_is_property_name(const char* key);
     Item path_property_get(Path* path, const char* key);  // built-in Path properties (shared by fn_member/item_attr)
     SymbolKeyList* item_keys(Item data);     // get typed list of Symbol* attribute names
+    // Distinct-key field count of map-shaped storage (flattens spread slots,
+    // dedupes duplicate names) — the count for-iteration performs (S8.3.1).
+    int64_t map_flat_field_count(struct TypeMap* map_type, void* map_data);
     SymbolKeyList* symbol_key_list_new(int64_t initial_capacity);
     bool symbol_key_list_append(SymbolKeyList* keys_ptr, Symbol* symbol);
     int64_t symbol_key_list_len(void* keys_ptr);

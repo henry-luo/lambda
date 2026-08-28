@@ -264,7 +264,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url,
-    int viewport_width, int viewport_height, float pixel_ratio,
+    int viewport_width, int viewport_height,
     const DocumentJsHostConfig* js_host_config);
 
 // Element-to-DOM map functions (from dom_element.cpp, Phase 12)
@@ -2497,7 +2497,7 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
 }
 
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int viewport_width,
-                                              int viewport_height, float pixel_ratio,
+                                              int viewport_height,
                                               const DocumentJsHostConfig* js_host_config) {
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
@@ -2535,7 +2535,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
 }
 
 DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height,
-                           float pixel_ratio, const DocumentJsHostConfig* js_host_config) {
+                           const DocumentJsHostConfig* js_host_config) {
     const int max_redirects = 8;
     Url* current_base = base;
     char* current_doc_url = doc_url;
@@ -2543,7 +2543,7 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
 
     for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
         DomDocument* doc = load_html_doc_no_redirect(current_base, current_doc_url,
-            viewport_width, viewport_height, pixel_ratio, js_host_config);
+            viewport_width, viewport_height, js_host_config);
         if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
             if (owned_doc_url) mem_free(owned_doc_url);
             return doc;

@@ -2,6 +2,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <math.h>
 #include "view.hpp"
 #include "../lambda/input/css/css_value.hpp"
 
@@ -47,7 +48,8 @@ void font_prop_release_handle(FontProp* fprop) {
 
 static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
                                      const char* family,
-                                     FontWeight weight, FontSlant slant) {
+                                     FontWeight weight, FontSlant slant,
+                                     float pixel_ratio) {
     if (!handle || !fprop || !family) return false;
     const char* handle_family = NULL;
     float handle_size = 0.0f;
@@ -70,6 +72,8 @@ static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
 #endif
     return family_matches &&
         handle_size == font_prop_used_size(fprop) &&
+        fabsf(font_handle_get_physical_size_px(handle) -
+              font_prop_used_size(fprop) * pixel_ratio) <= 0.0001f &&
         handle_weight == weight &&
         handle_slant == slant;
 }
@@ -132,7 +136,9 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     style.weight  = fw;
     style.slant   = fs;
 
-    if (font_handle_matches_prop(fprop->font_handle, fprop, family, fw, fs)) {
+    float pixel_ratio = uicon->pixel_ratio > 0.0f ? uicon->pixel_ratio : 1.0f;
+    if (font_handle_matches_prop(fprop->font_handle, fprop, family, fw, fs,
+                                 pixel_ratio)) {
         populate_font_prop_metrics(uicon, fprop, fprop->font_handle, &style);
         return;
     }

@@ -130,7 +130,7 @@ Item js_ctor_static_range_fn(Item init);
 // js_dom_events independent of radiant/event.hpp's RDT_MOD_* layout.
 // ============================================================================
 Item js_create_native_mouse_event(const char* type,
-    int client_x, int client_y,
+    double client_x, double client_y,
     int button, int buttons,
     bool ctrl, bool shift, bool alt, bool meta,
     int detail, Item related_target);
@@ -139,7 +139,7 @@ Item js_create_native_mouse_event(const char* type,
 void js_event_set_timestamp(Item event, double timestamp_ms);
 
 Item js_create_native_pointer_event(const char* type,
-    int client_x, int client_y,
+    double client_x, double client_y,
     int button, int buttons,
     bool ctrl, bool shift, bool alt, bool meta,
     const char* pointer_type, int pointer_id, bool is_primary);
@@ -159,7 +159,7 @@ Item js_create_native_composition_event(const char* type,
     const char* data);
 
 Item js_create_native_wheel_event(const char* type,
-    int client_x, int client_y,
+    double client_x, double client_y,
     double delta_x, double delta_y,
     int buttons,
     bool ctrl, bool shift, bool alt, bool meta);
@@ -170,7 +170,7 @@ Item js_create_native_wheel_event(const char* type,
 // is the single session DataTransfer shared across the whole gesture so
 // setData() in dragstart is visible to getData() in drop (browser-faithful).
 Item js_create_native_drag_event(const char* type,
-    int client_x, int client_y, Item data_transfer,
+    double client_x, double client_y, Item data_transfer,
     bool ctrl, bool shift, bool alt, bool meta);
 
 // CE-3 (Radiant_Design_Content_Editable.md §6): native InputEvent factory.

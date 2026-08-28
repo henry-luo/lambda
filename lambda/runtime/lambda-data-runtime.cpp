@@ -2971,6 +2971,75 @@ Item item_attr(Item data, const char* key) {
     }
 }
 
+// A spread slot is a nameless ShapeEntry holding a raw Map* link (see
+// _map_get_keyed); the map's FIELDS are the flattened walk through those links.
+// Map keys are unique, so only a spread can reintroduce a name already written
+// directly (`{*:base, p: 100}`) — a legitimate override whose first occurrence
+// fixes the position while the last writer supplies the value, matching the
+// read walkers. That is the only case needing this scan, so it runs solely
+// under has_spread; a shape without one is unique by construction.
+static bool symbol_key_list_contains_name(SymbolKeyList* keys_ptr,
+                                          const char* chars, size_t length) {
+    int64_t n = symbol_key_list_len(keys_ptr);
+    for (int64_t i = 0; i < n; i++) {
+        Symbol* sym = symbol_key_list_at(keys_ptr, i);
+        if (sym && (size_t)sym->len == length &&
+                memcmp(sym->chars, chars, length) == 0) return true;
+    }
+    return false;
+}
+
+// Spread walk. Always dedupes, including through recursion: a spread target is
+// itself an ordinary unique-keyed map, but its names can collide with the ones
+// the outer shape already contributed, so it must still be checked against what
+// has been collected so far rather than appended straight through.
+static void map_collect_spread_keys(SymbolKeyList* keys, TypeMap* map_type,
+                                    void* map_data) {
+    FOR_EACH_MAP_FIELD(map_type, field) {
+        if (!field->name) {
+            // spread slot: splice the linked map's fields in at this position
+            Map* nested = map_data ? map_shape_field_to_map(map_data, field) : NULL;
+            if (nested && nested->type_id == LMD_TYPE_MAP) {
+                map_collect_spread_keys(keys, (TypeMap*)nested->type, nested->data);
+            }
+            continue;
+        }
+        StrView* sv = field->name;
+        if (symbol_key_list_contains_name(keys, sv->str, sv->length)) continue;
+        Symbol* sym = heap_create_symbol(sv->str, sv->length);
+        symbol_key_list_append(keys, sym);
+    }
+}
+
+static void map_collect_flat_keys(SymbolKeyList* keys, TypeMap* map_type,
+                                  void* map_data) {
+    if (map_type && !map_type->has_spread) {
+        // no spread: every entry is named and keys are unique, so append straight through
+        FOR_EACH_MAP_FIELD(map_type, field) {
+            if (!field->name) continue;
+            StrView* sv = field->name;
+            symbol_key_list_append(keys, heap_create_symbol(sv->str, sv->length));
+        }
+        return;
+    }
+    map_collect_spread_keys(keys, map_type, map_data);
+}
+
+// Field count of map-shaped storage: the number of distinct keys the flattened
+// shape walk yields — the count `for (k, v in m)` iterates, which S8.3.1 pins
+// `len()` to. Without a spread, `length` already IS that count (keys are
+// unique), so the common map pays nothing; only a spread shape walks.
+extern "C" int64_t map_flat_field_count(TypeMap* map_type, void* map_data) {
+    if (!map_type) return 0;
+    if (!map_type->has_spread) return map_type->length;
+    SymbolKeyList* keys = symbol_key_list_new(map_type->length);
+    if (!keys) return map_type->length;
+    map_collect_flat_keys(keys, map_type, map_data);
+    int64_t count = symbol_key_list_len(keys);
+    symbol_key_list_free(keys);
+    return count;
+}
+
 // Get list of attribute/field names from an Item
 SymbolKeyList* item_keys(Item data) {
     if (!data.item) { return NULL; }
@@ -2995,14 +3064,10 @@ SymbolKeyList* item_keys(Item data) {
         Map* map = data.map;
         TypeMap* map_type = (TypeMap*)map->type;
         SymbolKeyList* keys = symbol_key_list_new(map_type->length);
-        FOR_EACH_MAP_FIELD(map_type, field) {
-            if (field->name) {
-                // Convert StrView to Symbol for the transpiled code
-                StrView* sv = field->name;
-                Symbol* sym = heap_create_symbol(sv->str, sv->length);
-                symbol_key_list_append(keys, sym);
-            }
-        }
+        // spread-built maps hold nameless Map* link slots; flatten so
+        // iteration sees every field exactly once — skipping them dropped the
+        // spread's whole key set from every for-loop
+        map_collect_flat_keys(keys, map_type, map->data);
         return keys;
     }
     case LMD_TYPE_VMAP: {
@@ -3018,14 +3083,9 @@ SymbolKeyList* item_keys(Item data) {
         Element* elmt = data.element;
         TypeMap* elmt_type = (TypeMap*)elmt->type;
         SymbolKeyList* keys = symbol_key_list_new(elmt_type->length);
-        FOR_EACH_MAP_FIELD(elmt_type, field) {
-            if (field->name) {
-                // Convert StrView to Symbol for the transpiled code
-                StrView* sv = field->name;
-                Symbol* sym = heap_create_symbol(sv->str, sv->length);
-                symbol_key_list_append(keys, sym);
-            }
-        }
+        // attribute spread (`<el *:attrs>`) uses the same nameless link slots
+        // as map spread; flatten identically
+        map_collect_flat_keys(keys, elmt_type, elmt->data);
         return keys;
     }
     default:

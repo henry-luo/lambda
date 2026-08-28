@@ -4711,9 +4711,13 @@ int64_t fn_len(Item item) {
         // were hardcoded to 0, which made `len(m)` disagree with the loop that
         // ranges over the same map, and made a populated map compare equal to
         // an empty one through `len`. OBJECT extends MAP and shares the shape.
+        // The raw shape length is NOT that count for spread-built maps: a
+        // spread is one nameless link slot covering many fields, so
+        // `len({*:m, w:5})` reported 2 for a 4-field map. Count the flattened
+        // distinct keys instead — the walk iteration itself uses (S8.3.1).
         Map* map = item.map;
         TypeMap* map_type = map ? (TypeMap*)map->type : NULL;
-        size = map_type ? map_type->length : 0;
+        size = map_type ? map_flat_field_count(map_type, map->data) : 0;
         break;
     }
     case LMD_TYPE_VMAP: {
@@ -8096,6 +8100,8 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     new_type->length = old_count + 1;
     new_type->byte_size = new_size;
     new_type->type_index = ((ArrayList*)context->type_list)->length;
+    // the copied chain above carries old_type's entries verbatim, spread slots included
+    new_type->has_spread = old_type->has_spread;
     new_type->has_named_shape = old_type->has_named_shape;
     new_type->is_trusted_contract = false;
     new_type->struct_name = old_type->struct_name;
