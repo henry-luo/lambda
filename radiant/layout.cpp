@@ -4568,14 +4568,13 @@ static void layout_store_last_remembered_sizes(DomNode* node) {
                 remembered_height += fragment->height;
             }
         }
-        // Intrinsic inline-size substitution consumes a content-box contribution;
-        // retaining the border-box width made every hidden layout add horizontal
-        // padding and borders a second time. The remembered block size stays the
-        // fragmented border-box extent consumed by the hidden-flow path.
+        // CSS Sizing 4 remembers the principal box's inner dimensions; fragment
+        // aggregation reconstructs its border box, so remove each boundary once.
         ViewBlock* remembered_block = lam::unsafe_view_block_element_storage(element);
         remembered_width = layout_content_size_from_border_box(
             remembered_block, remembered_width, true);
-        // first fragment's clipped border box; hidden sizing otherwise loses
+        remembered_height = layout_content_size_from_border_box(
+            remembered_block, remembered_height, false);
         if (element->block()->contain_intrinsic_width_auto) {
             element->set_last_remembered_width(remembered_width);
         }

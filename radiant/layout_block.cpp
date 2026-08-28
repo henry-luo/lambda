@@ -440,6 +440,27 @@ static ContainIntrinsicUsedAxes apply_contain_intrinsic_used_size(LayoutContext*
         has_intrinsic.x ? block->block()->contain_intrinsic_width : empty_size.x,
         has_intrinsic.y ? block->block()->contain_intrinsic_height : empty_size.y
     };
+    DomElement* element = block->is_element() ? block->as_element() : nullptr;
+    LayoutAxisPair<bool> uses_remembered_size = {
+        block->block()->content_visibility_hidden &&
+            block->block()->contain_intrinsic_width_auto && element &&
+            element->has_last_remembered_width(),
+        block->block()->content_visibility_hidden &&
+            block->block()->contain_intrinsic_height_auto && element &&
+            element->has_last_remembered_height()
+    };
+    LayoutAxisPair<float> remembered_size = {
+        element ? element->last_remembered_width() : 0.0f,
+        element ? element->last_remembered_height() : 0.0f
+    };
+    for (LayoutAxis axis : layout_axes()) {
+        if (uses_remembered_size[axis]) {
+            // A skipped box substitutes its remembered inner size before normal
+            // size-containment conversion adds padding and borders.
+            has_intrinsic[axis] = true;
+            intrinsic_size[axis] = remembered_size[axis];
+        }
+    }
     LayoutAxisPair<bool> used = {};
     for (LayoutAxis axis : layout_axes()) {
         if (has_size_containment[axis] && uses_empty_fallback[axis] && ratio_can_determine[axis]) {
@@ -8223,6 +8244,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         lycon->block.advance_y = max(lycon->block.advance_y, line_height);
     }
     layout_block_inner_content(lycon, block);
+    if (block->bound && !is_float &&
+        block->display.outer != CSS_VALUE_INLINE_BLOCK &&
+        block->display.outer != CSS_VALUE_INLINE &&
+        (block->boundary()->margin.left_type == CSS_VALUE_AUTO ||
+         block->boundary()->margin.right_type == CSS_VALUE_AUTO)) {
+        // Multipass content can finalize an auto width after initial positioning;
+        // resolve block auto margins against that final border-box width.
+        float margin_available = pa_block->content_width - bfc_available_width_reduction;
+        layout_resolve_auto_margins_after_width_change(
+            block, margin_available, is_float);
+    }
     if (closed_details_contents) {
         // The collapsed details box clips its used height to the control line;
         // descendants remain laid out as visible overflow after that line.
