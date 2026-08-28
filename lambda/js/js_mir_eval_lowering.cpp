@@ -154,6 +154,8 @@ static void js_dynfunc_apply_function_metadata(Item fn_item, Item* args, int arg
 static bool js_source_contains_import_meta(const char* source, size_t len);
 static bool js_dynamic_function_source_has_hashbang(const char* source, size_t len);
 static bool js_dynamic_function_param_has_invalid_html_close_comment(const char* source, size_t len);
+static void js_dynamic_function_append_normalized_params(StrBuf* out,
+    const char* source, size_t len);
 static bool js_eval_at_line_terminator(const char* source, size_t len, size_t pos, size_t* width);
 
 static Item js_dynamic_function_throw_syntax_error(const char* message) {
@@ -643,7 +645,10 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
                 strbuf_free(sb);
                 return js_dynamic_function_throw_syntax_error("Unexpected token '-->'");
             }
-            strbuf_append_str_n(sb, ps->chars, (int)ps->len);
+            // The parser receives a function-expression wrapper, where a
+            // valid Annex-B close comment is not recognized in parameter
+            // grammar context. Remove the already-validated comment line.
+            js_dynamic_function_append_normalized_params(sb, ps->chars, ps->len);
         }
     }
     // Newline before ) is required by spec §20.2.1.1 to handle params ending with // comment
@@ -1132,11 +1137,16 @@ JS_FORWARD_STATIC_EXPRESSION(bool, js_dynamic_function_source_has_hashbang,
     (const char* source, size_t len),
     source && len >= 2 && source[0] == '#' && source[1] == '!')
 
-static bool js_dynamic_function_param_has_line_terminator_before(const char* source, size_t pos) {
-    for (size_t i = 0; i < pos; i++) {
-        if (source[i] == '\n' || source[i] == '\r') return true;
-    }
-    return false;
+static bool js_dynamic_function_param_html_close_comment_starts_line(const char* source,
+        size_t len, size_t pos) {
+    // Dynamic-function parameter parsing requires an actual preceding line
+    // terminator; source offset zero is not a valid HTML close comment here.
+    if (!source || pos == 0 || pos > len) return false;
+    size_t prior = pos - 1;
+    if (source[prior] == '\n' || source[prior] == '\r') return true;
+    return prior >= 2 && (unsigned char)source[prior - 2] == 0xE2 &&
+        (unsigned char)source[prior - 1] == 0x80 &&
+        ((unsigned char)source[prior] == 0xA8 || (unsigned char)source[prior] == 0xA9);
 }
 
 static bool js_dynamic_function_param_has_invalid_html_close_comment(const char* source, size_t len) {
@@ -1149,12 +1159,38 @@ static bool js_dynamic_function_param_has_invalid_html_close_comment(const char*
         }
         char ch = source[pos];
         if (ch == '-' && pos + 2 < len && source[pos + 1] == '-' && source[pos + 2] == '>') {
-            if (!js_dynamic_function_param_has_line_terminator_before(source, pos)) return true;
+            if (!js_dynamic_function_param_html_close_comment_starts_line(source, len, pos)) {
+                return true;
+            }
             pos += 2;
         }
     }
 
     return false;
+}
+
+static void js_dynamic_function_append_normalized_params(StrBuf* out,
+        const char* source, size_t len) {
+    if (!out || !source) return;
+    size_t copied_start = 0;
+    for (size_t pos = 0; pos < len;) {
+        size_t skipped_end = pos;
+        if (js_eval_skip_string_or_comment(source, len, &skipped_end)) {
+            pos = skipped_end;
+            continue;
+        }
+        if (pos + 2 < len && source[pos] == '-' && source[pos + 1] == '-' &&
+                source[pos + 2] == '>' &&
+                js_dynamic_function_param_html_close_comment_starts_line(source, len, pos)) {
+            strbuf_append_str_n(out, source + copied_start, (int)(pos - copied_start));
+            pos += 3;
+            while (pos < len && !js_eval_at_line_terminator(source, len, pos, NULL)) pos++;
+            copied_start = pos;
+            continue;
+        }
+        pos++;
+    }
+    strbuf_append_str_n(out, source + copied_start, (int)(len - copied_start));
 }
 
 typedef struct JsEvalInitializerScan {
@@ -1586,7 +1622,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         // Indirect eval is global code, so it has no caller-local bridge to
         // preserve. Keep it in the selected AST tier instead of mixing AST
         // callbacks with a separately-owned JIT library image.
-        return js_interp_execute_source(js_current_runtime(), code_str->chars,
+        return js_interp_execute_indirect_eval_source(js_current_runtime(), code_str->chars,
             code_str->len, eval_filename, NULL);
     }
 
@@ -1849,6 +1885,15 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
                 // eval update only a disposable copied module state instead of
                 // defining/updating the realm-global binding.
                 js_install_realm_global_preamble(mt, tp);
+            }
+        }
+        if (is_direct_eval && !is_vm_global_context) {
+            uint32_t active_var_count = js_active_module_var_count();
+            if (active_var_count > (uint32_t)mt->preamble_var_count) {
+                // An AST caller owns a live slab but no MIR preamble snapshot.
+                // Reserve that prefix so eval's private compiler slots append
+                // after caller bindings instead of overwriting them.
+                mt->preamble_var_count = (int)active_var_count;
             }
         }
 

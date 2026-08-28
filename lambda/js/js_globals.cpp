@@ -12086,7 +12086,9 @@ static Item js_delete_map_property(Item obj, Item key, bool strict) {
             js_shape_entry_update_flags_name_id(obj, identity_id, JSPD_DELETED, 0);
             return (Item){.item = b2it(true)};
         }
-        if (str_key && str_key->len > 0 && str_key->len < 200) {
+        if (str_key && str_key->len < 200) {
+            // The empty string is an ordinary PropertyKey (JSON's root
+            // holder uses it), so it must take the same descriptor path.
             // Phase 2c fast path: consult ShapeEntry::flags first.
             int fp = js_prop_attrs_fast_path(obj, str_key->chars, (int)str_key->len, JSPD_NON_CONFIGURABLE);
             bool is_nc = false;
@@ -12132,7 +12134,7 @@ static Item js_delete_map_property(Item obj, Item key, bool strict) {
 #endif
     if (m && get_type_id(key) == LMD_TYPE_STRING) {
         String* str_key = it2s(key);
-        if (str_key && str_key->len > 0) {
+        if (str_key) {
             if (map_type && map_type->shape) {
                 js_shape_mark_deleted_own(obj, str_key->chars, (int)str_key->len,
                                            false);
@@ -14574,6 +14576,12 @@ extern "C" int64_t js_global_binding_exists(Item key) {
         if (found) return 1;
         if (item_is_error(with_result)) return 0;
     }
+    // Script global lexical declarations are bindings in the realm record,
+    // not properties on globalThis. Later classic Scripts (including a
+    // Test262 test after its harness) must find them before probing the
+    // object environment.
+    if (js_eval_global_lexical_has_binding(key) ||
+            js_global_lexical_binding_exists(key)) return 1;
     Item global = js_get_global_this();
     Item exists = js_in(key, global);
     if (item_is_error(exists)) return 0;

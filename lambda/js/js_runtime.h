@@ -279,6 +279,8 @@ Item js_set_name_id(Item object, NameId name_id, Item value, int64_t strict);
 // =============================================================================
 
 Item js_array_new(int length);
+// Preserve array-literal elisions as absent indexed properties.
+Item js_array_hole(void);
 // Allocate an array with an explicit immutable JS class carrier for branded
 // array-backed host objects such as FileList.
 Item js_array_new_with_class(int length, int class_id);
@@ -323,6 +325,11 @@ Item js_new_closure_mir(void* func_ptr, int param_count, Item* env, int env_size
 struct AstFuncNode;
 struct JsScript;
 struct JsInterpEnv;
+// Return the source text mandated by Function.prototype.toString for a parsed
+// method/function node. Both MIR and AST execution use this canonical trimming.
+bool js_function_source_span(const char* source, size_t source_length,
+                             const struct AstFuncNode* function,
+                             const char** text_out, uint32_t* length_out);
 Item js_new_interpreted_function(struct AstFuncNode* function,
                                  struct JsScript* script,
                                  struct JsInterpEnv* environment,
@@ -783,6 +790,7 @@ bool js_ensure_active_module_var_capacity(uint32_t required_var_count);
 uint32_t js_get_active_module_state_id(void);
 bool js_set_active_module_state_id(uint32_t module_state_id);
 bool js_module_state_is_available(uint32_t module_state_id);
+uint32_t js_active_module_var_count(void);
 uint64_t js_active_module_name_id(uint32_t index);
 Item js_active_module_name_item(uint32_t module_name_index, NameId direct_name_id);
 uint32_t js_active_module_name_count(void);

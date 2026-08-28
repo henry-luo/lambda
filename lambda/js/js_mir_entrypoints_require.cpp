@@ -657,12 +657,6 @@ static size_t js_commonjs_injection_offset(const char* source, size_t source_len
     return i;
 }
 
-bool js_ast_interpreter_requested(void) {
-    const char* backend = getenv("JS_EXECUTION_BACKEND");
-    return backend && (strcmp(backend, "ast") == 0 ||
-        strcmp(backend, "interpreter") == 0);
-}
-
 static bool js_ast_is_es_module(JsAstNode* ast) {
     JsProgramNode* program = ast && ast->node_type == JS_AST_NODE_PROGRAM
         ? (JsProgramNode*)ast : NULL;
