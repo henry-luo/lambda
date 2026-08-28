@@ -2226,10 +2226,6 @@ static Item event_target_get_idl_handler(Item target, const char* type) {
     if (target.item == 0 || !type) return ItemNull;
     void* key = get_event_target_key(target);
     EventHandlerSlot* slot = find_handler_slot(key, type);
-    log_debug("[EVENT_PROP_TRACE] lookup %s target=%p key=%p slot=%p active=%d root=%p",
-              type, js_dom_unwrap_element(target), key, (void*)slot,
-              slot ? (int)slot->active : 0,
-              slot ? (void*)slot->callback_root : nullptr);
     if (slot && slot->active && slot->callback_root) {
         Item rooted_handler = event_listener_root_item(slot->callback_root);
         if (js_is_callable(rooted_handler)) return rooted_handler;
@@ -2737,8 +2733,6 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
 
 void js_dom_events_reset(void) {
     if (!js_dom_event_runtime_state_get()) return;
-    log_debug("[EVENT_PROP_TRACE] events reset entries=%d handlers=%d",
-              _entry_count, _handler_slot_count);
     for (int i = 0; i < _entry_count; i++) {
         NodeListeners* nl = &_entries[i].listeners;
         for (int j = 0; j < nl->count; j++) {

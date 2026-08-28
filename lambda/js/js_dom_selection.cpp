@@ -1355,11 +1355,8 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     if (!js_active_runtime_state) return;
     if (!js_input || !js_input->pool) return;
     DomDocument* doc = elem->doc;
-    log_debug("[EVENT_PROP_TRACE] queue start node=%p doc=%p state=%p",
-              (void*)elem, (void*)doc, doc ? (void*)doc->state : nullptr);
     JsDocRuntimeScope scope;
     if (!js_doc_runtime_enter_if_needed(doc, &scope)) {
-        log_debug("[EVENT_PROP_TRACE] queue rejected node=%p", (void*)elem);
         return;
     }
     DocState* state = get_or_create_state();
@@ -1379,17 +1376,12 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     DomNodeRef pending_ref = dom_node_ref((DomNode*)elem);
     if (!doc || !dom_node_ref_validate(doc, pending_ref) ||
         !dom_node_pin(doc, pending_ref, DOM_NODE_PIN_EVENT_QUEUE)) {
-        log_debug("[EVENT_PROP_TRACE] queue pin rejected node=%p", (void*)elem);
         js_doc_runtime_exit(&scope);
         return;
     }
     task_state->selectionchange_event_pending = 1;
     task_state->selectionchange_event_next = state->tc_selectionchange_head;
     state->tc_selectionchange_head = elem;
-    log_debug("[EVENT_PROP_TRACE] queue linked node=%p head=%p scheduled=%d next=%p",
-              (void*)elem, (void*)state->tc_selectionchange_head,
-              state->tc_selectionchange_drain_scheduled,
-              (void*)task_state->selectionchange_event_next);
     if (state->tc_selectionchange_drain_scheduled) {
         js_doc_runtime_exit(&scope);
         return;
@@ -1411,9 +1403,6 @@ extern "C" void js_dom_selection_reset(void) {
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     if (!doc || !doc->state) return;
     DocState* state = doc->state;
-    log_debug("[EVENT_PROP_TRACE] selection reset head=%p scheduled=%d",
-              (void*)state->tc_selectionchange_head,
-              state->tc_selectionchange_drain_scheduled);
     DomElement* pending = state->tc_selectionchange_head;
     while (pending) {
         DomElementExt* task_state = pending->ext;
