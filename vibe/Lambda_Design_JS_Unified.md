@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-28
 
-**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, P2a–P2b shared function identity, and the P2c lowering-binding handoff are verified; P0b, P1e, the P2c dense identity graph, and P3–P6 remain proposed.
+**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, P2a–P2b shared function identity, and P2c identity publication/lowering handoff are verified; P0b, P1e, the remaining P2c use/definition graph, and P3–P6 remain proposed.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -147,7 +147,7 @@ Before P1b, the language-dependent assignment interpretation violated **D8.2.2**
 
 ### 2.3 Binding is decided, rediscovered, and repaired
 
-The JS builder predeclares bindings, looks up identifiers during CST construction, and writes `AstIdentNode::entry` and `AstNode::type`. MIR lowering later calls `js_scope_lookup()` again. It contains explicit shadow checks because the AST builder's current scope is stale during lowering.
+The JS builder predeclares bindings, looks up identifiers during CST construction, and writes `AstIdentNode::entry` and `AstNode::type`. The indexed post-build pass now publishes dense binding, scope, and class IDs; MIR lowering consumes those IDs instead of rebuilding compiler scope state. Builder lookup remains name-based only while the CST is being constructed.
 
 Lambda likewise performs substantial binding and inference during direct AST reduction. Both lanes use `NameScope` and `NameEntry`, but neither exposes the complete stable identity graph required by **D8.2.4**.
 
@@ -160,7 +160,7 @@ This has four costs:
 
 ### 2.4 `AstIndex` is a scaffold, not yet the authority
 
-The live `AstIndex` assigns dense node and function IDs and records parent and owner-function links. It does not yet assign scope, binding, or class IDs; function IDs have no production consumers outside index construction.
+The live `AstIndex` assigns dense node, function, scope, binding, and class IDs and records parent and owner-function links. Common AST scopes, resolved `NameEntry` bindings, and class nodes are now published through one table; use/definition edges and language-extension scope publication remain open. Function IDs are consumed by JS MIR; binding IDs are consumed by direct-call and Test262 assertion lowering.
 
 JavaScript separately counts functions/classes, walks again to populate exact-sized metadata, builds a pointer-keyed function index, and stores another `FnAnalysis` inside `JsFuncCollected`. The comment in `transpile_js_mir_ast()` explicitly treats the shared function count as only an upper-bound hint.
 
@@ -410,7 +410,7 @@ The cumulative numbers below are measured from the project-specific anchor, not 
 |---|---|---|---:|
 | P0 | P0a counters complete; P0b catalog assertions and timing manifests pending | stale assertions/helpers and any superseded catalog test code | `0` |
 | P1 | P1a iterator-for, P1b declarator, P1c assignment/declaration-wrapper, and P1d condition-loop layouts complete | private loop-layout casts, Lambda declaration-as-assignment casts, duplicate assignment/wrapper structs, old condition-loop tags, and migrated core-child cases | `-110` |
-| P2 | P2a/P2b source and synthetic `FunctionId` authority plus the P2c lowering-binding handoff landed; remaining scope/binding/class IDs and one binding/index graph | lowering name repair, pointer indexes, lookup caches made obsolete, repeated identity walks | `<= -500` |
+| P2 | P2a/P2b source and synthetic `FunctionId` authority plus P2c binding/scope/class ID publication and lowering handoff landed; remaining use/definition graph | lowering name repair, pointer indexes, builder lookup cache, repeated identity walks | `<= -500` |
 | P3 | one compilation unit, typed pass schedule, and one compile lifecycle | duplicated parse/build/validate/index/link/cleanup orchestration and false fact publication | `<= -800` |
 | P4 | `FunctionId`-owned analysis and graph worklists | duplicate `JsFuncCollected` analysis, count/fill scans, per-pass AST caches and propagation loops | `<= -1,200` |
 | P5 | full-contract `MirValue` core and shared structural MIR lowering | corresponding Lambda/JS bare-register cases, duplicate structural statement/expression/call plumbing | `<= -2,100` |
@@ -653,11 +653,12 @@ make build-release-compile                            # Errors: 0, Warnings: 37;
 git diff --check                                     # clean
 ```
 
-P2c now owns the lowering binding handoff; no callable identity fallback or
-compiler-time scope re-resolution remains in normal indexed compilation. Dense
-scope/binding/class IDs and the shared binding graph are the remaining P2c work.
+P2c now owns dense identity publication and the lowering binding handoff; no
+callable identity fallback or compiler-time scope re-resolution remains in
+normal indexed compilation. Shared use/definition edges and JavaScript
+extension-scope publication are the remaining P2c graph work.
 
-#### P2c implementation record — lowering binding handoff, 2026-08-28
+#### P2c implementation record — binding handoff and identity publication, 2026-08-28
 
 **D8.2.4** requires lowering to consume resolved binding identity rather than
 rebuild compiler scope state. P2c makes the AST builder's `AstIdentNode::entry`
@@ -667,21 +668,26 @@ indexed unit is sealed, and the stale-scope parameter/capture repair scan is
 deleted. Runtime dynamic lookup remains in the JS runtime; this change only
 removes compiler-time name re-resolution.
 
-The independent P2c slice is C/C++ `+8/-75 = -67`; all hand source is also
-`+8/-75 = -67`. The governed candidate is 310,532 lines, 179 below the project
-anchor and 9,074 below the formal anchor. The remaining P2c work is the dense
-`ScopeId`/`BindingId`/`ClassId` graph and shared use/definition publication; the
-builder-only lookup cache stays until those consumers migrate.
+The independent P2c identity slice is C/C++ `+128/-130 = -2`; all hand source
+is also `+128/-130 = -2`. The governed candidate is 310,530 lines, 181 below
+the project anchor and 9,076 below the formal anchor. `AstIndex` now owns the
+dense `ScopeId`/`BindingId`/`ClassId` tables for common scope nodes, resolved
+name entries, and class nodes; migrated MIR call paths dereference binding IDs.
+The retired implementation is `JsScopeLookupCacheEntry`, its hash/compare and
+enable/clear/free paths, plus the duplicate `jm_current_param_pattern_declares`
+pattern walk. The surviving builder owner is direct `js_scope_lookup`; no
+post-build consumer uses a name cache.
+The shared use/definition graph and JS extension-scope publication remain open.
 
 Focused evidence:
 
 ```text
-make build                                           # Errors: 0, Warnings: 12
+make build                                           # Errors: 0; no warnings in changed files
 ./test/test_js_gtest.exe                             # 357/357 passed
 ./test/test_js_opt_gtest.exe                         # 19/19 passed
 P2c shadow/closure/direct-call fixtures              # all passed in JS suite
 ! rg 'js_scope_lookup\(' lambda/js/js_mir*          # no MIR compiler lookup
-./utils/check_ast_tune_loc.sh ... --cap 310690      # C/C++ -179; source -195; candidate -179
+./utils/check_ast_tune_loc.sh ... --cap 310532      # C/C++ -2; source -2; candidate -2
 git diff --check                                     # clean
 ```
 

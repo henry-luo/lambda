@@ -60,7 +60,6 @@ typedef enum JsScopeType {
 struct JsScript : Script {
     size_t source_length;           // source byte count; adopted Script owns source bytes
     JsScope* global_scope;          // JS global/module lexical scope root
-    struct hashmap* scope_lookup_cache; // post-build (scope,name) binding facts
     bool strict_mode;               // JS script/function strictness default
     // Module top levels use a private module slab. CJS remains non-strict,
     // while ES modules set both this bit and strict_mode.
@@ -126,7 +125,6 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
 // AST building functions (build_js_ast.cpp)
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root);
 void js_report_any_census(JsTranspiler* tp);
-void js_scope_lookup_cache_enable(JsTranspiler* tp);
 typedef struct JsAstIndexPassContext {
     JsTranspiler* transpiler;
     JsAstNode* root;
@@ -144,7 +142,6 @@ static inline JsAstNode* build_js_ast_indexed(JsTranspiler* tp, TSNode root) {
     // Publish the root before post-build passes attach indexed facts to it.
     tp->ast_root = (AstNode*)ast;
     js_report_any_census(tp);
-    js_scope_lookup_cache_enable(tp);
     JsAstIndexPassContext pass_context = {tp, ast};
     CompilerPassManager pass_manager;
     compiler_pass_manager_init(&pass_manager, COMPILER_FACT_AST |

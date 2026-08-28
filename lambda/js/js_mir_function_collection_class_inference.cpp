@@ -105,7 +105,8 @@ static JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
     // consume the binding resolved by the AST builder; MIR must not rebuild
     // compiler scope state after the indexed unit is sealed.
-    NameEntry* entry = id->entry;
+    AstBindingId binding_id = id->entry ? id->entry->binding_id : AST_BINDING_ID_INVALID;
+    NameEntry* entry = ast_index_binding(mt && mt->tp ? &mt->tp->ast_index : NULL, binding_id);
     if (!entry || !entry->node) return NULL;
 
     JsFunctionNode* fn = NULL;

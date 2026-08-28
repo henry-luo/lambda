@@ -270,8 +270,21 @@ typedef enum ScopeKind {
     SCOPE_KIND_BLOCK,
 } ScopeKind;
 
+// Stable compiler identities shared by binding and lowering passes.
+typedef uint32_t AstNodeId;
+typedef uint32_t AstFunctionId;
+typedef uint32_t AstScopeId;
+typedef uint32_t AstBindingId;
+typedef uint32_t AstClassId;
+#define AST_NODE_ID_INVALID UINT32_MAX
+#define AST_FUNCTION_ID_INVALID UINT32_MAX
+#define AST_SCOPE_ID_INVALID UINT32_MAX
+#define AST_BINDING_ID_INVALID UINT32_MAX
+#define AST_CLASS_ID_INVALID UINT32_MAX
+
 // entry in the name_stack
 struct NameEntry {
+    AstBindingId binding_id;
     String* name;
     AstNode* node;
     NameEntry* next;
@@ -334,6 +347,7 @@ typedef struct FnFramePlan {
 
 // name_scope
 struct NameScope {
+    AstScopeId scope_id;
     NameEntry* first;
     NameEntry* last;
     bool is_proc;
@@ -349,20 +363,17 @@ struct AstNode {
     SourceSpan source_span;
 };
 
-// Stable compiler identities and one authoritative child/index contract. The
-// index is deliberately representation-neutral: language profiles add only
-// extension children, while all core passes use these dense IDs.
-typedef uint32_t AstNodeId;
-typedef uint32_t AstFunctionId;
-#define AST_NODE_ID_INVALID UINT32_MAX
-#define AST_FUNCTION_ID_INVALID UINT32_MAX
-
+// One identity/index table for all post-parse passes. Language profiles add
+// extension children, while core passes consume these dense IDs.
 typedef void (*AstChildVisitor)(AstNode* child, AstNode* parent, void* ctx);
 
 typedef struct AstIndex {
     AstNode** nodes;
     AstNode** parents;
     AstFunctionId* owner_functions;
+    NameScope** scopes;
+    NameEntry** bindings;
+    AstNode** classes;
     // Dense function roots make FunctionId the shared authority for Lambda
     // and JS lowering instead of requiring each frontend to rescan nodes.
     AstNode** functions;
@@ -371,6 +382,9 @@ typedef struct AstIndex {
     uint32_t capacity;
     uint32_t function_count;
     uint32_t function_capacity;
+    uint32_t scope_count;
+    uint32_t binding_count;
+    uint32_t class_count;
     AstNode** slots;
     AstNodeId* slot_ids;
     uint32_t slot_capacity;
@@ -404,6 +418,9 @@ bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
                               const LangProfile* profile);
 void ast_index_destroy(AstIndex* index);
 AstNodeId ast_index_find(const AstIndex* index, const AstNode* node);
+NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
+NameScope* ast_index_scope(const AstIndex* index, AstScopeId id);
+AstNode* ast_index_class(const AstIndex* index, AstClassId id);
 #ifdef __cplusplus
 }
 #endif
@@ -946,6 +963,7 @@ typedef struct AstScript : AstNode {
 } AstScript;
 
 typedef struct AstClassNode : AstNode {
+    AstClassId class_id;
     String* name;
     AstNode* superclass;
     AstNode* body;

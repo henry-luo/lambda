@@ -277,7 +277,8 @@ static const JsTest262Intercept* jm_test262_lookup(const JsTest262Intercept* tab
 // the harness fast path. Dynamic Function parameters can be MIR locals with no
 // useful scope node, so the MIR var table is checked too.
 static bool jm_test262_assert_is_local(JsMirTranspiler* mt, JsIdentifierNode* id) {
-    NameEntry* entry = id ? id->entry : NULL;
+    AstBindingId binding_id = id && id->entry ? id->entry->binding_id : AST_BINDING_ID_INVALID;
+    NameEntry* entry = ast_index_binding(mt && mt->tp ? &mt->tp->ast_index : NULL, binding_id);
     if (entry && entry->node) return true;
     return jm_find_var(mt, "_js_assert") != NULL;
 }
@@ -368,7 +369,8 @@ static bool jm_is_test262_global_assert_identifier(JsMirTranspiler* mt, JsAstNod
         return false;
     }
     JsIdentifierNode* id = (JsIdentifierNode*)node;
-    NameEntry* assert_entry = id->entry;
+    AstBindingId binding_id = id->entry ? id->entry->binding_id : AST_BINDING_ID_INVALID;
+    NameEntry* assert_entry = ast_index_binding(mt && mt->tp ? &mt->tp->ast_index : NULL, binding_id);
     char assert_vname[16];
     snprintf(assert_vname, sizeof(assert_vname), "_js_assert");
     bool is_local_assert = (assert_entry && assert_entry->node) ||
@@ -3295,20 +3297,6 @@ static bool jm_current_scope_has_var(JsMirTranspiler* mt, const char* vname) {
     return hashmap_get(scope, &key) != NULL;
 }
 
-static bool jm_current_param_pattern_declares(JsMirTranspiler* mt, const char* vname) {
-    if (!mt || !vname || !mt->current_fc || !mt->current_fc->node) return false;
-    struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
-    JsAstNode* param = mt->current_fc->node->params;
-    while (param) {
-        jm_collect_pattern_names(param, names);
-        param = param->next;
-    }
-    bool found = jm_name_set_has(names, vname);
-    hashmap_free(names);
-    return found;
-}
-
 static void jm_emit_destructure_var_value(JsMirTranspiler* mt,
         MIR_reg_t target_reg, bool from_env, int env_slot, MIR_reg_t env_reg,
         bool in_scope_env, int scope_env_slot, MIR_reg_t scope_env_reg,
@@ -3340,7 +3328,8 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
         }
     }
 
-    bool current_param_binding = jm_current_param_pattern_declares(mt, vname);
+    bool current_param_binding = mt && mt->current_fc && mt->current_fc->node &&
+        jm_func_has_param_named(mt->current_fc->node, vname, (int)strlen(vname));
     if (current_param_binding) {
         if (!jm_current_scope_has_var(mt, vname)) var = NULL;
         module_var = NULL;
@@ -5841,7 +5830,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
         // consume the binding resolved by the AST builder; the indexed unit is
         // immutable during MIR lowering.
-        NameEntry* entry = id->entry;
+        AstBindingId binding_id = id->entry ? id->entry->binding_id : AST_BINDING_ID_INVALID;
+        NameEntry* entry = ast_index_binding(mt && mt->tp ? &mt->tp->ast_index : NULL, binding_id);
 
         // Resolve to a JsFunctionNode for direct call.  Two cases are safe:
         //   1. A `function foo(){}` declaration (hoisted, always callable).

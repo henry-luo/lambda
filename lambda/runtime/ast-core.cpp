@@ -56,11 +56,17 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
     AstNode** nodes = (AstNode**)malloc(sizeof(AstNode*) * capacity);
     AstNode** parents = (AstNode**)malloc(sizeof(AstNode*) * capacity);
     AstFunctionId* owners = (AstFunctionId*)malloc(sizeof(AstFunctionId) * capacity);
+    NameScope** scopes = (NameScope**)malloc(sizeof(NameScope*) * capacity);
+    NameEntry** bindings = (NameEntry**)malloc(sizeof(NameEntry*) * capacity);
+    AstNode** classes = (AstNode**)malloc(sizeof(AstNode*) * capacity);
     AstNodeFacts* facts = (AstNodeFacts*)malloc(sizeof(AstNodeFacts) * capacity);
-    if (!nodes || !parents || !owners || !facts) {
+    if (!nodes || !parents || !owners || !scopes || !bindings || !classes || !facts) {
         free(nodes);
         free(parents);
         free(owners);
+        free(scopes);
+        free(bindings);
+        free(classes);
         free(facts);
         return false;
     }
@@ -68,15 +74,24 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
         memcpy(nodes, index->nodes, sizeof(AstNode*) * index->count);
         memcpy(parents, index->parents, sizeof(AstNode*) * index->count);
         memcpy(owners, index->owner_functions, sizeof(AstFunctionId) * index->count);
+        memcpy(scopes, index->scopes, sizeof(NameScope*) * index->scope_count);
+        memcpy(bindings, index->bindings, sizeof(NameEntry*) * index->binding_count);
+        memcpy(classes, index->classes, sizeof(AstNode*) * index->class_count);
         memcpy(facts, index->facts, sizeof(AstNodeFacts) * index->count);
     }
     free(index->nodes);
     free(index->parents);
     free(index->owner_functions);
+    free(index->scopes);
+    free(index->bindings);
+    free(index->classes);
     free(index->facts);
     index->nodes = nodes;
     index->parents = parents;
     index->owner_functions = owners;
+    index->scopes = scopes;
+    index->bindings = bindings;
+    index->classes = classes;
     index->facts = facts;
     index->capacity = capacity;
     return true;
@@ -122,6 +137,62 @@ static bool ast_index_rehash(AstIndex* index, uint32_t capacity) {
     return true;
 }
 
+static bool ast_index_publish_scope(AstIndex* index, NameScope* scope) {
+    if (!scope) return true;
+    for (uint32_t i = 0; i < index->scope_count; i++) {
+        if (index->scopes[i] == scope) { scope->scope_id = i; return true; }
+    }
+    if (index->scope_count >= index->capacity) return false;
+    scope->scope_id = index->scope_count;
+    index->scopes[index->scope_count++] = scope;
+    return true;
+}
+
+static bool ast_index_publish_binding(AstIndex* index, NameEntry* entry) {
+    if (!entry) return true;
+    if (!ast_index_publish_scope(index, entry->scope)) return false;
+    for (uint32_t i = 0; i < index->binding_count; i++) {
+        if (index->bindings[i] == entry) { entry->binding_id = i; return true; }
+    }
+    if (index->binding_count >= index->capacity) return false;
+    entry->binding_id = index->binding_count;
+    index->bindings[index->binding_count++] = entry;
+    return true;
+}
+
+static bool ast_index_publish_node(AstIndex* index, AstNode* node) {
+    if (!node) return true;
+    switch (node->node_type) {
+    case AST_SCRIPT:
+        return ast_index_publish_scope(index, ((AstScript*)node)->global_vars);
+    case AST_NODE_BLOCK:
+        return ast_index_publish_scope(index, ((AstBlockNode*)node)->vars);
+    case AST_NODE_LOOP:
+        return ast_index_publish_scope(index, ((AstLoopControlNode*)node)->vars);
+    case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
+    case AST_NODE_ARROW_FUNC: case AST_NODE_METHOD:
+        return ast_index_publish_scope(index, ((AstFuncNode*)node)->vars);
+    case AST_NODE_IDENT:
+        return ast_index_publish_binding(index, ((AstIdentNode*)node)->entry);
+    case AST_NODE_PARAM: case AST_NODE_KEY_EXPR: case AST_NODE_NAMED_ARG:
+        return ast_index_publish_binding(index, ((AstNamedNode*)node)->entry);
+    case AST_NODE_VARIABLE_DECLARATOR:
+        return ast_index_publish_binding(index, ((AstDeclaratorNode*)node)->entry);
+    case AST_NODE_CLASS: case AST_NODE_CLASS_EXPR: {
+        AstClassNode* cls = (AstClassNode*)node;
+        for (uint32_t i = 0; i < index->class_count; i++) {
+            if (index->classes[i] == node) { cls->class_id = i; return true; }
+        }
+        if (index->class_count >= index->capacity) return false;
+        cls->class_id = index->class_count;
+        index->classes[index->class_count++] = node;
+        return true;
+    }
+    default:
+        return true;
+    }
+}
+
 static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
         AstFunctionId owner) {
     if (!node) return AST_NODE_ID_INVALID;
@@ -145,6 +216,7 @@ static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
     index->facts[id].representation = VALUE_REP_NONE;
     index->facts[id].flags = 0;
     index->facts[id].folded_item = ITEM_NULL;
+    if (!ast_index_publish_node(index, node)) return AST_NODE_ID_INVALID;
     index->slots[slot] = node;
     index->slot_ids[slot] = id;
     return id;
@@ -360,6 +432,7 @@ bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
 void ast_index_destroy(AstIndex* index) {
     if (!index) return;
     free(index->nodes); free(index->parents); free(index->owner_functions);
+    free(index->scopes); free(index->bindings); free(index->classes);
     free(index->functions); free(index->facts);
     free(index->slots); free(index->slot_ids);
     memset(index, 0, sizeof(*index));
@@ -375,4 +448,16 @@ AstNodeId ast_index_find(const AstIndex* index, const AstNode* node) {
         slot = (slot + 1) & (index->slot_capacity - 1);
     }
     return AST_NODE_ID_INVALID;
+}
+
+NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id) {
+    return index && id < index->binding_count ? index->bindings[id] : NULL;
+}
+
+NameScope* ast_index_scope(const AstIndex* index, AstScopeId id) {
+    return index && id < index->scope_count ? index->scopes[id] : NULL;
+}
+
+AstNode* ast_index_class(const AstIndex* index, AstClassId id) {
+    return index && id < index->class_count ? index->classes[id] : NULL;
 }
