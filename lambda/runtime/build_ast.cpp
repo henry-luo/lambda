@@ -3291,6 +3291,19 @@ static Type* build_lit_datetime_from_span(Transpiler* tp, SourceSpan span) {
 static int decimal_literal_significant_digits(const char* str);
 static bool n_literal_is_integer(const char* str);
 
+static bool track_decimal_constant(Transpiler* tp, Decimal* decimal) {
+    if (!tp || !decimal) return false;
+    if (!tp->decimal_constants) {
+        tp->decimal_constants = arraylist_new(4);
+    }
+    if (!tp->decimal_constants ||
+            !arraylist_append(tp->decimal_constants, decimal)) {
+        decimal_payload_release(decimal);
+        return false;
+    }
+    return true;
+}
+
 static Type* build_lit_float_from_span(Transpiler* tp, SourceSpan span) {
     TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
     // C supports inf and nan
@@ -3340,6 +3353,7 @@ static Type* build_lit_decimal_poison_from_span(Transpiler* tp,
     decimal->unlimited = 0;
     decimal->dec_val = decimal_parse_str(spelling, decimal_fixed_context());
     if (!decimal->dec_val) return &TYPE_ERROR;
+    if (!track_decimal_constant(tp, decimal)) return &TYPE_ERROR;
     item_type->decimal = decimal;
     arraylist_append(tp->const_list, decimal);
     item_type->const_index = tp->const_list->length - 1;
@@ -3429,6 +3443,11 @@ static Type* build_lit_decimal_from_span(Transpiler* tp, SourceSpan span) {
         decimal->unlimited ? decimal_unlimited_context() : decimal_fixed_context());
     if (!decimal->dec_val) {
         log_error("Error: Failed to parse decimal: %s", num_str);
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+
+    if (!track_decimal_constant(tp, decimal)) {
         mem_free(num_str);
         return &TYPE_ERROR;
     }

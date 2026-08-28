@@ -77,6 +77,13 @@ static Item node_zlib_undefined(void) {
     return (Item){.item = ITEM_JS_UNDEFINED};
 }
 
+// avoid Clang 14's designated-initializer failure in instantiated templates.
+static Item node_zlib_item_from_word(uint64_t word) {
+    Item result = {};
+    result.item = word;
+    return result;
+}
+
 static bool node_zlib_is_undefined(Item value) {
     return !node_zlib_host || !node_zlib_host->value ||
         value.item == 0 || node_zlib_host->value->kind(value) == JUBE_VALUE_UNDEFINED;
@@ -707,10 +714,10 @@ static void node_zlib_set_instance_method(Item stream, const char* name, Target 
     *stream_root = stream.item;
     *key_root = node_zlib_key(name, strlen(name)).item;
     *function_root = jube_new_function(node_zlib_host->script, target, adapter_arity).item;
-    node_zlib_host->value->property_set((Item){.item = *stream_root},
-        (Item){.item = *key_root}, (Item){.item = *function_root});
-    node_zlib_host->script->mark_non_enumerable((Item){.item = *stream_root},
-        (Item){.item = *key_root});
+    node_zlib_host->value->property_set(node_zlib_item_from_word(*stream_root),
+        node_zlib_item_from_word(*key_root), node_zlib_item_from_word(*function_root));
+    node_zlib_host->script->mark_non_enumerable(node_zlib_item_from_word(*stream_root),
+        node_zlib_item_from_word(*key_root));
     node_zlib_host->node->roots->root_frame_end(&frame);
 }
 
@@ -844,9 +851,9 @@ static void node_zlib_install_method(uint64_t* namespace_root,
     Item function = jube_new_function(node_zlib_host->script, target,
         adapter_arity);
     *function_root = function.item;
-    node_zlib_host->value->property_set((Item){.item = *namespace_root},
-                                        (Item){.item = *key_root},
-                                        (Item){.item = *function_root});
+    node_zlib_host->value->property_set(node_zlib_item_from_word(*namespace_root),
+                                        node_zlib_item_from_word(*key_root),
+                                        node_zlib_item_from_word(*function_root));
 }
 
 template <typename Target>
@@ -872,27 +879,27 @@ static Item node_zlib_install_constructor(uint64_t* namespace_root, const char* 
     *key_slot = node_zlib_key(name, (size_t)name_length).item;
     *constructor_slot = jube_new_constructor(node_zlib_host->script, target, 1).item;
     *prototype_slot = node_zlib_host->value->new_object().item;
-    Item prototype = (Item){.item = *prototype_slot};
-    if (node_zlib_host->value->kind((Item){.item = *transform_proto_slot}) == JUBE_VALUE_OBJECT) {
+    Item prototype = node_zlib_item_from_word(*prototype_slot);
+    if (node_zlib_host->value->kind(node_zlib_item_from_word(*transform_proto_slot)) == JUBE_VALUE_OBJECT) {
         node_zlib_host->script->set_prototype(prototype,
-            (Item){.item = *transform_proto_slot});
+            node_zlib_item_from_word(*transform_proto_slot));
     }
     *constructor_key_slot = node_zlib_key("constructor", 11).item;
-    node_zlib_host->value->property_set(prototype, (Item){.item = *constructor_key_slot},
-        (Item){.item = *constructor_slot});
+    node_zlib_host->value->property_set(prototype, node_zlib_item_from_word(*constructor_key_slot),
+        node_zlib_item_from_word(*constructor_slot));
     node_zlib_host->script->mark_non_enumerable(prototype,
-        (Item){.item = *constructor_key_slot});
+        node_zlib_item_from_word(*constructor_key_slot));
     *prototype_key_slot = node_zlib_key("prototype", 9).item;
-    node_zlib_host->value->property_set((Item){.item = *constructor_slot},
-        (Item){.item = *prototype_key_slot}, prototype);
-    node_zlib_host->script->function_set_prototype((Item){.item = *constructor_slot}, prototype);
-    node_zlib_host->script->set_function_name((Item){.item = *constructor_slot},
-        (Item){.item = *key_slot});
+    node_zlib_host->value->property_set(node_zlib_item_from_word(*constructor_slot),
+        node_zlib_item_from_word(*prototype_key_slot), prototype);
+    node_zlib_host->script->function_set_prototype(node_zlib_item_from_word(*constructor_slot), prototype);
+    node_zlib_host->script->set_function_name(node_zlib_item_from_word(*constructor_slot),
+        node_zlib_item_from_word(*key_slot));
     node_zlib_constructor_prototypes[mode] = *prototype_slot;
-    node_zlib_host->value->property_set((Item){.item = *namespace_slot},
-        (Item){.item = *key_slot}, (Item){.item = *constructor_slot});
+    node_zlib_host->value->property_set(node_zlib_item_from_word(*namespace_slot),
+        node_zlib_item_from_word(*key_slot), node_zlib_item_from_word(*constructor_slot));
     node_zlib_host->node->roots->root_frame_end(&frame);
-    return (Item){.item = *constructor_slot};
+    return node_zlib_item_from_word(*constructor_slot);
 }
 
 static Item node_zlib_namespace(void) {

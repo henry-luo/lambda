@@ -158,6 +158,8 @@ AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal);
 bool has_fixed_shape(TypeMap* map_type);
 bool is_direct_access_type(TypeId type_id);
 bool static_literal_item_from_type(Type* type, Item* out);
+void decimal_payload_release(Decimal* dec);
+void decimal_constants_release(struct _ArrayList* constants);
 
 // Shape/type-graph helpers shared by the Lambda and JS AST builders.
 // `is_global_simple_type` answers whether a Type* is one of the compact global

@@ -619,6 +619,7 @@ struct Script : Input {
     AstIndex ast_index;          // one dense identity/index table for all post-parse passes
     NameScope* current_scope;   // current name scope
     ArrayList* const_list;      // list of constants (Script-specific)
+    ArrayList* decimal_constants; // mpd payloads owned outside the script pool
 
     // JIT compilation (Script-specific)
     MIR_context_t jit_context;

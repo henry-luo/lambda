@@ -8193,7 +8193,9 @@ static LaneReg emit_int_lane_arith(MirTranspiler* mt, Operator op,
     MIR_reg_t lo_ok = new_reg(mt, "ia_lo", MIR_T_I64);
     MIR_reg_t hi_ok = new_reg(mt, "ia_hi", MIR_T_I64);
     MIR_reg_t in_band = new_reg(mt, "ia_ok", MIR_T_I64);
-    MIR_label_t l_slow = new_label(mt);
+    bool needs_slow = !(result_in_band && !nullable) &&
+        !(op == OPERATOR_MUL && literal_mul_overflow);
+    MIR_label_t l_slow = needs_slow ? new_label(mt) : NULL;
     MIR_label_t l_done = new_label(mt);
 
     MIR_label_t l_null = 0;
@@ -11518,12 +11520,14 @@ static MIR_reg_t mir_prepare_dense_loop_guard(MirTranspiler* mt,
     MIR_reg_t no_overflow = new_reg(mt, "dense_extent_ok", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
         MIR_new_reg_op(mt->ctx, no_overflow), MIR_new_int_op(mt->ctx, 1)));
-    MIR_label_t l_base_overflow = new_label(mt);
+    MIR_label_t l_base_overflow = 0;
     MIR_label_t l_overflow = new_label(mt);
-    MIR_label_t l_after_base = new_label(mt);
+    MIR_label_t l_after_base = 0;
     if (inclusive) {
         // `counter <= extent` visits one extra element; extend the checked
         // length by one only after MIR proves that the addition stays in lane.
+        l_base_overflow = new_label(mt);
+        l_after_base = new_label(mt);
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADDO,
             MIR_new_reg_op(mt->ctx, extent_base),
             MIR_new_reg_op(mt->ctx, extent_var->reg),
@@ -15579,8 +15583,10 @@ static MIR_reg_t emit_checked_index_load(MirTranspiler* mt, MIR_reg_t arr_ptr,
     MIR_type_t result_type = policy.result_kind == MIR_INDEX_RESULT_NATIVE_FLOAT
         ? MIR_T_D : MIR_T_I64;
     MIR_reg_t result = new_reg(mt, "idx_result", result_type);
-    MIR_label_t l_fast = new_label(mt);
-    MIR_label_t l_slow = new_label(mt);
+    MIR_label_t l_fast = policy.guard_kind != MIR_INDEX_GUARD_NONE
+        ? new_label(mt) : NULL;
+    MIR_label_t l_slow = policy.guard_kind != MIR_INDEX_GUARD_NONE
+        ? new_label(mt) : NULL;
     MIR_label_t l_oob = new_label(mt);
     MIR_label_t l_end = new_label(mt);
     MIR_label_t l_dense = dense_inbounds ? new_label(mt) : 0;
@@ -18141,8 +18147,8 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             // A local raw call has no boxed wrapper to intercept an open
             // argument. Branch around the invocation and join its normal Item
             // with the exact original error after all arguments are prepared.
-            MIR_label_t parameter_error_label = new_label(mt);
-            MIR_reg_t parameter_error_result = new_reg(mt, "param_error", MIR_T_I64);
+            MIR_label_t parameter_error_label = NULL;
+            MIR_reg_t parameter_error_result = 0;
             bool has_parameter_error_guard = false;
             for (int i = 0; i < expected_params && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
                 TypeParam* type_param = param_iter ? (TypeParam*)param_iter->type : NULL;
@@ -18340,6 +18346,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                             // boxed result so an enclosing `or` can consume
                             // it; returning from the enclosing function here
                             // bypasses that documented fallback boundary.
+                            if (!has_parameter_error_guard) {
+                                parameter_error_label = new_label(mt);
+                                parameter_error_result = new_reg(mt, "param_error", MIR_T_I64);
+                            }
                             emit_jump_if_item_error(mt, val, parameter_error_result,
                                 parameter_error_label);
                             has_parameter_error_guard = true;
@@ -18437,6 +18447,10 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                             // Check before locating or detaching a `var` root:
                             // forwarding an error must leave caller storage
                             // unchanged and must not enter the callee body.
+                            if (!has_parameter_error_guard) {
+                                parameter_error_label = new_label(mt);
+                                parameter_error_result = new_reg(mt, "param_error", MIR_T_I64);
+                            }
                             emit_jump_if_item_error(mt, val, parameter_error_result,
                                 parameter_error_label);
                             has_parameter_error_guard = true;
@@ -28044,6 +28058,9 @@ static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
     hashmap_free(mt.global_vars);
     hashmap_free(mt.callsite_info);
     hashmap_free(mt.shape_hints);
+    // native function metadata is compiler-owned and must be released with
+    // the other per-transpile registries after MIR generation completes.
+    hashmap_free(mt.native_func_info);
     if (out_artifacts) {
         out_artifacts->consts_bss = mt.consts_bss;
         out_artifacts->layout_bss = mt.module_layout_bss;

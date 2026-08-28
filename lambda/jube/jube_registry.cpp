@@ -4033,7 +4033,10 @@ static int jube_host_load_lambda_module(void* execution_context, const char* sou
     *out_namespace = ItemNull;
     Runtime* runtime = (Runtime*)jube_execution_runtime_handle(execution_context);
     if (!runtime) return -1;
-    Script* script = load_script(runtime, source_path, NULL, true);
+    // cross-language exports need the native MIR entrypoint; the planner's
+    // T0 path intentionally leaves imported Lambda scripts without a callable
+    // main function.
+    Script* script = load_script_mir_direct(runtime, source_path, NULL, true);
     if (!script || !script->ast_root) return -1;
     *out_namespace = module_build_lambda_namespace(script);
     return out_namespace->item == ItemNull.item ? -1 : 0;

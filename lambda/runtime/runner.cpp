@@ -31,6 +31,7 @@
 #include "edit_bridge.h"
 #include "interp.hpp"
 #include "runtime-state.h"
+#include "../input/input.hpp"
 #include "../../lib/file.h"
 #include "../../lib/mem_factory.h"
 #include "../../lib/memtrack.h"
@@ -141,6 +142,22 @@ static void record_direct_parse_diagnostics(Transpiler* tp,
     for (uint32_t i = 0; i < report.error_count; i++) {
         record_direct_parse_error(tp, script_path, &report.errors[i]);
     }
+}
+
+static void free_transpiler_error_list(ArrayList* errors) {
+    if (!errors) return;
+    for (int i = 0; i < errors->length; i++) {
+        err_free((LambdaError*)errors->data[i]);
+    }
+    arraylist_free(errors);
+}
+
+static void free_transpiler_diagnostics(Transpiler* tp) {
+    if (!tp) return;
+    free_transpiler_error_list(tp->errors);
+    free_transpiler_error_list(tp->warnings);
+    tp->errors = NULL;
+    tp->warnings = NULL;
 }
 
 static int lambda_index_compiler_pass(void* opaque) {
@@ -801,6 +818,7 @@ static bool initialize_script_ast_storage(Transpiler* tp) {
     tp->pool = input_base->pool;
     tp->arena = input_base->arena;
     tp->name_pool = input_base->name_pool;
+    tp->shape_pool = input_base->shape_pool;
     tp->type_list = input_base->type_list;
     tp->url = input_base->url;
     tp->path = input_base->path;
@@ -1134,6 +1152,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         fprintf(stderr, "%d error(s) found.\n", transpiler.errors->length);
     }
 
+    free_transpiler_diagnostics(&transpiler);
+
     // check for compilation failure — a T0-planned script deliberately has no
     // MIR context, so its success signal is the frame plan instead.
     if (!new_script->jit_context && !new_script->interp_supported) {
@@ -1213,11 +1233,7 @@ static void repl_report_transpiler_errors(ArrayList* errors) {
 }
 
 static void repl_free_transpiler_errors(ArrayList* errors) {
-    if (!errors) return;
-    for (int i = 0; i < errors->length; i++) {
-        err_free((LambdaError*)errors->data[i]);
-    }
-    arraylist_free(errors);
+    free_transpiler_error_list(errors);
 }
 
 void interp_repl_session_destroy(InterpReplSession* session) {
@@ -1825,8 +1841,21 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     // (AIO4) instead of releasing it at the MIR handoff; destroying a zeroed
     // AstIndex is a no-op, so this covers both tiers.
     ast_index_destroy(&script->ast_index);
+    if (script->const_list) {
+        arraylist_free(script->const_list);
+        script->const_list = NULL;
+    }
+    decimal_constants_release(script->decimal_constants);
+    script->decimal_constants = NULL;
+    input_release_auxiliary_resources((Input*)script);
+    if (runtime && runtime->eval_context && runtime->eval_context->validator &&
+            runtime->eval_context->validator->get_pool() == script->pool) {
+        // The validator is allocated beside this Script; clear the shared
+        // context before its pool is destroyed to avoid a stale cleanup owner.
+        schema_validator_destroy(runtime->eval_context->validator);
+        runtime->eval_context->validator = NULL;
+    }
     if (script->pool) pool_destroy(script->pool);
-    if (script->type_list) arraylist_free(script->type_list);
     if (script->direct_imports) arraylist_free(script->direct_imports);
     if (script->jit_context) {
         jit_cleanup_mode(script->jit_context, script->mir_gen_initialized ? 1 : 0);
@@ -2090,6 +2119,11 @@ void runtime_cleanup(Runtime* runtime) {
         if (runtime->eval_context->last_error) {
             err_free(runtime->eval_context->last_error);
             runtime->eval_context->last_error = NULL;
+        }
+        if (runtime->eval_context->validator) {
+            // validator registries use heap allocations outside the script pool.
+            schema_validator_destroy(runtime->eval_context->validator);
+            runtime->eval_context->validator = NULL;
         }
         js_runtime_state_destroy_context();
         lambda_module_state_destroy();

@@ -1038,6 +1038,7 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
         // Clean up the error output (it has its own pool)
         // The Input struct was allocated from its own pool, so we just destroy the pool
         if (output_input->pool) {
+            input_release_auxiliary_resources(output_input);
             pool_destroy(output_input->pool);
         }
         // Do NOT delete output_input - it was allocated from the pool we just destroyed
@@ -1062,9 +1063,12 @@ int run_script_file(Runtime *runtime, const char *script_path, bool run_main = f
     }
     strbuf_free(output);
 
-    // Note: Do NOT destroy output_input->pool here!
-    // The pool is shared with the Script, which is managed by the Runtime
-    // Also do NOT delete output_input - it was allocated from the pool
+    // The result itself is rooted in the Runtime heap, so the wrapper Input
+    // can release its registries and pool after printing.
+    if (output_input->pool) {
+        input_release_auxiliary_resources(output_input);
+        pool_destroy(output_input->pool);
+    }
     return 0;  // success
 }
 
@@ -2302,8 +2306,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
             return lambda_main_finish(0);
         }
 
-        Runtime runtime;
-        runtime_init(&runtime);
         JsDocumentSession js_document_session;
         js_document_session_init(&js_document_session);
 
@@ -3013,8 +3015,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             return lambda_main_finish(0);
         }
 
-        Runtime runtime;
-        runtime_init(&runtime);
+        // Reuse lambda_main_impl's initialized Runtime so the common command
+        // cleanup releases the same script registry that this handler uses.
         lambda_stack_init();
 
         if (argc >= 3) {
