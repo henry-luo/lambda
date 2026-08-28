@@ -110,28 +110,6 @@ DomElement* build_dom_tree_from_element_with_input(Element* elem, DomDocument* d
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 static bool dom_element_add_cached_class(DomElement* element, const char* class_name);
 
-// helper: append a DomNode child to a parent's sibling chain
-static void dom_append_to_sibling_chain(DomElement* parent, DomNode* child) {
-    dom_node_cancel_detached(parent ? parent->doc : nullptr, child);
-    child->parent = parent;
-    if (!parent->first_child) {
-        parent->first_child = child;
-        parent->last_child = child;
-        child->prev_sibling = nullptr;
-        child->next_sibling = nullptr;
-    } else {
-        DomNode* last = parent->last_child;
-        if (!last) {
-            last = parent->first_child;
-            while (last->next_sibling) last = last->next_sibling;
-        }
-        last->next_sibling = child;
-        child->prev_sibling = last;
-        child->next_sibling = nullptr;
-        parent->last_child = child;
-    }
-}
-
 static DomText* dom_text_from_fat_string(DomDocument* doc, String* string_value) {
     if (!doc || !string_value) return nullptr;
     if (!dom_document_owns_node_storage(doc, string_value)) return nullptr;
@@ -1433,6 +1411,9 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
         target_style = element->pseudo_style_slot(PSEUDO_STYLE_AFTER);
         pseudo_name = "::after";
+    } else if (pseudo_element == 3) {  // PSEUDO_ELEMENT_FIRST_LINE
+        target_style = element->pseudo_style_slot(PSEUDO_STYLE_FIRST_LINE);
+        pseudo_name = "::first-line";
     } else if (pseudo_element == 4) {  // PSEUDO_ELEMENT_FIRST_LETTER
         target_style = element->pseudo_style_slot(PSEUDO_STYLE_FIRST_LETTER);
         pseudo_name = "::first-letter";
@@ -1500,6 +1481,10 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
         style = element->pseudo_style(PSEUDO_STYLE_BEFORE);
     } else if (pseudo_element == 2) {  // PSEUDO_ELEMENT_AFTER
         style = element->pseudo_style(PSEUDO_STYLE_AFTER);
+    } else if (pseudo_element == 3) {  // PSEUDO_ELEMENT_FIRST_LINE
+        style = element->pseudo_style(PSEUDO_STYLE_FIRST_LINE);
+    } else if (pseudo_element == 4) {  // PSEUDO_ELEMENT_FIRST_LETTER
+        style = element->pseudo_style(PSEUDO_STYLE_FIRST_LETTER);
     } else if (pseudo_element == 6) {  // PSEUDO_ELEMENT_MARKER
         style = element->pseudo_style(PSEUDO_STYLE_MARKER);
     } else if (pseudo_element == 7) {  // PSEUDO_ELEMENT_PLACEHOLDER
@@ -2147,6 +2132,7 @@ bool DomElement::append_child(DomElement* child) {
         // preserve the DOM chain so flattened-tree layout can discover the template.
         dom_append_to_sibling_chain(parent, child);
     }
+    dom_move_generated_after_to_end(parent);
 
     log_debug("dom_element_append_child: appended element to parent (both Lambda tree and DOM chain updated)");
 

@@ -55,6 +55,24 @@ static void zero_form_child_box(DomElement* elem) {
     set_form_child_box(elem, 0.0f, 0.0f, 0.0f, 0.0f);
 }
 
+static bool layout_select_child_is_hidden(DomElement* child) {
+    if (!child || resolve_display_value(child).outer == CSS_VALUE_NONE) {
+        return true;
+    }
+    // CSS Display 3: display:none on an optgroup suppresses its option
+    // descendants from the native listbox formatting tree as well.
+    for (DomNode* ancestor = child->parent; ancestor && ancestor->is_element();
+         ancestor = ancestor->parent) {
+        DomElement* elem = ancestor->as_element();
+        if (elem->tag() == MARKUP_NAME_OPTGROUP &&
+            resolve_display_value(elem).outer == CSS_VALUE_NONE) {
+            return true;
+        }
+        if (elem->tag() == MARKUP_NAME_SELECT) break;
+    }
+    return false;
+}
+
 float form_control_em_size(LayoutContext* lycon, ViewBlock* block, float em) {
     float font_size = block && block->font && block->fontp()->font_size > 0.0f
         ? block->fontp()->font_size : 0.0f;
@@ -493,6 +511,7 @@ float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
     float max_text_width = 0.0f;
     for (DomElement* option = dom_select_next_option(select, nullptr); option;
          option = dom_select_next_option(select, option)) {
+        if (layout_select_child_is_hidden(option)) continue;
         float option_width = layout_select_option_text_intrinsic_width(
             lycon, option, use_min_content);
         DomElement* parent = option->parent ? option->parent->as_element() : nullptr;
@@ -561,10 +580,10 @@ static bool layout_select_field_sizing_content(ViewBlock* block) {
         decl->value->data.keyword == CSS_VALUE_CONTENT;
 }
 
-static float layout_select_listbox_row_height(const FormControlProp* form) {
+static float layout_select_listbox_row_height(bool has_visible_content) {
     // Empty native listboxes use the compact anonymous-option metric; real
     // option rows use the 17px metric measured by their option layout.
-    return form && form->option_count == 0
+    return !has_visible_content
         ? FormDefaults::SELECT_EMPTY_LISTBOX_ROW_HEIGHT
         : FormDefaults::SELECT_OPTION_ROW_HEIGHT;
 }
@@ -590,6 +609,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     int option_index = 0;
     for (DomElement* option = dom_select_next_option(block, nullptr); option;
          option = dom_select_next_option(block, option), option_index++) {
+        if (layout_select_child_is_hidden(option)) continue;
         float width = layout_select_option_text_intrinsic_width(
             lycon, option, use_min_content);
         if (option_index == selected_index) selected_text_width = width;
@@ -615,9 +635,22 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
             visible_rows = 1;
         }
 
-        float row_height = layout_select_listbox_row_height(form);
         BoxMetrics box = layout_box_metrics(block);
-        if (form->option_count == 0) {
+        bool has_visible_option = false;
+        bool has_visible_optgroup = false;
+        for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+            if (!child->is_element()) continue;
+            DomElement* elem = child->as_element();
+            if (elem->tag() == MARKUP_NAME_OPTION) {
+                if (!layout_select_child_is_hidden(elem)) has_visible_option = true;
+            } else if (elem->tag() == MARKUP_NAME_OPTGROUP &&
+                       !layout_select_child_is_hidden(elem)) {
+                has_visible_optgroup = true;
+            }
+        }
+        bool has_visible_content = has_visible_option || has_visible_optgroup;
+        float row_height = layout_select_listbox_row_height(has_visible_content);
+        if (!has_visible_content) {
             // With no option content, the native listbox contributes only its
             // actual padding and border; it has no themed minimum width.
             form->intrinsic_width = box.pad_border_h;
@@ -918,7 +951,17 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
             padding.left - padding.right;
         if (option_width < 0) option_width = 0;
 
-        float row_height = layout_select_listbox_row_height(form);
+        bool has_visible_content = false;
+        for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+            if (!child->is_element()) continue;
+            DomElement* elem = child->as_element();
+            if ((elem->tag() == MARKUP_NAME_OPTION || elem->tag() == MARKUP_NAME_OPTGROUP) &&
+                !layout_select_child_is_hidden(elem)) {
+                has_visible_content = true;
+                break;
+            }
+        }
+        float row_height = layout_select_listbox_row_height(has_visible_content);
         // hr margin-top per UA stylesheet: 0.5em (HTML spec §10 / Chrome UA)
         float fs = (font && font->font_size > 0) ? font->font_size : 13.333f;
         const float hr_margin_top = fs * 0.5f;
@@ -930,6 +973,11 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
             NameId ctag = celem->tag();
 
             if (ctag == MARKUP_NAME_OPTION) {
+                if (layout_select_child_is_hidden(celem)) {
+                    celem->view_type = RDT_VIEW_NONE;
+                    zero_form_child_box(celem);
+                    continue;
+                }
                 layout_form_option_child(celem, is_listbox, border_left,
                                          &current_y, option_width, row_height);
             } else if (ctag == MARKUP_NAME_HR) {
@@ -943,17 +991,40 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
                     zero_form_child_box(celem);
                 }
             } else if (ctag == MARKUP_NAME_OPTGROUP) {
+                if (layout_select_child_is_hidden(celem)) {
+                    celem->view_type = RDT_VIEW_NONE;
+                    zero_form_child_box(celem);
+                    continue;
+                }
                 celem->view_type = RDT_VIEW_BLOCK;
-                zero_form_child_box(celem);
+                if (is_listbox) {
+                    // Native listboxes expose each optgroup label as one row;
+                    // the option rows follow it in the same internal list.
+                    set_form_child_box(celem, border_left, current_y,
+                                       option_width, row_height);
+                    current_y += row_height;
+                } else {
+                    zero_form_child_box(celem);
+                }
                 // Recurse into optgroup children
                 for (DomNode* gc = celem->first_child; gc; gc = gc->next_sibling) {
                     if (!gc->is_element()) continue;
                     DomElement* gcelem = gc->as_element();
                     uintptr_t gctag = gcelem->tag();
                     if (gctag == MARKUP_NAME_OPTION) {
+                        if (layout_select_child_is_hidden(gcelem)) {
+                            gcelem->view_type = RDT_VIEW_NONE;
+                            zero_form_child_box(gcelem);
+                            continue;
+                        }
                         layout_form_option_child(gcelem, is_listbox, border_left,
                                                  &current_y, option_width, row_height);
                     } else if (gctag == MARKUP_NAME_OPTGROUP) {
+                        if (layout_select_child_is_hidden(gcelem)) {
+                            gcelem->view_type = RDT_VIEW_NONE;
+                            zero_form_child_box(gcelem);
+                            continue;
+                        }
                         gcelem->view_type = RDT_VIEW_BLOCK;
                         zero_form_child_box(gcelem);
                     }

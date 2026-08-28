@@ -411,6 +411,9 @@ struct EventHandlerSlot {
     void* key;
     char* type;
     uint64_t order;
+    uint64_t* callback_root;
+    DomDocument* owner_doc;
+    DomNodeRef node_ref;
     bool active;
 };
 
@@ -702,6 +705,9 @@ static EventHandlerSlot* get_or_create_handler_slot(void* key, const char* type)
     slot->key = key;
     slot->type = type_copy;
     slot->order = 0;
+    slot->callback_root = nullptr;
+    slot->owner_doc = nullptr;
+    slot->node_ref = {nullptr, 0};
     slot->active = false;
     if (!_handler_index) {
         _handler_index = hashmap_new(sizeof(EventHandlerIndexEntry), 16, 0, 0,
@@ -729,6 +735,21 @@ static EventHandlerSlot* get_or_create_handler_slot(void* key, const char* type)
     return slot;
 }
 
+static void event_handler_release_target(EventHandlerSlot* slot) {
+    if (!slot || !slot->owner_doc || !slot->node_ref.address) return;
+    dom_node_unpin(slot->owner_doc, slot->node_ref,
+                   DOM_NODE_PIN_EVENT_QUEUE);
+    slot->owner_doc = nullptr;
+    slot->node_ref = {nullptr, 0};
+}
+
+static void event_handler_release_callback(EventHandlerSlot* slot) {
+    if (!slot || !slot->callback_root) return;
+    heap_unregister_gc_root(slot->callback_root);
+    mem_free(slot->callback_root);
+    slot->callback_root = nullptr;
+}
+
 static bool event_handler_target_supported(Item target) {
     Item global = js_get_global_this();
     if (target.item != 0 && target.item == global.item) return true;
@@ -741,7 +762,9 @@ static bool event_handler_target_supported(Item target) {
 static void event_handler_property_set_for_key(void* key,
                                                 const char* property_name,
                                                 int property_name_len,
-                                                Item value) {
+                                                Item value,
+                                                DomDocument* owner_doc,
+                                                DomNodeRef node_ref) {
     if (!property_name || property_name_len < 3 || property_name[0] != 'o' ||
         property_name[1] != 'n' || !key) {
         return;
@@ -756,11 +779,27 @@ static void event_handler_property_set_for_key(void* key,
     EventHandlerSlot* slot = find_handler_slot(key, stack_type);
     bool callable = js_is_callable(value);
     if (!callable) {
-        if (slot) slot->active = false;
+        if (slot) {
+            slot->active = false;
+            event_handler_release_callback(slot);
+            event_handler_release_target(slot);
+        }
         return;
     }
     if (!slot) slot = get_or_create_handler_slot(key, stack_type);
     if (!slot) return;
+    if (!slot->callback_root) {
+        slot->callback_root = heap_gc_root_slot_new(value.item);
+        if (!slot->callback_root) return;
+    } else {
+        *slot->callback_root = value.item;
+    }
+    if (!slot->owner_doc && owner_doc && node_ref.address &&
+        dom_node_ref_validate(owner_doc, node_ref) &&
+        dom_node_pin(owner_doc, node_ref, DOM_NODE_PIN_EVENT_QUEUE)) {
+        slot->owner_doc = owner_doc;
+        slot->node_ref = node_ref;
+    }
     if (!slot->active) {
         // Clearing an event-handler attribute removes its listener-list slot;
         // a later callable assignment must therefore append after live listeners.
@@ -776,6 +815,10 @@ extern "C" void js_dom_event_handler_property_set(Item target,
     if (!js_dom_event_runtime_state_ensure()) return;
     if (!event_handler_target_supported(target)) return;
     void* key = get_event_target_key(target);
+    DomNode* node = (DomNode*)js_dom_unwrap_element(target);
+    DomDocument* owner_doc = node && node->is_element()
+        ? node->as_element()->doc : nullptr;
+    DomNodeRef node_ref = node ? dom_node_ref(node) : DomNodeRef{nullptr, 0};
     DomNodeRef no_node = {nullptr, 0};
     if (event_target_needs_root(target, key, no_node) &&
         !get_or_create_listeners(key, nullptr, no_node, target)) {
@@ -783,14 +826,20 @@ extern "C" void js_dom_event_handler_property_set(Item target,
         return;
     }
     event_handler_property_set_for_key(key, property_name,
-                                       property_name_len, value);
+                                       property_name_len, value,
+                                       owner_doc, node_ref);
 }
 
 extern "C" void js_dom_event_handler_property_set_for_node(
         void* dom_node, const char* property_name, int property_name_len, Item value) {
     if (!js_dom_event_runtime_state_ensure()) return;
+    DomNode* node = (DomNode*)dom_node;
+    DomDocument* owner_doc = node && node->is_element()
+        ? node->as_element()->doc : nullptr;
+    DomNodeRef node_ref = node ? dom_node_ref(node) : DomNodeRef{nullptr, 0};
     event_handler_property_set_for_key(dom_node, property_name,
-                                       property_name_len, value);
+                                       property_name_len, value,
+                                       owner_doc, node_ref);
 }
 
 static void nl_push(NodeListeners* nl, EventListener listener) {
@@ -2175,6 +2224,12 @@ static Item wrap_path_key(void* key, bool key_is_dom) {
 
 static Item event_target_get_idl_handler(Item target, const char* type) {
     if (target.item == 0 || !type) return ItemNull;
+    void* key = get_event_target_key(target);
+    EventHandlerSlot* slot = find_handler_slot(key, type);
+    if (slot && slot->active && slot->callback_root) {
+        Item rooted_handler = event_listener_root_item(slot->callback_root);
+        if (js_is_callable(rooted_handler)) return rooted_handler;
+    }
     TypeId target_type = get_type_id(target);
     if (target_type != LMD_TYPE_MAP && target_type != LMD_TYPE_OBJECT &&
         target_type != LMD_TYPE_ELEMENT && target_type != LMD_TYPE_VMAP) {
@@ -2707,6 +2762,8 @@ void js_dom_events_reset(void) {
     }
     for (int i = 0; i < _handler_slot_count; i++) {
         if (_handler_slots[i].type) mem_free(_handler_slots[i].type);
+        event_handler_release_callback(&_handler_slots[i]);
+        event_handler_release_target(&_handler_slots[i]);
     }
     if (_handler_slots) {
         mem_free(_handler_slots);

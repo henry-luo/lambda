@@ -158,6 +158,8 @@ static CssAnimValueType property_value_type(CssPropertyCode id) {
             return ANIM_VAL_LENGTH;
         case CSS_PROPERTY_ASPECT_RATIO:
             return ANIM_VAL_ASPECT_RATIO;
+        case CSS_PROPERTY_DISPLAY:
+            return ANIM_VAL_DISPLAY;
         default:
             return ANIM_VAL_NONE;
     }
@@ -331,6 +333,14 @@ static bool parse_property_value(CssPropertyCode prop_id, const char* val,
         case ANIM_VAL_TRANSFORM: {
             out->value.transform = parse_transform_value(val, pool);
             return out->value.transform != NULL;
+        }
+        case ANIM_VAL_DISPLAY: {
+            CssDeclaration* declaration = css_parse_property_declaration(
+                "display", 7, val, strlen(val), pool);
+            if (!declaration || !declaration->value) return false;
+            out->value.display.value = declaration->value;
+            out->value.display.has_used = false;
+            return true;
         }
         default:
             return false;
@@ -714,6 +724,18 @@ static bool capture_underlying_aspect_ratio(DomElement* element,
     return true;
 }
 
+static bool capture_underlying_display(DomElement* element,
+                                       CssAnimatedProp* out) {
+    if (!element || !out) return false;
+    out->property_code = CSS_PROPERTY_DISPLAY;
+    out->value_type = ANIM_VAL_DISPLAY;
+    out->composite = CSS_ANIM_COMPOSITE_REPLACE;
+    out->value.display.value = NULL;
+    out->value.display.used = element->display;
+    out->value.display.has_used = true;
+    return true;
+}
+
 static void animation_update_layout_bounds(AnimationInstance* animation, View* target) {
     float x = target->x;
     float y = target->y;
@@ -820,6 +842,18 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
     ViewSpan* span = lam::view_require_element(static_cast<View*>(element));
 
     switch (prop->property_code) {
+        case CSS_PROPERTY_DISPLAY: {
+            DisplayValue display;
+            bool resolved = prop->value.display.has_used
+                ? (display = prop->value.display.used, true)
+                : css_resolve_display_css_value(
+                    element, prop->value.display.value, &display);
+            if (resolved) {
+                element->display = display;
+                element->set_animated_display(display);
+            }
+            break;
+        }
         case CSS_PROPERTY_OPACITY: {
             InlineProp* il = ensure_inline_prop(span);
             if (il) il->opacity = prop->value.f;
@@ -917,6 +951,43 @@ static float css_animation_composite_aspect_ratio(CssAnimState* state,
     // underlying value as the second value in the composite operation.
     return underlying && underlying->value_type == ANIM_VAL_ASPECT_RATIO
         ? underlying->value.aspect_ratio.value : value;
+}
+
+static bool css_display_is_none(DisplayValue display) {
+    return display.outer == CSS_VALUE_NONE;
+}
+
+static bool css_animation_resolve_display(DomElement* element,
+                                          CssAnimatedProp* prop,
+                                          DisplayValue* out_display) {
+    if (!element || !prop || !out_display ||
+        prop->value_type != ANIM_VAL_DISPLAY) return false;
+    if (prop->value.display.has_used) {
+        *out_display = prop->value.display.used;
+        return true;
+    }
+    return css_resolve_display_css_value(
+        element, prop->value.display.value, out_display);
+}
+
+static DisplayValue css_interpolate_display(DomElement* element,
+                                             CssAnimatedProp* from,
+                                             CssAnimatedProp* to, float t) {
+    DisplayValue from_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
+    DisplayValue to_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
+    if (!css_animation_resolve_display(element, from, &from_display) ||
+        !css_animation_resolve_display(element, to, &to_display)) {
+        return t < 0.5f ? from_display : to_display;
+    }
+    // CSS Display 3: `none` stays at the endpoint of an appearance or
+    // disappearance transition; other discrete values flip at 50 percent.
+    if (css_display_is_none(from_display) && !css_display_is_none(to_display)) {
+        return t <= 0.0f ? from_display : to_display;
+    }
+    if (!css_display_is_none(from_display) && css_display_is_none(to_display)) {
+        return t < 1.0f ? from_display : to_display;
+    }
+    return t < 0.5f ? from_display : to_display;
 }
 
 void css_animation_tick(AnimationInstance* anim, float t) {
@@ -1042,6 +1113,12 @@ void css_animation_tick(AnimationInstance* anim, float t) {
                         interp.value.transform = prop_b->value.transform;
                     }
                     break;
+                case ANIM_VAL_DISPLAY:
+                    interp.value.display.used = css_interpolate_display(
+                        state->element, prop_a, prop_b, local_t);
+                    interp.value.display.value = NULL;
+                    interp.value.display.has_used = true;
+                    break;
                 default:
                     interp.value = prop_b->value;
                     break;
@@ -1078,6 +1155,14 @@ void css_animation_tick(AnimationInstance* anim, float t) {
                     prop_a->value.aspect_ratio.value,
                     underlying->value.aspect_ratio.value, local_t);
                 interp.value.aspect_ratio.is_auto = false;
+                apply_animated_value(state->element, &interp);
+            } else if (underlying &&
+                       prop_a->value_type == ANIM_VAL_DISPLAY) {
+                CssAnimatedProp interp = *prop_a;
+                interp.value.display.used = css_interpolate_display(
+                    state->element, prop_a, underlying, local_t);
+                interp.value.display.value = NULL;
+                interp.value.display.has_used = true;
                 apply_animated_value(state->element, &interp);
             } else {
                 apply_animated_value(state->element, prop_a);
@@ -1151,9 +1236,11 @@ static void capture_animation_underlying(CssAnimState* state) {
             CssPropertyCode id = stop->properties[j].property_code;
             if (find_underlying_prop(state, id)) continue;
             CssAnimatedProp* slot = &state->underlying[state->underlying_count];
-            bool captured = id == CSS_PROPERTY_ASPECT_RATIO
-                ? capture_underlying_aspect_ratio(state->element, slot)
-                : capture_underlying_length(state->element, id, slot);
+            bool captured = id == CSS_PROPERTY_DISPLAY
+                ? capture_underlying_display(state->element, slot)
+                : (id == CSS_PROPERTY_ASPECT_RATIO
+                    ? capture_underlying_aspect_ratio(state->element, slot)
+                    : capture_underlying_length(state->element, id, slot));
             if (captured) state->underlying_count++;
         }
     }

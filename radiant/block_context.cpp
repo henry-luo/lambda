@@ -391,7 +391,6 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
     log_debug("[BlockContext] Add float: margin_box=(%.1f,%.1f,%.1f,%.1f)",
               box->margin_box_left, box->margin_box_top,
               box->margin_box_right, box->margin_box_bottom);
-
     // Add to appropriate list
     if (side == CSS_VALUE_LEFT) {
         if (!ctx->left_floats) {

@@ -724,8 +724,16 @@ static void script_source_cache_store(const char* resolved_path, bool is_http,
 static char* load_script_content(const char* resolved_path, bool is_http) {
     char* content = nullptr;
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharness.js") == 0) {
-        // Layout snapshots exclude test-harness execution and its temporary DOM.
-        return mem_strdup("", MEM_CAT_JS_RUNTIME);
+        // Layout snapshots avoid the full harness, but must run synchronous
+        // fixture setup exactly as the browser reference extractor does.
+        return mem_strdup(
+            "window.test=window.test||function(callback){if(typeof callback==='function')callback();};\n"
+            "window.async_test=window.async_test||function(){var t={done:function(){},step_func:function(fn){var self=this;return function(){return fn.apply(self,arguments);};},step_func_done:function(fn){var self=this;return function(){var result=fn.apply(self,arguments);t.done();return result;};}};return t;};\n"
+            "window.promise_test=window.promise_test||function(){};\n"
+            "window.assert_true=window.assert_true||function(){};\n"
+            "window.assert_false=window.assert_false||function(){};\n"
+            "window.assert_equals=window.assert_equals||function(){};\n",
+            MEM_CAT_JS_RUNTIME);
     }
     if (!is_http && resolved_path && strcmp(resolved_path, "builtin:wpt-testharnessreport.js") == 0) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
@@ -750,6 +758,7 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
             "function el(p,t){var e=document.createElement(t||'div');p.appendChild(e);return e;}\n"
             "function target(p,c){var box=el(p);box.classList.add('container');var tpl=document.querySelector('#target-template');if(tpl)box.appendChild(tpl.content.cloneNode(true));var t=box.querySelector('.target')||box;t.classList.add('target',c);t.parentElement.classList.add('parent');box.target=t;return box;}\n"
             "function easing(y){if(y===0)return'steps(1,end)';if(y===1)return'steps(1,start)';if(y===.5)return'linear';var b=(8*y-1)/6;return'cubic-bezier(0,'+b+',1,'+b+')';}\n"
+            "function nameListed(names,name){if(!names)return true;for(var i=0;i<names.length;i++)if(names[i]===name)return true;return false;}\n"
             "function key(prop,v,comp,off){var f={offset:off,composite:comp};if(!neutral(v))f[prop]=v;return f;}\n"
             "function styleValue(t,p,v){if(!neutral(v))t.style.setProperty(p,v);}\n"
             "/* no-interpolation tests still need targets, but unsupported computed properties have no visual target. */\n"
@@ -758,14 +767,15 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
             "function cssAnimation(p,from,to,at,t,compFrom,compTo){var id=next_id++,s=document.createElement('style');document.head.appendChild(s);s.textContent='@keyframes a'+id+' {'+(neutral(from)?'':'from {'+p+':'+from+';animation-composition:'+compFrom+'}')+(neutral(to)?'':'to {'+p+':'+to+';animation-composition:'+compTo+'}');t.style.animationName='a'+id;t.style.animationDuration='100s';t.style.animationDelay='-50s';t.style.animationTimingFunction=easing(at);}\n"
             "function webAnimation(p,from,to,at,t,compFrom,compTo){var frames=[];if(!neutral(from))frames.push(key(p,from,compFrom,0));if(!neutral(to))frames.push(key(p,to,compTo,1));var a=t.animate(frames,{fill:'forwards',duration:100000,easing:easing(at)});a.pause();a.currentTime=50000;}\n"
             "function setupExpected(box,p,v){var e=box.target;if(typeof v==='object'&&v!==null){for(var k in v)styleValue(e,k,v[k]);}else styleValue(e,p,v);}\n"
-            "function run(addDiscrete){if(active_root)return;var root=null;if(compositions.length>0){root=el(document.body);active_root=root;}var methods=addDiscrete?[{n:'CSS Transitions with transition-behavior:allow-discrete',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,false,'allow-discrete')}},{n:'CSS Transitions with transition-property:all and transition-behavior:allow-discrete',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,true,'allow-discrete')}}]:[];methods=methods.concat([{n:'CSS Transitions',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,false)}},{n:'CSS Transitions with transition: all',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,true)}},{n:'CSS Animations',f:function(p,a,b,x,t,ca,cb){cssAnimation(p,a,b,x,t,ca,cb)}},{n:'Web Animations',f:function(p,a,b,x,t,ca,cb){webAnimation(p,a,b,x,t,ca,cb)}}]);\n"
-            "for(var m=0;m<methods.length;m++){var mr=root?el(root):null;var method=methods[m];for(var q=0;q<tests.length;q++){var test=tests[q],o=test.o;if(o.method&&o.method!==method.n)continue;if(method.n==='Web Animations'&&(o.from===''||o.to===''))continue;if(!supportedValue(o.property,o.from)||!supportedValue(o.property,o.to))continue;if(!root){root=el(document.body);active_root=root;}if(!mr)mr=el(root);var tr=el(mr);el(tr);var ex=test.x;if(!ex){ex=[-.3,0,.3,.5,.6,1,1.5].map(function(x){return{at:x,expect:x<.5?o.from:o.to};});}for(var i=0;i<ex.length;i++){var ac=target(tr,'actual'),ee=target(tr,'expected');if(typeof o.underlying!=='undefined')styleValue(ac.target,o.property,o.underlying);method.f(o.property,o.from,o.to,ex[i].at,ac.target,'replace','replace');setupExpected(ee,o.property,ex[i].expect);}}}\n"
+            "function run(addDiscrete){if(active_root)return;var root=el(document.body),createdTarget=false;active_root=root;var methods=addDiscrete?[{n:'CSS Transitions with transition-behavior:allow-discrete',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,false,'allow-discrete')}},{n:'CSS Transitions with transition-property:all and transition-behavior:allow-discrete',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,true,'allow-discrete')}}]:[];methods=methods.concat([{n:'CSS Transitions',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,false)}},{n:'CSS Transitions with transition: all',f:function(p,a,b,x,t){cssTransition(p,a,b,x,t,true)}},{n:'CSS Animations',f:function(p,a,b,x,t,ca,cb){cssAnimation(p,a,b,x,t,ca,cb)}},{n:'Web Animations',f:function(p,a,b,x,t,ca,cb){webAnimation(p,a,b,x,t,ca,cb)}}]);\n"
+            "function expectedFor(test,method,at){var o=test.o;if(test.kind==='not'&&method.n.indexOf('CSS Transitions')===0&&method.n.indexOf('allow-discrete')<0)return o.to;if(test.kind==='not')return o.underlying;return at<.5?o.from:o.to;}\n"
+            "for(var m=0;m<methods.length;m++){var mr=el(root);var method=methods[m];for(var q=0;q<tests.length;q++){var test=tests[q],o=test.o;if(o.method&&o.method!==method.n)continue;if(!nameListed(o.target_names,method.n))continue;if(method.n==='Web Animations'&&(o.from===''||o.to===''))continue;if(!supportedValue(o.property,o.from)||!supportedValue(o.property,o.to))continue;var tr=el(mr);el(tr);var ex=test.x;if(!ex){ex=[-.3,0,.3,.5,.6,1,1.5].map(function(x){return{at:x,expect:expectedFor(test,method,x)};});}for(var i=0;i<ex.length;i++){var ac=target(tr,'actual'),ee=target(tr,'expected');createdTarget=true;if(test.kind==='not'&&typeof o.underlying!=='undefined')styleValue(ac.target,o.property,o.underlying);method.f(o.property,o.from,o.to,ex[i].at,ac.target,'replace','replace');setupExpected(ee,o.property,ex[i].expect);}}}if(!createdTarget){root.remove();active_root=null;}\n"
             "for(var c=0;c<2;c++){var list=compositions;if(!root){if(list.length===0)continue;root=el(document.body);active_root=root;}var cm=el(root);for(var q=0;q<list.length;q++){var o=list[q].o,tr=el(cm);el(tr);var from=o.accumulateFrom||o.addFrom||o.replaceFrom,to=o.accumulateTo||o.addTo||o.replaceTo,fc='accumulateFrom'in o?'accumulate':'addFrom'in o?'add':'replace',tc='accumulateTo'in o?'accumulate':'addTo'in o?'add':'replace';for(var i=0;i<list[q].x.length;i++){var ac=target(tr,'actual'),ee=target(tr,'expected');styleValue(ac.target,o.property,o.underlying);if(c===0)cssAnimation(o.property,from,to,list[q].x[i].at,ac.target,fc,tc);else webAnimation(o.property,from,to,list[q].x[i].at,ac.target,fc,tc);setupExpected(ee,o.property,list[q].x[i].expect);}}}\n"
             "}\n"
-            "window.test_interpolation=function(o,x){tests=[{o:o,x:x}];run(!x);tests=[];};\n"
-            "window.test_no_interpolation=function(o){tests=[{o:o,x:null}];run(true);tests=[];};\n"
+            "window.test_interpolation=function(o,x){tests=[{o:o,x:x,kind:'interpolation'}];run(!x);tests=[];};\n"
+            "window.test_no_interpolation=function(o){tests=[{o:o,x:null,kind:'no'}];run(true);tests=[];};\n"
             "window.test_composition=function(o,x){compositions=[{o:o,x:x}];run(false);compositions=[];};\n"
-            "window.test_not_animatable=window.test_no_interpolation;window.neutralKeyframe=neutralKeyframe;\n"
+            "window.test_not_animatable=function(o){tests=[{o:o,x:null,kind:'not'}];run(true);tests=[];};window.neutralKeyframe=neutralKeyframe;\n"
             "})();\n",
             MEM_CAT_JS_RUNTIME);
     }

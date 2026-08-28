@@ -777,6 +777,11 @@ static IntrinsicHorizontalBoxEdges intrinsic_horizontal_box_edges(
         LayoutContext* lycon, DomElement* element, bool resolve_cyclic_padding) {
     IntrinsicHorizontalBoxEdges edges = {0.0f, 0.0f, 0.0f, 0.0f};
     if (!element) return edges;
+    if (resolve_display_value(element).outer == CSS_VALUE_CONTENTS) {
+        // CSS Display 3: a contents element has no principal box, so its
+        // padding and border do not contribute to intrinsic sizing.
+        return edges;
+    }
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
     bool cyclic = resolve_cyclic_padding &&
         intrinsic_percentage_width_is_indefinite(lycon) && element->specified_style;
@@ -811,6 +816,11 @@ static bool intrinsic_percentage_width_is_indefinite(LayoutContext* lycon) {
 float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* element,
                                            bool horizontal, float inline_base) {
     if (!element) return 0.0f;
+    if (resolve_display_value(element).outer == CSS_VALUE_CONTENTS) {
+        // CSS Display 3: box edges belong to generated boxes, not the boxless
+        // element whose descendants participate in the parent formatting context.
+        return 0.0f;
+    }
 
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
     if (view->bound) {
@@ -1971,8 +1981,17 @@ float compute_text_height_at_width(LayoutContext* lycon,
     return result;
 }
 
+static bool is_inline_level_element(DomElement* element);
+
 static bool is_inline_level_element(DomElement* element) {
     if (!element) return false;
+
+    DisplayValue resolved_display = resolve_display_value((void*)element);
+    if (resolved_display.outer == CSS_VALUE_CONTENTS) {
+        // CSS Display 3: display:contents contributes no box; expose its
+        // descendants as inline content only when they contain no block flow box.
+        return !layout_display_contents_has_block_child(element);
+    }
 
     // Anonymous inline-table wrappers store resolved display on the DOM element
     // before a view box exists, so intrinsic sizing must read it directly.
@@ -4836,6 +4855,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         IntrinsicSizes child_sizes = {0, 0};
         bool is_inline = false;
         bool child_is_float = false;
+        bool child_is_flex_contents = false;
+        int flattened_flex_child_count = 0;
 
         if (child->is_element() &&
             layout_marker_is_outside(static_cast<View*>(child->as_element()))) {
@@ -5118,7 +5139,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 continue;
             }
 
-            child_sizes = measure_element_intrinsic_widths(lycon, child_elem);
+            DisplayValue child_display = resolve_display_value(child_elem);
+            child_is_flex_contents = is_flex_container &&
+                child_display.outer == CSS_VALUE_CONTENTS;
+            child_sizes = child_is_flex_contents
+                ? flex_measure_display_contents_intrinsic_widths(
+                    lycon, view_block, child_elem, is_row_flex, is_flex_wrap,
+                    &flattened_flex_child_count)
+                : measure_element_intrinsic_widths(lycon, child_elem);
             if (is_grid_container) {
                 // Auto-track grids use the normal child walk; retain the grid
                 // item's explicit minimum in that path as well.
@@ -5186,7 +5214,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (is_flex_container) {
             // CSS Flexbox §4: Absolutely positioned children are out-of-flow
             // and do not participate in flex layout or contribute to intrinsic size
-            if (child->is_element()) {
+            if (child->is_element() && !child_is_flex_contents) {
                 DomElement* child_elem = child->as_element();
                 ViewBlock* child_block = lam::unsafe_view_block_element_storage(child_elem);
                 bool child_is_absolute = false;
@@ -5203,7 +5231,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             // CSS Flexbox §9.9.1: Flex item intrinsic contributions include
             // the item's outer size (content + padding + border + margin).
             // Add flex item margins to child_sizes before accumulating.
-            if (child->is_element()) {
+            if (child->is_element() && !child_is_flex_contents) {
                 DomElement* child_elem = child->as_element();
                 LayoutIntrinsicMarginPair margins =
                     layout_intrinsic_horizontal_margin_pair(lycon, child_elem,
@@ -5221,12 +5249,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     sizes.min_content += child_sizes.min_content;
                 }
                 sizes.max_content += child_sizes.max_content;
-                flex_child_count++;
+                flex_child_count += child_is_flex_contents
+                    ? flattened_flex_child_count : 1;
             } else {
                 // Column flex: take max of widths
                 sizes.min_content = max(sizes.min_content, child_sizes.min_content);
                 sizes.max_content = max(sizes.max_content, child_sizes.max_content);
-                flex_child_count++;
+                flex_child_count += child_is_flex_contents
+                    ? flattened_flex_child_count : 1;
             }
         } else if (is_inline) {
             // For inline content, sum widths for max-content (no wrapping)
@@ -6557,8 +6587,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
     }
 
-    if (!is_grid_container && !is_flex_row && display_inner == CSS_VALUE_FLOW) {
-        // Block element with flow layout - check if all children are inline
+    if (!is_grid_container && !is_flex_row &&
+        (display_inner == CSS_VALUE_FLOW || display_inner == CSS_VALUE_CONTENTS)) {
+        // Flow and contents boxes expose their inline descendants to this formatting context.
         has_only_inline_content = true;
         for (DomNode* c = element->first_child; c; c = c->next_sibling) {
             if (c->is_text()) {
@@ -6571,38 +6602,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                 if (layout_display_is_none(child_ve->display)) {
                     continue;
                 }
-                // Resolve display.outer if not yet resolved (may happen during early
-                // measurement before resolve_htm_style runs).
-                CssEnum child_outer = child_ve->display.outer;
-                if (child_outer == 0) {
-                    DisplayValue dv = resolve_display_value((void*)c);
-                    child_outer = dv.outer;
+                if (!is_inline_level_element(child_elem)) {
+                    // CSS Display 3: a contents wrapper is inline here only when
+                    // flattening it does not expose a block-flow descendant.
+                    has_only_inline_content = false;
+                    break;
                 }
-                // Check if child is an inline element
-                const char* child_tag = child_elem->node_name();
-                if (child_tag && (
-                    strcmp(child_tag, "a") == 0 ||
-                    strcmp(child_tag, "span") == 0 ||
-                    strcmp(child_tag, "strong") == 0 ||
-                    strcmp(child_tag, "b") == 0 ||
-                    strcmp(child_tag, "em") == 0 ||
-                    strcmp(child_tag, "i") == 0 ||
-                    strcmp(child_tag, "code") == 0 ||
-                    strcmp(child_tag, "br") == 0 ||
-                    strcmp(child_tag, "abbr") == 0 ||
-                    strcmp(child_tag, "small") == 0 ||
-                    strcmp(child_tag, "sub") == 0 ||
-                    strcmp(child_tag, "sup") == 0)) {
-                    continue;  // Known inline elements
-                }
-                // Check display.outer for inline OR inline-block (both flow inline)
-                if (child_outer == CSS_VALUE_INLINE ||
-                    child_outer == CSS_VALUE_INLINE_BLOCK) {
-                    continue;  // CSS says it's inline-level
-                }
-                // Found a block element
-                has_only_inline_content = false;
-                break;
             }
         }
     }

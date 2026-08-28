@@ -5095,6 +5095,12 @@ static bool dom_js_node_contains(DomNode* ancestor, DomNode* node) {
 }
 
 static bool dom_js_node_has_table_fixup_context(DomNode* node) {
+    if (node && node->is_element() &&
+        layout_element_contains_table_internal(node->as_element())) {
+        // CSS Tables 3 §2.2: a display mutation can expose table-internal
+        // descendants through a boxless wrapper, so reset their flow parent.
+        return true;
+    }
     for (DomNode* current = node; current; current = current->parent) {
         if (!current->is_element()) continue;
         DomElement* element = lam::dom_require_element(current);
@@ -5110,20 +5116,28 @@ static bool dom_js_node_has_table_fixup_context(DomNode* node) {
 
 static DomElement* dom_js_table_layout_root(DomNode* node) {
     DomElement* fixup_parent = nullptr;
+    DomElement* flow_parent = nullptr;
     for (DomNode* current = node; current; current = current->parent) {
         if (!current->is_element()) continue;
         DomElement* element = lam::dom_require_element(current);
+        DisplayValue display = resolve_display_value((void*)element);
         if (!element->is_table_fixup() &&
             (element->tag() == MARKUP_NAME_TABLE ||
-             resolve_display_value((void*)element).inner == CSS_VALUE_TABLE)) {
+             display.inner == CSS_VALUE_TABLE)) {
             return element;
         }
         if (!fixup_parent && element->is_table_fixup() && element->parent &&
             element->parent->is_element()) {
             fixup_parent = element->parent->as_element();
         }
+        if (!flow_parent && current != node &&
+            display.outer != CSS_VALUE_CONTENTS &&
+            (display.inner == CSS_VALUE_FLOW ||
+             display.inner == CSS_VALUE_FLOW_ROOT)) {
+            flow_parent = element;
+        }
     }
-    return fixup_parent;
+    return fixup_parent ? fixup_parent : flow_parent;
 }
 
 static void dom_js_reset_mutated_layout_subtrees(DomDocument* doc,

@@ -186,6 +186,11 @@ struct DomNode {
     const char* view_name();
 };
 
+// CSS Generated Content keeps ::before/::after at the rendered child edges
+// when authored children are inserted dynamically.
+void dom_append_to_sibling_chain(struct DomElement* parent, DomNode* child);
+void dom_move_generated_after_to_end(struct DomElement* parent);
+
 // ============================================================================
 // DOM Text Node API
 // ============================================================================

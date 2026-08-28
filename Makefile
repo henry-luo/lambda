@@ -3455,7 +3455,7 @@ capture-layout:
 		echo "  make capture-layout test=table_007 force=1"; \
 		echo "  make capture-layout suite=baseline platform=linux force=1"; \
 		echo ""; \
-		echo "Available suites: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists"; \
+		echo "Available suites: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists, wpt-css-display"; \
 		echo "Available platforms: linux, darwin, win32"; \
 		echo ""; \
 		exit 1; \
@@ -3483,7 +3483,7 @@ capture-layout:
 	            *) \
 	                TEST_FILE=""; \
 	                FOUND_SUITE=""; \
-	                for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists; do \
+	                for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-display; do \
 	                    if [ -f "data/$$dir/$${TEST_VAR}.htm" ]; then \
 	                        TEST_FILE="data/$$dir/$${TEST_VAR}.htm"; \
 	                        FOUND_SUITE="$$dir"; \
@@ -3595,7 +3595,7 @@ test-layout:
 				;; \
 			esac; \
 			echo "🎯 Running single test: $$TEST_FILE"; \
-			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE -v; \
+			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE --category $$SUITE_VAR -v; \
 		elif [ -n "$$PATTERN_VAR" ]; then \
 			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
 			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR $$CONCURRENCY_FLAG; \

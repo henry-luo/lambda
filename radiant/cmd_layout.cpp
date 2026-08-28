@@ -273,6 +273,29 @@ void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem);
 DomElement* element_dom_map_lookup(HashMap* map, Element* elem);
 bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode* new_child);
 
+static HtmlVersion classify_html_doctype_identifiers(const char* name,
+                                                     const char* public_id,
+                                                     const char* system_id) {
+    // WHATWG: a doctype without a public identifier is the HTML5 doctype.
+    if (!public_id || public_id[0] == '\0') return HTML5;
+
+    int quirks_mode = html5_determine_quirks_mode(
+        name, public_id, system_id, false);
+    if (quirks_mode == 1) return HTML_QUIRKS;
+    if (quirks_mode == 2) return HTML4_01_STRICT;
+
+    if (strstr(public_id, "-//W3C//DTD HTML 4.01//EN") ||
+        strstr(public_id, "-//W3C//DTD HTML 4.0//EN")) {
+        return HTML4_01_STRICT;
+    }
+    if (strstr(public_id, "Transitional")) return HTML4_01_TRANSITIONAL;
+    if (strstr(public_id, "Frameset")) return HTML4_01_FRAMESET;
+    if (strstr(public_id, "-//W3C//DTD XHTML 1.0")) {
+        return HTML4_01_STRICT;
+    }
+    return HTML4_01_STRICT;
+}
+
 // Function to determine HTML version from Lambda CSS document DOCTYPE
 // This function examines the original Element tree to find DOCTYPE information
 // before it gets filtered out during DomElement tree construction
@@ -301,37 +324,8 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                         const char* system_id = extract_element_attribute(child_elem, "systemId", nullptr);
 
 
-                        // HTML5: <!DOCTYPE html> — name="html", no publicId
-                        if (!public_id || public_id[0] == '\0') {
-                            return HTML5;
-                        }
-
-                        int quirks_mode = html5_determine_quirks_mode(
-                            name, public_id, system_id, false);
-                        if (quirks_mode == 1) {
-                            return HTML_QUIRKS;
-                        }
-                        if (quirks_mode == 2) {
-                            return HTML4_01_STRICT;
-                        }
-
-                        // Check known public identifiers for HTML version
-                        if (strstr(public_id, "-//W3C//DTD HTML 4.01//EN") ||
-                            strstr(public_id, "-//W3C//DTD HTML 4.0//EN")) {
-                            return HTML4_01_STRICT;
-                        }
-                        if (strstr(public_id, "Transitional")) {
-                            return HTML4_01_STRICT;
-                        }
-                        if (strstr(public_id, "Frameset")) {
-                            return HTML4_01_FRAMESET;
-                        }
-                        if (strstr(public_id, "-//W3C//DTD XHTML 1.0")) {
-                            return HTML4_01_STRICT;
-                        }
-                        // Only identifiers in the WHATWG trigger lists enter quirks;
-                        // all other public identifiers are standards mode.
-                        return HTML4_01_STRICT;
+                        return classify_html_doctype_identifiers(
+                            name, public_id, system_id);
                     }
                 }
             }
@@ -351,8 +345,21 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                 Element* elem = item.element;
                 TypeElmt* type = (TypeElmt*)elem->type;
 
-                // Check for DOCTYPE element (case-insensitive)
-                if (type && str_ieq_const(type->name.str, strlen(type->name.str), "!DOCTYPE")) {
+                bool is_attribute_doctype = type && str_ieq_const(
+                    type->name.str, strlen(type->name.str), "#doctype");
+                bool is_content_doctype = type && str_ieq_const(
+                    type->name.str, strlen(type->name.str), "!DOCTYPE");
+
+                // The HTML5 parser represents the doctype as #doctype with
+                // name/publicId/systemId attributes, while the legacy parser
+                // emits !DOCTYPE with a content child.
+                if (is_attribute_doctype) {
+                    const char* name = extract_element_attribute(elem, "name", nullptr);
+                    const char* public_id = extract_element_attribute(elem, "publicId", nullptr);
+                    const char* system_id = extract_element_attribute(elem, "systemId", nullptr);
+                    return classify_html_doctype_identifiers(name, public_id, system_id);
+                }
+                if (is_content_doctype) {
 
                     // Extract DOCTYPE content from the element's children
                     if (elem->length > 0) {
@@ -2014,6 +2021,10 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
     // parsed HTML: the only page kind that may host a JS DOM script realm.
     dom_doc->page_kind = DOM_PAGE_KIND_HTML;
+    // Scripts may call getClientRects() during load. Preserve the parsed mode
+    // before that first layout so transient measurements use the same initial
+    // values as the eventual post-script layout.
+    dom_doc->html_version = (HtmlVersion)detected_version;
     log_debug("[page-kind] html document -> %s",
               dom_page_kind_name(dom_doc->page_kind));
     if (js_host_config) {
