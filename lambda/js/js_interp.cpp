@@ -4269,7 +4269,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     return result.value;
 }
 
-static JsScript* js_interp_adopt_source(Runtime* runtime, const char* source,
+JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, bool strict) {
     if (!runtime || !source) return NULL;
     JsTranspiler* transpiler = js_transpiler_create(runtime);
@@ -4294,7 +4294,7 @@ static JsScript* js_interp_adopt_source(Runtime* runtime, const char* source,
 static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, bool is_module, bool strict,
         uint64_t* result_home) {
-    JsScript* script = js_interp_adopt_source(runtime, source, source_length,
+    JsScript* script = js_interp_prepare_script(runtime, source, source_length,
         filename, strict);
     if (!script) return ItemError;
     script->is_module = is_module;
@@ -4545,7 +4545,7 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
 
 Item js_interp_execute_es_module_source(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, uint64_t* result_home) {
-    JsScript* script = js_interp_adopt_source(runtime, source, source_length,
+    JsScript* script = js_interp_prepare_script(runtime, source, source_length,
         filename, true);
     if (!script) return ItemError;
     return js_interp_execute_es_module_script(runtime, script, result_home);

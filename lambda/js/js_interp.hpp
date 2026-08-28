@@ -6,6 +6,11 @@
 // Tree-walking execution tier. It intentionally shares the JS object/value
 // helpers and the Runtime/EvalContext ownership model with MIR lowering.
 bool js_ast_interpreter_requested(void);
+// Parse, bind, and retain a classic Script without evaluating it. Batch hosts
+// use this to keep a harness AST across fresh per-test realms.
+JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
+                                   size_t source_length, const char* filename,
+                                   bool strict = false);
 Item js_interp_execute_script(Runtime* runtime, JsScript* script,
                               uint64_t* result_home);
 Item js_interp_execute_source(Runtime* runtime, const char* source,

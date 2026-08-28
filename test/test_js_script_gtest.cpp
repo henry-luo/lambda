@@ -115,6 +115,77 @@ TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, SeparateClassicScriptsReadHarnessGlobalLexicalBindings) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char harness_source[] = "const harnessValue = 42;";
+    JsScript* harness = js_interp_prepare_script(&runtime, harness_source,
+        sizeof(harness_source) - 1, "harness.js");
+    ASSERT_NE(harness, nullptr);
+    ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, harness, NULL)));
+
+    const char test_source[] = "harnessValue;";
+    Item result = js_interp_execute_source(&runtime, test_source,
+        sizeof(test_source) - 1, "test.js", NULL);
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, flt2it(42.0).item);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RetainedHarnessRebuildsAfterRealmReplacement) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char harness_source[] =
+        "function assertHarness(value) { if (!value) throw new Error('failed'); }";
+    JsScript* harness = js_interp_prepare_script(&runtime, harness_source,
+        sizeof(harness_source) - 1, "harness.js");
+    ASSERT_NE(harness, nullptr);
+
+    ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, harness, NULL)));
+    const char first_test[] = "assertHarness(true);";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, first_test,
+        sizeof(first_test) - 1, "first.js", NULL)));
+
+    // The harness AST survives; its function objects must be recreated with
+    // the new realm instead of surviving the old heap generation.
+    runtime_reset_heap(&runtime);
+    ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, harness, NULL)));
+    const char second_test[] = "assertHarness(true);";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, second_test,
+        sizeof(second_test) - 1, "second.js", NULL)));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsScriptOwnership, ReleasesBatchScriptGenerationAfterHeapReset) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char harness_source[] = "function harnessFn() { return 42; }";
+    JsScript* harness = js_interp_prepare_script(&runtime, harness_source,
+        sizeof(harness_source) - 1, "harness.js");
+    ASSERT_NE(harness, nullptr);
+    const int test_script_checkpoint = runtime.scripts->length;
+    const uint32_t test_module_state_checkpoint = runtime.next_module_state_id;
+
+    ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, harness, NULL)));
+    const char test_source[] = "harnessFn();";
+    ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, test_source,
+        sizeof(test_source) - 1, "test.js", NULL)));
+    ASSERT_EQ(runtime.scripts->length, test_script_checkpoint + 1);
+
+    runtime_reset_heap(&runtime);
+    runtime_release_script_generation(&runtime, test_script_checkpoint,
+        test_module_state_checkpoint);
+    EXPECT_EQ(runtime.scripts->length, test_script_checkpoint);
+    EXPECT_EQ(runtime.next_module_state_id, test_module_state_checkpoint);
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, UsesSharedCommonJsResolverAndModuleRegistry) {
     Runtime runtime = {};
     runtime_init(&runtime);
