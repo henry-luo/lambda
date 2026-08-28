@@ -309,7 +309,12 @@ void path_to_string(Path* path, void* out_ptr) {
     if (scheme == PATH_SCHEME_LOGICAL) {
         strbuf_append_char(out, '/');
     } else if (scheme == PATH_SCHEME_REL) {
-        strbuf_append_char(out, '.');
+        // S16.9.4: a relative path is spelled `\.a.b`. The escape is load-bearing,
+        // not cosmetic — printed bare, `.rect` re-parses as part of a qualified
+        // name, so `<svg \.rect>` would silently come back as tag `svg.rect`.
+        // OS/filesystem rendering is unaffected: path_to_os_path builds its own
+        // `./` form and never routes through here.
+        strbuf_append_str(out, "\\.");
     } else if (scheme == PATH_SCHEME_FILE) {
         strbuf_append_str(out, "file.");
         if (root->authority_kind == PATH_AUTHORITY_NAMED) {
@@ -320,7 +325,8 @@ void path_to_string(Path* path, void* out_ptr) {
             strbuf_append_char(out, '/');
         }
     } else if (scheme == PATH_SCHEME_PARENT) {
-        strbuf_append_str(out, ".~~");
+        // same escape as PATH_SCHEME_REL above: bare `.~~` no longer parses.
+        strbuf_append_str(out, "\\.~~");
     } else {
         strbuf_append_str(out, scheme_names[scheme]);
     }

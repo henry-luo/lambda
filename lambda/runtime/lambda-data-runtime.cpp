@@ -3027,8 +3027,9 @@ static void map_collect_flat_keys(SymbolKeyList* keys, TypeMap* map_type,
 
 // Field count of map-shaped storage: the number of distinct keys the flattened
 // shape walk yields — the count `for (k, v in m)` iterates, which S8.3.1 pins
-// `len()` to. Without a spread, `length` already IS that count (keys are
-// unique), so the common map pays nothing; only a spread shape walks.
+// `len()` to. Callers take `length` directly for a spread-less shape (keys are
+// unique, so it already IS the count); the guard below only keeps this safe to
+// call unconditionally.
 extern "C" int64_t map_flat_field_count(TypeMap* map_type, void* map_data) {
     if (!map_type) return 0;
     if (!map_type->has_spread) return map_type->length;

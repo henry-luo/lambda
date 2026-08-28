@@ -409,10 +409,13 @@ that building the model is itself the hardening instrument:
   (`if (field->name)`) counted that single slot as one entry instead of
   flattening through it. Fixed by a shared flattening key walk
   (`map_flat_field_count` / `map_collect_flat_keys` in
-  `lambda/runtime/lambda-data-runtime.cpp`), which also dedupes duplicate
-  keys — so `len` now provably equals the iteration count S8.3.1 defines it
-  as, for maps and for element attribute spread alike. Regression fixture:
-  `test/lambda/map_spread_len.ls`.
+  `lambda/runtime/lambda-data-runtime.cpp`), so `len` now provably equals the
+  iteration count S8.3.1 defines it as, for maps and element attribute spread
+  alike. A `TypeMap::has_spread` bit, set where a nameless entry enters a shape
+  and propagated across shape clones, keeps that walk off the common path:
+  without a spread `len` reads `length` directly, since **map keys are unique —
+  a duplicate key is a bug, not a case to accommodate** (designer ruling,
+  2026-08-28). Regression fixture: `test/lambda/map_spread_len.ls`.
 
   **The blast radius is the real finding.** Because a *purely* spread-built
   element (`<graph *:attrs, ...>` — the shape every canonicalizing builder in
