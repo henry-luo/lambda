@@ -412,6 +412,14 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
     result->source_span = field->source_span;
     result->argument = field->value;
 
+    // index synthetic capability alongside source functions.
+    if (mt->tp && !ast_index_append_profile(&mt->tp->ast_index,
+            (AstNode*)function, (AstNode*)field, mt->tp->profile)) {
+        log_error("js-mir: failed to index class field initializer");
+        mt->collection_failed = true;
+        return NULL;
+    }
+
     int function_index = mt->func_count;
     JsFuncCollected* collected = &mt->func_entries[function_index];
     memset(collected, 0, sizeof(JsFuncCollected));
@@ -944,15 +952,10 @@ JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn)
         AstNodeId node_id = ast_index_find(&mt->tp->ast_index, (AstNode*)fn);
         if (node_id != AST_NODE_ID_INVALID) {
             AstFunctionId function_id = mt->tp->ast_index.owner_functions[node_id];
-            if (function_id < mt->func_by_id_count && mt->func_by_id[function_id]) {
+            if (function_id < mt->tp->ast_index.function_count && mt->func_by_id[function_id]) {
                 return mt->func_by_id[function_id];
             }
         }
-    }
-    // Synthetic class-field initializers are created after the source index;
-    // keep this bounded compatibility path until P2b assigns them IDs too.
-    for (int i = 0; i < mt->func_count; i++) {
-        if (mt->func_entries[i].node == fn) return &mt->func_entries[i];
     }
     return NULL;
 }

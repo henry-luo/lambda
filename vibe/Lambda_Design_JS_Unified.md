@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-28
 
-**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, and P2a shared function identity are verified; P0b, P1e, P2b–P6 remain proposed.
+**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, and P2a–P2b shared function identity are verified; P0b, P1e, P2c–P6 remain proposed.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -410,7 +410,7 @@ The cumulative numbers below are measured from the project-specific anchor, not 
 |---|---|---|---:|
 | P0 | P0a counters complete; P0b catalog assertions and timing manifests pending | stale assertions/helpers and any superseded catalog test code | `0` |
 | P1 | P1a iterator-for, P1b declarator, P1c assignment/declaration-wrapper, and P1d condition-loop layouts complete | private loop-layout casts, Lambda declaration-as-assignment casts, duplicate assignment/wrapper structs, old condition-loop tags, and migrated core-child cases | `-110` |
-| P2 | P2a source-function `FunctionId` authority landed; remaining scope/binding/class IDs and one binding/index graph | lowering name repair, pointer indexes, lookup caches made obsolete, repeated identity walks | `<= -500` |
+| P2 | P2a/P2b source and synthetic `FunctionId` authority landed; remaining scope/binding/class IDs and one binding/index graph | lowering name repair, pointer indexes, lookup caches made obsolete, repeated identity walks | `<= -500` |
 | P3 | one compilation unit, typed pass schedule, and one compile lifecycle | duplicated parse/build/validate/index/link/cleanup orchestration and false fact publication | `<= -800` |
 | P4 | `FunctionId`-owned analysis and graph worklists | duplicate `JsFuncCollected` analysis, count/fill scans, per-pass AST caches and propagation loops | `<= -1,200` |
 | P5 | full-contract `MirValue` core and shared structural MIR lowering | corresponding Lambda/JS bare-register cases, duplicate structural statement/expression/call plumbing | `<= -2,100` |
@@ -599,10 +599,10 @@ collector's post-order array remains intact because parent/capture propagation
 still uses its semantic order; the ID table is the bridge, not a second identity
 scheme.
 
-Class-field initializer functions are synthesized after source indexing. They
-therefore retain a bounded linear fallback in `jm_find_collected_func()` and
-remain explicitly listed as P2b work; no false claim of complete FunctionId
-coverage is made. No source semantics or ABI changed.
+Class-field initializer functions are synthesized after source indexing. P2a
+therefore retained a bounded linear fallback and explicitly left their IDs to
+P2b; no false claim of complete FunctionId coverage was made. No source
+semantics or ABI changed.
 
 The independent P2a delta is C/C++ `+33/-35 = -2`; all hand source is also
 `+33/-35 = -2`. The governed candidate is 310,599 lines, two below the P1d
@@ -621,8 +621,40 @@ make test-lambda-baseline                            # 3978/3978 passed
 git diff --check                                     # clean
 ```
 
-P2b must promote synthetic functions and then migrate scope/binding identity;
-until that point, the fallback is residual duplication and not an exit claim.
+#### P2b implementation record — synthetic function identity, 2026-08-28
+
+**D8.2.4** requires synthesized callables to use the same stable identity
+authority as source functions. P2b appends each class-field initializer function
+to `AstIndex` at construction time, so the existing `func_by_id` table covers
+both source and synthesized entries. The linear fallback in
+`jm_find_collected_func()` is deleted. The append uses the field as the owning
+AST edge and preserves the existing collector order and capture semantics.
+Verification also exposed missing core edges for `await`/`yield` operands and
+destructuring assignment/array/map/rest patterns; those edges now enter the
+same index, so nested functions receive IDs instead of falling through to a
+repair scan.
+
+The independent P2b delta is C/C++ `+24/-24 = 0`; all hand source is also
+`+24/-24 = 0`. The governed candidate is 310,599 lines, unchanged from P2a and
+below the 310,690 cap. The retired implementation is the synthetic linear lookup;
+the surviving authority is `AstIndex`/`AstFunctionId`/`func_by_id`.
+
+Focused evidence:
+
+```text
+make build                                           # Errors: 0, Warnings: 10
+class-field JS fixtures                               # 2/2 passed
+promise/GC/pattern identity fixtures                  # 3/3 passed
+./test/test_js_gtest.exe                             # 354/354 passed
+./test/test_js_opt_gtest.exe                         # 19/19 passed
+make test-lambda-baseline                            # 3978/3978 passed
+make build-release-compile                            # Errors: 0, Warnings: 37; smoke: 6
+./utils/check_ast_tune_loc.sh ... --cap 310690      # C/C++ -125; source -128; candidate -112
+git diff --check                                     # clean
+```
+
+P2c now owns scope/binding/class IDs and the shared binding graph; no callable
+identity fallback remains in normal indexed compilation.
 
 ### 4.4 P3 — Make the pass manager and compile driver real
 

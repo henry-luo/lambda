@@ -199,6 +199,8 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
         case AST_NODE_PRIMARY: AST_VISIT(((AstPrimaryNode*)node)->expr); break;
         case AST_NODE_UNARY: AST_VISIT(((AstUnaryNode*)node)->operand); break;
         case AST_NODE_SPREAD: AST_VISIT(((AstSpreadNode*)node)->argument); break;
+        case AST_NODE_YIELD: case AST_NODE_AWAIT:
+            AST_VISIT(((AstYieldNode*)node)->argument); break;
         case AST_NODE_BINARY: case AST_NODE_PIPE:
             AST_VISIT(((AstBinaryNode*)node)->left);
             AST_VISIT(((AstBinaryNode*)node)->right); break;
@@ -210,6 +212,7 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
         case AST_NODE_ASSIGN_STAM:
         case AST_NODE_INDEX_ASSIGN_STAM:
         case AST_NODE_MEMBER_ASSIGN_STAM:
+        case AST_NODE_ASSIGN_PATTERN:
             AST_VISIT(((AstAssignNode*)node)->left);
             AST_VISIT(((AstAssignNode*)node)->right); break;
         case AST_NODE_CALL_EXPR: case AST_NODE_NEW_EXPR:
@@ -223,9 +226,13 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             AST_VISIT(((AstIfNode*)node)->then);
             AST_VISIT(((AstIfNode*)node)->otherwise); break;
         case AST_NODE_ARRAY: case AST_NODE_SEQ: case AST_NODE_CONTENT: case AST_NODE_CONTENT_TYPE:
+        case AST_NODE_ARRAY_PATTERN:
             AST_VISIT(((AstArrayNode*)node)->item); break;
         case AST_NODE_MAP: case AST_NODE_OBJECT_LITERAL:
+        case AST_NODE_MAP_PATTERN:
             AST_VISIT(((AstMapNode*)node)->item); break;
+        case AST_NODE_REST_ELEMENT: case AST_NODE_REST_PROPERTY:
+            AST_VISIT(((AstSpreadNode*)node)->argument); break;
         case AST_NODE_LIST_TYPE: case AST_NODE_ARRAY_TYPE:
             AST_VISIT(((AstArrayNode*)node)->item); break;
         case AST_NODE_MAP_TYPE: case AST_NODE_ELMT_TYPE:

@@ -2130,12 +2130,11 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         mt->collection_failed = true;
         return false;
     }
-    // Publish source callable identity through the shared AstIndex. Synthetic
-    // class-field initializers retain the bounded fallback in jm_find_collected_func.
-    mt->func_by_id_count = mt->tp ? mt->tp->ast_index.function_count : 0;
-    if (mt->func_by_id_count > 0) {
+    // Publish every collected callable through the shared AstIndex identity
+    // table; synthetic class-field initializers were appended during collection.
+    if (mt->tp->ast_index.function_count > 0) {
         mt->func_by_id = (JsFuncCollected**)pool_calloc(mt->tp->pool,
-            (size_t)mt->func_by_id_count * sizeof(JsFuncCollected*));
+            (size_t)mt->tp->ast_index.function_count * sizeof(JsFuncCollected*));
         if (!mt->func_by_id) {
             log_error("js-mir: failed to allocate shared function identity table");
             return false;
@@ -2143,17 +2142,10 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     }
     for (int fi = 0; fi < mt->func_count; fi++) {
         JsFuncCollected* e = &mt->func_entries[fi];
-        e->function_id = AST_FUNCTION_ID_INVALID;
-        AstNodeId node_id = mt->tp
-            ? ast_index_find(&mt->tp->ast_index, (AstNode*)e->node)
-            : AST_NODE_ID_INVALID;
-        if (node_id != AST_NODE_ID_INVALID) {
-            AstFunctionId function_id = mt->tp->ast_index.owner_functions[node_id];
-            if (function_id < mt->func_by_id_count) {
-                e->function_id = function_id;
-                mt->func_by_id[function_id] = e;
-            }
-        }
+        AstNodeId node_id = ast_index_find(&mt->tp->ast_index, (AstNode*)e->node);
+        if (node_id == AST_NODE_ID_INVALID) continue;
+        AstFunctionId function_id = mt->tp->ast_index.owner_functions[node_id];
+        if (function_id < mt->tp->ast_index.function_count) mt->func_by_id[function_id] = e;
     }
     log_debug("js-mir: collected %d functions, %d classes", mt->func_count, mt->class_count);
 
