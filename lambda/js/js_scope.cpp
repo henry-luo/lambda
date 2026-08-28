@@ -1,6 +1,5 @@
 #include "js_transpiler.hpp"
 #include "js_runtime.h"
-#include "js_exec_profile.h"
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem_factory.h"
@@ -19,31 +18,7 @@ extern "C" {
     const TSLanguage* tree_sitter_javascript(void);
 }
 
-typedef struct JsScopeLookupCacheEntry {
-    JsScope* scope;
-    String* name;
-    NameEntry* result;
-    bool found;
-    bool current_only;
-} JsScopeLookupCacheEntry;
-
 static void js_script_destroy_extension(Script* base_script);
-
-static uint64_t js_scope_lookup_cache_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const JsScopeLookupCacheEntry* entry = (const JsScopeLookupCacheEntry*)item;
-    uintptr_t scope = (uintptr_t)entry->scope >> 3;
-    uintptr_t name = (uintptr_t)entry->name >> 3;
-    uint64_t key[3] = {(uint64_t)scope, (uint64_t)name, entry->current_only ? 1u : 0u};
-    return hashmap_xxhash3(key, sizeof(key), seed0, seed1);
-}
-
-static int js_scope_lookup_cache_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const JsScopeLookupCacheEntry* lhs = (const JsScopeLookupCacheEntry*)a;
-    const JsScopeLookupCacheEntry* rhs = (const JsScopeLookupCacheEntry*)b;
-    return lhs->scope == rhs->scope && lhs->name == rhs->name &&
-        lhs->current_only == rhs->current_only ? 0 : 1;
-}
 static void js_parse_error_reset(JsTranspiler* tp) {
     if (!tp) return;
     tp->parse_error_valid = false;
@@ -151,70 +126,18 @@ static bool js_scope_entry_matches_node(const NameEntry* entry,
 }
 
 NameEntry* js_scope_lookup(JsTranspiler* tp, String* name) {
-    JsScope* scope = tp->current_scope;
-
-    if (tp && tp->scope_lookup_cache && scope && name) {
-        JsScopeLookupCacheEntry probe = {scope, name, NULL, false, false};
-        const JsScopeLookupCacheEntry* cached = (const JsScopeLookupCacheEntry*)
-            hashmap_get(tp->scope_lookup_cache, &probe);
-        if (cached) {
-            js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_HIT,
-                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
-            return cached->found ? cached->result : NULL;
-        }
-        js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_MISS,
-            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
-        NameEntry* result = NULL;
-        for (JsScope* scan_scope = scope; scan_scope && !result;
-                scan_scope = scan_scope->parent) {
-            result = js_scope_find_entry(scan_scope, name);
-        }
-        probe.result = result;
-        probe.found = result != NULL;
-        hashmap_set(tp->scope_lookup_cache, &probe);
-        return result;
-    }
-
-    while (scope) {
+    // builder-time lookup is the only spelling-based path; indexed lowering
+    // consumes binding IDs, so no mutable cache can outlive scope mutation.
+    for (JsScope* scope = tp ? tp->current_scope : NULL; scope;
+            scope = scope->parent) {
         NameEntry* entry = js_scope_find_entry(scope, name);
         if (entry) return entry;
-        // For var declarations, skip block scopes and go to function scope
-        scope = scope->parent;
     }
-
-    return NULL; // Not found
+    return NULL;
 }
 
 NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name) {
-    if (tp && tp->scope_lookup_cache && tp->current_scope && name) {
-        JsScopeLookupCacheEntry probe = {tp->current_scope, name, NULL, false, true};
-        const JsScopeLookupCacheEntry* cached = (const JsScopeLookupCacheEntry*)
-            hashmap_get(tp->scope_lookup_cache, &probe);
-        if (cached) {
-            js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_HIT,
-                JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
-            return cached->found ? cached->result : NULL;
-        }
-        js_opt_trace_record(JS_OPT_SCOPE_LOOKUP_CACHE_MISS,
-            JS_OPT_REASON_NONE, JS_OPT_OUTCOME_FALLBACK);
-    }
-    if (!tp->current_scope) return NULL;
-
-    NameEntry* entry = js_scope_find_entry(tp->current_scope, name);
-    if (entry) {
-        if (tp->scope_lookup_cache) {
-            JsScopeLookupCacheEntry hit = {tp->current_scope, name, entry, true, true};
-            hashmap_set(tp->scope_lookup_cache, &hit);
-        }
-        return entry;
-    }
-
-    if (tp->scope_lookup_cache && name) {
-        JsScopeLookupCacheEntry miss = {tp->current_scope, name, NULL, false, true};
-        hashmap_set(tp->scope_lookup_cache, &miss);
-    }
-
-    return NULL;
+    return tp ? js_scope_find_entry(tp->current_scope, name) : NULL;
 }
 
 NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
@@ -274,10 +197,6 @@ NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
         target_scope->last->next = entry;
     }
     target_scope->last = entry;
-    // declarations mutate lexical lookup results; clear cached probes before
-    // subsequent AST-builder references observe the new binding.
-    if (tp->scope_lookup_cache) hashmap_clear(tp->scope_lookup_cache, false);
-
     log_debug("Defined JavaScript variable '%.*s' in scope type %d",
              (int)name->len, name->chars, target_scope->kind);
     return entry;
@@ -368,11 +287,10 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     // The shared indexer owns core edges. Install JavaScript's extension-only
     // adapter before any parse can publish an AstIndex for this profile.
     js_profile.visit_ext_children = js_ast_visit_extension_children;
+    js_profile.publish_ext_facts = js_ast_publish_extension_facts;
     tp->profile = &js_profile;
     tp->destroy_extension = js_script_destroy_extension;
     tp->runtime = runtime;
-    js_scope_lookup_cache_enable(tp);
-
     return tp;
 }
 
@@ -398,10 +316,6 @@ static void js_transpiler_destroy_tail(JsTranspiler* tp) {
 static void js_script_destroy_extension(Script* base_script) {
     JsScript* script = js_script_from_script(base_script);
     if (!script) return;
-    if (script->scope_lookup_cache) {
-        hashmap_free(script->scope_lookup_cache);
-        script->scope_lookup_cache = NULL;
-    }
     if (script->type_registry) {
         hashmap_free(script->type_registry);
         script->type_registry = NULL;
@@ -463,12 +377,6 @@ JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
 
     if (runtime) runtime_register_script(runtime, (Script*)script);
     return script;
-}
-
-void js_scope_lookup_cache_enable(JsTranspiler* tp) {
-    if (!tp || tp->scope_lookup_cache) return;
-    tp->scope_lookup_cache = hashmap_new(sizeof(JsScopeLookupCacheEntry), 256,
-        0, 0, js_scope_lookup_cache_hash, js_scope_lookup_cache_compare, NULL, NULL);
 }
 
 static bool js_source_utf8_whitespace_at(const char* source, size_t length, size_t pos,

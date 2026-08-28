@@ -49,8 +49,7 @@ static const char* js_dump_kind_name(int type) {
         case JS_AST_NODE_EXPRESSION_STATEMENT: return "JS_AST_NODE_EXPRESSION_STATEMENT";
         case JS_AST_NODE_BLOCK_STATEMENT: return "JS_AST_NODE_BLOCK_STATEMENT";
         case JS_AST_NODE_IF_STATEMENT: return "JS_AST_NODE_IF_STATEMENT";
-        case JS_AST_NODE_WHILE_STATEMENT: return "JS_AST_NODE_WHILE_STATEMENT";
-        case JS_AST_NODE_FOR_STATEMENT: return "JS_AST_NODE_FOR_STATEMENT";
+        case AST_NODE_LOOP: return "JS_AST_NODE_LOOP";
         case JS_AST_NODE_RETURN_STATEMENT: return "JS_AST_NODE_RETURN_STATEMENT";
         case JS_AST_NODE_BREAK_STATEMENT: return "JS_AST_NODE_BREAK_STATEMENT";
         case JS_AST_NODE_CONTINUE_STATEMENT: return "JS_AST_NODE_CONTINUE_STATEMENT";
@@ -94,7 +93,6 @@ static const char* js_dump_kind_name(int type) {
         case JS_AST_NODE_REST_PROPERTY: return "JS_AST_NODE_REST_PROPERTY";
         case JS_AST_NODE_SWITCH_STATEMENT: return "JS_AST_NODE_SWITCH_STATEMENT";
         case JS_AST_NODE_SWITCH_CASE: return "JS_AST_NODE_SWITCH_CASE";
-        case JS_AST_NODE_DO_WHILE_STATEMENT: return "JS_AST_NODE_DO_WHILE_STATEMENT";
         case JS_AST_NODE_FOR_OF_STATEMENT: return "JS_AST_NODE_FOR_OF_STATEMENT";
         case JS_AST_NODE_FOR_IN_STATEMENT: return "JS_AST_NODE_FOR_IN_STATEMENT";
         case JS_AST_NODE_LABELED_STATEMENT: return "JS_AST_NODE_LABELED_STATEMENT";
@@ -341,18 +339,12 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
             emit_js_dump_field(source, "alternate", if_node->alternate, indent + 1);
             break;
         }
-        case JS_AST_NODE_WHILE_STATEMENT: {
-            JsWhileNode* wh = (JsWhileNode*)node;
-            emit_js_dump_field(source, "test", wh->test, indent + 1);
-            emit_js_dump_field(source, "body", wh->body, indent + 1);
-            break;
-        }
-        case JS_AST_NODE_FOR_STATEMENT: {
-            JsForNode* for_node = (JsForNode*)node;
-            emit_js_dump_field(source, "init", for_node->init, indent + 1);
-            emit_js_dump_field(source, "test", for_node->test, indent + 1);
-            emit_js_dump_field(source, "update", for_node->update, indent + 1);
-            emit_js_dump_field(source, "body", for_node->body, indent + 1);
+        case AST_NODE_LOOP: {
+            AstLoopControlNode* loop = (AstLoopControlNode*)node;
+            emit_js_dump_field(source, "init", loop->init, indent + 1);
+            emit_js_dump_field(source, "test", loop->test, indent + 1);
+            emit_js_dump_field(source, "update", loop->update, indent + 1);
+            emit_js_dump_field(source, "body", loop->body, indent + 1);
             break;
         }
         case JS_AST_NODE_RETURN_STATEMENT:

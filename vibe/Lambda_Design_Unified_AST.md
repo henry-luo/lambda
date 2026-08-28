@@ -1,8 +1,8 @@
 # Unified AST & Compiler Design — Lambda + LambdaJS (and beyond)
 
 **Date:** 2026-08-15 (rev 10 — U26 superseded: AST interpreter adopted by user ruling, `vibe/Lambda_Design_Ast_Interpreter.md` / **D8.1.1v2**)
-**Status:** Design settled — ledger U1–U36 in §9; continuation decisions U27–U36 are implementation requirements; **U26 superseded 2026-08-15** (§12 retained as the historical record)
-**Related:** `vibe/impl/Lambda_Impl_Tune_Ast.md`, `vibe/impl/Lambda_Impl_Unified_AST (done).md`, `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Design_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`, `vibe/Lambda_Expr_For_Clauses2.md` (FC1–FC9)
+**Status:** Design settled — ledger U1–U36 in §9; continuation decisions U27–U36 are implementation requirements; **U26 superseded 2026-08-15** (§12 retained as the historical record). The active Lambda/LambdaJS implementation proposal is `vibe/Lambda_Design_JS_Unified.md` (2026-08-28).
+**Related:** `vibe/Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `vibe/impl/Lambda_Impl_Unified_AST (done).md`, `vibe/Lambda_Semantics_Features.md` Part 1 (J1–J6, G1–G8), `vibe/Lambda_Design_Concurrency.md` (K17), `vibe/Lambda_Design_Native_Module.md`, `vibe/Lambda_Code_Clean_Up.md` §6, `vibe/Lambda_GC_Root_Issue.md`, `vibe/Lambda_Expr_For_Clauses2.md` (FC1–FC9)
 
 ---
 
@@ -152,7 +152,7 @@ The rich type-*syntax* nodes stay per-language (Lambda's `LIST_TYPE/MAP_TYPE/FUN
 | `AST_SEQ` | `items; SeqKind {list, tuple, comma}` *(var.)* | `AST_NODE_LIST` / `AST_NODE_CONTENT` | `SEQUENCE_EXPRESSION` | tuple |
 | `AST_UNARY` | `Operator op; operand; prefix` | `AST_NODE_UNARY` | `UNARY_EXPRESSION` | unary |
 | `AST_BINARY` | `Operator op; left; right` | `AST_NODE_BINARY` | `BINARY_EXPRESSION` (+logical) | binary/boolean ops |
-| `AST_ASSIGN` | `Operator op (incl. compound); target; value; lhs_parenthesized` *(var.)* — usable in expr (JS, Py walrus) and stmt position (§L2) | `AST_NODE_ASSIGN`, `ASSIGN_STAM`, `INDEX_ASSIGN_STAM`, `MEMBER_ASSIGN_STAM` (target = ident/member/pattern) | `ASSIGNMENT_EXPRESSION` | assignment, `:=` |
+| `AST_ASSIGN` | `Operator op (incl. compound); target; value; lhs_parenthesized` *(var.)* — usable in expr (JS, Py walrus) and stmt position (§L2) | `AST_NODE_ASSIGN`, `ASSIGN_STAM`, `INDEX_ASSIGN_STAM`, `MEMBER_ASSIGN_STAM` (target = ident/member/pattern); since P1b, Lambda declarations use `AST_NODE_VARIABLE_DECLARATOR` rather than this tag, and since P1c all four assignment spellings share `AstAssignNode` storage and `left/right` child ownership | `ASSIGNMENT_EXPRESSION` | assignment, `:=` |
 | `AST_IF` | `cond; then; otherwise` — one node for if-expr and if-stmt; value-ness from context | `AST_NODE_IF_EXPR` | `IF_STATEMENT`, `CONDITIONAL_EXPRESSION` | if / ternary |
 | `AST_CALL` | `callee; args; flags {optional, pipe_inject, propagate, can_raise}` *(var.)*; named args as `AST_NAMED_ARG` entries | `AST_NODE_CALL_EXPR`, `SYS_FUNC`, `NAMED_ARG` | `CALL_EXPRESSION` | call, kwargs |
 | `AST_MEMBER` | `object; property; computed; optional` | `AST_NODE_MEMBER_EXPR`, `INDEX_EXPR` | `MEMBER_EXPRESSION` | attribute / subscript |
@@ -173,9 +173,9 @@ Language-range L1 nodes (kept, minimal): **Lambda** — `PIPE`, `CURRENT_ITEM ~`
 | `AST_SCRIPT`                        | `body; NameScope* globals; LangProfile* (via Script)`                                                                                                                                           | `AST_SCRIPT`                          | `PROGRAM`                            | module body                       |
 | `AST_BLOCK`                         | `statements; NameScope*; label?`                                                                                                                                                                | let-block / body                      | `BLOCK_STATEMENT`                    | suite                             |
 | `AST_EXPR_STMT`                     | `expression`                                                                                                                                                                                    | expression content                    | `EXPRESSION_STATEMENT`               | expr stmt                         |
-| `AST_VAR_DECL`                      | `DeclKind {let, var, const, pub}` *(var.)*`; declarators` (L3)                                                                                                                                  | `LET_STAM`, `VAR_STAM`, `PUB_STAM`    | `VARIABLE_DECLARATION` (+`is_using`) | synthesized (below)               |
-| `AST_LOOP`                          | `LoopForm {while, do_while, until, for_c}` *(form, per U19)*`; init?; cond; update?; body; NameScope*; label?` — one node for all condition loops                                               | `WHILE_STAM`                          | `WHILE`/`DO_WHILE`/`FOR_STATEMENT`   | while / until / loop              |
-| `AST_FOR`                           | `target (L3 pattern); iterable; body; IterKind {of, in, range, await}` *(var.)*`; label?` — **deliberately NOT part of `AST_LOOP`** (U22): other languages treat for/while as near-siblings, but in Lambda they are fundamentally different — different **color** (for-expr is pure/fn; condition loops are pn-only statements) and deep iteration semantics (iterator protocol, pattern target, clause family shared with `AST_FOR_EXPR`) | `FOR_STAM`, `LOOP` clause reuse       | `FOR_OF`/`FOR_IN`                    | Py/Rb `for`/`each`                |
+| `AST_VAR_DECL`                      | `DeclKind {let, var, const, pub}` *(var.)*`; declarators` (L3)                                                                                                                                  | `LET_STAM`, `VAR_STAM`, `PUB_STAM` (P1c shares `AstVarDeclNode`, with `declare`/`declarations` as one slot; **D8.2.2**, **D8.2.4**) | `VARIABLE_DECLARATION` (+`is_using`) | synthesized (below)               |
+| `AST_LOOP`                          | `LoopForm {while, do_while, for_c}` *(form, per U19)*`; init?; cond; update?; body; NameScope*; label?` — one node for all condition loops                                               | `AST_NODE_LOOP`                       | `AST_NODE_LOOP` (`WHILE`/`DO_WHILE`/`FOR_STATEMENT`) | while / until / loop              |
+| `AST_FOR`                           | `target (L3 pattern); iterable; body; IterKind {of, in, range, await}` *(var.)*`; label?; discard_result` *(form)* — **deliberately NOT part of `AST_LOOP`** (U22): other languages treat for/while as near-siblings, but in Lambda they are fundamentally different — different **color** (for-expr is pure/fn; condition loops are pn-only statements) and deep iteration semantics (iterator protocol, pattern target, clause family shared with `AST_FOR_EXPR`) | `AST_NODE_FOR_EXPR` plus `AST_NODE_FOR_CLAUSE` edges; braced `pn` form sets `discard_result` | `AST_NODE_FOR_OF_STAM`/`AST_NODE_FOR_IN_STAM` | Py/Rb `for`/`each`                |
 | `AST_BREAK` / `AST_CONTINUE`        | `label?`                                                                                                                                                                                        | `BREAK_STAM`/`CONTINUE_STAM`          | `BREAK`/`CONTINUE`                   | break/continue/next               |
 | `AST_RETURN`                        | `value`                                                                                                                                                                                         | `RETURN_STAM`                         | `RETURN_STATEMENT`                   | return                            |
 | `AST_RAISE`                         | `value`                                                                                                                                                                                         | `RAISE_STAM`/`RAISE_EXPR`             | `THROW_STATEMENT`                    | raise / raise                     |
@@ -445,7 +445,7 @@ struct LangProfile {
     MirValue (*emit_to_number)(MirEmitter*, MirValue value,
                                ValueDemand demand);
     // member/index access semantics
-    MirValue (*emit_member_get)(MirEmitter*, MirValue obj, ...); // map vs prototype + IC
+    MirValue (*emit_member_get)(MirEmitter*, MirValue obj, ...); // map vs JS reference/property semantics
     void (*emit_member_set)(MirEmitter*, ...);
     // calls & errors
     MirValue (*emit_call)(MirEmitter*, ...);               // arity/this/spread policy
@@ -469,7 +469,7 @@ Concrete divergences and where they land:
 | `==` (JS coercing vs Lambda structural), `+` (JS string-concat overload), truthiness (`""`/`0` falsy in JS; Lambda's own rules per Formal_Semantics) | `lower_binary` / `emit_truthy_branch` per profile |
 | Number models (Lambda int/int64/float/decimal vs JS all-float64 + BigInt→decimal per N1–N9) | inference resolution policy + `emit_to_number`; the Item encoding already carries both |
 | `null` vs `undefined` | already solved in the value model (`LMD_TYPE_UNDEFINED`); Lambda code simply never produces it |
-| Object access: Lambda map field vs JS prototype chain + descriptors + ICs | `emit_member_get/set`; JS profile keeps its IC machinery (`JsLoadIC`/`JsStoreIC`), Lambda profile keeps direct shape access. `map_kind` already discriminates at runtime |
+| Object access: Lambda map field vs JS prototype chain + descriptors | `emit_member_get/set`; the JS profile keeps reference/property semantics and the Lambda profile keeps direct shape access. Per **D8.4.1v2**, neither profile introduces inline caches; `TypeMap` shape metadata is ordinary lookup data. `map_kind` already discriminates at runtime. |
 | Errors: Lambda `T^E`/raise vs JS throw/try vs Py/Rb exceptions | All lower to **error-values in MIR** (J3 already forces this at ABI level; JS's completion machinery is already value-based internally). Profile `emit_error_check` decides propagation style: Lambda `?`-style early-return vs try-context dispatch. Cross-language: an error crossing modules is an error Item — no unwinding, per J3 |
 | Mutability: Lambda immutable-by-default vs JS/Py/Rb mutable | DeclKind/fn-pn flags + profile; assignment lowering consults the profile |
 | `this`, prototype, MRO, classes | L5 records declarations; dispatch semantics live in profile `emit_member_get`/`emit_call`; JS-range/Py-range nodes for the genuinely unique parts |
@@ -519,13 +519,13 @@ This is required by **D5.3.4**: rooting policy and final store insertion live on
 
 ### 5.3 Unified variable model
 
-Merge `MirVarEntry` and `JsMirVarEntry` (near-identical: `{MIR_reg_t reg; MIR_type_t mir_type; TypeId type_id; env slot/offset; flags}`) into one `VarEntry` owned by the emitter layer, with the superset of flags (`tdz_active/is_let_const/is_const` from JS; `is_state_var/num_type/elem_type` from Lambda). The `var_scopes[64]` hashmap-stack machinery is identical in both — one implementation.
+Merge `MirVarEntry` and `JsMirVarEntry` (near-identical: `{MIR_reg_t reg; MIR_type_t mir_type; TypeId type_id; env slot/offset; flags}`) into one `VarEntry` owned by the emitter layer, with the superset of flags (`tdz_active/is_let_const/is_const` from JS; `is_state_var/num_type/elem_type` from Lambda). Both lanes implement pass-local hashmap scope stacks, but Lambda still uses a fixed `var_scopes[64]` array while JavaScript uses a dynamic `ArrayList`; the common implementation must replace both rather than preserve either storage accident.
 
 Closure environments: adopt the JS **shared scope-env** model (`Item*` array, slots, `scope_env_key` identity, grandparent links) as the common representation — it is the more general mechanism (Lambda's per-closure `CaptureInfo` env is a subset). Lambda closures move onto it; behavior is observationally identical, and it prepares Lambda for K17 layer-2 resume frames (also heap slot arrays).
 
 ### 5.4 Driver + handlers
 
-The shared driver owns the `switch(node_type)` over core nodes, delegating semantic decisions to the profile (§4.3), clause chains to `lower_clause`, and language-range nodes to `lower_ext_node`. The existing 10-file `js_mir_*` body becomes: JS profile handlers (classes' dispatch semantics, generators driver, eval, with, regex, ICs) + shared driver contributions (statements, expressions, destructuring, iterators, completion). Lambda's `transpile-mir.cpp` becomes: Lambda profile handlers (query/for-clause extensions, elements, pipes, patterns, views) + the same shared driver.
+The shared driver owns the `switch(node_type)` over core nodes, delegating semantic decisions to the profile (§4.3), clause chains to `lower_clause`, and language-range nodes to `lower_ext_node`. The existing 10-file `js_mir_*` body becomes: JS profile handlers (classes' dispatch semantics, generators driver, eval, `with`, regex, and reference/property semantics) + shared driver contributions (statements, expressions, destructuring, iterators, completion). Lambda's `transpile-mir.cpp` becomes: Lambda profile handlers (query/for-clause extensions, elements, pipes, patterns, views) + the same shared driver. **D8.4.1v2** forbids adding an inline-cache layer during this extraction.
 
 **Native specialization** (JS's boxed+native dual emission, `has_native_version`) generalizes: it's the same mechanism as Lambda's unboxed-param path; the shared driver emits native variants when the profile's inference policy typed the params natively.
 
@@ -577,7 +577,7 @@ Optimization cannot use whole-test wall time as a proxy for compiler work. Both 
 
 The batch protocols emit one timing/volume record per compiled test/module, and both GTest harnesses persist the same TSV schema. For JS, the code counts each test's top-level module after MIR finalization and prints its function count and finalized instruction count; the count uses the same definition as MT7 (`test_mir_ratchet_gtest`: labels and declarations are excluded). This is a compact size record, not a full textual MIR dump, so measurement does not add dump-I/O cost. Missing, duplicate, retried, or differently named samples make a comparison invalid. The older Lambda `LAMBDA_PROFILE` shared-file path may remain for ad-hoc diagnostics during migration, but it is not a gate because concurrent batch processes can overwrite it.
 
-The **D8.6.4v2** hard exit metrics and capture protocol are specified in `vibe/impl/Lambda_Impl_Tune_Ast.md`: at least 10% lower median aggregate `build_transpile_us` for `test_lambda_gtest`, at least 20% for `test_js_gtest`, and at least 2,000 net physical C/C++ LOC removed from the Lambda/JS runtime scope. Finalized MIR instructions for the frozen JS large-library cohort and complete corpus remain required numeric diagnostics with per-library attribution, but are not exit gates. Scheduler improvements are welcome and reported separately, but cannot satisfy the compiler-time gates.
+The **D8.6.4v2** hard exit metrics and capture protocol remain formal requirements: at least 10% lower median aggregate `build_transpile_us` for `test_lambda_gtest`, at least 20% for `test_js_gtest`, and at least 2,000 net physical C/C++ LOC removed from the Lambda/JS runtime scope. `vibe/Lambda_Design_JS_Unified.md` is the active implementation proposal and adds a stricter 310,711-line project anchor, phase-local non-growth, and same-phase retirement. `vibe/impl/Lambda_Impl_Tune_Ast (retired).md` retains the earlier partial evidence only. Finalized MIR instructions for the frozen JS large-library cohort and complete corpus remain required numeric diagnostics with per-library attribution, but are not exit gates. Scheduler improvements are welcome and reported separately, but cannot satisfy the compiler-time gates.
 
 ---
 
@@ -588,12 +588,12 @@ Already one `NamePool` shared across Lambda, JS, and runtime. No work. (Guests m
 
 ### 6.2 Shape pool + JS hidden classes — one shape system
 
-Today: Lambda's `ShapePool` interns whole shape chains by signature (find-or-create, arena-backed); JS builds shapes via `TypeMap` transition tables + per-ctor/class shape caches + ICs keyed on shape pointers. Both operate on the *same* `TypeMap`/`ShapeEntry` structures.
+Today: Lambda's `ShapePool` interns whole shape chains by signature (find-or-create, arena-backed); JS builds shapes through `TypeMap` transition tables and constructor/class pre-shaping metadata. Both operate on the *same* `TypeMap`/`ShapeEntry` structures. Per **D8.4.1v2**, this is ordinary shape/lookup data, not an inline cache.
 
 **Design:** ShapePool becomes the single interning/backing store; JS transitions become an *index* over pooled shapes:
 - `shape_pool_get_*` (whole-signature) stays for literal maps/elements (Lambda + JS object literals with known shape).
 - Add `shape_pool_transition(parent_shape, name, type) → TypeMap*` — find-or-create the successor shape, memoized in the parent's transition table. JS's incremental property-addition path routes through it, so structurally-identical objects built in different orders/modules converge on pooled shapes.
-- ICs stay JS-profile-owned but now key on pooled (therefore more shareable) shape pointers — strictly better hit rates.
+- JS reference/property semantics stay profile-owned and consume pooled shapes through ordinary lookup; no per-site mutable cache cell or dispatch patching is introduced.
 - One ref-count/lifecycle discipline (the `RefCountedPool` extraction from Clean_Up §1.7 folds in here).
 
 ### 6.3 Const pool — adopt the Lambda model, fold JS in
@@ -645,9 +645,9 @@ Porting order: **Python first** (most complete, already wired into Lambda's impo
 
 ## 8. Migration Plan
 
-**Live status, 2026-08-12:** the numbered phases below are the historical structural migration plan. The common AST, common node aliases, `FnAnalysis`, and `MirEmitter` are substantially landed. The remaining implementation is now governed by `vibe/impl/Lambda_Impl_Tune_Ast.md`, whose continuation sequence is: measurement → common traversal/index → explicit facts/pass manager → demand-driven `MirValue` lowering → duplicate-path deletion → hard-gate closeout. The old phase text remains as design provenance; it is not the current checklist.
+**Live status, 2026-08-28:** the numbered phases below are the historical structural migration plan. Common node storage, aliases, `FnAnalysis`, `AstIndex`, pass-fact scaffolding, `MirValue`, and `MirEmitter` are partially landed; P1a–P1d made the migrated core layouts authoritative, and P2a–P2c replaced the JS source-function pointer index and synthetic fallback with shared function, binding, scope, class, use, definition, and extension-scope identity publication. Pass ownership and expression contracts are not yet authoritative across both languages. `vibe/Lambda_Design_JS_Unified.md` is the active implementation proposal; `vibe/impl/Lambda_Impl_Tune_Ast (retired).md` preserves the earlier partial evidence. The old phase text remains design provenance, not the current checklist.
 
-Historical method: K17's extract-after-convergence — never a big-bang rewrite; every phase keeps both pipelines green. The current continuation gates are the hard contracts in `vibe/impl/Lambda_Impl_Tune_Ast.md` §2 and the closeout matrix in §11; the numbered phase record below is not used to substitute older corpus counts or looser wall-time measurements.
+Historical method: K17's extract-after-convergence — never a big-bang rewrite; every phase keeps both pipelines green. The current continuation gates are in `vibe/Lambda_Design_JS_Unified.md` §1.2 and §5; the retired plan's §2/§11 remain historical evidence and cannot substitute older corpus counts or looser wall-time measurements.
 
 **Track interleaving with concurrency work (U21, user-confirmed):** Phase 0 lands first — it is the shared prerequisite of *both* this project and the concurrency plan (Stage A runs JIT'd frames concurrently and must not be built on the G1 rooting hack). Then **concurrency Stage A proceeds in parallel with Phases 1–3** (Stage A works against the new emitter API in `transpile-mir.cpp`; Phases 1–3 live mostly in `ast-core`/builders/analysis — low contention). Phase 4's resumable-function-transform extraction then has **two green clients** (JS async/generators + Lambda's Stage-B transform), honoring K17's two-client rule; Stage B ships on the shared transform.
 
@@ -683,7 +683,7 @@ Historical method: K17's extract-after-convergence — never a big-bang rewrite;
 
 Risk register:
 - **G1 rooting** — addressed at Phase 0 by design; do not defer.
-- **JS perf cliffs** (ICs, native specialization, shape caches): Phase 4 must carry them into the profile intact; benchmark AWFY + LambdaJS perf suite per step.
+- **JS perf cliffs** (reference/property kernels, native specialization, constructor/transition-shape metadata): Phase 4 must preserve them in the profile; benchmark AWFY + LambdaJS perf suite per step. **D8.4.1v2** still forbids inline caches.
 - **Double-boxing v2 interaction**: if S0–S3 of that plan proceeds concurrently, sequence it *after* Phase 0 so it lands in the shared emitter once.
 - **Enum renumber blast radius** (Phase 1): purely mechanical but wide; one commit per language with AST-dump equivalence tests.
 - **`transpile.cpp` (C2MIR)**: frozen per U11; only the mechanical enum update touches it.

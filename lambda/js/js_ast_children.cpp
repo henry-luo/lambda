@@ -10,6 +10,7 @@
 // function) must say so as an explicit case rather than relying on the table.
 
 #include "js_ast.hpp"
+#include "../runtime/ast-core.hpp"
 #include "../ts/ts_ast.hpp"
 
 namespace {
@@ -56,10 +57,8 @@ const ChildRow kChildRows[] = {
     { JS_AST_NODE_CONDITIONAL_EXPRESSION, 3, { N(JsConditionalNode, test),
                                               N(JsConditionalNode, consequent),
                                               N(JsConditionalNode, alternate) } },
-    { JS_AST_NODE_WHILE_STATEMENT,       2, { N(JsWhileNode, test), N(JsWhileNode, body) } },
-    { JS_AST_NODE_DO_WHILE_STATEMENT,    2, { N(JsDoWhileNode, body), N(JsDoWhileNode, test) } },
-    { JS_AST_NODE_FOR_STATEMENT,         4, { N(JsForNode, init), N(JsForNode, test),
-                                              N(JsForNode, update), N(JsForNode, body) } },
+    { AST_NODE_LOOP,                     4, { N(AstLoopControlNode, init), N(AstLoopControlNode, test),
+                                              N(AstLoopControlNode, update), N(AstLoopControlNode, body) } },
     { JS_AST_NODE_FOR_OF_STATEMENT,      3, { N(JsForOfNode, left), N(JsForOfNode, right),
                                               N(JsForOfNode, body) } },
     { JS_AST_NODE_FOR_IN_STATEMENT,      3, { N(JsForInNode, left), N(JsForInNode, right),
@@ -126,41 +125,73 @@ JsAstNode* child_at(JsAstNode* node, const ChildSlot& slot) {
     return location ? *location : NULL;
 }
 
+typedef bool (*ChildAction)(JsAstNode* child, void* ctx);
+
+static bool walk_child_row(JsAstNode* node, const ChildRow* row,
+        ChildAction action, void* ctx) {
+    if (node->node_type == AST_NODE_LOOP &&
+            ((AstLoopControlNode*)node)->form == LOOP_FORM_DO_WHILE) {
+        JsAstNode* body = child_at(node, row->slots[3]);
+        JsAstNode* test = child_at(node, row->slots[1]);
+        return (body && action(body, ctx)) || (test && action(test, ctx));
+    }
+    for (uint8_t i = 0; i < row->count; i++) {
+        JsAstNode* child = child_at(node, row->slots[i]);
+        if (row->slots[i].kind == CHILD_LIST) {
+            for (JsAstNode* item = child; item; item = item->next) {
+                if (action(item, ctx)) return true;
+            }
+        } else if (child && action(child, ctx)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+struct VisitContext {
+    JsAstChildVisit visit;
+    void* ctx;
+};
+
+static bool visit_child(JsAstNode* child, void* opaque) {
+    VisitContext* context = (VisitContext*)opaque;
+    context->visit(child, context->ctx);
+    return false;
+}
+
 }  // namespace
 
-bool js_ast_has_child_table(JsAstNode* node) {
-    return node && row_for(node->node_type) != NULL;
+bool js_ast_publish_extension_facts(AstNode* node, struct AstIndex* index) {
+    if (!node || !index) return true;
+    switch (node->node_type) {
+    case JS_AST_NODE_IF_STATEMENT: {
+        JsIfNode* n = (JsIfNode*)node;
+        return ast_index_publish_scope(index, n->consequent_vars) &&
+            ast_index_publish_scope(index, n->alternate_vars);
+    }
+    case JS_AST_NODE_CLASS_EXPRESSION: return ast_index_publish_scope(index, ((JsClassNode*)node)->expression_scope);
+    case JS_AST_NODE_CATCH_CLAUSE: return ast_index_publish_scope(index, ((JsCatchNode*)node)->vars);
+    case JS_AST_NODE_SWITCH_STATEMENT: return ast_index_publish_scope(index, ((JsSwitchNode*)node)->vars);
+    case JS_AST_NODE_FOR_OF_STATEMENT: case JS_AST_NODE_FOR_IN_STATEMENT:
+        return ast_index_publish_scope(index, ((JsForOfNode*)node)->vars);
+    default:
+        return true;
+    }
 }
 
 void js_ast_visit_children(JsAstNode* node, JsAstChildVisit visit, void* ctx) {
     if (!node || !visit) return;
     const ChildRow* row = row_for(node->node_type);
     if (!row) return;
-    for (uint8_t i = 0; i < row->count; i++) {
-        JsAstNode* child = child_at(node, row->slots[i]);
-        if (row->slots[i].kind == CHILD_LIST) {
-            for (JsAstNode* item = child; item; item = item->next) visit(item, ctx);
-        } else if (child) {
-            visit(child, ctx);
-        }
-    }
+    VisitContext context = {visit, ctx};
+    walk_child_row(node, row, visit_child, &context);
 }
 
 bool js_ast_any_child(JsAstNode* node, JsAstChildPredicate predicate, void* ctx) {
     if (!node || !predicate) return false;
     const ChildRow* row = row_for(node->node_type);
     if (!row) return false;
-    for (uint8_t i = 0; i < row->count; i++) {
-        JsAstNode* child = child_at(node, row->slots[i]);
-        if (row->slots[i].kind == CHILD_LIST) {
-            for (JsAstNode* item = child; item; item = item->next) {
-                if (predicate(item, ctx)) return true;
-            }
-        } else if (child && predicate(child, ctx)) {
-            return true;
-        }
-    }
-    return false;
+    return walk_child_row(node, row, predicate, ctx);
 }
 
 void js_ast_visit_extension_children(AstNode* node, AstChildVisitor visitor,

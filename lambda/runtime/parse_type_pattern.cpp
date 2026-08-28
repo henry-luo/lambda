@@ -867,8 +867,8 @@ AstNode* parse_primary(Lexer* lx) {
         // match_arm_is_error_handler blind-casts an arm's type as (TypeType*),
         // so a raw TypePattern here reads pattern_index as a pointer — SEGV.
         if (def->node_type == AST_NODE_TYPE_STAM ||
-                (def->node_type == AST_NODE_ASSIGN &&
-                 ((AstNamedNode*)def)->is_type_definition) ||
+                (def->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+                 ((AstDeclaratorNode*)def)->is_type_definition) ||
                 def->node_type == AST_NODE_STRING_PATTERN ||
                 def->node_type == AST_NODE_SYMBOL_PATTERN) {
             // direct aliases for literals/ranges already carry the first-class

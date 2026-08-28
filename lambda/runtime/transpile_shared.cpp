@@ -10,6 +10,30 @@
 
 extern Type TYPE_ANY, TYPE_INT;
 
+void mir_count_module_volume(MIR_context_t ctx, uint64_t* out_module_count,
+                             uint64_t* out_function_count,
+                             uint64_t* out_instruction_count) {
+    uint64_t module_count = 0;
+    uint64_t function_count = 0;
+    uint64_t instruction_count = 0;
+    for (MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
+            module; module = DLIST_NEXT(MIR_module_t, module)) {
+        module_count++;
+        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items);
+                item; item = DLIST_NEXT(MIR_item_t, item)) {
+            if (item->item_type != MIR_func_item) continue;
+            function_count++;
+            for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, item->u.func->insns);
+                    insn; insn = DLIST_NEXT(MIR_insn_t, insn)) {
+                if (insn->code != MIR_LABEL) instruction_count++;
+            }
+        }
+    }
+    if (out_module_count) *out_module_count = module_count;
+    if (out_function_count) *out_function_count = function_count;
+    if (out_instruction_count) *out_instruction_count = instruction_count;
+}
+
 bool has_typed_params(AstFuncNode* fn_node) {
     AstNamedNode *param = fn_node->param;
     while (param) {
@@ -60,13 +84,15 @@ void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) 
     write_fn_name_ex(strbuf, fn_node, import, NULL);
 }
 
-void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import) {
+void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import) {
+    String* name = node && node->node_type == AST_NODE_VARIABLE_DECLARATOR
+        ? ((AstDeclaratorNode*)node)->name : ((AstNamedNode*)node)->name;
     if (import) {
         strbuf_append_format(strbuf, "m%d.", import->script->index);
     }
     // user var name starts with '_'
     strbuf_append_char(strbuf, '_');
-    strbuf_append_str_n(strbuf, asn_node->name->chars, asn_node->name->len);
+    strbuf_append_str_n(strbuf, name->chars, name->len);
 }
 
 ShapeEntry* find_shape_field_by_name(TypeMap* map_type, const char* name, int name_len) {
@@ -191,11 +217,11 @@ TypeId resolve_field_type_id(ShapeEntry* field, bool unwrap_type_type) {
     return t ? t->type_id : LMD_TYPE_ANY;
 }
 
-static bool has_disqualifying_array_item(AstNode* item, bool disqualify_assign) {
+static bool has_disqualifying_array_item(AstNode* item, bool disqualify_declarator) {
     while (item) {
         if (item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_SPREAD ||
             item->node_type == AST_NODE_PIPE ||
-            (disqualify_assign && item->node_type == AST_NODE_ASSIGN)) {
+            (disqualify_declarator && item->node_type == AST_NODE_VARIABLE_DECLARATOR)) {
             return true;
         }
         item = item->next;
@@ -204,7 +230,7 @@ static bool has_disqualifying_array_item(AstNode* item, bool disqualify_assign) 
 }
 
 int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
-                        ArrayNumElemType* elem_type_out, bool disqualify_assign) {
+                        ArrayNumElemType* elem_type_out, bool disqualify_declarator) {
     while (node && node->node_type == AST_NODE_PRIMARY) {
         node = ((AstPrimaryNode*)node)->expr;
     }
@@ -212,7 +238,7 @@ int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
     AstArrayNode* arr = (AstArrayNode*)node;
     TypeArray* type = (TypeArray*)arr->type;
     if (!type || type->length <= 0 || !type->nested) return 0;
-    if (has_disqualifying_array_item(arr->item, disqualify_assign)) return 0;
+    if (has_disqualifying_array_item(arr->item, disqualify_declarator)) return 0;
 
     TypeId nid = type->nested->type_id;
     if (nid == LMD_TYPE_INT)   { shape_out[0] = type->length; *elem_type_out = ELEM_INT;   return 1; }
@@ -229,14 +255,14 @@ int detect_ndim_literal(AstNode* node, int64_t* shape_out, int max_ndim,
         int64_t inner_shape[32];
         ArrayNumElemType inner_etype;
         int inner_ndim = detect_ndim_literal(arr->item, inner_shape, max_ndim - 1,
-                                             &inner_etype, disqualify_assign);
+                                             &inner_etype, disqualify_declarator);
         if (inner_ndim == 0) return 0;
         AstNode* sib = arr->item->next;
         while (sib) {
             int64_t sib_shape[32];
             ArrayNumElemType sib_etype;
             int sib_ndim = detect_ndim_literal(sib, sib_shape, max_ndim - 1,
-                                               &sib_etype, disqualify_assign);
+                                               &sib_etype, disqualify_declarator);
             if (sib_ndim != inner_ndim || sib_etype != inner_etype) return 0;
             for (int i = 0; i < sib_ndim; i++) {
                 if (sib_shape[i] != inner_shape[i]) return 0;

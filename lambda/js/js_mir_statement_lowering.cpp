@@ -520,24 +520,12 @@ static bool jm_mutable_native_var_needs_boxing_walk(JsMirTranspiler* mt,
             jm_mutable_native_var_needs_boxing_walk(mt, ifn->alternate, bare_name, bare_len, native_type);
     }
 
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* wn = (JsWhileNode*)node;
-        return jm_mutable_native_var_needs_boxing_walk(mt, wn->test, bare_name, bare_len, native_type) ||
-            jm_mutable_native_var_needs_boxing_walk(mt, wn->body, bare_name, bare_len, native_type);
-    }
-
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* dn = (JsDoWhileNode*)node;
-        return jm_mutable_native_var_needs_boxing_walk(mt, dn->body, bare_name, bare_len, native_type) ||
-            jm_mutable_native_var_needs_boxing_walk(mt, dn->test, bare_name, bare_len, native_type);
-    }
-
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* fn = (JsForNode*)node;
-        return jm_mutable_native_var_needs_boxing_walk(mt, fn->init, bare_name, bare_len, native_type) ||
-            jm_mutable_native_var_needs_boxing_walk(mt, fn->test, bare_name, bare_len, native_type) ||
-            jm_mutable_native_var_needs_boxing_walk(mt, fn->update, bare_name, bare_len, native_type) ||
-            jm_mutable_native_var_needs_boxing_walk(mt, fn->body, bare_name, bare_len, native_type);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        return jm_mutable_native_var_needs_boxing_walk(mt, loop->init, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, loop->test, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, loop->update, bare_name, bare_len, native_type) ||
+            jm_mutable_native_var_needs_boxing_walk(mt, loop->body, bare_name, bare_len, native_type);
     }
 
     case JS_AST_NODE_FOR_IN_STATEMENT:
@@ -3529,14 +3517,14 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
     case JS_AST_NODE_IF_STATEMENT:
         jm_transpile_if(mt, (JsIfNode*)stmt);
         break;
-    case JS_AST_NODE_WHILE_STATEMENT:
-        jm_transpile_while(mt, (JsWhileNode*)stmt);
-        break;
-    case JS_AST_NODE_FOR_STATEMENT:
-        jm_transpile_for(mt, (JsForNode*)stmt);
-        break;
-    case JS_AST_NODE_DO_WHILE_STATEMENT:
-        jm_transpile_do_while(mt, (JsDoWhileNode*)stmt);
+    case AST_NODE_LOOP:
+        if (((AstLoopControlNode*)stmt)->form == LOOP_FORM_FOR_C) {
+            jm_transpile_for(mt, (JsForNode*)stmt);
+        } else if (((AstLoopControlNode*)stmt)->form == LOOP_FORM_DO_WHILE) {
+            jm_transpile_do_while(mt, (JsDoWhileNode*)stmt);
+        } else {
+            jm_transpile_while(mt, (JsWhileNode*)stmt);
+        }
         break;
     case JS_AST_NODE_SWITCH_STATEMENT:
         jm_transpile_switch(mt, (JsSwitchNode*)stmt);
@@ -3564,9 +3552,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // check if body is a loop/switch — if so, the loop itself will push to loop_stack
             // and we just need to annotate the label on that entry
             JsAstNodeType body_type = labeled->body->node_type;
-            bool is_loop_or_switch = (body_type == JS_AST_NODE_FOR_STATEMENT ||
-                                      body_type == JS_AST_NODE_WHILE_STATEMENT ||
-                                      body_type == JS_AST_NODE_DO_WHILE_STATEMENT ||
+            bool is_loop_or_switch = (body_type == AST_NODE_LOOP ||
                                       body_type == JS_AST_NODE_FOR_OF_STATEMENT ||
                                       body_type == JS_AST_NODE_FOR_IN_STATEMENT ||
                                       body_type == JS_AST_NODE_SWITCH_STATEMENT);

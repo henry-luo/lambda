@@ -140,7 +140,7 @@ void* alloc_const(Transpiler* tp, size_t size);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix);
-void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import);
+void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import);
 bool needs_fn_call_wrapper(AstFuncNode* fn_node);
 
 // Shared AST/MIR helpers.
@@ -192,6 +192,12 @@ void jit_cleanup_mode(MIR_context_t ctx, int generator_initialized);
 void register_dynamic_import(const char *name, void *addr);
 void clear_dynamic_imports(void);
 }
+
+// Count finalized MIR volume once for all language front ends. Labels are
+// structural and excluded from the executable-instruction total.
+void mir_count_module_volume(MIR_context_t ctx, uint64_t* out_module_count,
+                             uint64_t* out_function_count,
+                             uint64_t* out_instruction_count);
 
 // MIR transpiler functions
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,

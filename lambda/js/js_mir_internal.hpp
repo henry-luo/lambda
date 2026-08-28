@@ -42,6 +42,8 @@ bool js_preamble_entry_copy(const JsModuleConstEntry* source,
                             JsModuleConstEntry* target);
 bool js_preamble_entries_copy(const JsModuleConstEntry* source, int count,
                               JsModuleConstEntry** out_entries);
+bool js_preamble_entries_from_module_consts(struct hashmap* module_consts,
+    int* out_count, JsModuleConstEntry** out_entries);
 void js_preamble_entries_free(JsModuleConstEntry* entries, int count);
 void js_eval_preamble_entries_free(void);
 extern __thread NamePool* g_js_mir_name_pool_override;
@@ -178,6 +180,11 @@ JsMirTranspiler* jm_create_mir_transpiler(
     JsTranspiler* tp, MIR_context_t ctx, const char* filename, bool is_module,
     int import_capacity, int local_func_capacity, int var_scope_capacity,
     const char* log_prefix);
+JsMirTranspiler* js_mir_open_compile_unit(
+    JsTranspiler* tp, const char* filename, const char* module_name,
+    bool is_module, uint32_t module_name_base, unsigned int optimize_level,
+    bool compact_storage,
+    const char* log_prefix, bool install_error_handler, MIR_context_t* out_ctx);
 void jm_destroy_mir_transpiler(JsMirTranspiler* mt);
 Item js_mir_compile_unit_fail(MIR_context_t ctx, JsMirTranspiler* mt,
     JsTranspiler* tp, char* owned_source, Runtime* runtime,
@@ -592,6 +599,8 @@ MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
                                              JsConditionalNode* cond,
                                              TypeId target_type);
 JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call);
+JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt, JsCallNode* call,
+        bool stable = false);
 JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
 bool jm_is_recursive_call(JsCallNode* call, JsFuncCollected* fc);
 bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc);

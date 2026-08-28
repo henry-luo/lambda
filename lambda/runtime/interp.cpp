@@ -671,7 +671,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         boundary ? boundary : "declared parameter binding");
 }
 
-static bool interp_bind_declared_value(InterpFrame* f, AstNamedNode* named,
+static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
         Item value) {
     if (!named) return false;
     Item source = value;
@@ -1784,9 +1784,9 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
     for (AstNode* item = node->item; item; item = item->next) {
         // `let` bindings inside an array literal are transparent: they bind but
         // contribute no element.
-        if (item->node_type == AST_NODE_ASSIGN) {
-            AstNamedNode* named = (AstNamedNode*)item;
-            Item bound = eval_expr(f, named->as);
+        if (item->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            AstDeclaratorNode* named = (AstDeclaratorNode*)item;
+            Item bound = eval_expr(f, named->init);
             if (interp_frame_pending(f)) return acc.get();
             if (!interp_bind_declared_value(f, named, bound)) {
                 return interp_signal_payload(f);
@@ -2327,9 +2327,9 @@ static bool interp_for_apply_row_clauses(ForCtx* fc, bool* keep) {
     InterpFrame* f = fc->f;
     *keep = true;
     for (AstNode* decl = fc->node->let_clause; decl; decl = decl->next) {
-        if (decl->node_type == AST_NODE_ASSIGN) {
-            AstNamedNode* named = (AstNamedNode*)decl;
-            Item bound = eval_expr(f, named->as);
+        if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
+            Item bound = eval_expr(f, named->init);
             if (interp_frame_pending(f)) return false;
             if (!interp_bind_declared_value(f, named, bound)) return false;
         } else if (decl->node_type == AST_NODE_DECOMPOSE) {
@@ -2976,8 +2976,8 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
             if (is_declaration_node(item->node_type)) { decl_count++; continue; }
             if (is_side_effect_stam(item->node_type) ||
                     is_proc_flow_side_effect_node(item, last_executable) ||
-                    item->node_type == AST_NODE_WHILE_STAM ||
-                    item->node_type == AST_NODE_FOR_STAM) {
+                    item->node_type == AST_NODE_LOOP ||
+                    ast_for_discards_result(item)) {
                 stam_count++;
                 continue;
             }
@@ -3001,8 +3001,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
     // so the stream flattens into the block instead of nesting one level.
     bool direct_value = value_count == 1 && last_value &&
         ((decl_count == 0 && stam_count == 0) ||
-         (last_value->node_type != AST_NODE_FOR_EXPR &&
-          last_value->node_type != AST_NODE_FOR_STAM));
+         last_value->node_type != AST_NODE_FOR_EXPR);
 
     // build_content's pass 1 registers every top-level `fn`/`pn` before any
     // body is built, so a call may legally precede the textual definition.
@@ -3029,7 +3028,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
                 interp_propagate_proc_side_effect_error(f, item, side_effect);
             } else if (item == last_value) {
                 result = eval_expr(f, item);
-            } else if (item->node_type == AST_NODE_FOR_STAM) {
+            } else if (ast_for_discards_result(item)) {
                 eval_for(f, (AstForNode*)item, false);   // statement: stream discarded
             } else {
                 Item side_effect = eval_expr(f, item);   // side effect only
@@ -3076,9 +3075,9 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
 // statements. Mirrors transpile_list.
 static Item eval_list(InterpFrame* f, AstListNode* list_node) {
     for (AstNode* decl = list_node->declare; decl; decl = decl->next) {
-        if (decl->node_type == AST_NODE_ASSIGN) {
-            AstNamedNode* named = (AstNamedNode*)decl;
-            Item bound = eval_expr(f, named->as);
+        if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
+            Item bound = eval_expr(f, named->init);
             if (interp_frame_pending(f)) return bound;
             if (!interp_bind_declared_value(f, named, bound)) {
                 return interp_signal_payload(f);
@@ -3158,9 +3157,9 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
                 if (!interp_exec_decompose(f, (AstDecomposeNode*)decl)) return;
                 continue;
             }
-            if (decl->node_type != AST_NODE_ASSIGN) continue;
-            AstNamedNode* named = (AstNamedNode*)decl;
-            Item value = eval_expr(f, named->as);
+            if (decl->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
+            AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
+            Item value = eval_expr(f, named->init);
             if (interp_frame_pending(f)) return;
             // A declared `float` binding is a coercion boundary (S7.7.2):
             // lowering stores the initializer in a double lane, so
@@ -3173,11 +3172,11 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
             // the aliased `let` would observe the write (proc/let_finality.ls).
             // Same helper and same condition lowering uses at its `cow_binding`
             // site, minus the register bookkeeping T0 has no use for (AI3).
-            AstNode* init = ast_unwrap_primary(named->as);
+            AstNode* init = ast_unwrap_primary(named->init);
             if (init && init->node_type == AST_NODE_IDENT) {
                 NameEntry* src = ((AstIdentNode*)init)->entry;
-                TypeId init_tid = named->as->type
-                    ? named->as->type->type_id : LMD_TYPE_ANY;
+                TypeId init_tid = named->init->type
+                    ? named->init->type->type_id : LMD_TYPE_ANY;
                 TypeId var_tid = named->declared_type
                     ? named->declared_type->type_id : LMD_TYPE_ANY;
                 if (ast_declared_type_is_open_any_array(named->declared_type)) {
@@ -3190,7 +3189,7 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
                 bool declared_open_any_array =
                     ast_declared_type_is_open_any_array(named->declared_type);
                 if (src && src->cow_owned && (declared_open_any_array ||
-                        ast_expr_may_return_container(named->as, init_tid, var_tid))) {
+                        ast_expr_may_return_container(named->init, init_tid, var_tid))) {
                     // cow_bind_var may detach a copy, so it is a safepoint: the
                     // operand has to be reachable from a frame slot, not a C++
                     // local, or a collection during the clone frees it.
@@ -3792,8 +3791,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // declaration never writes). Lowering makes the same distinction in
         // mir_is_type_value_node's IDENT arm.
         AstNode* decl = entry ? entry->node : NULL;
-        if (decl && decl->node_type == AST_NODE_ASSIGN &&
-                ((AstNamedNode*)decl)->is_type_definition) {
+        if (decl && decl->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+                ((AstDeclaratorNode*)decl)->is_type_definition) {
             Type* declared = decl->type;
             TypeId tid = LMD_TYPE_ANY;
             TypeType* singleton = lambda_type_node_singleton(declared, &tid);
@@ -4079,7 +4078,6 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         return fn_query(obj.get(), type_slot.get(), query->direct ? 1 : 0);
     }
     case AST_NODE_FOR_EXPR:
-    case AST_NODE_FOR_STAM:
         // Reached as an expression, a `for` always yields its stream — the
         // discard decision belongs to the enclosing content block, exactly as
         // transpile_expr defers it to transpile_content.
@@ -4094,8 +4092,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Function* fn = interp_make_closure(f->module, (AstFuncNode*)node, f);
         return fn ? interp_ptr_item(fn) : ItemError;
     }
+    case AST_NODE_VARIABLE_DECLARATOR:
+        return eval_expr(f, ((AstDeclaratorNode*)node)->init);
     case AST_NODE_KEY_EXPR:
-    case AST_NODE_ASSIGN:
         return eval_expr(f, ((AstNamedNode*)node)->as);
     case AST_NODE_NAMED_ARG:
         // MIR passes a pure system call's named operand as its value in source
@@ -4305,10 +4304,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         interp_write_binding(f, root, replacement);
         return ItemNull;
     }
-    case AST_NODE_WHILE_STAM:
-    case AST_NODE_DO_WHILE_STAM: {
-        AstWhileNode* loop = (AstWhileNode*)node;
-        bool test_first = node->node_type == AST_NODE_WHILE_STAM;
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        bool test_first = loop->form != LOOP_FORM_DO_WHILE;
         if (test_first) {
             Item fast_result = ItemNull;
             if (interp_fast_int_while(f, loop, &fast_result)) return fast_result;
