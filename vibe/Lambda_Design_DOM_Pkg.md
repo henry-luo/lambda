@@ -293,7 +293,7 @@ normative catalog; a placement change is a design change and gets a ledger entry
 | Hit testing, target-path computation, pointer capture, shadow retargeting | N | coupling test (user decision 2) |
 | Listener storage, 3-phase dispatch loop, propagation/cancelation flags | N | frequency (user decision 2) |
 | Trusted event construction, hover/mousemove restyle, cursor | N | frequency; dispatch must run before/without any policy registration |
-| Default actions / activation behavior (link follow, checkbox/radio toggle, submit-on-Enter, button/space activation, `details` toggle, label forwarding) | **L** | policy (user decision 2). **Per-behavior status: `Lambda_Design_DOM_Default.md` §3.9** — checkbox/radio/label/`select` have landed as templates; link follow runs on the wrong event; submit-on-Enter and `details` toggle do not exist on any path |
+| Default actions / activation behavior (link follow, checkbox/radio toggle, submit-on-Enter, button/space activation, `details` toggle, label forwarding) | **L** | policy (user decision 2). **Per-behavior status: `Lambda_Design_DOM_Default.md` §3.9** — checkbox/radio/label/`select` and local submit/reset activation have landed as templates; link follow runs on the wrong event; POST transport, popover and `details` remain open |
 | Sequential focus navigation (Tab order, focus delegation, `autofocus` processing) | **L** | policy, per-keypress cold. Still native and **divergent** on two points — DOM order instead of `tabindex` order, and `autofocus` inspecting only the first `<input>` (`Lambda_Design_DOM_Default.md` §5.3/§5.5, ESO52/ESO60) |
 | Focusability computation (needs style/layout: visibility, `disabled`, `tabindex`) | M | layout-coupled query the policy calls |
 | Key→editing-command mapping policy | **L** (later) | with the editor migration. *Amended 2026-08-25 (ES9, `Lambda_Design_DOM_State.md`)*: "text-insertion mechanics stay N" now holds only for contenteditable — for **form text controls** the whole edit policy is **L** (see the Forms row below); only the buffer/splice mechanism stays N |
@@ -457,9 +457,9 @@ Rules that keep this split safe:
 **The diagram is the target shape, not an inventory.** Which of the `[L]` behaviors it names
 exist today, which are native, which are divergent, and which are missing outright is tracked
 per event and per element in **`vibe/Lambda_Design_DOM_Default.md`** — the single source of
-truth for default-action status. Three of the behaviors named above have no implementation on
-any path yet (`submit-on-Enter`, `details` toggle, and the `scroll_by` keyboard-scroll
-consumer), and the `fallback until registered` rule has since inverted for the migrated
+truth for default-action status. `details` toggle and the `scroll_by` keyboard-scroll
+consumer still have no implementation on any path; F4's local submit/reset path exists, but
+the browsing layer does not yet transport POST bodies. The `fallback until registered` rule has since inverted for the migrated
 classes: once a native applier is deleted, a declining policy handler means the default action
 simply does not happen (DOM_Default §5.6). Add a row there before adding a behavior here.
 

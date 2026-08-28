@@ -840,6 +840,11 @@ struct DomNode* dom_edit_caret_node(void);
 uint32_t dom_edit_caret_offset_u16(void);
 uint64_t dom_edit_apply_epoch(void);
 bool radiant_dispatch_behavior_dom_edit(View* target, const InputIntent* intent);
+// F4: form activation is a behavior-only default action. The JS click pass
+// uses the same claim/dispatch seam so native and script-created clicks cannot
+// submit or reset twice.
+bool radiant_dispatch_behavior_submit_activation(EventContext* evcon, View* target);
+bool radiant_dispatch_behavior_reset_activation(EventContext* evcon, View* target);
 // F14.1: `document.execCommand` reaches the package's command set through here.
 bool radiant_dom_exec_command(void* document, const char* command,
                               const char* value);

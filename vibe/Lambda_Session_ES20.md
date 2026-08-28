@@ -1,8 +1,10 @@
-# Session handoff — ES20 / F14.4 complete (contenteditable redesign)
+# Session handoff — ES20 / F14.4 complete; F4 form submission partial
 
 **Date:** 2026-08-28
 **Design doc:** `vibe/Lambda_Design_DOM_State.md` §3.16 (ES20, staging table F14.1–F14.4)
-**Status:** F14.1–F14.4 are implemented. The current tree is verified below; changes remain uncommitted.
+**Status:** F14.1–F14.4 are implemented. The F4 local/package submission path is
+landed and verified; POST body transport through the browsing layer remains open.
+The current tree is verified below; changes remain uncommitted.
 
 ---
 
@@ -359,3 +361,49 @@ CLI path also exercises the synchronous package-load ownership seam.
 Nothing is committed. The implementation and verification updates are all in
 the current worktree; preserve unrelated worktree changes when continuing past
 F14.4.
+
+---
+
+## 8. Current continuation: F4 form submission (2026-08-28)
+
+**Status:** 🟡 local/package path implemented; browsing-layer POST transport remains open.
+
+F4 now has one package-owned policy path for native pointer activation, keyboard
+Space/Enter activation, implicit Enter in a single-line text control, and
+script-created submit/reset clicks. `form.ls` owns activation dispatch and
+`submit.ls` owns validation gating, the cancelable `submit` event, submitter
+overrides, GET/urlencoded/multipart serialization, and the navigation handoff.
+The native side remains the mechanism waist: form ownership, the successful
+control entry walk, validity/invalid dispatch, focus-first-invalid, reset
+mutation, and browsing target resolution.
+
+The entry walk now includes controls associated with a form through
+`form="..."`, not only descendants. The focused fixture proves submitter
+propagation, cancelation, reset, implicit Enter, invalid/focus-first-invalid,
+and the encoded GET trace:
+
+```text
+FORM_NAVIGATION_HANDOFF method=get enctype=application/x-www-form-urlencoded target=_self url=/serialized?existing=1&outside=associated&first=hello+world&second=a%2Bb&submit=go body=
+```
+
+The remaining boundary is deliberate: `radiant.request_navigation` records the
+serialized request and calls the existing browsing target resolver, but that
+resolver currently accepts only URL/target. POST method/body delivery therefore
+is not claimed complete. This keeps policy in Lambda and transport in the
+browsing layer, in line with **S12.1.3**, **S12.2.2**, **D7.2.1–D7.2.3**, and
+the package/default-action placement decisions **ES5**, **ES10**, and **ESO49**.
+
+### F4 verification
+
+- `make build` — 0 errors.
+- `make form-ui` — rebuild completes with 0 errors/0 warnings and 8/8 focused assertions pass.
+- Existing `test/ui/test_form_input_typing.json` — 6/6 assertions pass.
+- Existing WPT Form gate — 399 cases; 103 pass, 110 skipped, 180 tolerated
+  failures, and 6 baseline regressions. Each of those six reproduces with
+  `RADIANT_DOM_PKG=0` and `=1`, so none is attributable to this F4 package
+  path; the run also contains existing child-runtime crashes.
+- `git diff --check` — clean.
+
+The form test still reports a small shutdown memtrack leak from the current
+runtime; it does not affect the 8/8 event assertions and is not hidden by the
+focused gate.

@@ -8396,6 +8396,37 @@ static Item js_dom_check_or_report_validity(Item elem_item, bool report) {
 JS_FORWARD_ITEM(js_dom_check_validity_bridge, (Item elem_item), js_dom_check_or_report_validity, (elem_item, false))
 JS_FORWARD_ITEM(js_dom_report_validity_bridge, (Item elem_item), js_dom_check_or_report_validity, (elem_item, true))
 
+static DomElement* js_dom_first_invalid_control(DomNode* node) {
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!current->is_element()) continue;
+        DomElement* elem = current->as_element();
+        if (js_dom_is_constraint_control(elem)) {
+            Item state = _build_validity_state(elem);
+            if (!js_dom_validity_item_is_valid(js_get_key_cstr(state, "valid"))) {
+                return elem;
+            }
+        }
+        DomElement* nested = js_dom_first_invalid_control(elem->first_child);
+        if (nested) return nested;
+    }
+    return nullptr;
+}
+
+// Interactive submission focuses the first invalid control after the invalid
+// events have fired. The validity computation remains shared with the public
+// checkValidity/reportValidity bridges; this helper only supplies the focus
+// side effect required by the form submission policy.
+extern "C" bool js_dom_focus_first_invalid_form_control(void* form_ptr) {
+    DomElement* form = (DomElement*)form_ptr;
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return false;
+    }
+    DomElement* invalid = js_dom_first_invalid_control(form->first_child);
+    if (!invalid) return false;
+    js_dom_focus_method_bridge((void*)invalid, true);
+    return true;
+}
+
 // ----------------------------------------------------------------------
 // ----------------------------------------------------------------------
 // F-0: reflected IDL attributes.

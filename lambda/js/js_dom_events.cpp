@@ -30,9 +30,17 @@
 
 #include <cstring>
 #include <cmath>
-#include <functional>
 
 extern Item js_make_number(double d);
+
+struct EventContext;
+extern "C" bool radiant_native_click_dispatch_active(void);
+extern "C" bool radiant_dispatch_behavior_submit_activation(EventContext* evcon,
+                                                            View* target);
+extern "C" bool radiant_dispatch_behavior_reset_activation(EventContext* evcon,
+                                                           View* target);
+bool radiant_behavior_claims_event(EventContext* evcon, View* target,
+                                   const char* event_name);
 
 // Forward decls used by Event helpers below (signatures from js_runtime.h /
 // js_dom.h, declared here under extern "C" to avoid header coupling).
@@ -223,7 +231,8 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
     (void)type;
 }
 
-static DomElement* js_dom_find_form_owner(DomElement* control) {
+extern "C" DomElement* js_dom_find_form_owner(void* control_ptr) {
+    DomElement* control = (DomElement*)control_ptr;
     if (!control) return nullptr;
     const char* form_id = control->get_attribute("form");
     if (form_id && *form_id) {
@@ -241,7 +250,8 @@ static DomElement* js_dom_find_form_owner(DomElement* control) {
     return nullptr;
 }
 
-static bool js_dom_is_submit_button(DomElement* elem) {
+extern "C" bool js_dom_is_submit_button(void* elem_ptr) {
+    DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !elem->tag_name) return false;
     if (strcasecmp(elem->tag_name, "input") == 0) {
         const char* type = js_dom_input_type_lower(elem);
@@ -250,6 +260,18 @@ static bool js_dom_is_submit_button(DomElement* elem) {
     if (strcasecmp(elem->tag_name, "button") == 0) {
         const char* type = js_dom_input_type_lower(elem);
         return strcmp(type, "text") == 0 || strcmp(type, "submit") == 0;
+    }
+    return false;
+}
+
+extern "C" bool js_dom_is_reset_button(void* elem_ptr) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem || !elem->tag_name) return false;
+    if (strcasecmp(elem->tag_name, "input") == 0) {
+        return strcmp(js_dom_input_type_lower(elem), "reset") == 0;
+    }
+    if (strcasecmp(elem->tag_name, "button") == 0) {
+        return strcmp(js_dom_input_type_lower(elem), "reset") == 0;
     }
     return false;
 }
@@ -2590,63 +2612,49 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
             js_dom_dispatch_event(self_item, change_ev);
         }
     } else if (act_kind == 2 && act_target && !prevented && !act_disabled) {
-        // Submit-button activation and requestSubmit(submitter) share one path
-        // so constraint validation, cancelable submit events, and navigation agree.
-        // Re-check disabled in case the click listener disabled us.
+        // Native clicks run the package activation after the JS click returns.
+        // Script-created clicks use the same claim protocol here; the bridge
+        // remains only for documents where the package is not available.
         if (js_dom_is_disabled(act_target)) {
             // listener disabled the control mid-flight — skip submit.
         } else if (!js_dom_is_connected(act_target)) {
             // disconnected forms must not submit (HTML §4.10.21.3).
         } else {
             DomElement* el = (DomElement*)act_target;
-            DomElement* owner = js_dom_find_form_owner(el);
-            if (owner) {
-                js_dom_form_request_submit_bridge(js_dom_wrap_element(owner),
-                    js_dom_wrap_element(el));
+            if (!radiant_native_click_dispatch_active()) {
+                DomElement* owner = js_dom_find_form_owner(el);
+                if (owner) {
+                    View* target_view = (View*)el;
+                    bool claimed = radiant_behavior_claims_event(
+                        nullptr, target_view, "submitactivation");
+                    if (claimed) {
+                        radiant_dispatch_behavior_submit_activation(nullptr,
+                                                                    target_view);
+                    } else {
+                        js_dom_form_request_submit_bridge(
+                            js_dom_wrap_element(owner), js_dom_wrap_element(el));
+                    }
+                }
             }
         }
     } else if (act_kind == 3 && act_target && !prevented && !act_disabled) {
-        // Reset-button activation: walk up to owning <form> and call reset().
+        // Reset follows the same package claim protocol as submit.
         if (!js_dom_is_disabled(act_target) && js_dom_is_connected(act_target)) {
             DomElement* el = (DomElement*)act_target;
-            DomElement* owner = nullptr;
-            // Per HTML spec, a form-associated element's owner is determined
-            // by the `form` attribute first; otherwise the nearest ancestor.
-            const char* fa = el->get_attribute("form");
-            if (fa && *fa) {
-                DomDocument* doc = (DomDocument*)js_dom_get_document();
-                if (doc && doc->root) {
-                    // Walk to find element with matching id.
-                    std::function<DomElement*(DomNode*)> find_id =
-                        [&](DomNode* node) -> DomElement* {
-                        while (node) {
-                            if (node->is_element()) {
-                                DomElement* ce = (DomElement*)node;
-                                const char* eid = ce->get_attribute("id");
-                                if (eid && strcmp(eid, fa) == 0) return ce;
-                                DomElement* r = find_id(ce->first_child);
-                                if (r) return r;
-                            }
-                            node = node->next_sibling;
-                        }
-                        return nullptr;
-                    };
-                    owner = find_id((DomNode*)doc->root);
-                }
-            } else {
-                DomNode* p = el->parent;
-                while (p && p->is_element()) {
-                    DomElement* pe = (DomElement*)p;
-                    if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0) {
-                        owner = pe; break;
-                    }
-                    p = p->parent;
-                }
-            }
+            DomElement* owner = js_dom_find_form_owner(el);
             if (owner) {
-                Item form_item = js_dom_wrap_element(owner);
-                radiant_dom_element_operation(form_item, JUBE_DOM_RESET,
-                    nullptr, 0);
+                if (!radiant_native_click_dispatch_active()) {
+                    View* target_view = (View*)el;
+                    bool claimed = radiant_behavior_claims_event(
+                        nullptr, target_view, "resetactivation");
+                    if (claimed) {
+                        radiant_dispatch_behavior_reset_activation(nullptr,
+                                                                   target_view);
+                    } else {
+                        radiant_dom_element_operation(js_dom_wrap_element(owner),
+                            JUBE_DOM_RESET, nullptr, 0);
+                    }
+                }
             }
         }
     }

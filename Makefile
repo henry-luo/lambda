@@ -548,7 +548,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
+	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui form-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-jube-node-net-crypto-dynamic
@@ -618,6 +618,7 @@ help:
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  editable-unit        - Run focused editable gate, DOM action, and cancellation fixtures"
 	@echo "  editable-ui          - Run contenteditable UI automation fixtures"
+	@echo "  form-ui              - Run focused form activation and submission fixtures"
 	@echo "  editable-editor-e2e  - Run offline CodeMirror, ProseMirror, and Editor.js probes"
 	@echo "  test-editable        - Run all focused editable and upstream editor checks"
 	@echo "  drawing-editor-e2e   - Run offline Raphaël, maxGraph, and JointJS SVG probes"
@@ -2456,6 +2457,9 @@ editable-ui: build
 	@./lambda.exe view test/ui/editing/contenteditable.html --event-file test/ui/test_editing_paired_false_island_contenteditable.json --headless --no-log
 	@./lambda.exe view test/ui/rte_prototype.ls --event-file test/ui/rte_typing_at_caret.json --headless --no-log
 	@./lambda.exe view test/ui/editable-mixed-routes.ls --event-file test/ui/editable-mixed-routes.json --headless --no-log
+
+form-ui: build
+	@./lambda.exe view test/html/form-submission.html --event-file test/ui/form-submission.json --headless --no-log
 
 editable-editor-e2e: build
 	@./lambda.exe view test/ui/dom_mutation_replacechild_notifies.html --event-file test/ui/dom_mutation_replacechild_notifies.json --headless --no-log

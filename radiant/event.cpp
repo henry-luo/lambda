@@ -46,6 +46,12 @@ extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind,
                                                void* target, void* parent,
                                                const char* attribute_name,
                                                const char* old_value);
+extern "C" DomElement* js_dom_find_form_owner(void* control);
+extern "C" bool js_dom_is_submit_button(void* dom_elem);
+extern "C" bool js_dom_is_reset_button(void* dom_elem);
+extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter_item);
+extern "C" bool js_dom_is_disabled(void* dom_elem);
+extern "C" bool js_dom_is_connected(void* dom_elem);
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
 #include <chrono>       // timing for reactive event dispatch
@@ -2655,6 +2661,31 @@ extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* e
     return ok;
 }
 
+// F4: package submission policy uses this as the cancelable event waist. The
+// package handler already runs inside the document's live JS/Lambda batch, so
+// dispatch directly into EventTarget; opening a second evaluator here would
+// split submit listeners from the activation that raised them.
+extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
+                                                           void* submitter_node) {
+    if (!form_node) return false;
+    DomNode* node = static_cast<DomNode*>(form_node);
+    if (!node || !node->is_element()) return false;
+    DomElement* form = node->as_element();
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return false;
+    }
+    DomDocument* doc = g_emit_handler_ctx ? g_emit_handler_ctx->doc
+                                          : (DomDocument*)js_dom_get_document();
+    if (!doc || form->doc != doc) return false;
+
+    Item event = js_create_event("submit", true, true);
+    js_set_key_cstr(event, "isTrusted", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(event, "submitter", submitter_node
+        ? js_dom_wrap_element((DomElement*)submitter_node) : ItemNull);
+    Item dispatched = js_dom_dispatch_event(js_dom_wrap_element(form), event);
+    return dispatched.item != ITEM_FALSE;
+}
+
 // Does a behavior template own the default action for this event on this
 // target? The engine keeps its native default action as the fallback until the
 // package registers a replacement (ES5), so each native activation path asks
@@ -2994,6 +3025,19 @@ extern "C" bool radiant_dispatch_behavior_context_menu(EventContext* evcon,
 
 extern "C" bool radiant_dispatch_behavior_input(EventContext* evcon, View* target) {
     return dispatch_behavior_handler(evcon, target, "input", nullptr, nullptr);
+}
+
+// F4: submit/reset activation has no separate DOM event to expose to Lambda.
+// Keep it behavior-only so the ordinary click dispatch remains available to
+// author handlers and cancellation reaches this default-action seam first.
+extern "C" bool radiant_dispatch_behavior_submit_activation(EventContext* evcon,
+                                                             View* target) {
+    return dispatch_behavior_handler(evcon, target, "submitactivation", nullptr, nullptr);
+}
+
+extern "C" bool radiant_dispatch_behavior_reset_activation(EventContext* evcon,
+                                                            View* target) {
+    return dispatch_behavior_handler(evcon, target, "resetactivation", nullptr, nullptr);
 }
 
 // F5: the applier seam. A behavior template that handles this `beforeinput`
@@ -5979,6 +6023,15 @@ static Item build_mouse_event_item(void* userdata) {
     return event;
 }
 
+// Native pointer/keyboard activation enters JS through this wrapper. The
+// marker lets the JS activation pass defer to the package/native waist without
+// confusing it with a script-created HTMLElement.click().
+static __thread bool s_native_click_dispatch_active = false;
+
+extern "C" bool radiant_native_click_dispatch_active(void) {
+    return s_native_click_dispatch_active;
+}
+
 static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
                                          const char* type, int client_x, int client_y,
                                          int button, int buttons,
@@ -5990,8 +6043,13 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
         type, client_x, client_y, button, buttons,
         ctrl, shift, alt, meta, detail, -1.0
     };
-    return radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
+    bool is_click = type && strcmp(type, "click") == 0;
+    bool saved_click = s_native_click_dispatch_active;
+    if (is_click) s_native_click_dispatch_active = true;
+    bool prevented = radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
         &args, true, dispatched);
+    s_native_click_dispatch_active = saved_click;
+    return prevented;
 }
 
 extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
@@ -6913,6 +6971,111 @@ static View* find_checkbox_radio_input(View* target) {
     }
 
     return nullptr;
+}
+
+// Resolve the activation control from a hit inside a button/input, then use
+// the form subtree's document order for implicit submission. The tree walk is
+// mechanism; submitter selection stays in the form behavior.
+static View* find_form_activation_button(View* target, bool reset) {
+    for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+        if (!node->is_element()) continue;
+        bool match = reset
+            ? js_dom_is_reset_button((void*)node)
+            : js_dom_is_submit_button((void*)node);
+        if (match) return static_cast<View*>(node);
+    }
+    return nullptr;
+}
+
+static View* find_first_form_submitter_in_tree(DomNode* node, DomElement* form) {
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!current->is_element()) continue;
+        DomElement* current_elem = current->as_element();
+        if (js_dom_is_submit_button((void*)current) &&
+            js_dom_find_form_owner((void*)current) == form &&
+            !js_dom_is_disabled((void*)current)) {
+            return static_cast<View*>(current);
+        }
+        View* nested = find_first_form_submitter_in_tree(current_elem->first_child, form);
+        if (nested) return nested;
+    }
+    return nullptr;
+}
+
+static View* find_first_form_submitter(DomElement* form) {
+    if (!form) return nullptr;
+    DomDocument* doc = form->doc;
+    bool connected = false;
+    if (doc && doc->root) {
+        for (DomNode* node = (DomNode*)form; node; node = node->parent) {
+            if (node == (DomNode*)doc->root) {
+                connected = true;
+                break;
+            }
+        }
+    }
+    return find_first_form_submitter_in_tree(
+        connected ? (DomNode*)doc->root : form->first_child, form);
+}
+
+// Run the package policy for a submitter or an implicit form target. A direct
+// bridge remains only for package-off documents, preserving script-less HTML
+// behavior while the migrated class is still being staged.
+static bool run_form_submit_activation(EventContext* evcon, View* target) {
+    if (!target || !target->is_element()) return false;
+    DomElement* elem = lam::dom_require_element(target);
+    DomElement* owner = nullptr;
+    bool has_submitter = js_dom_is_submit_button((void*)elem);
+    if (has_submitter) {
+        if (js_dom_is_disabled((void*)elem) || !js_dom_is_connected((void*)elem)) {
+            return false;
+        }
+        owner = js_dom_find_form_owner((void*)elem);
+    } else if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+        owner = elem;
+    }
+    if (!owner) return false;
+
+    bool claimed = radiant_behavior_claims_event(
+        evcon, target, "submitactivation");
+    if (claimed) {
+        radiant_dispatch_behavior_submit_activation(evcon, target);
+    } else {
+        Item submitter = has_submitter ? js_dom_wrap_element(elem)
+                                       : make_js_undefined();
+        js_dom_form_request_submit_bridge(js_dom_wrap_element(owner), submitter);
+    }
+    return true;
+}
+
+static bool run_form_reset_activation(EventContext* evcon, View* target) {
+    if (!target || !target->is_element()) return false;
+    DomElement* elem = lam::dom_require_element(target);
+    if (!js_dom_is_reset_button((void*)elem) ||
+        js_dom_is_disabled((void*)elem) || !js_dom_is_connected((void*)elem)) {
+        return false;
+    }
+    DomElement* owner = js_dom_find_form_owner((void*)elem);
+    if (!owner) return false;
+
+    bool claimed = radiant_behavior_claims_event(
+        evcon, target, "resetactivation");
+    if (claimed) {
+        radiant_dispatch_behavior_reset_activation(evcon, target);
+    } else {
+        radiant_dom_element_operation(js_dom_wrap_element(owner), JUBE_DOM_RESET,
+                                      nullptr, 0);
+    }
+    return true;
+}
+
+static void run_form_button_default(EventContext* evcon, View* target) {
+    if (!evcon || !target || evcon->default_prevented) return;
+    if (find_form_activation_button(target, true)) {
+        run_form_reset_activation(evcon, target);
+    } else if (find_form_activation_button(target, false)) {
+        run_form_submit_activation(evcon, target);
+    }
 }
 
 
@@ -9407,6 +9570,28 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                                 behavior_may_activate)) {
                         evcon.need_repaint = true;
                     }
+
+                    // F4: submit/reset are separate default-action seams. The
+                    // ordinary click handler above remains the author hook;
+                    // only this post-click behavior event may activate the
+                    // form, and the old JS bridge is the package-off fallback.
+                    View* submit_target = find_form_activation_button(evcon.target, false);
+                    if (submit_target && !evcon.default_prevented &&
+                        !js_dom_is_disabled((void*)submit_target) &&
+                        js_dom_is_connected((void*)submit_target)) {
+                        if (run_form_submit_activation(&evcon, submit_target)) {
+                            evcon.need_repaint = true;
+                        }
+                    }
+
+                    View* reset_target = find_form_activation_button(evcon.target, true);
+                    if (reset_target && !evcon.default_prevented &&
+                        !js_dom_is_disabled((void*)reset_target) &&
+                        js_dom_is_connected((void*)reset_target)) {
+                        if (run_form_reset_activation(&evcon, reset_target)) {
+                            evcon.need_repaint = true;
+                        }
+                    }
                 }
             }
 
@@ -9897,6 +10082,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (!disabled) {
                     radiant_dispatch_mouse_event(&evcon, focused, "click",
                         0, 0, 0, 0, false, false, false, false, 1);
+                    run_form_button_default(&evcon, focused);
+                    handled = true;
+                }
+            } else if (tag == MARKUP_NAME_INPUT &&
+                       key_event->key == RDT_KEY_ENTER &&
+                       (js_dom_is_submit_button((void*)focused) ||
+                        js_dom_is_reset_button((void*)focused))) {
+                DomElement* delem = lam::dom_require_element(focused);
+                bool disabled = delem->form_control() &&
+                    form_control_is_disabled(state, static_cast<View*>(delem));
+                if (!disabled) {
+                    radiant_dispatch_mouse_event(&evcon, focused, "click",
+                        0, 0, 0, 0, false, false, false, false, 1);
+                    run_form_button_default(&evcon, focused);
                     handled = true;
                 }
             } else if (tag == MARKUP_NAME_SELECT) {
@@ -9976,6 +10175,29 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 "keydown", key_event->key, key_event->mods, false);
             if (prevented) evcon.default_prevented = true;
             focused = focus_get(state);
+        }
+
+        // F4: a single-line text control's Enter is implicit submission, not
+        // text insertion. JS keydown cancellation remains authoritative; the
+        // package then chooses the first enabled submitter or the form itself.
+        if (focused && !evcon.default_prevented &&
+            key_event->key == RDT_KEY_ENTER &&
+            !(key_event->mods & (RDT_MOD_SHIFT | RDT_MOD_CTRL |
+                                 RDT_MOD_ALT | RDT_MOD_SUPER)) &&
+            focused->is_element()) {
+            DomElement* focus_elem = lam::dom_require_element(focused);
+            if (focus_elem->form_control() &&
+                focus_elem->form->control_type == FORM_CONTROL_TEXT) {
+                DomElement* owner = js_dom_find_form_owner((void*)focus_elem);
+                if (owner) {
+                    View* submitter = find_first_form_submitter(owner);
+                    View* activation = submitter ? submitter : static_cast<View*>(owner);
+                    if (run_form_submit_activation(&evcon, activation)) {
+                        evcon.need_repaint = true;
+                        break;
+                    }
+                }
+            }
         }
 
         // Handle arrow keys and caret adjustment for text input form controls

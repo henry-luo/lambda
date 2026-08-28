@@ -1563,6 +1563,8 @@ static bool array_push_spread_array_items(Array* arr, Item item, bool require_sp
     Rooted<Item> rooted_source(roots, item);
     for (int i = 0; i < rooted_source.get().array->length; i++) {
         Array* inner = rooted_source.get().array;
+        // S9.3.1: each spread element is captured into the destination.
+        cow_capture_value(inner->items[i]);
         array_push(rooted_array.get(), inner->items[i]);
     }
     return true;
@@ -1587,7 +1589,7 @@ void array_push_spread(Array* arr, Item item) {
     if (item.item == ITEM_NULL_SPREADABLE) return;
     if (array_push_spread_array_items(arr, item, true) ||
             array_push_spread_array_num_items(arr, item, true)) return;
-    array_push(arr, item);
+    array_push_capture(arr, item);
 }
 
 // push item to array, spreading any array type unconditionally (regardless of is_spreadable flag)
@@ -1596,6 +1598,14 @@ void array_push_spread_all(Array* arr, Item item) {
     if (item.item == ITEM_NULL_SPREADABLE) return;
     if (array_push_spread_array_items(arr, item, false) ||
             array_push_spread_array_num_items(arr, item, false)) return;
+    array_push_capture(arr, item);
+}
+
+// S9.3.1 append for Lambda literals and comprehension output. array_push itself
+// stays policy-free: LambdaJS, the Python/Node modules, and the Radiant bridge
+// all build containers with it under reference semantics.
+void array_push_capture(Array* arr, Item item) {
+    cow_capture_value(item);
     array_push(arr, item);
 }
 

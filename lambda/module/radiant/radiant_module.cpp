@@ -18,6 +18,7 @@
 #include "../../../lib/url.h"
 #include <limits.h>
 #include <string.h>
+#include <stdio.h>
 
 String* heap_create_name(const char* name, size_t len);
 
@@ -46,6 +47,13 @@ RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
 const JubeHostAPI* radiant_host_api = nullptr;
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
+extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
+extern "C" Item js_dom_check_validity_bridge(Item elem_item);
+extern "C" bool js_dom_focus_first_invalid_form_control(void* form_elem);
+extern "C" Item js_dom_form_reset_bridge(Item form_item);
+extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
+extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
+                                                            void* submitter_node);
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -1321,6 +1329,102 @@ RADIANT_C_API Item fn_radiant_form_of(Item node_item) {
     return ItemNull;
 }
 
+static void* radiant_optional_dom_element(Item node_item) {
+    if (radiant_item_is_missing(node_item)) return nullptr;
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(node_item);
+    return node && node->is_element() ? (void*)node : nullptr;
+}
+
+// F4: form-data construction remains a native tree walk, but the package gets
+// the resulting entry list and owns serialization/order decisions.
+RADIANT_C_API Item fn_radiant_form_entries(Item form_item, Item submitter_item) {
+    DomElement* form = radiant_dom_element_from_item(form_item, "FORM_ENTRIES");
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return ItemNull;
+    }
+    return js_formdata_collect_form_entries(
+        (void*)form, radiant_optional_dom_element(submitter_item));
+}
+
+RADIANT_C_API Item fn_radiant_form_url(Item form_item) {
+    DomElement* form = radiant_dom_element_from_item(form_item, "FORM_URL");
+    if (!form || !form->doc || !form->doc->url) return radiant_string_item("");
+    return radiant_string_item(url_get_href(form->doc->url));
+}
+
+RADIANT_C_API Item fn_radiant_form_encode(Item value_item) {
+    const char* value = fn_to_cstr(value_item);
+    if (!value) value = "";
+    size_t value_len = strlen(value);
+    size_t encoded_len = url_encode_measure(value, value_len, URL_KEEP_FORM,
+                                            true, nullptr);
+    char* encoded = (char*)mem_alloc(encoded_len + 1, MEM_CAT_TEMP);
+    if (!encoded) return ItemNull;
+    url_encode_write(value, value_len, URL_KEEP_FORM, true, encoded);
+    encoded[encoded_len] = '\0';
+    Item result = radiant_string_item_n(encoded, encoded_len);
+    mem_free(encoded);
+    return result;
+}
+
+RADIANT_C_API Item fn_radiant_submit_event(Item form_item, Item submitter_item) {
+    DomElement* form = radiant_dom_element_from_item(form_item, "SUBMIT_EVENT");
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return radiant_bool_item(false);
+    }
+    bool ok = radiant_dispatch_submit_event_from_script(
+        (void*)form, radiant_optional_dom_element(submitter_item));
+    return radiant_bool_item(ok);
+}
+
+RADIANT_C_API Item fn_radiant_check_validity(Item form_item) {
+    DomElement* form = radiant_dom_element_from_item(form_item, "CHECK_VALIDITY");
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return radiant_bool_item(false);
+    }
+    Item valid = js_dom_check_validity_bridge(form_item);
+    if (!is_truthy(valid)) {
+        js_dom_focus_first_invalid_form_control((void*)form);
+    }
+    return radiant_bool_item(is_truthy(valid));
+}
+
+RADIANT_C_API Item fn_radiant_reset_form(Item form_item) {
+    DomElement* form = radiant_dom_element_from_item(form_item, "RESET_FORM");
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return radiant_bool_item(false);
+    }
+    js_dom_form_reset_bridge(form_item);
+    return radiant_bool_item(true);
+}
+
+static uint64_t g_radiant_form_boundary_serial = 1;
+
+RADIANT_C_API Item fn_radiant_form_boundary() {
+    char boundary[64];
+    snprintf(boundary, sizeof(boundary), "----LambdaFormBoundary-%llu",
+             (unsigned long long)g_radiant_form_boundary_serial++);
+    return radiant_string_item(boundary);
+}
+
+RADIANT_C_API Item fn_radiant_request_navigation(Item request_item) {
+    const char* target = fn_to_cstr(radiant_obj_get(request_item, "target"));
+    const char* url = fn_to_cstr(radiant_obj_get(request_item, "url"));
+    const char* method = fn_to_cstr(radiant_obj_get(request_item, "method"));
+    const char* enctype = fn_to_cstr(radiant_obj_get(request_item, "enctype"));
+    const char* body = fn_to_cstr(radiant_obj_get(request_item, "body"));
+    if (!target || !target[0]) target = "_self";
+    if (!method || !method[0]) method = "get";
+    if (!enctype || !enctype[0]) enctype = "application/x-www-form-urlencoded";
+    if (!url || !url[0]) return radiant_bool_item(false);
+
+    // The browsing layer owns network transport; this waist records the
+    // serialized request while handing its URL/target to document navigation.
+    log_info("FORM_NAVIGATION_HANDOFF method=%s enctype=%s target=%s url=%s body=%s",
+             method, enctype, target, url, body ? body : "");
+    return radiant_bool_item(js_dom_navigate_submit_target(target, url));
+}
+
 RADIANT_C_API Item fn_radiant_radio_group(Item node_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "RADIO_GROUP");
     if (!elem) return ItemNull;
@@ -2346,6 +2450,22 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_dispatch(Item node, Item name)", (fn_ptr)fn_radiant_dispatch},
     {"form_of", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_form_of, JUBE_FN_NONE,
      "Item fn_radiant_form_of(Item node)", (fn_ptr)fn_radiant_form_of},
+    {"form_entries", "fn(form: dom_node, submitter: dom_node|null) -> array", (fn_ptr)fn_radiant_form_entries, JUBE_FN_NONE,
+     "Item fn_radiant_form_entries(Item form, Item submitter)", (fn_ptr)fn_radiant_form_entries},
+    {"form_url", "fn(form: dom_node) -> string", (fn_ptr)fn_radiant_form_url, JUBE_FN_NONE,
+     "Item fn_radiant_form_url(Item form)", (fn_ptr)fn_radiant_form_url},
+    {"form_encode", "fn(value: string) -> string", (fn_ptr)fn_radiant_form_encode, JUBE_FN_NONE,
+     "Item fn_radiant_form_encode(Item value)", (fn_ptr)fn_radiant_form_encode},
+    {"submit_event", "fn(form: dom_node, submitter: dom_node|null) -> bool", (fn_ptr)fn_radiant_submit_event, JUBE_FN_NONE,
+     "Item fn_radiant_submit_event(Item form, Item submitter)", (fn_ptr)fn_radiant_submit_event},
+    {"check_validity", "fn(form: dom_node) -> bool", (fn_ptr)fn_radiant_check_validity, JUBE_FN_NONE,
+     "Item fn_radiant_check_validity(Item form)", (fn_ptr)fn_radiant_check_validity},
+    {"reset_form", "fn(form: dom_node) -> bool", (fn_ptr)fn_radiant_reset_form, JUBE_FN_NONE,
+     "Item fn_radiant_reset_form(Item form)", (fn_ptr)fn_radiant_reset_form},
+    {"form_boundary", "fn() -> string", (fn_ptr)fn_radiant_form_boundary, JUBE_FN_NONE,
+     "Item fn_radiant_form_boundary()", (fn_ptr)fn_radiant_form_boundary},
+    {"request_navigation", "fn(request: map) -> bool", (fn_ptr)fn_radiant_request_navigation, JUBE_FN_NONE,
+     "Item fn_radiant_request_navigation(Item request)", (fn_ptr)fn_radiant_request_navigation},
     {"radio_group", "fn(node: dom_node) -> array", (fn_ptr)fn_radiant_radio_group, JUBE_FN_NONE,
      "Item fn_radiant_radio_group(Item node)", (fn_ptr)fn_radiant_radio_group},
     {"dropdown_open", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dropdown_open, JUBE_FN_NONE,

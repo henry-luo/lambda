@@ -2064,6 +2064,34 @@ static bool mir_root_may_need_cow(MirVarEntry* root) {
     }
 }
 
+// S9.3.1: placing a binding's value into a container captures it, so from this
+// point on the binding has a second observer and writes through it must detach.
+//
+// The runtime share-mark the insertion performs is not enough on this tier:
+// MIR Direct picks the store form at COMPILE time from `cow_marked`, so an
+// unflagged binding keeps emitting raw field stores that never read the flag.
+// Emission order is program order, so setting it here reaches exactly the
+// writes that follow the capture -- the same mechanism binding aliases use.
+static void mir_note_value_captured(MirTranspiler* mt, AstNode* value_expr) {
+    MirVarEntry* source = mir_direct_root_binding(mt, value_expr);
+    if (source && mir_root_may_need_cow(source)) source->cow_marked = true;
+}
+
+// The same capture for assignment stores, which additionally need the RUNTIME
+// mark emitted here. Their many store branches (the T20-1d shaped guarded
+// store, fn_map_set, fn_array_set) are raw setters shared with LambdaJS and may
+// never carry COW policy (CW21), so none of them marks the value it stores.
+// Literal construction needs no emission: its fill/push helpers are Lambda-only
+// and capture in the runtime.
+static void mir_emit_value_capture(MirTranspiler* mt, AstNode* value_expr) {
+    MirVarEntry* source = mir_direct_root_binding(mt, value_expr);
+    if (!source || !mir_root_may_need_cow(source)) return;
+    source->cow_marked = true;
+    MIR_reg_t boxed = emit_box(mt, source->reg, source->type_id);
+    emit_call_1(mt, "cow_capture_value", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+}
+
 static MIR_reg_t root_gc_result_if_needed(MirTranspiler* mt, MIR_reg_t result,
     MIR_type_t mir_type, TypeId type_id, const char* prefix) {
     result = mir_materialize_pending_reg(mt, result,
@@ -13133,6 +13161,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
         }
 
         TypeId val_tid = get_effective_type(mt, item);
+        mir_note_value_captured(mt, item);  // S9.3.1
 
         if (item->node_type == AST_NODE_PIPE) {
             // pipe/that/where exprs in array literals spread their array results
@@ -13165,7 +13194,11 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
             int item_root = create_gc_root_slot(mt, boxed);
             boxed = load_gc_root_slot(mt, item_root, "arr_item");
             arr = load_gc_root_slot(mt, arr_root, "arrb");
-            emit_call_void_2(mt, "array_push",
+            // S9.3.1: only a NAMED element needs the capture; a fresh one has
+            // no second observer (ast_expr_insertion_needs_capture).
+            emit_call_void_2(mt,
+                ast_expr_insertion_needs_capture(item) ? "array_push_capture"
+                                                       : "array_push",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
         }
@@ -13250,6 +13283,7 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
         MIR_reg_t ls = emit_call_0(mt, "list", MIR_T_P);
         AstNode* item = list_node->item;
         while (item) {
+            mir_note_value_captured(mt, item);  // S9.3.1
             MIR_reg_t val = transpile_box_item(mt, item);
             emit_call_void_2(mt, "list_push_spread",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, ls),
@@ -13277,6 +13311,7 @@ static MIR_reg_t transpile_list(MirTranspiler* mt, AstListNode* list_node) {
             continue;
         }
         // Use transpile_box_item for proper type-aware boxing
+        mir_note_value_captured(mt, item);  // S9.3.1
         MIR_reg_t boxed = transpile_box_item(mt, item);
         emit_call_void_2(mt, "list_push_spread",
             MIR_T_P, MIR_new_reg_op(mt->ctx, ls),
@@ -13571,6 +13606,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             item = item->next;
             continue;
         }
+        mir_note_value_captured(mt, item);  // S9.3.1
         MIR_reg_t val = transpile_box_item(mt, item);
         emit_call_void_2(mt, "list_push_spread",
             MIR_T_P, MIR_new_reg_op(mt->ctx, ls),
@@ -14204,6 +14240,8 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
                     value_node = item;
                 }
 
+                mir_note_value_captured(mt, value_node);  // S9.3.1
+
                 if (is_null_literal || field_type == LMD_TYPE_NULL) {
                     // Data buffer is zero-initialized by heap_calloc — skip store
                 } else if (field_type == LMD_TYPE_FLOAT) {
@@ -14269,6 +14307,12 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
                     // Container types: get boxed Item, strip tag → raw Container*
                     // For null Items: AND mask strips to 0 (matching nullptr)
                     MIR_reg_t boxed = transpile_box_item(mt, value_node);
+                    // S9.3.1: capture a named field value here -- this shaped
+                    // fast path stores straight into the data buffer.
+                    if (ast_expr_insertion_needs_capture(value_node)) {
+                        emit_call_1(mt, "cow_capture_value", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
+                    }
                     MIR_reg_t raw = emit_unbox_container(mt, boxed);
                     MIR_reg_t live_m = load_gc_root_slot(mt, map_root_slot, "map_live");
                     MIR_reg_t live_data = new_reg(mt, "mdata_live", MIR_T_I64);
@@ -14310,7 +14354,12 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
         if (item->node_type == AST_NODE_KEY_EXPR) {
             AstNamedNode* key_expr = (AstNamedNode*)item;
             if (key_expr->as) {
+                mir_note_value_captured(mt, key_expr->as);  // S9.3.1
                 MIR_reg_t val = transpile_box_item(mt, key_expr->as);
+                if (ast_expr_insertion_needs_capture(key_expr->as)) {
+                    emit_call_1(mt, "cow_capture_value", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                }
                 if (field_contract &&
                         !mir_map_literal_field_proven(key_expr->as, field_contract)) {
                     char site[192];
@@ -14331,7 +14380,12 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
                 val_ops[vi++] = MIR_new_reg_op(mt->ctx, nul);
             }
         } else {
+            mir_note_value_captured(mt, item);  // S9.3.1
             MIR_reg_t val = transpile_box_item(mt, item);
+            if (ast_expr_insertion_needs_capture(item)) {
+                emit_call_1(mt, "cow_capture_value", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+            }
             val_root_slots[vi] = create_gc_root_slot(mt, val);
             val_ops[vi++] = MIR_new_reg_op(mt->ctx, val);
         }
@@ -14398,7 +14452,12 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
             if (scan->node_type == AST_NODE_KEY_EXPR) {
                 AstNamedNode* key_expr = (AstNamedNode*)scan;
                 if (key_expr->as) {
+                    mir_note_value_captured(mt, key_expr->as);  // S9.3.1
                     MIR_reg_t val = transpile_box_item(mt, key_expr->as);
+                    if (ast_expr_insertion_needs_capture(key_expr->as)) {
+                        emit_call_1(mt, "cow_capture_value", MIR_T_I64,
+                            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                    }
                     attr_roots[ai] = create_gc_root_slot(mt, val);
                     attr_ops[ai++] = MIR_new_reg_op(mt->ctx, val);
                 } else {
@@ -14409,7 +14468,12 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
                     attr_ops[ai++] = MIR_new_reg_op(mt->ctx, nul);
                 }
             } else {
+                mir_note_value_captured(mt, scan);  // S9.3.1
                 MIR_reg_t val = transpile_box_item(mt, scan);
+                if (ast_expr_insertion_needs_capture(scan)) {
+                    emit_call_1(mt, "cow_capture_value", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                }
                 attr_roots[ai] = create_gc_root_slot(mt, val);
                 attr_ops[ai++] = MIR_new_reg_op(mt->ctx, val);
             }
@@ -14447,6 +14511,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
                 int ci = 0;
                 cscan = content_item;
                 while (cscan) {
+                    mir_note_value_captured(mt, cscan);  // S9.3.1
                     MIR_reg_t val = transpile_box_item(mt, cscan);
                     content_roots[ci] = create_gc_root_slot(mt, val);
                     content_ops[ci++] = MIR_new_reg_op(mt->ctx, val);
@@ -14468,6 +14533,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
             } else {
                 // Use list_push_spread for each content item, then list_end
                 while (content_item) {
+                    mir_note_value_captured(mt, content_item);  // S9.3.1
                     MIR_reg_t val = transpile_box_item(mt, content_item);
                     int content_root = create_gc_root_slot(mt, val);
                     val = load_gc_root_slot(mt, content_root, "el_content");
@@ -20973,6 +21039,9 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         // arr[i] = val → inline store for ArrayInt, or fn_array_set fallback
         // arr[i, j, k] = val → dispatch to array_num_set_nd runtime helper
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+        // S9.3.1: the stored value is captured, so writes through the source
+        // binding after this statement must detach rather than alias the slot.
+        mir_emit_value_capture(mt, ca->value);
 
         // A direct write through `var a: T[]` is a binding boundary, not a
         // request to downgrade a specialized array. The checked helper builds
@@ -21775,6 +21844,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     case AST_NODE_MEMBER_ASSIGN_STAM: {
         // obj.field = val → fn_map_set(boxed_obj, boxed_key, boxed_val)
         AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
+        mir_emit_value_capture(mt, ca->value);  // S9.3.1
 
         // ==================================================================
         // Phase 4: Edit bridge — route through MarkEditor in edit handlers

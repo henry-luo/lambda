@@ -75,7 +75,7 @@ Three properties hold it together:
 
 ### 2.2 Two realms, one canonical state
 
-Per ES10, JS and Lambda are parallel peers over one canonical state store; neither gatekeeps the other, and **only one of them may perform the default action for a given event**. Where both could, the pipeline decides — today by narrow observation (`js_click_dispatched && checkedness actually changed` ⇒ the behavior template stands down, `event.cpp:9271`). That is a working coordination but not a contract; ESO49 tracks turning it into one.
+Per ES10, JS and Lambda are parallel peers over one canonical state store; neither gatekeeps the other, and **only one of them may perform the default action for a given event**. The migrated activation classes use the behavior claim protocol to make that ownership explicit; remaining legacy coordination and the un-migrated popover path stay in ESO49.
 
 ### 2.3 Behavior-only hooks
 
@@ -167,11 +167,11 @@ Verified against the tree at 2026-08-28 (`event.cpp` 500KB, `lambda/package/dom/
 
 | Concept | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
-| **Form submission from user interaction** | HTML §4.10.21; `submit` cancelable | submit-button activation, or implicit submission (Enter in a text field), runs the submission algorithm | **no native or package path reaches it.** The algorithm exists (`js_dom_run_form_submit_navigation`), but its only callers are the two JS bridges (`js_dom_events.cpp:305,333`). A submit-button *click* reaches it only when the click passes through `js_dom_dispatch_event`, whose post-activation step re-enters `requestSubmit` (`js_dom_events.cpp:2592`) — i.e. only on a document with a live JS realm, and implemented in the wrong home. Implicit Enter submission exists nowhere | ❌ / ⚠️ (F4; ESO49) |
+| **Form submission from user interaction** | HTML §4.10.21; `submit` cancelable | submit-button activation, or implicit submission (Enter in a text field), runs the submission algorithm | native pointer/keyboard activation now reaches `form.ls` → `submit.ls`; the package checks validity, fires cancelable `submit`, builds the native entry list (including `form="..."` associations), serializes GET/urlencoded/multipart data, and calls `request_navigation`. The browsing waist currently accepts URL/target only, so POST body delivery remains open | 🟡 (F4; ESO49) |
 | `form.submit()` / `requestSubmit()` | HTML | as above | implemented, including `novalidate` / `formnovalidate`, the cancelable `submit` event with `submitter`, and the disconnected-form rule | ✅ |
-| **Reset from user interaction** | HTML; `reset` cancelable | reset-button activation resets the form | same shape as submission: JS-layer only (`js_dom_events.cpp:2608` → `JUBE_DOM_RESET`) | ❌ / ⚠️ |
+| **Reset from user interaction** | HTML; `reset` cancelable | reset-button activation resets the form | native pointer/keyboard activation and script-created clicks use the same package claim protocol; `form.ls` calls the existing cancelable reset waist, including associated controls | ✅ |
 | `form.reset()` | HTML | as above | implemented incl. `form=`-associated controls outside the subtree (`js_dom.cpp:8088`) | ✅ |
-| **Interactive constraint validation** | HTML | block submission, fire `invalid`, show the validation bubble | `validate.ls` owns `:valid`/`:invalid` on `init`/`input`/`blur` (F3, native validator deleted). `invalid` fires only from `checkValidity()`/`reportValidity()`; there is no validation bubble and nothing to block, because nothing submits | 🟡 |
+| **Interactive constraint validation** | HTML | block submission, fire `invalid`, show the validation bubble | `validate.ls` owns `:valid`/`:invalid` on `init`/`input`/`blur`; F4 calls the existing validity bridge before `submit`, fires `invalid`, and focuses the first invalid control. There is still no validation bubble | 🟡 |
 | `invalid` | HTML; cancelable | suppress the UA validation message | dispatched from the JS validity bridges only | 🟡 |
 
 ### 3.8 Navigation & document
@@ -199,8 +199,8 @@ The `click` row of §3.3, expanded. This is the table to check before claiming "
 | `label` | retarget activation to the labeled control | native association lookup + retargeted dispatch (F1b) | ✅ |
 | `select` | open/close the picker | `form.ls` open/close (F2) + native overlay + `optioncommit` (F2c) | ✅ |
 | `option` in a listbox (`size>1` or `multiple`) | select / extend / toggle selection | laid out and painted (`layout_form.cpp:609`) but **no event code** — `event.cpp` never reads `select_size` or `multiple` | ❌ |
-| `input[type=submit]` / `input[type=image]`, `button[type=submit]` (and bare `<button>`) | submit the form owner | §3.7 — JS-layer only | ❌ / ⚠️ |
-| `input[type=reset]`, `button[type=reset]` | reset the form owner | §3.7 — JS-layer only | ❌ / ⚠️ |
+| `input[type=submit]` / `input[type=image]`, `button[type=submit]` (and bare `<button>`) | submit the form owner | `form.ls` activation handlers → `submit.ls`; native click/keyboard and JS click share the claim protocol | 🟡 (POST transport open) |
+| `input[type=reset]`, `button[type=reset]` | reset the form owner | `form.ls` activation handlers → cancelable reset waist | ✅ |
 | `input[type=range]` | thumb drag; arrow / Home / End / Page keys | laid out and painted; **zero interaction**. `form.ls:130` states this explicitly — the template exists only for the ARIA value mirrors | ❌ |
 | `input[type=file]` | open the file picker | `input_type_to_control()` falls file/color/date through to `FORM_CONTROL_TEXT` (`view.hpp:2727`) | ❌ |
 | `input[type=color]`, `date`/`time`/`datetime-local`/`month`/`week` | open the respective picker | as above | ❌ |
@@ -285,9 +285,9 @@ bool js_did_activation = js_click_dispatched && click_check_radio && click_check
 Two consequences follow, and both are already visible:
 
 1. **They have diverged.** The JS copy sets a clicked radio checked but its own comment concedes *"group exclusion not implemented headlessly"* — the exclusivity walk `form.ls` performs is absent there. This is exactly the class of defect that made `radiant_uncheck_radio_group` a shadow implementation of radio policy until it was retired in F1b.
-2. **Submit, reset, and popover activation exist only in the JS copy.** They are therefore unreachable when a click does not pass through `js_dom_dispatch_event` — `radiant_dispatch_built_event` returns early without a live JS dispatch scope (`event.cpp:5821`) — and they are unreachable from the keyboard path regardless, which dispatches `click` through the same routine but on documents that may have no JS realm.
+2. **Submit and reset used to exist only in the JS copy.** F4 moved their policy into `form.ls`/`submit.ls`; native and JS click paths now consult the same behavior claim protocol, while the native browsing waist still owns only navigation execution. Popover activation remains JS-only.
 
-ES10's rule ("only one of them may perform the default action for a given event") is satisfied per-case rather than structurally. The resolution is F4-shaped: move submit/reset/popover activation into `form.ls` alongside checkbox/radio, and make the JS-layer pass defer to the same claim protocol the native blocks use. **ESO49.**
+ES10's rule ("only one of them may perform the default action for a given event") is now structural for submit/reset: both paths consult one claim protocol, and the package owns the local policy. Popover remains the un-migrated half of **ESO49**.
 
 ### 5.3 Sequential focus ignores `tabindex` order and never scrolls
 
@@ -316,7 +316,7 @@ New rows start at ESO48; ESO1–ESO47 remain in DOM_State §7. Rows here are def
 | # | Issue | Direction |
 | --- | --- | --- |
 | ESO48 | **No keyboard scrolling for HTML documents.** Space / PageUp / PageDown / Home / End / arrows do not scroll the nearest scrollport; scroll arrives only from wheel, scrollbar drag, and drag-autoscroll. `key_code_to_name` also lacks `PageUp`/`PageDown`, so JS sees `event.key === ""` for them | fix the key naming first (one-line, unblocks JS pages immediately); then a scroll default action on the keydown path, ordered after `caretkey` declines. Interacts with §5.4 |
-| ESO49 | **Activation behavior has two implementations, and submit/reset/popover live only in the JS one.** §5.2 | F4: move submit / reset / popover activation into `form.ls`; give the JS-layer pass the same claim protocol the native blocks use, replacing the `js_did_activation` observation with a contract |
+| ESO49 | **Activation behavior has two implementations; popover activation still lives only in the JS one.** §5.2 | F4 moved submit/reset into `form.ls`/`submit.ls` and gave native/JS click paths the same claim protocol. Remaining work: migrate popover activation, and give the browsing layer a real POST body/method transport |
 | ESO50 | **Pointer Events are partial** — `pointerdown`/`up`/`move` dispatch, but no `pointerover`/`out`/`enter`/`leave`/`cancel` and no `setPointerCapture` | boundary events follow the existing mouse boundary logic; capture needs a target-override in the dispatch path |
 | ESO51 | **Link activation is on `mousedown`, and has no keyboard path.** §5.1; and Enter on a focused `<a href>` does nothing (`event.cpp:9751` covers only `input`/`button`/`select`) | move to the `click` path, then to a template per DOM_State §6.1; add `<a>` to the Space/Enter activation set at the same time |
 | ESO52 | **Sequential focus ignores `tabindex` ordering and never scrolls the target into view.** §5.3 | both belong to the `focus.ls` work (DOM_State §6.2), together with the ESO60 autofocus fix |
@@ -342,7 +342,7 @@ Ordered by how often the gap is hit by an ordinary page, not by implementation c
    commands now use the F14.2 structural primitives; paste, cut, drop, and
    history remain the visible contenteditable gaps.
 2. **Link activation on `click`** (ESO51). One-line-shaped change in trigger point, and it makes `preventDefault` on `click` work — the assumption behind essentially every JS router.
-3. **Form submission and reset as UA activation** (ESO49 / F4). Also discharges the two-implementations divergence, which is the structural half of the problem.
+3. **Complete form submission transport and popover activation** (ESO49 / F4). Local submit/reset activation is landed; POST body delivery and popover remain.
 
 **Tier 2 — cheap, high visibility**
 
