@@ -3425,8 +3425,9 @@ static Type* build_lit_decimal_from_span(Transpiler* tp, SourceSpan span) {
         (needs_unlimited_decimal ? 1 : 0);
 
     // literal digits are preserved exactly by selecting the necessary tier.
-    decimal->dec_val = decimal_parse_str(num_str,
-        decimal->unlimited ? decimal_unlimited_context() : decimal_fixed_context());
+    // parse the literal without a precision context; the selected tier must
+    // not round away source digits before runtime evaluation sees them.
+    decimal->dec_val = decimal_parse_str_exact(num_str);
     if (!decimal->dec_val) {
         log_error("Error: Failed to parse decimal: %s", num_str);
         mem_free(num_str);

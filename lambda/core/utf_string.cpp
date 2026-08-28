@@ -54,8 +54,8 @@ UnicodeCompareResult string_compare_unicode(const char* str1, int len1, const ch
         return UTF8PROC_COMPARE_ERROR;
     }
 
-    // For proper Unicode collation, we need to use utf8proc's casefold + normalization
-    // which handles proper collation order for accented characters
+    // this opt-in helper normalizes and case-folds before comparison; it is not
+    // Lambda's core bytewise order (S6.2.2) or a full UCA collation.
     int fold1_len, fold2_len;
     char* fold1 = normalize_utf8proc_casefold(str1, len1, &fold1_len);
     char* fold2 = normalize_utf8proc_casefold(str2, len2, &fold2_len);
@@ -68,7 +68,7 @@ UnicodeCompareResult string_compare_unicode(const char* str1, int len1, const ch
     log_debug("fold1: origin %s vs. %s", str1, fold1);
     log_debug("fold2: origin %s vs. %s", str2, fold2);
 
-    // Compare casefolded strings byte by byte for proper collation
+    // compare the normalized bytes after case folding
     int min_len = fold1_len < fold2_len ? fold1_len : fold2_len;
     int cmp = memcmp(fold1, fold2, min_len);
 
