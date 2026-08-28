@@ -1175,12 +1175,6 @@ static void sim_event_free_owned_fields(SimEvent* ev) {
     if (ev->js_code) mem_free(ev->js_code);
     if (ev->frame_selector) mem_free(ev->frame_selector);
     if (ev->ime_phase) mem_free(ev->ime_phase);
-    if (ev->editing_event_type) mem_free(ev->editing_event_type);
-    if (ev->editing_input_type) mem_free(ev->editing_input_type);
-    if (ev->editing_surface_kind) mem_free(ev->editing_surface_kind);
-    if (ev->editing_surface_mode) mem_free(ev->editing_surface_mode);
-    if (ev->editing_operation) mem_free(ev->editing_operation);
-    if (ev->editing_owned_by) mem_free(ev->editing_owned_by);
     if (ev->replay_event_name) mem_free(ev->replay_event_name);
     if (ev->state_dump_reference) mem_free(ev->state_dump_reference);
     if (ev->expected_reconcile_mode) mem_free(ev->expected_reconcile_mode);
@@ -1907,38 +1901,6 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
             return parse_sim_event_fail(ev);
         }
     }
-    else if (strcmp(type_str, "assert_editing_event") == 0) {
-        ev->type = SIM_EVENT_ASSERT_EDITING_EVENT;
-        const char* event_type = reader.get("event").cstring();
-        if (!event_type) event_type = reader.get("record").cstring();
-        if (event_type) ev->editing_event_type = mem_strdup(event_type, MEM_CAT_LAYOUT);
-        const char* input_type = reader.get("inputType").cstring();
-        if (!input_type) input_type = reader.get("input_type").cstring();
-        if (input_type) ev->editing_input_type = mem_strdup(input_type, MEM_CAT_LAYOUT);
-        const char* surface = reader.get("surface").cstring();
-        if (!surface) surface = reader.get("surface_kind").cstring();
-        if (surface) ev->editing_surface_kind = mem_strdup(surface, MEM_CAT_LAYOUT);
-        const char* mode = reader.get("mode").cstring();
-        if (!mode) mode = reader.get("surface_mode").cstring();
-        if (mode) ev->editing_surface_mode = mem_strdup(mode, MEM_CAT_LAYOUT);
-        const char* operation = reader.get("operation").cstring();
-        if (operation) ev->editing_operation = mem_strdup(operation, MEM_CAT_LAYOUT);
-        const char* owned_by = reader.get("owned_by").cstring();
-        if (owned_by) ev->editing_owned_by = mem_strdup(owned_by, MEM_CAT_LAYOUT);
-        if (reader.has("prevented")) {
-            ev->has_expected_prevented = true;
-            ev->expected_prevented = reader.get("prevented").asBool();
-        }
-        if (reader.has("redacted")) {
-            ev->has_expected_redacted = true;
-            ev->expected_redacted = reader.get("redacted").asBool();
-        }
-        parse_assert_count(reader, ev);
-        if (!ev->editing_event_type) {
-            log_error("event_sim: assert_editing_event requires 'event'");
-            return parse_sim_event_fail(ev);
-        }
-    }
     else if (strcmp(type_str, "navigate") == 0) {
         ev->type = SIM_EVENT_NAVIGATE;
         const char* url = reader.get("url").cstring();
@@ -2434,94 +2396,6 @@ static int count_substring_occurrences(const char* haystack, const char* needle)
     return count;
 }
 
-static bool sim_line_contains(const char* line, size_t len, const char* needle) {
-    if (!line || !needle) return false;
-    size_t needle_len = strlen(needle);
-    if (needle_len == 0) return true;
-    if (needle_len > len) return false;
-    size_t limit = len - needle_len;
-    for (size_t i = 0; i <= limit; i++) {
-        if (line[i] == needle[0] && strncmp(line + i, needle, needle_len) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool sim_line_contains_str_field(const char* line, size_t len,
-                                        const char* key,
-                                        const char* value) {
-    if (!value) return true;
-    char needle[256];
-    snprintf(needle, sizeof(needle), "\"%s\":\"%s\"", key, value);
-    return sim_line_contains(line, len, needle);
-}
-
-static bool sim_line_contains_bool_field(const char* line, size_t len,
-                                         const char* key,
-                                         bool value) {
-    char needle[64];
-    snprintf(needle, sizeof(needle), "\"%s\":%s",
-             key, value ? "true" : "false");
-    return sim_line_contains(line, len, needle);
-}
-
-static bool sim_editing_event_line_matches(const char* line, size_t len,
-                                           SimEvent* ev) {
-    if (!sim_line_contains_str_field(line, len, "type",
-                                     ev->editing_event_type)) {
-        return false;
-    }
-    if (ev->editing_input_type) {
-        bool has_snake = sim_line_contains_str_field(line, len, "input_type",
-                                                     ev->editing_input_type);
-        bool has_camel = sim_line_contains_str_field(line, len, "inputType",
-                                                     ev->editing_input_type);
-        if (!has_snake && !has_camel) return false;
-    }
-    if (!sim_line_contains_str_field(line, len, "kind",
-                                     ev->editing_surface_kind)) {
-        return false;
-    }
-    if (!sim_line_contains_str_field(line, len, "mode",
-                                     ev->editing_surface_mode)) {
-        return false;
-    }
-    if (!sim_line_contains_str_field(line, len, "operation",
-                                     ev->editing_operation)) {
-        return false;
-    }
-    if (!sim_line_contains_str_field(line, len, "owned_by",
-                                     ev->editing_owned_by)) {
-        return false;
-    }
-    if (ev->has_expected_prevented &&
-        !sim_line_contains_bool_field(line, len, "prevented",
-                                      ev->expected_prevented)) {
-        return false;
-    }
-    if (ev->has_expected_redacted &&
-        !sim_line_contains_bool_field(line, len, "redacted",
-                                      ev->expected_redacted)) {
-        return false;
-    }
-    return true;
-}
-
-static int count_editing_event_matches(const char* content, SimEvent* ev) {
-    if (!content || !ev) return 0;
-    int count = 0;
-    const char* line = content;
-    while (*line) {
-        const char* next = strchr(line, '\n');
-        size_t len = next ? (size_t)(next - line) : strlen(line);
-        if (sim_editing_event_line_matches(line, len, ev)) count++;
-        if (!next) break;
-        line = next + 1;
-    }
-    return count;
-}
-
 static void assert_event_log_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
     if (!ctx || !uicon || !ev) return;
     EventStateLog* event_log = uicon->event_log;
@@ -2926,63 +2800,6 @@ static void assert_state_dump_impl(EventSimContext* ctx, UiContext* uicon, SimEv
 
     strbuf_free(expected_norm);
     strbuf_free(actual_norm);
-}
-
-static void assert_editing_event_impl(EventSimContext* ctx, UiContext* uicon,
-                                      SimEvent* ev) {
-    if (!ctx || !uicon || !ev) return;
-    EventStateLog* event_log = uicon->event_log;
-    if (!event_state_log_enabled(event_log)) {
-        log_info("event_sim: assert_editing_event SKIP - event log disabled");
-        ctx->pass_count++;
-        return;
-    }
-
-    const char* path = event_state_log_path(event_log);
-    if (!path) {
-        log_error("event_sim: assert_editing_event FAIL - event log has no path");
-        ctx->fail_count++;
-        return;
-    }
-
-    char* content = read_text_file(path);
-    if (!content) {
-        log_error("event_sim: assert_editing_event FAIL - cannot read '%s'", path);
-        ctx->fail_count++;
-        return;
-    }
-
-    int actual = count_editing_event_matches(content, ev);
-    int expected = ev->assert_count_expected;
-    int min_count = ev->assert_count_min;
-    int max_count = ev->assert_count_max;
-    if (expected < 0 && min_count < 0 && max_count < 0) min_count = 1;
-
-    bool passed = true;
-    if (expected >= 0 && actual != expected) {
-        log_error("event_sim: assert_editing_event FAIL - event '%s' expected %d, got %d",
-                  ev->editing_event_type, expected, actual);
-        passed = false;
-    }
-    if (min_count >= 0 && actual < min_count) {
-        log_error("event_sim: assert_editing_event FAIL - event '%s' expected min %d, got %d",
-                  ev->editing_event_type, min_count, actual);
-        passed = false;
-    }
-    if (max_count >= 0 && actual > max_count) {
-        log_error("event_sim: assert_editing_event FAIL - event '%s' expected max %d, got %d",
-                  ev->editing_event_type, max_count, actual);
-        passed = false;
-    }
-
-    if (passed) {
-        log_info("event_sim: assert_editing_event PASS - event '%s' count=%d",
-                 ev->editing_event_type, actual);
-        ctx->pass_count++;
-    } else {
-        ctx->fail_count++;
-    }
-    mem_free(content);
 }
 
 // Simulate a mouse move event
@@ -5739,11 +5556,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             } else {
                 ctx->fail_count++;
             }
-            break;
-        }
-
-        case SIM_EVENT_ASSERT_EDITING_EVENT: {
-            assert_editing_event_impl(ctx, uicon, ev);
             break;
         }
 

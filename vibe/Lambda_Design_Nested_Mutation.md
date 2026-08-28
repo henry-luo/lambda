@@ -1,6 +1,10 @@
 # Lambda Design: Nested Mutation — Places, Path Borrows, and the Lost-Update Rule
 
-- **Status:** PROPOSED — rev 1, 2026-08-28. Not ratified; no `S#` minted yet.
+- **Status:** PROPOSED — rev 2, 2026-08-28. Not ratified; no `S#` minted yet.
+  Rev 2 is the simplicity pass: CW27 folded into CW22 as a corollary, and
+  **CW26 (`with var`) demoted from a committed ruling to a deferred candidate**
+  — the committed surface is now one diagnostic (CW24) plus conformance to
+  already-ratified rules (CW25/S9.2.2), with zero new syntax.
 - **Owns:** `SO14` (nested-mutation ergonomics) — the open issue that had no
   owner document. Also closes out `C4.4 #6` and
   [COW Appendix B.2](Lambda_Design_Runtime_COW.md) row 1, which
@@ -71,11 +75,17 @@ design is conformance work, not new semantics.
 **CW22 — Places.** A *place* is a location named by a root binding plus a
 static path: `m`, `m.rows`, `m.rows[i]`, `t.nodes[i].value`. A place is **not a
 value**. It cannot be bound by `let`, returned, stored into a container,
-captured by a closure, or compared. It is legal in exactly three positions:
+captured by a closure, or compared. It is legal in exactly two positions:
 
 1. the target of a path write (§3.1),
-2. a `var` argument (§3.2),
-3. the head of a `with var` block (§3.3).
+2. a `var` argument (§3.2).
+
+*Corollary (was CW27 in rev 1):* there is no way to obtain a place as a
+first-class thing, name its root, compare two places, or build one
+dynamically. A first-class place is a reference, and a reference
+reintroduces every property C4 bought (total `==`, the cycle ban,
+printability). Runtime-selected indirection is the handle store (C4.2e) —
+data, not a place.
 
 This is not a new concept — it is **S9.2.2 generalized from slices to paths**.
 That ruling already says write-through views are "borrows, never values —
@@ -88,13 +98,6 @@ It also keeps **S10.4.3**: places carry no parent pointers and add no
 observable identity. A place exists during a call or a block and is gone
 after; it is compiler bookkeeping, exactly as S10.4.3 permits lineage to be
 "a navigation path, cursor, or zipper".
-
-**CW27 — No place values, no place arithmetic.** There is no way to obtain a
-place as a first-class thing, name its root, compare two places, or build one
-dynamically. If a program needs runtime-selected indirection, it needs the
-handle store (C4.2e), which is data, not a place. This is what keeps S9.1.5
-(structural `==` is the only equality) and the cycle ban intact: a first-class
-place is a reference, and a reference reintroduces every property C4 bought.
 
 ---
 
@@ -116,13 +119,13 @@ the same descend/detach/install machinery (Appendix A).
 steady-state descend has a poor constant factor today — including a heap
 allocation per member key per write — measured and itemized in Appendix A.4.
 None of it changes this ruling; all of it is mechanical tuning of the one
-shared lowering, and it is what makes N3, not N1, the answer for hot loops
-until A.4 items land.
+shared lowering, and it is what makes N2 — the descend-once borrow — the
+answer for hot loops until A.4 items land.
 
 Teaching consequence: the answer to "how do I update a nested value" is
-"write the whole path". The other two forms exist for the cases where that
-answer is insufficient — passing a deep location to a procedure (N2), and
-repeating writes to one deep location (N3).
+"write the whole path". N2 exists for the one case where that answer is
+insufficient — handing a deep location to code that will write it repeatedly
+(a procedure today; a `with var` block if NM-O7 ever adopts one).
 
 ### 3.2 N2 — the path borrow
 
@@ -165,7 +168,7 @@ exact type match, and a member read currently types as `any`, so every
 `get_effective_type`-vs-`node->type` carrier-read problem tracked as TIG1; N2
 is blocked behind it, not behind semantics.
 
-### 3.3 N3 — `with var`, the scoped place borrow
+### 3.3 N3 — `with var`, the scoped place borrow (CW26, DEFERRED)
 
 ```lambda
 with var row = m.rows[i] {
@@ -173,28 +176,35 @@ with var row = m.rows[i] {
 }
 ```
 
-**CW26 — `with var p = <place> { … }` borrows the place for the block.** The
-spine is detached once at block entry and the leaf written back once at block
-exit — including on early `return`, `raise`, and loop exit. Inside the block
-`p` is a borrow with all of CW22's restrictions: it cannot escape, be returned,
-be stored, or be captured.
+**CW26 (deferred candidate) — `with var p = <place> { … }` borrows the place
+for the block**: spine detached once at entry, leaf written back once at exit
+(including early `return`/`raise`/loop exit); inside, `p` carries all of
+CW22's restrictions.
 
-Why a block rather than a bare binding: **a block is a borrow scope in exactly
-the way a call is**, so COW §11.2's structural argument — "borrows live only
-for the duration of a call, and the runtime is single-threaded, therefore a
-second live writer has exactly two possible sources" — carries over verbatim
-with "call" widened to "call or `with` block". No second lifetime notion is
-introduced, and the exclusivity design does not have to be re-derived.
+**Rev 2 demotes this from the committed surface.** N3 is expressible today as
+an extracted procedure with a path-borrow argument:
 
-Why the spelling: `var` already means *borrow* in parameter position, so
-`with var` composes two meanings the language has rather than inventing a
-third; `with` marks the scope that bounds it; and both are words, per S10.3.1's
-preference for keyword operators over sigils. `with` is unused today in both
-front ends.
+```lambda
+pn fill_row(var r: int[], n: int) { for y in 0 to n { r[y] = f(y) } }
+fill_row(var m.rows[i], n)
+```
 
-Block-exit writeback is the same hook the resource model needs (S12.4, R1–R5
-scoped `open()`/auto-close). They should share one scope-guard mechanism rather
-than each growing its own.
+— one descend at the call, raw in-place writes inside, one writeback on
+return: the same steady-state cost N3 promises, with zero new syntax, no
+scope-guard machinery, no early-exit writeback rules, and no new
+borrow-lifetime story (a call already is one). The block form is *not* an
+exact desugaring of that call — a `with` body would read and write enclosing
+locals freely, where a nested `pn` snapshots captures and C4.2a bars mutating
+them — and that friction (threading needed locals as parameters) is the one
+real cost of doing without it.
+
+So the block form stays recorded here with its design intact — the borrow
+scope maps to COW §11.2 by widening "call" to "call or block"; the spelling
+composes `var`-as-borrow with `with`-as-scope (both words, per S10.3.1;
+`with` is free in both front ends); block-exit writeback would share the
+S12.4 resource-scope guard — but it ships only if the extracted-`pn`
+friction proves real in migrated code. Adopting it later is additive and
+breaks nothing. Pick-up trigger: NM-O7.
 
 ---
 
@@ -240,8 +250,8 @@ error[E2xx]: writes through `row` do not reach `m.rows[i]`
   |     row[y] = v
   |     ^^^^^^^^^^ this updates the copy; `m` is unchanged
   |
-help: write the path directly           m.rows[i][y] = v
-help: or borrow the place for a block   with var row = m.rows[i] { ... }
+help: write the path directly              m.rows[i][y] = v
+help: or pass the place as a borrow        update_row(var m.rows[i], ...)
 ```
 
 This is the ruling that matters, and it is worth being explicit about why:
@@ -275,7 +285,7 @@ needs an opt-out — see NM-O2.
 | **Implicit borrow on projection bindings** (§4.1) | **Rejected** — makes `var h = g` and `var h = g.f` differ; unbounded borrow lifetime; contradicts C4.2e teaching. |
 | **`_modify` coroutines** (Swift) / **subscript projections** (Hylo) | **Not now.** They are the general mechanism behind N2/N3 and would let *user-defined* accessors yield places. Lambda has no user-defined subscripts, so the generality buys nothing yet. Revisit if user-defined containers land. |
 | **Guaranteed get-modify-put via uniqueness** (C4.4 #6 candidate 3) | **Subsumed.** This is what N1 already does under COW: the first write detaches, subsequent writes find a unique spine and mutate in place. It is a performance property, not a surface. |
-| **Auto-hoisting N1 out of loops** | **Deferred, and deliberately not a semantic guarantee.** An optimizer may turn a loop of path writes into one descend plus N in-place stores when it can prove the prefix invariant; N3 is how a *program* states that intent without depending on an optimizer. |
+| **Auto-hoisting N1 out of loops** | **Deferred, and deliberately not a semantic guarantee.** An optimizer may turn a loop of path writes into one descend plus N in-place stores when it can prove the prefix invariant; N2 (and N3, if adopted) is how a *program* states that intent without depending on an optimizer. |
 | **A first-class place/reference value** | **Rejected** — CW27. It is a reference; it costs the cycle ban, total `==`, and printability (C4.2e point 2). |
 | **Leave reads aliasing and never flip S9.3.1** | **Rejected** — leaves the model permanently half-aliasing, which LR12-9 already argues is harder to reason about than either endpoint. |
 
@@ -293,16 +303,15 @@ The design splits into three independently shippable pieces, in this order:
    S9.2.2 ("un-shares first"), plus the `E207`/TIG1 type-propagation fix that
    currently rejects every annotated path borrow. Removes the "extract a
    procedure and pass the root" workaround.
-3. **CW26, `with var`.** New syntax in both front ends plus a scope guard;
-   the largest piece. Best done alongside the S12.4 resource-scope work, which
-   needs the same block-exit hook. Its urgency is set by Appendix A.4: until
-   the steady-state descend is tuned, N1 in a hot loop allocates per write, so
-   CW26 is also the *performance* spelling, not only the ergonomic one.
+CW26 is out of the committed sequence entirely (deferred, NM-O7); if it is
+ever adopted, it rides the S12.4 resource-scope guard rather than growing its
+own.
 
-Independent of all three: the A.4 tuning items (interned path keys,
+Independent of both: the A.4 tuning items (interned path keys,
 skip-unchanged reinstall) are small, semantics-free, and worth doing first —
 they cheapen every existing nested write in the corpus, not just the new
-forms.
+forms. Until they land, the hot-loop spelling is N2 (descend once per call,
+raw writes inside).
 
 Piece 1 does not depend on 2 or 3. That is the point of §4.2.
 
@@ -324,13 +333,28 @@ Piece 1 does not depend on 2 or 3. That is the point of §4.2.
   Stage-1 borrow, but it is easier to trip (`f(var t, var t.nodes[i])` looks
   innocuous). Options: ship with the residue, or gate N2 on COW §11.3 face 3.
 - **NM-O4 — Interaction with S9.2.3 snapshot iteration.** `for x in m.rows[i]`
-  share-marks at the loop head. Inside a `with var` block over the same place,
-  the head mark and the block's detach must not fight. Believed benign
-  (detach precedes the loop), but it needs a fixture.
+  share-marks at the loop head. Inside a borrow over the same place (an N2
+  callee body, or a `with var` block if NM-O7 adopts one), the head mark and
+  the borrow's detach must not fight. Believed benign (detach precedes the
+  loop), but it needs a fixture.
 - **NM-O5 — Where these ratify.** The formal spec's S9 currently ends at S9.3;
   the legacy "§9.5.2" references in the COW doc point at a section that
   distillation removed. On ratification these become **S9.4** (nested
   mutation), and `SO14` is struck.
+- **NM-O6 — A written-once spine witness.** Appendix A.4 item 1: the
+  compile-time children-shared flag is monotonic, so the shaped fast path
+  never returns after a root's first COW event. A per-path emission-order
+  witness — "this exact static path was descended-and-detached earlier on
+  every path reaching here, with no intervening capture, call, or loop-back"
+  — would let later N1 writes to the same path lower as raw shaped stores.
+  It is the analysis §5's auto-hoist row deferred, in a narrower form.
+  Decide only with profile evidence *after* the A.4 item-2/3 cheap fixes:
+  they may make the witness unnecessary.
+- **NM-O7 — Adopting `with var` (CW26).** Deferred by rev 2 (§3.3): the
+  extracted-`pn` form buys the same steady state with zero new machinery.
+  Pick-up trigger: migrated corpus code where threading enclosing locals
+  through an extracted `pn`'s parameters (the C4.2a friction) is a repeated,
+  demonstrated pain — not a hypothetical one. Adoption is additive.
 
 ---
 
@@ -346,8 +370,8 @@ it into three reusable steps:
 - `install(parent, key, leaf)` — raw store, no capture (CW25).
 - `write(leaf, key, value)` — the existing final store, capturing per S9.3.1.
 
-N1 = descend_detach + write. N2 = descend_detach, bind, then install on return.
-N3 = descend_detach at block entry, install at block exit.
+N1 = descend_detach + write. N2 = descend_detach, bind, then install on
+return. N3 (if adopted, NM-O7) = the same pair at block entry/exit.
 
 ### A.2 Where the borrow writeback goes
 
@@ -358,14 +382,20 @@ computes that parent during `descend_detach`; it needs to be retained across
 the call in the same register/scratch discipline the existing borrowed-root
 scratch uses.
 
-### A.3 The CW24 check — keep it linear
+### A.3 The CW24 check
 
-Implement as one pass per function body: collect the mutation-root name set
-(index/member assigns, `var` arguments, `pn` receivers) into a small set,
-then check each place-initialized binding against it — O(body + bindings),
-not the O(bindings × body) a per-binding rescan would cost. The existing
-walkers (`mir_nested_control_writes_name`, `has_elem_type_invalidation`) are
-per-name rescans; reuse their *arms*, not their driving loop.
+Both tiers already have the pieces. A binding is *place-initialized* when its
+initializer is a member/index expression whose `compound_root_ident` resolves;
+a mutation root is the root of an `AST_NODE_INDEX_ASSIGN_STAM` /
+`AST_NODE_MEMBER_ASSIGN_STAM`, a `var` argument, or a `pn` method receiver.
+The check belongs in `build_ast` so one implementation serves both tiers,
+alongside the existing `E211` var-argument overlap check.
+
+Keep it linear: one pass per function body collecting the mutation-root name
+set, then one membership test per place-initialized binding — O(body +
+bindings). The existing walkers (`mir_nested_control_writes_name`, the
+`INDEX_ASSIGN_STAM`/`CALL_EXPR` arms of `has_elem_type_invalidation`) are
+per-name rescans, O(body) *each*; reuse their arms, not their driving loop.
 
 ### A.4 Steady-state cost of the shared lowering — measured 2026-08-28
 
@@ -373,15 +403,19 @@ The descend/detach/install machinery is asymptotically right and
 constant-factor wrong. Facts, from the current MIR emission
 (`mir_emit_cow_path_set`, transpile-mir.cpp) and runtime:
 
-1. **The slow path is sticky, and parameters start on it.**
+1. **The slow path is sticky, and `var` parameters start on it.**
    `MirVarEntry::cow_children_may_be_shared` is set in 14 places and cleared
-   in none, and every `var`/`pn` parameter is born with it set. So *every*
-   nested write through a parameter — the dominant shape in the graph
-   benchmarks — permanently lowers through the dynamic path helper instead of
-   the T20-1d shaped guarded store. The flag is honest (the runtime child
-   marks it mirrors are themselves monotonic under CW3's 1-bit), so this
-   cannot be fixed by clearing it; it is fixed by making the path helper
-   cheap (items 2–4) or by a per-path written-once witness (NM-O6).
+   in none, and every `var` parameter is born with it set (plain `pn` params
+   are not — they ride the in-place checked setters via `is_proc_param`). So
+   every nested write through a `var` param, and every nested write after a
+   root's first COW event, permanently lowers through the dynamic path helper
+   instead of the T20-1d shaped guarded store. The flag is honest (the
+   runtime child marks it mirrors are themselves monotonic under CW3's
+   1-bit), so this cannot be fixed by clearing it; it is fixed by making the
+   path helper cheap (items 2–4) or by a per-path written-once witness
+   (NM-O6). Watch this row when S9.1.3 lands: plain params become
+   snapshot-or-borrow, and whichever they become must not inherit this
+   pessimization wholesale.
 2. **A heap allocation per member key per write.** `mir_emit_cow_path_key`
    calls `heap_create_symbol` for each member segment on every execution of
    the write — and `heap_create_symbol` does not intern (lambda-mem.cpp: a
@@ -405,27 +439,15 @@ constant-factor wrong. Facts, from the current MIR emission
 
 Ladder order: 2 and 3 are afternoon-sized and semantics-free; 4 is real work;
 NM-O6 is a design question. With 2+3 done, the steady-state N1 write is
-per-link {flag check, fn_index, raw store} with zero allocation — and N3
-still beats it in loops by hoisting even that.
+per-link {flag check, fn_index, raw store} with zero allocation — and N2
+still beats it in loops by hoisting even that to once per call.
 
 *Why this doesn't reopen §5's rejected alternatives:* implicit borrowing
-would be faster than untuned N1, but N3 reaches the same steady state —
+would be faster than untuned N1, but N2 reaches the same steady state —
 descend once, raw in-place writes thereafter — without the semantic damage,
 and tuned N1 closes most of the rest. Nothing on the table is asymptotically
 better than what CW25/CW26 already specify; first-write detach cost O(width)
 per level is Stage-1 COW itself (NM-O1), not this design.
-
-Both tiers already have the pieces. Per function body: for each binding whose
-initializer's root is a place (`compound_root_ident` returns non-null and the
-initializer is a member/index expression), record it; then scan the body for a
-mutation whose root is that binding — `AST_NODE_INDEX_ASSIGN_STAM`,
-`AST_NODE_MEMBER_ASSIGN_STAM`, a `var` argument position, or a `pn` method
-receiver. The mutation-site walkers exist (`mir_nested_control_writes_name`
-plus the `INDEX_ASSIGN_STAM`/`CALL_EXPR` arms of
-`has_elem_type_invalidation`); they are name-keyed over an AST subtree, which
-is the shape this check needs. The check belongs in `build_ast` so one
-implementation serves both tiers, alongside the existing `E211` var-argument
-overlap check.
 
 ---
 

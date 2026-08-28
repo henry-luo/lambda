@@ -871,7 +871,8 @@ ergonomic follow-up, which is a change from this appendix's original sequencing
 **Refined by CW24 (same day).** The nested-mutation design narrows what
 actually gates the flip: only **CW24**, the compile error for a mutated place
 copy, is required — it converts the silent lost update into four located,
-mechanical fixes. The ergonomic forms (CW25 path borrows, CW26 `with var`)
+mechanical fixes. The other forms (CW25 path borrows; CW26 `with var`,
+deferred by that doc's rev 2 in favor of extracted-`pn` path borrows)
 remove a verbosity tax and can follow. The design also finds that path borrows
 already alias rather than un-sharing, which is a standing violation of the
 ratified **S9.2.2** ("a mutable borrow over shared storage un-shares first"),

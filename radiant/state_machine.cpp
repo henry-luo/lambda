@@ -1220,7 +1220,7 @@ static void write_editing_surface_ref(JsonWriter* w,
         return;
     }
     jw_obj_begin(w);
-        editing_log_write_surface_core_fields(w, surface, false);
+        event_log_write_surface_core_fields(w, surface, false);
     jw_obj_end(w);
 }
 

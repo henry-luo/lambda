@@ -39,7 +39,6 @@
  *     {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
  *     {"type": "assert_state_dump", "reference": "test/ui/state/form_after_paste.mark"},
  *     {"type": "assert_event_log", "contains": "\"type\":\"editing.history\"", "min": 1},
- *     {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "insertText", "min": 1},
  *     {"type": "set_editing_selection", "target": {"selector": "#editor"}, "start": 1, "end": 3},
  *     {"type": "assert_editing_selection", "target": {"selector": "#editor"}, "start": 1, "end": 3},
  *     {"type": "assert_editing_value", "target": {"selector": "#editor"}, "equals": "abc"},
@@ -144,7 +143,6 @@ enum SimEventType {
     SIM_EVENT_ASSERT_STATE_STORE, // verify DocState/ViewState store invariants
     SIM_EVENT_ASSERT_STATE_STORE_SNAPSHOT, // compare current state binding against snapshot
     SIM_EVENT_ASSERT_EVENT_LOG, // verify event/state JSONL contains records
-    SIM_EVENT_ASSERT_EDITING_EVENT, // structured editing event-state log assertion
     SIM_EVENT_ASSERT_EDITING_SELECTION, // verify form/rich editing selection range
     SIM_EVENT_ASSERT_EDITING_VALUE, // verify live form value / contenteditable text
     SIM_EVENT_ASSERT_PIXEL,      // verify a rendered pixel's color channel ranges
@@ -260,17 +258,6 @@ struct SimEvent {
     // set_editing_selection fields.
     int editing_selection_start;
     int editing_selection_end;
-    // assert_editing_event structured filters.
-    char* editing_event_type;
-    char* editing_input_type;
-    char* editing_surface_kind;
-    char* editing_surface_mode;
-    char* editing_operation;
-    char* editing_owned_by;
-    bool has_expected_prevented;
-    bool expected_prevented;
-    bool has_expected_redacted;
-    bool expected_redacted;
     // assert_count fields
     int assert_count_expected;   // exact expected count (-1 = not set)
     int assert_count_min;        // minimum expected count (-1 = not set)

@@ -341,9 +341,9 @@ void event_state_log_write_node_ref(JsonWriter* w, const char* key,
 void event_state_log_node_stable_id(const struct DomNode* node,
                                     char* buf, size_t buf_sz);
 
-void editing_log_write_surface_core_fields(JsonWriter* w,
-                                           const struct EditingSurface* surface,
-                                           bool include_state_flags);
+void event_log_write_surface_core_fields(JsonWriter* w,
+                                         const struct EditingSurface* surface,
+                                         bool include_state_flags);
 
 /* ------------------------------------------------------------------ */
 /* Convenience record helpers.                                         */
@@ -1236,10 +1236,6 @@ struct EditingFormNotificationHooks {
 };
 
 struct EventContext;
-
-void editing_dispatch_log_intent(EventContext* evcon,
-                                 const EditingSurface* surface,
-                                 const EditingIntent* intent);
 
 // Splices performed by the dom package's editing waist (radiant.replace_range).
 // Sampled either side of a beforeinput dispatch to tell an applier that edited

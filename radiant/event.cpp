@@ -245,7 +245,7 @@ static void event_log_editing_surface(JsonWriter* w,
                                       const EditingSurface* surface) {
     jw_key(w, "surface");
     jw_obj_begin(w);
-        editing_log_write_surface_core_fields(w, surface, false);
+        event_log_write_surface_core_fields(w, surface, false);
     jw_obj_end(w);
 }
 
@@ -3347,7 +3347,6 @@ static bool dispatch_contenteditable_select_all(EventContext* evcon,
 
     // Select-all is a selection operation, not a beforeinput/default-action
     // edit. Keep it outside the text action gate and do not emit input.
-    editing_dispatch_log_intent(evcon, &surface, intent);
     bool selected = dispatch_contenteditable_select_all_default(evcon, state,
                                                                  target, intent);
     if (selected) evcon->need_repaint = true;
@@ -3681,8 +3680,6 @@ static bool dispatch_form_select_all(EventContext* evcon, DomElement* elem,
 
     InputIntent intent;
     intent.type = INPUT_INTENT_SELECT_ALL;
-    editing_dispatch_log_intent(evcon, &surface, &intent);
-
     uint32_t value_len = 0;
     form_control_live_value(elem, &value_len);
     state_store_selection_start_pointer(state, target, 0);
