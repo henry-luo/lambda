@@ -8696,6 +8696,10 @@ extern "C" Item js_arguments_mapped_get(Item arguments, int64_t index, Item curr
     if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_content != 1 || !js_array_has_props(arguments.array)) {
         return current_value;
     }
+    // ParameterMap links only the actually supplied argument indices. A
+    // missing formal must remain its lexical binding, not read an inherited
+    // numeric property through the Arguments exotic object.
+    if (index < 0 || index >= arguments.array->length) return current_value;
     Item companion = {.map = js_array_props(arguments.array)};
     char marker_key[64];
     snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)index);
@@ -8718,6 +8722,9 @@ extern "C" Item js_arguments_mapped_param_writeback(Item arguments, int64_t inde
     if (get_type_id(arguments) != LMD_TYPE_ARRAY || arguments.array->is_content != 1 || !js_array_has_props(arguments.array)) {
         return js_set_key_default(arguments, (Item){.item = i2it(index)}, value);
     }
+    // Initializing or assigning an omitted formal cannot create an Arguments
+    // property: no ParameterMap entry exists for an absent actual argument.
+    if (index < 0 || index >= arguments.array->length) return value;
     Item companion = {.map = js_array_props(arguments.array)};
     char marker_key[64];
     snprintf(marker_key, sizeof(marker_key), "__arg_unmapped_%lld", (long long)index);
@@ -28127,20 +28134,6 @@ extern "C" Item js_generator_next(Item generator, Item input) {
     gen->started = true;
     gen->executing = true;
 
-    if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
-        extern Item js_interp_resume_generator(Item, JsGeneratorStateRecord*, Item);
-        Item result = js_interp_resume_generator(generator_root.get(), gen,
-            input_root.get());
-        gen->executing = false;
-        if (item_is_error(result)) {
-            gen->done = true;
-            gen->state = -1;
-            js_interp_generator_clear_continuations(gen);
-            return is_async ? js_promise_reject(js_error_lane_payload(result)) : result;
-        }
-        return is_async ? js_promise_resolve(result) : result;
-    }
-
     // If we have an active delegate (from yield*), advance it by one
     // iterator result. Delegates can be infinite; do not drain them here.
     if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
@@ -28171,6 +28164,11 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             gen->state = gen->delegate_resume;
             gen->delegate_resume = -1;
             gen->delegate_idx = 0;
+            if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
+                // Replaying the AST treats a completed yield* as one program
+                // point and injects the delegate's completion value there.
+                gen->ast_yield_skip++;
+            }
             input = return_val;
             input_root.set(input);
             // Fall through to call state machine at resumed state
@@ -28183,6 +28181,25 @@ extern "C" Item js_generator_next(Item generator, Item input) {
             }
             return del_result;
         }
+    }
+
+    if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
+        extern Item js_interp_resume_generator(Item, JsGeneratorStateRecord*, Item);
+        Item result = js_interp_resume_generator(generator_root.get(), gen,
+            input_root.get());
+        gen->executing = false;
+        if (item_is_error(result)) {
+            gen->done = true;
+            gen->state = -1;
+            js_interp_generator_clear_continuations(gen);
+            return is_async ? js_promise_reject(js_error_lane_payload(result)) : result;
+        }
+        if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
+            // `yield*` installed a delegate without exposing an iterator
+            // result. Re-enter the shared protocol with its initial next().
+            return js_generator_next(generator_root.get(), make_js_undefined());
+        }
+        return is_async ? js_promise_resolve(result) : result;
     }
 
     // Call the state machine: fn(env, input, state) -> [value, next_state]

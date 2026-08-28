@@ -54,6 +54,7 @@
 #include "js/js_runtime.h"           // JS result and exception-lane helpers
 #include "js/js_dom.h"               // JS DOM document/session bridge
 #include "js/js_transpiler.hpp"      // JsPreambleState for js-test-batch
+#include "js/js_interp.hpp"          // retained AST harness execution
 #include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
@@ -72,6 +73,8 @@
 #include "network/network_thread_pool.h"
 
 extern __thread EvalContext* context;
+Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source,
+                                const char* filename);
 
 static long js_batch_process_cpu_us(void) {
 #ifdef _WIN32
@@ -441,6 +444,51 @@ static bool js_test262_hot_context_recycle(Runtime* runtime,
     return true;
 }
 
+struct JsTest262AstHarness {
+    JsScript* script;
+    bool prepare_failed;
+};
+
+static void js_test262_clear_ast_harness(Runtime* runtime,
+        JsTest262AstHarness* harness) {
+    if (!harness) return;
+    if (runtime && harness->script) {
+        // The caller has already detached the retiring realm. Releasing from
+        // the harness owner also drops any failed test tail before its module
+        // IDs can be reused by the next manifest.
+        runtime_release_script_generation(runtime, harness->script->index,
+            harness->script->module_state_id);
+    }
+    memset(harness, 0, sizeof(JsTest262AstHarness));
+}
+
+static Item js_test262_execute_batch_source(Runtime* runtime,
+        JsTest262AstHarness* ast_harness, const char* source, size_t source_len,
+        const char* filename, bool inline_module_source,
+        const JsPreambleState* preamble, bool has_preamble,
+        uint64_t* result_home) {
+    if (ast_harness) {
+        if (ast_harness->prepare_failed || !ast_harness->script) {
+            return js_throw_syntax_error(js_name_item(
+                "AST Test262 harness preparation failed"));
+        }
+        // A retained AST owns immutable source/binding facts only. Rebuild its
+        // heap objects in this test realm so test mutations cannot cross the
+        // batch boundary.
+        Item harness_result = js_interp_execute_script(runtime, ast_harness->script,
+            result_home);
+        if (item_is_error(harness_result)) return harness_result;
+    }
+    if (inline_module_source) {
+        return transpile_js_module_to_mir(runtime, source, filename);
+    }
+    if (has_preamble) {
+        return transpile_js_to_mir_with_preamble_len(runtime, source, source_len,
+            filename, preamble, result_home);
+    }
+    return transpile_js_to_mir_len(runtime, source, source_len, filename, result_home);
+}
+
 static void js_test262_clear_preamble(
     JsPreambleState* preamble,
     bool* has_preamble,
@@ -656,7 +704,6 @@ void clear_persistent_last_error();
 // ValidationResult* run_ast_validation(const char *data_file, const char *schema_file, const char *input_format);
 AstValidationResult* exec_validation(int argc, char* argv[]);
 int exec_convert(int argc, char* argv[]);
-Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);
 
 // Layout command implementation (Lambda HTML/CSS layout with Radiant engine)
 int cmd_layout(int argc, char** argv);
@@ -4257,6 +4304,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         memset(&preamble, 0, sizeof(preamble));
         bool has_preamble = false;
         int preamble_var_checkpoint = 0;
+        JsTest262AstHarness ast_harness = {};
         int batch_crash_count = 0;
         int batch_test_count = 0;  // diagnostic: track how many tests processed
 #ifndef _WIN32
@@ -4306,6 +4354,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     runtime_reset_heap(&runtime);
                     path_reset();
                 }
+                js_test262_clear_ast_harness(&runtime, &ast_harness);
                 // A document directive belongs only to its next source job;
                 // a manifest boundary must not leak it into the next manifest.
                 batch_document_path[0] = '\0';
@@ -4345,19 +4394,38 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 int ch = fgetc(stdin);
                 if (ch != '\n' && ch != EOF) ungetc(ch, stdin);
 
-                // Destroy any previous preamble state
-                if (has_preamble) {
-                    preamble_state_destroy(&preamble);
-                    has_preamble = false;
+                // A replacement harness starts a new realm. Retire an AST
+                // owner only after that realm has been detached, since old
+                // function objects still refer to its Script while it lives.
+                js_test262_clear_preamble(&preamble, &has_preamble,
+                    &preamble_var_checkpoint, &saved_harness_src, &saved_harness_len);
+                if (ast_harness.script || ast_harness.prepare_failed) {
+                    jm_cleanup_deferred_mir();
+                    if (hot_reload) {
+                        if (!js_test262_hot_context_recycle(&runtime, batch_context)) {
+                            mem_free(harness_src);
+                            break;
+                        }
+                    } else {
+                        js_batch_reset();
+                        runtime_reset_heap(&runtime);
+                    }
+                    js_test262_clear_ast_harness(&runtime, &ast_harness);
                 }
 
-                memset(&preamble, 0, sizeof(preamble));
+                if (js_ast_interpreter_requested()) {
+                    ast_harness.script = js_interp_prepare_script(&runtime,
+                        harness_src, total_read, "<harness>");
+                    ast_harness.prepare_failed = ast_harness.script == NULL;
+                    mem_free(harness_src);
+                    continue;
+                }
+
                 uint64_t preamble_result_home = 0;
                 transpile_js_to_mir_preamble_len(&runtime, harness_src, total_read, "<harness>",
                                                   &preamble, &preamble_result_home);
 
                 // Save harness source for recompilation after crash recovery
-                if (saved_harness_src) mem_free(saved_harness_src);
                 saved_harness_src = harness_src;  // take ownership instead of freeing
                 saved_harness_len = total_read;
 
@@ -4494,6 +4562,13 @@ static int lambda_main_impl(int argc, char *argv[]) {
             // per-script Node process lifecycle only there. File-backed Node tests
             // depend on process.on('exit') flushing expected output.
             js_batch_execution_mode = (inline_source || inline_module_source || has_preamble) ? 1 : 0;
+            // The AST selector registers every classic source as a retained
+            // JsScript. Raw/native jobs have no harness checkpoint, so capture
+            // their own generation before dispatch as well.
+            bool ast_test_generation_active = js_ast_interpreter_requested() &&
+                !inline_module_source;
+            int ast_test_script_checkpoint = runtime.scripts ? runtime.scripts->length : 0;
+            uint32_t ast_test_module_state_checkpoint = runtime.next_module_state_id;
 
             if (!batch_context->side_root_base &&
                 !lambda_side_stack_bind()) {
@@ -4541,13 +4616,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     if (sigsetjmp(batch_timeout_jmp, 1) == 0) {
                         alarm(batch_timeout);
                         uint64_t result_home = 0;
-                        Item res = inline_module_source
-                            ? transpile_js_module_to_mir(&runtime, js_source, script_exec_path)
-                            : has_preamble
-                            ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len,
-                                                                    script_exec_path, &preamble, &result_home)
-                            : transpile_js_to_mir_len(&runtime, js_source, js_source_len,
-                                                      script_exec_path, &result_home);
+                        Item res = js_test262_execute_batch_source(&runtime,
+                            ast_harness.script || ast_harness.prepare_failed ? &ast_harness : NULL,
+                            js_source, js_source_len, script_exec_path, inline_module_source,
+                            &preamble, has_preamble, &result_home);
                         alarm(0);
                         batch_timeout_active = 0;
                         mir_error_active = 0;
@@ -4572,13 +4644,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 mir_error_active = 1;
                 if (setjmp(mir_error_jmp) == 0) {
                     uint64_t result_home = 0;
-                    Item res = inline_module_source
-                        ? transpile_js_module_to_mir(&runtime, js_source, script_exec_path)
-                        : has_preamble
-                        ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len,
-                                                                script_exec_path, &preamble, &result_home)
-                        : transpile_js_to_mir_len(&runtime, js_source, js_source_len,
-                                                  script_exec_path, &result_home);
+                    Item res = js_test262_execute_batch_source(&runtime,
+                        ast_harness.script || ast_harness.prepare_failed ? &ast_harness : NULL,
+                        js_source, js_source_len, script_exec_path, inline_module_source,
+                        &preamble, has_preamble, &result_home);
                     mir_error_active = 0;
                     if (item_is_error(res)) {
                         batch_error = res;
@@ -4591,13 +4660,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
             }
 #else
             uint64_t result_home = 0;
-            Item res = inline_module_source
-                ? transpile_js_module_to_mir(&runtime, js_source, script_exec_path)
-                : has_preamble
-                ? transpile_js_to_mir_with_preamble_len(&runtime, js_source, js_source_len,
-                                                        script_exec_path, &preamble, &result_home)
-                : transpile_js_to_mir_len(&runtime, js_source, js_source_len,
-                                          script_exec_path, &result_home);
+            Item res = js_test262_execute_batch_source(&runtime,
+                ast_harness.script || ast_harness.prepare_failed ? &ast_harness : NULL,
+                js_source, js_source_len, script_exec_path, inline_module_source,
+                &preamble, has_preamble, &result_home);
             if (item_is_error(res)) {
                 batch_error = res;
                 result = 1;
@@ -4729,6 +4795,18 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     jm_abandon_active_mir_after_signal();
                     js_test262_hot_context_destroy(&runtime, batch_context);
                     js_test262_hot_context_create(&runtime, batch_context);
+                    if (ast_harness.script) {
+                        // Signal-safe destruction discarded the old heap
+                        // without unregistering its exact slab roots. Keep
+                        // the retained AST but rebuild its module state in
+                        // the fresh EvalContext before the next harness run.
+                        lambda_module_state_release_from(
+                            ast_harness.script->module_state_id);
+                    }
+                    if (ast_test_generation_active) {
+                        runtime_release_script_generation(&runtime,
+                            ast_test_script_checkpoint, ast_test_module_state_checkpoint);
+                    }
 
                     // Heap destroyed — recompile preamble for subsequent tests.
                     if (saved_harness_src) {
@@ -4780,6 +4858,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     } else if (!js_test262_hot_context_recycle(&runtime, batch_context)) {
                         break;
                     }
+                    if (ast_test_generation_active) {
+                        runtime_release_script_generation(&runtime,
+                            ast_test_script_checkpoint, ast_test_module_state_checkpoint);
+                    }
                     rss_after = get_rss_bytes();
                     if (rss_after > RSS_LIMIT) {
                         printf("\x01" "BATCH_EXIT rss_exceeded RSS=%zuMB limit=%zuMB tests=%d\n",
@@ -4789,6 +4871,15 @@ static int lambda_main_impl(int argc, char *argv[]) {
                         js_batch_document_finish(&runtime, &batch_document);
                         break;
                     }
+                } else if (ast_test_generation_active) {
+                    // AST harnesses retain only parsed source and scope facts.
+                    // Replacing the realm after every source prevents a test
+                    // from mutating harness functions, globals, or intrinsics
+                    // observed by its successor.
+                    jm_cleanup_deferred_mir();
+                    if (!js_test262_hot_context_recycle(&runtime, batch_context)) break;
+                    runtime_release_script_generation(&runtime,
+                        ast_test_script_checkpoint, ast_test_module_state_checkpoint);
                 } else if (has_preamble) {
                     if (js_test262_restore_preamble_module_state(&preamble)) {
                         js_batch_reset_to(preamble_var_checkpoint);
@@ -4813,6 +4904,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 // Just reset JS runtime state between tests.
                 js_batch_reset();
                 runtime_reset_heap(&runtime);
+                if (ast_test_generation_active) {
+                    runtime_release_script_generation(&runtime,
+                        ast_test_script_checkpoint, ast_test_module_state_checkpoint);
+                }
             }
             if (has_batch_document) {
                 js_batch_document_finish(&runtime, &batch_document);

@@ -2936,7 +2936,10 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     }
 
     if (runtime->type_list) {
-        arraylist_free(runtime->type_list);
+        // A loaded Lambda package can publish its Script-owned type list here.
+        if (!runtime_type_list_is_script_owned(runtime)) {
+            arraylist_free(runtime->type_list);
+        }
         runtime->type_list = nullptr;
     }
 

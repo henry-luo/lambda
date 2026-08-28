@@ -140,17 +140,8 @@ NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name) {
     return tp ? js_scope_find_entry(tp->current_scope, name) : NULL;
 }
 
-NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVarKind kind) {
-    JsScope* target_scope = tp->current_scope;
-
-    // var declarations are function-scoped, let/const are block-scoped
-    if (kind == JS_VAR_VAR) {
-        // Find the nearest function scope or global scope
-        while (target_scope && target_scope->kind == SCOPE_KIND_BLOCK) {
-            target_scope = target_scope->parent;
-        }
-    }
-
+NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
+        String* name, JsAstNode* node, JsVarKind kind) {
     if (!target_scope) {
         target_scope = tp->global_scope;
     }
@@ -209,6 +200,30 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
     log_debug("Defined JavaScript variable '%.*s' in scope type %d",
              (int)name->len, name->chars, target_scope->kind);
     return entry;
+}
+
+NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVarKind kind) {
+    JsScope* target_scope = tp->current_scope;
+
+    // var declarations are function-scoped, let/const are block-scoped
+    if (kind == JS_VAR_VAR) {
+        // Annex B.3.5 keeps a var whose name matches a simple catch parameter
+        // in the handler environment. Walk only the current var-declaration
+        // region, so a nested function still starts a new var scope.
+        for (JsScope* scope = target_scope; scope; scope = scope->parent) {
+            if (scope->allows_legacy_var_redeclaration) {
+                NameEntry* entry = js_scope_find_entry(scope, name);
+                if (entry && entry->is_lexical) return entry;
+            }
+            if (scope->kind != SCOPE_KIND_BLOCK) break;
+        }
+
+        // Find the nearest function scope or global scope
+        while (target_scope && target_scope->kind == SCOPE_KIND_BLOCK) {
+            target_scope = target_scope->parent;
+        }
+    }
+    return js_scope_define_in_scope(tp, target_scope, name, node, kind);
 }
 
 // Error handling functions

@@ -331,10 +331,8 @@ extern "C" void lambda_module_state_snapshot_dispose(
     memset(snapshot, 0, sizeof(*snapshot));
 }
 
-extern "C" void lambda_module_state_release(uint32_t module_id) {
-    EvalContext* owner = context;
-    if (!owner || module_id >= owner->module_state_capacity ||
-            !owner->module_states) return;
+static void lambda_module_state_release_at(EvalContext* owner, uint32_t module_id) {
+    if (!owner || module_id >= owner->module_state_capacity || !owner->module_states) return;
     LambdaModuleState* state = owner->module_states[module_id];
     if (!state) return;
     // A cleared REPL module must drop its exact root before its Script/AST is
@@ -350,6 +348,19 @@ extern "C" void lambda_module_state_release(uint32_t module_id) {
     mem_free(state->property_keys);
     mem_free(state);
     owner->module_states[module_id] = NULL;
+}
+
+extern "C" void lambda_module_state_release(uint32_t module_id) {
+    lambda_module_state_release_at(context, module_id);
+}
+
+extern "C" void lambda_module_state_release_from(uint32_t first_module_id) {
+    EvalContext* owner = context;
+    if (!owner || !owner->module_states || first_module_id >= owner->module_state_capacity) return;
+    for (uint32_t module_id = first_module_id;
+            module_id < owner->module_state_capacity; module_id++) {
+        lambda_module_state_release_at(owner, module_id);
+    }
 }
 
 extern "C" bool lambda_module_state_prepare_layout(const LambdaModuleLayout* layout) {

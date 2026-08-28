@@ -2278,17 +2278,7 @@ static bool multicol_has_fragmentable_block_children(ViewBlock* child) {
 }
 
 static bool multicol_is_scroll_container(ViewBlock* block) {
-    if (!block || !block->scroller) return false;
-    const ScrollProp* scroll = block->scroll();
-    if (!scroll) return false;
-    auto establishes_scroll_container = [](CssEnum overflow) {
-        // CSS Overflow: clip suppresses scrolling and does not establish a
-        // scroll container; hidden remains programmatically scrollable.
-        return overflow == CSS_VALUE_AUTO || overflow == CSS_VALUE_SCROLL ||
-            overflow == CSS_VALUE_HIDDEN;
-    };
-    return establishes_scroll_container(scroll->overflow_x) ||
-        establishes_scroll_container(scroll->overflow_y);
+    return layout_block_establishes_scroll_container(block);
 }
 
 static bool multicol_has_unbreakable_scroll_children(ViewBlock* parent) {

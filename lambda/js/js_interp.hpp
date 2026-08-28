@@ -1,16 +1,33 @@
 #pragma once
 
+#include <cstdlib>
+#include <cstring>
+
 #include "js_transpiler.hpp"
 #include "js_function.hpp"
 
 // Tree-walking execution tier. It intentionally shares the JS object/value
 // helpers and the Runtime/EvalContext ownership model with MIR lowering.
-bool js_ast_interpreter_requested(void);
+static inline bool js_ast_interpreter_requested(void) {
+    const char* backend = getenv("JS_EXECUTION_BACKEND");
+    return backend && (strcmp(backend, "ast") == 0 ||
+        strcmp(backend, "interpreter") == 0);
+}
+// Parse, bind, and retain a classic Script without evaluating it. Batch hosts
+// use this to keep a harness AST across fresh per-test realms.
+JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
+                                   size_t source_length, const char* filename,
+                                   bool strict = false);
 Item js_interp_execute_script(Runtime* runtime, JsScript* script,
                               uint64_t* result_home);
 Item js_interp_execute_source(Runtime* runtime, const char* source,
                               size_t source_length, const char* filename,
                               uint64_t* result_home);
+// Execute indirect eval code in the AST tier with EvalDeclarationInstantiation
+// global binding semantics.
+Item js_interp_execute_indirect_eval_source(Runtime* runtime, const char* source,
+                                             size_t source_length, const char* filename,
+                                             uint64_t* result_home);
 // Execute source in a module-private slab. `strict` distinguishes the
 // CommonJS wrapper (sloppy) from an ES module (always strict).
 Item js_interp_execute_module_source(Runtime* runtime, const char* source,

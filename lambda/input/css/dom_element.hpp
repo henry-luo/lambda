@@ -58,7 +58,8 @@ typedef enum DomJsMutationKind {
     DOM_JS_MUTATION_ATTRIBUTE = 4,
     DOM_JS_MUTATION_STYLE = 5,
     DOM_JS_MUTATION_TREE_REPLACE = 6,
-    DOM_JS_MUTATION_STYLE_REPAINT = 7
+    DOM_JS_MUTATION_STYLE_REPAINT = 7,
+    DOM_JS_MUTATION_CONTROL_VALUE = 8
 } DomJsMutationKind;
 
 // tier-1: doc-pool, survives relayout
@@ -273,6 +274,7 @@ struct DomDocument {
     float pending_viewport_scroll_y;
     DomElement* pending_scroll_into_view_target;
     uint32_t pending_scroll_into_view_target_id;
+    bool pending_scroll_into_view_center;
 
     // Keep new editing state at the document tail: native/JIT consumers depend
     // on the offsets of the long-lived DOM/JS members above.
@@ -325,6 +327,7 @@ struct DomDocument {
                     pending_viewport_scroll_x(0.0f), pending_viewport_scroll_y(0.0f),
                     pending_scroll_into_view_target(nullptr),
                     pending_scroll_into_view_target_id(0),
+                    pending_scroll_into_view_center(false),
                     mutation_epoch(0), page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
                     dom_package_loaded(false), owns_script_runtime(false),
                     behavior_init_pending(false) {}

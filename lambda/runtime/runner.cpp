@@ -1802,7 +1802,7 @@ void runtime_register_script(Runtime* runtime, Script* script) {
 
 // runtime::type_list can alias a Script's Input-owned list while a nested
 // Lambda package is evaluated. The Script remains the owner of that alias.
-static bool runtime_type_list_is_script_owned(Runtime* runtime) {
+bool runtime_type_list_is_script_owned(Runtime* runtime) {
     if (!runtime || !runtime->type_list || !runtime->scripts) return false;
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script* script = (Script*)runtime->scripts->data[i];
@@ -1885,6 +1885,31 @@ void runtime_teardown_batch_scripts(Runtime* runtime) {
         if (script->cache_retain && !script->cache_retired) continue;
         runtime_free_script(runtime, script, true);
         runtime->scripts->data[i] = NULL;
+    }
+}
+
+void runtime_release_script_generation(Runtime* runtime, int first_script_index,
+        uint32_t first_module_state_id) {
+    if (!runtime) return;
+    // The batch realm has already dropped callbacks, globals, and module
+    // registry entries. Retire the exact tail before the next test reuses its
+    // module IDs; otherwise an old AST can retain a mismatched sealed slab.
+    lambda_module_state_release_from(first_module_state_id);
+    if (runtime->scripts) {
+        int first = first_script_index;
+        if (first < 0) first = 0;
+        if (first > runtime->scripts->length) first = runtime->scripts->length;
+        for (int i = runtime->scripts->length - 1; i >= first; i--) {
+            Script* script = (Script*)runtime->scripts->data[i];
+            if (script) runtime_free_script(runtime, script, true);
+        }
+        if (first < runtime->scripts->length) {
+            arraylist_remove_range(runtime->scripts, first,
+                runtime->scripts->length - first);
+        }
+    }
+    if (runtime->next_module_state_id > first_module_state_id) {
+        runtime->next_module_state_id = first_module_state_id;
     }
 }
 

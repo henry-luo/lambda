@@ -289,8 +289,12 @@ struct NameEntry {
     NameEntry* next;
     AstImportNode* import;
     NameScope* scope;
+    // A sloppy block function publishes only to this validated Annex-B outer
+    // binding; null records a parameter, arguments, or lexical collision.
+    NameEntry* annex_b_outer_binding;
     bool is_mutable;
     bool is_var_param;
+    bool is_parameter;
     // A plain (non-`var`) parameter of a `pn`. Under the current pn ABI such a
     // parameter is locally mutable AND its typed-container writes stay visible
     // to the caller, so a checked write must use the in-place setter rather
@@ -353,6 +357,13 @@ struct NameScope {
     NameScope* parent;
     ScopeKind kind;
     bool strict;
+    // Function bodies keep a block environment for top-level lexicals, while
+    // their FunctionDeclarations still belong to the enclosing function scope.
+    bool is_function_body;
+    bool has_implicit_arguments;
+    // JavaScript B.3.5 permits a legacy var redeclaration of a simple catch
+    // BindingIdentifier; JavaScript marks only that handler scope.
+    bool allows_legacy_var_redeclaration;
 };
 
 struct AstNode {

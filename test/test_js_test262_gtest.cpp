@@ -55,6 +55,8 @@
 // =============================================================================
 
 #include <gtest/gtest.h>
+
+#include "../lambda/js/js_interp.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -124,6 +126,12 @@ static const char* SPECIAL_PREAMBLE_FILE = "test/js262/special_premble.txt";
 static const char* SLOW_TEST_FILE = "test/js262/t262_slow.txt";
 static const char* TEST262_RUN_LOCK_FILE = "temp/test_js_test262_gtest.lock";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
+
+static bool test262_native_harness_is_available(void) {
+    // Native assertion interception belongs to MIR lowering. The AST backend
+    // executes source directly, so ordinary tests require the JS preamble.
+    return !js_ast_interpreter_requested();
+}
 
 // Features above ES2023 — skip tests requiring these.
 // Target: ES2023 compliance. All features ≤ES2023 are in scope, except
@@ -1273,7 +1281,9 @@ struct BatchResult {
 };
 
 static const size_t T262_DEFAULT_BATCH_CHUNK_SIZE = 100;
-static const size_t T262_MAX_BATCH_CHUNK_SIZE = 200;
+// AST batch cleanup replaces the test realm after every source, so a larger
+// worker manifest does not retain prior test heaps between result records.
+static const size_t T262_MAX_BATCH_CHUNK_SIZE = 600;
 static size_t g_t262_jobs = 0;  // 0 means auto: CPU count - 1
 static size_t g_t262_batch_chunk_size = T262_DEFAULT_BATCH_CHUNK_SIZE;
 static size_t g_t262_async_chunk_size = T262_DEFAULT_BATCH_CHUNK_SIZE;
@@ -2426,7 +2436,8 @@ static void prepare_all_tests(
 #ifndef NDEBUG
             // Native harness eligibility: pre-computed in metadata cache (V2+),
             // or computed inline when no cache is available.
-            p.native_harness = p.is_raw || (!p.is_async && cached_native_harness);
+            p.native_harness = p.is_raw || (test262_native_harness_is_available() &&
+                !p.is_async && cached_native_harness);
 #else
             p.native_harness = p.is_raw;
 #endif
@@ -4825,7 +4836,8 @@ int main(int argc, char** argv) {
                 p.is_raw = is_raw;
                 p.includes = cm.includes;
                 p.features = cm.features;
-                p.native_harness = !p.is_async && cm.native_harness;
+                p.native_harness = test262_native_harness_is_available() &&
+                    !p.is_async && cm.native_harness;
                 meta.is_async = p.is_async;
                 meta.is_module = is_module;
                 meta.is_raw = is_raw;
@@ -5041,7 +5053,8 @@ int main(int argc, char** argv) {
                 // match prepare_all_tests: release retries must not promote the
                 // cache's debug-only native-harness optimization into native mode.
 #ifndef NDEBUG
-                p.native_harness = p.is_raw || (!p.is_async &&
+                p.native_harness = p.is_raw || (test262_native_harness_is_available() &&
+                                                !p.is_async &&
                                                 cm_it != g_metadata_cache.end() &&
                                                 cm_it->second.native_harness);
 #else

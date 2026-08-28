@@ -1480,6 +1480,7 @@ static bool dom_js_mutation_requires_inline_stylesheet_rescan(DomDocument* doc) 
                 return true;
             case DOM_JS_MUTATION_STYLE:
             case DOM_JS_MUTATION_STYLE_REPAINT:
+            case DOM_JS_MUTATION_CONTROL_VALUE:
             default:
                 break;
         }

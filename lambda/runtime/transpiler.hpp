@@ -233,10 +233,15 @@ void runtime_reset_heap(Runtime* runtime);  // reset heap between independent ev
 EvalContext* runtime_get_eval_context(Runtime* runtime);
 void runtime_register_script(Runtime* runtime, Script* script);
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index);
+bool runtime_type_list_is_script_owned(Runtime* runtime);
 // Free every Script a runtime owns, with its script list and path index.
 // runtime_cleanup calls this; hosts that tear a runtime down by hand must too.
 void runtime_free_all_scripts(Runtime* runtime);
 void runtime_teardown_batch_scripts(Runtime* runtime);
+// Release every Script and module slab created after a batch checkpoint. The
+// caller must have cleared all heap-owned references before this operation.
+void runtime_release_script_generation(Runtime* runtime, int first_script_index,
+                                       uint32_t first_module_state_id);
 void runtime_log_mir_cache_summary(Runtime* runtime);
 void path_reset(void);  // reset path scheme roots (must call after runtime_reset_heap in batch)
 

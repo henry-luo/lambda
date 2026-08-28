@@ -46,6 +46,9 @@ struct JsInterpCompletion {
     // activation before another allocation can occur.
     Item tail_arguments = ItemNull;
     Item tail_this = ItemNull;
+    // A delegated yield parks the outer AST activation while the shared
+    // generator runtime advances the delegated iterator.
+    bool yield_delegate = false;
 };
 
 struct JsInterpTailScratch {
@@ -99,6 +102,10 @@ struct JsInterpReference {
     // reference must keep both operands live while evaluating its RHS.
     uint64_t* object_home;
     uint64_t* key_home;
+    // The key has already completed ToPropertyKey. Preserve the shared lane
+    // classification so computed numeric AST members reach the same dense
+    // array kernels as MIR without repeating coercion.
+    JsPropertyLane property_lane;
     bool property;
     bool super_property;
     bool with_binding;
@@ -188,8 +195,9 @@ static JsInterpGeneratorLoopContinuation* js_interp_generator_find_loop(
 static bool js_interp_generator_has_list_resume(JsInterpFrame* frame,
         JsAstNode* statements) {
     JsGeneratorStateRecord* state = frame ? frame->generator_state : NULL;
-    return state && state->ast_resumable_loop_active &&
-        state->ast_list_continuation &&
+    // A terminal yield has a list cursor even outside a loop. Requiring a
+    // loop continuation here replays prior statements on every next/return.
+    return state && state->ast_list_continuation &&
         state->ast_list_continuation->statements == statements;
 }
 
@@ -585,6 +593,92 @@ static JsInterpEnv* js_interp_env_clone(JsInterpEnv* source) {
     return copy;
 }
 
+static bool js_interp_loop_scope_owns_entry(NameScope* scope, NameEntry* entry) {
+    if (!scope || !entry) return false;
+    for (NameEntry* candidate = scope->first; candidate; candidate = candidate->next) {
+        if (candidate == entry) return true;
+    }
+    return false;
+}
+
+static bool js_interp_function_node(JsAstNode* node) {
+    return node && (node->node_type == AST_NODE_FUNC ||
+        node->node_type == AST_NODE_FUNC_EXPR ||
+        node->node_type == AST_NODE_ARROW_FUNC ||
+        node->node_type == JS_AST_NODE_METHOD_DEFINITION);
+}
+
+struct JsInterpLoopCaptureProbe {
+    NameScope* loop_scope;
+    int function_depth;
+    bool captures_loop_lexical;
+};
+
+static void js_interp_probe_loop_capture(JsAstNode* node,
+    JsInterpLoopCaptureProbe* probe);
+
+static void js_interp_probe_loop_capture_child(JsAstNode* child, void* opaque) {
+    js_interp_probe_loop_capture(child, (JsInterpLoopCaptureProbe*)opaque);
+}
+
+static void js_interp_probe_loop_capture(JsAstNode* node,
+        JsInterpLoopCaptureProbe* probe) {
+    if (!node || !probe || probe->captures_loop_lexical) return;
+    if (node->node_type == AST_NODE_IDENT && probe->function_depth > 0) {
+        JsIdentifierNode* identifier = (JsIdentifierNode*)node;
+        if (js_interp_loop_scope_owns_entry(probe->loop_scope, identifier->entry)) {
+            probe->captures_loop_lexical = true;
+        }
+        return;
+    }
+    if (js_interp_function_node(node)) {
+        JsFunctionNode* function = (JsFunctionNode*)node;
+        // Direct eval can publish a closure over a loop binding that does not
+        // appear as an identifier in its enclosing AST.
+        if (js_ast_has_direct_eval_call((JsAstNode*)function->body)) {
+            probe->captures_loop_lexical = true;
+            return;
+        }
+        probe->function_depth++;
+        for (JsAstNode* parameter = (JsAstNode*)function->params; parameter;
+                parameter = (JsAstNode*)parameter->next) {
+            js_interp_probe_loop_capture(parameter, probe);
+        }
+        js_interp_probe_loop_capture((JsAstNode*)function->body, probe);
+        probe->function_depth--;
+        return;
+    }
+    if (node->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+            node->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        // Class members and instance-field initializer thunks can retain the
+        // loop lexical environment after the iteration completes.
+        probe->captures_loop_lexical = true;
+        return;
+    }
+    js_ast_visit_children(node, js_interp_probe_loop_capture_child, probe);
+}
+
+static bool js_interp_loop_needs_per_iteration_env(NameScope* scope,
+        JsAstNode* test, JsAstNode* update, JsAstNode* body) {
+    bool has_lexical = false;
+    for (NameEntry* entry = scope ? scope->first : NULL; entry; entry = entry->next) {
+        if (entry->is_lexical) {
+            has_lexical = true;
+            break;
+        }
+    }
+    if (!has_lexical) return false;
+    // Direct eval in the loop frame can create a closure over its lexical
+    // binding without an AST-visible nested function.
+    if (js_ast_has_direct_eval_call(test) || js_ast_has_direct_eval_call(update) ||
+            js_ast_has_direct_eval_call(body)) return true;
+    JsInterpLoopCaptureProbe probe = {scope, 0, false};
+    js_interp_probe_loop_capture(test, &probe);
+    js_interp_probe_loop_capture(update, &probe);
+    js_interp_probe_loop_capture(body, &probe);
+    return probe.captures_loop_lexical;
+}
+
 static JsInterpEnv* js_interp_find_env(JsInterpEnv* env, NameScope* scope) {
     for (JsInterpEnv* scan = env; scan; scan = scan->outer) {
         if (scan->scope == scope) return scan;
@@ -704,6 +798,8 @@ static Item js_interp_tdz_error(String* name) {
         name ? (int)name->len : 0));
 }
 
+static NameEntry* js_interp_find_binding(JsInterpFrame* frame, String* name);
+
 static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         String* unresolved_name) {
     if (!frame) return ItemError;
@@ -747,6 +843,11 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
         if (js_eval_local_has_var_binding(key)) {
             return js_eval_local_get_binding_or_fallback(key, ItemError);
         }
+    }
+    if (!entry && unresolved_name) {
+        // Annex-B companions are discovered while later block declarations
+        // are built, after an earlier identifier node captured no static entry.
+        entry = js_interp_find_binding(frame, unresolved_name);
     }
     if (!entry) {
         JsInterpImportBinding* imported = js_interp_import_binding(frame->script,
@@ -811,8 +912,17 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
             // must never publish their cells as realm-global properties.
             if (!frame->script->is_module) {
                 if (initialize) {
-                    js_define_global_var_property(key, value);
-                    js_register_global_var_module_binding(key, entry->slot);
+                    if (frame->script->is_eval_script) {
+                        js_define_global_eval_var_property(key, value);
+                    } else {
+                        js_define_global_var_property(key, value);
+                    }
+                    // An indirect eval has a private execution slab. Let the
+                    // pre-existing Script binding remain the global-property
+                    // synchronization owner instead of replacing it here.
+                    if (!frame->script->is_eval_script) {
+                        js_register_global_var_module_binding(key, entry->slot);
+                    }
                 } else {
                     Item global_written = js_set_global_property(key, value,
                         frame->strict ? 1 : 0);
@@ -882,26 +992,38 @@ static Item js_interp_configure_function_metadata(Item function_item);
 static Item js_interp_new_function(JsInterpFrame* frame,
         JsFunctionNode* function, uint32_t flags) {
     if (!frame || !function) return ItemError;
-    Item result = js_new_interpreted_function(function, frame->script, frame->env,
-        js_interp_function_param_count(function), flags);
-    result = js_interp_configure_function_metadata(result);
-    if (!item_is_error(result)) {
-        js_set_formal_length(result, js_interp_function_formal_length(function));
+    JS_ROOTS(roots, result_root, js_new_interpreted_function(function, frame->script, frame->env,
+        js_interp_function_param_count(function), flags));
+    result_root.set(js_interp_configure_function_metadata(result_root.get()));
+    if (!item_is_error(result_root.get())) {
+        js_set_formal_length(result_root.get(), js_interp_function_formal_length(function));
+        const char* source_text = NULL;
+        uint32_t source_length = 0;
+        if (frame->script && js_function_source_span(frame->script->source,
+                frame->script->source_length, function, &source_text, &source_length)) {
+            Item source_item = js_make_string_len(source_text, (int)source_length);
+            if (get_type_id(source_item) == LMD_TYPE_STRING) {
+                js_set_function_source(result_root.get(), source_item);
+            }
+        }
     }
-    return result;
+    return result_root.get();
 }
 
 static Item js_interp_make_function(JsInterpFrame* frame, JsFunctionNode* function) {
-    if (!frame || !function || (function->is_generator && function->is_async)) {
+    if (!frame || !function) {
         return js_throw_type_error("unsupported interpreted function form");
     }
     uint32_t flags = 0;
     if (function->is_arrow) flags |= JS_FUNC_FLAG_ARROW;
-    if (function->is_generator) flags |= JS_FUNC_FLAG_GENERATOR;
+    if (function->is_generator) {
+        flags |= JS_FUNC_FLAG_GENERATOR;
+        if (function->is_async) flags |= JS_FUNC_FLAG_ASYNC_GEN;
+    }
     // Async AST bodies use the common promise call wrapper.  `await` itself
     // remains in the AST tier so closure and EvalContext ownership do not
     // cross into a separately compiled function body.
-    if (function->is_async) flags |= JS_FUNC_FLAG_ASYNC;
+    if (function->is_async && !function->is_generator) flags |= JS_FUNC_FLAG_ASYNC;
     if (frame->strict || function->has_use_strict_directive) flags |= JS_FUNC_FLAG_STRICT;
     Item result = js_interp_new_function(frame, function, flags);
     if (function->is_arrow && !item_is_error(result)) {
@@ -924,25 +1046,31 @@ static Item js_interp_make_function(JsInterpFrame* frame, JsFunctionNode* functi
 }
 
 static Item js_interp_make_method(JsInterpFrame* frame, JsFunctionNode* function) {
-    if (!frame || !function || (function->is_generator && function->is_async)) {
+    if (!frame || !function) {
         return js_throw_type_error("unsupported interpreted method form");
     }
     // Class methods are strict and never expose [[Construct]]. The common
     // function factory still supplies their ordinary JS call capability.
     uint32_t flags = JS_FUNC_FLAG_METHOD | JS_FUNC_FLAG_STRICT;
-    if (function->is_generator) flags |= JS_FUNC_FLAG_GENERATOR;
-    if (function->is_async) flags |= JS_FUNC_FLAG_ASYNC;
+    if (function->is_generator) {
+        flags |= JS_FUNC_FLAG_GENERATOR;
+        if (function->is_async) flags |= JS_FUNC_FLAG_ASYNC_GEN;
+    }
+    if (function->is_async && !function->is_generator) flags |= JS_FUNC_FLAG_ASYNC;
     return js_interp_new_function(frame, function, flags);
 }
 
 static Item js_interp_make_object_method(JsInterpFrame* frame,
         JsFunctionNode* function) {
-    if (!frame || !function || (function->is_generator && function->is_async)) {
+    if (!frame || !function) {
         return js_throw_type_error("unsupported interpreted object method form");
     }
     uint32_t flags = JS_FUNC_FLAG_METHOD;
-    if (function->is_generator) flags |= JS_FUNC_FLAG_GENERATOR;
-    if (function->is_async) flags |= JS_FUNC_FLAG_ASYNC;
+    if (function->is_generator) {
+        flags |= JS_FUNC_FLAG_GENERATOR;
+        if (function->is_async) flags |= JS_FUNC_FLAG_ASYNC_GEN;
+    }
+    if (function->is_async && !function->is_generator) flags |= JS_FUNC_FLAG_ASYNC;
     if (frame->strict || function->has_use_strict_directive) flags |= JS_FUNC_FLAG_STRICT;
     return js_interp_new_function(frame, function, flags);
 }
@@ -1271,7 +1399,8 @@ static JsInterpCompletion js_interp_eval_reference(JsInterpFrame* frame,
     out_reference->key_home = key_home;
     if (node && node->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* identifier = (JsIdentifierNode*)node;
-        out_reference->entry = identifier->entry;
+        out_reference->entry = identifier->entry ? identifier->entry
+            : js_interp_find_binding(frame, identifier->name);
         Item key = js_interp_name_key(identifier->name);
         if (key_home) *key_home = key.item;
         if (js_with_depth_active()) {
@@ -1307,7 +1436,18 @@ static JsInterpCompletion js_interp_eval_reference(JsInterpFrame* frame,
         if (key_home) *key_home = key_root.get().item;
         out_reference->property = true;
         out_reference->super_property = super_property;
+        out_reference->property_lane = js_property_lane_for_canonical_key(
+            key_root.get());
         return js_interp_normal(ItemNull);
+    }
+    if (node && node->node_type == AST_NODE_CALL_EXPR) {
+        // Annex B accepts a call expression in sloppy assignment positions.
+        // Evaluate the call for its side effects, then reject its non-reference
+        // result without reading it, coercing it, or evaluating a RHS.
+        JsInterpCompletion evaluated = js_interp_eval(frame, node);
+        if (evaluated.kind != JS_INTERP_NORMAL) return evaluated;
+        return js_interp_throw(js_throw_reference_error(js_make_string(
+            "Invalid left-hand side in assignment")));
     }
     return js_interp_throw(js_throw_type_error("invalid assignment target"));
 }
@@ -1330,6 +1470,10 @@ static Item js_interp_reference_read(JsInterpFrame* frame,
     if (reference->super_property) {
         return js_super_property_get(js_interp_reference_object(reference),
             js_interp_reference_key(reference));
+    }
+    if (js_property_lane_is_valid(reference->property_lane)) {
+        return js_get(js_interp_reference_object(reference), reference->property_lane,
+            js_interp_reference_key(reference), js_interp_reference_object(reference));
     }
     return js_get_key_default(js_interp_reference_object(reference),
         js_interp_reference_key(reference));
@@ -1360,6 +1504,13 @@ static Item js_interp_reference_write(JsInterpFrame* frame,
     if (reference->super_property) {
         return js_super_property_set(js_interp_reference_object(reference),
             js_interp_reference_key(reference), value, frame->strict ? 1 : 0);
+    }
+    if (js_property_lane_is_valid(reference->property_lane)) {
+        Item set_result = js_set(js_interp_reference_object(reference),
+            reference->property_lane, js_interp_reference_key(reference), value,
+            js_interp_reference_object(reference));
+        return js_assignment_set_result(value, js_interp_reference_key(reference),
+            set_result, frame->strict ? 1 : 0, js_interp_reference_object(reference));
     }
     return js_set_key_policy(js_interp_reference_object(reference),
         js_interp_reference_key(reference), value,
@@ -1627,9 +1778,8 @@ struct JsInterpEvalBridge {
     Item writeback() {
         if (!active) return ItemError;
         if (global_lexical) {
-            // The AST script stores lexical bindings in its module slab while
-            // the compiled direct-eval source sees a temporary global bridge.
-            // Synchronize that bridge before it is removed.
+            // The direct-eval script sees caller bindings through temporary
+            // globals; synchronize both lexical and var cells before removal.
             return js_interp_eval_writeback_scope(frame,
                 frame->script ? frame->script->global_scope : NULL, NULL, true);
         }
@@ -1883,7 +2033,10 @@ static JsInterpCompletion js_interp_eval_template(JsInterpFrame* frame,
             }
             JsInterpCompletion substituted = js_interp_eval(frame, expression);
             if (substituted.kind != JS_INTERP_NORMAL) return substituted;
-            value_root.set(substituted.value);
+            // Template substitutions apply ToString directly. Routing this
+            // through `+` would use the default coercion hint instead.
+            value_root.set(js_to_string(substituted.value));
+            if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
             result_root.set(js_add(result_root.get(), value_root.get()));
             if (item_is_error(result_root.get())) return js_interp_throw(result_root.get());
             expression = (JsAstNode*)expression->next;
@@ -1978,6 +2131,84 @@ static bool js_interp_is_undefined(Item value) {
     return value.item == ITEM_JS_UNDEFINED || get_type_id(value) == LMD_TYPE_UNDEFINED;
 }
 
+static void js_interp_set_parameter_pattern_tdz(JsInterpFrame* frame,
+        JsAstNode* pattern) {
+    if (!frame || !pattern) return;
+    switch (pattern->node_type) {
+    case AST_NODE_IDENT: {
+        JsIdentifierNode* identifier = (JsIdentifierNode*)pattern;
+        NameEntry* entry = identifier->entry ? identifier->entry
+            : js_interp_find_binding(frame, identifier->name);
+        JsInterpEnv* env = entry ? js_interp_find_env(frame->env, entry->scope) : NULL;
+        if (env && entry->slot >= 0 && (uint32_t)entry->slot < env->slot_count) {
+            owned_item_slot_store((Item*)(void*)env->slots, env->slot_count,
+                entry->slot, (Item){.item = ITEM_JS_TDZ});
+        }
+        return;
+    }
+    case JS_AST_NODE_ASSIGNMENT_PATTERN:
+        js_interp_set_parameter_pattern_tdz(frame,
+            (JsAstNode*)((JsAssignmentPatternNode*)pattern)->left);
+        return;
+    case JS_AST_NODE_REST_ELEMENT:
+    case JS_AST_NODE_REST_PROPERTY:
+        js_interp_set_parameter_pattern_tdz(frame,
+            (JsAstNode*)((JsSpreadElementNode*)pattern)->argument);
+        return;
+    case JS_AST_NODE_ARRAY_PATTERN:
+        for (JsAstNode* element = (JsAstNode*)((JsArrayPatternNode*)pattern)->elements;
+                element; element = (JsAstNode*)element->next) {
+            js_interp_set_parameter_pattern_tdz(frame, element);
+        }
+        return;
+    case JS_AST_NODE_OBJECT_PATTERN:
+        for (JsAstNode* property = (JsAstNode*)((JsObjectPatternNode*)pattern)->properties;
+                property; property = (JsAstNode*)property->next) {
+            if (property->node_type == JS_AST_NODE_REST_PROPERTY) {
+                js_interp_set_parameter_pattern_tdz(frame, property);
+            } else if (property->node_type == AST_NODE_PROPERTY) {
+                js_interp_set_parameter_pattern_tdz(frame,
+                    (JsAstNode*)((JsPropertyNode*)property)->value);
+            }
+        }
+        return;
+    default:
+        return;
+    }
+}
+
+static void js_interp_prepare_parameter_tdz(JsInterpFrame* frame,
+        JsFunctionNode* function) {
+    // FunctionDeclarationInstantiation creates every formal binding before
+    // evaluating defaults, but only initializes them left-to-right. Keep later
+    // parameter names in TDZ rather than the scope's ordinary `undefined`.
+    for (JsAstNode* param = function ? (JsAstNode*)function->params : NULL;
+            param; param = (JsAstNode*)param->next) {
+        js_interp_set_parameter_pattern_tdz(frame, param);
+    }
+}
+
+static JsInterpCompletion js_interp_finish_array_binding(Item iterator,
+        bool iterator_done, JsInterpCompletion completion) {
+    // A suspended initializer resumes the surrounding generator before its
+    // destructuring can finish, so its iterator must remain live.
+    if (iterator_done || completion.kind == JS_INTERP_YIELD ||
+            completion.kind == JS_INTERP_AWAIT) {
+        return completion;
+    }
+    RootFrame roots(1);
+    Rooted<Item> completion_root(roots, completion.value);
+    Item closed = js_iterator_close(iterator);
+    // IteratorClose retains a pre-existing throw, even when `.return()` fails.
+    if (completion.kind == JS_INTERP_THROW) {
+        completion.value = completion_root.get();
+        return completion;
+    }
+    if (item_is_error(closed)) return js_interp_throw(closed);
+    completion.value = completion_root.get();
+    return completion;
+}
+
 static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
         JsAstNode* pattern, Item input, bool initialize) {
     if (!pattern) return js_interp_throw(js_throw_type_error("missing binding pattern"));
@@ -2013,42 +2244,60 @@ static JsInterpCompletion js_interp_bind_pattern(JsInterpFrame* frame,
         JsArrayPatternNode* array = (JsArrayPatternNode*)pattern;
         RootFrame roots(3);
         Rooted<Item> source_root(roots, input);
+        Rooted<Item> iterator_root(roots, ItemNull);
         Rooted<Item> value_root(roots, ItemNull);
-        Rooted<Item> rest_root(roots, ItemNull);
-        source_root.set(js_iterable_to_array(source_root.get()));
-        if (item_is_error(source_root.get())) return js_interp_throw(source_root.get());
-        int64_t length = js_array_length(source_root.get());
-        int64_t index = 0;
+        // Binding patterns consume iterators one entry at a time. Materializing
+        // first both starts generators too eagerly and misses IteratorClose.
+        iterator_root.set(js_get_iterator_lazy(source_root.get()));
+        if (item_is_error(iterator_root.get())) return js_interp_throw(iterator_root.get());
+        bool iterator_done = false;
         for (JsAstNode* element = (JsAstNode*)array->elements; element;
                 element = (JsAstNode*)element->next) {
             if (element->node_type == AST_NODE_NULL) {
-                index++;
+                if (iterator_done) continue;
+                value_root.set(js_iterator_step(iterator_root.get()));
+                if (item_is_error(value_root.get())) {
+                    return js_interp_finish_array_binding(iterator_root.get(), false,
+                        js_interp_throw(value_root.get()));
+                }
+                iterator_done = value_root.get().item == JS_ITER_DONE_SENTINEL;
                 continue;
             }
             if (element->node_type == JS_AST_NODE_REST_ELEMENT ||
                     element->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
                 JsSpreadElementNode* rest = (JsSpreadElementNode*)element;
-                rest_root.set(js_array_new(0));
-                if (item_is_error(rest_root.get())) return js_interp_throw(rest_root.get());
-                for (; index < length; index++) {
-                    value_root.set(js_elements_get_int(source_root.get(), index));
-                    if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
-                    Item pushed = js_array_push(rest_root.get(), value_root.get());
-                    if (item_is_error(pushed)) return js_interp_throw(pushed);
+                value_root.set(iterator_done ? js_array_new(0)
+                    : js_iterator_collect_rest(iterator_root.get()));
+                if (item_is_error(value_root.get())) {
+                    return js_interp_finish_array_binding(iterator_root.get(), false,
+                        js_interp_throw(value_root.get()));
                 }
-                return js_interp_bind_pattern(frame, (JsAstNode*)rest->argument,
-                    rest_root.get(), initialize);
+                iterator_done = true;
+                JsInterpCompletion bound = js_interp_bind_pattern(frame,
+                    (JsAstNode*)rest->argument, value_root.get(), initialize);
+                return js_interp_finish_array_binding(iterator_root.get(), iterator_done, bound);
             }
-            value_root.set(index < length
-                ? js_elements_get_int(source_root.get(), index)
-                : make_js_undefined());
-            if (item_is_error(value_root.get())) return js_interp_throw(value_root.get());
+            if (iterator_done) {
+                value_root.set(make_js_undefined());
+            } else {
+                value_root.set(js_iterator_step(iterator_root.get()));
+                if (item_is_error(value_root.get())) {
+                    return js_interp_finish_array_binding(iterator_root.get(), false,
+                        js_interp_throw(value_root.get()));
+                }
+                if (value_root.get().item == JS_ITER_DONE_SENTINEL) {
+                    iterator_done = true;
+                    value_root.set(make_js_undefined());
+                }
+            }
             JsInterpCompletion bound = js_interp_bind_pattern(frame, element,
                 value_root.get(), initialize);
-            if (bound.kind != JS_INTERP_NORMAL) return bound;
-            index++;
+            if (bound.kind != JS_INTERP_NORMAL) {
+                return js_interp_finish_array_binding(iterator_root.get(), iterator_done, bound);
+            }
         }
-        return js_interp_normal(make_js_undefined());
+        return js_interp_finish_array_binding(iterator_root.get(), iterator_done,
+            js_interp_normal(make_js_undefined()));
     }
     case JS_AST_NODE_OBJECT_PATTERN: {
         JsObjectPatternNode* object = (JsObjectPatternNode*)pattern;
@@ -2145,13 +2394,22 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         if (unary->op == OPERATOR_JS_TYPEOF && unary->operand &&
                 unary->operand->node_type == AST_NODE_IDENT) {
             JsIdentifierNode* identifier = (JsIdentifierNode*)unary->operand;
-            bool has_arguments_binding = !identifier->entry &&
+            NameEntry* entry = identifier->entry ? identifier->entry
+                : js_interp_find_binding(frame, identifier->name);
+            bool has_arguments_binding = !entry &&
                 js_interp_name_equals(identifier->name, "arguments") &&
                 js_interp_find_arguments_env(frame->env) != NULL;
+            // The AST retains `this`, `new.target`, and `import.meta` as
+            // identifier-shaped nodes, but they are activation/module bindings
+            // rather than unresolvable references. Let the normal evaluator
+            // resolve them instead of folding `typeof this` to "undefined".
+            bool has_special_binding = js_interp_name_equals(identifier->name, "this") ||
+                js_interp_name_equals(identifier->name, "new.target") ||
+                js_interp_name_equals(identifier->name, "import.meta");
             // ECMAScript's `typeof` is the one identifier consumer that does
             // not throw for an unresolvable reference. A lexical TDZ still
             // has an entry and therefore follows the regular error path.
-            if (!has_arguments_binding && !identifier->entry && !js_global_binding_exists(
+            if (!has_special_binding && !has_arguments_binding && !entry && !js_global_binding_exists(
                     js_interp_name_key(identifier->name)) &&
                     !js_interp_import_binding(frame->script, identifier->name) &&
                     !js_eval_local_has_var_binding(
@@ -2430,8 +2688,26 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
             return js_interp_normal(make_js_undefined());
         }
         if (yielded->delegate) {
-            return js_interp_throw(js_throw_type_error(
-                "yield* is not yet supported by the AST generator"));
+            RootFrame roots(1);
+            Rooted<Item> iterator_root(roots, make_js_undefined());
+            if (yielded->argument) {
+                JsInterpCompletion value = js_interp_eval(frame,
+                    (JsAstNode*)yielded->argument);
+                if (value.kind != JS_INTERP_NORMAL) return value;
+                iterator_root.set(js_get_iterator(value.value));
+                if (item_is_error(iterator_root.get())) {
+                    return js_interp_throw(iterator_root.get());
+                }
+            } else {
+                iterator_root.set(js_get_iterator(make_js_undefined()));
+                if (item_is_error(iterator_root.get())) {
+                    return js_interp_throw(iterator_root.get());
+                }
+            }
+            // The shared generator runtime owns delegated next/throw/return
+            // protocol. This completion only transfers its iterator there.
+            return {JS_INTERP_YIELD, iterator_root.get(), NULL, 0,
+                ItemNull, ItemNull, true};
         }
         RootFrame roots(1);
         Rooted<Item> value_root(roots, make_js_undefined());
@@ -2453,6 +2729,12 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         if (item_is_error(result_root.get())) return js_interp_throw(result_root.get());
         for (JsAstNode* element = (JsAstNode*)array->elements; element;
                 element = (JsAstNode*)element->next) {
+            if (element->node_type == JS_AST_NODE_NULL) {
+                // An elision is an absent property, not an own undefined value.
+                Item pushed = js_array_push(result_root.get(), js_array_hole());
+                if (item_is_error(pushed)) return js_interp_throw(pushed);
+                continue;
+            }
             if (element->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
                 JsSpreadElementNode* spread = (JsSpreadElementNode*)element;
                 JsInterpCompletion source = js_interp_eval(frame,
@@ -2571,9 +2853,32 @@ static JsInterpCompletion js_interp_initialize_scope(JsInterpFrame* frame,
         NameScope* scope) {
     if (!scope) return js_interp_normal(make_js_undefined());
     js_interp_scope_slot_count(scope);
+    if (frame && frame->script->is_eval_script && !frame->script->is_module &&
+            scope == frame->script->global_scope) {
+        // Global eval declaration instantiation validates every lexical name
+        // before it creates any binding, so a later collision cannot leak an
+        // earlier var or lexical declaration into the realm.
+        for (NameEntry* entry = scope->first; entry; entry = entry->next) {
+            if (!entry->is_lexical || !entry->name) continue;
+            Item status = js_evalscript_check_global_lex_decl(
+                js_interp_name_key(entry->name));
+            if (item_is_error(status)) return js_interp_throw(status);
+        }
+    }
     for (NameEntry* entry = scope->first; entry; entry = entry->next) {
         Item initial = entry->is_lexical ? (Item){.item = ITEM_JS_TDZ}
             : make_js_undefined();
+        if (frame->script->is_eval_script && !entry->is_lexical &&
+                entry->scope == frame->script->global_scope && !frame->script->is_module) {
+            Item key = js_interp_name_key(entry->name);
+            Item global = js_get_global_this();
+            Item exists = js_has_own_property(global, key);
+            if (item_is_error(exists)) return js_interp_throw(exists);
+            if (js_is_truthy(exists)) {
+                initial = js_get_key_default(global, key);
+                if (item_is_error(initial)) return js_interp_throw(initial);
+            }
+        }
         Item stored = js_interp_write_binding(frame, entry, NULL, initial, true);
         if (item_is_error(stored)) return js_interp_throw(stored);
     }
@@ -2595,7 +2900,16 @@ static JsInterpCompletion js_interp_initialize_scope(JsInterpFrame* frame,
         Item stored = js_interp_write_binding(frame, entry, NULL, function_root.get(), true);
         if (item_is_error(stored)) return js_interp_throw(stored);
         if (entry->scope == frame->script->global_scope && !frame->script->is_module) {
-            js_define_global_function_property(js_interp_name_key(entry->name), function_root.get());
+            Item key = js_interp_name_key(entry->name);
+            if (frame->script->is_eval_script) {
+                // Eval var instantiation created a configurable binding first;
+                // function initialization updates that same global property.
+                Item global_written = js_set_global_property(key, function_root.get(),
+                    frame->strict ? 1 : 0);
+                if (item_is_error(global_written)) return js_interp_throw(global_written);
+            } else {
+                js_define_global_function_property(key, function_root.get());
+            }
         }
     }
     return js_interp_normal(make_js_undefined());
@@ -2715,18 +3029,7 @@ static JsInterpCompletion js_interp_publish_annex_b_functions(JsInterpFrame* fra
         AstNode* declaration = lexical->node;
         if (!lexical->is_lexical || !lexical->name || !declaration ||
                 declaration->node_type != AST_NODE_FUNC) continue;
-        NameEntry* outer = NULL;
-        for (NameScope* outer_scope = scope->parent; outer_scope && !outer;
-                outer_scope = outer_scope->parent) {
-            for (NameEntry* candidate = outer_scope->first; candidate;
-                    candidate = candidate->next) {
-                if (!candidate->is_lexical && js_interp_name_matches(candidate->name,
-                        lexical->name)) {
-                    outer = candidate;
-                    break;
-                }
-            }
-        }
+        NameEntry* outer = lexical->annex_b_outer_binding;
         if (!outer) continue;
         Item value = js_interp_binding_raw_value(frame, lexical);
         if (item_is_error(value)) return js_interp_throw(value);
@@ -2891,6 +3194,14 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
         if (loop->init) {
             JsInterpCompletion initial = js_interp_eval(frame, (JsAstNode*)loop->init);
             if (initial.kind != JS_INTERP_NORMAL) return initial;
+            value_root.set(initial.value);
+            // Sloppy for-in permits `var name = value`. Its initializer writes
+            // before the RHS is evaluated, including when the object is empty.
+            if (is_for_in && loop->declares_binding) {
+                JsInterpCompletion bound = js_interp_assign_iteration_head(frame,
+                    (JsAstNode*)loop->left, value_root.get(), false);
+                if (bound.kind != JS_INTERP_NORMAL) return bound;
+            }
         }
         JsInterpCompletion source = js_interp_eval(frame, (JsAstNode*)loop->right);
         if (source.kind != JS_INTERP_NORMAL) return source;
@@ -2913,14 +3224,8 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
         JsInterpCompletion initialized = js_interp_initialize_scope(&header_frame, loop->vars);
         if (initialized.kind != JS_INTERP_NORMAL) return initialized;
     }
-    bool has_per_iteration_lexical = false;
-    for (NameEntry* entry = loop->vars ? loop->vars->first : NULL;
-            entry; entry = entry->next) {
-        if (entry->is_lexical) {
-            has_per_iteration_lexical = true;
-            break;
-        }
-    }
+    bool has_per_iteration_lexical = js_interp_loop_needs_per_iteration_env(
+        loop->vars, NULL, NULL, (JsAstNode*)loop->body);
 
     bool resume_body = resume != NULL;
     for (;;) {
@@ -3168,6 +3473,12 @@ static bool js_interp_prepare_self_tail_call(JsInterpFrame* frame,
             !call->function || call->function->node_type != AST_NODE_IDENT) {
         return false;
     }
+    if (js_interp_identifier_is((JsAstNode*)call->function, "super")) {
+        // SuperCall is a syntactically identifier-shaped call, but it is an
+        // activation capability rather than a lexical function binding.
+        // Evaluating it for self-tail-call detection would wrongly throw.
+        return false;
+    }
     JsInterpCompletion callee = js_interp_eval(frame, (JsAstNode*)call->function);
     if (callee.kind != JS_INTERP_NORMAL) {
         *completion = callee;
@@ -3368,14 +3679,9 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                 if (init.kind != JS_INTERP_NORMAL) return init;
             }
         }
-        bool has_per_iteration_lexical = false;
-        for (NameEntry* entry = loop->vars ? loop->vars->first : NULL;
-                entry; entry = entry->next) {
-            if (entry->is_lexical) {
-                has_per_iteration_lexical = true;
-                break;
-            }
-        }
+        bool has_per_iteration_lexical = js_interp_loop_needs_per_iteration_env(
+            loop->vars, (JsAstNode*)loop->test, (JsAstNode*)loop->update,
+            (JsAstNode*)loop->body);
         bool resume_body = resume != NULL;
         for (;;) {
             JsInterpFrame loop_frame = *frame;
@@ -3598,7 +3904,8 @@ static bool js_interp_iteration_head_supported(JsAstNode* left) {
     if (!left) return false;
     if (js_interp_pattern_supported(left) || left->node_type == AST_NODE_IDENT ||
             left->node_type == AST_NODE_MEMBER_EXPR ||
-            left->node_type == AST_NODE_INDEX_EXPR) return true;
+            left->node_type == AST_NODE_INDEX_EXPR ||
+            left->node_type == AST_NODE_CALL_EXPR) return true;
     if (left->node_type != AST_NODE_VAR_STAM) return false;
     JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)left;
     JsVariableDeclaratorNode* declarator = declaration->declarations &&
@@ -3658,8 +3965,7 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
     }
     case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_ARROW_FUNC: {
         JsFunctionNode* function = (JsFunctionNode*)node;
-        if ((function->is_generator && function->is_async) ||
-                !js_interp_function_params_supported(function)) state->supported = false;
+        if (!js_interp_function_params_supported(function)) state->supported = false;
         break;
     }
     case AST_NODE_IDENT:
@@ -3862,6 +4168,7 @@ Item js_interp_call_function(JsFunction* function, Item* args, int arg_count,
         initialized = js_interp_bind_named_function_expression_self(&frame,
             function, function_root.get());
         if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
+        js_interp_prepare_parameter_tdz(&frame, function->ast_function);
         int index = 0;
         for (JsAstNode* param = (JsAstNode*)function->ast_function->params; param;
                 param = (JsAstNode*)param->next) {
@@ -3940,7 +4247,7 @@ Item js_interp_start_async_function(JsFunction* function, Item* args,
 
 Item js_interp_create_generator(JsFunction* function, Item* args, int arg_count) {
     if (!function || function->body_kind != JS_FUNCTION_BODY_AST ||
-            !function->ast_function || function->ast_function->is_async) {
+            !function->ast_function) {
         return js_throw_type_error("unsupported interpreted generator form");
     }
     RootFrame roots(3);
@@ -3954,7 +4261,7 @@ Item js_interp_create_generator(JsFunction* function, Item* args, int arg_count)
         if (item_is_error(pushed)) return pushed;
     }
     return js_generator_create_ast(function_root.get(), arguments_root.get(),
-        this_root.get(), 0);
+        this_root.get(), (function->flags & JS_FUNC_FLAG_ASYNC_GEN) != 0);
 }
 
 static Item js_interp_prepare_suspended_activation(JsFunction* function,
@@ -4002,6 +4309,7 @@ static Item js_interp_prepare_suspended_activation(JsFunction* function,
     initialized = js_interp_bind_named_function_expression_self(&init_frame,
         function, function_root.get());
     if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
+    js_interp_prepare_parameter_tdz(&init_frame, function->ast_function);
     int index = 0;
     for (JsAstNode* parameter = (JsAstNode*)function->ast_function->params;
             parameter; parameter = (JsAstNode*)parameter->next) {
@@ -4064,14 +4372,12 @@ extern "C" Item js_interp_resume_generator(Item generator,
         state->ast_initialized = true;
     }
 
-    // Only for/for-of can retain their iterator and lexical activation in the
-    // compact continuation. Other generator shapes keep the proven replay
-    // path, so discard an unclaimed terminal-yield cursor before re-entry.
-    if (!state->ast_resumable_loop_active && state->ast_list_continuation) {
-        js_interp_generator_clear_list_continuation(state);
-    }
+    // A terminal yield records the next statement and its live environment.
+    // Resume through that cursor: replaying from the function body repeats
+    // observable work before the yield, including IteratorClose's return path.
 
-    if (state->ast_yield_skip > 0 &&
+    bool resuming_list = state->ast_list_continuation != NULL;
+    if (!resuming_list && state->ast_yield_skip > 0 &&
             (js_gen_is_throw_signal(input_root.get()) ||
              js_gen_is_return_signal(input_root.get()))) {
         // A yield in finally suspends before the injected completion escapes.
@@ -4091,7 +4397,9 @@ extern "C" Item js_interp_resume_generator(Item generator,
     frame.strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
     frame.active_function = function;
     frame.generator_yield_seen = &yielded;
-    frame.generator_yield_skip = state->ast_yield_skip;
+    // The list cursor starts after the observed yield. Its next yield is new
+    // work, so do not consume it through the replay skip counter.
+    frame.generator_yield_skip = resuming_list ? 0 : state->ast_yield_skip;
     frame.generator_resume_input = input_root.get();
     frame.generator_abrupt_resume_yield = state->ast_pending_resume_yield;
     frame.generator_abrupt_resume_input = pending_root.get();
@@ -4101,6 +4409,12 @@ extern "C" Item js_interp_resume_generator(Item generator,
     JsInterpCompletion result = js_interp_exec_list(&frame,
         (JsAstNode*)body->statements);
     if (result.kind == JS_INTERP_YIELD) {
+        if (result.yield_delegate) {
+            // The generator record is a traced owner, so the iterator remains
+            // live while the common generator runtime drives its protocol.
+            state->delegate = result.value;
+            return ItemNull;
+        }
         if (!state->ast_resumable_loop_active) state->ast_yield_skip++;
         return js_make_iter_result(result.value, false);
     }
@@ -4265,7 +4579,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     return result.value;
 }
 
-static JsScript* js_interp_adopt_source(Runtime* runtime, const char* source,
+JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, bool strict) {
     if (!runtime || !source) return NULL;
     JsTranspiler* transpiler = js_transpiler_create(runtime);
@@ -4289,26 +4603,37 @@ static JsScript* js_interp_adopt_source(Runtime* runtime, const char* source,
 
 static Item js_interp_execute_source_mode(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, bool is_module, bool strict,
-        uint64_t* result_home) {
-    JsScript* script = js_interp_adopt_source(runtime, source, source_length,
+        bool is_eval_script, uint64_t* result_home) {
+    JsScript* script = js_interp_prepare_script(runtime, source, source_length,
         filename, strict);
-    if (!script) return ItemError;
+    if (!script) {
+        // Parse and early-error rejection must enter JavaScript as SyntaxError.
+        // Dynamic Function invokes this entry beneath a user catch handler.
+        return js_throw_syntax_error(js_make_string("invalid JavaScript source"));
+    }
     script->is_module = is_module;
     if (strict) script->strict_mode = true;
+    script->is_eval_script = is_eval_script;
     return js_interp_execute_script(runtime, script, result_home);
 }
 
 Item js_interp_execute_source(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, uint64_t* result_home) {
     return js_interp_execute_source_mode(runtime, source, source_length, filename,
-        false, false, result_home);
+        false, false, false, result_home);
+}
+
+Item js_interp_execute_indirect_eval_source(Runtime* runtime, const char* source,
+        size_t source_length, const char* filename, uint64_t* result_home) {
+    return js_interp_execute_source_mode(runtime, source, source_length, filename,
+        false, false, true, result_home);
 }
 
 Item js_interp_execute_module_source(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, bool strict,
         uint64_t* result_home) {
     return js_interp_execute_source_mode(runtime, source, source_length, filename,
-        true, strict, result_home);
+        true, strict, false, result_home);
 }
 
 static bool js_interp_is_lambda_module_path(const char* filename) {
@@ -4541,7 +4866,7 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
 
 Item js_interp_execute_es_module_source(Runtime* runtime, const char* source,
         size_t source_length, const char* filename, uint64_t* result_home) {
-    JsScript* script = js_interp_adopt_source(runtime, source, source_length,
+    JsScript* script = js_interp_prepare_script(runtime, source, source_length,
         filename, true);
     if (!script) return ItemError;
     return js_interp_execute_es_module_script(runtime, script, result_home);

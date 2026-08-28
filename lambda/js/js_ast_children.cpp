@@ -11,6 +11,7 @@
 
 #include "js_ast.hpp"
 #include "../runtime/ast-core.hpp"
+#include "../ts/ts_ast.hpp"
 
 namespace {
 
@@ -195,9 +196,221 @@ bool js_ast_any_child(JsAstNode* node, JsAstChildPredicate predicate, void* ctx)
 
 void js_ast_visit_extension_children(AstNode* node, AstChildVisitor visitor,
                                      void* ctx) {
-    if (!node || !visitor || node->node_type < JS_AST_NODE_TEMPLATE_LITERAL) {
+    if (!node || !visitor) return;
+
+    // Core-shaped JS nodes retain a few TypeScript edges outside their shared
+    // child table. Visit those edges here without repeating their core fields.
+    if (node->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+        JsVariableDeclaratorNode* declarator =
+            (JsVariableDeclaratorNode*)node;
+        if (declarator->ts_type) {
+            visitor((AstNode*)declarator->ts_type, node, ctx);
+        }
         return;
     }
+    if (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
+            node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+            node->node_type == JS_AST_NODE_ARROW_FUNCTION ||
+            node->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+        JsFunctionNode* function = (JsFunctionNode*)node;
+        if (function->ts_return_type) {
+            visitor((AstNode*)function->ts_return_type, node, ctx);
+        }
+        return;
+    }
+
+    // AstNodeType owns the storage field while TypeScript reserves values in
+    // the same numeric domain. Compare through the shared scalar domain so
+    // the TS extension range does not mix unrelated enum types.
+    int node_type = node->node_type;
+    if (node_type >= TS_AST_NODE_TYPE_ANNOTATION &&
+            node_type < TS_AST_NODE__MAX) {
+        switch (node_type) {
+        case TS_AST_NODE_TYPE_ANNOTATION:
+            if (((TsTypeAnnotationNode*)node)->type_expr) {
+                visitor((AstNode*)((TsTypeAnnotationNode*)node)->type_expr,
+                    node, ctx);
+            }
+            break;
+        case TS_AST_NODE_TYPE_ALIAS: {
+            TsTypeAliasNode* alias = (TsTypeAliasNode*)node;
+            for (int i = 0; i < alias->type_param_count; i++) {
+                if (alias->type_params && alias->type_params[i]) {
+                    visitor((AstNode*)alias->type_params[i], node, ctx);
+                }
+            }
+            if (alias->type_expr) visitor((AstNode*)alias->type_expr,
+                node, ctx);
+            break;
+        }
+        case TS_AST_NODE_INTERFACE: {
+            TsInterfaceNode* iface = (TsInterfaceNode*)node;
+            for (int i = 0; i < iface->type_param_count; i++) {
+                if (iface->type_params && iface->type_params[i]) {
+                    visitor((AstNode*)iface->type_params[i], node, ctx);
+                }
+            }
+            for (int i = 0; i < iface->extends_count; i++) {
+                if (iface->extends_types && iface->extends_types[i]) {
+                    visitor((AstNode*)iface->extends_types[i], node, ctx);
+                }
+            }
+            if (iface->body) visitor((AstNode*)iface->body, node, ctx);
+            break;
+        }
+        case TS_AST_NODE_TYPE_PARAMETER: {
+            TsTypeParamNode* parameter = (TsTypeParamNode*)node;
+            if (parameter->constraint) visitor((AstNode*)parameter->constraint,
+                node, ctx);
+            if (parameter->default_type) visitor(
+                (AstNode*)parameter->default_type, node, ctx);
+            break;
+        }
+        case TS_AST_NODE_TYPE_REFERENCE: {
+            TsTypeReferenceNode* reference = (TsTypeReferenceNode*)node;
+            for (int i = 0; i < reference->type_arg_count; i++) {
+                if (reference->type_args && reference->type_args[i]) {
+                    visitor((AstNode*)reference->type_args[i], node, ctx);
+                }
+            }
+            break;
+        }
+        case TS_AST_NODE_UNION_TYPE: {
+            TsUnionTypeNode* union_type = (TsUnionTypeNode*)node;
+            for (int i = 0; i < union_type->type_count; i++) {
+                if (union_type->types && union_type->types[i]) {
+                    visitor((AstNode*)union_type->types[i], node, ctx);
+                }
+            }
+            break;
+        }
+        case TS_AST_NODE_INTERSECTION_TYPE: {
+            TsIntersectionTypeNode* intersection =
+                (TsIntersectionTypeNode*)node;
+            for (int i = 0; i < intersection->type_count; i++) {
+                if (intersection->types && intersection->types[i]) {
+                    visitor((AstNode*)intersection->types[i], node, ctx);
+                }
+            }
+            break;
+        }
+        case TS_AST_NODE_TUPLE_TYPE: {
+            TsTupleTypeNode* tuple = (TsTupleTypeNode*)node;
+            for (int i = 0; i < tuple->element_count; i++) {
+                if (tuple->element_types && tuple->element_types[i]) {
+                    visitor((AstNode*)tuple->element_types[i], node, ctx);
+                }
+            }
+            break;
+        }
+        case TS_AST_NODE_ARRAY_TYPE:
+            if (((TsArrayTypeNode*)node)->element_type) {
+                visitor((AstNode*)((TsArrayTypeNode*)node)->element_type,
+                    node, ctx);
+            }
+            break;
+        case TS_AST_NODE_FUNCTION_TYPE: {
+            TsFunctionTypeNode* function_type = (TsFunctionTypeNode*)node;
+            for (int i = 0; i < function_type->param_count; i++) {
+                if (function_type->param_types &&
+                        function_type->param_types[i]) {
+                    visitor((AstNode*)function_type->param_types[i], node,
+                        ctx);
+                }
+            }
+            if (function_type->return_type) {
+                visitor((AstNode*)function_type->return_type, node, ctx);
+            }
+            break;
+        }
+        case TS_AST_NODE_OBJECT_TYPE:
+        case TS_AST_NODE_MAPPED_TYPE: {
+            TsObjectTypeNode* object_type = (TsObjectTypeNode*)node;
+            for (int i = 0; i < object_type->member_count; i++) {
+                if (object_type->member_types && object_type->member_types[i]) {
+                    visitor((AstNode*)object_type->member_types[i], node, ctx);
+                }
+            }
+            break;
+        }
+        case TS_AST_NODE_CONDITIONAL_TYPE: {
+            TsConditionalTypeNode* conditional =
+                (TsConditionalTypeNode*)node;
+            if (conditional->check_type) visitor(
+                (AstNode*)conditional->check_type, node, ctx);
+            if (conditional->extends_type) visitor(
+                (AstNode*)conditional->extends_type, node, ctx);
+            if (conditional->true_type) visitor(
+                (AstNode*)conditional->true_type, node, ctx);
+            if (conditional->false_type) visitor(
+                (AstNode*)conditional->false_type, node, ctx);
+            break;
+        }
+        case TS_AST_NODE_PARENTHESIZED_TYPE:
+        case TS_AST_NODE_KEYOF_TYPE:
+            if (((TsParenthesizedTypeNode*)node)->inner) visitor(
+                (AstNode*)((TsParenthesizedTypeNode*)node)->inner, node, ctx);
+            break;
+        case TS_AST_NODE_AS_EXPRESSION:
+        case TS_AST_NODE_SATISFIES_EXPRESSION:
+        case TS_AST_NODE_TYPE_ASSERTION: {
+            TsTypeExprNode* expression = (TsTypeExprNode*)node;
+            if (expression->inner) visitor((AstNode*)expression->inner, node,
+                ctx);
+            if (expression->target_type) visitor(
+                (AstNode*)expression->target_type, node, ctx);
+            break;
+        }
+        case TS_AST_NODE_NON_NULL_EXPRESSION:
+            if (((TsNonNullNode*)node)->inner) visitor(
+                (AstNode*)((TsNonNullNode*)node)->inner, node, ctx);
+            break;
+        case TS_AST_NODE_ENUM_DECLARATION: {
+            TsEnumDeclarationNode* enumeration =
+                (TsEnumDeclarationNode*)node;
+            for (int i = 0; i < enumeration->member_count; i++) {
+                if (enumeration->members && enumeration->members[i]) {
+                    visitor((AstNode*)enumeration->members[i], node, ctx);
+                }
+            }
+            break;
+        }
+        case TS_AST_NODE_ENUM_MEMBER:
+            if (((TsEnumMemberNode*)node)->initializer) visitor(
+                (AstNode*)((TsEnumMemberNode*)node)->initializer, node, ctx);
+            break;
+        case TS_AST_NODE_NAMESPACE_DECLARATION: {
+            TsNamespaceDeclarationNode* namespace_node =
+                (TsNamespaceDeclarationNode*)node;
+            for (int i = 0; i < namespace_node->body_count; i++) {
+                if (namespace_node->body && namespace_node->body[i]) {
+                    visitor((AstNode*)namespace_node->body[i], node, ctx);
+                }
+            }
+            break;
+        }
+        case TS_AST_NODE_DECORATOR:
+            if (((TsDecoratorNode*)node)->expression) visitor(
+                (AstNode*)((TsDecoratorNode*)node)->expression, node, ctx);
+            break;
+        case TS_AST_NODE_PARAMETER: {
+            TsParameterNode* parameter = (TsParameterNode*)node;
+            if (parameter->pattern) visitor((AstNode*)parameter->pattern, node,
+                ctx);
+            if (parameter->ts_type) visitor((AstNode*)parameter->ts_type, node,
+                ctx);
+            if (parameter->default_value) visitor(
+                (AstNode*)parameter->default_value, node, ctx);
+            break;
+        }
+        default:
+            // The remaining TS leaves use scalar metadata or a reference name.
+            break;
+        }
+        return;
+    }
+
+    if (node->node_type < JS_AST_NODE_TEMPLATE_LITERAL) return;
     const ChildRow* row = row_for(node->node_type);
     if (!row) return;
     for (uint8_t i = 0; i < row->count; i++) {

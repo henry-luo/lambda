@@ -174,8 +174,11 @@ static JsVarKind js_ts_lexical_declaration_kind(JsTranspiler* tp,
 
 static void js_predeclare_named_declaration(JsTranspiler* tp, TSNode child,
         const char* child_type) {
-    if (!tp || !child_type || (strcmp(child_type, "function_declaration") != 0 &&
-            strcmp(child_type, "class_declaration") != 0)) return;
+    if (!tp || !child_type) return;
+    bool is_function = strcmp(child_type, "function_declaration") == 0 ||
+        strcmp(child_type, "generator_function_declaration") == 0;
+    bool is_class = strstr(child_type, "class_declaration") != NULL;
+    if (!is_function && !is_class) return;
     TSNode name_node = ts_node_child_by_field_name(child, "name", 4);
     if (ts_node_is_null(name_node)) return;
     StrView source = js_predeclare_node_source(tp, name_node);
@@ -192,10 +195,10 @@ static void js_predeclare_named_declaration(JsTranspiler* tp, TSNode child,
     // A block-level function has a lexical binding which closures retain
     // across loop iterations. Its Annex-B var companion is recorded when
     // the concrete declaration is built below.
-    JsVarKind kind = strcmp(child_type, "class_declaration") == 0
+    JsVarKind kind = is_class
         ? JS_VAR_LET
-        : (tp->current_scope && tp->current_scope->kind == SCOPE_KIND_BLOCK
-            ? JS_VAR_LET : JS_VAR_VAR);
+        : (tp->current_scope && tp->current_scope->kind == SCOPE_KIND_BLOCK &&
+            !tp->current_scope->is_function_body ? JS_VAR_LET : JS_VAR_VAR);
     js_scope_define(tp, name, (JsAstNode*)placeholder, kind);
 }
 
@@ -317,7 +320,8 @@ extern "C" {
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
 
 // Forward declarations
-JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node, JsScopeType scope_type);
+JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node,
+    JsScopeType scope_type, bool is_function_body);
 JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node);
 JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node);
 JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node);
@@ -783,6 +787,49 @@ static void js_bind_pattern_names(JsTranspiler* tp, JsAstNode* pattern, JsVarKin
     }
 }
 
+static void js_mark_parameter_bindings(JsAstNode* pattern) {
+    if (!pattern) return;
+    if (pattern->node_type == (int)TS_AST_NODE_PARAMETER) {
+        js_mark_parameter_bindings(((TsParameterNode*)pattern)->pattern);
+        return;
+    }
+    switch (pattern->node_type) {
+    case JS_AST_NODE_IDENTIFIER: {
+        JsIdentifierNode* identifier = (JsIdentifierNode*)pattern;
+        if (identifier->entry) identifier->entry->is_parameter = true;
+        return;
+    }
+    case JS_AST_NODE_ASSIGNMENT_PATTERN:
+        js_mark_parameter_bindings(((JsAssignmentPatternNode*)pattern)->left);
+        return;
+    case JS_AST_NODE_REST_ELEMENT:
+        js_mark_parameter_bindings(((JsSpreadElementNode*)pattern)->argument);
+        return;
+    case JS_AST_NODE_ARRAY_PATTERN:
+    case JS_AST_NODE_ARRAY_EXPRESSION: {
+        for (JsAstNode* item = ((JsArrayNode*)pattern)->elements; item;
+                item = item->next) {
+            js_mark_parameter_bindings(item);
+        }
+        return;
+    }
+    case JS_AST_NODE_OBJECT_PATTERN:
+    case JS_AST_NODE_OBJECT_EXPRESSION: {
+        for (JsAstNode* item = ((JsObjectNode*)pattern)->properties; item;
+                item = item->next) {
+            if (item->node_type == JS_AST_NODE_PROPERTY) {
+                js_mark_parameter_bindings(((JsPropertyNode*)item)->value);
+            } else {
+                js_mark_parameter_bindings(item);
+            }
+        }
+        return;
+    }
+    default:
+        return;
+    }
+}
+
 static void js_mark_for_in_head_bindings(JsAstNode* pattern) {
     if (!pattern) return;
     if (pattern->node_type == (int)TS_AST_NODE_PARAMETER) {
@@ -1183,7 +1230,7 @@ JsAstNode* build_js_array_expression(JsTranspiler* tp, TSNode array_node) {
         if (strcmp(child_type, "[") == 0 || strcmp(child_type, "]") == 0) continue;
         if (strcmp(child_type, ",") == 0) {
             if (expect_elem) {
-                // consecutive comma or leading comma = elision: insert undefined hole
+                // consecutive comma or leading comma = elision: preserve an absent array slot
                 JsAstNode* elision = (JsAstNode*)alloc_js_ast_node(
                     tp, JS_AST_NODE_NULL, child, sizeof(JsAstNode));
                 elision->type = js_set_type_any(tp, ANY_STATEMENT);
@@ -1558,12 +1605,52 @@ static void js_define_function_declaration_bindings(JsTranspiler* tp,
     // through the normal var definition below.
     NameEntry* lexical = js_scope_lookup_current(tp, function->name);
     if (lexical && lexical->is_lexical) {
+        bool annex_b_var_conflict = false;
+        for (JsScope* outer = tp->current_scope ? tp->current_scope->parent : NULL;
+                outer; outer = outer->parent) {
+            NameEntry* conflict = NULL;
+            for (NameEntry* candidate = outer->first; candidate; candidate = candidate->next) {
+                if (candidate->is_lexical && candidate->name &&
+                        candidate->name->len == function->name->len &&
+                        memcmp(candidate->name->chars, function->name->chars,
+                            function->name->len) == 0) {
+                    conflict = candidate;
+                    break;
+                }
+            }
+            // Only a simple catch BindingIdentifier has the B.3.5 exception.
+            // Other lexical identifiers, including loop heads and destructured
+            // catch parameters, make the synthetic Annex-B var an early error.
+            if (conflict && !outer->allows_legacy_var_redeclaration) {
+                annex_b_var_conflict = true;
+                break;
+            }
+            if (outer->kind == SCOPE_KIND_FUNCTION || outer->kind == SCOPE_KIND_GLOBAL) break;
+        }
         // The companion var begins as undefined. Keep the predeclared
         // placeholder on that binding; execution publishes the lexical
         // function only after its block has been entered (Annex B.3.3).
         JsAstNode* outer_placeholder = (JsAstNode*)lexical->node;
         lexical->node = (AstNode*)function;
-        js_scope_define(tp, function->name, outer_placeholder, JS_VAR_VAR);
+        lexical->annex_b_outer_binding = NULL;
+        if (!annex_b_var_conflict) {
+            JsScope* var_scope = tp->current_scope;
+            while (var_scope && var_scope->kind == SCOPE_KIND_BLOCK) {
+                var_scope = var_scope->parent;
+            }
+            // Ordinary functions already expose `arguments` through their
+            // Function Environment Record. B.3.3 never replaces that binding.
+            if (!(var_scope && var_scope->kind == SCOPE_KIND_FUNCTION &&
+                    var_scope->has_implicit_arguments &&
+                    function->name->len == 9 &&
+                    memcmp(function->name->chars, "arguments", 9) == 0)) {
+                NameEntry* outer = js_scope_define_in_scope(tp, var_scope,
+                    function->name, outer_placeholder, JS_VAR_VAR);
+                if (outer && !outer->is_parameter) {
+                    lexical->annex_b_outer_binding = outer;
+                }
+            }
+        }
         return;
     }
     js_scope_define(tp, function->name, (JsAstNode*)function, JS_VAR_VAR);
@@ -1666,6 +1753,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     // block is nested below this scope so var declarations still target the
     // function scope while top-level lexical declarations keep their own entries.
     JsScope* fn_scope = js_scope_create(tp, JS_SCOPE_FUNCTION, tp->current_scope);
+    fn_scope->has_implicit_arguments = !is_arrow;
     func->vars = fn_scope;
     js_scope_push(tp, fn_scope);
     if (func->name && is_expression && !is_arrow) {
@@ -1740,6 +1828,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
             param_done:
             if (param) {
                 js_bind_pattern_names(tp, param, JS_VAR_VAR);
+                js_mark_parameter_bindings(param);
                 if (!prev_param) {
                     func->params = param;
                 } else {
@@ -1759,6 +1848,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
                 func->params = build_js_expression(tp, param_node);
             }
             js_bind_pattern_names(tp, func->params, JS_VAR_VAR);
+            js_mark_parameter_bindings(func->params);
         }
     }
 
@@ -1772,7 +1862,7 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
             // and overwrite a same-named outer closure cell.
             js_predeclare_function_vars(tp, body_node);
             func->has_use_strict_directive = js_ts_body_has_use_strict_directive(tp, body_node);
-            func->body = build_js_block_statement(tp, body_node, JS_SCOPE_BLOCK);
+            func->body = build_js_block_statement(tp, body_node, JS_SCOPE_BLOCK, true);
         } else {
             // Arrow function with expression body
             func->body = build_js_expression(tp, body_node);
@@ -1801,6 +1891,16 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     return (JsAstNode*)func;
 }
 
+static TSNode js_branch_declaration_node(TSNode branch_node) {
+    // `else` is a wrapper node, unlike the direct consequence. Unwrap it for
+    // declaration instantiation while keeping the outer scope for execution.
+    if (strcmp(ts_node_type(branch_node), "else_clause") == 0 &&
+            ts_node_named_child_count(branch_node) == 1) {
+        return ts_node_named_child(branch_node, 0);
+    }
+    return branch_node;
+}
+
 // Build a statement branch under its own lexical scope.  Tree-sitter exposes an
 // unbraced `if (...) function f(){}` directly as the branch statement, but it
 // still has Annex B's block function binding; without this scope the builder
@@ -1810,7 +1910,8 @@ static JsAstNode* build_js_branch_statement(JsTranspiler* tp, TSNode branch_node
     JsScope* branch_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
     if (branch_scope_out) *branch_scope_out = branch_scope;
     js_scope_push(tp, branch_scope);
-    js_predeclare_named_declaration(tp, branch_node, ts_node_type(branch_node));
+    TSNode declaration_node = js_branch_declaration_node(branch_node);
+    js_predeclare_named_declaration(tp, declaration_node, ts_node_type(declaration_node));
     JsAstNode* branch = build_js_statement(tp, branch_node);
     js_scope_pop(tp);
     return branch;
@@ -1927,11 +2028,13 @@ JsAstNode* build_js_return_statement(JsTranspiler* tp, TSNode return_node) {
 }
 
 // Build JavaScript block statement node
-JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node, JsScopeType scope_type) {
+JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node,
+        JsScopeType scope_type, bool is_function_body) {
     JsBlockNode* block = (JsBlockNode*)alloc_js_ast_node(tp, JS_AST_NODE_BLOCK_STATEMENT, block_node, sizeof(JsBlockNode));
 
     // Create new scope (JS_SCOPE_FUNCTION for function bodies, JS_SCOPE_BLOCK otherwise)
     JsScope* block_scope = js_scope_create(tp, scope_type, tp->current_scope);
+    block_scope->is_function_body = is_function_body;
     block->vars = block_scope;
     js_scope_push(tp, block_scope);
     // Both execution tiers share one complete lexical declaration graph.
@@ -3727,6 +3830,10 @@ JsAstNode* build_js_try_statement(JsTranspiler* tp, TSNode try_node) {
         TSNode param_node = ts_node_child_by_field_name(handler_node, "parameter", 9);
         if (!ts_node_is_null(param_node)) {
             const char* param_type = ts_node_type(param_node);
+            // B.3.5 only exempts CatchParameter: BindingIdentifier, not a
+            // destructuring pattern whose binding happens to be an identifier.
+            catch_scope->allows_legacy_var_redeclaration =
+                strcmp(param_type, "identifier") == 0;
             if (strcmp(param_type, "object_pattern") == 0 || strcmp(param_type, "array_pattern") == 0) {
                 catch_clause->param = build_js_expression(tp, param_node);
             } else {
@@ -4780,6 +4887,7 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
     }
 
     JsScope* fn_scope = js_scope_create(tp, JS_SCOPE_FUNCTION, tp->current_scope);
+    fn_scope->has_implicit_arguments = !is_arrow;
     func->vars = fn_scope;
     js_scope_push(tp, fn_scope);
     if (func->name && is_expression && !is_arrow) {
@@ -4828,6 +4936,7 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
             JsAstNode* param = build_ts_parameter_u(tp, param_node, false);
             if (param) {
                 js_bind_pattern_names(tp, param, JS_VAR_VAR);
+                js_mark_parameter_bindings(param);
                 if (!prev_param) { func->params = param; }
                 else { prev_param->next = param; }
                 prev_param = param;
@@ -4838,6 +4947,7 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
         if (!ts_node_is_null(param_node)) {
             func->params = build_ts_parameter_u(tp, param_node, false);
             js_bind_pattern_names(tp, func->params, JS_VAR_VAR);
+            js_mark_parameter_bindings(func->params);
         }
     }
 
@@ -4849,7 +4959,7 @@ static JsAstNode* build_ts_function_u(JsTranspiler* tp, TSNode func_node) {
             // Keep the TypeScript-compatible builder on the same function-wide
             // var-hoisting invariant as the JavaScript builder above.
             js_predeclare_function_vars(tp, body_node);
-            func->body = build_js_block_statement(tp, body_node, JS_SCOPE_BLOCK);
+            func->body = build_js_block_statement(tp, body_node, JS_SCOPE_BLOCK, true);
         } else {
             func->body = build_js_expression(tp, body_node);
         }

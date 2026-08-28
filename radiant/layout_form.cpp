@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "view.hpp"
 #include "event.hpp"
+#include "../lambda/module/radiant/radiant_input_value.hpp"
 #include "../lib/log.h"
 #include "../lib/strbuf.h"
 #include <string.h>
@@ -260,10 +261,13 @@ static double datetime_local_step_seconds(ViewBlock* block) {
 static float datetime_local_intrinsic_content_width(ViewBlock* block,
                                                     FormControlProp* form) {
     double step_seconds = datetime_local_step_seconds(block);
+    // Typed IDL value state survives recascade separately from the reset attribute.
+    const char* value = form && form->current_value ? form->current_value
+        : radiant_input_live_value(static_cast<DomElement*>(block));
     bool has_fractional_seconds = datetime_local_value_has_nonzero_fraction(
-        form ? form->value : nullptr) || step_seconds < 1.0;
+        value) || step_seconds < 1.0;
     bool has_seconds = has_fractional_seconds ||
-        datetime_local_value_has_nonzero_seconds(form ? form->value : nullptr) ||
+        datetime_local_value_has_nonzero_seconds(value) ||
         step_seconds < 60.0;
     if (has_fractional_seconds) {
         return FormDefaults::DATETIME_LOCAL_MILLISECONDS_CONTENT_WIDTH;

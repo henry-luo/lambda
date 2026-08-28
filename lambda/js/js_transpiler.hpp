@@ -61,6 +61,9 @@ struct JsScript : Script {
     size_t source_length;           // source byte count; adopted Script owns source bytes
     JsScope* global_scope;          // JS global/module lexical scope root
     bool strict_mode;               // JS script/function strictness default
+    // Eval code uses configurable global var bindings and inherits any
+    // pre-existing global property during declaration instantiation.
+    bool is_eval_script;
     // Module top levels use a private module slab. CJS remains non-strict,
     // while ES modules set both this bit and strict_mode.
     bool is_module;
@@ -121,6 +124,10 @@ void js_scope_pop(JsTranspiler* tp);
 NameEntry* js_scope_lookup(JsTranspiler* tp, String* name);
 NameEntry* js_scope_lookup_current(JsTranspiler* tp, String* name);
 NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVarKind kind);
+// Define in an already-selected scope. Annex B companions use the enclosing
+// var scope rather than a simple catch parameter's legacy var target.
+NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* scope,
+    String* name, JsAstNode* node, JsVarKind kind);
 
 // AST building functions (build_js_ast.cpp)
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root);
@@ -180,7 +187,8 @@ JsAstNode* build_js_array_expression(JsTranspiler* tp, TSNode array_node);
 JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node);
 JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node);
 JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node);
-JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node, JsScopeType scope_type = JS_SCOPE_BLOCK);
+JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node,
+    JsScopeType scope_type = JS_SCOPE_BLOCK, bool is_function_body = false);
 JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node);
 JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node);
 JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node);

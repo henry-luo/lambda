@@ -89,11 +89,21 @@ it never silently executes a second MIR copy after observable work
 (**D8.1.3v9**, **D8.4.3v2**). The unset backend deliberately remains the
 existing whole-script MIR policy.
 
+Synchronous Test262 batches retain their parsed harness `JsScript`, not MIR
+preamble state or heap objects. Each test receives a fresh realm, executes
+that harness as a separate classic Script, then releases its Script/module
+generation before the next test reuses those IDs. This preserves classic
+global-lexical visibility while preventing mutable harness objects, callbacks,
+or stale AST references from crossing the batch boundary (**D5.3.3**,
+**D5.4.3**, **D8.1.3v9**).
+
 ## Validation
 
 `test_js_script_gtest` covers:
 
 - retained `JsScript` ownership and shared module-state identity;
+- separate classic harness/test Scripts, fresh-realm harness rebuilding, and
+  batch Script-generation reclamation;
 - mutable closures surviving forced GC;
 - explicit backend selection;
 - control/property references and structured completions;

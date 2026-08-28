@@ -1663,6 +1663,16 @@ static Item radiant_dom_throw_named_error(const char* name, const char* message)
     return radiant_host_api->script->throw_value(error);
 }
 
+static bool radiant_dom_input_commit_live_value(DomElement* elem,
+                                                 const char* value) {
+    if (!radiant_input_set_live_value(elem, value)) return false;
+    if (elem->form) elem->form->value = radiant_input_live_value(elem);
+    // IDL value state affects native control rendering without changing an attribute.
+    js_dom_notify_mutation(DOM_JS_MUTATION_CONTROL_VALUE, (void*)elem,
+                           (void*)elem->parent);
+    return true;
+}
+
 RADIANT_C_API int radiant_dom_input_type_get(Item r, Item* out) {
     DomElement* elem = radiant_dom_member_elem(r);
     if (!elem || !out) return 0;
@@ -1732,8 +1742,7 @@ RADIANT_C_API int radiant_dom_input_typed_value_set(Item r, Item v, Item* out) {
         *out = v;
         return 1;
     }
-    radiant_input_set_live_value(elem, text);
-    if (elem->form) elem->form->value = radiant_input_live_value(elem);
+    radiant_dom_input_commit_live_value(elem, text);
     *out = v;
     return 1;
 }
@@ -1763,7 +1772,7 @@ RADIANT_C_API int radiant_dom_input_value_as_number_set(Item r, Item v, Item* ou
                                       "This input type has no numeric value state");
         return 1;
     } else {
-        radiant_input_set_live_value(elem, formatted);
+        radiant_dom_input_commit_live_value(elem, formatted);
     }
     *out = v;
     return 1;
@@ -1793,7 +1802,7 @@ RADIANT_C_API int radiant_dom_input_value_as_date_set(Item r, Item v, Item* out)
                                       "This input type has no Date value state");
         return 1;
     } else if (v.item == ITEM_NULL) {
-        radiant_input_set_live_value(elem, "");
+        radiant_dom_input_commit_live_value(elem, "");
     } else if (radiant_host_api->script->class_id(v) != JS_CLASS_DATE) {
         *out = radiant_dom_throw_named_error("TypeError", "valueAsDate requires a Date or null");
         return 1;
@@ -1802,10 +1811,10 @@ RADIANT_C_API int radiant_dom_input_value_as_date_set(Item r, Item v, Item* out)
         double number = radiant_host_api->script->get_number(time);
         char formatted[128];
         if (!isfinite(number)) {
-            radiant_input_set_live_value(elem, "");
+            radiant_dom_input_commit_live_value(elem, "");
         } else if (radiant_input_value_from_number(type, number, formatted,
                                                     sizeof(formatted))) {
-            radiant_input_set_live_value(elem, formatted);
+            radiant_dom_input_commit_live_value(elem, formatted);
         }
     }
     *out = v;
@@ -1854,7 +1863,7 @@ RADIANT_C_API int radiant_dom_input_step_up(Item r, Item* args, int argc, Item* 
         *out = radiant_dom_throw_named_error("InvalidStateError", "Input value cannot be stepped");
         return 1;
     } else {
-        radiant_input_set_live_value(elem, stepped);
+        radiant_dom_input_commit_live_value(elem, stepped);
     }
     *out = (Item){.item = ITEM_JS_UNDEFINED};
     return 1;
