@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.38.1 (2026-08-27)
+**Spec version:** 1.38.3 (2026-08-28)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -59,9 +59,11 @@ the decision records.
 - **D1.5 — Precise GC everywhere, forever.** Conservative native-stack
   scanning is retired from every build and stays retired; a guest is
   precise iff it emits through the shared rooting primitives. [CR1–CR8]
-- **D1.6 — The legacy paths are frozen.** C2MIR (`transpile.cpp`, `--c2mir`)
-  is permanently compatibility-only: no edits, no new features, no
-  validation gates, exempt from every new protocol. [rule 14; SM14, CR7, U11]
+- **D1.6 — The legacy paths are frozen.** The C-text C2MIR back end
+  (`transpile.cpp`) was permanently compatibility-only — no edits, no new
+  features, no validation gates, exempt from every new protocol — and has
+  since been removed from the tree along with the CLI flag that selected it;
+  MIR Direct is the sole back end. [rule 14; SM14, CR7, U11]
 - **D1.7 — Source is the spec level.** Scripts distribute as source; MIR is
   a private in-memory IR, never a distribution format; every compiled
   artifact is a **local derived cache keyed by build ID + content hash** —
@@ -523,7 +525,7 @@ that carries them.
   transactionally, so on failure nothing changes (semantics S11.4.1).
   `let`-bound containers never transition (immutable); only
   `var`/procedural code can, and an annotated root must keep conforming.
-  [TE §6 B7b, Transpile_Map DD3]
+  [TE §6 B7b, Transpiler DD3]
 - **D3.4.6** Shapes carry the immutable `LaneStorageDesc` derived from the
   full `Type*` via the one shared descriptor resolver (D2.6.1); changing
   a field's *contract* re-derives layout, writing a null into a `T?`
@@ -1597,7 +1599,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
 | D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
 | D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
-| D3.4 | Shape_Pool §1–§8; Transpile_Map DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b | `Lambda_Shape_Pool.md`, `Lambda_Transpile_Map.md`, `Lambda_Design_Name_Identity.md` |
+| D3.4 | Shape_Pool §1–§8; Transpiler DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b | `Lambda_Shape_Pool.md`, `Lambda_Transpiler.md`, `Lambda_Design_Name_Identity.md` |
 | D4.1 | GC1 §2.10.4; CW8; SF16; CR8; Mem_Heap §1 (MP-12, MP-15) | `Lambda_Garbage_Collector.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.2 | Memory_Context stages; Mem_Heap §1.3–§1.4, §2, §9 (MP-13, MP-14, MP-16–MP-18) | `vibe/Memory_Context.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.3 | GC2 §4–§12 | `Lambda_Garbage_Collector2.md` |

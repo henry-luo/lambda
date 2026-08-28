@@ -1,0 +1,142 @@
+{
+  "name": "Contenteditable structural range commands",
+  "html": "test/html/editable-dom-structural.html",
+  "viewport": {
+    "width": 640,
+    "height": 700
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "=== contenteditable_structural ==="
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#replace-button"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "replace:true|<p>alXga</p>"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#delete-button"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "delete:true|<p>oo</p>"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#paragraph-button"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "paragraph:true|<p>he</p><p>llo</p>"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#line-button"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "line:true|<p>he<br>llo</p>"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#keyboard-paragraph"
+      },
+      "start": 2,
+      "end": 2
+    },
+    {
+      "type": "key_press",
+      "key": "Enter"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#keyboard-paragraph-button"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "keyboard-paragraph|<p>he</p><p>llo</p>"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#join-second"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "key_press",
+      "key": "Backspace"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#keyboard-join-button"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "keyboard-join|<p>hello</p>"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#keyboard-line"
+      },
+      "start": 2,
+      "end": 2
+    },
+    {
+      "type": "key_press",
+      "key": "Enter",
+      "mods_str": "shift"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#keyboard-line-button"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "keyboard-line|<p>he<br>llo</p>"
+    }
+  ]
+}

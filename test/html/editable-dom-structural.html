@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM structural editing commands</title>
+<style>
+  [contenteditable] { border: 1px solid #777; margin: 4px; padding: 4px; }
+  #out { margin-top: 8px; white-space: pre-wrap; }
+</style>
+<div id="replace" contenteditable="true"><p>alpha</p><p>omega</p></div>
+<div id="delete" contenteditable="true"><p>one</p><p>two</p></div>
+<div id="paragraph" contenteditable="true"><p>hello</p></div>
+<div id="line" contenteditable="true"><p>hello</p></div>
+<div id="keyboard-paragraph" contenteditable="true"><p>hello</p></div>
+<div id="keyboard-line" contenteditable="true"><p>hello</p></div>
+<div id="keyboard-join" contenteditable="true"><p>he</p><p id="join-second">llo</p></div>
+<button id="replace-button">replace</button>
+<button id="delete-button">delete</button>
+<button id="paragraph-button">paragraph</button>
+<button id="line-button">line</button>
+<button id="keyboard-paragraph-button">keyboard paragraph</button>
+<button id="keyboard-line-button">keyboard line</button>
+<button id="keyboard-join-button">keyboard join</button>
+<div id="out"></div>
+<script>
+  var replace = document.getElementById('replace');
+  var del = document.getElementById('delete');
+  var paragraph = document.getElementById('paragraph');
+  var line = document.getElementById('line');
+  var keyboardParagraph = document.getElementById('keyboard-paragraph');
+  var keyboardLine = document.getElementById('keyboard-line');
+  var keyboardJoin = document.getElementById('keyboard-join');
+  var out = document.getElementById('out');
+
+  function setRange(startNode, startOffset, endNode, endOffset) {
+    var range = document.createRange();
+    range.setStart(startNode, startOffset);
+    range.setEnd(endNode, endOffset);
+    var selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  document.getElementById('replace-button').addEventListener('click', function() {
+    setRange(replace.children[0].firstChild, 2,
+             replace.children[1].firstChild, 3);
+    out.textContent = 'replace:' + document.execCommand('insertText', false, 'X') +
+      '|' + replace.innerHTML;
+  });
+  document.getElementById('delete-button').addEventListener('click', function() {
+    setRange(del.children[0].firstChild, 1,
+             del.children[1].firstChild, 2);
+    out.textContent = 'delete:' + document.execCommand('delete', false, '') +
+      '|' + del.innerHTML;
+  });
+  document.getElementById('paragraph-button').addEventListener('click', function() {
+    setRange(paragraph.firstChild.firstChild, 2,
+             paragraph.firstChild.firstChild, 2);
+    out.textContent = 'paragraph:' +
+      document.execCommand('insertParagraph', false, '') + '|' +
+      paragraph.innerHTML;
+  });
+  document.getElementById('line-button').addEventListener('click', function() {
+    setRange(line.firstChild.firstChild, 2,
+             line.firstChild.firstChild, 2);
+    out.textContent = 'line:' +
+      document.execCommand('insertLineBreak', false, '') + '|' + line.innerHTML;
+  });
+  document.getElementById('keyboard-paragraph-button').addEventListener('click', function() {
+    out.textContent = 'keyboard-paragraph|' + keyboardParagraph.innerHTML;
+  });
+  document.getElementById('keyboard-line-button').addEventListener('click', function() {
+    out.textContent = 'keyboard-line|' + keyboardLine.innerHTML;
+  });
+  document.getElementById('keyboard-join-button').addEventListener('click', function() {
+    out.textContent = 'keyboard-join|' + keyboardJoin.innerHTML;
+  });
+</script>

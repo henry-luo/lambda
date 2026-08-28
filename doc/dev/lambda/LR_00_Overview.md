@@ -148,9 +148,9 @@ Mermaid rendering needs `npx`/mmdc; the C4 views additionally need a JDK and str
 
 ## Appendix — Relationship to the previous docs
 
-This set absorbs and supersedes two earlier hand-written notes, which remain in place for now:
+This set absorbed and superseded two earlier hand-written notes. Both have since been removed from the tree; they are named here only so older references resolve:
 
-- **[doc/dev/Lamdba_Runtime.md](../Lamdba_Runtime.md)** — "Lambda Runtime Data Management": the runtime data model, GC nursery, the two-transpiler architecture, MIR JIT workarounds, and a list of structuring suggestions. Its material is distributed across [LR_03](LR_03_Value_and_Type_Model.md), [LR_06](LR_06_C_Transpiler.md), [LR_07](LR_07_MIR_Transpiler_JIT.md), and [LR_08](LR_08_Memory_and_GC.md), updated where the code has since diverged (notably: the C2MIR path is now `#ifdef`-gated and MIR Direct is the live default).
-- **[doc/dev/Lambda_Transpiler.md](../Lambda_Transpiler.md)** — the transpiler developer guide. Its material is folded into [LR_06](LR_06_C_Transpiler.md) and [LR_07](LR_07_MIR_Transpiler_JIT.md).
+- **`doc/dev/Lamdba_Runtime.md`** *(removed)* — "Lambda Runtime Data Management": the runtime data model, GC nursery, the two-transpiler architecture, MIR JIT workarounds, and a list of structuring suggestions. Its material is distributed across [LR_03](LR_03_Value_and_Type_Model.md), [LR_06](LR_06_C_Transpiler.md), [LR_07](LR_07_MIR_Transpiler_JIT.md), and [LR_08](LR_08_Memory_and_GC.md), updated where the code has since diverged — notably, its "two transpilers" framing no longer holds: the C-text C2MIR back end has been removed outright and MIR Direct is the sole back end.
+- **`doc/dev/Lambda_Transpiler.md`** *(removed)* — the transpiler developer guide. Its material is folded into [LR_06](LR_06_C_Transpiler.md) and [LR_07](LR_07_MIR_Transpiler_JIT.md).
 
-Where this set and those notes disagree, **this set reflects a fresh read of the current code** and should be treated as authoritative.
+Where this set and those notes disagreed, **this set reflects a fresh read of the current code** and is authoritative. The design-record counterpart in the working docs is [`vibe/Lambda_Transpiler.md`](../../../vibe/Lambda_Transpiler.md).

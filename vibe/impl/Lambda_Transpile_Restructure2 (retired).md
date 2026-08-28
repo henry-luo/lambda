@@ -8,7 +8,7 @@ This document proposes structural improvements to the Lambda transpiler pipeline
 2. **O(1) system function lookup** — replace linear scan with hashmap
 3. **Configuration-driven code generation** — replace inline-coded dispatch tables with data-driven metadata
 
-These changes complement the earlier refactoring proposal ([Lambda_Transpile_Restructure.md](Lambda_Transpile_Restructure.md)) which focused on box/unbox uniformity and dual-version function generation.
+These changes complement the earlier refactoring proposal ([Lambda_Transpile_Restructure (retired).md](Lambda_Transpile_Restructure%20(retired).md)) which focused on box/unbox uniformity and dual-version function generation.
 
 ### Current State
 

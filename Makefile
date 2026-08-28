@@ -2445,6 +2445,8 @@ editable-unit: build
 	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_unsupported_transfer.json --headless --no-log
 	@./lambda.exe view test/html/editable-physical-keydown.html --event-file test/ui/test_editing_physical_keydown_cancellation.json --headless --no-log
 	@./lambda.exe view test/ui/editable-template-gate.ls --event-file test/ui/editable-template-gate.json --headless --no-log
+	@./lambda.exe view test/html/editable-dom-commands.html --event-file test/ui/test_editing_contenteditable_commands.json --headless --no-log
+	@./lambda.exe view test/html/editable-dom-structural.html --event-file test/ui/test_editing_contenteditable_structural.json --headless --no-log
 
 editable-ui: build
 	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_dom_action.json --headless --no-log
@@ -2457,6 +2459,7 @@ editable-ui: build
 
 editable-editor-e2e: build
 	@./lambda.exe view test/ui/dom_mutation_replacechild_notifies.html --event-file test/ui/dom_mutation_replacechild_notifies.json --headless --no-log
+	@./lambda.exe view test/html/editable-plain-event-guard.html --event-file test/ui/test_editing_contenteditable_plain_event_guard.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-operations.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-full.json --headless --no-log

@@ -2,7 +2,7 @@
 
 > **Status**: **accepted — committed direction** (2026-08-25). The architecture below is decided (ES14); what remains open is phasing, tuning, and the ESO implementation items — no measurement gates adoption.
 > **Scope**: migrate Radiant's element interaction-state *policy* — state transitions, default actions, validation, **text-control value editing**, and (long-term) the declarative state schema — from C++ into Lambda **behavior templates** under `lambda/package/dom`, built on the shipped `view`/`edit` reactive-template design. **Initial slice: HTML form states.**
-> **Companion docs**: `vibe/Lambda_Design_DOM_Pkg.md` (layering, placement policy, event-pipeline decision 2 — this proposal is the concrete design for its "state store → L" and "forms → L (Phase 3)" rows), `vibe/Reactive_UI.md`–`Reactive_UI5.md` (the template system, shipped), `vibe/radiant/Radiant_Design_State_Management.md` (RS durability classes), `doc/dev/radiant/RAD_17_Interaction_State.md`, `RAD_19_Form_Controls.md`, `RAD_15_Events_Input.md`.
+> **Companion docs**: `vibe/Lambda_Design_DOM_Default.md` (**the default-action ledger** — which UA default actions exist, where each half lives, and what is missing; absorbed this doc's Appendix B on 2026-08-28 and owns the `ESO48+` gap rows), `vibe/Lambda_Design_DOM_Pkg.md` (layering, placement policy, event-pipeline decision 2 — this proposal is the concrete design for its "state store → L" and "forms → L (Phase 3)" rows), `vibe/Reactive_UI.md`–`Reactive_UI5.md` (the template system, shipped), `vibe/radiant/Radiant_Design_State_Management.md` (RS durability classes), `doc/dev/radiant/RAD_17_Interaction_State.md`, `RAD_19_Form_Controls.md`, `RAD_15_Events_Input.md`.
 > **Formal anchors**: S12.1.3 (reactive templates: body = pure `fn`, mutation only in `on` handlers), S9.1.4 (state lives in view state, never in function values), S12.2.2 (element mutation), S7.6/S7.10 (error discharge and the sys-func contract), D4.5.1v3 (the Radiant memory seam: pin, gen-check, copy-as-value), D7.2.1–D7.2.3 (script packages), D8.5.1 (MIR module cache).
 
 ---
@@ -522,7 +522,7 @@ The switch carries a note pointing back here: restore the registry if a third im
 
 **Scope decision (user direction, 2026-08-28).** An earlier analysis of `editing_dom_handler.cpp` recommended *against* migrating it, on the grounds that it is ~90% mechanism — DOM traversal, text-node splitting, boundary arithmetic, UTF-16↔codepoint conversion — and that moving it would require a DOM-range waist that does not exist. That recommendation was overruled: the waist is to be built and the handler retired. This section records the design and the staging; the earlier objection is preserved above as context, not as a live dissent.
 
-**What the handler actually does**, and therefore what must be replaced: it claims exactly three intent families and passes everything else. `insertText`/`insertReplacementText`, `deleteContentBackward`/`deleteContentForward`, and the four composition intents. Crucially it also *only* handles the **single-text-node case** — `editing_dom_single_text_range` returns false when the resolved start and end land in different text nodes, and the transaction falls through unclaimed. The waist inherits that limit rather than widening it; broadening to cross-node ranges is a separate change with its own correctness surface.
+**What the handler actually does**, and therefore what must be replaced: it claims exactly three intent families and passes everything else. `insertText`/`insertReplacementText`, `deleteContentBackward`/`deleteContentForward`, and the four composition intents. Crucially it also *only* handles the **single-text-node case** — `editing_dom_single_text_range` returns false when the resolved start and end land in different text nodes, and the transaction falls through unclaimed. F13 deliberately inherited that limit; F14.2 is the separate structural change that widens replacement and deletion to raw cross-node ranges.
 
 **The waist.** Two primitives, both codepoint-offset per ES9 — the DOM speaks UTF-16 code units, and converting at the boundary is what keeps every Lambda-facing offset in one unit:
 
@@ -583,13 +583,13 @@ With that, `compositionStart` and the empty-replacement-at-a-boundary case becam
 
 **Every intent it once applied is now the package's:** `insertText`, `insertReplacementText`, `deleteContentBackward`, `deleteContentForward`, and all four composition intents, including the two that are handled by doing nothing.
 
-**`editing_dom_action_handle` no longer decides anything.** Every composition transaction is the template's — the edits through the waist, the no-change cases through the verdict. Verified by deleting the `domedit` handler: **24 tests fail** without it, against 1 pre-existing with it. `editing_dom_action_handle` is now: the waist dispatch, the composition branch, and a guard that declines cross-node ranges. Composition needs the preedit caret the native path threads through `intent->composition_caret`, and it is the least test-covered of the three families — worth treating as its own slice rather than folding into this one.
+**`editing_dom_action_handle` no longer decides anything.** Every composition transaction is the template's — the edits through the waist, the no-change cases through the verdict. Verified by deleting the `domedit` handler: **24 tests fail** without it, against 1 pre-existing with it. F13.4 left a guard that declined cross-node ranges; F14.2 removes that limitation for structural replacement and deletion while keeping composition's separate single-target contract. Composition needs the preedit caret the native path threads through `intent->composition_caret`, and it is the least test-covered of the three families — worth treating as its own slice rather than folding into this one.
 
 **Two known hazards, both already paid for once in this migration.** The dispatch must not be suppressed by `default_prevented` — a script editor that prevents `beforeinput` and then relies on the engine is the case that broke F11's first attempt — and the target it dispatches on must be reachable from the live tree, since `active_surface.view` can be a node from a superseded render generation. The action-time dispatch runs later than F11's keydown-time one, so the second hazard may not bite; it must be checked rather than assumed.
 
 ---
 
-### 3.16 Contenteditable redesign: one UA implementation in the package, JS editors as plain JS (F14, proposed)
+### 3.16 Contenteditable redesign: one UA implementation in the package, JS editors as plain JS (F14, implemented)
 
 **Ruling (user direction, 2026-08-28; ES20).** Contenteditable handling under Radiant is redesigned around two pillars, and the old mechanism — the editing-transaction pipeline, its ownership routes, and the native command surface — is retired completely:
 
@@ -606,14 +606,15 @@ With that, `compositionStart` and the empty-replacement-at-a-boundary case becam
 | `editing_template_handler.cpp` (whole file) | the edit-template route. `edit` templates consume `beforeinput` as ordinary template handlers — same registry, no side channel |
 | `editing_dom_waist.cpp`: `editing_dom_route_apply`, `editing_dom_live_selection_matches`, `editing_dom_prepared_extended_range` | the last native shell around the waist. The dispatch site resolves the range, checks the live host, and offers the edit; the **waist primitives all stay** |
 | `EditingRouteSnapshot`, `editing_route_snapshot`, `EDITING_ROUTE_DOM_SCRIPT` / `EDITING_ROUTE_RADIANT_TEMPLATE` (12+13 sites) | ownership routing. Replaced by ES5 ordering: JS listeners first, unprevented edits go to the package, full stop |
-| `event.cpp`: `dispatch_contenteditable_transaction`, `dispatch_contenteditable_consumer_transaction`, the "rich key fallback fenced" branch | pipeline entry wrappers around what becomes one dispatch |
+| `event.cpp`: `dispatch_contenteditable_template_compat` and the remaining template-only wrapper | the last compatibility shell; `dispatch_contenteditable_event` is the single ordinary dispatch site for JS-owned editors |
 | `EditingActionOutcome` / `EDITING_ACTION_PASS/CLAIMED/ERROR` | the outcome protocol. ES15 verdicts + the apply epoch + the claim return already say everything it said |
-| `js_dom_document_exec_command_bridge` (insertHTML-only special case) + `radiant_dom_document_legacy_command_enabled` gate | the native `execCommand`. Today it implements exactly one command, `insertHTML`, behind a legacy gate; it becomes a thin dispatch into the package's command set |
+| `event.hpp` / `state_machine.cpp` / `state_schema.cpp`: rich transaction phase, target-range, FSM, transition, and invariant state | the unreachable transaction schema and snapshot surface; live selection, composition, geometry, and mutation invariants remain |
+| `js_dom_document_exec_command_bridge` (insertHTML-only special case) + `radiant_dom_document_legacy_command_enabled` gate | the native `execCommand` special case and contenteditable-presence gate; the bridge is now a thin dispatch into the package's command set |
 | `text_edit.cpp` residue that exists only to serve the pipeline | audited at F14.4; the ring/scanner mechanism stays per ES17/ES9 |
 
 **What stays, because it is mechanism:** the DOM-range waist (`dom_edit_*`, `dom_replace_range`, `dom_insert_at_boundary`, `dom_set_caret`) plus the structural primitives below; `editing_geometry.cpp` / `editing_target_range.cpp` (caret and selection geometry, range resolution for painting); `editing_host.cpp` (what *is* an editing host); the composition session and preedit paint (ES18); `DomSelection`/`DomRange` and the CharacterData mutation envelope; `editing_controller.cpp`'s autoscroll and caret tick.
 
-**The structural primitives the package needs (the real cost).** The waist is single-text-node today, and full UA editing is structural: `insertParagraph` splits a block, formatting wraps a range in an element, cross-node deletion removes a subtree span, `insertHTML`/rich paste insert a parsed fragment. The waist grows a small set of structural operations — split node at offset, wrap/unwrap a range in an element, remove a cross-node range, merge adjacent blocks, insert a parsed fragment — each ≤ 4 arguments (the arity ceiling, §3.15), each pure mechanism with the decision of *when* in the package. Formatting state (`queryCommandState('bold')`) is derived by reading the tree, not cached — ES16's rule.
+**The structural primitives the package needs (the real cost).** Full UA editing is structural: `insertParagraph` splits a block, formatting wraps a range in an element, cross-node deletion removes a subtree span, and `insertHTML`/rich paste inserts a parsed fragment. The waist now has the small set of structural operations needed by the current command slice — split node at offset, wrap/unwrap a range in an element, remove a cross-node range, merge adjacent blocks, and insert a parsed fragment — each ≤ 4 arguments (the arity ceiling, §3.15), each pure mechanism with the decision of *when* in the package. Formatting state (`queryCommandState('bold')`) is derived by reading the tree, not cached — ES16's rule.
 
 **`execCommand` shape.** `document.execCommand(cmd, _, value)` dispatches a behavior-only `execcommand` carrying the command name; the package routes it to the *same* command implementations the keyboard path uses, so Cmd+B and `execCommand('bold')` cannot diverge — the F9/F11 lesson (one rule set, two entry points) applied to commands. The formatting intents (`formatBold` etc.) that keymap.ls already names but **nothing anywhere applies** finally gain an applier. Scope is the command subset real editors invoke (`bold`, `italic`, `underline`, `insertText`, `insertHTML`, `insertParagraph`, list/indent commands), not the full deprecated surface; `queryCommandSupported` answers honestly for the rest.
 
@@ -621,12 +622,77 @@ With that, `compositionStart` and the empty-replacement-at-a-boundary case becam
 
 | Stage | Content |
 | --- | --- |
-| F14.1 | `commands.ls` + the `execcommand` dispatch; migrate `insertHTML` off the native bridge; formatting on single-text-node ranges via the wrap primitive |
-| F14.2 | structural primitives; cross-node delete and insert; `insertParagraph`/`insertLineBreak` block handling |
-| F14.3 | JS editors on the plain event path: retire the prepared-transaction wrapper, keep the live-host guard at the package dispatch site; verify against the CodeMirror/ProseMirror/Editor.js suites |
-| F14.4 | delete the retire list above; `edit` templates take `beforeinput` as ordinary handlers (`rte_prototype.ls` adjusts); audit `text_edit.cpp` residue |
+| F14.1 ✅ | `commands.ls` + the `execcommand` dispatch; migrate `insertHTML` off the native bridge; formatting on single-text-node ranges via the wrap primitive |
+| F14.2 ✅ | partial formatting unwrap; cross-node delete/replacement; adjacent-block merge; `insertParagraph`/`insertLineBreak` block handling |
+| F14.3 ✅ | JS editors on the plain event path: retire the prepared-transaction wrapper, keep the live-host guard at the package dispatch site; verify against the CodeMirror/ProseMirror/Editor.js suites |
+| F14.4 ✅ | delete the retire list above; `edit` templates take `beforeinput` as ordinary handlers (`rte_prototype.ls` adjusts); audit `text_edit.cpp` residue |
+
+**F14.1 landed 2026-08-28.** `lambda/package/dom/commands.ls` is the command set; `<body>` claims a behavior-only `execcommand`, and `document.execCommand` dispatches into it through `radiant_dom_exec_command`, which resolves the live selection using the same geometry as ordinary edit dispatch (single-text-node range, stashed for the waist) and reads back the same two channels F13.3 established — the apply epoch for "edited", the dispatch verdict for "handled, no change".
+
+**The keyboard half needed no native change at all**, which was the surprise. The formatting intents are `input_intent_is_dispatchable() == false`, so they fire no `beforeinput` — but ordinary edit dispatch still offers them to `domedit` directly. Cmd+B has therefore been arriving at `dom_edit.ls` all along with `input_type == "formatBold"` and falling through to `'pass'`. One `else if` delegating to `commands.run` is the whole keyboard path, and it is the *same* applier `execCommand` reaches — which is what the one-rule-set property actually requires.
+
+**Four waist primitives, all ≤ 4 arguments** (§3.15's ceiling): `dom_range_format(host, tag)` reads formatting state off the tree per ES16, `dom_wrap_range(host, s, e, tag)` and `dom_unwrap_range(host, s, e, tag)` are the first *structural* waist operations, and `dom_insert_html(host, html)` reaches the fragment parse the retired bridge drove. `dom_text_split_at` already existed and is what makes wrap cheap: split the tail, split the head, wrap what is left.
+
+**F14.2 landed 2026-08-28.** The waist retains both raw DOM endpoints in the
+pending edit range, so the package can call `dom_replace_dom_range` for text
+replacement or `dom_delete_dom_range` for deletion without reducing a
+cross-node selection to one text node. `Range.deleteContents()` performs the
+subtree removal; adjacent same-tag structural blocks are then merged by moving
+their children into the surviving block. The range path preserves the original
+start boundary when it survives, avoiding the DOM Range collapse-to-parent-end
+case that would otherwise append replacement text. All structural moves use
+the existing mutation envelope and JS mutation ledger required by S12.2.2.
+
+`dom_insert_paragraph` splits the containing paragraph-like block at the caret,
+preserving the authored block tag and moving the suffix into a sibling;
+`dom_insert_line_break` splits a text node when needed and inserts `<br>` at the
+same DOM boundary. Both commands are package decisions over ≤4-argument waist
+primitives. The focused fixture covers cross-paragraph replacement and delete
+with merge, `insertParagraph`, `insertLineBreak`, and the keyboard Enter,
+Shift+Enter, and Backspace paths. The earlier partial unwrap behavior remains
+bounded to a formatting element with one direct text child; nested, multi-child,
+and cross-node unwrap shapes still decline rather than being half applied.
+
+**One latent bug fixed on the way.** `dom_edit_set_pending_range` did not clear the caret channel, so a primitive that moves the epoch *without* placing a caret — which is exactly what a wrap does — would have let the dispatch collapse the selection into the previous transaction's node. Wrapping is the first operation that could expose it; clearing the caret with the range it belongs to is the fix, and it belongs there regardless.
+
+**Unwrap remains deliberately bounded.** F14.2 now handles a partial range when
+the formatting element has one direct text child: the element is split around
+the selected text and the middle is promoted to the host. Nested formatting
+elements, multiple direct children, and cross-node ranges still decline rather
+than being half applied; those are the remaining structural cases.
+
+**F14.4 removed the native `insertHTML` fallback.** The JS bridge now always
+enters the dom-package command path. A synchronous package load may use the
+already-bound caller `EvalContext`, but the document never borrows that
+stack-owned runtime; this preserves **D5.4.1**'s one canonical context and
+**D7.2.2**'s package initialization barrier. Runtime cleanup also recognizes a
+Script-owned type-list alias before releasing runtime-owned storage. The exact
+CLI golden `test/js/dom_exec_command_insert_html` remains green after this
+ownership fix.
 
 **Hazards, all previously paid for once.** The `domedit` dispatch is a genuine *default action*, so `default_prevented` **must** suppress it (unlike `keyintent`, the translation — getting this backwards silenced every JS editor in F11's first attempt, and the inverse mistake here would double-apply every edit a JS editor handles). Dispatch targets must be resolved from the live tree, not `active_surface.view` (§3.15's superseded-generation trap). And the claim-without-edit protocol (verdict + epoch, two channels) carries over unchanged — structural commands will have their own "handled, no change" cases, `queryCommandState` among them.
+
+**F14.3 landed 2026-08-28.** JS-owned contenteditable now follows one ordinary
+event path: `beforeinput` is dispatched first, the live-host guard revalidates
+the editor after listeners run, the package supplies the unprevented default,
+and `input` follows a package mutation. A listener that removes or replaces the
+host therefore cannot leave the old host eligible for the package action.
+Composition keeps its native document-scoped session and anchor bookkeeping,
+including the IME caret inside a newly inserted preedit run; the DOM mutation
+itself still flows through the package waist and the mutation envelope required
+by **S12.2.2**.
+
+**F14.4 landed 2026-08-28.** Lambda `edit` templates now receive
+`beforeinput` through the same ordinary handler dispatch as other page events;
+their verdict is the only author-side claim/cancel channel. The old prepared
+transaction route, template compatibility file, rich-edit FSM/schema and
+transaction snapshot serialization are deleted. `text_edit.cpp` was audited:
+its history ring, UTF-8/UTF-16 conversion, word/line scanners, form-control
+replacement, and IME commit helpers still have live form or composition callers,
+so they remain as substrate mechanism rather than pipeline residue. The focused
+F14.4 regressions assert ordinary template events and a zero count for the
+retired `editing.transaction` log record; the implementation continues to honor
+**S12.1.3** for pn handlers and **S12.2.2** for DOM mutation.
 
 ---
 
@@ -696,6 +762,8 @@ A behavior template with a non-empty body rendering the control's UA chrome as r
 ---
 
 ## 7. Gaps and open issues (ESO ledger)
+
+> **Scope split (2026-08-28).** This table keeps the *architecture and migration* issues (ESO1–ESO47). Gaps in the UA **default actions themselves** — a behavior that is missing, doubly implemented, or divergent from the spec — live in `vibe/Lambda_Design_DOM_Default.md` §6, which continues the same series from ESO48. One series, two homes, split by what the issue is about.
 
 | # | Issue | Notes / proposed direction |
 | --- | --- | --- |
@@ -784,7 +852,7 @@ A behavior template with a non-empty body rendering the control's UA chrome as r
 | ES16 | **Reflected form state is derived at read, never written** (user direction to retire `te_reflect_control_state`, 2026-08-26): `:required`, `:optional`, `:read-only` and `:read-write` are pure functions of the markup, so nothing caches them into the state store — the matcher computes them from `form_control_is_required` / `form_control_is_readonly` / `form_control_is_disabled` at match time, which it already does for `:required` and `:optional`. This retires the reflection pass rather than moving it to Lambda. Making these *template-managed* was considered and rejected: a template only runs where the package loads, so `:required` would stop matching in batch layout/render, in `lambda.exe layout`, and at first paint — the same hole `:valid`/`:invalid` legitimately live with (a verdict genuinely does not exist until something validates) but that a static consequence of markup must not. It also caches a value that can go stale, and the write path mutates the control rather than recording a verdict. Live, event-driven state (`:checked`, `:valid`, `:invalid`, `:indeterminate`) stays template-managed; derived state has no owner because it has no state. Consistent with DOM_Pkg's "reflected IDL attributes → N": with nothing cached there is no reflection left to own |
 | ES15 | **Handler verdicts are return values, not callables** (user decision, 2026-08-25): a handler returns `'pass'` (decline — dispatch continues looking, and the native default action for that class stays in charge) or `'prevent-default'` (handled, and remaining default actions are suppressed, including UA behavior dispatch); any other return means handled. Chosen over an `evt.prevent_default()` callable because it fits the existing `Item handler(Item model, Item event)` ABI without putting native function values into the event map; the callable form can be revisited with the ESO4 event-contract v2 |
 | ES19 | **`init` is its own pipeline phase, between layout and rendering** (user ruling, 2026-08-26): the attach queue is replaced by a "behavior init done" bit on `ViewState` (keyed by the stable `view->id`), one doc-scoped `LayoutContext` gate flag, and a document-order tree walk. The phase is *positioned* rather than gated on paint, which is what decouples UA behavior from rendering — headless event handling inits, while `lambda.exe layout` stops before the phase and keeps batch output unchanged. Chosen over an end-of-layout hook because a hook fires inside nested and measurement layouts, which would require a layout depth counter that does not exist; and over the render-time queue because that made behavior depend on whether pixels were produced. Retires the queue, its cap and drop path, the `free_document` purge, and the clear-first re-entrancy bug, and takes `init` from once-per-frame-per-control to once-per-control (§3.13) |
-| ES20 | **Contenteditable is redesigned onto two pillars and the transaction pipeline retires** (user ruling, 2026-08-28): UA default contenteditable support — `execCommand` included, reversing every prior scoping that excluded it — lives in the dom package as the one implementation; JS contenteditable editors are plain JS pages whose `preventDefault` suppresses the package default per ES5 and whose mutations flow through the ordinary reconcile path. The editing-transaction machinery (prepared transactions, ownership routes, action outcomes, the insertHTML-only native `execCommand`) is retired outright — §3.16 carries the concrete retire list, what stays as mechanism, the structural waist primitives this needs, and the F14 staging |
+| ES20 (F14.1–F14.4 ✅) | **Contenteditable is redesigned onto two pillars and the transaction pipeline retires** (user ruling, 2026-08-28): UA default contenteditable support — `execCommand` included, reversing every prior scoping that excluded it — lives in the dom package as the one implementation; JS contenteditable editors are plain JS pages whose `preventDefault` suppresses the package default per ES5 and whose mutations flow through the ordinary reconcile path. F14.3 routes JS-owned pages through ordinary `beforeinput`/default/`input` ordering with a post-listener live-host guard; F14.4 removes the prepared route, template compatibility handler, rich-edit FSM/schema, transaction snapshot serialization, native `insertHTML` fallback and legacy command gate. §3.16 carries the concrete retire list, what stays as mechanism, the structural waist primitives this needs, and the completed F14 staging |
 
 ---
 
@@ -798,92 +866,11 @@ A behavior template with a non-empty body rendering the control's UA chrome as r
 - **D7.2.1–D7.2.3** — script packages: immutable module scope (state is document-anchored instead), transactional init (ES7), source distribution + derived compile caches.
 - **D8.5.1** — MIR module cache amortizing package compile (ESO9).
 
+
 ---
 
-## Appendix B — W3C/WHATWG ↔ Radiant: DOM events and default actions
+## Appendix B — moved
 
-Every event class Radiant handles, mapped to its standard definition and to where each half now lives. Three spec concepts organize the table, and they are different things:
+**The DOM events / default-actions table that stood here is now `vibe/Lambda_Design_DOM_Default.md`** (moved 2026-08-28), which is the single source of truth for what Radiant does after an event is dispatched: the per-event ledger with status, the per-element activation-behavior table, the contenteditable `inputType` coverage matrix, the spec divergences, and the default-action gap ledger (ESO48–ESO61 extending §7 above).
 
-- **Event dispatch** — the spec-visible part: the event object JS listeners receive, its bubbling, its `cancelable` flag.
-- **Default action** — what the UA does *after* dispatch unless script canceled it (DOM Standard; UI Events). Never itself observable as an event.
-- **Activation behavior** — the DOM Standard's name for the click-triggered default actions HTML defines per element (checkbox toggles, radio selects, …).
-
-Radiant's split follows those seams: dispatch and storage are native mechanism; default actions and activation behavior are dom-package policy, reached through behavior-only hooks. Status: ✅ implemented · 🟡 partial · ❌ not yet.
-
-### B.1 Input & editing
-
-| Event | Spec, cancelable | Default action per spec | Radiant realization |
-| --- | --- | --- | --- |
-| `beforeinput` ✅ | Input Events L1/L2; cancelable (except `insertCompositionText`/`deleteCompositionText`, which the spec marks non-cancelable) | UA updates the DOM as described by `inputType` | dispatched to JS; the default action is the package's: `editing.ls` splices text controls (F5/ES9), `dom_edit.ls` splices contenteditable through the DOM-range waist (F13). Prevented ⇒ the pipeline never invokes the apply (§3.16 hazard: the gate moves local at F14.3) |
-| `input` ✅ | Input Events; not cancelable | none — it reports a mutation that already happened | dispatched post-mutation from the one engine path that applied the edit; package `on input` re-derives `:valid`/`:invalid` and the ARIA mirrors |
-| `change` ✅ | HTML; not cancelable | none | the *decision* is the behavior-only `commit` hook before blur (ESO42); native still fires the event so it precedes `blur` for JS and templates alike |
-
-### B.2 Keyboard
-
-| Event | Spec, cancelable | Default action per spec | Radiant realization |
-| --- | --- | --- | --- |
-| `keydown` ✅ | UI Events; cancelable | text input, caret movement, scrolling, activation via Space/Enter — "the key processing model" | dispatched to JS first; then split by kind: **`caretkey`** (default action — caret movement; dispatched *with* context, so a prevented keydown suppresses it) → `caret.ls`, both surfaces; **`keyintent`** (a *translation*, not a default action — key → `inputType`; dispatched context-free because a JS editor that prevents the keydown still relies on the intent, the F11 finding) → `keymap.ls`; **`dropdownkey`** (open `<select>` popup keys) → `form.ls`. The non-rich compatibility branch (Ctrl+A/C/X on a plain document selection) stays native by EO4 (F11b) |
-| `keyup` ✅ | UI Events; cancelable | none meaningful | dispatched; no package involvement |
-| `keypress` ❌ | legacy, deprecated | — | not dispatched, deliberately |
-
-### B.3 Pointer & activation
-
-| Event | Spec, cancelable | Default action per spec | Radiant realization |
-| --- | --- | --- | --- |
-| `mousedown` ✅ | UI Events; cancelable | begin selection, focus change, drag preparation | transform-aware hit-testing (ESO47) native; `selectstart` dispatched at selection begin; focus transition via the state machine |
-| `mouseup` / `click` ✅ | UI Events; cancelable; canceling `click` cancels **activation behavior** | element-specific activation (HTML): checkbox toggle, radio select + group exclusivity, `<select>` open/close, label retarget | activation behavior is entirely the package's: `form.ls` templates (F1/F2), no native fallback. Label association lookup stays native (`for=` is not an ancestor walk); the dispatch is retargeted. Canceled activation restores pre-click checkedness (spec's canceled activation steps), verified against browser behavior |
-| dropdown option click ✅ | no spec event — the popup overlay is not DOM | — | native geometry resolves the row; behavior-only **`optioncommit`** carries the index; `form.ls` commits and closes (F2c). One commit path shared by pointer, Enter, and the test harness |
-| `dblclick` 🟡 | UI Events; cancelable | UA convention: word selection | word/line selection implemented natively via click counts; **the `dblclick` event itself is not dispatched to JS** (gap) |
-| `contextmenu` 🟡 | UI Events; cancelable | show the UA context menu | right-click dispatches the behavior-only hook; `menu.ls` decides target + enable mask (F10), native paints the popup. **The spec-visible JS event is not dispatched** (gap — a page cannot `preventDefault` it) |
-| `mousemove`/`over`/`out`/`enter`/`leave` ✅ | UI Events | none | dispatched; hover state native; hot-path gate keeps the package out of per-frame dispatch |
-| `wheel` ✅ | UI Events; cancelable | scroll | dispatched; scrolling native; hot-path gated |
-
-### B.4 Focus & selection
-
-| Event | Spec, cancelable | Default action per spec | Radiant realization |
-| --- | --- | --- | --- |
-| `focus`/`blur`/`focusin`/`focusout` ✅ | UI Events; not cancelable | none (focus already moved) | focus machinery and `:focus`/`:focus-within`/`:focus-visible` native; package `on blur` revalidates; `commit` runs before the blur decision |
-| `selectstart` ✅ | Selection API; cancelable | begin a selection | dispatched when a pointer selection begins; selection storage is `DocState::sel` (document-scoped) |
-| `selectionchange` ✅ | Selection API; not cancelable | none | dispatched from the selection projection |
-
-### B.5 Clipboard & drag-and-drop
-
-| Event | Spec, cancelable | Default action per spec | Radiant realization |
-| --- | --- | --- | --- |
-| `copy` ✅ | Clipboard APIs; cancelable | place selection on clipboard | native — copy has no `beforeinput` intent (nothing is input), so it never enters the package |
-| `cut` ✅ | Clipboard APIs; cancelable | copy + delete selection | copy half native; the deletion arrives as `deleteByCut` and is the package's (`editing.ls` / `dom_edit.ls`). On non-editable text: full no-op, matching browsers |
-| `paste` ✅ | Clipboard APIs; cancelable | insert clipboard content | payload fill native (clipboard read is mechanism); insertion arrives as `insertFromPaste` — newline sanitization and `maxlength` in `editing.ls` |
-| `dragstart`/`dragover`/`drop`/`dragend` ✅ | HTML DnD; cancelable (`dragover`'s default is *rejecting* the drop — preventDefault enables it) | move/copy the dragged content | drag geometry and range tracking native; the edits arrive as `deleteByDrag` + `insertFromDrop`, claimed by the same appliers as cut/paste |
-
-### B.6 Composition (IME)
-
-| Event | Spec, cancelable | Default action per spec | Radiant realization |
-| --- | --- | --- | --- |
-| `compositionstart` ✅ | UI Events; cancelable | begin the composition session | session policy in `ime.ls`, bound to document-scoped IME state (ES18); the claim-without-edit is expressed through the verdict channel (§3.15) |
-| `compositionupdate` ✅ | UI Events; not cancelable | update the preedit | preedit storage + inline paint native; `insertCompositionText` application is the package's, caret placed inside the run via `dom_set_caret` |
-| `compositionend` ✅ | UI Events; not cancelable | commit or cancel | commit arrives as `insertFromComposition` (same rules as typing); an END with no text maps to `deleteCompositionText` — cancellation removes the preedit |
-
-### B.7 Not yet implemented
-
-| Event | Spec | Status |
-| --- | --- | --- |
-| `submit` / form submission | HTML; cancelable, default = submit the form | ❌ F4, greenfield |
-| `document.execCommand` | deprecated compat surface (abandoned draft) | 🟡 native supports only `insertHTML`; F14 moves the command set to the package (§3.16) |
-| Pointer Events (`pointerdown` …) | Pointer Events L2 | ❌ mouse events only (`pointermove` exists solely as a hot-path guard name) |
-
-### B.8 Behavior-only hooks — no spec event, implementing a spec concept
-
-These are Radiant-internal seams. No JS listener can observe them; each exists because the spec concept it implements has no event of its own, or must run at a moment the event pipeline does not expose.
-
-| Hook | Spec concept implemented | Suppressed by `preventDefault`? |
-| --- | --- | --- |
-| `init` | steady-state constraint validation + ARIA reflection at control creation (ESO31) | n/a — runs as a pipeline phase between layout and render (ES19), not in event dispatch |
-| `commit` | HTML's "when the value is committed" decision behind `change` | n/a — pre-event, no JS has run yet (ESO42) |
-| `optioncommit` | activation of a `<select>` option — the popup overlay is not DOM, so no event exists | follows the click that carried it |
-| `dropdownkey` | UA keyboard handling of an open popup | follows its keydown |
-| `caretkey` | keydown's caret-movement **default action** | **yes** — dispatched with context |
-| `keyintent` | the key→`inputType` **translation** inside UI Events' key processing model | **no** — deliberately context-free (F11: a JS editor that prevents the keydown still relies on the intent) |
-| `domedit` | `beforeinput`'s **default action** on contenteditable (Input Events: "update the DOM as described by the inputType") | **yes** — via the pipeline's beforeinput gate today; local check at F14.3 |
-| `execcommand` (planned) | the deprecated command surface, one rule set with the keyboard path | per command (F14) |
-
-The suppression column is the load-bearing distinction: a **default action** must die with `preventDefault` (or edits double-apply), a **translation** must survive it (or JS editors go deaf) — each direction of that mistake has been made once and is recorded in §3.15/§3.16.
+Two rows were corrected against the tree in the move — the clipboard/drag row over-claimed `dom_edit.ls` coverage, and Pointer Events were marked unimplemented while three pointer types were in fact being dispatched. Add new default-action rows there, not here.

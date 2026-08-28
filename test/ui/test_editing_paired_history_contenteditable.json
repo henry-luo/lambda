@@ -7,7 +7,7 @@
     {"type": "click", "target": {"selector": "#surface"}},
     {"type": "key_combo", "key": "z", "mods_str": "super"},
     {"type": "assert_text", "target": {"selector": "#history-log"}, "equals": "history:historyUndo"},
-    {"type": "assert_editing_event", "event": "editing.transaction", "inputType": "historyUndo", "surface": "contenteditable", "operation": "history", "min": 2},
+    {"type": "assert_editing_event", "event": "editing.history", "inputType": "historyUndo", "surface": "contenteditable", "operation": "history", "min": 1},
     {"type": "assert_event_log", "contains": "\"owned_by\":\"consumer\"", "min": 1}
   ]
 }

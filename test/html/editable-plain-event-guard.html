@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Plain contenteditable event host guard</title>
+<div id="surface" contenteditable="true" tabindex="0">seed</div>
+<output id="events"></output>
+<script>
+  let surface = document.getElementById('surface');
+  let events = [];
+  function record(value) {
+    events.push(value);
+    document.getElementById('events').textContent = events.join('|');
+  }
+  surface.addEventListener('beforeinput', function() {
+    record('beforeinput');
+    const replacement = document.createElement('div');
+    replacement.id = 'replacement';
+    replacement.contentEditable = 'true';
+    replacement.setAttribute('tabindex', '0');
+    replacement.textContent = 'listener';
+    replacement.addEventListener('input', function() {
+      record('unexpected-input');
+    });
+    surface.parentNode.replaceChild(replacement, surface);
+    surface = replacement;
+  });
+  surface.addEventListener('input', function() {
+    record('unexpected-input');
+  });
+</script>

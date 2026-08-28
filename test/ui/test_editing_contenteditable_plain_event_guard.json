@@ -1,0 +1,13 @@
+{
+  "name": "plain contenteditable path rejects a replaced host before package default",
+  "html": "test/html/editable-plain-event-guard.html",
+  "viewport": {"width": 640, "height": 240},
+  "events": [
+    {"type": "click", "target": {"selector": "#surface"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": "#surface"}, "text": "X"},
+    {"type": "assert_count", "target": {"selector": "#surface"}, "equals": 0},
+    {"type": "assert_text", "target": {"selector": "#replacement"}, "equals": "listener"},
+    {"type": "assert_text", "target": {"selector": "#events"}, "equals": "beforeinput"}
+  ]
+}

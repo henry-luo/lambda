@@ -11,6 +11,7 @@ import menu: lambda.package.dom.menu
 import caret: lambda.package.dom.caret
 import keymap: lambda.package.dom.keymap
 import dom_edit: lambda.package.dom.dom_edit
+import commands: lambda.package.dom.commands
 
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
@@ -145,6 +146,10 @@ on caretkey(evt) { caret.navigate(~, evt) }
 on keyintent(evt) { keymap.resolve(~, evt) }
 // F13: editing a plain contenteditable, the DOM twin of the text-control applier.
 on domedit(evt) { dom_edit.apply_fn(~, evt) }
+// F14.1: the legacy command surface. Behavior-only — `document.execCommand` is
+// a method call, not an event — and document-scoped for the same reason the IME
+// session is: it addresses whatever the one selection currently covers.
+on execcommand(evt) { commands.exec(~, evt) }
 on compositionstart(evt)  { ime.begin(~) }
 on compositionupdate(evt) { ime.update(~, evt, null) }
 on compositionend(evt)    { ime.end(~) }
