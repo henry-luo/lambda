@@ -5538,28 +5538,17 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         }
     }
 
-    MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
-    if (!ctx) {
-        log_error("js-mir: module: MIR context init failed for '%s'", filename);
-        (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
-            runtime, context, true);
-        return ItemNull;
-    }
-
-    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, true, 64, 32, 16, "js-mir: module");
+    // ES modules own a private zero-based property-name image even when their
+    // importer uses a test harness preamble. Sharing the preamble offset here
+    // makes globalThis member names resolve against the wrong image (D3.4.4v2).
+    MIR_context_t ctx = NULL;
+    JsMirTranspiler* mt = js_mir_open_compile_unit(tp, filename, "js_module", true,
+        0, "js-mir: module", false, &ctx);
     if (!mt) {
         (void)js_mir_compile_unit_fail(ctx, NULL, tp, NULL,
             runtime, context, true);
         return ItemNull;
     }
-    jm_track_active_js_transpile(NULL, mt, NULL);
-    // ES modules own a private zero-based property-name image even when their
-    // importer uses a test harness preamble. Sharing the preamble offset here
-    // makes globalThis member names resolve against the wrong image (D3.4.4v2).
-    mt->module_name_base = 0;
-
-    mt->module = MIR_new_module(ctx, "js_module");
-
     if (!transpile_js_mir_ast(mt, js_ast)) {
         log_error("js-mir: module: collection/allocation failed for '%s'", filename);
         (void)js_mir_compile_unit_fail(ctx, mt, tp, NULL,

@@ -400,10 +400,10 @@ extern "C" bool js_prepare_eval_context(Runtime* runtime,
     return true;
 }
 
-// one script-shaped unit owns one MIR transpiler and its module artifact.
-static JsMirTranspiler* js_mir_open_script_unit(
+// one compile unit owns one MIR transpiler and its module artifact.
+JsMirTranspiler* js_mir_open_compile_unit(
         JsTranspiler* tp, const char* filename,
-        const char* module_name, uint32_t module_name_base,
+        const char* module_name, bool is_module, uint32_t module_name_base,
         const char* log_prefix, bool install_error_handler,
         MIR_context_t* out_ctx) {
     if (!out_ctx) return NULL;
@@ -416,7 +416,7 @@ static JsMirTranspiler* js_mir_open_script_unit(
         MIR_set_error_func(*out_ctx, g_batch_mir_error_handler);
     }
     JsMirTranspiler* mt = jm_create_mir_transpiler(
-        tp, *out_ctx, filename, false, 64, 32, 16, log_prefix);
+        tp, *out_ctx, filename, is_module, 64, 32, 16, log_prefix);
     if (!mt) return NULL;
     jm_track_active_js_transpile(NULL, mt, NULL);
     mt->module_name_base = module_name_base;
@@ -441,8 +441,8 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     js_runtime_set_input(js_input);
 
     MIR_context_t ctx = NULL;
-    JsMirTranspiler* mt = js_mir_open_script_unit(tp, filename,
-        "ts_script", js_preamble_consumer_name_base(g_jm_preamble_in),
+    JsMirTranspiler* mt = js_mir_open_compile_unit(tp, filename,
+        "ts_script", false, js_preamble_consumer_name_base(g_jm_preamble_in),
         "js-mir-ast", false, &ctx);
     if (!mt) {
         return js_mir_compile_unit_fail(ctx, NULL, tp, NULL,
@@ -890,7 +890,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
     MIR_context_t ctx = NULL;
 
-    JsMirTranspiler* mt = js_mir_open_script_unit(tp, filename, "js_script",
+    JsMirTranspiler* mt = js_mir_open_compile_unit(tp, filename, "js_script", false,
         js_preamble_consumer_name_base(g_jm_preamble_in), "js-mir", true, &ctx);
     if (!mt) {
         return js_mir_compile_unit_fail(ctx, NULL, tp, owned_source,

@@ -742,7 +742,7 @@ Recommended order:
 
 Mode-specific policy is data on the unit: parse goal, module/eval/preamble flags, backend selection, execution policy, and artifact-retention policy. It is not a copy of the driver.
 
-The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. P3b moves MIR context creation, error-handler installation, transpiler ownership, name-base setup, and module creation into one script-unit opener used by ordinary source and pre-built-AST entry points. Manual phase timing and cleanup labels remain for the later driver slices.
+The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. P3b moves MIR context creation, error-handler installation, transpiler ownership, name-base setup, and module creation into one script-unit opener used by ordinary source and pre-built-AST entry points. P3c extends that opener to ES modules while retaining the module's private zero-based name image and registry/TLA policy. Manual phase timing and cleanup labels remain for the later driver slices.
 
 #### P3a implementation record — truthful JavaScript validation pass, 2026-08-28
 
@@ -771,6 +771,34 @@ make build-test                                      # Errors: 0; Warnings: 40
                                                        # 51/51 passed
 ./utils/check_ast_tune_loc.sh --base 44b98dcebd19a548a14bbb75785091b545445f00 --cap 310711 --phase-base 068301268
                                                        # candidate 310,524; phase C/C++ -3; source -3
+git diff --check                                     # clean
+```
+
+#### P3c implementation record — module compile-unit opener, 2026-08-28
+
+**D8.2.5** requires compilation-unit setup to be shared without erasing
+language- or mode-specific policy. `js_mir_open_compile_unit` now accepts the
+module bit and module name, so the ES-module entry uses the same MIR context,
+transpiler ownership, active-owner tracking, and module-artifact creation as
+ordinary source. Its zero-based private property-name image, prelink ordering,
+registry placeholder, top-level-await bookkeeping, and deferred MIR retention
+remain in the module caller. The previous module-local context/transpiler/
+module setup is retired in the same change.
+
+The independent P3c slice is C/C++ `+17/-24 = -7`; all hand source is also
+`+17/-24 = -7`. The phase base is commit `91e89a0c4`; the governed candidate is
+310,517 lines, seven below P3b and 194 below the 310,711-line project anchor.
+
+Focused evidence:
+
+```text
+make build-test                                      # Errors: 0; Warnings: 40
+./test/test_js_gtest.exe --gtest_filter='JavaScriptRegression.Module*'
+                                                       # 2/2 passed
+./test/test_js_script_gtest.exe --gtest_filter='JsInterpreter.LinksEsModulesWithLiveRegistryBindings:JsInterpreter.SupportsModuleMetadataAndDynamicImports:JsInterpreter.PreservesLiveBindingsThroughNamedReexports:JsInterpreter.PreservesLiveBindingsThroughStarReexports:JsInterpreter.ExportsNamespaceObjectsAndAnonymousDefaultFunctions:JsInterpreter.InstantiatesHoistedExportsBeforeCircularDependencies:JsInterpreter.RejectsAmbiguousStarExportsBeforeModuleBodyExecution:JsInterpreter.ImportsLambdaModulesThroughTheSharedRegistry'
+                                                       # 8/8 passed
+./utils/check_ast_tune_loc.sh --base 44b98dcebd19a548a14bbb75785091b545445f00 --cap 310711 --phase-base 91e89a0c4
+                                                       # candidate 310,517; phase C/C++ -7; source -7
 git diff --check                                     # clean
 ```
 

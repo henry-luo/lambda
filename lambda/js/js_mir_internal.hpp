@@ -178,6 +178,10 @@ JsMirTranspiler* jm_create_mir_transpiler(
     JsTranspiler* tp, MIR_context_t ctx, const char* filename, bool is_module,
     int import_capacity, int local_func_capacity, int var_scope_capacity,
     const char* log_prefix);
+JsMirTranspiler* js_mir_open_compile_unit(
+    JsTranspiler* tp, const char* filename, const char* module_name,
+    bool is_module, uint32_t module_name_base, const char* log_prefix,
+    bool install_error_handler, MIR_context_t* out_ctx);
 void jm_destroy_mir_transpiler(JsMirTranspiler* mt);
 Item js_mir_compile_unit_fail(MIR_context_t ctx, JsMirTranspiler* mt,
     JsTranspiler* tp, char* owned_source, Runtime* runtime,
