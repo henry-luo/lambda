@@ -2073,6 +2073,7 @@ static bool mir_root_may_need_cow(MirVarEntry* root) {
 // Emission order is program order, so setting it here reaches exactly the
 // writes that follow the capture -- the same mechanism binding aliases use.
 static void mir_note_value_captured(MirTranspiler* mt, AstNode* value_expr) {
+    if (!cow_capture_enabled()) return;
     MirVarEntry* source = mir_direct_root_binding(mt, value_expr);
     if (source && mir_root_may_need_cow(source)) source->cow_marked = true;
 }
@@ -2084,6 +2085,7 @@ static void mir_note_value_captured(MirTranspiler* mt, AstNode* value_expr) {
 // Literal construction needs no emission: its fill/push helpers are Lambda-only
 // and capture in the runtime.
 static void mir_emit_value_capture(MirTranspiler* mt, AstNode* value_expr) {
+    if (!cow_capture_enabled()) return;
     MirVarEntry* source = mir_direct_root_binding(mt, value_expr);
     if (!source || !mir_root_may_need_cow(source)) return;
     source->cow_marked = true;
@@ -13197,8 +13199,8 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
             // S9.3.1: only a NAMED element needs the capture; a fresh one has
             // no second observer (ast_expr_insertion_needs_capture).
             emit_call_void_2(mt,
-                ast_expr_insertion_needs_capture(item) ? "array_push_capture"
-                                                       : "array_push",
+                cow_capture_enabled() && ast_expr_insertion_needs_capture(item)
+                    ? "array_push_capture" : "array_push",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
         }
@@ -14309,7 +14311,8 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
                     MIR_reg_t boxed = transpile_box_item(mt, value_node);
                     // S9.3.1: capture a named field value here -- this shaped
                     // fast path stores straight into the data buffer.
-                    if (ast_expr_insertion_needs_capture(value_node)) {
+                    if (cow_capture_enabled() &&
+                            ast_expr_insertion_needs_capture(value_node)) {
                         emit_call_1(mt, "cow_capture_value", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
                     }
@@ -14356,7 +14359,8 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
             if (key_expr->as) {
                 mir_note_value_captured(mt, key_expr->as);  // S9.3.1
                 MIR_reg_t val = transpile_box_item(mt, key_expr->as);
-                if (ast_expr_insertion_needs_capture(key_expr->as)) {
+                if (cow_capture_enabled() &&
+                        ast_expr_insertion_needs_capture(key_expr->as)) {
                     emit_call_1(mt, "cow_capture_value", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                 }
@@ -14382,7 +14386,7 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
         } else {
             mir_note_value_captured(mt, item);  // S9.3.1
             MIR_reg_t val = transpile_box_item(mt, item);
-            if (ast_expr_insertion_needs_capture(item)) {
+            if (cow_capture_enabled() && ast_expr_insertion_needs_capture(item)) {
                 emit_call_1(mt, "cow_capture_value", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
@@ -14454,7 +14458,8 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
                 if (key_expr->as) {
                     mir_note_value_captured(mt, key_expr->as);  // S9.3.1
                     MIR_reg_t val = transpile_box_item(mt, key_expr->as);
-                    if (ast_expr_insertion_needs_capture(key_expr->as)) {
+                    if (cow_capture_enabled() &&
+                        ast_expr_insertion_needs_capture(key_expr->as)) {
                         emit_call_1(mt, "cow_capture_value", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                     }
@@ -14470,7 +14475,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
             } else {
                 mir_note_value_captured(mt, scan);  // S9.3.1
                 MIR_reg_t val = transpile_box_item(mt, scan);
-                if (ast_expr_insertion_needs_capture(scan)) {
+                if (cow_capture_enabled() && ast_expr_insertion_needs_capture(scan)) {
                     emit_call_1(mt, "cow_capture_value", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                 }

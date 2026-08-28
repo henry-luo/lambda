@@ -1221,11 +1221,6 @@ bool editing_geometry_caret_rect(UiContext* uicon,
 // shared editing event dispatch policy for form text controls and
 // standard contenteditable hosts.
 
-// F14.4: retain only the lifecycle guard when a plain event handler may replace
-// the editable host before the package default is offered.
-DomElement* editing_live_host_guard(DomDocument* document, DomNodeRef host_ref,
-                                    uint32_t host_view_id);
-
 struct EventContext;
 struct DocState;
 

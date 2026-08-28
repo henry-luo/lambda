@@ -1,19 +1,19 @@
 # Radiant — Editing, Selection & DOM Ranges
 
-> **Last verified against tree:** 2026-07-30 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-08-28 *(F14.3/F14.4 canonical-target dispatch update)*
 
-> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's WHATWG-aligned editing model as it sits over the shared DOM/view tree ([RAD_01](RAD_01_View_and_DOM_Model.md)): the spec-conformant `DomRange`/`DomSelection` primitives, live-range mutation envelopes, the `inputType` intent taxonomy, and the one registered-action gate for `contenteditable`. It also covers caret/selection geometry and hit-testing, and the pluggable clipboard store. The native form-control editing path is a sibling subject — see [RAD_19](RAD_19_Form_Controls.md).
+> **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers Radiant's WHATWG-aligned editing model as it sits over the shared DOM/view tree ([RAD_01](RAD_01_View_and_DOM_Model.md)): the spec-conformant `DomRange`/`DomSelection` primitives, live-range mutation envelopes, the `inputType` intent taxonomy, and the ordinary notification/default-action path for `contenteditable`. It also covers caret/selection geometry and hit-testing, and the pluggable clipboard store. The native form-control editing path is a sibling subject — see [RAD_19](RAD_19_Form_Controls.md).
 >
-> **Primary sources:** `radiant/event.hpp` / `dom_range.cpp` (`DomBoundary`/`DomRange`/`DomSelection`, mutation envelopes, `Selection.modify`, extract/clone/surround, stringification), `radiant/editing.cpp` (surface classification), `radiant/editing_dispatch.cpp` (prepared transaction and notification/action/notification gate), `radiant/editing_action_registry.cpp` (per-document action registry), `radiant/editing_dom_handler.cpp` (narrow DOM action), `radiant/editing_template_handler.cpp` (template adapter), `radiant/editing_host.cpp` (canonical host recognition), and `radiant/editing_target_range.cpp` (immutable `InputEvent` target ranges).
+> **Primary sources:** `radiant/event.hpp` / `dom_range.cpp` (`DomBoundary`/`DomRange`/`DomSelection`, mutation envelopes, `Selection.modify`, extract/clone/surround, stringification), `radiant/editing.cpp` (surface classification), `radiant/event.cpp` (ordinary contenteditable notification/default/input dispatch and canonical target re-resolution), `radiant/editing_dispatch.cpp` (form notification bridge and diagnostics), `radiant/editing_host.cpp` (canonical host recognition), and `radiant/editing_target_range.cpp` (immutable `InputEvent` target ranges).
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the symbol name. The historical design docs `vibe/radiant/Radiant_Design_Editing*.md` and `Radiant_Design_Selection.md` are rationale only and are explicitly marked phased-out.
 
 ---
 
 ## 1. Scope and the central decision
 
-The editing subsystem is a **WHATWG-aligned editing model** layered over the unified DOM/view tree, where a `DomText` is its own `ViewText` and a `DomElement` is its own `ViewElement` ([RAD_01](RAD_01_View_and_DOM_Model.md)). It resolves text controls and standard `contenteditable` hosts through one `EditingSurface` abstraction, maps raw key/text/composition events to `inputType` intents, and routes every contenteditable edit through one transaction gate.
+The editing subsystem is a **WHATWG-aligned editing model** layered over the unified DOM/view tree, where a `DomText` is its own `ViewText` and a `DomElement` is its own `ViewElement` ([RAD_01](RAD_01_View_and_DOM_Model.md)). It resolves text controls and standard `contenteditable` hosts through one `EditingSurface` abstraction, maps raw key/text/composition events to `inputType` intents, and routes every contenteditable edit through one ordinary default-action dispatch site.
 
-The gate has a strict notification/action/notification contract. It resolves a canonical host and route, snapshots at most one per-document action handler, sends cancelable `beforeinput`, validates the monotonic mutation epoch, invokes the selected action only when allowed, verifies the observable outcome, then sends non-cancelable `input` only after a claim or change. `beforeinput` and `input` never select a handler or perform mutation themselves. A direct DOM host uses the deliberately narrow `dom-compat` action; a live Radiant template owner uses `radiant-template`. `data-editable` is not a routing signal. Form controls retain their separate value-store action between the same kind of notifications, as documented by [RAD_19](RAD_19_Form_Controls.md).
+The path has a strict notification/default/notification contract. It dispatches cancelable `beforeinput`, lets author JavaScript or an ordinary Lambda handler prevent the package default, then re-resolves the current canonical contenteditable surface from the StateStore's DOM `Selection` (with focused-surface fallback for a range-less composition start). The package applies the unprevented default and sends non-cancelable `input` after a claim or change. `editing_live_host_guard`, its retained `DomNodeRef`, and its view-ID validity check are retired: author mutation can replace the original host, and a replacement is eligible only if canonical selection/focus now resolves it. Form controls retain their separate value-store action between the same kind of notifications, as documented by [RAD_19](RAD_19_Form_Controls.md). This ordering follows **S12.1.3** and **S12.2.2**; package dispatch remains within **D7.2.1–D7.2.3**.
 
 ---
 
@@ -57,15 +57,33 @@ The carrier `struct InputIntent` (`event.hpp`, aliased `EditingIntent`) bundles 
 
 ---
 
-## 5. The contenteditable transaction gate
+## 5. The contenteditable default-action dispatch
 
-<img alt="Prepared contenteditable transaction passes through one selected action" src="diagram/rad18_dispatch_seam.svg" width="720">
+<img alt="Contenteditable beforeinput resolves the canonical target before the package default" src="diagram/rad18_dispatch_seam.svg" width="720">
 
-`editing_run_contenteditable_transaction` in `editing_dispatch.cpp` uses `EditingPreparedTransaction` and `EditingTransactionResult` instead of ambiguous handled/mutated booleans. The prepared value owns intent payload, immutable target ranges, a selection snapshot, a generation-bearing host reference, route, registry generation, and selected handler identity. The result records cancellation, mutation before notification, action invocation/claim, DOM/model/selection outcome, post-input delivery, unsupported fall-through, and failure.
+`dispatch_contenteditable_plain_event` in `event.cpp` is the single ordinary
+contenteditable path. It dispatches cancelable `beforeinput` to the original
+event target, then refreshes the canonical selection shadow and resolves the
+current `EditingSurface`. The selection focus boundary is preferred; the
+focused editing surface is used only when a composition start has no DOM range.
+No original-host identity, `DomNodeRef`, view ID, route snapshot, or live-host
+validity check survives the author notification.
 
-The order is fixed: canonical host and route → target/selection snapshot → one registry snapshot → epoch E0 → cancelable `beforeinput` → epoch E1 → action (only if uncanceled and E0 equals E1) → epoch E2/outcome validation → non-cancelable `input` on claim/change. A listener that mutates without canceling is a contract violation; the action and synthetic `input` do not run. Registry mutations during notification are deferred by dispatch-depth tombstones, so the pre-notification snapshot remains safe and deterministic.
+The order is fixed: initial editing-surface resolution → cancelable
+`beforeinput` → canonical selection/focus re-resolution → package default (only
+when not prevented) → non-cancelable `input` after a claim or DOM change. Live
+`DomRange` mutation envelopes preserve the selection's current boundaries while
+author code edits the tree. If the original host is detached and no replacement
+is canonical, the default declines. If author code moves selection/focus to a
+replacement editable host, the package applies there and the `input` event uses
+that same owner. This is the post-F14.4 target rule and is consistent with
+**S12.1.3** (author mutation in `pn` handlers) and **S12.2.2** (current DOM
+mutation semantics).
 
-The built-ins deliberately have disjoint routes. `dom-compat` handles only text insertion/replacement, selected text-run deletion, one text-run backward/forward deletion, and provisional composition. Structural line/paragraph, format, history, and first-gate clipboard/drop intents return `PASS`; editors own those commands. `radiant-template` invokes the existing template editing/retransform machinery and reports model reconciliation without pretending that handler existence was a claim. `event.cpp` runs the entire gate inside one retained JS dispatch batch, so MutationObserver delivery occurs after post-action `input`, not between action and notification.
+Lambda `edit` templates use the same ordinary handler path; their return verdict
+is the author-side decision, without a prepared transaction or route/result side
+channel. The entire path remains inside one retained JS dispatch batch, so
+MutationObserver delivery stays after the post-action `input` notification.
 
 ---
 
@@ -118,9 +136,8 @@ The canonical selection is `state->dom_selection` / `state->sel`. Snapshot/acces
 | `radiant/event.hpp` / `dom_range.cpp` | `DomBoundary`/`DomRange`/`DomSelection`, UTF-16↔UTF-8 offsets, Range/Selection methods, live-range mutation envelopes, navigation, and stringification. |
 | `radiant/event.hpp` / `dom_range_resolver.cpp` | Layout-cache resolution, pixel↔boundary hit-testing, selection rectangles, and glyph-precise X resolvers. |
 | `radiant/event.hpp` / `editing.cpp` | `EditingSurface`/`EditingMode` resolution and canonical-host helpers. |
-| `radiant/event.hpp` / `editing_dispatch.cpp` | Prepared/result contracts and the contenteditable notification/action/notification gate. |
-| `radiant/editing_action_registry.cpp` | Per-document deterministic action selection, snapshots, and tombstone lifetime. |
-| `radiant/editing_dom_handler.cpp` / `editing_template_handler.cpp` | The narrow DOM fallback and the template model-reconciliation action. |
+| `radiant/event.hpp` / `radiant/event.cpp` | Editing-surface contracts and the contenteditable notification/default/input path, including canonical target re-resolution. |
+| `radiant/editing_dispatch.cpp` | Form-control notification bridge and editing diagnostics. |
 | `radiant/event.hpp` / `editing_intent.cpp` | Input-intent taxonomy and key/text/composition mapping. |
 | `radiant/event.hpp` / `editing_host.cpp` | Centralized `contenteditable` recognition, `="false"` islands, and the `contentEditable` IDL. |
 | `radiant/event.hpp` / `editing_controller.cpp` | Rich navigation, history, composition, and drag-autoscroll hooks. |

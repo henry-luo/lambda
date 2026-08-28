@@ -923,7 +923,42 @@ single non-thread-local flag: concurrent compilation/execution that wants
 per-run dry-run semantics has no per-context override. Cross-link: RG1–RG14 in
 [Runtime globals audit].
 
-<a id="lr12-9"></a>**LR12-9 · Construction/insertion aliases instead of capturing by value (`S9.3.1`) · OPEN**
+<a id="lr12-9"></a>**LR12-9 · Construction/insertion aliases instead of capturing by value (`S9.3.1`) · IMPLEMENTED BEHIND A FLAG**
+
+**Update 2026-08-28.** Insertion capture is implemented on both tiers behind
+`LAMBDA_COW_CAPTURE` (default OFF). With the flag set, all four probes below
+return the ruled value, the two-node cycle is no longer constructible, and
+`awfy/richards3` still passes. Mechanism: capture is `cow_mark_shared` at the
+insertion site — the copy stays deferred to `cow_prepare_write`, so nothing is
+eagerly cloned. It is decided at COMPILE time and applied only to a *named*
+value (`ast_expr_insertion_needs_capture`): a freshly produced container has no
+second observer, and marking one would make `rows[i] = <fresh>` detach on the
+owner's first write. MIR Direct additionally needed the static half — it picks
+the store form from `MirVarEntry::cow_marked` at compile time, so an unflagged
+binding keeps emitting raw field stores that never read the runtime bit
+(`mir_note_value_captured` / `mir_emit_value_capture`).
+
+**Why it is not yet the default.** Insertion capture is sound alone, but element
+and field READS still borrow (the open C4.1 half). Once a slot holds a captured
+value, the get-modify idiom `c = owner[i]` … `c[j] = v` writes to a detached
+copy and the update is lost. Measured cost of flipping it: exactly **four**
+corpus scripts, all that idiom — `proc/proc_fill_gc_nested`,
+`awfy/{cd2_orig,deltablue,deltablue2}`. Three are benchmark sources (`cd2_orig`
+is a perf *control*), so the rewrite is a scoping decision, not a mechanical
+fix. The sanctioned rewrites are the path write (`owner[i][j] = v`, which
+`cow_path_set` already propagates correctly), mutate-then-insert, or the
+explicit read-modify-write handle store (`C4.2e`) that `richards3` uses.
+`S9.1.3` plain-parameter snapshots remain unimplemented and are still expected
+to land with this. The nested-mutation design that lets the flag become the
+default is now written:
+[`Lambda_Design_Nested_Mutation.md`](Lambda_Design_Nested_Mutation.md)
+(CW22–CW28, PROPOSED, owner of `SO14`). Its scheduling result is that the flip
+is gated on **CW24 alone** — a compile error for a mutated place copy — not on
+the ergonomic forms; that turns the four blocked scripts from silent wrong
+answers into four located, mechanical fixes.
+
+Original record (behavior with the flag unset) follows.
+
 Probed 2026-08-27 on `ba7ce817c`, interpreter and `LAMBDA_TIER=jit` alike.
 `S9.3.1` rules that placing a value into a container captures it **by value** at
 every constructor and insertion point; none of them do:

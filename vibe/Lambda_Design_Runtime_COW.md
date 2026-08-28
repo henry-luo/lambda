@@ -852,9 +852,30 @@ bounds-check elimination as a new item not yet in any ledger.
 
 | Item | Source | Notes |
 |---|---|---|
-| **Nested-mutation ergonomics** — path-shaped `var` borrows (`f(var t.nodes[i])`), `_modify`-style in-place accessors, guaranteed get-modify-put | C4.4 #6; `doc/Lambda_Formal_Semantics.md` §9.5.2 | Stage 1 *reduces the urgency* (the naive spelling becomes safe — worst case O(spine), never O(size)) but the guaranteed-in-place forms and their syntax are undesigned. Natural sequencing: after Stage 2 (path borrows reuse the exclusivity machinery) |
+| **Nested-mutation ergonomics** — path-shaped `var` borrows (`f(var t.nodes[i])`), `_modify`-style in-place accessors, guaranteed get-modify-put | C4.4 #6; `doc/Lambda_Formal_Semantics.md` §9.5.2 | **OWNED as of 2026-08-28 by [`Lambda_Design_Nested_Mutation.md`](Lambda_Design_Nested_Mutation.md) (CW22–CW28)**, which extends this doc's CW series. **PROMOTED to blocking** — see the note below. Stage 1 *reduces the urgency* (the naive spelling becomes safe — worst case O(spine), never O(size)) but the guaranteed-in-place forms and their syntax are undesigned. Natural sequencing: after Stage 2 (path borrows reuse the exclusivity machinery) |
 | **Element/document node representation for huge fan-out** — chunked children so a one-level copy of a 10⁵-child node isn't O(width) | §9.5.1 residue; §12.2 | gate on the editor/document benchmark from Tune-COW Phase A3; only if it fails on real documents |
 | **Non-escaping nested-`pn` relaxation** (direct up-level `var` access for call-position-only nested `pn`s — the closure-style parser case) | C4.2a spec sketch | backward-compatible addition; interim idiom (object with `pn` methods) is unblocked by Tune-COW Phase B, which lowers the pressure to do this soon |
+
+**Nested mutation now gates S9.3.1 (2026-08-28).** Insertion capture is
+implemented on both tiers behind `LAMBDA_COW_CAPTURE` (default off;
+[LR12-9](Lambda_Issue_Ledger.md#lr12-9)). It cannot become the default while
+element/field reads still borrow: as soon as a slot holds a captured value, the
+get-modify idiom `c = owner[i]` … `c[j] = v` writes a detached copy and loses
+the update. So the two halves of C4.1 are not independently shippable — closing
+insertion without closing reads breaks the one spelling every nested-container
+script uses. Measured flip cost is four corpus scripts, three of them benchmark
+sources. This makes §9.5.2 a prerequisite for the S9.3.1 flip rather than an
+ergonomic follow-up, which is a change from this appendix's original sequencing
+("after Stage 2").
+
+**Refined by CW24 (same day).** The nested-mutation design narrows what
+actually gates the flip: only **CW24**, the compile error for a mutated place
+copy, is required — it converts the silent lost update into four located,
+mechanical fixes. The ergonomic forms (CW25 path borrows, CW26 `with var`)
+remove a verbosity tax and can follow. The design also finds that path borrows
+already alias rather than un-sharing, which is a standing violation of the
+ratified **S9.2.2** ("a mutable borrow over shared storage un-shares first"),
+so CW25 is conformance work rather than new semantics.
 
 ### B.3 Different project
 

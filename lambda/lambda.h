@@ -2808,6 +2808,9 @@ extern "C" {
     bool cow_item_is_container(Item value);
     Item cow_mark_shared(Item value);
     Item cow_capture_value(Item value);
+    // Whether S9.3.1 insertion capture is active (LAMBDA_COW_CAPTURE). The
+    // transpiler reads it too, so flag-off emits the pre-capture code exactly.
+    bool cow_capture_enabled(void);
     // Capture every field of a freshly built shaped literal (S9.3.1).
     void cow_mark_shape_children(struct TypeMap* type, void* data);
     Item cow_bind_var(Item value);

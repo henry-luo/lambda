@@ -22,7 +22,7 @@ The staging table in §3.16:
 | --- | --- | --- |
 | F14.1 | `commands.ls` + the `execcommand` dispatch; migrate `insertHTML` off the native bridge; formatting on single-text-node ranges via the wrap primitive | **implemented this session** |
 | F14.2 | structural primitives; cross-node delete and replacement; adjacent-block merge; `insertParagraph`/`insertLineBreak` block handling | **implemented this session** |
-| F14.3 | JS editors on the plain event path: retire the prepared-transaction wrapper, keep the live-host guard | **implemented this session** |
+| F14.3 | JS editors on the plain event path: retire the prepared-transaction wrapper and re-resolve the canonical target after author notification | **implemented this session** |
 | F14.4 | delete the §3.16 retire list; `edit` templates take `beforeinput` as ordinary handlers; audit `text_edit.cpp` residue | **implemented this session** |
 
 **F14.4 removes the remaining compatibility machinery.** JS pages and Lambda
@@ -134,12 +134,14 @@ node's text **before** any split, because the splits invalidate the offsets.
 dispatch sequence:
 
 ```
-beforeinput → live-host guard → dom package default → input
+beforeinput → canonical selection/focus re-resolution → dom package default → input
 ```
 
 The package default is offered only when `beforeinput` was not canceled. The
-host is resolved again after the listener returns, so a listener that detaches
-or replaces the editable host cannot cause the old DOM to be mutated. The
+canonical target is resolved again after the listener returns, so a detached
+original host is never reused. If author code moves the live `Selection` (and,
+for a no-range composition start, focus) to a replacement editable host, the
+package default and resulting `input` event target that replacement. The
 Lambda `edit` templates use the same ordinary handler path; their return verdict
 is the author decision, with no prepared target snapshot or route/result side
 channel.
@@ -210,14 +212,15 @@ unsupported commands continue to decline through the package verdict.
   F14.2 fixtures.
 - `make editable-ui` — all seven listed contenteditable/editor fixtures pass;
   the composition fixture is 5/5 after the F14.3 anchor fix.
-- **New UI test `test/ui/test_editing_contenteditable_plain_event_guard.json` —
-  3/3 pass** (`test/html/editable-plain-event-guard.html`). A JS
-  `beforeinput` listener replaces the host; the old host receives no package
-  mutation or `input` event.
+- **UI test `test/ui/test_editing_contenteditable_plain_event_guard.json` —
+  5/5 pass** (`test/html/editable-plain-event-guard.html`). A JS
+  `beforeinput` listener replaces the host, moves the canonical `Selection`
+  and focus to the replacement, and the package inserts `X` there with
+  `beforeinput|replacement-input`; the detached old host receives no event.
 - CodeMirror, ProseMirror, and Editor.js editor fixtures pass when run as
   individual processes. The CodeMirror and ProseMirror full fixtures are 14/14
   each; all 11 Editor.js fixtures also pass individually.
-- `./test/test_ui_automation_gtest.exe --gtest_filter='*editable_editors_*:*test_editing_contenteditable_*:*editable_mixed_routes:*editable_template_gate'` — 39/39 selected editor/contenteditable cases pass, including the new F14.3 guard.
+- `LAMBDA_UI_TEST_JOBS=1 ./test/test_ui_automation_gtest.exe --gtest_filter='*test_editing_contenteditable_*:*editable_mixed_routes:*editable_template_gate'` — 8/8 focused contenteditable cases pass, including the F14.3 canonical-target regression. The broader 39-case aggregate remains resource-sensitive under parallel execution.
 - `test/js/dom_exec_command_insert_html` — byte-identical to its golden.
 - `test/ui/test_editing_contenteditable_dom_action.json` (the F13 test) — 7/7.
 - `./test/test_js_gtest.exe` — 356/357 pass on the current tree. The one
@@ -261,14 +264,33 @@ helpers. The paired false-island fixture also asserts that no
 
 ### 6.2 F14.3 is closed
 
-JS-owned contenteditable now follows `beforeinput` → live-host guard → package
-default → `input`. The package default is suppressed when `beforeinput` is
-prevented, and a host replaced by a listener is rejected before any package
-mutation. Composition retains its document-scoped native session; its anchor is
-recorded from the replaced range start, so an IME caret inside a preedit and a
-new composition after commit both replace the intended run.
+JS-owned contenteditable now follows `beforeinput` → canonical
+selection/focus re-resolution → package default → `input`. The package default
+is suppressed when `beforeinput` is prevented. Author mutation may replace the
+original host; the dispatch site does not retain or validate that host identity,
+but re-resolves the current canonical editable surface. Composition retains its
+document-scoped native session; its anchor is recorded from the replaced range
+start, so an IME caret inside a preedit and a new composition after commit both
+replace the intended run.
 
-### 6.3 F14.2 is closed
+### 6.3 F14.3 follow-up — canonical target re-resolution
+
+The former `editing_live_host_guard` and its `DomNodeRef`/view-ID validity
+check are retired. After author `beforeinput`, `state->dom_selection` (refreshed
+through the StateStore shadow) is the first source for the target; the focused
+editing surface is only the fallback for a composition start with no DOM range.
+The package action and post-action `input` notification both use that resolved
+surface. This follows **S12.1.3** and **S12.2.2**: author handlers are the
+mutation-capable phase, and subsequent DOM mutation acts on the current DOM
+state; package loading/dispatch remains within **D7.2.1–D7.2.3**'s document
+script-package seam.
+
+The replacement-host regression now proves the positive case (`listenerX` and
+`beforeinput|replacement-input`). If author code removes the original host but
+does not establish another canonical editable selection/focus, resolution
+declines the default instead of mutating a stale node.
+
+### 6.4 F14.2 is closed
 
 The F14.2 package path and native waist are now verified for cross-paragraph
 replacement and delete, same-tag adjacent-block merge, paragraph splitting,
@@ -278,7 +300,7 @@ what makes Backspace at the start of a block reach the cross-node target range.
 The implementation does not broaden partial unwrap beyond its deliberate
 single-direct-text-child shape.
 
-### 6.4 F14.2 — the structural primitives (the real cost)
+### 6.5 F14.2 — the structural primitives (the real cost)
 
 §3.16: "split node at offset, wrap/unwrap a range in an element, remove a
 cross-node range, merge adjacent blocks, insert a parsed fragment — each ≤ 4
@@ -291,7 +313,7 @@ now exist. Partial unwrap remains deliberately bounded to a formatting element
 with one direct text child; nested, multi-child, and cross-node unwrap shapes
 remain future work rather than being half applied.
 
-### 6.5 Hazards to carry forward (§3.16, all previously paid for once)
+### 6.6 Hazards to carry forward (§3.16, all previously paid for once)
 
 - **The `domedit`/`execcommand` dispatch is a genuine default action**, so
   `default_prevented` must suppress it — unlike `keyintent`, which is a
@@ -309,7 +331,7 @@ remain future work rather than being half applied.
   (`'prevent-default'` vs `'pass'`) = "handled, no change". `queryCommandState`
   and a declined toggle both need the second. Do not invent a third.
 
-### 6.6 Useful commands
+### 6.7 Useful commands
 
 ```bash
 make build
@@ -342,7 +364,7 @@ CLI path also exercises the synchronous package-load ownership seam.
  M radiant/editing_intent.cpp                InputIntent::command and edit payload ownership
  M radiant/event.cpp                         execcommand dispatch + ordinary editing event path
  M radiant/event.hpp                         InputIntent, waist, and retired transaction state removal
- M radiant/editing_dispatch.cpp              live-host guard; prepared transaction path removed
+ M radiant/editing_dispatch.cpp              logging/form bridge; identity guard removed
  M radiant/state_machine.cpp                 retired rich-edit validators and snapshot fields removed
  M radiant/state_schema.cpp                  retired rich-edit FSM/rules/invariant bindings removed
  M test/dedup/exclude.json                   remove the deleted rich transaction phase region

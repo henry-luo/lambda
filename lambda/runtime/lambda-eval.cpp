@@ -7768,7 +7768,20 @@ Item cow_bind_var(Item value) {
 // detaches correctly when a COW-aware setter writes it (clone_mutable_array_num
 // via cow_prepare_write); what stays open is the raw/native-lane store paths
 // that never consult the flag, and those are Stage-2 ArrayNum work either way.
+// Opt-in until the nested-mutation half of C4 lands. Insertion capture on its
+// own is sound, but element/field READS still borrow (the open C4.1 half), so
+// the get-modify idiom `c = owner[i]` ... `c[j] = v` silently writes a detached
+// copy once the insertion that produced `owner[i]` captured a named value.
+// Four corpus scripts depend on that idiom today (Appendix B.2 / §9.5.2 is the
+// design that closes it), so the flip stays behind this flag -- the same
+// staging Phase C/D used for LAMBDA_COW.
+bool cow_capture_enabled(void) {
+    static const bool enabled = getenv("LAMBDA_COW_CAPTURE") != NULL;
+    return enabled;
+}
+
 Item cow_capture_value(Item value) {
+    if (!cow_capture_enabled()) return value;
     return cow_mark_shared(value);
 }
 

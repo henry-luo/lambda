@@ -1,7 +1,5 @@
 #include "event.hpp"
 
-#include "view.hpp"
-#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lib/log.h"
 
 #include <string.h>
@@ -51,56 +49,6 @@ static void editing_log_write_intent(JsonWriter* w,
                    redacted || !intent ? 0 : editing_log_cstr_len(intent->html_data));
         jw_kv_bool(w, "redacted", redacted);
     jw_obj_end(w);
-}
-
-static bool editing_node_is_connected(DomDocument* document, DomNode* node) {
-    if (!document || !node) return false;
-    if (document->root && view_tree_contains_view(
-            static_cast<DomNode*>(document->root), static_cast<View*>(node))) {
-        return true;
-    }
-    return document->view_tree && document->view_tree->root &&
-        view_tree_contains_view(static_cast<DomNode*>(document->view_tree->root),
-                                static_cast<View*>(node));
-}
-
-DomElement* editing_live_host_guard(DomDocument* document, DomNodeRef host_ref,
-                                    uint32_t host_view_id) {
-    if (!document) return nullptr;
-    DomNode* live_host = nullptr;
-    if (host_view_id && document->view_tree &&
-            document->view_tree->root) {
-        // Event selection and target ranges belong to the current view tree.
-        // A retained source-DOM record can be valid yet detached from that
-        // tree after relayout, so prefer the logical view identity first.
-        live_host = static_cast<DomNode*>(view_tree_find_live_id(
-            static_cast<DomNode*>(document->view_tree->root),
-            host_view_id));
-    }
-    if (!live_host && host_ref.address) {
-        live_host = dom_node_ref_validate(document, host_ref);
-    }
-    if (!live_host) {
-        return nullptr;
-    }
-    if (!live_host->is_element()) {
-        return nullptr;
-    }
-    if (!editing_node_is_connected(document, live_host)) {
-        return nullptr;
-    }
-    EditingSurface current_surface;
-    if (!editing_surface_from_target(static_cast<View*>(live_host),
-                                     &current_surface)) {
-        return nullptr;
-    }
-    // A listener may detach the host, but it may not reroute dispatch to another
-    // editable owner after the original target was resolved.
-    if (!editing_surface_is_rich(&current_surface) ||
-            current_surface.owner != live_host->as_element()) {
-        return nullptr;
-    }
-    return current_surface.owner;
 }
 
 static void editing_log_record(EventContext* evcon,

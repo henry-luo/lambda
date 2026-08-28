@@ -1680,6 +1680,30 @@ static View* canonical_selection_focus_target(DocState* state) {
     return focus.node ? static_cast<View*>(focus.node) : nullptr;
 }
 
+static bool canonical_contenteditable_surface_from_state(DocState* state,
+                                                          EditingSurface* out) {
+    if (out) editing_surface_clear(out);
+    if (!state) return false;
+
+    EditingSurface surface;
+    state_store_refresh_editing_selection_shadow(state);
+    View* selection_target = canonical_selection_focus_target(state);
+    if (selection_target && editing_surface_from_target(selection_target, &surface) &&
+        editing_surface_is_rich(&surface) && surface.owner) {
+        if (out) *out = surface;
+        return true;
+    }
+
+    // composition start can have focus without a DOM range; use the current
+    // focus surface only after the canonical selection has declined.
+    if (editing_surface_from_focus(state, &surface) &&
+        editing_surface_is_rich(&surface) && surface.owner) {
+        if (out) *out = surface;
+        return true;
+    }
+    return false;
+}
+
 static View* rich_keyboard_target_from_selection(DocState* state,
                                                  View* preferred,
                                                  EditingSurface* out_surface) {
@@ -5701,9 +5725,8 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
         !editing_surface_is_rich(surface)) {
         return false;
     }
-    DomDocument* document = event_context_target_document(evcon);
     DocState* state = event_context_target_state(evcon);
-    if (!document || !state || !surface->owner) return false;
+    if (!state || !surface->owner) return false;
 
     // All rich editors use the same synchronous ordering: an ordinary
     // beforeinput handler gets first refusal, the package supplies the
@@ -5712,8 +5735,6 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
     if (!dispatch_scope.active) return false;
     editing_interaction_set_active_surface(state, surface);
 
-    DomNodeRef host_ref = dom_node_ref(static_cast<DomNode*>(surface->owner));
-    uint32_t host_view_id = static_cast<DomNode*>(surface->owner)->id;
     bool has_js_runtime = event_document_has_js_runtime(evcon);
     bool beforeinput_prevented = false;
     bool author_handled = false;
@@ -5732,30 +5753,22 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
         }
     }
 
-    // the listener may remove or replace the host. Resolve by lifecycle
-    // identity after dispatch so the package never acts on a detached editor.
-    DomElement* live_host = editing_live_host_guard(document, host_ref,
-                                                    host_view_id);
-    if (!live_host) return true;
-
-    EditingSurface live_surface;
-    if (!editing_surface_from_target(static_cast<View*>(live_host),
-                                     &live_surface) ||
-        !editing_surface_is_rich(&live_surface)) {
+    // author code may replace the original host or move the selection. The
+    // canonical DOM selection/focus now decides where the default can apply.
+    EditingSurface canonical_surface;
+    if (!canonical_contenteditable_surface_from_state(state,
+                                                      &canonical_surface)) {
         return true;
     }
-    editing_interaction_set_active_surface(state, &live_surface);
+    DomElement* canonical_host = canonical_surface.owner;
+    editing_interaction_set_active_surface(state, &canonical_surface);
     if (beforeinput_prevented) return true;
     if (author_handled) {
         if (author_model_reconciled) {
-            DomElement* input_host = editing_live_host_guard(
-                document, host_ref, host_view_id);
-            if (input_host) {
-                bool input_model_reconciled = false;
-                dispatch_lambda_handler(
-                    evcon, static_cast<View*>(input_host), "input", intent,
-                    &input_model_reconciled, false);
-            }
+            bool input_model_reconciled = false;
+            dispatch_lambda_handler(
+                evcon, static_cast<View*>(canonical_host), "input", intent,
+                &input_model_reconciled, false);
             evcon->need_repaint = true;
         }
         return true;
@@ -5763,11 +5776,11 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
 
     EditingTargetRange target_ranges[4] = {};
     uint32_t target_range_count = editing_compute_target_ranges(
-        state, &live_surface, intent, target_ranges, 4);
+        state, &canonical_surface, intent, target_ranges, 4);
     if (target_range_count > 4) return true;
     for (uint32_t i = 0; i < target_range_count; i++) {
         if (!editing_geometry_surface_contains_target_range(
-                &live_surface, &target_ranges[i])) {
+                &canonical_surface, &target_ranges[i])) {
             return true;
         }
     }
@@ -5790,12 +5803,14 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
     }
 
     if (have_range) {
-        if (!dom_edit_prepare_pending_range(state, live_host, start, end)) {
+        bool prepared = dom_edit_prepare_pending_range(
+            state, canonical_host, start, end);
+        if (!prepared) {
             return true;
         }
     } else if (intent->type == INPUT_INTENT_COMPOSITION_START) {
         // starting composition reserves state but has no replacement range yet.
-        dom_edit_set_pending_range(state, live_host, nullptr, 0, 0,
+        dom_edit_set_pending_range(state, canonical_host, nullptr, 0, 0,
                                    nullptr, 0);
     } else {
         return true;
@@ -5803,7 +5818,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
 
     uint64_t apply_epoch_before = dom_edit_apply_epoch();
     bool claimed = radiant_dispatch_behavior_dom_edit(
-        static_cast<View*>(live_host), intent);
+        static_cast<View*>(canonical_host), intent);
     bool applied = dom_edit_apply_epoch() != apply_epoch_before;
     DomNode* caret_node = dom_edit_caret_node();
     uint32_t caret_offset = dom_edit_caret_offset_u16();
@@ -5838,7 +5853,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
         } else if (caret_offset >= data_u16) {
             anchor_u16 = caret_offset - data_u16;
         }
-        state->editing.composition.surface = live_surface;
+        state->editing.composition.surface = canonical_surface;
         state->editing.composition.anchor_view = static_cast<View*>(caret_text);
         state->editing.composition.anchor_offset = (int)dom_text_utf16_to_utf8(
             caret_text, anchor_u16); // INT_CAST_OK: DOM offsets fit the composition anchor.
@@ -5850,12 +5865,12 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
             intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
         if (input_intent_is_dispatchable(intent->type) && !composition_cancel) {
             if (has_js_runtime) {
-                radiant_dispatch_input_event(evcon, static_cast<View*>(live_host),
+                radiant_dispatch_input_event(evcon, static_cast<View*>(canonical_host),
                                              "input", intent);
             } else {
                 bool input_model_reconciled = false;
                 dispatch_lambda_handler(
-                    evcon, static_cast<View*>(live_host), "input", intent,
+                    evcon, static_cast<View*>(canonical_host), "input", intent,
                     &input_model_reconciled, false);
             }
         }
