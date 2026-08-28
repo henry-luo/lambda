@@ -1395,9 +1395,8 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
     *loaded = glyph != nullptr;
     if (!glyph) return 0.0f;
 
-    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
-        ? lycon->ui_context->pixel_ratio : 1.0f;
-    float advance = glyph->advance_x / pixel_ratio + kerning;
+    float raster_scale = ui_context_raster_scale(lycon->ui_context);
+    float advance = glyph->advance_x / raster_scale + kerning;
     if (small_caps_lower) {
         advance *= font_get_small_caps_scale(font_box_handle(&lycon->font));
     }

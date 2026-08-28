@@ -182,7 +182,7 @@ Order chosen so each task's measurement is attributable. Run `size_probe` + reco
 
 ## P6 — DomDocument grouping  **[DV13 — independent; any time after P0]**
 
-- Group into named sub-structs (member access rewrites only, no behavior): `DomJsRuntime` (`js_mir_ctx`, `js_preamble_state`, `js_runtime_*`, `js_mutation_*` records + counters, `js_ready_state`, `js_doc_node`), `ViewportMeta` (`viewport_*`, `given_scale`, `scale`, `body_transform_scale`), `ReconcileLog` (`last_dom_reconcile_*`).
+- Group into named sub-structs (member access rewrites only, no behavior): `DomJsRuntime` (`js_mir_ctx`, `js_preamble_state`, `js_runtime_*`, `js_mutation_*` records + counters, `js_ready_state`, `js_doc_node`), `ViewportMeta` (`viewport_*`, now RSC7 `output_scale` / `raster_scale` / `page_zoom`, `body_transform_scale`), `ReconcileLog` (`last_dom_reconcile_*`).
 - The `void*` typed-as-comment fields (`keyframe_registry`, `cached_css_engine`, `mem_ctx`) keep their opacity but move into the relevant group.
 - Gate: build + baseline; ~200 mechanical site edits.
 

@@ -74,9 +74,9 @@ void webview_manager_destroy(WebViewManager* mgr) {
 // Lifecycle wrappers — child window mode (delegate to platform)
 // ---------------------------------------------------------------------------
 
-WebViewHandle* webview_handle_create(WebViewManager* mgr, float w, float h, float pixel_ratio) {
+WebViewHandle* webview_handle_create(WebViewManager* mgr, float w, float h, float device_scale) {
     if (!mgr) return nullptr;
-    WebViewHandle* handle = webview_platform_create(mgr->window, 0, 0, w, h, pixel_ratio);
+    WebViewHandle* handle = webview_platform_create(mgr->window, 0, 0, w, h, device_scale);
     if (handle) {
         if (!mgr_track_handle(mgr, handle, WEBVIEW_MODE_WINDOW)) {
             // tracking owns lifecycle; destroy immediately if the registry cannot grow
@@ -92,9 +92,9 @@ WebViewHandle* webview_handle_create(WebViewManager* mgr, float w, float h, floa
 // Lifecycle wrappers — layer mode (offscreen rendering)
 // ---------------------------------------------------------------------------
 
-static WebViewHandle* webview_layer_handle_create(WebViewManager* mgr, float w, float h, float pixel_ratio) {
+static WebViewHandle* webview_layer_handle_create(WebViewManager* mgr, float w, float h, float raster_scale) {
     if (!mgr) return nullptr;
-    WebViewHandle* handle = webview_layer_platform_create(w, h, pixel_ratio);
+    WebViewHandle* handle = webview_layer_platform_create(w, h, raster_scale);
     if (handle) {
         if (!mgr_track_handle(mgr, handle, WEBVIEW_MODE_LAYER)) {
             // tracking owns lifecycle; destroy immediately if the registry cannot grow
@@ -146,8 +146,8 @@ static void webview_layer_set_html(WebViewHandle* handle, const char* html) {
 }
 
 void webview_set_bounds(WebViewHandle* handle, float x, float y,
-                        float w, float h, float pixel_ratio) {
-    if (handle) webview_platform_set_bounds(handle, x, y, w, h, pixel_ratio);
+                        float w, float h, float device_scale) {
+    if (handle) webview_platform_set_bounds(handle, x, y, w, h, device_scale);
 }
 
 void webview_set_visible(WebViewHandle* handle, bool visible) {
@@ -178,7 +178,8 @@ static bool tree_has_webview(View* view) {
 }
 
 static void sync_walk(WebViewManager* mgr, ViewBlock* block,
-                      float parent_x, float parent_y, float pixel_ratio) {
+                      float parent_x, float parent_y,
+                      float device_scale, float raster_scale) {
     if (!block) return;
 
     float abs_x = parent_x + block->x;
@@ -201,15 +202,18 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
         if (wv->mode == WEBVIEW_MODE_LAYER) {
             // --- Layer mode: offscreen rendering ---
             if (wv->needs_create && !wv->handle) {
-                wv->handle = webview_layer_handle_create(mgr, block->width, block->height, pixel_ratio);
+                wv->handle = webview_layer_handle_create(
+                    mgr, block->width, block->height, raster_scale);
                 wv->needs_create = false;
 
                 if (wv->handle) {
                     // allocate the ImageSurface for snapshot storage
                     if (!wv->surface) {
-                        int phys_w = (int)(block->width * pixel_ratio);   // INT_CAST_OK: pixel dimension
-                        int phys_h = (int)(block->height * pixel_ratio);  // INT_CAST_OK: pixel dimension
-                        wv->surface = image_surface_create(phys_w, phys_h);
+                        RdtDeviceRect device_rect = rdt_logical_to_device_rect(
+                            {0.0f, 0.0f, block->width, block->height},
+                            raster_scale, raster_scale);
+                        RdtDevicePixelSize extent = rdt_device_rect_pixel_extent(device_rect);
+                        wv->surface = image_surface_create(extent.width, extent.height);
                     }
 
                     if (wv->srcdoc) {
@@ -226,16 +230,21 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
 
             if (wv->handle) {
                 // resize if dimensions changed
-                bool size_changed = (block->width != wv->last_w || block->height != wv->last_h);
+                bool size_changed = block->width != wv->last_w ||
+                    block->height != wv->last_h ||
+                    fabsf(raster_scale - wv->last_raster_scale) > 0.0001f;
                 if (size_changed) {
-                    webview_layer_platform_resize(wv->handle, block->width, block->height, pixel_ratio);
+                    webview_layer_platform_resize(
+                        wv->handle, block->width, block->height, raster_scale);
                     // reallocate surface at new size
                     if (wv->surface) {
                         image_surface_destroy(wv->surface);
                     }
-                    int phys_w = (int)(block->width * pixel_ratio);   // INT_CAST_OK: pixel dimension
-                    int phys_h = (int)(block->height * pixel_ratio);  // INT_CAST_OK: pixel dimension
-                    wv->surface = image_surface_create(phys_w, phys_h);
+                    RdtDeviceRect device_rect = rdt_logical_to_device_rect(
+                        {0.0f, 0.0f, block->width, block->height},
+                        raster_scale, raster_scale);
+                    RdtDevicePixelSize extent = rdt_device_rect_pixel_extent(device_rect);
+                    wv->surface = image_surface_create(extent.width, extent.height);
                     wv->dirty = true;
                 }
 
@@ -244,6 +253,7 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
                 wv->last_y = abs_y;
                 wv->last_w = block->width;
                 wv->last_h = block->height;
+                wv->last_raster_scale = raster_scale;
 
                 // capture snapshot if dirty and loaded
                 if (wv->dirty && wv->surface) {
@@ -261,7 +271,8 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
         } else {
             // --- Child window mode: native overlay ---
             if (wv->needs_create && !wv->handle) {
-                wv->handle = webview_handle_create(mgr, block->width, block->height, pixel_ratio);
+                wv->handle = webview_handle_create(
+                    mgr, block->width, block->height, device_scale);
                 wv->needs_create = false;
 
                 if (wv->handle) {
@@ -278,14 +289,16 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
 
             if (wv->handle) {
                 bool bounds_changed = (abs_x != wv->last_x || abs_y != wv->last_y ||
-                                       block->width != wv->last_w || block->height != wv->last_h);
+                                       block->width != wv->last_w || block->height != wv->last_h ||
+                                       fabsf(device_scale - wv->last_device_scale) > 0.0001f);
                 if (bounds_changed) {
                     webview_set_bounds(wv->handle, abs_x, abs_y,
-                                       block->width, block->height, pixel_ratio);
+                                       block->width, block->height, device_scale);
                     wv->last_x = abs_x;
                     wv->last_y = abs_y;
                     wv->last_w = block->width;
                     wv->last_h = block->height;
+                    wv->last_device_scale = device_scale;
                     log_debug("webview child repositioned: (%.0f,%.0f) %.0fx%.0f",
                               abs_x, abs_y, block->width, block->height);
                 }
@@ -306,7 +319,8 @@ static void sync_walk(WebViewManager* mgr, ViewBlock* block,
             ViewBlock* child_block = lam::view_as_block(child);
             if (child_block) {
                 sync_walk(mgr, child_block,
-                          abs_x + scroll_dx, abs_y + scroll_dy, pixel_ratio);
+                          abs_x + scroll_dx, abs_y + scroll_dy,
+                          device_scale, raster_scale);
             }
         }
         child = child->next_sibling;
@@ -328,7 +342,8 @@ void webview_manager_sync_layout(UiContext* uicon, ViewTree* tree) {
         }
     }
 
-    sync_walk(uicon->webview_mgr, root, 0, 0, uicon->pixel_ratio);
+    sync_walk(uicon->webview_mgr, root, 0, 0,
+              uicon->device_scale, ui_context_raster_scale(uicon));
 }
 
 // poll dirty layer-mode webviews: walk tree, re-snapshot any that became dirty

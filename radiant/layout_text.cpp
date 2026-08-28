@@ -1028,11 +1028,10 @@ static float measure_current_glyph_advance(LayoutContext* lycon, uint32_t codepo
         FontStyleDesc sd = font_style_desc_from_prop(lycon->font.style);
         LoadedGlyph* glyph = font_load_glyph(handle, &sd, codepoint, false);
         if (glyph) {
-            float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
-                ? lycon->ui_context->pixel_ratio : 1.0f;
+            float raster_scale = ui_context_raster_scale(lycon->ui_context);
             // CSS Text keeps the selected font's advance; East Asian width does
             // not replace a real glyph metric with the nominal em cell.
-            float advance = glyph->advance_x / pixel_ratio;
+            float advance = glyph->advance_x / raster_scale;
             if (trim_cjk_spacing) {
                 float base_advance = advance;
                 advance += font_get_halt_adjustment(handle, codepoint) * 0.5f;
@@ -3976,10 +3975,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 LoadedGlyph* glyph = emoji_presentation
                     ? font_load_glyph_emoji(font_box_handle(&lycon->font), &_sd, codepoint, false)
                     : font_load_glyph(font_box_handle(&lycon->font), &_sd, codepoint, false);
-                float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                float raster_scale = ui_context_raster_scale(lycon->ui_context);
                 wd = document_font_missing_figure_space(lycon, codepoint)
                     ? layout_font_em_size(lycon)
-                    : (glyph ? glyph->advance_x / pixel_ratio : layout_font_em_size(lycon));
+                    : (glyph ? glyph->advance_x / raster_scale : layout_font_em_size(lycon));
                 if (glyph && trim_cjk_spacing) {
                     float base_wd = wd;
                     wd += text_spacing_trim_halt_advance(
@@ -4074,13 +4073,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
             if (tt_count > 1) {
                 FontStyleDesc _sd_extra = font_style_desc_from_prop(lycon->font.style);
-                float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
+                float raster_scale = ui_context_raster_scale(lycon->ui_context);
                 for (int ti = 1; ti < tt_count; ti++) {
                     uint32_t extra_cp = tt_out[ti];
                     if (extra_cp == 0) continue;
                     if (text_codepoint_has_zero_advance(extra_cp)) continue;
                     LoadedGlyph* extra_glyph = font_load_glyph(font_box_handle(&lycon->font), &_sd_extra, extra_cp, false);
-                    float extra_wd = extra_glyph ? (extra_glyph->advance_x / pixel_ratio) : 0;
+                    float extra_wd = extra_glyph ? (extra_glyph->advance_x / raster_scale) : 0;
                     if (extra_glyph && trim_cjk_spacing) {
                         float base_extra_wd = extra_wd;
                         extra_wd += font_get_halt_adjustment(

@@ -1,0 +1,41 @@
+{
+  "name": "RSC12 editing geometry scale matrix",
+  "html": "test/ui/test_form_input.html",
+  "description": "Fractional logical clicks and drags resolve identical caret and selection offsets at four device scales.",
+  "device_scale": 1.0,
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "set_editing_value", "target": {"selector": "#name"}, "text": "abcdefghij"},
+
+    {"type": "click", "target": {"selector": "#name", "offset_x": 30.25, "offset_y": 12.25}},
+    {"type": "assert_form_selection", "target": {"selector": "#name"}, "start": 3, "end": 3},
+    {"type": "mouse_down", "target": {"selector": "#name", "offset_x": 6.25, "offset_y": 12.25}, "button": 0},
+    {"type": "mouse_move", "target": {"selector": "#name", "offset_x": 55.25, "offset_y": 12.25}},
+    {"type": "assert_form_selection", "target": {"selector": "#name"}, "start": 0, "end": 7},
+    {"type": "mouse_up", "target": {"selector": "#name", "offset_x": 55.25, "offset_y": 12.25}, "button": 0},
+
+    {"type": "set_device_scale", "scale": 1.25},
+    {"type": "click", "target": {"selector": "#name", "offset_x": 30.25, "offset_y": 12.25}},
+    {"type": "assert_form_selection", "target": {"selector": "#name"}, "start": 3, "end": 3},
+    {"type": "mouse_down", "target": {"selector": "#name", "offset_x": 6.25, "offset_y": 12.25}, "button": 0},
+    {"type": "mouse_move", "target": {"selector": "#name", "offset_x": 55.25, "offset_y": 12.25}},
+    {"type": "assert_form_selection", "target": {"selector": "#name"}, "start": 0, "end": 7},
+    {"type": "mouse_up", "target": {"selector": "#name", "offset_x": 55.25, "offset_y": 12.25}, "button": 0},
+
+    {"type": "set_device_scale", "scale": 1.5},
+    {"type": "click", "target": {"selector": "#name", "offset_x": 30.25, "offset_y": 12.25}},
+    {"type": "assert_form_selection", "target": {"selector": "#name"}, "start": 3, "end": 3},
+    {"type": "mouse_down", "target": {"selector": "#name", "offset_x": 6.25, "offset_y": 12.25}, "button": 0},
+    {"type": "mouse_move", "target": {"selector": "#name", "offset_x": 55.25, "offset_y": 12.25}},
+    {"type": "assert_form_selection", "target": {"selector": "#name"}, "start": 0, "end": 7},
+    {"type": "mouse_up", "target": {"selector": "#name", "offset_x": 55.25, "offset_y": 12.25}, "button": 0},
+
+    {"type": "set_device_scale", "scale": 2.0},
+    {"type": "click", "target": {"selector": "#name", "offset_x": 30.25, "offset_y": 12.25}},
+    {"type": "assert_form_selection", "target": {"selector": "#name"}, "start": 3, "end": 3},
+    {"type": "mouse_down", "target": {"selector": "#name", "offset_x": 6.25, "offset_y": 12.25}, "button": 0},
+    {"type": "mouse_move", "target": {"selector": "#name", "offset_x": 55.25, "offset_y": 12.25}},
+    {"type": "assert_form_selection", "target": {"selector": "#name"}, "start": 0, "end": 7},
+    {"type": "mouse_up", "target": {"selector": "#name", "offset_x": 55.25, "offset_y": 12.25}, "button": 0}
+  ]
+}

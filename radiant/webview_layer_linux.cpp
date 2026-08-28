@@ -239,7 +239,7 @@ static void on_snapshot_ready(GObject* object, GAsyncResult* result, gpointer us
 // Platform API — layer mode
 // ---------------------------------------------------------------------------
 
-WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio) {
+WebViewHandle* webview_layer_platform_create(float w, float h, float raster_scale) {
     ensure_gtk_layer_initialized();
     if (!s_gtk_layer_initialized) return nullptr;
 
@@ -247,7 +247,7 @@ WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio
     handle->mode        = WEBVIEW_MODE_LAYER;
     handle->width       = w;
     handle->height      = h;
-    handle->pixel_ratio = pixel_ratio;
+    handle->raster_scale = raster_scale;
     handle->dirty       = true;
     handle->loaded      = false;
 
@@ -298,8 +298,8 @@ WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio
     // GtkOffscreenWindow renders off-screen with a real cairo surface
     handle->offscreen_win = gtk_offscreen_window_new();
     gtk_widget_set_size_request(handle->offscreen_win,
-                                (int)(w * pixel_ratio),   // INT_CAST_OK: physical pixel width
-                                (int)(h * pixel_ratio));  // INT_CAST_OK: physical pixel height
+                                (int)ceilf(w * raster_scale),   // INT_CAST_OK: containing pixel width
+                                (int)ceilf(h * raster_scale));  // INT_CAST_OK: containing pixel height
     gtk_container_add(GTK_CONTAINER(handle->offscreen_win), GTK_WIDGET(handle->wk_view));
     gtk_widget_show_all(handle->offscreen_win);
 
@@ -307,7 +307,7 @@ WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio
     while (gtk_events_pending()) gtk_main_iteration_do(FALSE);
 
     log_info("webview_layer_platform_create (linux): offscreen %.0fx%.0f (pr=%.1f)",
-             w, h, pixel_ratio);
+             w, h, raster_scale);
     return handle;
 }
 
@@ -338,17 +338,17 @@ void webview_layer_platform_set_html(WebViewHandle* handle, const char* html) {
     log_debug("webview_layer_linux: loaded inline HTML (%zu bytes)", strlen(html));
 }
 
-void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float pixel_ratio) {
+void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float raster_scale) {
     if (!handle || !handle->offscreen_win) return;
     handle->width       = w;
     handle->height      = h;
-    handle->pixel_ratio = pixel_ratio;
+    handle->raster_scale = raster_scale;
     gtk_widget_set_size_request(handle->offscreen_win,
-                                (int)(w * pixel_ratio),   // INT_CAST_OK: physical pixel width
-                                (int)(h * pixel_ratio));  // INT_CAST_OK: physical pixel height
+                                (int)ceilf(w * raster_scale),   // INT_CAST_OK: containing pixel width
+                                (int)ceilf(h * raster_scale));  // INT_CAST_OK: containing pixel height
     handle->dirty = true;
     while (gtk_events_pending()) gtk_main_iteration_do(FALSE);
-    log_debug("webview_layer_linux: resized to %.0fx%.0f (pr=%.1f)", w, h, pixel_ratio);
+    log_debug("webview_layer_linux: resized to %.0fx%.0f (raster=%.1f)", w, h, raster_scale);
 }
 
 bool webview_layer_platform_snapshot(WebViewHandle* handle, ImageSurface* surface) {

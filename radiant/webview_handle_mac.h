@@ -45,8 +45,10 @@ struct WebViewHandle {
     bool loaded;                // initial navigation finished
     bool snapshot_in_progress;  // prevent concurrent snapshots (layer mode)
 
-    // shared
-    float pixel_ratio;          // DPI scale factor
+    // scale keys are mode-specific: child bounds use host device scale while
+    // layer snapshots use the complete logical-to-raster scale.
+    float device_scale;
+    float raster_scale;
 };
 
 #endif // __APPLE__

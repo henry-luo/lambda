@@ -22,7 +22,7 @@ static void render_focus_outline(RenderContext* rdcon, DocState* state) {
     if (focused->view_type != RDT_VIEW_BLOCK) return;
 
     ViewBlock* block = lam::view_require_block(focused);
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
 
     float x = block->x;
     float y = block->y;
@@ -80,7 +80,7 @@ static void render_caret(RenderContext* rdcon, DocState* state) {
         }
     }
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     float x = caret_x;
     float y = caret_y;
 
@@ -259,7 +259,7 @@ static void render_selection(RenderContext* rdcon, DocState* state) {
 
     SelectionPaintCtx ctx;
     ctx.rdcon = rdcon;
-    ctx.scale = rdcon->scale;
+    ctx.scale = rdcon->raster_scale;
     selection_get_iframe_offset(state, &ctx.iframe_offset_x, &ctx.iframe_offset_y);
     ctx.color.r = 0x00; ctx.color.g = 0x78; ctx.color.b = 0xD7; ctx.color.a = 0x80;
 
@@ -293,7 +293,7 @@ void render_ui_overlays(RenderContext* rdcon, DocState* state) {
 
     if (state->drag_drop && state->drag_drop->active) {
         DragDropState* dd = state->drag_drop;
-        float s = rdcon->scale;
+        float s = rdcon->raster_scale;
 
         if (dd->drop_target && dd->drop_target->view_type == RDT_VIEW_BLOCK) {
             ViewBlock* dt = lam::view_require_block(dd->drop_target);

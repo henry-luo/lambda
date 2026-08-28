@@ -1,9 +1,9 @@
 # Radiant Coordinate Spaces and Scale
 
-**Status:** accepted working design; layout and interaction boundaries are
-implemented, while paint vocabulary and host-boundary consolidation remain
-partial
-**Revised:** 2026-08-28
+**Status:** accepted working design; scale ownership, input, interaction,
+raster-cache, and host-native boundaries are implemented; the broader semantic
+Paint IR migration and real-monitor automation remain partial
+**Revised:** 2026-08-29
 **Scope:** Radiant layout, input, interaction state, paint geometry, raster
 output, vector export, native overlays, nested documents, and HiDPI changes
 **Formal-spec linkage:** no current `S#` or `D#` ruling covers Radiant
@@ -155,11 +155,13 @@ The scale vocabulary is:
 | `page_zoom` | semantic page zoom or viewport scaling | potentially; its viewport and CSS behavior must be defined separately |
 | `raster_scale` | logical paint units to destination surface pixels | derived, normally `device_scale × output_scale` |
 
-The existing names `pixel_ratio`, `given_scale`, `ViewportMeta::scale`, and
-`RenderContext::scale` predate this distinction. Their current uses must be
-classified before renaming: a mechanical rename would preserve existing
-conflation rather than resolve it. In particular, viewport `initial-scale` is
-not automatically the same concept as CLI output density.
+Radiant owns these quantities explicitly as `UiContext::device_scale`,
+`ViewportMeta::output_scale`, `ViewportMeta::page_zoom`, and the derived
+`ViewportMeta::raster_scale` / `RenderContext::raster_scale`. Viewport
+`initial-scale` initializes `page_zoom`; it does not silently become CLI output
+density. The legacy CLI spelling `--pixel-ratio` and the font library's
+`FontContextConfig::pixel_ratio` remain adapter vocabulary at their public
+boundaries, not document/layout state.
 
 ### RSC8 — Conversion functions are centralized and typed
 
@@ -181,6 +183,12 @@ conversion, and document policy calls neither.
 Device scale should retain independent X/Y measurements at the platform seam.
 Code may expose one scalar only after validating that the axes agree within a
 defined tolerance.
+
+The C+ boundary types and conversions live in `radiant/scale.hpp`:
+`RdtLogicalPoint/Rect`, `RdtDevicePoint/Rect`, discrete device-pixel point/size
+types, and logical-to-host conversion with an explicit Y-origin policy.
+`UiContext` wrappers add the document's output scale and preserve the
+platform's independent X/Y device scales.
 
 ### RSC9 — Host-native overlays have an explicit second boundary
 
@@ -256,7 +264,11 @@ top-level logical rectangle through the host adapter.
 |---|---|
 | `UiContext::viewport_width/height` | logical CSS pixels |
 | `UiContext::window_width/height` | physical framebuffer pixels |
-| `UiContext::pixel_ratio` | current device-scale compatibility field |
+| `UiContext::device_scale_x/y` | platform device scale on each axis |
+| `UiContext::device_scale` | validated isotropic scale used by the current raster backend |
+| `ViewportMeta::output_scale` | explicit raster/export density |
+| `ViewportMeta::page_zoom` | semantic viewport zoom metadata; excluded from raster density |
+| `ViewportMeta::raster_scale` | derived logical-paint to destination-pixel scale |
 | view `x/y/width/height`, bounds, scroll positions | logical CSS pixels |
 | absolute pointer coordinates in `RdtEvent` | top-level viewport logical pixels |
 | dropdown/context-menu/caret/selection state | logical pixels with an explicit origin |
@@ -281,14 +293,15 @@ physical units must be divided exactly once before layout consumes it.
 7. Every float-to-integer conversion is at a discrete boundary and follows the
    Radiant `INT_CAST_OK` rule.
 
-Not every use of `pixel_ratio` outside the rasterizer is a defect. Font engines,
-native children, physical cache allocation, and conversion of physical metrics
-back to logical units legitimately need it. Audits classify each use by domain
-instead of deleting multiplications mechanically.
+Not every compatibility use of `pixel_ratio` is a defect. The font library and
+legacy CLI/fixture inputs expose that established spelling at their adapter
+boundaries. Radiant immediately maps it to `device_scale` or `raster_scale` and
+does not carry it into layout or event policy.
 
 ## 7. Current conformance and known gaps
 
-The 2026-08-28 code audit confirmed these implemented boundaries:
+The 2026-08-28 through 2026-08-29 audit confirmed these implemented
+boundaries:
 
 - style, layout, intrinsic form sizing, initial containing blocks, multicol
   geometry, replaced-image sizing, and scrollbar interaction use CSS logical
@@ -302,34 +315,47 @@ The 2026-08-28 code audit confirmed these implemented boundaries:
   `DocState` (RSC4);
 - a shared nested-document viewport-offset walk accounts for iframe ancestors
   and scroll before popup placement (RSC5);
+- `ViewportMeta`, `UiContext`, render/export targets, tile jobs, SVG subscenes,
+  and webview state use the RSC7 vocabulary. `ViewportMeta` deliberately
+  retains its 32-byte footprint under a `static_assert`, because later
+  `DomDocument` members have native/JIT-sensitive offsets (RSC7);
+- `radiant/scale.hpp` centralizes typed logical-to-device and logical-to-host
+  conversions. GLFW's already-logical input passes through the platform-input
+  adapter, while popup painting, surface sampling, webview bounds, and IME
+  placement use explicit destination adapters (RSC2, RSC8, RSC9);
 - `UiContext` retains independent X/Y device scales, recreates physical
   surfaces and font raster caches on scale changes, recursively invalidates
   embedded-document paint state, and avoids reflow when the logical viewport
   is unchanged (RSC10, RSC11);
+- retained display-list fragments are invalidated by a full dirty frame on a
+  raster-scale change; webview child bounds are keyed by device scale and layer
+  snapshots by raster scale (RSC11);
 - headless event fixtures can declare a device scale, allocate a proportionate
-  surface, and keep their viewport and event coordinates logical. Select
-  commit is covered at `1.0`, `1.25`, `1.5`, and `2.0`, including a fractional
-  pointer coordinate; an injected `1.0` to `2.0` live transition also proves
-  that logical select geometry is unchanged while the surface is rebuilt
-  (RSC10, RSC12).
+  surface, and keep their viewport and event coordinates logical. Four-scale
+  matrices cover select/default-action commit, context-menu targeting and
+  geometry, scrollbar dragging, translated-transform hit-testing, and
+  fractional caret/selection geometry. An injected `1.0` to `2.0` transition
+  proves logical select geometry is unchanged while the surface and physical
+  resources are rebuilt (RSC10, RSC12).
 
-The remaining gaps are narrower but still architectural:
+Two gaps remain:
 
-- `ViewportMeta::given_scale/scale`, `UiContext::pixel_ratio`, export `scale`,
-  and `RenderContext::scale` still conflate parts of the RSC7 vocabulary;
-- logical-to-raster conversion is still distributed among painters rather than
-  expressed by the typed, centralized RSC8 boundary throughout Paint IR;
-- native webview and other host-overlay adapters accept scale explicitly, but
-  have not yet been consolidated behind one logical-to-host conversion API
-  (RSC9);
-- RSC12's four-scale matrix currently proves select/default-action behavior.
-  Context menus, scrollbar dragging, transformed hit tests, editing geometry,
-  and a real platform monitor transition still need equivalent matrix coverage.
+- the thin PaintIR primitive gateway still receives destination-space geometry
+  from several painters to preserve byte-identical DisplayList output. Moving
+  every primitive to logical semantic geometry and applying the complete target
+  transform during lowering remains the RSC6/RSC8 render-path migration; the
+  device-scale ownership and conversion boundaries no longer depend on that
+  migration;
+- the native window path settles framebuffer and content-scale callbacks and
+  repaints without reflow, but CI has only the injected transition. A real
+  cross-monitor transition remains a platform integration/manual gate.
 
-All remaining layout-side `pixel_ratio` uses found by this audit divide
-physical font-engine glyph advances back into logical metrics. Document loading
-no longer accepts a device-scale argument. These are classified boundary uses,
-not geometry-policy exceptions.
+The 2026-08-29 HiDPI visual audit also corrected the
+`svg_text_hidpi_01` reference setup: Radiant used a 360×140 logical viewport at
+2×, while Chromium had been captured at a 720×280 logical viewport at 1×.
+Capturing both at 360×140 logical and 2× physical reduced the comparison from
+3.20% to 0.55%; changing Radiant to match the old reference would have violated
+RSC1 and RSC7.
 
 ## 8. Non-goals
 
@@ -356,7 +382,7 @@ dropdown HiDPI failure and were too broad.
 | Historical phase | Work recorded by the original document | Revised interpretation |
 |---|---|---|
 | Phase 0 | View-tree JSON changed to CSS logical pixels and added `coordinate_system: css_logical_pixels` | landed |
-| Phase 1 | Added document `given_scale` and combined `scale` fields | landed, but naming now falls under RSC7 debt |
+| Phase 1 | Added document `given_scale` and combined `scale` fields | landed historically; replaced by the RSC7 ownership vocabulary in the 2026-08-29 follow-up |
 | Phase 2 | Removed broad `pixel_ratio` multiplication from CSS/HTML style resolution | substantially landed; residual uses require classification |
 | Phase 3 | Converted layout geometry and intrinsic sizes to logical pixels | substantially landed, not globally proven |
 | Phase 4 | Changed default CSS font sizing to logical units while retaining scale-aware glyph resources | landed |
@@ -450,6 +476,24 @@ iframe dropdown fixture to assert the canonical top-level logical anchor. This
 entry records implementation history; the decisions in the main body remain
 the authority.
 
+### A.6 2026-08-29 ownership, host, and matrix completion
+
+The follow-up slice:
+
+- separated device scale, output density, page zoom, and derived raster scale
+  throughout document, UI, render-target, SVG, tiling, and webview ownership;
+- preserved the ABI-sensitive `ViewportMeta` footprint after an initial added
+  field exposed native/JIT offset coupling;
+- introduced typed logical/device/host coordinate helpers;
+- corrected AppKit top-left/bottom-left mapping, Windows IME DPI conversion,
+  Linux child-webview bounds, and raster-keyed webview layer snapshots;
+- added four-scale context-menu, scrollbar, transformed-hit, and editing
+  geometry fixtures; and
+- repaired the HiDPI browser reference so both engines use the same logical
+  viewport and device scale.
+
+This entry records implementation history, not a replacement for RSC1–RSC12.
+
 ## Appendix B — Remaining migration
 
 Completed in the 2026-08-28 audit:
@@ -463,16 +507,25 @@ Completed in the 2026-08-28 audit:
 6. the select interaction matrix runs at all four RSC12 scales and includes an
    injected live scale transition.
 
+Completed in the 2026-08-29 follow-up:
+
+1. the RSC7 factors have explicit names and owners, with page zoom excluded
+   from raster density;
+2. typed logical/device/host conversion helpers cover the platform, popup,
+   pixel-sampling, webview, and IME boundaries;
+3. native overlays use logical-to-host conversion and do not cache host-native
+   geometry as document state;
+4. retained physical caches are invalidated or scale-keyed; and
+5. the four-scale interaction matrix covers context menus, scrollbars,
+   translated transforms, and editing geometry in addition to selects.
+
 Remaining sequence:
 
-1. introduce explicit logical/device point and rectangle types or consistently
-   suffixed conversion helpers across Paint IR and raster lowering (RSC6, RSC8);
-2. separate device scale, output density, semantic page zoom, and derived raster
-   scale in names and ownership (RSC7);
-3. consolidate native overlays behind logical-to-host conversion (RSC9);
-4. extend the four-scale matrix to the remaining RSC12 interaction classes and
-   a real platform monitor transition test;
-5. keep the ordinary Radiant baseline as the acceptance gate for each slice.
+1. migrate the remaining thin PaintIR primitive commands from
+   destination-space payloads to logical semantic geometry and apply target
+   transforms in each lowering (RSC6, RSC8);
+2. add a real cross-monitor device-scale transition integration/manual gate;
+3. keep the ordinary Radiant baseline as the acceptance gate for each slice.
 
 This appendix is staging guidance, not a competing source of truth. If staging
 and RSC1–RSC12 disagree, the decisions win.

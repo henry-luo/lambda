@@ -127,7 +127,7 @@ void render(GLFWwindow* window);
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
                                            int viewport_width, int viewport_height, Pool* pool);
-DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio);
+DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float device_scale);
 void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event);
 bool radiant_editing_animation_active(DocState* state);
 bool radiant_editing_animation_tick(UiContext* uicon, double timestamp);
@@ -397,7 +397,7 @@ static void view_attach_event_log(DomDocument* doc, const char* doc_name) {
         if (ui_context.event_log) {
             event_state_log_session_start(ui_context.event_log,
                 (int)ui_context.viewport_width, (int)ui_context.viewport_height,
-                doc->viewport.scale > 0 ? doc->viewport.scale : 1.0);
+                doc->viewport.raster_scale > 0 ? doc->viewport.raster_scale : 1.0);
             event_state_log_document(ui_context.event_log, "load_start");
             event_state_log_document(ui_context.event_log, "load_complete");
         }
@@ -424,13 +424,12 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     DomDocument* doc = load_html_doc(base, doc_url, viewport_width, viewport_height);
     if (!doc) return nullptr;
 
-    // Set scale for window display: given_scale = 1.0, scale = pixel_ratio
-    doc->viewport.given_scale = 1.0f;
-    doc->viewport.scale = doc->viewport.given_scale * ui_context.pixel_ratio;
+    doc->viewport.output_scale = 1.0f;
 
     // BrowsingSession owns replacement of the previously presented document;
     // this presentation helper only publishes the newly loaded document.
     ui_context.document = doc;
+    ui_context_sync_document_raster_scale(&ui_context, doc);
 
     radiant_document_ensure_state(doc, "show_html_doc");
     view_attach_event_log(doc, doc_url);
@@ -569,9 +568,11 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
     log_debug("Cursor position: (%.1f, %.1f)", xpos, ypos);
     event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
     event.mouse_position.timestamp = glfwGetTime();
-    // GLFW returns logical (CSS) pixels, which matches our layout coordinate system
-    event.mouse_position.x = xpos;
-    event.mouse_position.y = ypos;
+    // GLFW reports logical window coordinates, so the platform scale is 1:1.
+    RdtLogicalPoint logical = rdt_platform_to_logical_point(
+        (float)xpos, (float)ypos, 1.0f, 1.0f);
+    event.mouse_position.x = logical.x;
+    event.mouse_position.y = logical.y;
     handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
 
     // Trigger redraw so any pending reflows/repaints from hover state
@@ -593,13 +594,15 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
     // Get cursor position for all mouse button events
     double xpos, ypos;
     glfwGetCursorPos(window, &xpos, &ypos);
-    event.mouse_button.x = xpos;
-    event.mouse_button.y = ypos;
+    RdtLogicalPoint logical = rdt_platform_to_logical_point(
+        (float)xpos, (float)ypos, 1.0f, 1.0f);
+    event.mouse_button.x = logical.x;
+    event.mouse_button.y = logical.y;
 
     UiContext* ui = &ui_context;
     if (action == GLFW_PRESS) {
-        double dx = xpos - ui->last_click_x;
-        double dy = ypos - ui->last_click_y;
+        double dx = logical.x - ui->last_click_x;
+        double dy = logical.y - ui->last_click_y;
         bool same_click_series = ui->last_click_time >= 0.0 &&
             button == ui->last_click_button &&
             event.mouse_button.timestamp - ui->last_click_time <= 0.5 &&
@@ -607,8 +610,8 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
         ui->click_count = same_click_series ? (uint8_t)(ui->click_count + 1) : 1;
         if (ui->click_count > 3) ui->click_count = 3;
         ui->last_click_time = event.mouse_button.timestamp;
-        ui->last_click_x = xpos;
-        ui->last_click_y = ypos;
+        ui->last_click_x = logical.x;
+        ui->last_click_y = logical.y;
         ui->last_click_button = button;
         ui->active_click_count = ui->click_count;
     } else {
@@ -633,8 +636,8 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
         log_debug("Left mouse button pressed at (%.2f, %.2f)", xpos, ypos);
         ui_context.mouse_state.is_mouse_down = 1;
         // GLFW returns logical (CSS) pixels, which matches our layout coordinate system
-        ui_context.mouse_state.down_x = xpos;
-        ui_context.mouse_state.down_y = ypos;
+        ui_context.mouse_state.down_x = logical.x;
+        ui_context.mouse_state.down_y = logical.y;
     }
     else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
         log_debug("Left mouse button released");
@@ -665,9 +668,10 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     double xpos, ypos;
     glfwGetCursorPos(window, &xpos, &ypos);
     log_debug("Mouse position: (%.1f, %.1f)", xpos, ypos);
-    // GLFW returns logical (CSS) pixels, which matches our layout coordinate system
-    event.scroll.x = xpos;
-    event.scroll.y = ypos;
+    RdtLogicalPoint logical = rdt_platform_to_logical_point(
+        (float)xpos, (float)ypos, 1.0f, 1.0f);
+    event.scroll.x = logical.x;
+    event.scroll.y = logical.y;
     handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
     do_redraw = 1;
     log_leave();
@@ -972,7 +976,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
              event_file ? event_file : "NULL", headless);
 
     // Load fixture metrics before constructing fonts and the raster surface.
-    // Event coordinates remain logical; pixel_ratio controls only the device side.
+    // Event coordinates remain logical; device scale controls only the device side.
     EventSimContext* sim_ctx = NULL;
     if (event_file) {
         size_t event_file_len = strlen(event_file);
@@ -984,7 +988,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             log_info("Event simulation loaded: %d events", sim_ctx->events->length);
         }
     }
-    float requested_device_scale = headless && sim_ctx ? sim_ctx->pixel_ratio : 0.0f;
+    float requested_device_scale = headless && sim_ctx ? sim_ctx->device_scale : 0.0f;
     if (ui_context_init(&ui_context, headless, requested_device_scale) != 0) {
         if (sim_ctx) event_sim_free(sim_ctx);
         log_cleanup();
@@ -998,8 +1002,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         font_context_add_scan_directory(ui_context.font_ctx, font_dirs[i]);
         log_debug("view: Added font directory: %s", font_dirs[i]);
     }
-    log_debug("view_doc_in_window: after ui_context_init: window_width=%.1f, window_height=%.1f, pixel_ratio=%.2f",
-              ui_context.window_width, ui_context.window_height, ui_context.pixel_ratio);
+    log_debug("view_doc_in_window: after ui_context_init: window_width=%.1f, window_height=%.1f, device_scale=%.2f",
+              ui_context.window_width, ui_context.window_height, ui_context.device_scale);
     GLFWwindow* window = ui_context.window;
     if (!headless && !window) {
         if (sim_ctx) event_sim_free(sim_ctx);
@@ -1160,16 +1164,14 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         log_mem_stage("after-load");
         log_notice("view: document loaded, starting layout...");
 
-        // Set scale for window display: given_scale = 1.0, scale = pixel_ratio
-        // For HTML documents, this updates the default; for PDF/SVG/Image, this was already set in loader
+        // Screen presentation has no extra export density. Semantic page zoom
+        // remains document-owned and device scale is supplied by UiContext.
         if (doc->html_root) {
-            // HTML documents need scale set for display (layout is in CSS pixels)
-            doc->viewport.given_scale = 1.0f;
-            doc->viewport.scale = doc->viewport.given_scale * ui_context.pixel_ratio;
+            doc->viewport.output_scale = 1.0f;
         }
-        // Note: PDF/SVG/Image documents already have scale set in their respective loaders
 
         ui_context.document = doc;
+        ui_context_sync_document_raster_scale(&ui_context, doc);
 
         // Initialize network support for HTTP-loaded documents.
         // Top-level URL views may be staged through ./temp after content-type

@@ -1284,7 +1284,7 @@ typedef struct PaintSvgSubscene {
     void* font_context;      // FontContext* for SVG text resolution
     float viewport_width;
     float viewport_height;
-    float pixel_ratio;
+    float raster_scale;
     float opacity;
     bool has_color;          // inherited currentColor present
     Color color;             // inherited currentColor
@@ -1648,8 +1648,8 @@ typedef struct RenderContext {
     float perspective_origin_x;
     float perspective_origin_y;
 
-    // HiDPI scaling: CSS logical pixels -> physical surface pixels
-    float scale;                   // pixel_ratio (1.0 for standard, 2.0 for Retina, etc.)
+    // Derived logical-paint -> destination-surface scale (RSC7).
+    float raster_scale;
     
     // Phase 18: Dirty-region tracking for render tree clipping
     DirtyTracker* dirty_tracker;   // NULL = full repaint (no clipping)
@@ -2196,10 +2196,10 @@ typedef struct TileGrid {
     int cols, rows;
     int total;
     size_t pixel_slab_count;
-    float scale;                // pixel_ratio (1.0, 2.0, etc.)
+    float raster_scale;
     int surface_w, surface_h;  // full surface dimensions in physical pixels
 #ifdef __cplusplus
-    void init(int surface_w, int surface_h, float scale);
+    void init(int surface_w, int surface_h, float raster_scale);
     void destroy();
     void clear(uint32_t color);
     void composite(ImageSurface* surface);
@@ -2207,8 +2207,7 @@ typedef struct TileGrid {
 } TileGrid;
 
 // Create a tile grid covering the given surface dimensions.
-// scale = pixel_ratio (e.g. 2.0 for Retina).
-void tile_grid_init(TileGrid* grid, int surface_w, int surface_h, float scale);
+void tile_grid_init(TileGrid* grid, int surface_w, int surface_h, float raster_scale);
 
 // Free tile pixel slab and the grid array.
 void tile_grid_destroy(TileGrid* grid);
@@ -2226,7 +2225,7 @@ void tile_grid_composite(TileGrid* grid, ImageSurface* surface);
 typedef struct TileJob {
     Tile* tile;
     DisplayList* display_list;  // shared, read-only
-    float scale;
+    float raster_scale;
     uint32_t bg_color;          // tile background clear color (ABGR8888)
 } TileJob;
 
@@ -3459,7 +3458,7 @@ bool render_effect_group_finish(RenderEffectGroup* group,
                                 Bound* clip);
 
 // ===== render_export_support.hpp =====
-int ui_context_init(UiContext* uicon, bool headless, float requested_pixel_ratio);
+int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 
@@ -3490,10 +3489,10 @@ void save_surface_to_png(ImageSurface* surface, const char* filename);
 void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quality);
 int render_html_to_png(const char* html_file, const char* png_file,
                        int viewport_width, int viewport_height,
-                       float scale = 1.0f, float pixel_ratio = 1.0f);
+                       float output_scale = 1.0f, float device_scale = 1.0f);
 int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality,
                         int viewport_width, int viewport_height,
-                        float scale = 1.0f, float pixel_ratio = 1.0f);
+                        float output_scale = 1.0f, float device_scale = 1.0f);
 
 // Render existing UiContext with state (caret/selection) to image file
 int render_uicontext_to_png(UiContext* uicon, const char* png_file);
@@ -3542,15 +3541,15 @@ typedef struct RenderOutputTarget {
     int viewport_width;
     int viewport_height;
     int jpeg_quality;
-    float scale;
-    float pixel_ratio;
+    float output_scale;
+    float device_scale;
 } RenderOutputTarget;
 
 typedef struct RenderExportSession {
     UiContext* ui_context;
     Url* base_url;
     DomDocument* document;
-    float scale;
+    float output_scale;
     int content_width;
     int content_height;
 } RenderExportSession;
@@ -3559,13 +3558,13 @@ void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind
                                const char* output_file);
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
-                                 int fallback_width, int fallback_height, float scale);
+                                 int fallback_width, int fallback_height, float output_scale);
 void render_export_session_end(RenderExportSession* session);
 int render_output_render_view_tree_to_target(UiContext* uicon, ViewTree* view_tree,
                                              RenderOutputTarget* target);
 int render_html_to_output_target(const char* html_file, const char* output_file,
                                  int viewport_width, int viewport_height,
-                                 float scale, float pixel_ratio,
+                                 float output_scale, float device_scale,
                                  int jpeg_quality);
 
 // Graph syntax files enter Radiant through an in-memory Lambda transform document.
@@ -3662,9 +3661,9 @@ struct SvgInlineRenderContext {
     void* image_resolver_context;
     RdtMatrix transform;         // accumulated transform from root (viewBox × group × element)
 
-    // pixel ratio for text sizing - text font sizes need to be divided by this
-    // because the entire SVG scene is scaled by pixel_ratio after building
-    float pixel_ratio;
+    // Derived logical-to-target scale; SVG text resource sizing divides by it
+    // because the whole scene transform applies it during lowering.
+    float raster_scale;
 
     // viewBox transform state
     float viewbox_x, viewbox_y;
@@ -3745,7 +3744,7 @@ void render_svg_initial_paint(const ViewSpan* view, Color current_color,
 void render_svg_build_subscene(PaintSvgSubscene* subscene,
                       Element* svg_element,
                       float viewport_width, float viewport_height,
-                      Pool* pool, float pixel_ratio,
+                      Pool* pool, float raster_scale,
                       FontContext* font_ctx,
                       const RdtMatrix* base_transform,
                       const Bound* content_clip,
@@ -3767,7 +3766,7 @@ void render_svg_inline_register_paint_ir_lowerers(void);
  */
 void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
                       float viewport_width, float viewport_height,
-                      Pool* pool, float pixel_ratio = 1.0f,
+                      Pool* pool, float raster_scale = 1.0f,
                       FontContext* font_ctx = nullptr,
                       const RdtMatrix* base_transform = nullptr,
                       const Color* initial_current_color = nullptr,

@@ -7742,8 +7742,7 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     unsigned char* end = run.end;
     int byte_offset = rect->start_index;  // track byte offset for return value
 
-    float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
-        ? evcon->ui_context->pixel_ratio : 1.0f;
+    float raster_scale = ui_context_raster_scale(evcon->ui_context);
 
     // Get letter-spacing and word-spacing from font style (same as used in layout)
     float letter_spacing = evcon->font.style ? evcon->font.style->letter_spacing : 0.0f;
@@ -7809,7 +7808,7 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
                 byte_offset += bytes;
                 continue;
             }
-            wd = glyph->advance_x / pixel_ratio;
+            wd = glyph->advance_x / raster_scale;
         }
 
         // Add letter-spacing (applied after each character except the last)
@@ -7853,13 +7852,12 @@ void calculate_position_from_char_offset(EventContext* evcon, ViewText* text,
     EventTextRun run = event_text_run(text, rect);
     unsigned char* end = run.end;
     int byte_offset = rect->start_index;  // track byte offset
-    float pixel_ratio = (evcon->ui_context && evcon->ui_context->pixel_ratio > 0)
-        ? evcon->ui_context->pixel_ratio : 1.0f;
+    float raster_scale = ui_context_raster_scale(evcon->ui_context);
     bool has_space = false;
 
     // Debug: log initial state
-    log_debug("[CALC-POS] target_offset=%d, rect->x=%.1f, rect->start_index=%d, pixel_ratio=%.1f, y_ppem=%d",
-        target_offset, rect->x, rect->start_index, pixel_ratio,
+    log_debug("[CALC-POS] target_offset=%d, rect->x=%.1f, rect->start_index=%d, raster_scale=%.1f, y_ppem=%d",
+        target_offset, rect->x, rect->start_index, raster_scale,
         font_box_handle(&evcon->font) ? (int)font_handle_get_physical_size_px(font_box_handle(&evcon->font)) : -1);
 
     while (p < end && byte_offset < target_offset) {
@@ -9719,10 +9717,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                           css_vw, css_vh);
                         if (new_doc) {
                             radiant_document_ensure_state(new_doc, "iframe_target_navigation");
-                            // Set scale for nested document
-                            // Iframe content uses default scale (1.0), combined with display pixel_ratio
-                            new_doc->viewport.given_scale = 1.0f;
-                            new_doc->viewport.scale = new_doc->viewport.given_scale * evcon.ui_context->pixel_ratio;
+                            // Nested documents share the screen device scale but
+                            // retain their own semantic page zoom.
+                            new_doc->viewport.output_scale = 1.0f;
+                            ui_context_sync_document_raster_scale(evcon.ui_context, new_doc);
 
                             if (new_doc->html_root) {
                                 // HTML/Markdown/XML documents: need CSS layout

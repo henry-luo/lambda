@@ -1,0 +1,30 @@
+{
+  "name": "RSC12 scrollbar drag scale matrix",
+  "html": "test/ui/test_state_store_scrollbar_interaction.html",
+  "description": "Equal logical thumb movement produces equal logical scrolling across device-scale transitions.",
+  "device_scale": 1.0,
+  "events": [
+    {"type": "mouse_down", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 20.25}},
+    {"type": "mouse_move", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 40.25}},
+    {"type": "mouse_up", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 40.25}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_scroll_y": 92.2, "tolerance": 0.6},
+
+    {"type": "set_device_scale", "scale": 1.25},
+    {"type": "mouse_down", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 40.25}},
+    {"type": "mouse_move", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 60.25}},
+    {"type": "mouse_up", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 60.25}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_scroll_y": 184.4, "tolerance": 0.6},
+
+    {"type": "set_device_scale", "scale": 1.5},
+    {"type": "mouse_down", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 60.25}},
+    {"type": "mouse_move", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 80.25}},
+    {"type": "mouse_up", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 80.25}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_scroll_y": 276.6, "tolerance": 0.6},
+
+    {"type": "set_device_scale", "scale": 2.0},
+    {"type": "mouse_down", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 80.25}},
+    {"type": "mouse_move", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 100.25}},
+    {"type": "mouse_up", "target": {"selector": "#pane", "offset_x": 216.25, "offset_y": 100.25}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"}, "view_scroll_y": 368.8, "tolerance": 0.6}
+  ]
+}

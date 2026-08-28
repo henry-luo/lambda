@@ -144,7 +144,7 @@ void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
 }
 
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     if (block->scroll()->has_clip) {
         // Inset clip by border widths for padding-box clipping (CSS spec: overflow clips to padding edge)
         BoxEdges border = layout_boundary_border_edges(
@@ -198,7 +198,7 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
 void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block) {
     log_debug("render scrollbars");
     // need to reset block.x and y, which was changed by the scroller
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     rdcon->block.x = pa_block->x + block->x * s;  rdcon->block.y = pa_block->y + block->y * s;
     if (block->scroll()->has_hz_scroll || block->scroll()->has_vt_scroll) {
         Rect rect = {rdcon->block.x, rdcon->block.y, block->width * s, block->height * s};

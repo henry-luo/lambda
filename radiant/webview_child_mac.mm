@@ -156,7 +156,7 @@ extern "C" {
 
 WebViewHandle* webview_platform_create(GLFWwindow* window,
                                        float x, float y, float w, float h,
-                                       float pixel_ratio) {
+                                       float device_scale) {
     @autoreleasepool {
         NSWindow* ns_window = glfwGetCocoaWindow(window);
         if (!ns_window) {
@@ -212,11 +212,12 @@ WebViewHandle* webview_platform_create(GLFWwindow* window,
             forMainFrameOnly:YES];
         [config.userContentController addUserScript:script];
 
-        // compute frame in NSView coordinates (flipped Y: macOS origin is bottom-left)
-        float view_height = content_view.bounds.size.height;
-
-        // NSView uses logical (point) coordinates; WKWebView handles retina scaling internally
-        NSRect frame = NSMakeRect(x, view_height / pixel_ratio - y - h, w, h);
+        // NSView uses logical points and a bottom-left origin; WKWebView applies
+        // Retina backing scale after this host-coordinate conversion.
+        RdtHostRect host = rdt_logical_to_host_rect(
+            {x, y, w, h},
+            {1.0f, 1.0f, (float)content_view.bounds.size.height, RDT_HOST_Y_UP});
+        NSRect frame = NSMakeRect(host.x, host.y, host.width, host.height);
 
         WKWebView* wk_view = [[WKWebView alloc] initWithFrame:frame configuration:config];
         wk_view.autoresizingMask = 0;  // we manage position manually
@@ -232,7 +233,7 @@ WebViewHandle* webview_platform_create(GLFWwindow* window,
         WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: platform webview handle is released by webview_platform_destroy.
         handle->wk_view = wk_view;
         handle->parent_view = content_view;
-        handle->pixel_ratio = pixel_ratio;
+        handle->device_scale = device_scale;
         handle->scheme_handler = scheme_handler;
         handle->mode = WEBVIEW_MODE_WINDOW;
 
@@ -301,14 +302,16 @@ void webview_platform_eval_js(WebViewHandle* handle, const char* js) {
 
 void webview_platform_set_bounds(WebViewHandle* handle,
                                  float x, float y, float w, float h,
-                                 float pixel_ratio) {
+                                 float device_scale) {
     if (!handle || !handle->wk_view || !handle->parent_view) return;
     @autoreleasepool {
-        // NSView coordinates: origin at bottom-left, Y increases upward
-        float view_height = handle->parent_view.bounds.size.height;
-        NSRect frame = NSMakeRect(x, view_height / pixel_ratio - y - h, w, h);
+        RdtHostRect host = rdt_logical_to_host_rect(
+            {x, y, w, h},
+            {1.0f, 1.0f, (float)handle->parent_view.bounds.size.height,
+             RDT_HOST_Y_UP});
+        NSRect frame = NSMakeRect(host.x, host.y, host.width, host.height);
         [handle->wk_view setFrame:frame];
-        handle->pixel_ratio = pixel_ratio;
+        handle->device_scale = device_scale;
     }
 }
 

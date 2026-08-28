@@ -474,7 +474,7 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->border) return;
 
     BorderProp* border = view->boundary()->border;
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
 
     Corner scaled_radius = radiant_corner_scaled(&border->radius, s);
     Corner orig_radius = border->radius;
@@ -522,7 +522,7 @@ static bool render_border_image_gradient(RenderContext* rdcon, BorderProp* borde
 
     LinearGradient* gradient = border->border_image_linear_gradient;
     float edge_width = border->has_border_image_width
-        ? border->border_image_width * rdcon->scale : 0.0f;
+        ? border->border_image_width * rdcon->raster_scale : 0.0f;
     float top = border->has_border_image_width ? edge_width : border->width.values[0];
     float right = border->has_border_image_width ? edge_width : border->width.values[1];
     float bottom = border->has_border_image_width ? edge_width : border->width.values[2];
@@ -738,7 +738,7 @@ void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (outline->width <= 0 || outline->style == CSS_VALUE_NONE || outline->style == CSS_VALUE_HIDDEN) return;
     if (outline->color.a == 0) return;
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     float w = outline->width * s;
     float offset = outline->offset * s;
 

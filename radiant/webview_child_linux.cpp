@@ -180,25 +180,27 @@ static WebKitWebView* create_webkit_view(WebViewHandle* handle,
 
 static void apply_child_window_bounds(WebViewHandle* handle,
                                       float x, float y, float width, float height,
-                                      float pixel_ratio) {
+                                      float device_scale) {
     int window_x = 0, window_y = 0;
     glfwGetWindowPos(handle->glfw_window, &window_x, &window_y);
-    int absolute_x = (int)(window_x + x);  // INT_CAST_OK: screen pixel coordinates
-    int absolute_y = (int)(window_y + y);  // INT_CAST_OK: screen pixel coordinates
-    int gtk_width = (int)width;             // INT_CAST_OK: CSS pixels to GTK logical pixels
-    int gtk_height = (int)height;           // INT_CAST_OK: CSS pixels to GTK logical pixels
+    RdtHostRect host = rdt_logical_to_host_rect(
+        {x, y, width, height}, {1.0f, 1.0f, 0.0f, RDT_HOST_Y_DOWN});
+    int absolute_x = (int)(window_x + host.x);  // INT_CAST_OK: GTK screen coordinate
+    int absolute_y = (int)(window_y + host.y);  // INT_CAST_OK: GTK screen coordinate
+    int gtk_width = (int)host.width;             // INT_CAST_OK: GTK logical dimension
+    int gtk_height = (int)host.height;           // INT_CAST_OK: GTK logical dimension
     gtk_window_move(GTK_WINDOW(handle->gtk_window), absolute_x, absolute_y);
     gtk_window_resize(GTK_WINDOW(handle->gtk_window), gtk_width, gtk_height);
     handle->last_x = x;
     handle->last_y = y;
     handle->width = width;
     handle->height = height;
-    handle->pixel_ratio = pixel_ratio;
+    handle->device_scale = device_scale;
 }
 
 WebViewHandle* webview_platform_create(GLFWwindow* window,
                                        float x, float y, float w, float h,
-                                       float pixel_ratio) {
+                                       float device_scale) {
     ensure_gtk_initialized();
     if (!s_gtk_initialized) return nullptr;
 
@@ -207,7 +209,7 @@ WebViewHandle* webview_platform_create(GLFWwindow* window,
     handle->glfw_window = window;
     handle->width       = w;
     handle->height      = h;
-    handle->pixel_ratio = pixel_ratio;
+    handle->device_scale = device_scale;
 
     handle->wk_view = create_webkit_view(handle, w, h);
 
@@ -221,7 +223,7 @@ WebViewHandle* webview_platform_create(GLFWwindow* window,
     gtk_container_add(GTK_CONTAINER(handle->gtk_window), GTK_WIDGET(handle->wk_view));
     gtk_widget_show_all(handle->gtk_window);
 
-    apply_child_window_bounds(handle, x, y, w, h, pixel_ratio);
+    apply_child_window_bounds(handle, x, y, w, h, device_scale);
 
     // pump GTK events so the window appears
     while (gtk_events_pending()) gtk_main_iteration_do(FALSE);
@@ -263,9 +265,9 @@ void webview_platform_eval_js(WebViewHandle* handle, const char* js) {
 
 void webview_platform_set_bounds(WebViewHandle* handle,
                                  float x, float y, float w, float h,
-                                 float pixel_ratio) {
+                                 float device_scale) {
     if (!handle || !handle->gtk_window || !handle->glfw_window) return;
-    apply_child_window_bounds(handle, x, y, w, h, pixel_ratio);
+    apply_child_window_bounds(handle, x, y, w, h, device_scale);
 
     // pump pending GTK events to apply the move/resize
     while (gtk_events_pending()) gtk_main_iteration_do(FALSE);

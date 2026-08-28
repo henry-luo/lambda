@@ -3115,7 +3115,7 @@ RADIANT_C_API int radiant_dom_window_get_property(Item object, Item key, Item* o
         return 1;
     }
     if (radiant_dom_key_equals(key, "devicePixelRatio", 16)) {
-        *out = radiant_dom_window_dimension(uicon->pixel_ratio > 0.0f ? uicon->pixel_ratio : 1.0f);
+        *out = radiant_dom_window_dimension(uicon->device_scale > 0.0f ? uicon->device_scale : 1.0f);
         return 1;
     }
 

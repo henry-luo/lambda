@@ -167,7 +167,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         case CSS_VALUE_ARMENIAN:
         case CSS_VALUE_GEORGIAN: {
             if (marker_prop->text_content && *marker_prop->text_content && font_box_handle(&rdcon->font)) {
-                float s = rdcon->scale;
+                float s = rdcon->raster_scale;
                 const FontMetrics* _mk = font_get_metrics(font_box_handle(&rdcon->font));
                 float ascend = _mk ? (_mk->hhea_ascender * s) : 12.0f;
 

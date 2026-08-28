@@ -175,7 +175,7 @@ static EventSimContext* event_sim_create_context() {
     ctx->pass_count = 0;
     ctx->fail_count = 0;
     ctx->test_name = NULL;
-    ctx->pixel_ratio = 1.0f;
+    ctx->device_scale = 1.0f;
     ctx->default_timeout = 2000;
     ctx->replay_assert_state = g_replay_assert_state;
     ctx->replay_expected_focus_id = -1;
@@ -1786,6 +1786,15 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
             ev->has_expected_open_dropdown = true;
             ev->expected_open_dropdown = reader.get("open_dropdown").asBool();
         }
+        if (reader.has("context_menu_open")) {
+            ev->has_expected_context_menu_open = true;
+            ev->expected_context_menu_open = reader.get("context_menu_open").asBool();
+        }
+        if (reader.has("context_menu_enabled")) {
+            ev->has_expected_context_menu_enabled = true;
+            ev->expected_context_menu_enabled =
+                static_cast<uint32_t>(reader.get("context_menu_enabled").asInt32());
+        }
         if (reader.has("scrollbar_h_hovered")) {
             ev->has_expected_scrollbar_h_hovered = true;
             ev->expected_scrollbar_h_hovered = reader.get("scrollbar_h_hovered").asBool();
@@ -1841,6 +1850,26 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
             ev->has_expected_dropdown_height = true;
             ItemReader sh = reader.get("dropdown_height");
             ev->expected_dropdown_height = (float)(sh.isFloat() ? sh.asFloat() : sh.asInt());
+        }
+        if (reader.has("context_menu_x")) {
+            ev->has_expected_context_menu_x = true;
+            ItemReader sx = reader.get("context_menu_x");
+            ev->expected_context_menu_x = (float)(sx.isFloat() ? sx.asFloat() : sx.asInt());
+        }
+        if (reader.has("context_menu_y")) {
+            ev->has_expected_context_menu_y = true;
+            ItemReader sy = reader.get("context_menu_y");
+            ev->expected_context_menu_y = (float)(sy.isFloat() ? sy.asFloat() : sy.asInt());
+        }
+        if (reader.has("context_menu_width")) {
+            ev->has_expected_context_menu_width = true;
+            ItemReader sw = reader.get("context_menu_width");
+            ev->expected_context_menu_width = (float)(sw.isFloat() ? sw.asFloat() : sw.asInt());
+        }
+        if (reader.has("context_menu_height")) {
+            ev->has_expected_context_menu_height = true;
+            ItemReader sh = reader.get("context_menu_height");
+            ev->expected_context_menu_height = (float)(sh.isFloat() ? sh.asFloat() : sh.asInt());
         }
         {
             ItemReader st = reader.get("tolerance");
@@ -2105,15 +2134,17 @@ EventSimContext* event_sim_load(const char* json_file) {
         log_info("event_sim: viewport %dx%d", ctx->viewport_width, ctx->viewport_height);
     }
 
-    ItemReader pixel_ratio_item = root_map.get("pixel_ratio");
-    if (pixel_ratio_item.isFloat() || pixel_ratio_item.isInt()) {
-        ctx->pixel_ratio = sim_number_as_float(pixel_ratio_item);
-        if (ctx->pixel_ratio <= 0.0f) {
-            log_error("event_sim: pixel_ratio must be positive");
+    // `pixel_ratio` remains a compatibility alias for older fixtures.
+    ItemReader device_scale_item = root_map.has("device_scale")
+        ? root_map.get("device_scale") : root_map.get("pixel_ratio");
+    if (device_scale_item.isFloat() || device_scale_item.isInt()) {
+        ctx->device_scale = sim_number_as_float(device_scale_item);
+        if (ctx->device_scale <= 0.0f) {
+            log_error("event_sim: device_scale must be positive");
             event_sim_free(ctx);
             return NULL;
         }
-        log_info("event_sim: device scale %.3f", ctx->pixel_ratio);
+        log_info("event_sim: device scale %.3f", ctx->device_scale);
     }
 
     // Parse optional default_timeout (ms) for auto-waiting assertions.
@@ -2348,7 +2379,7 @@ EventSimContext* event_sim_load_replay_log(const char* jsonl_file) {
                         ctx->viewport_height = viewport.get("h").asInt32();
                     }
                     double recorded_scale = sim_number_as_float(root_map.get("zoom"));
-                    if (recorded_scale > 0.0) ctx->pixel_ratio = (float)recorded_scale;
+                    if (recorded_scale > 0.0) ctx->device_scale = (float)recorded_scale;
                 } else if (type && strcmp(type, "input.raw") == 0) {
                     ItemReader data_item = root_map.get("data");
                     if (data_item.isMap()) {
@@ -3267,10 +3298,11 @@ static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* 
         ctx->fail_count++;
         return;
     }
-    float scale_x = uicon->device_scale_x > 0.0f ? uicon->device_scale_x : 1.0f;
-    float scale_y = uicon->device_scale_y > 0.0f ? uicon->device_scale_y : scale_x;
-    int device_x = (int)lroundf(logical_x * scale_x); // INT_CAST_OK: discrete surface sample
-    int device_y = (int)lroundf(logical_y * scale_y); // INT_CAST_OK: discrete surface sample
+    RdtDevicePoint device = ui_context_logical_to_device_point(
+        uicon, {logical_x, logical_y});
+    RdtDevicePixelPoint sample = rdt_device_point_round(device);
+    int device_x = sample.x;
+    int device_y = sample.y;
     if (device_x < 0 || device_y < 0 ||
         device_x >= actual->width || device_y >= actual->height) {
         log_error("event_sim: assert_pixel FAIL - logical (%.2f,%.2f) maps outside surface at (%d,%d) in %dx%d",
@@ -4172,7 +4204,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // Resize viewport and trigger full relayout
             int new_css_w = (int)lroundf(ev->x); // INT_CAST_OK: viewport API is discrete CSS pixels
             int new_css_h = (int)lroundf(ev->y); // INT_CAST_OK: viewport API is discrete CSS pixels
-            float pr = uicon->pixel_ratio > 0 ? uicon->pixel_ratio : 1.0f;
+            float pr = uicon->device_scale > 0 ? uicon->device_scale : 1.0f;
             int new_phys_w = (int)lroundf(new_css_w * pr); // INT_CAST_OK: physical surface width
             int new_phys_h = (int)lroundf(new_css_h * pr); // INT_CAST_OK: physical surface height
             log_info("event_sim: resize to %dx%d CSS pixels (%dx%d physical)", new_css_w, new_css_h, new_phys_w, new_phys_h);
@@ -5420,6 +5452,18 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 log_error("event_sim: assert_state_store FAIL - open dropdown expectation mismatch");
                 passed = false;
             }
+            if (state && elem && ev->has_expected_context_menu_open &&
+                ((state->context_menu_target == elem) != ev->expected_context_menu_open)) {
+                log_error("event_sim: assert_state_store FAIL - context menu expectation mismatch");
+                passed = false;
+            }
+            if (state && ev->has_expected_context_menu_enabled &&
+                state->context_menu_enabled_mask != ev->expected_context_menu_enabled) {
+                log_error("event_sim: assert_state_store FAIL - context menu enabled expected %u, got %u",
+                          ev->expected_context_menu_enabled,
+                          state->context_menu_enabled_mask);
+                passed = false;
+            }
             float tol = ev->scroll_tolerance > 0.0f ? ev->scroll_tolerance : 1.0f;
             if (state && (ev->has_expected_dropdown_x || ev->has_expected_dropdown_y ||
                           ev->has_expected_dropdown_width || ev->has_expected_dropdown_height)) {
@@ -5445,6 +5489,33 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     (state->dropdown_height < ev->expected_dropdown_height - tol || state->dropdown_height > ev->expected_dropdown_height + tol)) {
                     log_error("event_sim: assert_state_store FAIL - dropdown_height expected %.1f, got %.1f",
                         ev->expected_dropdown_height, state->dropdown_height);
+                    passed = false;
+                }
+            }
+            if (state && (ev->has_expected_context_menu_x || ev->has_expected_context_menu_y ||
+                          ev->has_expected_context_menu_width || ev->has_expected_context_menu_height)) {
+                if (ev->has_expected_context_menu_x &&
+                    fabsf(state->context_menu_x - ev->expected_context_menu_x) > tol) {
+                    log_error("event_sim: assert_state_store FAIL - context_menu_x expected %.1f, got %.1f",
+                              ev->expected_context_menu_x, state->context_menu_x);
+                    passed = false;
+                }
+                if (ev->has_expected_context_menu_y &&
+                    fabsf(state->context_menu_y - ev->expected_context_menu_y) > tol) {
+                    log_error("event_sim: assert_state_store FAIL - context_menu_y expected %.1f, got %.1f",
+                              ev->expected_context_menu_y, state->context_menu_y);
+                    passed = false;
+                }
+                if (ev->has_expected_context_menu_width &&
+                    fabsf(state->context_menu_width - ev->expected_context_menu_width) > tol) {
+                    log_error("event_sim: assert_state_store FAIL - context_menu_width expected %.1f, got %.1f",
+                              ev->expected_context_menu_width, state->context_menu_width);
+                    passed = false;
+                }
+                if (ev->has_expected_context_menu_height &&
+                    fabsf(state->context_menu_height - ev->expected_context_menu_height) > tol) {
+                    log_error("event_sim: assert_state_store FAIL - context_menu_height expected %.1f, got %.1f",
+                              ev->expected_context_menu_height, state->context_menu_height);
                     passed = false;
                 }
             }

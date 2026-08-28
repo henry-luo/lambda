@@ -95,13 +95,13 @@ void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind
     target->kind = kind;
     target->output_file = output_file;
     target->jpeg_quality = 85;
-    target->scale = 1.0f;
-    target->pixel_ratio = 1.0f;
+    target->output_scale = 1.0f;
+    target->device_scale = 1.0f;
 }
 
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
-                                 int fallback_width, int fallback_height, float scale) {
+                                 int fallback_width, int fallback_height, float output_scale) {
     if (!session || !html_file) return false;
     memset(session, 0, sizeof(*session));
 
@@ -109,7 +109,7 @@ bool render_export_session_begin(RenderExportSession* session, const char* html_
     bool auto_height = viewport_height == 0;
     int layout_width = viewport_width > 0 ? viewport_width : fallback_width;
     int layout_height = viewport_height > 0 ? viewport_height : fallback_height;
-    session->scale = scale > 0.0f ? scale : 1.0f;
+    session->output_scale = output_scale > 0.0f ? output_scale : 1.0f;
 
     session->ui_context = (UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER); // OBJ_HEAP_OK: export session owns the headless UI context shell.
     if (!session->ui_context) {
@@ -145,8 +145,9 @@ bool render_export_session_begin(RenderExportSession* session, const char* html_
 
     // Every file exporter must lay out and measure the same scaled document before encoding.
     session->ui_context->document = session->document;
-    session->document->viewport.given_scale = session->scale;
-    session->document->viewport.scale = session->scale;
+    session->document->viewport.output_scale = session->output_scale;
+    ui_context_sync_document_raster_scale(session->ui_context,
+                                          session->document);
     process_document_font_faces(session->ui_context, session->document);
     layout_html_doc(session->ui_context, session->document, false);
 
@@ -245,7 +246,7 @@ static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, V
         uicon->surface->width, uicon->surface->height, uicon->surface->width);
     rdcon->transform = rdt_matrix_identity();
     rdcon->has_transform = false;
-    rdcon->scale = uicon->pixel_ratio > 0 ? uicon->pixel_ratio : 1.0f;
+    rdcon->raster_scale = ui_context_raster_scale(uicon);
 
     FontProp* default_font = view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
     setup_font(uicon, &rdcon->font, default_font);
@@ -321,7 +322,7 @@ static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon,
     if (!force_full && state && !state->dirty_tracker.full_repaint &&
         dirty_has_regions(&state->dirty_tracker)) {
         DirtyRect* dr = state->dirty_tracker.dirty_list;
-        float scale = rdcon->scale;
+        float scale = rdcon->raster_scale;
         while (dr) {
             Rect dirty_rect = {dr->x * scale, dr->y * scale, dr->width * scale, dr->height * scale};
             RasterPaintContext raster = {rdcon->ui_context->surface, &rdcon->block.clip, nullptr, 0};
@@ -373,7 +374,7 @@ static RenderOutputReplayResult render_output_replay_display_list(RenderContext*
     if (!replay_dirty && render_threads != 1 && item_count > 0 && !has_glyphs) {
         ImageSurface* surface = rdcon->ui_context->surface;
         TileGrid grid;
-        tile_grid_init(&grid, surface->width, surface->height, rdcon->scale);
+        tile_grid_init(&grid, surface->width, surface->height, rdcon->raster_scale);
         if (grid.total <= 0) {
             log_error("[RENDER] tile grid initialization failed for %dx%d surface",
                       surface->width, surface->height);
@@ -394,7 +395,7 @@ static RenderOutputReplayResult render_output_replay_display_list(RenderContext*
         for (int i = 0; i < grid.total; i++) {
             jobs[i].tile = &grid.tiles[i];
             jobs[i].display_list = display_list;
-            jobs[i].scale = rdcon->scale;
+            jobs[i].raster_scale = rdcon->raster_scale;
             jobs[i].bg_color = canvas_bg;
         }
 
@@ -411,7 +412,7 @@ static RenderOutputReplayResult render_output_replay_display_list(RenderContext*
     }
 
     dl_replay(display_list, &rdcon->vec, rdcon->ui_context->surface,
-              &rdcon->block.clip, &rdcon->scratch, rdcon->scale, replay_dirty);
+              &rdcon->block.clip, &rdcon->scratch, rdcon->raster_scale, replay_dirty);
     return result;
 }
 
@@ -576,8 +577,8 @@ static int render_output_render_html_file_to_target(const char* html_file,
         return 1;
     }
 
-    float scale = target->scale > 0 ? target->scale : 1.0f;
-    float pixel_ratio = target->pixel_ratio > 0 ? target->pixel_ratio : 1.0f;
+    float output_scale = target->output_scale > 0 ? target->output_scale : 1.0f;
+    float device_scale = target->device_scale > 0 ? target->device_scale : 1.0f;
     int viewport_width = target->viewport_width;
     int viewport_height = target->viewport_height;
     if (target->kind == RENDER_OUTPUT_PDF || target->kind == RENDER_OUTPUT_SVG) {
@@ -597,18 +598,18 @@ static int render_output_render_html_file_to_target(const char* html_file,
     switch (target->kind) {
         case RENDER_OUTPUT_PDF:
             return render_html_to_pdf(html_file, target->output_file,
-                                      viewport_width, viewport_height, scale);
+                                      viewport_width, viewport_height, output_scale);
         case RENDER_OUTPUT_SVG:
             return render_html_to_svg(html_file, target->output_file,
-                                      viewport_width, viewport_height, scale);
+                                      viewport_width, viewport_height, output_scale);
         case RENDER_OUTPUT_PNG:
         case RENDER_OUTPUT_TILED_PNG:
             return render_html_to_png(html_file, target->output_file,
-                                      viewport_width, viewport_height, scale, pixel_ratio);
+                                      viewport_width, viewport_height, output_scale, device_scale);
         case RENDER_OUTPUT_JPEG:
             return render_html_to_jpeg(html_file, target->output_file,
                                        target->jpeg_quality > 0 ? target->jpeg_quality : 85,
-                                       viewport_width, viewport_height, scale, pixel_ratio);
+                                       viewport_width, viewport_height, output_scale, device_scale);
         case RENDER_OUTPUT_SCREEN:
             log_error("render_output_render_html_file_to_target: screen target needs a UiContext");
             return 1;
@@ -620,14 +621,14 @@ static int render_output_render_html_file_to_target(const char* html_file,
 
 int render_html_to_output_target(const char* html_file, const char* output_file,
                                  int viewport_width, int viewport_height,
-                                 float scale, float pixel_ratio,
+                                 float output_scale, float device_scale,
                                  int jpeg_quality) {
     RenderOutputTarget target;
     render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
     target.viewport_width = viewport_width;
     target.viewport_height = viewport_height;
-    target.scale = scale;
-    target.pixel_ratio = pixel_ratio;
+    target.output_scale = output_scale;
+    target.device_scale = device_scale;
     target.jpeg_quality = jpeg_quality > 0 ? jpeg_quality : 85;
     return render_output_render_html_file_to_target(html_file, &target);
 }
@@ -766,7 +767,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
 
         dl_replay_tile(&display_list, &rdcon.vec, tile_surf, &rdcon.scratch,
                        0.0f, (float)tile_y, (float)total_width, (float)tile_h,
-                       rdcon.scale);
+                       rdcon.raster_scale);
 
         for (int y = 0; y < tile_h; y++) {
             uint8_t* row = (uint8_t*)tile_surf->pixels + y * tile_surf->pitch;

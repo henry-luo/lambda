@@ -251,8 +251,8 @@ lambda render <input> -o <output> [options]
 | `-o` | `--output` | Output file path (**required**; format inferred from extension) | |
 | `-vw` | `--viewport-width` | Viewport width in CSS pixels | Auto-size to content |
 | `-vh` | `--viewport-height` | Viewport height in CSS pixels | Auto-size to content |
-| `-s` | `--scale` | User zoom scale factor | `1.0` |
-| | `--pixel-ratio` | Device pixel ratio for HiDPI/Retina displays | `1.0` |
+| `-s` | `--scale` | Raster export density; does not change logical layout (RSC7) | `1.0` |
+| | `--pixel-ratio` | Device scale for HiDPI/Retina displays; legacy option spelling (RSC7) | `1.0` |
 | `-t` | `--theme <name>` | Color theme for graph diagrams | `zinc-dark` |
 | `-h` | `--help` | Show help | |
 

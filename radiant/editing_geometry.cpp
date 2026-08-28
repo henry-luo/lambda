@@ -195,7 +195,7 @@ static bool editing_geometry_text_metrics(UiContext* uicon, ViewBlock* block,
     FontHandle* font_handle = font_box_handle(&fbox);
     if (!font_handle) return false;
 
-    float pixel_ratio = (uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
+    float raster_scale = ui_context_raster_scale(uicon);
     const unsigned char* p = (const unsigned char*)value;
     const unsigned char* p_end = p + limit;
     float width = 0.0f;
@@ -209,7 +209,7 @@ static bool editing_geometry_text_metrics(UiContext* uicon, ViewBlock* block,
         p += bytes;
         FontStyleDesc sd = font_style_desc_from_prop(block->font);
         LoadedGlyph* glyph = font_load_glyph(font_handle, &sd, codepoint, false);
-        if (glyph) width += glyph->advance_x / pixel_ratio;
+        if (glyph) width += glyph->advance_x / raster_scale;
     }
     if (out_width) *out_width = width;
     return true;
@@ -287,7 +287,7 @@ static uint32_t editing_geometry_line_offset_for_x(UiContext* uicon,
     FontHandle* font_handle = font_box_handle(&fbox);
     if (!font_handle) return line_start + line_len;
 
-    float pixel_ratio = (uicon && uicon->pixel_ratio > 0) ? uicon->pixel_ratio : 1.0f;
+    float raster_scale = ui_context_raster_scale(uicon);
     const unsigned char* p = (const unsigned char*)(value + line_start);
     const unsigned char* p_end = p + line_len;
     float accum_w = 0.0f;
@@ -302,7 +302,7 @@ static uint32_t editing_geometry_line_offset_for_x(UiContext* uicon,
         }
         FontStyleDesc sd = font_style_desc_from_prop(block->font);
         LoadedGlyph* glyph = font_load_glyph(font_handle, &sd, codepoint, false);
-        float gw = glyph ? glyph->advance_x / pixel_ratio : 0.0f;
+        float gw = glyph ? glyph->advance_x / raster_scale : 0.0f;
         if (rel_x < accum_w + gw / 2.0f) {
             return line_start + byte_off;
         }

@@ -15,6 +15,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_value.hpp"
 #include "../lambda/input/css/css_style.hpp"
+#include "scale.hpp"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -3235,7 +3236,7 @@ typedef struct UiContext {
 
     float device_scale_x;   // physical framebuffer px per logical window px on X
     float device_scale_y;   // physical framebuffer px per logical window px on Y
-    float pixel_ratio;      // compatibility scalar after validating X/Y agreement
+    float device_scale;     // isotropic device scale after validating X/Y agreement
     DomDocument* document;  // current document
     // Nested iframe layout belongs to this UI/document tree, not to the host
     // thread.  Recursive layout may construct short-lived LayoutContexts.
@@ -3259,17 +3260,52 @@ typedef struct UiContext {
                             // operations use the in-process ClipboardStore only and do NOT touch
                             // the OS pasteboard via GLFW (avoids cross-process races in tests).
 
-    int init(bool headless, float requested_pixel_ratio = 0.0f);
+    int init(bool headless, float requested_device_scale = 0.0f);
     void create_surface(int pixel_width, int pixel_height);
     void destroy_document();
     void destroy();
 } UiContext;
+
+inline float ui_context_raster_scale(const UiContext* uicon) {
+    if (!uicon) return 1.0f;
+    if (uicon->document && uicon->document->viewport.raster_scale > 0.0f) {
+        return uicon->document->viewport.raster_scale;
+    }
+    return uicon->device_scale > 0.0f ? uicon->device_scale : 1.0f;
+}
+
+inline RdtDeviceRect ui_context_logical_to_device_rect(
+        const UiContext* uicon, RdtLogicalRect logical) {
+    if (!uicon) return rdt_logical_to_device_rect(logical, 1.0f, 1.0f);
+    float output_scale = uicon->document && uicon->document->viewport.output_scale > 0.0f
+        ? uicon->document->viewport.output_scale : 1.0f;
+    return rdt_logical_to_device_rect(
+        logical,
+        uicon->device_scale_x * output_scale,
+        uicon->device_scale_y * output_scale);
+}
+
+inline RdtDevicePoint ui_context_logical_to_device_point(
+        const UiContext* uicon, RdtLogicalPoint logical) {
+    if (!uicon) return rdt_logical_to_device_point(logical, 1.0f, 1.0f);
+    float output_scale = uicon->document && uicon->document->viewport.output_scale > 0.0f
+        ? uicon->document->viewport.output_scale : 1.0f;
+    return rdt_logical_to_device_point(
+        logical,
+        uicon->device_scale_x * output_scale,
+        uicon->device_scale_y * output_scale);
+}
 
 // Publish coherent platform scale metrics. This invalidates physical resources
 // and requests repaint, but does not reflow logical layout.
 bool ui_context_set_device_scale(UiContext* uicon,
                                  float scale_x,
                                  float scale_y);
+// Recompute one document's derived raster scale from its explicit page/output
+// inputs and the UI's device scale. The top-level call also refreshes physical
+// font resources; logical layout remains unchanged.
+void ui_context_sync_document_raster_scale(UiContext* uicon,
+                                           DomDocument* doc);
 
 // Loader-time host settings.  They are copied into DomDocument::js before
 // script execution creates its Runtime, so parallel views never share browser

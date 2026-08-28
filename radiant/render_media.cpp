@@ -115,9 +115,9 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embedp()->img) return;
 
     ImageSurface* img = view->embedp()->img;
-    Rect border_rect = render_geometry_block_border_rect(&rdcon->block, view, rdcon->scale);
-    Rect rect = render_geometry_block_content_rect(&rdcon->block, view, rdcon->scale);
-    float s = rdcon->scale;
+    Rect border_rect = render_geometry_block_border_rect(&rdcon->block, view, rdcon->raster_scale);
+    Rect rect = render_geometry_block_content_rect(&rdcon->block, view, rdcon->raster_scale);
+    float s = rdcon->raster_scale;
 
     // Apply object-fit: compute actual image render rect
     CssEnum object_fit = view->embedp()->object_fit;
@@ -270,7 +270,7 @@ void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
     if (wv->mode != WEBVIEW_MODE_LAYER || !wv->surface || !wv->surface->pixels) return;
     if (!wv->visible) return;
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     float dst_x = rdcon->block.x + view->x * s;
     float dst_y = rdcon->block.y + view->y * s;
     float dst_w = view->width * s;
@@ -286,7 +286,7 @@ void render_webview_layer_content(RenderContext* rdcon, ViewBlock* view) {
 void render_video_content(RenderContext* rdcon, ViewBlock* view) {
     if (!view->embed || !view->embedp()->video) return;
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     float dst_x = rdcon->block.x + view->x * s;
     float dst_y = rdcon->block.y + view->y * s;
     float dst_w = view->width * s;

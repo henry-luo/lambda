@@ -1283,9 +1283,8 @@ float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
             ? font_load_glyph(resolved, &desc, (uint32_t)' ', false) : NULL;
         float advance = 0.0f;
         if (glyph && glyph->advance_x > 0.0f) {
-            float pixel_ratio = lycon->ui_context && lycon->ui_context->pixel_ratio > 0.0f
-                ? lycon->ui_context->pixel_ratio : 1.0f;
-            advance = glyph->advance_x / pixel_ratio;
+            float raster_scale = ui_context_raster_scale(lycon->ui_context);
+            advance = glyph->advance_x / raster_scale;
         }
         if (release_resolved) font_handle_release(resolved);
         if (advance > 0.0f) return advance;

@@ -115,21 +115,24 @@ struct DomJsRuntime {
         virtual_clock_enabled(false), virtual_clock_ms(0.0) {}
 };
 
-// tier-1: document-owned viewport and render scale inputs
+// tier-1: document-owned semantic zoom and raster-output scale inputs
 struct ViewportMeta {
-    float given_scale;
-    float scale;
-    float initial_scale;
+    float output_scale;
+    float raster_scale;
+    float page_zoom;
     float min_scale;
     float max_scale;
     int width;
     int height;
     float body_transform_scale;
 
-    ViewportMeta() : given_scale(1.0f), scale(1.0f), initial_scale(1.0f),
+    ViewportMeta() : output_scale(1.0f), raster_scale(1.0f), page_zoom(1.0f),
         min_scale(0.0f), max_scale(0.0f), width(0), height(0),
         body_transform_scale(1.0f) {}
 };
+
+static_assert(sizeof(ViewportMeta) == 32,
+              "ViewportMeta is embedded before DomDocument ABI-sensitive members");
 
 // tier-1: last reconciliation result exposed to diagnostics and tests
 struct ReconcileLog {

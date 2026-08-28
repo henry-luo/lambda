@@ -142,7 +142,7 @@ extern "C" {
 // Platform API — layer mode
 // ---------------------------------------------------------------------------
 
-WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio) {
+WebViewHandle* webview_layer_platform_create(float w, float h, float raster_scale) {
     @autoreleasepool {
         WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
         WKWebpagePreferences* page_prefs = [[WKWebpagePreferences alloc] init];
@@ -187,10 +187,10 @@ WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio
         LayerMessageHandler* msg_handler = [[LayerMessageHandler alloc] init];
         [config.userContentController addScriptMessageHandler:msg_handler name:@"lambda"];
 
-        // create WKWebView with physical pixel dimensions but not attached to a window
-        // use logical size * pixel_ratio for the frame so snapshots capture at retina resolution
-        float phys_w = w * pixel_ratio;
-        float phys_h = h * pixel_ratio;
+        // The offscreen frame is the backend's raster target. The handle keeps
+        // the logical dimensions separately for snapshot configuration.
+        float phys_w = w * raster_scale;
+        float phys_h = h * raster_scale;
         NSRect frame = NSMakeRect(0, 0, phys_w, phys_h);
         WKWebView* wk_view = [[WKWebView alloc] initWithFrame:frame configuration:config];
 
@@ -200,7 +200,7 @@ WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio
         WebViewHandle* handle = (WebViewHandle*)mem_calloc(1, sizeof(WebViewHandle), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: platform webview handle is released by webview_layer_platform_destroy.
         handle->wk_view = wk_view;
         handle->mode = WEBVIEW_MODE_LAYER;
-        handle->pixel_ratio = pixel_ratio;
+        handle->raster_scale = raster_scale;
         handle->width = w;
         handle->height = h;
         handle->dirty = true;
@@ -218,7 +218,7 @@ WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
         log_info("webview layer: created offscreen WKWebView %.0fx%.0f (phys %.0fx%.0f, pr=%.1f)",
-                 w, h, phys_w, phys_h, pixel_ratio);
+                 w, h, phys_w, phys_h, raster_scale);
         return handle;
     }
 }
@@ -263,14 +263,14 @@ void webview_layer_platform_set_html(WebViewHandle* handle, const char* html) {
     }
 }
 
-void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float pixel_ratio) {
+void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float raster_scale) {
     if (!handle || !handle->wk_view) return;
     @autoreleasepool {
         handle->width = w;
         handle->height = h;
-        handle->pixel_ratio = pixel_ratio;
-        float phys_w = w * pixel_ratio;
-        float phys_h = h * pixel_ratio;
+        handle->raster_scale = raster_scale;
+        float phys_w = w * raster_scale;
+        float phys_h = h * raster_scale;
         [handle->wk_view setFrame:NSMakeRect(0, 0, phys_w, phys_h)];
         handle->dirty = true;
         log_debug("webview layer: resized to %.0fx%.0f (phys %.0fx%.0f)", w, h, phys_w, phys_h);
@@ -285,8 +285,8 @@ bool webview_layer_platform_snapshot(WebViewHandle* handle, ImageSurface* surfac
         handle->snapshot_in_progress = true;
 
         // compute physical pixel dimensions
-        int phys_w = (int)(handle->width * handle->pixel_ratio);  // INT_CAST_OK: pixel dimension for bitmap
-        int phys_h = (int)(handle->height * handle->pixel_ratio); // INT_CAST_OK: pixel dimension for bitmap
+        int phys_w = (int)ceilf(handle->width * handle->raster_scale);  // INT_CAST_OK: containing pixel dimension
+        int phys_h = (int)ceilf(handle->height * handle->raster_scale); // INT_CAST_OK: containing pixel dimension
         if (phys_w <= 0 || phys_h <= 0) {
             handle->snapshot_in_progress = false;
             return false;

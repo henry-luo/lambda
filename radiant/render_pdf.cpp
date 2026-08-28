@@ -917,7 +917,7 @@ static bool pdf_raster_fallback_svg_subscene(PdfRenderContext* ctx,
                                        subscene->viewport_width,
                                        subscene->viewport_height,
                                        (Pool*)subscene->pool,
-                                       subscene->pixel_ratio,
+                                       subscene->raster_scale,
                                        (FontContext*)subscene->font_context,
                                        nullptr,
                                        current_color,
@@ -1965,8 +1965,8 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
     // Render to PDF (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
         // PDF output dimensions are scaled; coordinates inside are in CSS pixels with transform
-        float pdf_width = session.content_width * session.scale;
-        float pdf_height = session.content_height * session.scale;
+        float pdf_width = session.content_width * session.output_scale;
+        float pdf_height = session.content_height * session.output_scale;
         HPDF_Doc pdf_doc = render_view_tree_to_pdf(ui_context, doc->view_tree->root,
                                                    pdf_width, pdf_height);
         if (pdf_doc) {

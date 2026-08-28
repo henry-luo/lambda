@@ -9,7 +9,7 @@ It is built from scratch in C/C++ and compiled into `lambda.exe` by default, pro
 
 ## Overview
 
-Radiant takes a DOM-like tree with computed styles, performs layout in CSS pixels (with pixel-ratio aware rendering), and produces a view tree that can be rendered to a window or exported to files.
+Radiant takes a DOM-like tree with computed styles, performs layout in logical CSS pixels, and lowers paint through the RSC7-derived raster scale for windows or file exports.
 
 Within this repo, Radiant is the engine behind the Lambda CLI commands:
 - `lambda.exe layout` (layout analysis)
