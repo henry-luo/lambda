@@ -893,6 +893,9 @@ extern "C" bool js_ensure_active_module_var_capacity(uint32_t required_var_count
 JS_FORWARD_EXPRESSION(uint32_t, js_get_active_module_state_id, (void),
     context && context->active_module_state
         ? context->active_module_state->module_id : UINT32_MAX)
+JS_FORWARD_EXPRESSION(uint32_t, js_active_module_var_count, (void),
+    context && context->active_module_state
+        ? context->active_module_state->var_count : 0)
 
 static LambdaModuleState* js_module_state_at(uint32_t module_state_id) {
     if (!context || module_state_id == UINT32_MAX ||

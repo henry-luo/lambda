@@ -2,6 +2,7 @@
  * JavaScript runtime function object wrappers for Lambda.
  */
 #include "js_runtime_internal.hpp"
+#include "js_ast.hpp"
 #include "../../lib/memtrack.h"
 #include "../runtime/gc/gc_heap.h"
 #include "../runtime/side_stack.h"
@@ -455,6 +456,74 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     js_function_capture_with_env(fn);
     js_function_finalize_capabilities(fn);
     return function_root.get();
+}
+
+static void js_function_source_skip_trivia(const char** text, uint32_t* length) {
+    if (!text || !*text || !length) return;
+    bool advanced = true;
+    while (advanced && *length > 0) {
+        advanced = false;
+        while (*length > 0 && (**text == ' ' || **text == '\t' ||
+                **text == '\n' || **text == '\r')) {
+            (*text)++;
+            (*length)--;
+            advanced = true;
+        }
+        if (*length >= 2 && (*text)[0] == '/' && (*text)[1] == '*') {
+            *text += 2;
+            *length -= 2;
+            while (*length >= 2 && !((*text)[0] == '*' && (*text)[1] == '/')) {
+                (*text)++;
+                (*length)--;
+            }
+            if (*length >= 2) {
+                *text += 2;
+                *length -= 2;
+            }
+            advanced = true;
+        } else if (*length >= 2 && (*text)[0] == '/' && (*text)[1] == '/') {
+            *text += 2;
+            *length -= 2;
+            while (*length > 0 && (*text)[0] != '\n') {
+                (*text)++;
+                (*length)--;
+            }
+            advanced = true;
+        }
+    }
+}
+
+bool js_function_source_span(const char* source, size_t source_length,
+        const AstFuncNode* function, const char** text_out, uint32_t* length_out) {
+    if (!source || !function || !text_out || !length_out) return false;
+    uint32_t start = function->source_span.start_byte;
+    uint32_t end = function->source_span.end_byte;
+    if (end <= start || end > source_length) return false;
+    const char* text = source + start;
+    uint32_t length = end - start;
+    if (length > 65536) return false;
+
+    while (length > 0 && (text[0] == ' ' || text[0] == '\t' ||
+            text[0] == '\n' || text[0] == '\r')) {
+        text++;
+        length--;
+    }
+    const char* scan = text;
+    uint32_t scan_length = length;
+    js_function_source_skip_trivia(&scan, &scan_length);
+    if (scan_length >= 7 && strncmp(scan, "static", 6) == 0 &&
+            (scan[6] == ' ' || scan[6] == '\t' || scan[6] == '\n' || scan[6] == '/')) {
+        text = scan + 6;
+        length = scan_length - 6;
+        js_function_source_skip_trivia(&text, &length);
+    }
+    if (length > 0 && function->body &&
+            function->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
+        while (length > 1 && text[length - 1] != '}') length--;
+    }
+    *text_out = text;
+    *length_out = length;
+    return true;
 }
 
 #define JS_DEFINE_NATIVE_CALL_ADAPTER(arity, member, params, call_args) \

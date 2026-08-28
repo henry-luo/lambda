@@ -1,9 +1,20 @@
 #include <gtest/gtest.h>
 
+#include "../lib/file.h"
+#include "../lib/strbuf.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/module_registry.h"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
+
+static bool js_test262_append_file(StrBuf* source, const char* path) {
+    char* contents = read_text_file(path);
+    if (!contents) return false;
+    strbuf_append_str(source, contents);
+    strbuf_append_char(source, '\n');
+    free(contents);
+    return true;
+}
 
 TEST(JsScriptOwnership, AdoptsCommonScriptPrefixIntoRuntimeCatalog) {
     const char source[] = "let retained = 41; retained + 1;";
@@ -443,6 +454,33 @@ TEST(JsInterpreter, ExecutesControlFlowAndPropertyReferences) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, EvaluatesLegacyForInInitializerBeforeRightHandSide) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var first = (function() { var effects = 0; "
+        "for (var value = ++effects in {}); return effects; })(); "
+        "var second = (function() { var stored; "
+        "for (var value = 0 in stored = value, {}); return stored; })(); "
+        "var third = (function() { for (var value = 0 in {}); return value; })(); "
+        "var fourth = (function() { var effects = 0, iterations = 0, stored; "
+        "for (var value = (++effects, -1) in stored = value, {a: 0, b: 1, c: 2}) "
+        "{ ++iterations; } return (stored === -1 ? 1 : 0) + "
+        "(effects === 1 ? 2 : 0) + (iterations === 3 ? 4 : 0); })(); "
+        "[first, second, third, fourth];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "legacy-for-in.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, flt2it(1.0).item);
+    EXPECT_EQ(js_elements_get_int(result, 1).item, flt2it(0.0).item);
+    EXPECT_EQ(js_elements_get_int(result, 2).item, flt2it(0.0).item);
+    EXPECT_EQ(js_elements_get_int(result, 3).item, flt2it(7.0).item);
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, ExecutesThrowCatchAndFinallyCompletions) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -539,6 +577,127 @@ TEST(JsInterpreter, InvokesInterpretedCallbacksFromNativeBuiltins) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, PreservesStrictPrimitiveReceiverAcrossIntrinsicCallbacks) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "\"use strict\"; "
+        "Boolean.prototype.toString = function() { return typeof this; }; "
+        "var direct = [true, false].toLocaleString(); "
+        "Object.defineProperty(Boolean.prototype, 'toString', { get: function() { "
+        "var receiver_type = typeof this; return function() { return receiver_type; }; } }); "
+        "var getter = [true, false].toLocaleString(); "
+        "[direct, getter];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "strict-primitive-receiver.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0),
+        js_make_string("boolean,boolean")).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1),
+        js_make_string("boolean,boolean")).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ObservesInheritedBigIntWrapperCoercionAccessors) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "const BigIntToString = BigInt.prototype.toString; "
+        "let gets = 0; let calls = 0; "
+        "const stringify = function() { ++calls; return `${BigIntToString.call(this)}foo`; }; "
+        "Object.defineProperty(BigInt.prototype, 'toString', { get: function() { "
+        "++gets; return stringify; } }); "
+        "const boxed = Object(1n); "
+        "const default_value = '' + boxed; "
+        "const string_value = `${boxed}`; "
+        "[default_value === '1', string_value === '1foo', gets === 1, calls === 1];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "bigint-wrapper-coercion.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    for (int index = 0; index < 4; index++) {
+        EXPECT_EQ(js_elements_get_int(result, index).item, b2it(true))
+            << "BigInt wrapper coercion result index " << index;
+    }
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, DelegatesAstGeneratorYieldsThroughTheSharedAsyncProtocol) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function* inner() { yield 40; yield 2; } "
+        "function* outer() { yield* inner(); } "
+        "var sync = outer(); var first = sync.next(); var second = sync.next(); "
+        "var complete = sync.next(); "
+        "async function* asyncOuter() { yield* inner(); } "
+        "var asyncNext = asyncOuter().next(); "
+        "[first.value === 40, !first.done, second.value === 2, !second.done, "
+        "complete.done, asyncNext instanceof Promise];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "generator-delegation.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    for (int index = 0; index < 6; index++) {
+        EXPECT_EQ(js_elements_get_int(result, index).item, b2it(true))
+            << "generator delegation result index " << index;
+    }
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AppliesArrayHoleSemanticsThroughNativeCallbacks) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var copy = [0, 1, , , 1]; copy.copyWithin(0, 1, 4); "
+        "var copied_holes = copy[0] === 1 && copy[4] === 1 && "
+        "!copy.hasOwnProperty(1) && !copy.hasOwnProperty(2) && !copy.hasOwnProperty(3); "
+        "var deleted_before_hole = false; "
+        "var deleted_array = [0, , 2]; "
+        "Object.defineProperty(deleted_array, '0', { get: function() { "
+        "delete Array.prototype[1]; return 0; }, configurable: true }); "
+        "Array.prototype[1] = 1; "
+        "var deleted_result = deleted_array.every(function(value, index) { "
+        "deleted_before_hole = true; return index !== 1; }); "
+        "delete Array.prototype[1]; "
+        "var added_array = [0, , 2]; "
+        "Object.defineProperty(added_array, '0', { get: function() { "
+        "Object.defineProperty(Array.prototype, '1', { get: function() { return 6.99; }, "
+        "configurable: true }); return 0; }, configurable: true }); "
+        "var added_result = added_array.every(function(value, index) { "
+        "return index !== 1 || value !== 6.99; }); "
+        "delete Array.prototype[1]; "
+        "Object.defineProperty(Array.prototype, '0', { get: function() { return 11; }, "
+        "configurable: true }); "
+        "var inherited_accessor_result = [,,,].every(function(value, index) { "
+        "return index !== 0 || value !== 11; }); "
+        "delete Array.prototype[0]; "
+        "Array.prototype[1] = 13; "
+        "var inherited_data_result = [,,,].every(function(value, index) { "
+        "return index !== 1 || value !== 13; }); "
+        "delete Array.prototype[1]; "
+        "[copied_holes, deleted_result, deleted_before_hole, !added_result, "
+        "!inherited_accessor_result, !inherited_data_result];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "array-holes.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    for (int index = 0; index < 6; index++) {
+        EXPECT_EQ(js_elements_get_int(result, index).item, b2it(true))
+            << "array-hole result index " << index;
+    }
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, KeepsDeclarationIdentityAndPerIterationClosures) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -557,6 +716,140 @@ TEST(JsInterpreter, KeepsDeclarationIdentityAndPerIterationClosures) {
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(12.0)).item, b2it(true));
 
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, BindsUnbracedAnnexBFunctionSelfReferencesLexically) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "if (false) function _f() {} else function f() { initial = f; f = 123; }";
+    JsScript* script = js_interp_prepare_script(&runtime, source, sizeof(source) - 1,
+        "annexb-branch.js");
+    ASSERT_NE(script, nullptr);
+
+    JsIfNode* conditional = (JsIfNode*)((JsProgramNode*)script->ast_root)->body;
+    ASSERT_NE(conditional, nullptr);
+    ASSERT_NE(conditional->alternate_vars, nullptr);
+    ASSERT_NE(conditional->alternate, nullptr);
+    JsFunctionNode* function = (JsFunctionNode*)conditional->alternate;
+    ASSERT_NE(function->name, nullptr);
+    EXPECT_EQ(function->name->len, 1u);
+    EXPECT_EQ(function->name->chars[0], 'f');
+    EXPECT_EQ(function->vars->parent, conditional->alternate_vars);
+    ASSERT_NE(function->body, nullptr);
+    JsBlockNode* body = (JsBlockNode*)function->body;
+    ASSERT_NE(body->statements, nullptr);
+    ASSERT_NE(body->statements->next, nullptr);
+
+    NameEntry* branch_f = nullptr;
+    for (NameEntry* entry = conditional->alternate_vars->first; entry; entry = entry->next) {
+        if (entry->name && entry->name->len == 1 && entry->name->chars[0] == 'f') {
+            branch_f = entry;
+            break;
+        }
+    }
+    ASSERT_NE(conditional->alternate_vars->first, nullptr);
+    ASSERT_NE(branch_f, nullptr);
+    JsAssignmentNode* first = (JsAssignmentNode*)((JsExpressionStatementNode*)
+        body->statements)->expression;
+    JsAssignmentNode* second = (JsAssignmentNode*)((JsExpressionStatementNode*)
+        body->statements->next)->expression;
+    ASSERT_NE(first->right, nullptr);
+    ASSERT_NE(second->left, nullptr);
+    EXPECT_EQ(((JsIdentifierNode*)first->right)->entry, branch_f);
+    EXPECT_EQ(((JsIdentifierNode*)second->left)->entry, branch_f);
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AppliesAnnexBVarCompanionOnlyWhenNoLexicalConflictExists) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char loop_source[] =
+        "(0,eval)('for (let f in { key: 0 }) {{ function f() {} }}'); typeof f;";
+    Item loop_result = js_interp_execute_source(&runtime, loop_source,
+        sizeof(loop_source) - 1, "annexb-loop-conflict.js", NULL);
+    ASSERT_FALSE(item_is_error(loop_result));
+    EXPECT_EQ(js_strict_equal(loop_result, js_make_string("undefined")).item, b2it(true));
+
+    const char catch_source[] =
+        "(0,eval)('try { throw 0; } catch (f) {{ function f() {} }}'); typeof f;";
+    Item catch_result = js_interp_execute_source(&runtime, catch_source,
+        sizeof(catch_source) - 1, "annexb-catch-exception.js", NULL);
+    ASSERT_FALSE(item_is_error(catch_result));
+    EXPECT_EQ(js_strict_equal(catch_result, js_make_string("function")).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, EvaluatesSloppyCallAssignmentTargetsBeforeReferenceError) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var fCalled = 0; var gCalled = 0; "
+        "function f() { fCalled++; return {}; } function g() { gCalled++; return 1; } "
+        "var compound = false; try { f() += g(); } catch (error) { compound = error instanceof ReferenceError; } "
+        "var update = false; try { f()++; } catch (error) { update = error instanceof ReferenceError; } "
+        "var forIn = false; try { for (f() in [1]) {} } catch (error) { forIn = error instanceof ReferenceError; } "
+        "var forOf = false; try { for (f() of [1]) {} } catch (error) { forOf = error instanceof ReferenceError; } "
+        "compound && update && forIn && forOf && fCalled === 4 && gCalled === 0;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "annexb-call-assignment-target.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, CreatesDynamicFunctionWithHtmlCloseCommentParameter) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var created = Function('\\n-->', ''); typeof created === 'function' && created.length === 0;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "dynamic-html-close-comment.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RejectsDynamicFunctionHtmlCloseCommentWithoutLineTerminator) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var caught; try { Function('-->', ''); } catch (error) { caught = error; } "
+        "caught instanceof SyntaxError && caught.constructor === SyntaxError;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "dynamic-html-close-comment-invalid.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ThrowsCatchableSyntaxErrorsForInvalidDynamicFunctionBodies) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var duplicate = false; var restricted = false; "
+        "try { Function('a', 'a', '\"use strict\";'); } "
+        "catch (error) { duplicate = error instanceof SyntaxError; } "
+        "try { Function('eval', '\"use strict\";'); } "
+        "catch (error) { restricted = error instanceof SyntaxError; } "
+        "duplicate && restricted;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "dynamic-function-early-error.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
     runtime_cleanup(&runtime);
 }
 
@@ -774,6 +1067,25 @@ TEST(JsInterpreter, BindsDestructuringDefaultsAndRestInSharedCells) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, DestructuringConsumesAndClosesIteratorsLazily) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var first = 0; var second = 0; function* values() { first += 1; "
+        "yield; second += 1; } var [[,] = values()] = []; [first, second];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "lazy-destructuring.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(0.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, BindsPatternParametersThroughTheCommonCallKernel) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -786,6 +1098,24 @@ TEST(JsInterpreter, BindsPatternParametersThroughTheCommonCallKernel) {
 
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesLaterParameterTdzDuringDefaultInitialization) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let calls = 0; let fn = (first = later, later) => { calls++; }; "
+        "try { fn(); } catch (error) { [error instanceof ReferenceError, calls]; }";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "parameter-tdz.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(0.0)).item,
+        b2it(true));
 
     runtime_cleanup(&runtime);
 }
@@ -968,6 +1298,40 @@ TEST(JsInterpreter, DirectEvalSharesInterpretedFunctionEnvironment) {
     ASSERT_FALSE(item_is_error(global));
     EXPECT_EQ(js_strict_equal(global, flt2it(42.0)).item, b2it(true));
 
+    const char eval_harness_source[] =
+        "var __globalObject = Function('return this;')(); "
+        "function fnGlobalObject() { return __globalObject; }";
+    Item eval_harness = js_interp_execute_source(&runtime, eval_harness_source,
+        sizeof(eval_harness_source) - 1, "direct-eval-harness.js", NULL);
+
+    ASSERT_FALSE(item_is_error(eval_harness));
+
+    const char annexb_global_source[] =
+        "Object.defineProperty(fnGlobalObject(), 'f', { value: 'x', enumerable: true, "
+        "writable: true, configurable: false }); "
+        "eval('var global = fnGlobalObject(); if (global !== fnGlobalObject()) throw new Error(); "
+        "if (f !== \\\"x\\\") throw new Error(); if (true) function f() {} else function _f() {}'); "
+        "global === fnGlobalObject() && typeof globalThis.f === 'function' && "
+        "!Object.getOwnPropertyDescriptor(fnGlobalObject(), 'f').configurable;";
+    Item annexb_global = js_interp_execute_source(&runtime, annexb_global_source,
+        sizeof(annexb_global_source) - 1, "direct-eval-annexb.js", NULL);
+
+    ASSERT_FALSE(item_is_error(annexb_global));
+    EXPECT_EQ(annexb_global.item, b2it(true));
+
+    const char annexb_else_source[] =
+        "Object.defineProperty(fnGlobalObject(), 'f', { value: 'x', enumerable: true, "
+        "writable: true, configurable: false }); "
+        "eval('var global = fnGlobalObject(); if (global !== fnGlobalObject()) throw new Error(); "
+        "if (f !== \\\"x\\\") throw new Error(); if (false) function _f() {} else function f() {}'); "
+        "global === fnGlobalObject() && typeof globalThis.f === 'function' && "
+        "!Object.getOwnPropertyDescriptor(fnGlobalObject(), 'f').configurable;";
+    Item annexb_else = js_interp_execute_source(&runtime, annexb_else_source,
+        sizeof(annexb_else_source) - 1, "direct-eval-annexb-else.js", NULL);
+
+    ASSERT_FALSE(item_is_error(annexb_else));
+    EXPECT_EQ(annexb_else.item, b2it(true));
+
     const char indirect_source[] =
         "function indirect() { let local = 40; let saved = eval; return saved('typeof local'); } "
         "indirect();";
@@ -978,6 +1342,36 @@ TEST(JsInterpreter, DirectEvalSharesInterpretedFunctionEnvironment) {
     ASSERT_EQ(get_type_id(indirect), LMD_TYPE_STRING);
     EXPECT_STREQ(it2s(indirect)->chars, "undefined");
 
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, DirectEvalAnnexBUsesRetainedTest262Assertions) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    StrBuf* harness = strbuf_new();
+    ASSERT_NE(harness, nullptr);
+    ASSERT_TRUE(js_test262_append_file(harness, "ref/test262/harness/sta.js"));
+    ASSERT_TRUE(js_test262_append_file(harness, "ref/test262/harness/assert.js"));
+    ASSERT_TRUE(js_test262_append_file(harness,
+        "ref/test262/harness/nativeFunctionMatcher.js"));
+    Item harness_result = js_interp_execute_source(&runtime, harness->str,
+        harness->length, "test262-harness.js", NULL);
+    strbuf_free(harness);
+    ASSERT_FALSE(item_is_error(harness_result));
+
+    StrBuf* source = strbuf_create("globalThis.__lambda_can_block = true;\n");
+    ASSERT_NE(source, nullptr);
+    ASSERT_TRUE(js_test262_append_file(source, "ref/test262/harness/fnGlobalObject.js"));
+    ASSERT_TRUE(js_test262_append_file(source, "ref/test262/harness/propertyHelper.js"));
+    ASSERT_TRUE(js_test262_append_file(source,
+        "ref/test262/test/annexB/language/eval-code/direct/"
+        "global-if-decl-else-decl-b-eval-global-existing-global-init.js"));
+    Item result = js_interp_execute_source(&runtime, source->str, source->length,
+        "test262-annexb-direct-eval.js", NULL);
+    strbuf_free(source);
+
+    EXPECT_FALSE(item_is_error(result));
     runtime_cleanup(&runtime);
 }
 
@@ -1025,6 +1419,22 @@ TEST(JsInterpreter, ExecutesSuperThroughTheSharedClassCallKernel) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, ConstructsPromiseSubclassesThroughAstSuperCalls) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let calls = 0; class Child extends Promise { constructor(executor) { "
+        "return super(executor); } } new Child(function(resolve) { calls++; resolve(); }); calls;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "promise-super.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(1.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, PreservesObjectMethodSuperHomeAcrossTheSharedCallKernel) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1062,6 +1472,24 @@ TEST(JsInterpreter, RetainsArgumentsAcrossNestedCallsAndEscapedArrows) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, EnumeratesOnlySuppliedMappedArguments) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function keys(a, b, c) { a = 40; b = 50; c = 60; "
+        "return Object.keys(arguments).join(',') + ':' + arguments.length; } "
+        "[keys(), keys(1, 2), keys(1, 2, 3), keys(1, 2, 3, 4)].join('|');";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "arguments-enumeration.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_TRUE(js_strict_equal(result, js_make_string(
+        ":0|0,1:2|0,1,2:3|0,1,2,3:4")).item == b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, SharesPrivateClassElementsWithTheRuntimeKernel) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1082,6 +1510,95 @@ TEST(JsInterpreter, SharesPrivateClassElementsWithTheRuntimeKernel) {
 
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(30.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, UsesCreateDataPropertyForJsonCallbackHolders) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "Object.defineProperty(Object.prototype, '', { set: function() { "
+        "throw new Error('setter called'); }, configurable: true }); "
+        "let parsedHolder; JSON.parse('2', function() { parsedHolder = this; }); "
+        "let stringifiedHolder; let value = {}; JSON.stringify(value, function() { "
+        "stringifiedHolder = this; }); "
+        "let parsed = Object.getOwnPropertyDescriptor(parsedHolder, ''); "
+        "let stringified = Object.getOwnPropertyDescriptor(stringifiedHolder, ''); "
+        "let parsedDeleted = delete parsedHolder['']; "
+        "let stringifiedDeleted = delete stringifiedHolder['']; "
+        "(Object.getPrototypeOf(parsedHolder) === Object.prototype && parsed.value === 2 && "
+        "parsed.writable && parsed.enumerable && parsed.configurable && "
+        "Object.getPrototypeOf(stringifiedHolder) === Object.prototype && "
+        "stringified.value === value && stringified.writable && stringified.enumerable && "
+        "stringified.configurable && parsedDeleted && stringifiedDeleted && "
+        "!Object.prototype.hasOwnProperty.call(parsedHolder, '') && "
+        "!Object.prototype.hasOwnProperty.call(stringifiedHolder, '')) ? 42 : 0;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "json-callback-holder.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RunsJsonReviverWrapperThroughRetainedTest262Harness) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    StrBuf* harness = strbuf_new();
+    ASSERT_NE(harness, nullptr);
+    ASSERT_TRUE(js_test262_append_file(harness, "ref/test262/harness/sta.js"));
+    ASSERT_TRUE(js_test262_append_file(harness, "ref/test262/harness/assert.js"));
+    JsScript* retained = js_interp_prepare_script(&runtime, harness->str,
+        harness->length, "test262-harness.js");
+    strbuf_free(harness);
+    ASSERT_NE(retained, nullptr);
+    ASSERT_FALSE(item_is_error(js_interp_execute_script(&runtime, retained, NULL)));
+
+    StrBuf* source = strbuf_new();
+    ASSERT_NE(source, nullptr);
+    strbuf_append_str(source, "let testResult = 'ok'; try {\n");
+    ASSERT_TRUE(js_test262_append_file(source, "ref/test262/harness/propertyHelper.js"));
+    ASSERT_TRUE(js_test262_append_file(source,
+        "ref/test262/test/built-ins/JSON/parse/reviver-wrapper.js"));
+    strbuf_append_str(source,
+        "\n} catch (error) { testResult = error.name + ': ' + error.message; } testResult;");
+    Item result = js_interp_execute_source(&runtime, source->str, source->length,
+        "json-reviver-wrapper.js", NULL);
+    strbuf_free(source);
+
+    ASSERT_FALSE(item_is_error(result));
+    ASSERT_EQ(get_type_id(result), LMD_TYPE_STRING);
+    EXPECT_STREQ(it2s(result)->chars, "ok");
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesExactMethodSourceText) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let computed = { /* before */[ /* a */ \"f\" /* b */ ] /* c */ "
+        "( /* d */ ) /* e */ { /* f */ }/* after */ }.f; "
+        "class C { /* before */#instance /* a */ ( /* b */ ) /* c */ "
+        "{ /* d */ }/* after */ getInstance() { return this.#instance; } "
+        "/* before */static #statik /* a */ ( /* b */ ) /* c */ "
+        "{ /* d */ }/* after */ static getStatic() { return this.#statik; } } "
+        "let instance = new C(); [computed.toString(), instance.getInstance().toString(), "
+        "C.getStatic().toString()];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "method-source.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_STREQ(it2s(js_elements_get_int(result, 0))->chars,
+        "[ /* a */ \"f\" /* b */ ] /* c */ ( /* d */ ) /* e */ { /* f */ }");
+    EXPECT_STREQ(it2s(js_elements_get_int(result, 1))->chars,
+        "#instance /* a */ ( /* b */ ) /* c */ { /* d */ }");
+    EXPECT_STREQ(it2s(js_elements_get_int(result, 2))->chars,
+        "#statik /* a */ ( /* b */ ) /* c */ { /* d */ }");
 
     runtime_cleanup(&runtime);
 }

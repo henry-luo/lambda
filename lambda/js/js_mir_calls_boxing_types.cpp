@@ -728,77 +728,8 @@ void jm_emit_set_class_assignment_name(JsMirTranspiler* mt, JsAssignmentNode* as
 
 static bool jm_function_source_span(JsMirTranspiler* mt,
         JsFunctionNode* fn_node, const char** text_out, uint32_t* len_out) {
-    if (!mt || !fn_node || !text_out || !len_out || !mt->tp ||
-            !mt->tp->source) return false;
-    uint32_t start = fn_node->source_span.start_byte;
-    uint32_t end = fn_node->source_span.end_byte;
-    if (end <= start || end > mt->tp->source_length) return false;
-    const char* text = mt->tp->source + start;
-    uint32_t len = end - start;
-    // Cap source text to avoid overly large string literals in MIR
-    if (len > 65536) return false;
-    // Skip leading whitespace and comments, then strip "static" keyword if present.
-    // Class static methods span from (optional comment + "static" keyword) through body.
-    // We want source text to start at "get"/"set"/function-keyword, not "static".
-    // Helper lambda: skip whitespace in-place
-    auto skip_ws = [](const char* p, uint32_t& rem) {
-        while (rem > 0 && (p[0] == ' ' || p[0] == '\t' || p[0] == '\n' || p[0] == '\r')) { p++; rem--; }
-        return p;
-    };
-    (void)skip_ws; // suppress unused warning
-    // Step 1: trim leading whitespace
-    while (len > 0 && (text[0] == ' ' || text[0] == '\t' || text[0] == '\n' || text[0] == '\r')) { text++; len--; }
-    // Step 2: skip leading block comments (/* ... */) and then check for "static"
-    {
-        const char* scan = text;
-        uint32_t slen = len;
-        // skip any leading block/line comments
-        bool advanced = true;
-        while (advanced && slen > 0) {
-            advanced = false;
-            while (slen > 0 && (scan[0] == ' ' || scan[0] == '\t' || scan[0] == '\n' || scan[0] == '\r')) { scan++; slen--; advanced = true; }
-            if (slen >= 2 && scan[0] == '/' && scan[1] == '*') {
-                // skip block comment
-                scan += 2; slen -= 2;
-                while (slen >= 2 && !(scan[0] == '*' && scan[1] == '/')) { scan++; slen--; }
-                if (slen >= 2) { scan += 2; slen -= 2; }
-                advanced = true;
-            } else if (slen >= 2 && scan[0] == '/' && scan[1] == '/') {
-                // skip line comment
-                scan += 2; slen -= 2;
-                while (slen > 0 && scan[0] != '\n') { scan++; slen--; }
-                advanced = true;
-            }
-        }
-        // Now scan points past any leading comments. Check if next token is "static".
-        if (slen >= 7 && strncmp(scan, "static", 6) == 0 &&
-            (scan[6] == ' ' || scan[6] == '\t' || scan[6] == '\n' || scan[6] == '/' )) {
-            // Static method: advance scan past "static" and then skip whitespace/comments again
-            scan += 6; slen -= 6;
-            // skip whitespace/comments after "static"
-            bool adv2 = true;
-            while (adv2 && slen > 0) {
-                adv2 = false;
-                while (slen > 0 && (scan[0] == ' ' || scan[0] == '\t' || scan[0] == '\n' || scan[0] == '\r')) { scan++; slen--; adv2 = true; }
-                if (slen >= 2 && scan[0] == '/' && scan[1] == '*') {
-                    scan += 2; slen -= 2;
-                    while (slen >= 2 && !(scan[0] == '*' && scan[1] == '/')) { scan++; slen--; }
-                    if (slen >= 2) { scan += 2; slen -= 2; }
-                    adv2 = true;
-                }
-            }
-            text = scan;
-            len = slen;
-        }
-    }
-    // Tree-sitter may extend node ranges to include trailing comments.
-    // Trim back to the actual closing '}' for block-bodied functions.
-    if (len > 0 && fn_node->body && fn_node->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-        while (len > 1 && text[len - 1] != '}') len--;
-    }
-    *text_out = text;
-    *len_out = len;
-    return true;
+    return mt && mt->tp && js_function_source_span(mt->tp->source,
+        mt->tp->source_length, fn_node, text_out, len_out);
 }
 
 // Helper: emit js_set_function_source call to store original source text for toString
