@@ -1688,6 +1688,13 @@ static DomText* find_first_text_node(DomNode* node, bool* suppressed) {
 static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (!elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER)) return;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (child->is_element() && child->as_element()->tag_name &&
+            strcmp(child->as_element()->tag_name, "::first-letter") == 0) {
+            // keep the existing split; re-running layout must not nest pseudo-elements.
+            return;
+        }
+    }
     // CSS 2.1 §5.12.2: If non-eligible content (e.g., an image) precedes the first
     // letter, ::first-letter must not be created.
     bool suppressed = false;
@@ -1715,19 +1722,12 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     dom_element_retain_tag_name(fl_elem, lam::borrow_const(lam::promote_to_pool(pool, "::first-letter")));
     fl_elem->doc = elem->doc;
     fl_elem->parent = text_node->parent;  // same parent as the text node
+    dom_element_borrow_specified_style(
+        fl_elem, elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER));
     // Set display — default to inline, but check for float (CSS 2.1 §5.12.2)
     // block-level box (CSS 2.1 §9.7 blockification)
-    CssEnum fl_float_value = CSS_VALUE_NONE;
-    if (elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER) && elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER)->tree) {
-        AvlNode* fl_float_node = avl_tree_search(elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER)->tree, CSS_PROPERTY_FLOAT);
-        if (fl_float_node) {
-            StyleNode* fl_sn = (StyleNode*)fl_float_node->declaration;
-            if (fl_sn && fl_sn->winning_decl && fl_sn->winning_decl->value &&
-                fl_sn->winning_decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                fl_float_value = fl_sn->winning_decl->value->data.keyword;
-            }
-        }
-    }
+    CssEnum fl_float_value = layout_specified_keyword(
+        fl_elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
     if (fl_float_value == CSS_VALUE_LEFT || fl_float_value == CSS_VALUE_RIGHT) {
         // CSS 2.1 §9.7: floated elements are blockified
         fl_elem->display.outer = CSS_VALUE_BLOCK;
@@ -1738,8 +1738,6 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
         fl_elem->display.outer = CSS_VALUE_INLINE;
         fl_elem->display.inner = CSS_VALUE_FLOW;
     }
-    dom_element_borrow_specified_style(
-        fl_elem, elem->pseudo_style(PSEUDO_STYLE_FIRST_LETTER));
     int preserved_prefix = preserves_space_advance ? ws_offset : 0;
     int first_letter_length = preserved_prefix + boundary;
     char* fl_text = (char*)pool_calloc(pool, first_letter_length + 1);
@@ -1818,6 +1816,13 @@ static bool margin_collapse_has_separating_content_after(View* child,
             continue;
         }
         if (!sibling->is_block()) {
+            if (sibling->view_type == RDT_VIEW_INLINE && sibling->is_element() &&
+                sibling->as_element()->display.outer == CSS_VALUE_CONTENTS &&
+                is_inline_substantial(lam::view_require_element(sibling))) {
+                // CSS Display 3: descendants of a boxless sibling remain inline
+                // content and therefore separate a preceding block's bottom margin.
+                return true;
+            }
             if (sibling->height > 0.0f ||
                 (include_unlaid_content && sibling->view_type == RDT_VIEW_TEXT)) {
                 return true;
@@ -3763,6 +3768,13 @@ static float layout_list_item_marker_line_height(LayoutContext* lycon) {
     return line_height;
 }
 
+static bool layout_empty_editing_host(ViewBlock* block) {
+    if (!block || !block->is_element() || block->first_placed_child()) return false;
+    EditingHost host = {};
+    DomElement* element = block->as_element();
+    return editing_host_lookup(element, &host) && host.host == element;
+}
+
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display) {
     float flow_width, flow_height;
     bool preserved_empty_vertical_multicol_line = false;
@@ -3779,6 +3791,12 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
     float content_max_x = 0.0f;
     float content_min_y = 0.0f;
     float content_max_y = 0.0f;
+    if (layout_empty_editing_host(block) && lycon->block.line_height > 0.0f) {
+        // html editing hosts expose the caret's anonymous line box when empty.
+        lycon->block.advance_y += lycon->block.line_height;
+        block->content_height = lycon->block.advance_y + block_box.padding.bottom;
+        flow_height = block->content_height + block_box.border.bottom;
+    }
     bool is_root_element = block->tag_id == MARKUP_NAME_HTML;
     if (is_root_element) {
         // root's used inline size is its own border box; descendant overflow is
@@ -4060,17 +4078,17 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display
                                             lycon->block.text_align);
     }
     if (block->tag_id == MARKUP_NAME_LEGEND && display != CSS_VALUE_INLINE_BLOCK) {
-        ViewElement* pa = block->parent_view();
-        if (pa && pa->tag_id == MARKUP_NAME_FIELDSET) {
-            bool is_first_legend = true;
-            for (View* sib = pa->first_child; sib; sib = sib->next()) {
-                if (sib == static_cast<View*>(block)) break;
-                if (sib->is_element() && lam::view_require_element(sib)->tag_id == MARKUP_NAME_LEGEND) {
-                    is_first_legend = false;
-                    break;
-                }
-            }
-                bool width_is_auto = !block->blk ||
+        ViewElement* parent_view = block->parent_view();
+        while (parent_view && parent_view->display.outer == CSS_VALUE_CONTENTS) {
+            parent_view = parent_view->parent_view();
+        }
+        ViewBlock* fieldset_parent = parent_view &&
+            parent_view->tag_id == MARKUP_NAME_FIELDSET
+            ? lam::view_as_block(static_cast<View*>(parent_view)) : nullptr;
+        if (fieldset_parent) {
+            bool is_first_legend = find_fieldset_rendered_legend(fieldset_parent) ==
+                static_cast<DomElement*>(block);
+            bool width_is_auto = !block->blk ||
                 block->block()->given_width_type == CSS_VALUE_AUTO ||
                 block->block()->given_width_type == CSS_VALUE__UNDEF;
             if (is_first_legend && width_is_auto) {
@@ -4696,6 +4714,41 @@ void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_befo
     }
 }
 
+static void remove_pseudo_from_dom(DomElement* parent, DomElement* pseudo) {
+    if (!parent || !pseudo) return;
+    DomNode* previous = nullptr;
+    for (DomNode* child = parent->first_child; child;
+         child = child->next_sibling) {
+        if (child != static_cast<DomNode*>(pseudo)) {
+            previous = child;
+            continue;
+        }
+        DomNode* next = child->next_sibling;
+        if (previous) previous->next_sibling = next;
+        else parent->first_child = next;
+        if (next) next->prev_sibling = previous;
+        if (parent->last_child == child) parent->last_child = previous;
+        child->prev_sibling = nullptr;
+        child->next_sibling = nullptr;
+        return;
+    }
+}
+
+static void insert_pseudo_into_rendered_tree(DomElement* element,
+                                             DomElement* pseudo,
+                                             bool is_before) {
+    if (!element || !pseudo) return;
+    DomElement* shadow_root = element->shadow_root_element();
+    if (!shadow_root) {
+        insert_pseudo_into_dom(element, pseudo, is_before);
+        return;
+    }
+    // CSS Shadow DOM: host-generated content is in the host's rendered child
+    // sequence, but must stay out of light-DOM slot assignment.
+    remove_pseudo_from_dom(element, pseudo);
+    insert_pseudo_into_dom(shadow_root, pseudo, is_before);
+}
+
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
                                        bool include_marker, bool create_first_letter) {
     if (!lycon || !block || !block->is_element()) return;
@@ -4703,10 +4756,10 @@ void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
     DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (block->pseudo) {
         if (block->pseudo->before) {
-            insert_pseudo_into_dom(element, block->pseudo->before, true);
+            insert_pseudo_into_rendered_tree(element, block->pseudo->before, true);
         }
         if (block->pseudo->after) {
-            insert_pseudo_into_dom(element, block->pseudo->after, false);
+            insert_pseudo_into_rendered_tree(element, block->pseudo->after, false);
         }
         if (include_marker && block->pseudo->marker) {
             insert_pseudo_into_dom(element, block->pseudo->marker, true);
@@ -4753,14 +4806,18 @@ static CssEnum get_element_float_value(DomElement* elem) {
     return layout_specified_keyword(elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
 }
 
-DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset) {
-    if (!fieldset || !fieldset->is_element() ||
-        fieldset->tag() != MARKUP_NAME_FIELDSET) {
-        return nullptr;
-    }
-    for (DomNode* child = fieldset->first_child; child; child = child->next_sibling) {
+static DomElement* find_fieldset_legend_in_contents(DomNode* first_child) {
+    for (DomNode* child = first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* candidate = child->as_element();
+        DisplayValue display = resolve_display_value(candidate);
+        if (layout_display_is_none(display)) continue;
+        if (display.outer == CSS_VALUE_CONTENTS) {
+            DomElement* nested = find_fieldset_legend_in_contents(
+                candidate->first_child);
+            if (nested) return nested;
+            continue;
+        }
         if (candidate->tag() != MARKUP_NAME_LEGEND ||
             get_element_float_value(candidate) != CSS_VALUE_NONE) {
             continue;
@@ -4774,6 +4831,16 @@ DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset) {
         }
     }
     return nullptr;
+}
+
+DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset) {
+    if (!fieldset || !fieldset->is_element() ||
+        fieldset->tag() != MARKUP_NAME_FIELDSET) {
+        return nullptr;
+    }
+    // CSS Display 3 box generation: fieldset legend selection follows the
+    // flattened child tree through display:contents wrappers.
+    return find_fieldset_legend_in_contents(fieldset->first_child);
 }
 
 static float fieldset_legend_content_width(ViewBlock* legend,
@@ -4859,20 +4926,68 @@ static void align_fieldset_vertical_content_to_legend(
         fieldset, rendered_legend, target_edge - content_edge, false);
 }
 
+static bool fieldset_contains_node(DomNode* ancestor, DomNode* node) {
+    for (DomNode* current = node; current; current = current->parent) {
+        if (current == ancestor) return true;
+    }
+    return false;
+}
+
+static DomNode* fieldset_first_flow_node(DomNode* first_child,
+                                          DomElement* rendered_legend) {
+    for (DomNode* child = first_child; child; child = child->next_sibling) {
+        if (child == static_cast<DomNode*>(rendered_legend)) continue;
+        if (child->is_element()) {
+            DisplayValue display = resolve_display_value(child);
+            if (layout_display_is_none(display)) continue;
+            if (display.outer == CSS_VALUE_CONTENTS &&
+                fieldset_contains_node(child, static_cast<DomNode*>(rendered_legend))) {
+                DomNode* nested = fieldset_first_flow_node(
+                    child->as_element()->first_child, rendered_legend);
+                if (nested) return nested;
+                continue;
+            }
+        }
+        return child;
+    }
+    return nullptr;
+}
+
+static void fieldset_initialize_contents_ancestors(
+        LayoutContext* lycon, DomElement* fieldset, DomNode* node) {
+    if (!lycon || !fieldset || !node || node == static_cast<DomNode*>(fieldset)) return;
+    if (node->parent && node->parent != static_cast<DomNode*>(fieldset)) {
+        fieldset_initialize_contents_ancestors(
+            lycon, fieldset, node->parent);
+    }
+    if (node->is_element()) {
+        DomElement* element = node->as_element();
+        if (resolve_display_value(element).outer == CSS_VALUE_CONTENTS) {
+            layout_init_display_contents_view(lycon, element);
+        }
+    }
+}
+
 static DomNode* fieldset_next_flow_child(ViewBlock* fieldset, DomNode* current,
                                          DomElement* rendered_legend) {
     if (!fieldset || !current || !rendered_legend) return nullptr;
     if (current == static_cast<DomNode*>(rendered_legend)) {
-        for (DomNode* child = fieldset->first_child; child; child = child->next_sibling) {
-            if (child != current) return child;
+        return fieldset_first_flow_node(fieldset->first_child, rendered_legend);
+    }
+
+    DomNode* cursor = current;
+    DomNode* next = cursor->next_sibling;
+    while (true) {
+        while (next) {
+            DomNode* flow_node = fieldset_first_flow_node(next, rendered_legend);
+            if (flow_node) return flow_node;
+            next = next->next_sibling;
         }
-        return nullptr;
+        DomNode* parent = cursor->parent;
+        if (!parent || parent == static_cast<DomNode*>(fieldset)) return nullptr;
+        cursor = parent;
+        next = cursor->next_sibling;
     }
-    DomNode* next = current->next_sibling;
-    if (next == static_cast<DomNode*>(rendered_legend)) {
-        next = next->next_sibling;
-    }
-    return next;
 }
 
 static bool prescan_node_has_in_flow_inline_content(DomNode* node) {
@@ -5211,6 +5326,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 } else {
                     DomElement* rendered_legend = find_fieldset_rendered_legend(block);
                     if (rendered_legend) {
+                        fieldset_initialize_contents_ancestors(
+                            lycon, block->as_element(),
+                            static_cast<DomNode*>(rendered_legend));
                         child = static_cast<DomNode*>(rendered_legend);
                     }
                     prescan_and_layout_floats(lycon, child, block);
@@ -5285,6 +5403,9 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                 auto t_flex_start = high_resolution_clock::now();
                 DomElement* rendered_legend = find_fieldset_rendered_legend(block);
                 if (rendered_legend) {
+                    fieldset_initialize_contents_ancestors(
+                        lycon, block->as_element(),
+                        static_cast<DomNode*>(rendered_legend));
                     // collection must not consume or reposition this box.
                     LayoutContextScope context_scope(lycon);
                     LayoutViewScope view_scope(lycon);
@@ -5550,6 +5671,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     // CSS 2.1 §16.1: text-indent applies only to the first formatted line of a block container
     lycon->block.is_first_line = true;
+    lycon->block.first_line_font = nullptr;
+    lycon->block.first_line_style_active = false;
     lycon->block.initial_letter_exclusion_width = 0.0f;
     lycon->block.initial_letter_exclusion_right = 0.0f;
     lycon->block.initial_letter_exclusion_lines = 0;
@@ -5711,6 +5834,13 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
                                         &lycon->block.init_ascender,
                                         &lycon->block.init_descender);
         }
+    }
+    if (block->is_element() && lycon->font.style) {
+        DomElement* block_element = lam::dom_require<DOM_NODE_ELEMENT>(block);
+        lycon->block.first_line_font = layout_resolve_first_line_font(
+            lycon, block_element, lycon->font.style);
+        lycon->block.first_line_style_active =
+            lycon->block.first_line_font != nullptr;
     }
     float balance_width = text_wrap_balance_measure(lycon, block, line_content_width);
     if (balance_width > 0.0f) {
@@ -6416,6 +6546,23 @@ static bool layout_percentage_width_basis_is_cyclic(BlockContext* containing_con
     return layout_is_shrink_to_fit_width(containing_context->establishing_element);
 }
 
+static bool layout_closed_details_has_contents_without_summary(ViewBlock* block) {
+    if (!block || !block->is_element() || block->tag() != MARKUP_NAME_DETAILS) {
+        return false;
+    }
+    DomElement* details = block->as_element();
+    if (details->has_attribute(MARKUP_NAME_OPEN)) return false;
+    bool has_summary = false;
+    for (DomNode* child = details->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* child_elem = child->as_element();
+        if (child_elem->tag() == MARKUP_NAME_SUMMARY) {
+            has_summary = true;
+        }
+    }
+    return !has_summary;
+}
+
 __attribute__((noinline))
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *pa_block,
                           Linebox *pa_line, float* out_original_margin_top,
@@ -6462,6 +6609,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     bool bfc_width_was_reduced = false;  // true if auto-width was reduced for float avoidance
     float bfc_shift_down = 0;  // Amount to shift down if element doesn't fit beside floats
     BlockContext* parent_bfc = nullptr;
+    float inline_block_static_offset_x = 0.0f;
+    View* inline_parent = block->parent_view();
+    if (inline_parent && inline_parent->is_inline() && pa_line->is_line_start &&
+        !line_has_prior_flow_content(pa_line) && should_avoid_floats) {
+        // CSS 2.2 §9.5: only a BFC or block-level replaced fragment avoids
+        // floats; a normal block keeps its anonymous block edge as its origin.
+        inline_block_static_offset_x = pa_line->advance_x - pa_line->left;
+    }
     if (should_avoid_floats) {
         parent_bfc = block_context_find_bfc(pa_block);
         if (parent_bfc && (parent_bfc->left_float_count > 0 || parent_bfc->right_float_count > 0)) {
@@ -6488,6 +6643,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 y_in_bfc += walker->y;
                 x_in_bfc += walker->x;
                 walker = walker->parent_view();
+            }
+            if (block->parent_view() && block->parent_view()->is_inline()) {
+                // CSS 2.1 §9.2.1.1: the block fragment's line origin is
+                // already present in block->x; do not add it twice through
+                // the provisional inline fragment position.
+                x_in_bfc -= pa_line->left;
             }
             // For elements with explicit CSS width, use that; otherwise use parent width
             float element_required_width = pa_block->content_width;
@@ -7650,8 +7811,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             block, pa_block->content_width - bfc_available_width_reduction,
             is_rtl, is_float || is_inline_level);
         // margin-trim — parent trims children's margins (CSS Box 4 §3.1)
-        if (block->parent && block->parent->is_block()) {
-            ViewBlock* mt_pa = lam::view_require_block(static_cast<View*>(block->parent));
+        if (ViewBlock* mt_pa = layout_nearest_block_ancestor(block->parent_view())) {
             if (is_quirky_container(mt_pa, lycon) &&
                 has_quirky_margin(block, true)) {
                 View* first = mt_pa->first_placed_child();
@@ -7689,12 +7849,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         *out_original_margin_top = block->boundary()->margin.top;
         block->x += block->boundary()->margin.left;
         block->y += block->boundary()->margin.top;
+        block->x += inline_block_static_offset_x;
         if (bfc_float_offset_x > 0) {
             block->x += bfc_float_offset_x;
         }
     }
     else {
         block->width = content_width;  block->height = content_height;
+        block->x += inline_block_static_offset_x;
         if (bfc_float_offset_x > 0) {
             block->x += bfc_float_offset_x;
         }
@@ -7808,7 +7970,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 break;
             }
             if (first_in_flow == static_cast<View*>(block)) {
-                ViewBlock* parent = (block->parent && block->parent->is_block()) ? lam::view_require_block(static_cast<View*>(block->parent)) : nullptr;
+                ViewBlock* parent = layout_nearest_block_ancestor(block->parent_view());
                 bool parent_creates_bfc = parent && block_context_establishes_bfc(parent);
                 float parent_decoration_top = layout_axis_decoration_start(
                     parent && parent->bound ? parent->boundary() : nullptr, LAYOUT_AXIS_Y);
@@ -8050,7 +8212,41 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 block, margin_available, is_float);
         }
     }
+    bool closed_details_contents = layout_closed_details_has_contents_without_summary(block);
+    float closed_details_reserved_line = closed_details_contents
+        ? layout_list_item_marker_line_height(lycon) : 0.0f;
+    if (closed_details_contents) {
+        // HTML rendering reserves the internal default summary line when no
+        // direct summary child exists, including boxless content wrappers.
+        lycon->block.advance_y += closed_details_reserved_line;
+    }
+    if (block->tag() == MARKUP_NAME_OPTGROUP &&
+        !layout_optgroup_is_native_child(block->as_element()) &&
+        !layout_axis_has_given_size(block, false)) {
+        // HTML rendering gives an external optgroup an anonymous label line,
+        // including when all of its option descendants are display:none.
+        float line_height = layout_optgroup_anonymous_line_height(lycon);
+        lycon->block.advance_y = max(lycon->block.advance_y, line_height);
+    }
+    if (block->parent_view() && block->parent_view()->is_inline()) {
+        log_info("[BLOCK_INLINE_TRACE] content-start block=%s tag=%d y=%.1f h=%.1f adv=%.1f line_start=%d",
+            block->source_loc(), block->tag(), block->y, block->height,
+            lycon->block.advance_y, lycon->line.is_line_start);
+    }
     layout_block_inner_content(lycon, block);
+    if (block->parent_view() && block->parent_view()->is_inline()) {
+        log_info("[BLOCK_INLINE_TRACE] content-end block=%s y=%.1f h=%.1f content_h=%.1f adv=%.1f line_start=%d",
+            block->source_loc(), block->y, block->height, block->content_height,
+            lycon->block.advance_y, lycon->line.is_line_start);
+    }
+    if (closed_details_contents) {
+        // The collapsed details box clips its used height to the control line;
+        // descendants remain laid out as visible overflow after that line.
+        lycon->block.advance_y = closed_details_reserved_line;
+        block->height = layout_border_size_from_content_box(
+            block, closed_details_reserved_line, false);
+        block->content_height = closed_details_reserved_line;
+    }
     recompute_inline_descendant_bounds(static_cast<View*>(block), font_box_handle(&lycon->font));
     if (block->tag() == MARKUP_NAME_SVG && block->blk) {
         bool is_border_box = layout_uses_border_box(block);
@@ -8425,6 +8621,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         elmt));
     block->display = display;
     dom_node_resolve_style(elmt, lycon);
+    if (elmt->is_element() && elmt->as_element()->has_animated_display()) {
+        // CSS Animations apply after the cascade; refresh the local routing
+        // value because this call may have entered through the underlying box.
+        display = resolve_display_value(elmt->as_element());
+        block->display = display;
+    }
     if (elmt->is_element() && elmt->as_element()->tag() == MARKUP_NAME_BUTTON) {
         // HTML Rendering §15.5.3: button layout is a used-value transformation;
         // keep the computed display on DomElement, but lay out the principal box
@@ -8432,6 +8634,26 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         display = layout_button_used_display(elmt->as_element(),
             resolve_display_value(elmt));
         block->display = display;
+    }
+    if (display.outer == CSS_VALUE_NONE) {
+        // A sampled display:none suppresses this provisional box and must not
+        // leave the pre-resolution line break in the parent formatting context.
+        block->view_type = RDT_VIEW_NONE;
+        block->x = 0.0f;
+        block->y = 0.0f;
+        block->width = 0.0f;
+        block->height = 0.0f;
+        block->content_width = 0.0f;
+        block->content_height = 0.0f;
+        lycon->block = pa_block;
+        lycon->font = pa_font;
+        lycon->line = pa_line;
+        log_leave();
+        auto t_block_end = high_resolution_clock::now();
+        g_block_layout_time += duration<double, std::milli>(
+            t_block_end - t_block_start).count();
+        g_block_layout_count++;
+        return;
     }
     if (display.inner == RDT_DISPLAY_REPLACED &&
         layout_element_is_replaced(block->as_element()) &&
@@ -9119,7 +9341,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 float y_shift = block->y - pa_block.advance_y;
                 float unaccounted = y_shift - stored_mt;
                 if (fabsf(unaccounted) > 0.01f) {
-                    ViewBlock* gp = (block->parent && block->parent->is_block()) ? lam::view_require_block(static_cast<View*>(block->parent)) : NULL;
+                    ViewBlock* gp = layout_nearest_block_ancestor(block->parent_view());
                     if (gp) {
                         View* first = gp->first_placed_child();
                         while (first) {
@@ -9246,8 +9468,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     if (first_shadow_child) {
                         parent = collapse_parent_view && collapse_parent_view->is_block()
                             ? lam::view_require_block(collapse_parent_view) : nullptr;
-                    } else if (block->parent && block->parent->is_block()) {
-                        parent = lam::view_require_block(static_cast<View*>(block->parent));
+                    } else {
+                        parent = layout_nearest_block_ancestor(block->parent_view());
                     }
                     bool parent_creates_bfc = parent && block_context_establishes_bfc(parent);
                     float parent_decoration_top = layout_axis_decoration_start(
@@ -9267,7 +9489,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         bool parent_has_clearance = parent &&
                             margin_collapse_ancestor_has_clearance(parent);
                             bool quirky_container = is_quirky_container(parent, lycon);
-                        if (parent && parent->parent && !is_root_element_block(parent) && !parent_creates_bfc &&
+                        if (parent && parent->parent && !is_root_element_block(parent) &&
+                            !parent_creates_bfc &&
+                            !layout_inline_has_prior_in_flow_content(
+                                static_cast<DomNode*>(block->parent_view())) &&
                             parent_decoration_top == 0) {
                             float child_mt = (quirky_container && has_quirky_margin(block, true))
                                 ? 0 : block->boundary()->margin.top;

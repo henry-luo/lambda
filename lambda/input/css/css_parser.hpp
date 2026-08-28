@@ -240,6 +240,9 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_FULLSCREEN,     // :fullscreen
     CSS_SELECTOR_PSEUDO_GENERIC,        // Generic unknown pseudo-class (uses value field)
 
+    // Shadow DOM pseudo-elements that can be followed by a pseudo-element.
+    CSS_SELECTOR_PSEUDO_SLOTTED,         // ::slotted(...)
+
     // Pseudo-elements
     CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE,     // ::before
     CSS_SELECTOR_PSEUDO_ELEMENT_AFTER,      // ::after

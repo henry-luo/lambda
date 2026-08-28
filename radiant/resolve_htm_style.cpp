@@ -1651,6 +1651,10 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case MARKUP_NAME_OPTGROUP: {
         // HTML spec: option/optgroup inside select/datalist are 0×0 (UA rendered).
         // Outside select/datalist, they render as normal block flow content.
+        if (elmt_name == MARKUP_NAME_OPTGROUP) {
+            // HTML UA styles render optgroup labels with bolder inherited text.
+            apply_html_font_weight(block->ensure_font(lycon), CSS_VALUE_BOLD, 700);
+        }
         uintptr_t parent_tag = elmt->parent ? elmt->parent->tag() : 0;
         if (parent_tag == MARKUP_NAME_SELECT || parent_tag == MARKUP_NAME_DATALIST ||
             parent_tag == MARKUP_NAME_OPTGROUP) {

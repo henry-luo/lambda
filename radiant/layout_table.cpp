@@ -17,17 +17,36 @@ static inline ViewBlock* table_array_view_block(ArrayList* list, int index) {
     return lam::view_require_block(view);
 }
 
-ViewTableRow* ViewTable::first_row() {
-    for (View* child = static_cast<View*>(first_child); child; child = static_cast<View*>(child->next_sibling)) {
-        if (child->view_type == RDT_VIEW_TABLE_ROW) {
+static bool table_view_can_contain_flattened_rows(View* view) {
+    return view && (view->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+                    (view->view_type == RDT_VIEW_INLINE &&
+                     view->as_element()->display.outer == CSS_VALUE_CONTENTS));
+}
+
+static ViewTableRow* table_find_flattened_row(View* first, View* after,
+                                              bool* after_seen) {
+    for (View* child = first; child;
+         child = static_cast<View*>(child->next_sibling)) {
+        if (child == after) {
+            *after_seen = true;
+            continue;
+        }
+        if (*after_seen && child->view_type == RDT_VIEW_TABLE_ROW) {
             return lam::view_require<RDT_VIEW_TABLE_ROW>(child);
         }
-        if (child->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-            ViewTableRow* row = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(child)->first_row();
+        if (table_view_can_contain_flattened_rows(child)) {
+            ViewTableRow* row = table_find_flattened_row(
+                static_cast<View*>(child->as_element()->first_child), after, after_seen);
             if (row) return row;
         }
     }
     return nullptr;
+}
+
+ViewTableRow* ViewTable::first_row() {
+    bool after_seen = true;
+    return table_find_flattened_row(static_cast<View*>(first_child), nullptr,
+                                    &after_seen);
 }
 
 ViewBlock* ViewTable::first_row_group() {
@@ -39,20 +58,9 @@ ViewBlock* ViewTable::first_row_group() {
 
 ViewTableRow* ViewTable::next_row(ViewTableRow* current) {
     if (!current) return nullptr;
-    for (View* sibling = static_cast<View*>(current->next_sibling); sibling; sibling = static_cast<View*>(sibling->next_sibling)) {
-        if (sibling->view_type == RDT_VIEW_TABLE_ROW) return lam::view_require<RDT_VIEW_TABLE_ROW>(sibling);
-    }
-    ViewBlock* parent = lam::view_as_block(static_cast<View*>(current->parent));
-    if (parent && parent->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-        for (View* next = static_cast<View*>(parent->next_sibling); next; next = static_cast<View*>(next->next_sibling)) {
-            if (next->view_type == RDT_VIEW_TABLE_ROW) return lam::view_require<RDT_VIEW_TABLE_ROW>(next);
-            if (next->view_type == RDT_VIEW_TABLE_ROW_GROUP) {
-                ViewTableRow* row = lam::view_require<RDT_VIEW_TABLE_ROW_GROUP>(next)->first_row();
-                if (row) return row;
-            }
-        }
-    }
-    return nullptr;
+    bool after_seen = false;
+    return table_find_flattened_row(static_cast<View*>(first_child),
+                                    static_cast<View*>(current), &after_seen);
 }
 
 TableSectionType ViewTableRowGroup::get_section_type() const {
@@ -60,7 +68,7 @@ TableSectionType ViewTableRowGroup::get_section_type() const {
     if (tag == MARKUP_NAME_THEAD) return TABLE_SECTION_THEAD;
     if (tag == MARKUP_NAME_TFOOT) return TABLE_SECTION_TFOOT;
     if (tag == MARKUP_NAME_TBODY) return TABLE_SECTION_TBODY;
-    DisplayValue resolved = resolve_display_value((void*)this);
+    DisplayValue resolved = display;
     if (resolved.inner == CSS_VALUE_TABLE_HEADER_GROUP) {
         return TABLE_SECTION_THEAD;
     }
@@ -71,29 +79,50 @@ TableSectionType ViewTableRowGroup::get_section_type() const {
 }
 
 ViewTableRow* ViewTableRowGroup::first_row() {
-    View* row = layout_first_view_with_type(static_cast<View*>(first_child),
-                                        RDT_VIEW_TABLE_ROW);
-    return row ? lam::view_require<RDT_VIEW_TABLE_ROW>(row) : nullptr;
+    bool after_seen = true;
+    return table_find_flattened_row(static_cast<View*>(first_child), nullptr,
+                                    &after_seen);
 }
 
 ViewTableRow* ViewTableRowGroup::next_row(ViewTableRow* current) {
     if (!current) return nullptr;
-    View* row = layout_first_view_with_type(static_cast<View*>(current->next_sibling),
-                                        RDT_VIEW_TABLE_ROW);
-    return row ? lam::view_require<RDT_VIEW_TABLE_ROW>(row) : nullptr;
+    bool after_seen = false;
+    return table_find_flattened_row(static_cast<View*>(first_child),
+                                    static_cast<View*>(current), &after_seen);
+}
+
+static ViewTableCell* table_row_find_cell(View* first, View* after,
+                                          bool* after_seen) {
+    for (View* child = first; child; child = static_cast<View*>(child->next_sibling)) {
+        if (child == after) {
+            *after_seen = true;
+            continue;
+        }
+        if (*after_seen && child->view_type == RDT_VIEW_TABLE_CELL) {
+            return lam::view_require<RDT_VIEW_TABLE_CELL>(child);
+        }
+        if (child->is_element()) {
+            DisplayValue display = resolve_display_value((void*)child);
+            if (display.outer == CSS_VALUE_CONTENTS) {
+                ViewTableCell* cell = table_row_find_cell(
+                    static_cast<View*>(child->as_element()->first_child), after, after_seen);
+                if (cell) return cell;
+            }
+        }
+    }
+    return nullptr;
 }
 
 ViewTableCell* ViewTableRow::first_cell() {
-    View* cell = layout_first_view_with_type(static_cast<View*>(first_child),
-                                         RDT_VIEW_TABLE_CELL);
-    return cell ? lam::view_require<RDT_VIEW_TABLE_CELL>(cell) : nullptr;
+    bool after_seen = true;
+    return table_row_find_cell(static_cast<View*>(first_child), nullptr, &after_seen);
 }
 
 ViewTableCell* ViewTableRow::next_cell(ViewTableCell* current) {
     if (!current) return nullptr;
-    View* cell = layout_first_view_with_type(static_cast<View*>(current->next_sibling),
-                                         RDT_VIEW_TABLE_CELL);
-    return cell ? lam::view_require<RDT_VIEW_TABLE_CELL>(cell) : nullptr;
+    bool after_seen = false;
+    return table_row_find_cell(static_cast<View*>(first_child),
+                               static_cast<View*>(current), &after_seen);
 }
 
 static float table_row_collapsed_vertical_border_contribution(ViewTableRow* row,
@@ -117,9 +146,12 @@ static float table_row_collapsed_vertical_border_contribution(ViewTableRow* row,
 }
 
 ViewBlock* ViewTableRow::parent_row_group() {
-    ViewBlock* parent = lam::view_as_block(static_cast<View*>(this->parent));
-    if (parent && (parent->view_type == RDT_VIEW_TABLE_ROW_GROUP || parent->view_type == RDT_VIEW_TABLE)) {
-        return parent;
+    for (View* ancestor = static_cast<View*>(this->parent); ancestor;
+         ancestor = static_cast<View*>(ancestor->parent)) {
+        if (ancestor->view_type == RDT_VIEW_TABLE_ROW_GROUP ||
+            ancestor->view_type == RDT_VIEW_TABLE) {
+            return lam::view_as_block(ancestor);
+        }
     }
     return nullptr;
 }
@@ -2930,14 +2962,23 @@ static bool is_out_of_flow_table_cell_slot(View* view) {
 }
 
 template <typename Fn>
-static void for_each_table_row_cell_slot(ViewTableRow* row, Fn fn) {
-    if (!row) return;
-    for (View* child = static_cast<View*>(row->first_child); child;
+static void for_each_table_row_cell_slot_in_tree(View* first, Fn fn) {
+    for (View* child = first; child;
          child = static_cast<View*>(child->next_sibling)) {
         if (child->view_type == RDT_VIEW_TABLE_CELL || is_out_of_flow_table_cell_slot(child)) {
             fn(child);
+        } else if (child->is_element() &&
+                   resolve_display_value((void*)child).outer == CSS_VALUE_CONTENTS) {
+            for_each_table_row_cell_slot_in_tree(
+                static_cast<View*>(child->as_element()->first_child), fn);
         }
     }
+}
+
+template <typename Fn>
+static void for_each_table_row_cell_slot(ViewTableRow* row, Fn fn) {
+    if (!row) return;
+    for_each_table_row_cell_slot_in_tree(static_cast<View*>(row->first_child), fn);
 }
 
 static void collect_collapsed_border_candidates(ViewTable* table,
@@ -3653,16 +3694,79 @@ static bool table_text_node_generates_anonymous_content(DomNode* node,
     return run_allows_preserved_whitespace;
 }
 
+static bool table_display_contents_is_run_of_display(DomElement* element,
+                                                     CssEnum expected_display) {
+    if (!element) return false;
+    bool has_expected = false;
+    for (DomNode* child = layout_render_child_list(element); child;
+         child = child->next_sibling) {
+        if (child->is_text()) {
+            if (layout_dom_text_has_non_whitespace(child->as_text())) return false;
+            continue;
+        }
+        if (!child->is_element()) continue;
+        DisplayValue display = resolve_display_value(child);
+        if (layout_display_is_none(display)) continue;
+        if (display.inner == expected_display) {
+            has_expected = true;
+        } else if (display.outer == CSS_VALUE_CONTENTS) {
+            if (!table_display_contents_is_run_of_display(
+                    child->as_element(), expected_display)) return false;
+            has_expected = true;
+        } else {
+            return false;
+        }
+    }
+    return has_expected;
+}
+
+static CssEnum table_display_contents_first_internal_display(DomElement* element) {
+    if (!element) return CSS_VALUE__UNDEF;
+    for (DomNode* child = layout_render_child_list(element); child;
+         child = child->next_sibling) {
+        if (child->is_text()) {
+            if (layout_dom_text_has_non_whitespace(child->as_text())) {
+                return CSS_VALUE__UNDEF;
+            }
+            continue;
+        }
+        if (!child->is_element()) continue;
+        DisplayValue display = resolve_display_value(child);
+        if (layout_display_is_none(display)) continue;
+        if (display.outer == CSS_VALUE_CONTENTS) {
+            CssEnum nested_display = table_display_contents_first_internal_display(
+                child->as_element());
+            if (nested_display != CSS_VALUE__UNDEF) return nested_display;
+            return CSS_VALUE__UNDEF;
+        }
+        return is_table_internal_display(display.inner)
+            ? display.inner : CSS_VALUE__UNDEF;
+    }
+    return CSS_VALUE__UNDEF;
+}
+
+static CssEnum table_effective_internal_display(DomNode* node) {
+    if (!node || !node->is_element()) return CSS_VALUE__UNDEF;
+    DisplayValue display = resolve_display_value(node);
+    return display.outer == CSS_VALUE_CONTENTS
+        ? table_display_contents_first_internal_display(node->as_element())
+        : display.inner;
+}
+
 static void wrap_run_in_cells(LayoutContext* lycon, ArrayList* run, DomElement* parent_row) {
     DomElement* current_anon_td = nullptr;
     for (int i = 0; i < run->length; i++) {
         DomNode* node = static_cast<DomNode*>(run->data[i]);
         bool is_cell = false;
+        bool is_transparent_cell_run = false;
         if (node->is_element()) {
             DisplayValue disp = resolve_display_value(node);
             is_cell = disp.inner == CSS_VALUE_TABLE_CELL;
+            is_transparent_cell_run = disp.outer == CSS_VALUE_CONTENTS &&
+            table_display_contents_is_run_of_display(
+                node->as_element(), CSS_VALUE_TABLE_CELL);
         }
-        if (is_cell) {
+        if (is_cell || is_transparent_cell_run) {
             current_anon_td = nullptr;
             reparent_node(node, parent_row);
         } else {
@@ -3692,6 +3796,74 @@ static ArrayList* table_snapshot_children(DomElement* parent) {
         arraylist_append(children, child);
     }
     return children;
+}
+
+static bool table_display_contents_contains_display(DomElement* element,
+                                                     CssEnum expected_display) {
+    if (!element) return false;
+    for (DomNode* child = layout_render_child_list(element); child;
+         child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DisplayValue display = resolve_display_value(child);
+        if (layout_display_is_none(display)) continue;
+        if (display.inner == expected_display) return true;
+        if (display.outer == CSS_VALUE_CONTENTS &&
+            table_display_contents_contains_display(
+                child->as_element(), expected_display)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool table_display_contents_has_row_content(DomElement* element) {
+    if (!element) return false;
+    for (DomNode* child = layout_render_child_list(element); child;
+         child = child->next_sibling) {
+        if (child->is_text()) {
+            if (layout_dom_text_has_non_whitespace(child->as_text())) return true;
+            continue;
+        }
+        if (!child->is_element()) continue;
+        DisplayValue display = resolve_display_value(child);
+        if (layout_display_is_none(display)) continue;
+        if (display.outer == CSS_VALUE_CONTENTS) {
+            if (table_display_contents_has_row_content(child->as_element())) {
+                return true;
+            }
+        } else if (display.inner == CSS_VALUE_TABLE_CELL) {
+            return true;
+        } else if (!is_table_internal_display(display.inner)) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+    return false;
+}
+
+static void table_wrap_display_contents_children(LayoutContext* lycon,
+                                                 DomElement* contents,
+                                                 CssEnum display_type,
+                                                 const char* tag_name) {
+    if (!lycon || !contents) return;
+    for (DomNode* child = contents->first_child; child; child = child->next_sibling) {
+        if (child->is_element() && child->as_element()->is_table_fixup() &&
+            resolve_display_value(child).inner == display_type) {
+            return;
+        }
+    }
+    DomElement* anonymous = create_anonymous_table_element(
+        lycon, contents, display_type, tag_name);
+    if (!anonymous) return;
+    ArrayList* children = table_snapshot_children(contents);
+    if (!children) return;
+    for (int i = 0; i < children->length; i++) {
+        DomNode* child = static_cast<DomNode*>(children->data[i]);
+        if (child) reparent_node(child, anonymous);
+    }
+    append_child_to_element(contents, anonymous);
+    arraylist_free(children);
 }
 
 static bool table_fixup_is_outer_anonymous_table(DomElement* element) {
@@ -3772,10 +3944,19 @@ static void remerge_stale_anonymous_table_runs(DomElement* parent) {
     }
 }
 
+static DomNode* table_run_insertion_point(ArrayList* run, DomNode* before) {
+    if (before || !run || run->length == 0) return before;
+    DomNode* last = static_cast<DomNode*>(run->data[run->length - 1]);
+    // CSS Tables 3 §2.2 removes display:none boxes without changing the
+    // source order used when a generated table box is inserted.
+    return last ? last->next_sibling : nullptr;
+}
+
 static void flush_anonymous_cell_run(LayoutContext* lycon, DomElement* parent,
                                      ArrayList* run, DomNode* before,
                                      bool create_row_group) {
     if (!run || run->length == 0) return;
+    DomNode* insertion_before = table_run_insertion_point(run, before);
     DomElement* row_parent = parent;
     DomElement* row_group = nullptr;
     if (create_row_group) {
@@ -3787,28 +3968,30 @@ static void flush_anonymous_cell_run(LayoutContext* lycon, DomElement* parent,
         lycon, row_parent, CSS_VALUE_TABLE_ROW, "::anon-tr");
     if (row_group) append_child_to_element(row_group, row);
     wrap_run_in_cells(lycon, run, row);
-    place_anonymous_table_child(parent, row_group ? row_group : row, before);
+    place_anonymous_table_child(parent, row_group ? row_group : row, insertion_before);
     arraylist_clear(run);
 }
 
 static void flush_anonymous_row_run(LayoutContext* lycon, DomElement* table,
                                     ArrayList* run, DomNode* before) {
     if (!run || run->length == 0) return;
+    DomNode* insertion_before = table_run_insertion_point(run, before);
     DomElement* row_group = create_anonymous_table_element(
         lycon, table, CSS_VALUE_TABLE_ROW_GROUP, "::anon-tbody");
     reparent_run(run, row_group);
-    place_anonymous_table_child(table, row_group, before);
+    place_anonymous_table_child(table, row_group, insertion_before);
     arraylist_clear(run);
 }
 
 static void flush_anonymous_noncell_run(LayoutContext* lycon, DomElement* row,
                                         ArrayList* run, DomNode* before) {
     if (!run || run->length == 0) return;
+    DomNode* insertion_before = table_run_insertion_point(run, before);
     DomElement* cell = create_anonymous_table_element(
         lycon, row, CSS_VALUE_TABLE_CELL, "::anon-td");
     if (!cell) return;
     reparent_run(run, cell);
-    place_anonymous_table_child(row, cell, before);
+    place_anonymous_table_child(row, cell, insertion_before);
     arraylist_clear(run);
 }
 
@@ -3838,7 +4021,33 @@ static void repair_anonymous_table_children(LayoutContext* lycon,
         // CSS Tables 3 §2.2 removes display:none boxes before anonymous-table
         // runs are formed, so they cannot acquire generated table parents.
         if (layout_display_is_none(display)) continue;
-        if (display.inner == proper_child_display) {
+        if (wrap_run_in_row && display.outer == CSS_VALUE_CONTENTS &&
+            !table_display_contents_contains_display(
+                child->as_element(), CSS_VALUE_TABLE_ROW) &&
+            table_display_contents_contains_display(
+                child->as_element(), CSS_VALUE_TABLE_CELL) &&
+            !table_display_contents_is_run_of_display(
+                child->as_element(), CSS_VALUE_TABLE_CELL) &&
+            table_display_contents_has_row_content(child->as_element())) {
+            if (run->length > 0) {
+                flush_anonymous_cell_run(lycon, parent, run, child, false);
+            }
+            // CSS Tables 3 §2.2: a boxless row-like subtree needs an anonymous
+            // row around its flattened cell/content sequence.
+            table_wrap_display_contents_children(
+                lycon, child->as_element(), CSS_VALUE_TABLE_ROW, "::anon-tr");
+            continue;
+        }
+        bool is_transparent_proper_run = display.outer == CSS_VALUE_CONTENTS &&
+            table_display_contents_is_run_of_display(
+                child->as_element(), proper_child_display);
+        if (is_transparent_proper_run) {
+            if (run->length > 0) {
+                flush_anonymous_noncell_run(lycon, parent, run, child);
+            }
+            // The table view builder flattens this boxless subtree and marks
+            // its expected table children directly under the current parent.
+        } else if (display.inner == proper_child_display) {
             if (run->length > 0) {
                 if (wrap_run_in_row) {
                     flush_anonymous_cell_run(lycon, parent, run, child, false);
@@ -3859,6 +4068,24 @@ static void repair_anonymous_table_children(LayoutContext* lycon,
     }
     arraylist_free(children);
     arraylist_free(run);
+}
+
+static void repair_anonymous_table_descendants(LayoutContext* lycon,
+                                               DomElement* parent) {
+    if (!lycon || !parent) return;
+    DisplayValue display = resolve_display_value((void*)parent);
+    if (layout_display_is_table_row_group(display.inner)) {
+        repair_anonymous_table_children(
+            lycon, parent, CSS_VALUE_TABLE_ROW, true);
+    } else if (display.inner == CSS_VALUE_TABLE_ROW) {
+        repair_anonymous_table_children(
+            lycon, parent, CSS_VALUE_TABLE_CELL, false);
+    }
+    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
+        if (child->is_element()) {
+            repair_anonymous_table_descendants(lycon, child->as_element());
+        }
+    }
 }
 
 static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* table) {
@@ -3889,23 +4116,24 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
             i++;
             continue;
         }
+        CssEnum table_display = table_effective_internal_display(child);
         NameId tag = child->tag();
-        bool is_row_group = layout_display_is_table_row_group(display.inner);
-        bool is_row = display.inner == CSS_VALUE_TABLE_ROW;
-        bool is_cell = display.inner == CSS_VALUE_TABLE_CELL;
-        bool is_column = (display.inner == CSS_VALUE_TABLE_COLUMN ||
-                          display.inner == CSS_VALUE_TABLE_COLUMN_GROUP) ||
+        bool is_row_group = layout_display_is_table_row_group(table_display);
+        bool is_row = table_display == CSS_VALUE_TABLE_ROW;
+        bool is_cell = table_display == CSS_VALUE_TABLE_CELL;
+        bool is_column = (table_display == CSS_VALUE_TABLE_COLUMN ||
+                          table_display == CSS_VALUE_TABLE_COLUMN_GROUP) ||
                         tag == MARKUP_NAME_COL || tag == MARKUP_NAME_COLGROUP;
-        bool is_caption = display.inner == CSS_VALUE_TABLE_CAPTION ||
+        bool is_caption = table_display == CSS_VALUE_TABLE_CAPTION ||
                           tag == MARKUP_NAME_CAPTION;
         if (is_row_group || is_column || is_caption) {
             if (current_cell_run->length > 0) {
                 flush_anonymous_cell_run(
                     lycon, table, current_cell_run, child, true);
             }
-            if (current_row_run->length > 0) {
-                flush_anonymous_row_run(lycon, table, current_row_run, child);
-            }
+                if (current_row_run->length > 0) {
+                    flush_anonymous_row_run(lycon, table, current_row_run, child);
+                }
             i++;
             continue;
         }
@@ -3939,34 +4167,7 @@ static void generate_anonymous_table_boxes(LayoutContext* lycon, DomElement* tab
     arraylist_free(children_to_process);
     arraylist_free(current_cell_run);
     arraylist_free(current_row_run);
-    for (DomNode* child = table->first_child; child; child = child->next_sibling) {
-        if (!child->is_element()) continue;
-        DomElement* row_group = child->as_element();
-        DisplayValue display = resolve_display_value(child);
-        if (!layout_display_is_table_row_group(display.inner)) {
-            continue;
-        }
-        repair_anonymous_table_children(
-            lycon, row_group, CSS_VALUE_TABLE_ROW, true);
-    }
-    for (DomNode* group_node = table->first_child; group_node; group_node = group_node->next_sibling) {
-        if (!group_node->is_element()) continue;
-        DomElement* row_group = group_node->as_element();
-        DisplayValue group_display = resolve_display_value(group_node);
-        if (!layout_display_is_table_row_group(group_display.inner)) {
-            continue;
-        }
-        for (DomNode* row_node = row_group->first_child; row_node; row_node = row_node->next_sibling) {
-            if (!row_node->is_element()) continue;
-            DomElement* row = row_node->as_element();
-            DisplayValue row_display = resolve_display_value(row_node);
-            if (row_display.inner != CSS_VALUE_TABLE_ROW) {
-                continue;
-            }
-            repair_anonymous_table_children(
-                lycon, row, CSS_VALUE_TABLE_CELL, false);
-        }
-    }
+    repair_anonymous_table_descendants(lycon, table);
 
 }
 
@@ -4074,9 +4275,18 @@ static ViewElement* mark_table_box(LayoutContext* lycon, DomNode* node,
 static void mark_table_children(LayoutContext* lycon, DomNode* node,
                                 ViewElement* parent) {
     if (!lycon || !node || !parent || !node->is_element()) return;
-    for (DomNode* child = node->as_element()->first_child; child;
+    for (DomNode* child = layout_render_child_list(node->as_element()); child;
          child = child->next_sibling) {
-        if (child->is_element()) mark_table_node(lycon, child, parent);
+        if (!child->is_element()) continue;
+        DisplayValue display = resolve_display_value(child);
+        if (display.outer == CSS_VALUE_CONTENTS) {
+            // CSS Display 3: a boxless table descendant contributes its
+            // rendered table-internal children to the surrounding row.
+            layout_init_display_contents_view(lycon, child->as_element());
+            mark_table_children(lycon, child, parent);
+        } else {
+            mark_table_node(lycon, child, parent);
+        }
     }
 }
 
@@ -4108,6 +4318,15 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             LayoutViewScope view_scope(lycon);
             layout_flow_node(lycon, node);
         }
+        return;
+    }
+    if (layout_element_is_replaced(elem) &&
+        is_table_internal_display(display.inner)) {
+        // CSS Tables 3 §2.1: a replaced element keeps its principal box even
+        // when its computed display value is a table-internal type.
+        DisplayValue replaced_display = display;
+        replaced_display.inner = RDT_DISPLAY_REPLACED;
+        layout_block(lycon, node, replaced_display);
         return;
     }
     LayoutViewScope view_scope(lycon);
@@ -5357,6 +5576,7 @@ static bool table_layout_flow_row(LayoutContext* lycon, ViewTable* table,
     row->x = 0.0f;
     row->y = in_group ? *current_y - group_start_y : *current_y;
     row->width = row_width;
+    ViewTableCell* first_cell = trow->first_cell();
     float row_height = table_measure_row_height(
         lycon, table, meta, trow, row, col_widths, col_x_positions,
         columns, row_idx, in_group);
@@ -5977,8 +6197,13 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                 child_max += child_unresolved_box_extra;
                 child_min += child_unresolved_box_extra;
             }
-            bool is_inline = (child_display.outer == CSS_VALUE_INLINE ||
-                              child_display.outer == CSS_VALUE_INLINE_BLOCK);
+            bool is_inline = child_display.outer == CSS_VALUE_INLINE ||
+                child_display.outer == CSS_VALUE_INLINE_BLOCK ||
+                child_display.outer == CSS_VALUE_INLINE_FLEX ||
+                child_display.outer == CSS_VALUE_INLINE_GRID ||
+                child_display.outer == CSS_VALUE_INLINE_TABLE ||
+                (child_display.outer == CSS_VALUE_CONTENTS &&
+                 !layout_display_contents_has_block_child(child_elem));
             bool child_is_float = layout_element_is_floated(child_elem);
             // Special handling for <br> - it breaks the inline run even though it's inline
             NameId child_tag = child->tag();
@@ -7240,14 +7465,38 @@ bool is_table_internal_display(CssEnum display) {
            display == CSS_VALUE_TABLE_CAPTION;
 }
 
+bool layout_element_contains_table_internal(DomElement* element) {
+    if (!element) return false;
+    for (DomNode* child = layout_render_child_list(element); child;
+         child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DisplayValue display = resolve_display_value(child);
+        if (layout_display_is_none(display)) continue;
+        if (is_table_internal_display(display.inner)) return true;
+        if (layout_element_contains_table_internal(child->as_element())) return true;
+    }
+    return false;
+}
+
 bool layout_element_is_anonymous_table_fixup(const DomElement* element) {
     // CSS Tables 3 §2.2.2: retained fixup boxes keep their generated table
     // display across reflow instead of becoming ordinary inline flow boxes.
     return element && element->is_table_fixup();
 }
 
+static bool table_child_requires_anonymous_fixup(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    // CSS Tables 3 §2.1: replaced table-internal elements keep their principal
+    // box and therefore do not participate in orphaned table-internal repair.
+    return is_table_internal_display(table_effective_internal_display(node)) &&
+        !layout_element_is_replaced(node->as_element());
+}
+
 bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
     if (!lycon || !parent || !parent->first_child) return false;
+    // display:contents has no independent formatting context; its flattened
+    // children must be repaired by the nearest real table parent.
+    if (resolve_display_value((void*)parent).outer == CSS_VALUE_CONTENTS) return false;
     remerge_stale_anonymous_table_runs(parent);
     // Retained outer anonymous tables can be the parent's only direct child;
     // refresh them before the early no-orphan return so descendants inherit
@@ -7256,8 +7505,8 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
     bool has_table_internal = false;
     for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
-        DisplayValue child_display = resolve_display_value((void*)child);
-        if (is_table_internal_display(child_display.inner)) {
+        if (child->as_element()->is_table_fixup()) continue;
+        if (table_child_requires_anonymous_fixup(child)) {
             has_table_internal = true;
             break;
         }
@@ -7272,8 +7521,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
             child = child->next_sibling;
             continue;
         }
-        DisplayValue child_display = resolve_display_value((void*)child);
-        if (!is_table_internal_display(child_display.inner)) {
+        if (!table_child_requires_anonymous_fixup(child)) {
             child = child->next_sibling;
             continue;
         }
@@ -7282,8 +7530,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         while (run_end->next_sibling) {
             DomNode* next = run_end->next_sibling;
             if (next->is_element()) {
-                DisplayValue next_display = resolve_display_value((void*)next);
-                if (is_table_internal_display(next_display.inner)) {
+                if (table_child_requires_anonymous_fixup(next)) {
                     run_end = next;
                 } else {
                     break;
@@ -7299,8 +7546,7 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                         after_text = after_text->next_sibling;
                     }
                     if (after_text && after_text->is_element()) {
-                        DisplayValue after_display = resolve_display_value((void*)after_text);
-                        if (is_table_internal_display(after_display.inner)) {
+                        if (table_child_requires_anonymous_fixup(after_text)) {
                             continue;
                         }
                     }
@@ -7311,33 +7557,14 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
             }
         }
         // CSS 2.1 §17.2.1: All orphaned table-internal elements need an anonymous table.
-        // When the run contains ONLY cells (no rows/row-groups), also create an
-        // anonymous row to wrap them directly (avoiding an unnecessary extra anon-tbody
-        bool has_cells = false;
-        bool has_rows_or_groups = false;
         bool needs_table = false;
         for (DomNode* n = run_start; n; n = n->next_sibling) {
             if (n->is_element()) {
-                DisplayValue n_display = resolve_display_value((void*)n);
-                CssEnum disp = n_display.inner;
-                if (disp == CSS_VALUE_TABLE_CELL) {
-                    has_cells = true;
-                    needs_table = true;
-                } else if (disp == CSS_VALUE_TABLE_CAPTION) {
-                    // anonymous table wrapper but must not be wrapped in a row.
-                    needs_table = true;
-                } else if (disp == CSS_VALUE_TABLE_ROW ||
-                           disp == CSS_VALUE_TABLE_ROW_GROUP ||
-                           disp == CSS_VALUE_TABLE_HEADER_GROUP ||
-                           disp == CSS_VALUE_TABLE_FOOTER_GROUP) {
-                    has_rows_or_groups = true;
-                    needs_table = true;
-                }
+                if (table_child_requires_anonymous_fixup(n)) needs_table = true;
             }
             if (n == run_end) break;
         }
         DomElement* table_wrapper = nullptr;
-        DomElement* row_wrapper = nullptr;
         if (needs_table) {
             // and table-child repair share inheritance and pool ownership.
             DisplayValue parent_display = resolve_display_value((void*)parent);
@@ -7355,14 +7582,6 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                 }
             }
         }
-        // - cells-only: create anon-tr as sole child of anon-table
-        if (has_cells && table_wrapper) {
-            row_wrapper = create_anonymous_table_element(
-                lycon, table_wrapper, CSS_VALUE_TABLE_ROW, "::anon-tr");
-            if (row_wrapper) {
-                row_wrapper->display.outer = CSS_VALUE_BLOCK;
-            }
-        }
         if (table_wrapper) {
             // Detach the source range once; appending each node then cannot
             DomNode* prev = run_start->prev_sibling;
@@ -7373,35 +7592,13 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
             else parent->last_child = prev;
             run_start->prev_sibling = nullptr;
             run_end->next_sibling = nullptr;
-            // - When no mix (cells-only), all go into row_wrapper
-            bool has_mix = has_cells && has_rows_or_groups;
-            bool row_added_to_table = false;
             DomNode* move_node = run_start;
             while (move_node) {
                 DomNode* next_to_move = move_node->next_sibling;
                 bool is_last = (move_node == run_end);
-                DomElement* target = table_wrapper;  // default: direct child of table
-                if (row_wrapper) {
-                    if (has_mix && move_node->is_element()) {
-                        DisplayValue n_display = resolve_display_value((void*)move_node);
-                        CssEnum disp = n_display.inner;
-                        if (disp == CSS_VALUE_TABLE_ROW ||
-                            disp == CSS_VALUE_TABLE_ROW_GROUP ||
-                            disp == CSS_VALUE_TABLE_HEADER_GROUP ||
-                            disp == CSS_VALUE_TABLE_FOOTER_GROUP) {
-                            if (!row_added_to_table && row_wrapper->first_child) {
-                                append_child_to_element(table_wrapper, row_wrapper);
-                                row_added_to_table = true;
-                            }
-                            target = table_wrapper;
-                        } else {
-                            target = row_wrapper;
-                        }
-                    } else {
-                        // Cells-only: all go into row_wrapper
-                        target = row_wrapper;
-                    }
-                }
+                // CSS Tables 3 §2.2.1: internal row and cell repair is deferred
+                // to the table formatting context after this wrapper is built.
+                append_detached_table_node(table_wrapper, move_node);
                 if (move_node->is_text() &&
                     !layout_dom_text_has_non_whitespace(move_node->as_text()) &&
                     !table_text_node_has_preserved_whitespace_content(move_node)) {
@@ -7409,13 +7606,8 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                     // has no table box; clear any inline view retained before fixup.
                     layout_suppress_ignorable_container_text(move_node);
                 }
-                append_detached_table_node(target, move_node);
                 if (is_last) break;
                 move_node = next_to_move;
-            }
-            if (row_wrapper && row_wrapper->first_child && !row_added_to_table) {
-                // For cells-only case or when row comes at the end
-                append_child_to_element(table_wrapper, row_wrapper);
             }
             place_anonymous_table_child(parent, table_wrapper, next_after_run);
             wrapped_any = true;

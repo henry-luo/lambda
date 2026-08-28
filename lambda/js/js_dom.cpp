@@ -13396,6 +13396,34 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
     return true;
 }
 
+static bool js_dom_append_fragment_children(DomElement* parent,
+                                             DomElement* fragment) {
+    if (!parent || !fragment) return false;
+    DomNode* child = fragment->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        if (!js_dom_prepare_cross_document_insertion(child, parent)) {
+            return false;
+        }
+        if (child->is_element()) {
+            // DOM Standard: appending a DocumentFragment splices its children;
+            // keep the backing Element order aligned with the live DOM chain.
+            if (!js_dom_append_backed_element(parent, child)) return false;
+        } else if (child->is_text()) {
+            if (!js_dom_insert_backed_text(parent, child->as_text(), nullptr)) {
+                return false;
+            }
+        } else if (!((DomNode*)parent)->append_child(child)) {
+            return false;
+        }
+        dom_post_insert((DomNode*)parent, child);
+        child = next;
+    }
+    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                           (DomNode*)parent, (DomNode*)parent);
+    return true;
+}
+
 static bool js_dom_insert_before_child(DomElement* parent, DomNode* child,
                                        DomNode* ref_child) {
     if (!parent || !child) return false;
@@ -13642,28 +13670,7 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
     if (child_node->is_element()) {
         DomElement* child_elem = child_node->as_element();
         if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
-            DomNode* frag_child = child_elem->first_child;
-            while (frag_child) {
-                DomNode* next = frag_child->next_sibling;
-                if (!js_dom_prepare_cross_document_insertion(frag_child, elem)) {
-                    return ItemNull;
-                }
-                if (frag_child->is_element()) {
-                    // Moving a fragment child must update the destination Mark
-                    // tree; the base DOM linker leaves renderer-visible SVG
-                    // children detached from their Element backing.
-                    if (!js_dom_append_backed_element(elem, frag_child)) return ItemNull;
-                } else if (frag_child->is_text()) {
-                    if (!js_dom_insert_backed_text(elem, frag_child->as_text(), nullptr)) {
-                        return ItemNull;
-                    }
-                } else if (!((DomNode*)elem)->append_child(frag_child)) {
-                    return ItemNull;
-                }
-                dom_post_insert((DomNode*)elem, frag_child);
-                frag_child = next;
-            }
-            js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, (DomNode*)elem, (DomNode*)elem);
+            if (!js_dom_append_fragment_children(elem, child_elem)) return ItemNull;
             return child_arg;
         }
     }
@@ -14204,6 +14211,16 @@ extern "C" Item js_dom_append_variadic_bridge(void* elem_ptr, Item* args, int ar
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
         if (child_node) {
+            if (child_node->is_element()) {
+                DomElement* child_elem = child_node->as_element();
+                if (child_elem->tag_name &&
+                    strcmp(child_elem->tag_name, "#document-fragment") == 0) {
+                    if (!js_dom_append_fragment_children(elem, child_elem)) {
+                        return (Item){.item = ITEM_JS_UNDEFINED};
+                    }
+                    continue;
+                }
+            }
             // ParentNode.append is the path used by DOMParser consumers such
             // as HTMX; it must adopt foreign nodes before relinking them.
             if (!js_dom_prepare_cross_document_insertion(child_node, elem)) {
