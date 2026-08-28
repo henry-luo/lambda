@@ -141,8 +141,9 @@ console.log(docTextB.parentNode === null);
 document.adoptNode(docTextA);
 console.log(docTextA.parentNode === null);
 console.log(document.elementFromPoint(0, 0) !== null);
-// execCommand is editor-only; this document has no contenteditable host.
-console.log(typeof document.execCommand === "undefined");
+// execCommand is package-owned and exposed on every document; queryCommand*
+// remain unsupported until their command-state surface is implemented.
+console.log(typeof document.execCommand === "function");
 console.log(typeof document.queryCommandSupported === "undefined");
 console.log(typeof document.queryCommandEnabled === "undefined");
 console.log(typeof document.queryCommandIndeterm === "undefined");

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Form submission activation</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; font-size: 16px; padding: 16px; }
+        form { margin-bottom: 18px; }
+        input, button { margin: 4px; padding: 4px 8px; }
+        output { display: block; min-height: 20px; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <form id="activation-form" action="/submit-target" method="post">
+        <input id="query" name="query" value="alpha">
+        <button id="send" type="submit">Send</button>
+        <button id="cancel" type="submit">Cancel</button>
+        <button id="plain" type="button">Plain</button>
+        <button id="reset" type="reset">Reset</button>
+    </form>
+    <output id="activation-status">idle</output>
+
+    <form id="implicit-form" action="/implicit-target">
+        <input id="implicit-query" name="q" value="typed">
+        <button id="implicit-send" type="submit">Implicit send</button>
+    </form>
+    <output id="implicit-status">idle</output>
+
+    <form id="invalid-form">
+        <input id="required-query" name="required" required value="">
+        <button id="invalid-send" type="submit">Invalid send</button>
+    </form>
+    <output id="invalid-status">idle</output>
+
+    <input type="hidden" form="serialize-form" name="outside" value="associated">
+    <form id="serialize-form" action="/serialized?existing=1" method="get">
+        <input name="first" value="hello world">
+        <input name="second" value="a+b">
+        <button id="serialize" type="submit" name="submit" value="go">Serialize</button>
+    </form>
+
+    <script>
+        var activationForm = document.getElementById("activation-form");
+        var activationStatus = document.getElementById("activation-status");
+        activationForm.addEventListener("submit", function (event) {
+            var submitter = event.submitter;
+            activationStatus.textContent = "submit:" +
+                (submitter ? submitter.id : "none");
+            event.preventDefault();
+        });
+        activationForm.addEventListener("reset", function () {
+            activationStatus.textContent = "reset";
+        });
+
+        var implicitForm = document.getElementById("implicit-form");
+        var implicitStatus = document.getElementById("implicit-status");
+        implicitForm.addEventListener("submit", function (event) {
+            var submitter = event.submitter;
+            implicitStatus.textContent = "submit:" +
+                (submitter ? submitter.id : "none");
+            event.preventDefault();
+        });
+
+        var requiredQuery = document.getElementById("required-query");
+        requiredQuery.addEventListener("invalid", function () {
+            document.getElementById("invalid-status").textContent = "invalid";
+        });
+    </script>
+</body>
+</html>

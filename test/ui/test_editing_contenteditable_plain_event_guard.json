@@ -1,0 +1,18 @@
+{
+  "name": "plain contenteditable default re-resolves after author host replacement",
+  "html": "test/html/editable-plain-event-guard.html",
+  "viewport": {"width": 640, "height": 240},
+  "events": [
+    {"type": "click", "target": {"selector": "#reject-surface"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": "#reject-surface"}, "text": "X"},
+    {"type": "assert_count", "target": {"selector": "#reject-surface"}, "equals": 0},
+    {"type": "assert_text", "target": {"selector": "#reject-replacement"}, "equals": "listener"},
+    {"type": "click", "target": {"selector": "#surface"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type_physical", "target": {"selector": "#surface"}, "text": "X"},
+    {"type": "assert_count", "target": {"selector": "#surface"}, "equals": 0},
+    {"type": "assert_text", "target": {"selector": "#replacement"}, "equals": "listenerX"},
+    {"type": "assert_text", "target": {"selector": "#events"}, "equals": "beforeinput|beforeinput|replacement-input"}
+  ]
+}

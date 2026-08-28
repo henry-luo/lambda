@@ -1,0 +1,31 @@
+{
+  "name": "Form submission activation (F4)",
+  "html": "test/html/form-submission.html",
+  "viewport": {"width": 640, "height": 640},
+  "events": [
+    {"type": "click", "target": {"selector": "#send"}},
+    {"type": "assert_text", "target": {"selector": "#activation-status"}, "equals": "submit:send"},
+
+    {"type": "click", "target": {"selector": "#cancel"}},
+    {"type": "assert_text", "target": {"selector": "#activation-status"}, "equals": "submit:cancel"},
+
+    {"type": "click", "target": {"selector": "#query"}},
+    {"type": "type", "target": {"selector": "#query"}, "text": "x"},
+    {"type": "click", "target": {"selector": "#reset"}},
+    {"type": "assert_value", "target": {"selector": "#query"}, "equals": "alpha"},
+    {"type": "assert_text", "target": {"selector": "#activation-status"}, "equals": "reset"},
+    {"type": "click", "target": {"selector": "#plain"}},
+    {"type": "assert_text", "target": {"selector": "#activation-status"}, "equals": "reset"},
+
+    {"type": "click", "target": {"selector": "#implicit-query"}},
+    {"type": "key_press", "key": "enter"},
+    {"type": "assert_text", "target": {"selector": "#implicit-status"}, "equals": "submit:implicit-send"},
+
+    {"type": "click", "target": {"selector": "#required-query"}},
+    {"type": "key_press", "key": "enter"},
+    {"type": "assert_text", "target": {"selector": "#invalid-status"}, "equals": "invalid"},
+    {"type": "assert_focus", "target": {"selector": "#required-query"}},
+
+    {"type": "click", "target": {"selector": "#serialize"}}
+  ]
+}

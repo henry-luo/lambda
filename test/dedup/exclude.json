@@ -105,11 +105,6 @@
         {
           "file": "radiant/state_machine.cpp",
           "start": "static const char* editing_drag_mode_name(",
-          "end": "static const char* editing_rich_transaction_phase_name("
-        },
-        {
-          "file": "radiant/state_machine.cpp",
-          "start": "static const char* editing_rich_transaction_phase_name(",
           "end": "static void write_editing_surface_ref("
         },
         {

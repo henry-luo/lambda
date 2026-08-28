@@ -11,7 +11,8 @@ property operands, JS shapes and inline caches, computed property keys,
 ECMAScript Symbols/private names, reflection, and the Mark/Input seam.
 
 Per **D1.6**, implementation and verification cover MIR Direct only; the
-frozen `--c2mir` compatibility path receives no NameId-first extension.
+retired C2MIR compatibility path received no NameId-first extension, and has
+since been removed.
 
 **Current formal authority:** **D1.4v3** (language failures return as explicit
 completions through every frame), **D1.5** (precise rooting only), **D1.6** (C2MIR is frozen), **D1.7**

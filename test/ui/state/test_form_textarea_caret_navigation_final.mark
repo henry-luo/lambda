@@ -30,7 +30,6 @@
             }>>
         <div index: 11, flags: ['hover', 'focus-within']
           <textarea index: 3, id: "bio", flags: ['hover', 'focus', 'focus-within', 'valid'], form: {
-              value: "ab
-cd",
+              value: "ab\ncd",
               sel: [5, 5]
             }>>>>>>

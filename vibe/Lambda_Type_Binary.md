@@ -221,7 +221,7 @@ let out: binary = bld.freeze()        // immutable snapshot
 
 - `binary.builder()` returns a mutable, growable buffer (doubling strategy).
 - `freeze()` transfers ownership into an immutable `binary` (zero‑copy when capacity ≈ length, otherwise truncating copy).
-- Internally implemented as a thin wrapper around the existing `StringBuf` machinery (see `strbuf_append_str_n` in [Lambda_Transpiler.md](../doc/dev/Lambda_Transpiler.md)).
+- Internally implemented as a thin wrapper around the existing `StringBuf` machinery (see `strbuf_append_str_n` in [LR_06](../doc/dev/lambda/LR_06_C_Transpiler.md) §2).
 
 ### 5.2 Encoding stdlib — `encode`/`decode` with a codec selector *(API SETTLED 2026-07-15, user-confirmed)*
 

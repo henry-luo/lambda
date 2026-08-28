@@ -10,6 +10,9 @@ import ime: lambda.package.dom.ime
 import menu: lambda.package.dom.menu
 import caret: lambda.package.dom.caret
 import keymap: lambda.package.dom.keymap
+import dom_edit: lambda.package.dom.dom_edit
+import commands: lambda.package.dom.commands
+import submit: lambda.package.dom.submit
 
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
@@ -130,6 +133,35 @@ view <input type:'range'> state valid, invalid {}
 on init(evt)  { aria.reflect_range(~) }
 on input(evt) { aria.reflect_range(~) }
 
+// Form activation is behavior-only: the ordinary click remains the author
+// event, while submit/reset policy runs after click cancellation is settled.
+view <form> state form_activation {}
+on submitactivation(evt) { submit.run(~, null) }
+
+view <button> state form_activation {}
+on submitactivation(evt) {
+    let kind = radiant.attr(~, "type");
+    let normalized = if (kind == null or kind == "") "submit" else lower(kind);
+    if (normalized == "button" or normalized == "reset") { true }
+    submit.run(radiant.form_of(~), ~)
+}
+on resetactivation(evt) {
+    let kind = radiant.attr(~, "type");
+    if (kind != null and lower(kind) == "reset") {
+        submit.reset(radiant.form_of(~))
+    }
+    else { true }
+}
+
+view <input type:'submit'> state form_activation {}
+on submitactivation(evt) { submit.run(radiant.form_of(~), ~) }
+
+view <input type:'image'> state form_activation {}
+on submitactivation(evt) { submit.run(radiant.form_of(~), ~) }
+
+view <input type:'reset'> state form_activation {}
+on resetactivation(evt) { submit.reset(radiant.form_of(~)) }
+
 // The composition session, bound to the page rather than to a control (ES18).
 // Composition events bubble from the focused control, so the ancestor walk
 // reaches <body> and this template claims them there.
@@ -142,6 +174,12 @@ on contextmenu(evt) { menu.open_for(~) }
 on caretkey(evt) { caret.navigate(~, evt) }
 // F11: key -> edit intent, one rule set for both surfaces.
 on keyintent(evt) { keymap.resolve(~, evt) }
+// F13: editing a plain contenteditable, the DOM twin of the text-control applier.
+on domedit(evt) { dom_edit.apply_fn(~, evt) }
+// F14.1: the legacy command surface. Behavior-only — `document.execCommand` is
+// a method call, not an event — and document-scoped for the same reason the IME
+// session is: it addresses whatever the one selection currently covers.
+on execcommand(evt) { commands.exec(~, evt) }
 on compositionstart(evt)  { ime.begin(~) }
 on compositionupdate(evt) { ime.update(~, evt, null) }
 on compositionend(evt)    { ime.end(~) }

@@ -7,9 +7,7 @@
     {"type": "click", "target": {"selector": "#surface"}},
     {"type": "paste_text", "target": {"selector": "#surface"}, "text": "log\nline"},
     {"type": "assert_text", "target": {"selector": "#input-log"}, "equals": "input:insertFromPaste|log\nline|log\nline"},
-    {"type": "assert_event_log", "contains": "\"type\":\"editing.intent\"", "min": 1},
-    {"type": "assert_event_log", "contains": "\"type\":\"editing.beforeinput\"", "min": 1},
-    {"type": "assert_event_log", "contains": "\"type\":\"editing.input\"", "min": 1},
-    {"type": "assert_event_log", "contains": "\"type\":\"editing.mutation\"", "min": 1}
+    {"type": "assert_event_log", "contains": "\"type\":\"editing.history\"", "min": 1},
+    {"type": "assert_event_log", "contains": "\"type\":\"editing.clipboard\"", "min": 1}
   ]
 }

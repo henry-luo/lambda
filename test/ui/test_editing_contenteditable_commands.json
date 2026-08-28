@@ -1,0 +1,178 @@
+{
+  "name": "Contenteditable execCommand runs the dom package command set",
+  "html": "test/html/editable-dom-commands.html",
+  "viewport": {
+    "width": 640,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "log",
+      "message": "=== contenteditable_commands ==="
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#surface"
+      },
+      "start": 4,
+      "end": 8
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bold"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "bold:true|seed<b>text</b>"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#bold"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "bold:true|seedtext"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#surface"
+      },
+      "start": 0,
+      "end": 4
+    },
+    {
+      "type": "key_combo",
+      "key": "b",
+      "mods_str": "super"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#surface"
+      },
+      "equals": "seedtext"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#report"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "report:true|<b>seed</b>text"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#surface"
+      },
+      "start": 0,
+      "end": 0
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#html"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "html:true|<b><i>-x</i>seed</b>text"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#unsup"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "unsup:false|<b><i>-x</i>seed</b>text"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#partial"
+      },
+      "start": 4,
+      "end": 8
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#partial-bold"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "partial:true|<b>seed</b>text"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#partial-middle"
+      },
+      "start": 2,
+      "end": 6
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#partial-middle-bold"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "partial-middle:true|<b>se</b>edte<b>xt</b>"
+    },
+    {
+      "type": "set_editing_selection",
+      "target": {
+        "selector": "#partial-start"
+      },
+      "start": 0,
+      "end": 4
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#partial-start-bold"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#out"
+      },
+      "equals": "partial-start:true|seed<b>text</b>"
+    }
+  ]
+}

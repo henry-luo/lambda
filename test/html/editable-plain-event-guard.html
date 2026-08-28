@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Plain contenteditable canonical target re-resolution</title>
+<div id="reject-surface" contenteditable="true" tabindex="0">seed</div>
+<div id="surface" contenteditable="true" tabindex="0">seed</div>
+<output id="events"></output>
+<script>
+  let rejectSurface = document.getElementById('reject-surface');
+  let surface = document.getElementById('surface');
+  let events = [];
+  function record(value) {
+    events.push(value);
+    document.getElementById('events').textContent = events.join('|');
+  }
+  rejectSurface.addEventListener('beforeinput', function() {
+    record('beforeinput');
+    const rejectReplacement = document.createElement('div');
+    rejectReplacement.id = 'reject-replacement';
+    rejectReplacement.contentEditable = 'true';
+    rejectReplacement.setAttribute('tabindex', '0');
+    rejectReplacement.textContent = 'listener';
+    rejectSurface.parentNode.replaceChild(rejectReplacement, rejectSurface);
+    rejectSurface = rejectReplacement;
+  });
+
+  surface.addEventListener('beforeinput', function() {
+    record('beforeinput');
+    const replacement = document.createElement('div');
+    replacement.id = 'replacement';
+    replacement.contentEditable = 'true';
+    replacement.setAttribute('tabindex', '0');
+    replacement.textContent = 'listener';
+    replacement.addEventListener('input', function() {
+      record('replacement-input');
+    });
+    surface.parentNode.replaceChild(replacement, surface);
+    surface = replacement;
+    replacement.focus();
+    const range = document.createRange();
+    range.selectNodeContents(replacement);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  surface.addEventListener('input', function() {
+    record('detached-input');
+  });
+</script>

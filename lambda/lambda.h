@@ -1056,6 +1056,8 @@ void array_limit_inplace(Array* arr, int64_t n);  // limit to first n items in-p
 void array_limit_last_inplace(Array* arr, int64_t n);  // limit to last n items in-place
 Array* array_spreadable();  // constructs a spreadable empty array
 void array_push(Array* arr, Item item);  // push item to array
+// S9.3.1 capturing append for Lambda literals/comprehensions; array_push is raw.
+void array_push_capture(Array* arr, Item item);
 void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array
 void array_push_spread_all(Array* arr, Item item);  // push item, spreading any array (for pipe exprs in array literals)
 Item array_end(Array* arr);  // finalize and return array as Item
@@ -2805,6 +2807,12 @@ extern "C" {
     Item fn_map_set(Item map, Item key, Item value);
     bool cow_item_is_container(Item value);
     Item cow_mark_shared(Item value);
+    Item cow_capture_value(Item value);
+    // Whether S9.3.1 insertion capture is active (LAMBDA_COW_CAPTURE). The
+    // transpiler reads it too, so flag-off emits the pre-capture code exactly.
+    bool cow_capture_enabled(void);
+    // Capture every field of a freshly built shaped literal (S9.3.1).
+    void cow_mark_shape_children(struct TypeMap* type, void* data);
     Item cow_bind_var(Item value);
     Item cow_prepare_write(Item old);
     // Optional release-safe COW instrumentation.  It stays dormant unless

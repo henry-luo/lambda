@@ -86,8 +86,6 @@ RADIANT_C_API int radiant_dom_document_host_own_property_descriptor(Item object,
 RADIANT_C_API int radiant_dom_document_host_own_property_names(Item object, Item* out);
 RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
 RADIANT_C_API int radiant_dom_document_prototype(Item object, Item* out);
-RADIANT_C_API int radiant_dom_document_legacy_command_enabled(Item object);
-
 RADIANT_C_API int radiant_dom_document_operation(Item object,
                                                  RadiantDocumentOperation operation,
                                                  Item* args, int argc, Item* out);

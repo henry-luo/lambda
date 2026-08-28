@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 #include "../lambda/runtime/lambda-error.h"
 #include "../lambda/runtime/ast_build.hpp"
+#include "../lambda/runtime/mir_emitter_shared.hpp"
 #include "../lambda/runtime/type_contract.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/input.hpp"
@@ -30,6 +31,75 @@
 //==============================================================================
 // Type-contract metadata tests
 //==============================================================================
+
+TEST(ValueRepresentationTest, CanonicalRepUsesTheFullSemanticContract) {
+    EXPECT_EQ(lambda_canonical_rep(&TYPE_INT), VALUE_REP_INT_LANE);
+    EXPECT_EQ(lambda_canonical_rep(&TYPE_FLOAT), VALUE_REP_F64);
+    EXPECT_EQ(lambda_canonical_rep(&TYPE_BOOL), VALUE_REP_I64);
+    EXPECT_EQ(lambda_canonical_rep(&TYPE_INT64), VALUE_REP_I64);
+    EXPECT_EQ(lambda_canonical_rep(&TYPE_UINT64), VALUE_REP_U64);
+    EXPECT_EQ(lambda_canonical_rep(&TYPE_STRING), VALUE_REP_RAW_GC_POINTER);
+    EXPECT_EQ(lambda_canonical_rep(&TYPE_TYPE), VALUE_REP_RAW_NON_GC_POINTER);
+    EXPECT_EQ(lambda_canonical_rep(&TYPE_ANY), VALUE_REP_ITEM);
+    EXPECT_EQ(lambda_canonical_rep(&TYPE_INTEGER), VALUE_REP_ITEM);
+    EXPECT_EQ(lambda_canonical_rep(&TYPE_NUMBER), VALUE_REP_ITEM);
+    EXPECT_EQ(lambda_canonical_rep_for_type_id(LMD_TYPE_INT),
+        VALUE_REP_INT_LANE);
+    EXPECT_EQ(lambda_canonical_rep_for_type_id(LMD_TYPE_INT64),
+        VALUE_REP_I64);
+    EXPECT_EQ(lambda_canonical_rep_for_type_id(LMD_TYPE_ARRAY_NUM),
+        VALUE_REP_RAW_GC_POINTER);
+
+    TypeConstrained constrained = {};
+    constrained.type_id = LMD_TYPE_TYPE;
+    constrained.kind = TYPE_KIND_CONSTRAINED;
+    constrained.base = &TYPE_FLOAT;
+    EXPECT_EQ(lambda_canonical_rep((Type*)&constrained), VALUE_REP_F64);
+
+    TypeParam parameter = {};
+    parameter.type_id = LMD_TYPE_TYPE;
+    parameter.kind = TYPE_KIND_PARAM;
+    parameter.full_type = &TYPE_INT;
+    EXPECT_EQ(lambda_canonical_rep((Type*)&parameter), VALUE_REP_INT_LANE);
+
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Type* nullable_int = lambda_type_nullable_normalized(pool, &TYPE_INT);
+    Type* int_or_string = lambda_type_union_normalized(pool, &TYPE_INT,
+        &TYPE_STRING);
+    ASSERT_NE(nullable_int, nullptr);
+    ASSERT_NE(int_or_string, nullptr);
+    EXPECT_EQ(lambda_canonical_rep(nullable_int), VALUE_REP_INT_LANE);
+    EXPECT_EQ(lambda_canonical_rep(int_or_string), VALUE_REP_ITEM);
+    Type* nullable_int64 = lambda_type_nullable_normalized(pool, &TYPE_INT64);
+    ASSERT_NE(nullable_int64, nullptr);
+    EXPECT_EQ(lambda_canonical_rep(nullable_int64), VALUE_REP_ITEM);
+    pool_destroy(pool);
+}
+
+TEST(ValueRepresentationTest, DirectTransitionsKeepLogicalAndPhysicalAxesSeparate) {
+    EXPECT_NE(VALUE_REP_INT_LANE, VALUE_REP_I64);
+    EXPECT_NE(VALUE_REP_INT_LANE, VALUE_REP_MACHINE_I64);
+    EXPECT_EQ(em_mir_type_for_rep(VALUE_REP_ITEM), MIR_T_I64);
+    EXPECT_EQ(em_mir_type_for_rep(VALUE_REP_INT_LANE), MIR_T_I64);
+    EXPECT_EQ(em_mir_type_for_rep(VALUE_REP_I64), MIR_T_I64);
+    EXPECT_EQ(em_mir_type_for_rep(VALUE_REP_F64), MIR_T_D);
+
+    MirEmitter emitter = {};
+    MirValue lane = em_value(1, MIR_T_I64, LMD_TYPE_INT,
+        VALUE_REP_INT_LANE, JIT_VALUE_NON_GC_SCALAR, &TYPE_INT);
+    MirValue same = em_require_rep(&emitter, lane, VALUE_REP_INT_LANE);
+    EXPECT_EQ(same.reg, lane.reg);
+    EXPECT_EQ(same.rep, VALUE_REP_INT_LANE);
+    EXPECT_EQ(same.semantic_contract, &TYPE_INT);
+}
+
+TEST(ValueRepresentationTest, UnsupportedDirectTransitionFailsClosed) {
+    MirEmitter emitter = {};
+    MirValue lane = em_value(1, MIR_T_I64, LMD_TYPE_INT,
+        VALUE_REP_INT_LANE, JIT_VALUE_NON_GC_SCALAR, &TYPE_INT);
+    EXPECT_DEATH(em_require_rep(&emitter, lane, VALUE_REP_MACHINE_I64), "");
+}
 
 TEST(TypeContractMetadataTest, InternalTopExclusionsStayDistinctFromAny) {
     EXPECT_TRUE(lambda_type_accepts_error(&TYPE_ANY));

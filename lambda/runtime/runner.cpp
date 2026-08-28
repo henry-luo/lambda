@@ -1784,6 +1784,17 @@ void runtime_register_script(Runtime* runtime, Script* script) {
     runtime_script_index_put(runtime, script);
 }
 
+// runtime::type_list can alias a Script's Input-owned list while a nested
+// Lambda package is evaluated. The Script remains the owner of that alias.
+static bool runtime_type_list_is_script_owned(Runtime* runtime) {
+    if (!runtime || !runtime->type_list || !runtime->scripts) return false;
+    for (int i = 0; i < runtime->scripts->length; i++) {
+        Script* script = (Script*)runtime->scripts->data[i];
+        if (script && script->type_list == runtime->type_list) return true;
+    }
+    return false;
+}
+
 // Release every Script this runtime owns, plus the list and path index.
 // Hosts that tear a runtime down by hand (script_runner's per-document JS
 // runtime) must call this too: a Lambda module loaded into such a runtime is
@@ -1929,7 +1940,10 @@ void runtime_reset_heap(Runtime* runtime) {
         lambda_module_state_reset();
 
         if (runtime->type_list) {
-            arraylist_free(runtime->type_list);
+            // a nested package may publish its Script-owned type list through
+            // the runtime context; let runtime_free_script release that owner.
+            bool script_owned = runtime_type_list_is_script_owned(runtime);
+            if (!script_owned) arraylist_free(runtime->type_list);
             runtime->type_list = NULL;
         }
 
@@ -2033,7 +2047,10 @@ void runtime_cleanup(Runtime* runtime) {
         check_memory_leak();
 
         if (runtime->type_list) {
-            arraylist_free(runtime->type_list);
+            // a nested package may publish its Script-owned type list through
+            // the runtime context; let runtime_free_script release that owner.
+            bool script_owned = runtime_type_list_is_script_owned(runtime);
+            if (!script_owned) arraylist_free(runtime->type_list);
             runtime->type_list = NULL;
         }
 

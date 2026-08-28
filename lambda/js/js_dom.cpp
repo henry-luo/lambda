@@ -5580,7 +5580,9 @@ static DomElement* js_dom_parse_html_fragment(DomDocument* doc,
     return fragment;
 }
 
-static bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
+// F14.1: the DOM package owns the command decision; this remains only as the
+// parse-and-splice mechanism behind radiant.dom_insert_html.
+extern "C" bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
     if (!doc || !html_str) return false;
     DocState* state = doc->state ? doc->state : js_dom_current_state();
     DomSelection* selection = state ? state->dom_selection : nullptr;
@@ -5615,8 +5617,6 @@ static bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
         return false;
     }
 
-    // Editor.js delegates inline paste to execCommand; the bridge removed by
-    // DOM API consolidation must report the Range mutation that saves editor state.
     if (replaced_selection && replace_root) {
         js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
                                replace_root, replace_root);
@@ -5639,6 +5639,14 @@ static bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
     return true;
 }
 
+extern "C" bool radiant_dom_exec_command(void* document, const char* command,
+                                        const char* value);
+
+// F14.1/ES20: `document.execCommand` is now a thin dispatch into the dom
+// package's command set. It used to implement exactly one command here —
+// `insertHTML` — which meant Cmd+B and `execCommand('bold')` could not share an
+// implementation because only one of them had one. The package owns the command
+// set for both entry points; this only converts the arguments.
 extern "C" Item js_dom_document_exec_command_bridge(Item command_item,
                                                       Item value_item) {
     JS_ROOTS(roots,
@@ -5647,18 +5655,21 @@ extern "C" Item js_dom_document_exec_command_bridge(Item command_item,
         string_root, js_to_string(value_root.get()));
     const char* command = fn_to_cstr(command_root.get());
     const char* value = fn_to_cstr(string_root.get());
-    if (!command || !value || strcasecmp(command, "insertHTML") != 0) {
-        return (Item){.item = ITEM_FALSE};
-    }
+    if (!command || !*command) return (Item){.item = ITEM_FALSE};
 
-    // A precise root keeps the JS string live, while this owned copy keeps the
-    // parser input stable if fragment construction triggers a moving collection.
-    char* stable_value = mem_strdup(value, MEM_CAT_JS_RUNTIME);
-    if (!stable_value) return (Item){.item = ITEM_FALSE};
-    bool inserted = js_dom_exec_insert_html(
-        (DomDocument*)js_dom_get_document(), stable_value);
+    // Owned copies: the package may parse a fragment or splice a text node, and
+    // both can move the heap out from under a JS string the roots only pin in
+    // place, not in address.
+    char* stable_command = mem_strdup(command, MEM_CAT_JS_RUNTIME);
+    char* stable_value = mem_strdup(value ? value : "", MEM_CAT_JS_RUNTIME);
+    bool handled = false;
+    if (stable_command && stable_value) {
+        handled = radiant_dom_exec_command(js_dom_get_document(), stable_command,
+                                           stable_value);
+    }
+    mem_free(stable_command);
     mem_free(stable_value);
-    return (Item){.item = b2it(inserted ? 1 : 0)};
+    return (Item){.item = b2it(handled ? 1 : 0)};
 }
 
 // ============================================================================
@@ -8384,6 +8395,37 @@ static Item js_dom_check_or_report_validity(Item elem_item, bool report) {
 }
 JS_FORWARD_ITEM(js_dom_check_validity_bridge, (Item elem_item), js_dom_check_or_report_validity, (elem_item, false))
 JS_FORWARD_ITEM(js_dom_report_validity_bridge, (Item elem_item), js_dom_check_or_report_validity, (elem_item, true))
+
+static DomElement* js_dom_first_invalid_control(DomNode* node) {
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!current->is_element()) continue;
+        DomElement* elem = current->as_element();
+        if (js_dom_is_constraint_control(elem)) {
+            Item state = _build_validity_state(elem);
+            if (!js_dom_validity_item_is_valid(js_get_key_cstr(state, "valid"))) {
+                return elem;
+            }
+        }
+        DomElement* nested = js_dom_first_invalid_control(elem->first_child);
+        if (nested) return nested;
+    }
+    return nullptr;
+}
+
+// Interactive submission focuses the first invalid control after the invalid
+// events have fired. The validity computation remains shared with the public
+// checkValidity/reportValidity bridges; this helper only supplies the focus
+// side effect required by the form submission policy.
+extern "C" bool js_dom_focus_first_invalid_form_control(void* form_ptr) {
+    DomElement* form = (DomElement*)form_ptr;
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return false;
+    }
+    DomElement* invalid = js_dom_first_invalid_control(form->first_child);
+    if (!invalid) return false;
+    js_dom_focus_method_bridge((void*)invalid, true);
+    return true;
+}
 
 // ----------------------------------------------------------------------
 // ----------------------------------------------------------------------

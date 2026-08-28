@@ -292,8 +292,7 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | [Formal Design](doc/Lambda_Formal_Design.md)          | Normative design/implementation specification — D-numbered rulings for the core runtime and Jube hosting; the design authority when docs or implementation disagree |
 | [Documentation Convention](doc/Doc_Convention.md)     | How Lambda documentation is organized — document tiers, authority order, and style conventions |
 | [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                                |
-| [Lambda Runtime](doc/dev/Lamdba_Runtime.md)           | Runtime internals and architecture                                                     |
-| [Lambda Core Runtime Design](doc/dev/lambda/LR_00_Overview.md) | Detailed design of the core runtime — compilation pipeline, value & type model, the C and MIR-Direct transpilers, MIR JIT, memory & GC, builtins, error handling, Mark API, and the procedural runtime |
+| [Lambda Core Runtime Design](doc/dev/lambda/LR_00_Overview.md) | Detailed design of the core runtime — compilation pipeline, value & type model, the MIR-Direct transpiler, MIR JIT, memory & GC, builtins, error handling, Mark API, and the procedural runtime |
 | [Radiant Engine Design](doc/dev/radiant/RAD_00_Overview.md) | Detailed design of the HTML/CSS layout, rendering, and interaction engine — view/DOM model, CSS resolution, layout (block/inline/flex/grid/table), rendering pipeline, SVG, events, editing, state, shell, JS scripting, and media/webview (index to the RAD_01–RAD_22 set) |
 | [Lambda Jube Runtime](doc/Lambda_Jube_Runtime.md)      | Polyglot runtime build — Python, Bash, and Ruby guests over the MIR Direct Lambda runtime |
 | [LambdaJS Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |
