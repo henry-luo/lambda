@@ -776,8 +776,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         return ItemNull;
     }
 
-    int early_errors = js_check_early_errors(tp, js_ast);
-    if (early_errors > 0) {
+    if (tp->has_errors) {
         (void)js_mir_compile_unit_fail(NULL, NULL, tp, source,
             js_current_runtime(), context, true);
         return js_throw_syntax_error(js_name_item("Invalid function source", 23));
@@ -1787,8 +1786,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             return ItemNull;
         }
 
-        int early_errors = js_check_early_errors(tp, js_ast);
-        if (early_errors > 0) {
+        if (tp->has_errors) {
             (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
                 js_current_runtime(), context, true);
             return js_throw_syntax_error(js_name_item("Invalid eval source", 19));

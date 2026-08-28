@@ -805,15 +805,11 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     g_last_js_mir_phase_timing.ast_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ast_built");
 
-    // Run early error detection (static semantic validation)
-    phase_start = js_mir_phase_now_us();
-    int early_errors = js_check_early_errors(tp, js_ast);
-    if (early_errors > 0) {
-        log_error("js-mir: %d early error(s) detected", early_errors);
+    if (tp->has_errors) {
+        log_error("js-mir: early error(s) detected");
         return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
             runtime, NULL, true);
     }
-    g_last_js_mir_phase_timing.early_us = js_mir_phase_now_us() - phase_start;
 
     if (js_ast_interpreter_requested()) {
         // The AST tier owns the retained JsScript, but uses the same source

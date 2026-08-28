@@ -4278,7 +4278,7 @@ static JsScript* js_interp_adopt_source(Runtime* runtime, const char* source,
         return NULL;
     }
     JsAstNode* ast = build_js_ast_indexed(transpiler, ts_tree_root_node(transpiler->tree));
-    if (!ast || js_check_early_errors(transpiler, ast) > 0) {
+    if (!ast || transpiler->has_errors) {
         js_transpiler_destroy(transpiler);
         return NULL;
     }

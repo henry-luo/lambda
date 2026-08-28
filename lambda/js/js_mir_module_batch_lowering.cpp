@@ -5501,13 +5501,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return (Item){.item = ITEM_ERROR};
     }
 
-    // Js57 P7b: run early-error checks before any further compilation. The
-    // module path previously skipped this and crashed on illegal forms like
-    // `await 0;` (escaped await — contextually-reserved keyword written
-    // with a unicode escape, which is a SyntaxError per the spec).
-    int p7b_early_errors = js_check_early_errors(tp, js_ast);
-    if (p7b_early_errors > 0) {
-        log_error("js-mir: module: %d early error(s) for '%s'", p7b_early_errors, filename);
+    if (tp->has_errors) {
+        log_error("js-mir: module: early error(s) for '%s'", filename);
         (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
             runtime, context, true);
         js_tla_exit_module();

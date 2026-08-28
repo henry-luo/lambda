@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-28
 
-**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, and P2a–P2c shared identity publication/lowering are verified; P0b, P1e, and P3–P6 remain proposed.
+**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, P2a–P2c shared identity publication/lowering, and P3a truthful JS validation/indexing are verified; P0b, P1e, and the remaining P3–P6 driver work remain proposed.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -166,11 +166,11 @@ JavaScript separately counts functions/classes, walks again to populate exact-si
 
 This is the duplication that the index should delete, not coexist with.
 
-### 2.5 Pass facts currently overstate reality
+### 2.5 Pass facts are only partly authoritative
 
-`build_js_ast_indexed()` initializes its pass manager with `AST | BOUND | VALIDATED` and then builds the index. The actual `js_check_early_errors()` validation runs afterward in the entry points.
+`build_js_ast_indexed()` now runs a required validation pass before index publication. The pass manager marks `VALIDATED` only when `js_check_early_errors()` succeeds; validation failures retain the AST for the caller's existing error lane but do not publish an indexed unit.
 
-The current pass manager is a useful prerequisite checker, but it is not yet the **D8.2.5** production schedule. Only a few operations are registered with it; the large numbered JS phase sequence and Lambda's later analyses remain manually ordered.
+This is the first truthful **D8.2.5** slice, not yet the production schedule. Only JavaScript validation/indexing is registered; build/bind, Lambda validation/indexing, and the large numbered analysis/lowering sequence remain manually ordered.
 
 ### 2.6 `MirValue` exists around a bare-register core
 
@@ -742,7 +742,37 @@ Recommended order:
 
 Mode-specific policy is data on the unit: parse goal, module/eval/preamble flags, backend selection, execution policy, and artifact-retention policy. It is not a copy of the driver.
 
-The JS index pass no longer claims `VALIDATED` before early errors. Manual phase timing and repeated cleanup labels disappear as their paths migrate.
+The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. Manual phase timing and cleanup labels remain for the later driver slices.
+
+#### P3a implementation record — truthful JavaScript validation pass, 2026-08-28
+
+**D8.2.5** requires a pass to declare the facts it produces and to run only
+after its prerequisites are present. P3a removes the pre-seeded `VALIDATED`
+fact from `build_js_ast_indexed()`, registers `js_check_early_errors()` as a
+required validation pass, and makes index publication depend on that fact.
+Validation failures leave the original AST available to the caller's existing
+syntax-error lane, but no `INDEXED` fact is published. Source, module,
+eval/new-Function, and AST-interpreter paths now consume the one validation
+result instead of rerunning the checker and its cleanup branch.
+
+The independent P3a slice is C/C++ `+22/-25 = -3`; all hand source is also
+`+22/-25 = -3`. The phase base is commit `068301268`; the governed candidate
+is 310,524 lines, a non-positive delta. The retired implementation is the
+five entry-point early-error call blocks and the false initial fact; the
+surviving authority is the `validate`/`index` pair in `build_js_ast_indexed()`.
+
+Focused evidence:
+
+```text
+make build-test                                      # Errors: 0; Warnings: 40
+./test/test_js_gtest.exe                             # 357/357 passed
+./test/test_js_opt_gtest.exe                         # 19/19 passed
+./test/test_js_script_gtest.exe --gtest_filter='JsScriptOwnership.*:JsInterpreter.*'
+                                                       # 51/51 passed
+./utils/check_ast_tune_loc.sh --base 44b98dcebd19a548a14bbb75785091b545445f00 --cap 310711 --phase-base 068301268
+                                                       # candidate 310,524; phase C/C++ -3; source -3
+git diff --check                                     # clean
+```
 
 ### 4.5 P4 — Replace collection with indexed analysis
 
@@ -985,7 +1015,7 @@ The initial stale-document set was reconciled on 2026-08-28:
 
 | Document | Reconciliation |
 |---|---|
-| `doc/Lambda_Formal_Design.md` | Spec 1.38.3 Appendix A now records the P2c `AstIndex` identity publication status alongside the partial traversal, pass-fact, and `MirValue` scaffolding; it names the incompatible core layouts, false validation publication, bare-register residue, current 310,711-line formal LOC result, and still-open combined closeout. The D8.2 rulings were not changed; older IC examples elsewhere were editorially reconciled with **D8.4.1v2**. |
+| `doc/Lambda_Formal_Design.md` | Spec 1.38.4 Appendix A now records the P2c `AstIndex` identity publication and P3a truthful JS validation/index pass alongside the partial traversal, pass-fact, and `MirValue` scaffolding; it names the incompatible core layouts, remaining manual schedule, bare-register residue, current 310,711-line formal LOC result, and still-open combined closeout. The D8.2 rulings were not changed; older IC examples elsewhere were editorially reconciled with **D8.4.1v2**. |
 | `vibe/impl/Lambda_Impl_Tune_Ast (retired).md` | Renamed from `(done)` to `(retired)` and marked as a historical partial record whose G1/G2/G3 closeout was not accepted. Open work points here. |
 | `doc/dev/js/JS_01_Compilation_Pipeline.md` | Reverified against the 2026-08-28 tree: function/class/member arrays are exact-sized after count/fill collection, control stacks are dynamic, duplicate pointer identity and orchestration residue are explicit, and **D8.4.1v2** no-inline-cache terminology is restored. |
 | `Lambda_Design_Unified_AST.md` | Current continuation links now point here; the retired plan is historical only; `JsLoadIC`/`JsStoreIC` wording was removed and replaced by the formal **D8.4.1v2** boundary. |
