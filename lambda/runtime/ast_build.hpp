@@ -62,7 +62,7 @@ void lambda_ast_leave_scope(Transpiler* tp, NameScope* scope);
 // Register an already-built declaration only after its grammar branch has
 // committed. Forward placeholders use the same NameEntry path as their final
 // declarations, so recursive references keep a single binding identity.
-void lambda_ast_register_name(Transpiler* tp, AstNamedNode* node);
+void lambda_ast_register_name(Transpiler* tp, AstNode* node);
 AstFuncNode* build_function_placeholder_from_parts(Transpiler* tp,
         SourceSpan span, StrView name, bool is_proc);
 
@@ -91,7 +91,7 @@ AstNode* build_map_from_items(Transpiler* tp, SourceSpan span,
 AstNamedNode* build_named_argument_from_parts(Transpiler* tp,
         SourceSpan span, StrView name, AstNode* value);
 
-AstNamedNode* build_assignment_from_parts(Transpiler* tp, SourceSpan span,
+AstDeclaratorNode* build_declarator_from_parts(Transpiler* tp, SourceSpan span,
         StrView name, AstNode* type_expr, AstNode* value);
 AstNode* build_decompose_from_parts(Transpiler* tp, SourceSpan span,
         String** names, int name_count, AstNode* value, bool is_named);

@@ -1,9 +1,9 @@
 # Unified AST Compiler Consolidation and Tuning — Detailed Implementation Plan
 
 **Date:** 2026-08-12  
-**Status:** Implementation in progress; Phase 0/1/2/3 slices are landed, and the remaining work is performance/LOC closure
+**Status:** RETIRED 2026-08-28 — historical partial implementation record. Phase 0/1/2/3 slices landed, but this plan did not prove its G1/G2/G3 closeout. The open compiler/runtime consolidation moved to `vibe/Lambda_Design_JS_Unified.md` under the stricter project LOC anchor and phase-local non-growth gates.
 **Design authority:** `doc/Lambda_Formal_Design.md` D2.4.1–D2.4.3, D3.2.3, D3.3.1, D5.3.4, D8.1.1, D8.2.1–D8.2.6, D8.4.3, D8.5.1–D8.5.3, D8.6.1, D8.6.3, D8.6.4v2
-**Working design:** `vibe/Lambda_Design_Unified_AST.md` U27–U36  
+**Working design:** historical basis `vibe/Lambda_Design_Unified_AST.md` U27–U36; active continuation `vibe/Lambda_Design_JS_Unified.md`  
 **Predecessor:** `vibe/impl/Lambda_Impl_Unified_AST (done).md` (structural convergence record; not the checklist for this continuation)
 
 ---
@@ -1014,27 +1014,28 @@ new fixtures. The optimization-contract executable passed 12/12. This closes
 the instability regression without weakening a gate. The standalone
 `make test-gc-rooting-core` gate also passed: all dynamic root oracles, 45
 `NO_GC` imports over 81 call-graph nodes, 14,945 native-function hazard checks,
-and the 66/66 corpus sweep. The broader G1/G2/G3 Unified-AST closeout remains
-open.
+and the 66/66 corpus sweep. The broader G1/G2/G3 Unified-AST closeout remained
+unaccepted when this plan was retired; `vibe/Lambda_Design_JS_Unified.md` owns
+the continuation.
 
-### 13.2 Phase status
+### 13.2 Phase status at retirement
 
 | Phase | Status | Evidence |
 |---|---|---|
 | 0 — measurement/guardrails | completed | Common timing/MIR protocol, GTest parsers, TSV capture summaries, clean five-run Lambda/JS manifests, instrumentation equivalence, and finalized-artifact equivalence are recorded |
-| 0.5 — optimization contract testing | core implementation landed; matrix expansion remains | `test_js_opt_gtest` passes 12/12 with profile tracing, including the medium capture-free regex cache/fresh-object contract, D8.4.3 logical and conditional join-carrier contracts, the D5.3.3 rooted URI cache contract, trace-off semantic/finalized-MIR differential, and fail-closed parser checks; `test_mir_gc_stress_gtest` passes 66/66 with named fixtures for all repaired ownership paths; runtime ownership migration and the remaining optimization rows remain |
-| 1 — traversal/index/binding | in progress | `AstIndex`, dense node/function identities, common core child visitor, JS function pointer index, and pass-manager prerequisite harness landed; extension catalog/binding migration remain |
-| 2 — facts/pass manager | in progress | Typed fact bits/pass manager and `MirValue` demand/contract fields landed; production pass wrapping remains |
-| 3 — demand-driven `MirValue` | in progress | Immediate boxed-number reuse is live for indexed JS function/module scopes; full demand propagation and common expression boundaries remain |
-| 4 — consolidation/deletion | in progress | Common index/cache/emitter paths and safe lazy policy are live; source-scope deletion audit and baseline gates remain |
+| 0.5 — optimization contract testing | partial at retirement | `test_js_opt_gtest` passes 12/12 with profile tracing, including the medium capture-free regex cache/fresh-object contract, D8.4.3 logical and conditional join-carrier contracts, the D5.3.3 rooted URI cache contract, trace-off semantic/finalized-MIR differential, and fail-closed parser checks; `test_mir_gc_stress_gtest` passes 66/66 with named fixtures for all repaired ownership paths; runtime ownership migration and the remaining optimization rows remain |
+| 1 — traversal/index/binding | partial at retirement | `AstIndex`, dense node/function identities, common core child visitor, JS function pointer index, and pass-manager prerequisite harness landed; extension catalog/binding migration remain |
+| 2 — facts/pass manager | partial at retirement | Typed fact bits/pass manager and `MirValue` demand/contract fields landed; production pass wrapping remains |
+| 3 — demand-driven `MirValue` | partial at retirement | Immediate boxed-number reuse is live for indexed JS function/module scopes; full demand propagation and common expression boundaries remain |
+| 4 — consolidation/deletion | partial at retirement | Common index/cache/emitter paths and safe lazy policy are live; source-scope deletion audit and baseline gates remain |
 | 5 — measured contingency | completed for current profile | Lazy/interpreter policy entered only after phase profiles showed MIR/link dominance; rollback switches remain documented |
-| closeout | in progress | Test262 instability is closed at zero non-fully-passing tests and the Lambda baseline is green; final G2/G3 recapture and audited deletion ledger remain |
+| closeout | not accepted; transferred | Test262 instability is closed at zero non-fully-passing tests and the Lambda baseline is green; final G2/G3 recapture and audited deletion ledger were not accepted and moved to the active proposal |
 
-### 13.3 Gate and diagnostic results
+### 13.3 Historical gate and diagnostic snapshot
 
 | Gate | Baseline | Candidate | Required | Status |
 |---|---:|---:|---:|---|
-| G1 runtime LOC | 319,606 | 318,358 (working tree after rejecting unsafe lexical-path memo) | ≤317,606 | open; 752 additional audited runtime/compiler LOC must be deleted before closeout |
+| G1 runtime LOC | 319,606 | 318,358 (historical working tree after rejecting unsafe lexical-path memo) | ≤317,606 | not accepted in this plan; later tree counts do not retroactively close its missing audit |
 | G2 Lambda median `build_transpile_us` | 24,134,804 | 18,685,648 (historical candidate_lazy; 5 complete runs) | candidate/base ≤0.90 | provisional evidence invalidated for closeout; recapture after unsafe lexical-path memo removal |
 | G3 JS median `build_transpile_us` | 192,832,974 | 120,444,046 (historical `candidate_final_js`; 5 complete runs) | candidate/base ≤0.80 | provisional evidence invalidated for closeout; recapture after unsafe lexical-path memo removal |
 | D4 JS large-library finalized MIR diagnostic | 5,743,247 | 5,008,331 (`candidate_final_js` run 0) | deterministic report; investigate growth | diagnostic |
@@ -1042,7 +1043,7 @@ open.
 | G5 sample/timing integrity | 698 Lambda rows / 324 JS rows, identical sorted manifests | historical captures retained for diagnosis only; incomplete captures are rejected | exact timing manifest | open until post-rejection recapture |
 | G0 regressions | current baselines | `make test-lambda-baseline`: input 2104/2104 plus Lambda runtime 1609/1609 (3713/3713 total), including JS MIR 20/20 and forced-GC 66/66; nine consecutive post-fix `make test262-baseline` runs: 40261/40261 fully passing, 0 non-fully-passing, 0 failed, 0 retries/crash exits/killed batches; `test_js_opt_gtest`: 12/12 | Lambda and Test262 baselines green | verified 2026-08-13 after adding the focused GTests; latest Test262 run 195.6 s at 676.9 MB peak RSS; `test/js262/t262_partial.txt` is empty and no Test262 test/runner source was changed |
 
-### 13.4 Deletion ledger
+### 13.4 Historical deletion ledger
 
 | Phase | Deleted implementation | Removed LOC | Replacement |
 |---|---|---:|---|
@@ -1056,9 +1057,9 @@ open.
 
 ---
 
-## 14. Definition of done
+## 14. Historical definition of done (not achieved)
 
-This plan is complete only when all statements are true:
+This plan would have been complete only if all statements were true:
 
 - [ ] Lambda and JS compile through one explicit pass manager over one indexed compilation unit (**D8.2.4–D8.2.5**).
 - [ ] Core traversal, binding identity, function/class lookup, facts, and graph scheduling each have one authority (**D8.2.4–D8.2.5**).
@@ -1076,4 +1077,4 @@ This plan is complete only when all statements are true:
 - [ ] G0 and the entire §11 matrix are green with no weakened ratchets. Current evidence has `make test-lambda-baseline` green at 3713/3713 (input 2104/2104 plus Lambda runtime 1609/1609, including JS MIR 20/20 and forced-GC 66/66), nine consecutive post-fix `make test262-baseline` runs green at 40261/40261 with zero non-fully-passing tests, retries, crash exits, or killed batches, and `test_js_opt_gtest` green at 12/12; the remaining §11 commands still require final closeout execution.
 - [ ] §13 contains the final commits, raw-capture locations, medians, phase attribution, LOC ledger, and verified test results.
 
-Until every item is checked, the unified-AST tuning continuation remains open.
+The unchecked items above are intentionally preserved as historical evidence of what this plan did not close. They are not an active checklist and the `(retired)` suffix does not claim success. The live continuation, deletion ledger, and acceptance gates are in `vibe/Lambda_Design_JS_Unified.md`.

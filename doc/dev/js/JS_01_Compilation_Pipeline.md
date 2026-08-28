@@ -1,17 +1,17 @@
 # LambdaJS — Compilation Pipeline & Phase Model
 
-> **Last verified against tree:** 2026-07-15 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-08-28
 
-> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers how a JavaScript source file becomes executing native code (or interpreted MIR): the entry points, the per-compile transpiler state, the multi-phase compile, the interpreter-vs-JIT decision, and MIR symbol resolution.
+> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the default MIR lane from JavaScript source to native code or interpreted MIR, plus its boundary with the explicit AST backend: entry points, per-compile state, multi-phase lowering, MIR-interpreter-vs-JIT policy, and symbol resolution.
 >
-> **Primary sources:** `lambda/js/js_mir_entrypoints_require.cpp`, `lambda/js/js_mir_module_batch_lowering.cpp` (`transpile_js_mir_ast`), `lambda/js/js_mir_context.hpp` / `js_mir_internal.hpp` (`JsMirTranspiler`), `lambda/js/transpile_js_mir.cpp` (globals anchor), `lambda/mir.c` + `lambda/sys_func_registry.c` (import resolution), `lambda/main.cpp` (CLI dispatch).
+> **Primary sources:** `lambda/js/js_transpiler.hpp` (`build_js_ast_indexed`), `lambda/runtime/ast-core.hpp` / `ast-core.cpp` (`AstIndex`), `lambda/runtime/compiler_pass.cpp`, `lambda/js/js_mir_entrypoints_require.cpp`, `lambda/js/js_mir_module_batch_lowering.cpp` (`transpile_js_mir_ast`), `lambda/js/js_mir_context.hpp` / `js_mir_internal.hpp` (`JsMirTranspiler`), `lambda/js/transpile_js_mir.cpp` (globals anchor), `lambda/mir.c` + `lambda/sys_func_registry.c` (import resolution), and `lambda/main.cpp` (CLI dispatch).
 > **Audience:** engine developers. **Convention:** `file:line` references are accurate as of this writing but drift; treat them as starting points, confirm against the symbol name.
 
 ---
 
 ## 1. Purpose & scope
 
-LambdaJS reuses Lambda's `Item` value model, GC heap, name pool and MIR JIT, but has its own front end and transpiler. The compilation path is **distinct from the Lambda-script path** (`runner.cpp`): a `.js` source is only reached through the explicit `js` / `js-test-batch` CLI subcommands, or through `require`/`import` and `load_js_module` from inside running code (see [§8](#8-cli-dispatch--batch-mode)). This document is the map of that path; the lowering *mechanics* (boxing, native fast paths, statement/expression emission, exceptions) are in [JS_04 — MIR Lowering & Code Generation](JS_04_MIR_Lowering.md), and the front-end (Tree-sitter, AST, early errors) is in [JS_02 — Parsing, AST & Front-End](JS_02_Parsing_AST.md).
+LambdaJS reuses Lambda's `Item` value model, GC heap, name pool, module registry, event-loop host, shared AST substrate, compiler-fact scaffolding, `MirEmitter`, and MIR JIT under **D1.2–D1.3** and **D8.1.3v9**. It retains its own JavaScript front end and semantic lowering. Under **D8.2.2** and **D8.2.4**, P1b reserves shared `AST_NODE_ASSIGN` for its single `AstAssignNode {op, left, right}` contract; Lambda declarations now use `AST_NODE_VARIABLE_DECLARATOR`, so a shared child walker need not distinguish language layouts for this tag. A `.js` source reaches this lane through the explicit `js` / `js-test-batch` CLI subcommands, through `require`/`import` and `load_js_module`, or through the explicit AST backend. This document maps the MIR compilation lane; the lowering *mechanics* are in [JS_04 — MIR Lowering & Code Generation](JS_04_MIR_Lowering.md), and the front end is in [JS_02 — Parsing, AST & Front-End](JS_02_Parsing_AST.md).
 
 ---
 
@@ -19,20 +19,22 @@ LambdaJS reuses Lambda's `Item` value model, GC heap, name pool and MIR JIT, but
 
 <img alt="Compilation pipeline overview" src="diagram/pipeline_overview.svg" width="318">
 
-Source bytes flow through parse → AST → early-error validation → context setup → import resolution → JIT init → transpiler creation → multi-phase lowering → link (JIT or interpreter) → execution of `js_main` → event-loop drain → result. The single core implementation is `transpile_js_to_mir_core_len` (`js_mir_entrypoints_require.cpp:359`); every public entry point is a thin wrapper that sets preamble-mode globals and delegates to it.
+Source bytes flow through parse → AST/build-time binding → shared AST index → early-error validation → context setup → import resolution → JIT init → MIR-transpiler creation → multi-phase lowering → link → execution of `js_main` → event-loop drain → result. The ordinary MIR implementation is `transpile_js_to_mir_core_profile_len`; wrappers delegate through `transpile_js_to_mir_core_len`. Module, eval/new-Function, and pre-built-AST paths still own parallel orchestration, which is active consolidation residue under **D8.2.5**.
+
+`JS_EXECUTION_BACKEND=ast` is the explicit fail-closed AST lane under **D8.1.3v9**. It shares the same indexed AST, early errors, `Runtime`/`EvalContext`, heap, module registry, and event-loop host, then enters `js_interp.cpp` rather than MIR lowering. The default remains MIR.
 
 The control/data flow, step by step (CLI `lambda js script.js`):
 
 1. `main.cpp:1699` → `transpile_js_to_mir_len` → `transpile_js_to_mir_core_len`.
 2. Copy source into an owned buffer; for a real file lacking an explicit `var __filename`, compute the realpath and **inject `var __filename` / `var __dirname`** after the directive prologue (CommonJS ergonomics) (`js_mir_entrypoints_require.cpp:374`).
 3. Resolve interpreter env flags once and cache them (`:421`).
-4. `js_transpiler_create` → `js_transpiler_parse` (Tree-sitter) → `build_js_ast` → `js_check_early_errors` (`:449`–`:474`), each timed.
+4. `js_transpiler_create` → `js_transpiler_parse` (Tree-sitter) → `build_js_ast_indexed` → `js_check_early_errors`, each timed. `build_js_ast_indexed` currently seeds `BOUND|VALIDATED` before the separate early-error call; that fact-order mismatch is residue, not the target **D8.2.5** schedule.
 5. Set up or **reuse** the `EvalContext` + GC heap + name pool + `Input` (reuse is the batch hot-reload fast path); set the `_lambda_rt` runtime pointer (`:483`–`:519`).
 6. Resolve imports: a fast-path skip unless the source contains `import `, else parallel precompile (`jm_precompile_js_imports`) then serial fallback (`jm_load_imports`) (`:521`).
 7. `jit_init(g_js_mir_optimize_level)` → `MIR_init` (+ `MIR_gen_init` unless pure-interpreter) (`mir.c:128`).
-8. `jm_create_mir_transpiler` allocates the transpiler state and opens a MIR module (`:560`; see [§4](#4-the-transpiler-context-jsmirtranspiler)).
-9. **`transpile_js_mir_ast`** runs phases 1→3 and finishes/loads the MIR module (`js_mir_module_batch_lowering.cpp:2055`; see [§5](#5-compilation-phases)).
-10. Count `total_insns`; apply the interpreter/JIT policy and any opt-downgrade; validate MIR labels; then **`MIR_link(ctx, interface, import_resolver)`** — the eager-codegen (or interpreter-install) step (`:646`–`:730`).
+8. `jm_create_mir_transpiler` allocates the dynamic control stacks and per-compile state and opens a MIR module (see [§4](#4-the-transpiler-context-jsmirtranspiler)).
+9. **`transpile_js_mir_ast`** count-walks functions/classes, allocates exact metadata, fill-walks them, runs the remaining numbered analysis/lowering phases, and finishes/loads the MIR module (see [§5](#5-compilation-phases)).
+10. Count `total_insns`; apply the interpreter/JIT policy and any opt-downgrade; validate MIR labels; then call **`MIR_link(ctx, interface, import_resolver)`** for eager codegen or MIR-interpreter installation.
 11. `find_func(ctx, "js_main")` → typed `Item (*)(Context*)` (`:747`).
 12. Initialize the event loop, attach the document if any, allocate module-var storage, arm the stack-overflow `sigsetjmp` guard, and **call `js_main`** (`:813`).
 13. `js_event_loop_drain` and (document mode) animation-frame drain run **before** `MIR_finish` so JIT'd callbacks remain valid (`:820`).
@@ -46,14 +48,15 @@ All are defined in `js_mir_entrypoints_require.cpp` (except the module entry, in
 
 | Function | Used by | Notes |
 |---|---|---|
-| `transpile_js_to_mir_core_len(Runtime*, src, len, filename)` `:359` | (internal) | The real pipeline; all wrappers delegate here. |
-| `transpile_js_to_mir[_len]` `:960/:964` | CLI `js`; batch normal tests | `g_jm_preamble_mode=false`. |
-| `transpile_js_to_mir_preamble[_len]` `:971/:976` | `js-test-batch` harness compile | Snapshots `module_consts` into a `JsPreambleState`; forces `-O3` for the harness. |
-| `transpile_js_to_mir_with_preamble[_len]` `:991/:996` | batch per-test execution | Pre-seeds `mt->preamble_entries` so a test inherits harness module vars. |
-| `transpile_js_module_to_mir(Runtime*, src, filename)` `module_batch_lowering.cpp:6308` | `require` / `import()` / `load_js_module` / batch module tests | Own `MIR_context`; runs with `is_module=true`; `js_main` returns the **namespace object**; registers it in the module cache and defers MIR cleanup. |
-| `transpile_js_ast_to_mir(Runtime*, JsTranspiler*, JsAstNode*, filename)` `:63` | TS transpiler | Transpiles a **pre-built AST** (skips parse/early-error/import phases). |
-| `load_js_module(Runtime*, path)` `:1061` | Lambda→JS import | Reads a file, ensures a persistent heap context, delegates to the module entry. |
-| `js_require(Item)` `:1143`, `js_dynamic_import(Item)` `:1231` | JIT'd code (runtime) | Both route through `transpile_js_module_to_mir`. See [JS_09](JS_09_Async_Modules.md). |
+| `transpile_js_to_mir_core_profile_len` `js_mir_entrypoints_require.cpp:671` | (internal) | Ordinary source pipeline with JS/TypeScript profile policy. |
+| `transpile_js_to_mir_core_len` `js_mir_entrypoints_require.cpp:1276` | wrappers | Pure-JS profile wrapper around the core profile pipeline. |
+| `transpile_js_to_mir[_len]` `js_mir_entrypoints_require.cpp:1293/1298` | CLI `js`; batch normal tests | Clears preamble mode and delegates. |
+| `transpile_js_to_mir_preamble[_len]` `js_mir_entrypoints_require.cpp:1316/1322` | `js-test-batch` harness compile | Snapshots `module_consts` into a `JsPreambleState`; forces `-O3` for the harness. |
+| `transpile_js_to_mir_with_preamble[_len]` `js_mir_entrypoints_require.cpp:1445/1451` | batch per-test execution | Pre-seeds `mt->preamble_entries` so a test inherits harness module vars. |
+| `transpile_js_module_to_mir` `js_mir_module_batch_lowering.cpp:5459` | `require` / `import()` / `load_js_module` / batch module tests | Own `MIR_context`; runs with `is_module=true`; `js_main` returns the namespace object; publishes through the shared module registry and defers MIR cleanup. |
+| `transpile_js_ast_to_mir` `js_mir_entrypoints_require.cpp:403` | TS transpiler | Transpiles a pre-built AST and skips source parsing/import discovery. |
+| `load_js_module` `js_mir_entrypoints_require.cpp:1657` | Lambda→JS import | Reads a file, ensures a persistent heap context, and delegates to the module entry. |
+| `js_require` / `js_dynamic_import` `js_mir_entrypoints_require.cpp:2098/2223` | generated/runtime calls | Both route module loading through the shared registry and module compiler. See [JS_09](JS_09_Async_Modules.md). |
 
 The preamble mechanism (compile a shared harness once, then compile each test pre-seeded against that snapshot) is the backbone of the test262 batch runner; it is detailed in [JS_16 — Testing & Conformance](JS_16_Testing.md).
 
@@ -61,17 +64,17 @@ The preamble mechanism (compile a shared harness once, then compile each test pr
 
 ## 4. The transpiler context (`JsMirTranspiler`)
 
-`JsMirTranspiler` (`js_mir_context.hpp:350`) is the central per-compile state, heap-allocated and zeroed by `jm_create_mir_transpiler` (`js_mir_hashmap_scope_utils.cpp:43`). Key field groups:
+`JsMirTranspiler` (`js_mir_context.hpp`, exact symbol) is the central per-compile state, allocated by `jm_create_mir_transpiler` in `js_mir_hashmap_scope_utils.cpp`. Key field groups:
 
 - **MIR targets** — `ctx`, `module`, `current_func_item`, `current_func`.
-- **Scopes & control flow** — `var_scopes[64]` (fixed-depth lexical scope hashmaps), `loop_stack[32]`, `for_of_iterators[32]`, `try_ctx_stack[16]`. *(All fixed-capacity; see [§9](#9-known-issues--future-improvements).)*
-- **Collected program** — `func_entries[JS_MIR_MAX_COLLECTED_FUNCTIONS]` and `class_entries[JS_MIR_MAX_COLLECTED_CLASSES]`, where the caps are **32768** and **4096** respectively (`js_mir_context.hpp:128-129`). These inline arrays dominate the struct size.
+- **Scopes & control flow** — `var_scopes`, `loop_stack`, `for_of_iterators`, and `try_ctx_stack` are dynamic `ArrayList` stacks. Their initial capacities are policy inputs to `jm_create_mir_transpiler`, not depth limits.
+- **Collected program** — `func_entries` and `class_entries` are pool-owned exact-sized arrays. `transpile_js_mir_ast` runs `jm_collect_functions` once in count-only mode, allocates from those counts, runs it again to fill, and fails closed on a count/fill mismatch. A separate `func_index_nodes`/`func_index_ids` pointer table is then built for lowering lookups.
 - **Type inference** — `widen_to_float`, `force_boxed` hash sets; per-function `current_fc`, `in_native_func`.
 - **Module state** — `module_consts` (name → `JsModuleConstEntry`), `module_var_count`, `is_module`, `namespace_reg`, preamble seed fields.
-- **Closure read-back** — fixed `last_closure_capture_names[512][128]` parallel arrays (see [JS_05](JS_05_Functions_Closures.md)).
+- **Closure read-back** — parallel `last_closure_capture_*[512]` arrays remain fixed-capacity (see [JS_05](JS_05_Functions_Closures.md)).
 - **Generators** — `gen_state_labels[64]`, `gen_*` registers/offsets (64-state cap; see [JS_08](JS_08_Iterators_Generators.md)).
 
-Supporting records (same header): `JsFuncCollected` (per-function pre-pass record: name, `func_item`, `param_types[16]`, `return_type`, `ctor_prop_*[16]`, ~25 booleans), `JsClassEntry` (`methods[128]`, `instance_fields[32]`, `static_fields[16]`, `static_blocks[8]`), `JsModuleConstEntry`, `JsMirVarEntry`, `JsCaptureEntry`, `JsTryContext`.
+Supporting records in the same header include `JsFuncCollected`, whose captures and `FnAnalysis::param_types` are dynamically sized but whose constructor-shape evidence retains 16 slots, and `JsClassEntry`, whose methods/fields/static blocks are exact-sized per class. `JsModuleConstEntry`, `JsMirVarEntry`, `JsCaptureEntry`, and `JsTryContext` carry the remaining pass-local metadata.
 
 The companion `JsTranspiler` (`js_transpiler.hpp:40`) holds the parse/AST context (Tree-sitter tree, name pool, scope); see [JS_02](JS_02_Parsing_AST.md).
 
@@ -79,13 +82,14 @@ The companion `JsTranspiler` (`js_transpiler.hpp:40`) holds the parse/AST contex
 
 ## 5. Compilation phases
 
-`transpile_js_mir_ast` (`js_mir_module_batch_lowering.cpp:2055`) drives all phases in order; the per-phase workers live across the split `js_mir_*` files. The phase numbers are real labels in the code (not invented for this doc), though their *textual* order in source is slightly non-monotonic (see [§9](#9-known-issues--future-improvements)).
+`transpile_js_mir_ast` drives the phases; workers live across the split `js_mir_*` files. The phase numbers are comments in the current driver, not yet typed `CompilerPassManager` ownership under **D8.2.5**.
 
 <img alt="Compilation phases" src="diagram/compile_phases.svg" width="346">
 
 | Phase | Worker | Responsibility |
 |---|---|---|
-| 1.0 | `jm_collect_functions` (`function_collection_class_inference.cpp:395`) | Post-order (innermost-first) walk; fill `func_entries`/`class_entries`; set `parent_index`; scan ctor `this.prop` fields. |
+| 1.0 count | `jm_collect_functions` | Post-order count-only walk for functions, classes, synthetic field initializers, and exact class-member capacities. |
+| 1.0 allocate/fill | `transpile_js_mir_ast` + `jm_collect_functions` | Allocate exact `func_entries`/`class_entries`; repeat the walk to fill records, parent links, and class members; reject count/fill mismatch; build the separate function-pointer index. |
 | 1.0b | (inline `:2070`) | Resolve strict mode per function (own directive / global / class body / parent). |
 | 1.1 | (inline `:2111`) | Build `module_consts`; pre-seed from preamble; assign `js_module_vars[]` indices to top-level decls. |
 | 1.5 | `jm_analyze_captures` (`:3027`) | Free-variable detection: `free = refs − params − locals − module_consts`. |
@@ -103,7 +107,7 @@ Detail of capture analysis (1.5–1.7) belongs to [JS_05 — Functions, Closures
 
 ---
 
-## 6. Interpreter vs JIT selection
+## 6. MIR interpreter vs JIT selection
 
 LambdaJS can link a module either to native code (`MIR_set_gen_interface`) or to the MIR interpreter (`MIR_set_interp_interface`). The decision is made inline in `transpile_js_to_mir_core_len`, not in a dedicated function. Thresholds are defined in `js_mir_internal.hpp:22` (and duplicated in `transpile_js_mir.cpp:59`).
 
@@ -113,7 +117,7 @@ LambdaJS can link a module either to native code (`MIR_set_gen_interface`) or to
 - **Large-source-at-O0 pre-check** — if O0 and `source_len ≥ LAMBDA_JS_LARGE_INTERP_BYTES` (default **15000**), temporarily flips interpreter on around `jit_init`.
 - **Post-MIR instruction policy** — interpret if `total_insns > JM_LARGE_MODULE_INSN_THRESHOLD` (**100000**), or if a document is attached and (`g_js_force_document_interp` or `total_insns > JM_RADIANT_INTERP_INSN_THRESHOLD`, **20000**). `document_context = (runtime->dom_doc != NULL)`.
 - **Opt-downgrade fallback** — if still JIT and opt ≥ 2 and insns > 100k, `MIR_gen_set_optimize_level(ctx, 0)`.
-- **Lazy** — `JS_LAZY_MIR≠0` selects `MIR_set_lazy_gen_interface` (see issues — non-viable at opt ≥ 2).
+- **Lazy** — `JS_LAZY_MIR≠0` selects `MIR_set_lazy_gen_interface`; its optimization-level caveats and measurements are recorded in [JS_15](JS_15_Performance.md).
 
 **"Link-interface interp" vs "pure interp":** size/document-driven interpretation leaves `g_mir_interp_mode = 0`, so `jit_init` still calls `MIR_gen_init` and only the `MIR_link` *interface* differs. Pure interpreter (`g_mir_interp_mode≠0`) skips `MIR_gen_init` entirely. The rationale (link cost dominates for large/cold modules; the interpreter sidesteps codegen) is covered with measurements in [JS_15 — Performance](JS_15_Performance.md). The interpreter has **no tail-call optimization**, a deliberate correctness divergence from the JIT.
 
@@ -134,25 +138,26 @@ Adding a new runtime function therefore means: implement it, register it in `jit
 
 `main.cpp` routes by `argv[1]`:
 
-- **`js`** (`:1533`) — init runtime + stack guard; parse `--document <html>`, `--mir-interp`, `--diagnose`, `--opt-level=N`; read the file; optionally build a `DomDocument` and set `runtime.dom_doc`; set `process.argv`; call `transpile_js_to_mir_len` (`:1699`).
-- **`js-test-batch`** (`:3361`) — persistent-process batch driver. With hot-reload (default) it keeps one `EvalContext`/heap across tests (the reuse fast path in step 5). It reads a line protocol on stdin: `harness:<len>` → `transpile_js_to_mir_preamble_len`; `source:<name>[:<path>]:<len>` / `module-source:<…>` → per-test compile via the with-preamble / module / plain entry, wrapped in per-test `sigsetjmp` crash recovery and an `alarm()` timeout. Full protocol and crash-recovery layering: [JS_16](JS_16_Testing.md).
+- **`js`** (`main.cpp:2280`) — initializes the runtime and stack guard; parses document/interpreter/diagnostic/optimization options; reads the file; optionally attaches a `DomDocument`; sets `process.argv`; and calls `transpile_js_to_mir_len` (ordinary execution call at `main.cpp:1943`).
+- **`js-test-batch`** (`main.cpp:4186`) — persistent-process batch driver. With hot reload it keeps one `EvalContext`/heap across tests. It reads the harness/source/module line protocol and dispatches through the preamble, module, or plain entry under per-test recovery and timeout containment. Full protocol and recovery layering: [JS_16](JS_16_Testing.md).
 
 A **bare `.js` path as `argv[1]` does not** enter the JS pipeline — the default extension dispatch handles `.ls`/document formats. JS is reachable only via the `js`/`js-test-batch` subcommands or from within running code (`require`/`import`/`load_js_module`).
 
 ---
 
-## 9. Known Issues & Future Improvements
+## 9. Current consolidation boundary
 
-Grounded in the current code; these are candidates for cleanup, not necessarily bugs.
+The fixed function/class arrays and fixed scope/loop/try stacks described by the 2026-07-15 version of this document are retired. The current implementation boundary is:
 
-1. **Transpiler struct is very large and silently capped.** `JsMirTranspiler` is on the order of **45–55 MB** (dominated by `func_entries[32768]` and `class_entries[4096]`, each `JsClassEntry` ≈ 6–7 KB), allocated and zeroed **per compile** in `jm_create_mir_transpiler`. A stale comment at `js_mir_entrypoints_require.cpp:571` still says "~3 MB due to `func_entries[256]`" — doubly wrong. Modules exceeding 32768 functions or 4096 classes are **silently truncated** (overflow logged once, `function_collection_class_inference.cpp:442`). *Improvement:* grow these dynamically, or right-size + grow-on-demand; fix the comment.
-2. **Vestigial dead-codegen fields.** `JsTranspiler::code_buf` / `func_buf` (`js_transpiler.hpp:46`) are allocated and freed but never read/written by the MIR pipeline (leftover from the retired C-codegen path); `normalized_source` is only ever set to NULL. *Improvement:* delete.
-3. **Duplicated threshold/extern blocks.** The `JM_*_THRESHOLD` macros and many `extern` declarations are duplicated verbatim between `transpile_js_mir.cpp:59` and `js_mir_internal.hpp:22`, risking drift. `JM_LARGE_FUNC_INSN_THRESHOLD` (10000) is defined but unused in the selection logic (its "adaptive per-function opt" comment is aspirational/dead).
-4. **One enormous function.** `transpile_js_mir_ast` is ~3800 lines (`module_batch_lowering.cpp:2055-5891`) with all 14 phases inline; `transpile_js_to_mir_core_len` is ~590 lines with two textually-duplicated `#ifndef NDEBUG` MIR-dump blocks. *Improvement:* extract phase drivers; factor the dump helper.
-5. **Implicit, comment-only phase-ordering invariants.** Comments (`module_batch_lowering.cpp:3636`, `:3783`) warn that phase 1.7.5 must precede 1.7b and parents must be processed before children, but nothing enforces it. The textual phase labels are also out of execution order (the 1.9 comment precedes 1.76–1.78 code).
-6. **Duplicated link/run boilerplate** across `transpile_js_to_mir_core_len`, `transpile_js_module_to_mir`, `jm_compile_js_module`, `transpile_js_ast_to_mir`, and the eval path — but only the core path applies the interpreter/opt policy, so module/eval/parallel paths can diverge in link behavior. *Improvement:* a single `link_and_find_main(ctx, …)` helper.
-7. **Hard-coded fixed capacities** with inconsistent overflow handling: scope depth 64, loop depth 32, try depth 16, generator yield-states 64, closure-capture arrays 512, params 16. Several (e.g. `loop_stack[32]`, `try_ctx_stack[16]`) have **no overflow guard**.
-8. **Compiled-artifact caching is blocked** by ~59 sites that bake raw realm heap pointers into MIR as integer constants (`js_mir_expression_lowering.cpp` and the ctor/shape inline caches); cross-realm reuse would dereference stale pointers. See [JS_15](JS_15_Performance.md).
+- `AstIndex` supplies dense node/function identity and parent/owner links, but the JS MIR lane still count-walks and fill-walks functions/classes, stores duplicate `JsFuncCollected::analysis`, and creates `func_index_nodes`/`func_index_ids`. **D8.2.4** requires one stable ID authority.
+- `CompilerPassManager` and fact bits exist, but they wrap isolated operations rather than the full build→bind→validate→index→analysis→lower→link schedule. `build_js_ast_indexed` currently claims `VALIDATED` before `js_check_early_errors`. **D8.2.5** requires truthful produced facts and one schedule.
+- `MirValue`, demands, provenance, representation conversion, and emitter-owned rooting exist, but `jm_transpile_expression` and the Lambda `transpile_expr` boundary still return `MIR_reg_t`. **D2.4.1–D2.4.3** and **D8.2.6** require the full contract at every core expression boundary.
+- Dynamic `ArrayList` control stacks and exact function/class/member allocation remove the old silent limits. Remaining explicit semantic/optimization capacities include 64 generator resume labels, 512 closure read-back/TDZ entries, and 16 constructor-shape evidence slots; callers fail closed, fall back, or clamp according to the owning feature.
+- Ordinary source, pre-built AST, module, eval/new-Function, and batch/preamble paths still duplicate parts of build/validate/link/cleanup orchestration. Their JavaScript policy differs, but **D8.2.5** requires one lifecycle driver with mode policy as data.
+
+Per **D8.4.1v2**, LambdaJS has no property inline cache. `property_name_cache` only reuses MIR registers for immutable module-name-table loads within one generated function; it does not cache receiver/property lookup. `TypeMap` constructor/transition shapes remain ordinary lookup metadata.
+
+The active consolidation sequence and deletion gates are in [`vibe/Lambda_Design_JS_Unified.md`](../../../vibe/Lambda_Design_JS_Unified.md). The historical partial attempt is retained as [`vibe/impl/Lambda_Impl_Tune_Ast (retired).md`](<../../../vibe/impl/Lambda_Impl_Tune_Ast (retired).md>).
 
 ---
 

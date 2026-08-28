@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.38.1 (2026-08-27)
+**Spec version:** 1.38.2 (2026-08-28)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -862,8 +862,8 @@ that carries them.
   [RG2, RG5]
 - **D5.4.3** **No context-dependent value at a code-baked address**:
   module globals live in per-context slabs indexed by baked slot +
-  module cell; IC cells in per-context slabs; shared MIR contexts are
-  sealed eagerly. *Reset becomes construction* — reset/replace-heap/
+  module cell; any other per-instantiation mutable cells live in per-context
+  slabs; shared MIR contexts are sealed eagerly. *Reset becomes construction* — reset/replace-heap/
   destroy are three distinct ordered contracts. [MT2 contract, RG11]
 - **D5.4.4** Frozen registries stay global (immutable after publication);
   diagnostics may never feed semantics; one event loop per context;
@@ -1363,8 +1363,9 @@ loosely across the corpus — context disambiguates, and we live with it.
   is born verified*. Keys include build stamp, arch, opt policy, format
   version, and transitive source hashes; artifacts are local,
   SHA-validated, size-capped, never signed, **never distributed**.
-  Per-instantiation mutable cells (JS ICs) must become named data items
-  before JS joins. [L3-6..L3-9, MC7/MC8]
+  Any per-instantiation mutable cell must become a named data item before its
+  language joins; LambdaJS has no inline-cache admission path under
+  D8.4.1v2. [L3-6..L3-9, MC7/MC8]
 
 ### D8.6 Emission testing
 
@@ -1403,15 +1404,15 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-24.
+Status of `*`-marked rulings as of 2026-08-28.
 
 | Ruling | Status |
 |---|---|
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
 | D2.6.5 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S16.7 does not run. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
-| D2.4.1–D2.4.3 | `MirValue`/`em_require_rep` infrastructure exists; LambdaJS uses it; propagation through Lambda expression lowering not started (phases L0–L6), sequenced after nullable-lane work. |
-| D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
+| D2.4.1–D2.4.3 | `MirValue`, demand, provenance, rooting-home, and `em_require_rep` infrastructure is shared and used at selected LambdaJS/emitter boundaries. The principal Lambda `transpile_expr` and LambdaJS `jm_transpile_expression` APIs still return bare `MIR_reg_t`, so full-contract propagation through every expression boundary remains open under `vibe/Lambda_Design_JS_Unified.md` P5. |
+| D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JavaScript reference/property lane lowering, mutable ArrayNum views, and vector/N-D kernels remain pending. |
 | D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
 | D2.6.3 | ELEM_INT i64 revert landed; SIMD kernels only partly re-enabled (C16-era gating comments remain). |
 | D2.7.2v2 | v2 (companion-lane entries) decided 2026-08-14, not implemented — the v1 trailing-home wrapper ABI ships until Return_Value P4. Ownerless-slot GC scalar fallback active and counted; removal gated on the per-boundary inventory reaching zero. SG2 OQ audits open (dispatch-helper enumeration, resume-path slot reads, RetItem census). |
@@ -1446,14 +1447,14 @@ Status of `*`-marked rulings as of 2026-08-24.
 | D8.1.1v5 | Decided 2026-08-25. Normal Lambda files/modules use the first-party C hybrid recursive-descent + Pratt parser, which reduces directly to the shared typed AST and retains no Lambda CST. `LAMBDA_PARSER=tree`/`tree-sitter` remains an explicit reference/rollback path; `compare` checks Tree-sitter syntax acceptance while publishing the direct AST. The REPL and legacy inspection paths remain reference-parser consumers until their fragment/source-span migration is complete. The default script selector chooses `AUTO`; `interp` forces T0 and `jit` retains the eager whole-module path. P2 satellite promotion uses a default function-entry threshold of 5. A direct validated self-tail edge uses the same tail-edge threshold and may hand the active activation to an already-published boxed satellite entry; arbitrary-PC / loop OSR is not implemented. P2 fails closed for aggregate/structured signatures, mutable/index writes, object-field identifiers, indirect/`var` calls, and invalid batch-retained module state; scalar module reads and dynamic multi-argument calls use the shared boxed ABI. Status and gates: `vibe/Lambda_Grammar_Parser.md` §7 and `vibe/impl/Lambda_Impl_Ast_Interp.md` §3.1. |
 | D8.1.2v2 | Decided 2026-08-24 with D8.1.1v4. `grammar-lambda.js` remains the complete Tree-sitter syntax oracle/editor/bindings grammar; `grammar.js` and generated `parser.c` are reference artifacts regenerated by the normal grammar target and are never hand-edited. The production Lambda parser is maintained in `lambda/runtime/parser/` and is built through the generated build configuration. |
 | D8.1.3v9 | Revised 2026-08-26: the LambdaJS AST tier now includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, continuations, and AUTO policy remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/Lambda_Design_JS_Interpreter.md` and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
-| D8.2.1–D8.2.3 | Structural Unified AST convergence is substantially landed for Lambda/JS: common core catalog, node aliases, `FnAnalysis`, and `MirEmitter`; Python remains the guest acceptance test. |
-| D8.2.4–D8.2.6 | Indexed compilation unit, authoritative traversal, typed fact/pass process, and demand-driven full-contract `MirValue` continuation are designed in U27–U32; implementation not started. |
+| D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) made `AST_NODE_FOR_STAM` exclusively the JS C-style `AstForStmtNode` contract: Lambda iterator `for` now publishes `AST_NODE_FOR_EXPR`/`AstForNode`, with procedural stream discard as a form flag. P1b (2026-08-28) makes `AST_NODE_ASSIGN` exclusively the JS `AstAssignNode {op, left, right}` contract; Lambda declarations publish `AST_NODE_VARIABLE_DECLARATOR` with `AstDeclaratorNode {id, init, ...}` instead. `vibe/Lambda_Design_JS_Unified.md` P1 owns the remaining one-layout/one-child-contract closeout; Python remains the later guest acceptance test. |
+| D8.2.4–D8.2.6 | Partial scaffolding is landed, not the unified process: `AstIndex` publishes dense node/function identity plus parent/owner links, and Lambda MIR/interpreter consumers use node facts, but it lacks scope/binding/class IDs and its function IDs do not replace the JavaScript pointer index. P1a made the common C-style `for` child row truthful; P1b moves migrated Lambda core-child traversal through `ast_visit_core_children()`, leaving only extension layouts in the Lambda planner. Fact bits and `CompilerPassManager` wrap isolated passes, while JavaScript currently seeds `VALIDATED` before its early-error pass and the complete schedule remains manual; `MirValue`/demand support exists around bare-register expression APIs. P1–P5 of `vibe/Lambda_Design_JS_Unified.md` own the residue. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
 | D8.4.2v3 | Lambda and LambdaJS direct calls pass `Context*` and source operands only; internal shape-2 results use two MIR results and C-reachable entries use the context companion slot. The trailing scalar-home operand is deleted from generated call ABI. |
 | D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |
 | D8.5.1 | MIR cache L1 landed; L2 lazy codegen approved but `mir.c` still eager. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
-| D8.6.4v2 | Timing/MIR instrumentation is landed. The LOC and compiler-time ratchets remain open against anchor `e66e5b5c71bc7ee7fe2d1e2b2a9afe27dc6825a3` at 319,606 lines; large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
+| D8.6.4v2 | Timing/MIR instrumentation is landed. At commit `44b98dcebd19a548a14bbb75785091b545445f00`, the governed tree is 310,711 lines and passes the older 317,606 LOC cap, but the combined closeout remains open: final identical-manifest compiler-time captures and an audited consolidation ledger are not accepted. `vibe/Lambda_Design_JS_Unified.md` additionally freezes that 310,711-line tree as a stricter project anchor requiring ≤308,711; large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
 
 ## Appendix B — Open Design Issues (DO#)
 
@@ -1615,11 +1616,11 @@ Numbered `DO#` (design-open); each links to its record.
 | D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1 | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md` |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md` |
-| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12; JSI1–JSI13 | `Lambda_Design_Unified_AST.md`, `vibe/impl/Lambda_Impl_Tune_Ast.md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md` |
+| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12; JSI1–JSI13 | `Lambda_Design_Unified_AST.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1 + call-ABI notes; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md` |
-| D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `vibe/impl/Lambda_Impl_Tune_Ast.md` |
+| D8.6 | MT1–MT8; U33–U36 | `Lambda_Design_MIR_Emission_Test.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md` |
 
 The decision records preserve the full deliberations — every alternative
 that lost and the arguments that did not persuade. This specification is

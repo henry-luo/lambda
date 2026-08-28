@@ -504,6 +504,12 @@ static Type* mir_named_contract(AstNamedNode* named) {
     return parameter ? parameter->full_type : named->type;
 }
 
+static Type* mir_binding_contract(AstNode* binding) {
+    return binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR
+        ? ((AstDeclaratorNode*)binding)->declared_type
+        : mir_named_contract((AstNamedNode*)binding);
+}
+
 static Type* mir_param_contract_at(AstFuncNode* fn_node, int index) {
     return mir_named_contract(mir_param_at(fn_node, index));
 }
@@ -764,11 +770,6 @@ static int mir_explicit_return_count(AstNode* node) {
         case AST_NODE_FOR_EXPR:
             count += mir_explicit_return_count(((AstForNode*)current)->then);
             break;
-        case AST_NODE_FOR_STAM: {
-            AstForStmtNode* loop = (AstForStmtNode*)current;
-            count += mir_explicit_return_count(loop->body);
-            break;
-        }
         case AST_NODE_MATCH_EXPR: {
             AstMatchNode* match = (AstMatchNode*)current;
             for (AstMatchArm* arm = match->first_arm; arm;
@@ -2263,7 +2264,7 @@ static bool mir_last_call_returned_boxed(MirTranspiler* mt, AstNode* node) {
 }
 
 
-static bool mir_unannotated_native_int_decl(MirTranspiler* mt, AstNamedNode* asn);
+static bool mir_unannotated_native_int_decl(MirTranspiler* mt, AstDeclaratorNode* asn);
 
 static bool mir_module_binding_has_native_lane(MirTranspiler* mt,
         AstNode* node, TypeId expected) {
@@ -5027,7 +5028,7 @@ static bool static_const_array_from_node(MirTranspiler* mt, AstArrayNode* arr_no
     int64_t count = 0;
     for (AstNode* item = arr_node->item; item; item = item->next) {
         if (item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_SPREAD ||
-            item->node_type == AST_NODE_PIPE || item->node_type == AST_NODE_ASSIGN) return false;
+            item->node_type == AST_NODE_PIPE || item->node_type == AST_NODE_VARIABLE_DECLARATOR) return false;
         AstNode* value = item;
         if (value->node_type == AST_NODE_PRIMARY) {
             AstPrimaryNode* pri = (AstPrimaryNode*)value;
@@ -5489,8 +5490,8 @@ static MIR_reg_t mir_emit_declared_type_value(MirTranspiler* mt, Type* type) {
 }
 
 static bool mir_is_type_definition_binding(AstNode* node) {
-    return node && node->node_type == AST_NODE_ASSIGN &&
-        ((AstNamedNode*)node)->is_type_definition;
+    return node && node->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+        ((AstDeclaratorNode*)node)->is_type_definition;
 }
 
 static bool mir_is_type_value_node(AstNode* node) {
@@ -5604,11 +5605,10 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             return mir_emit_declared_type_value(mt, entry_node->type);
         }
         // Imported pub variables
-        if (entry_node && (entry_node->node_type == AST_NODE_ASSIGN ||
+        if (entry_node && (entry_node->node_type == AST_NODE_VARIABLE_DECLARATOR ||
             entry_node->node_type == AST_NODE_PARAM)) {
-            AstNamedNode* named = (AstNamedNode*)entry_node;
             StrBuf* var_name = strbuf_new_cap(64);
-            write_var_name(var_name, named, NULL);
+            write_var_name(var_name, entry_node, NULL);
 
             TypeId var_tid = entry_node->type ? entry_node->type->type_id : LMD_TYPE_ANY;
             log_debug("mir: loading imported variable '%s' type_id=%d", var_name->str, var_tid);
@@ -6441,12 +6441,12 @@ static TypeId mir_guarded_array_num_witness(MirTranspiler* mt, AstNode* object) 
         }
         // (a) module binding with a declared (or inferred-final) contract.
         AstNode* binding = ident->entry ? ident->entry->node : NULL;
-        if (binding && binding->node_type == AST_NODE_ASSIGN &&
+        if (binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR &&
                 ident->entry && !ident->entry->is_mutable &&
                 !ident->entry->type_widened &&
                 mir_argument_is_module_binding(mt, object)) {
             Type* contract = mir_unwrap_decl_contract(ident->entry->declared_type);
-            if (!contract) contract = mir_named_contract((AstNamedNode*)binding);
+            if (!contract) contract = mir_binding_contract(binding);
             return mir_guarded_elem_admits(mir_array_occurrence_element(contract));
         }
         return LMD_TYPE_ANY;
@@ -6828,9 +6828,9 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
                     AstIdentNode* ident = (AstIdentNode*)unwrapped;
                     AstNode* declare = list->declare;
                     while (declare) {
-                        if (declare->node_type == AST_NODE_ASSIGN) {
-                            AstNamedNode* asn = (AstNamedNode*)declare;
-                            if (asn->as && ident->name && asn->name &&
+                        if (declare->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+                            AstDeclaratorNode* asn = (AstDeclaratorNode*)declare;
+                            if (asn->init && ident->name && asn->name &&
                                 ident->name->len == asn->name->len &&
                                 memcmp(ident->name->chars, asn->name->chars, ident->name->len) == 0) {
                                 // final local identifiers are not in MIR scope yet
@@ -6838,7 +6838,7 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
                                 if (mir_unannotated_native_int_decl(mt, asn)) {
                                     return LMD_TYPE_INT;
                                 }
-                                return get_effective_type(mt, asn->as);
+                                return get_effective_type(mt, asn->init);
                             }
                         }
                         declare = declare->next;
@@ -7550,14 +7550,14 @@ static bool mir_is_native_int_arith(MirTranspiler* mt, AstNode* node) {
 // two spellings is exactly what made a block-local `let b = a + 1` publish a
 // raw lane through an oracle that still reported the default boxed carrier,
 // and MIR cannot catch that (a boxed Item and an int lane are both i64).
-static bool mir_unannotated_native_int_decl(MirTranspiler* mt, AstNamedNode* asn) {
-    if (!asn || !asn->as || asn->declared_type) return false;
-    AstNode* init = ast_unwrap_primary(asn->as);
+static bool mir_unannotated_native_int_decl(MirTranspiler* mt, AstDeclaratorNode* asn) {
+    if (!asn || !asn->init || asn->declared_type) return false;
+    AstNode* init = ast_unwrap_primary(asn->init);
     if (!init || init->node_type != AST_NODE_BINARY) return false;
     if (!mir_is_native_int_arith(mt, init)) return false;
     // Only the case the ordinary carrier does not already cover, so this stays
     // strictly additive to the pre-T19-4 gate.
-    return get_effective_type(mt, asn->as) == LMD_TYPE_ANY;
+    return get_effective_type(mt, asn->init) == LMD_TYPE_ANY;
 }
 
 // A native scalar consumer may prove an entire closed integer tree without
@@ -7731,8 +7731,8 @@ static MIR_reg_t transpile_native_int_expr(MirTranspiler* mt, AstNode* node) {
     if (primary && primary->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)primary;
         AstNode* binding = ident->entry ? ident->entry->node : NULL;
-        if (binding && binding->node_type == AST_NODE_ASSIGN) {
-            AstNamedNode* named = (AstNamedNode*)binding;
+        if (binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            AstDeclaratorNode* named = (AstDeclaratorNode*)binding;
             // A declared int local whose carrier is a boxed Item owns that
             // Item even inside a dual native body. Reopen the carrier before a
             // raw typed-array store or native call argument; the semantic int
@@ -7749,7 +7749,7 @@ static MIR_reg_t transpile_native_int_expr(MirTranspiler* mt, AstNode* node) {
             MirVarEntry* native_var = find_var(mt, ident->name->chars);
             bool boxed_carrier = native_var
                 ? native_var->type_id == LMD_TYPE_ANY
-                : (named->as && get_effective_type(mt, named->as) == LMD_TYPE_ANY);
+                : (named->init && get_effective_type(mt, named->init) == LMD_TYPE_ANY);
             if (boxed_carrier) {
                 if (mir_argument_is_module_binding(mt, primary)) {
                     // Imported scalar slots are reopened by the module/global
@@ -10338,7 +10338,7 @@ static void mir_prewiden_loop_bindings(MirTranspiler* mt, AstNode* node,
         mir_prewiden_loop_bindings(mt, ((AstIfNode*)node)->then, depth + 1);
         mir_prewiden_loop_bindings(mt, ((AstIfNode*)node)->otherwise, depth + 1);
         break;
-    case AST_NODE_FOR_EXPR: case AST_NODE_FOR_STAM:
+    case AST_NODE_FOR_EXPR:
         // A nested loop's own body assigns to the same outer bindings.
         mir_prewiden_loop_bindings(mt, ((AstForNode*)node)->then, depth + 1);
         break;
@@ -11022,14 +11022,8 @@ static bool mir_nested_control_writes_name(AstNode* node, const String* name) {
             node->node_type == AST_NODE_DO_WHILE_STAM) {
         return mir_nested_control_writes_name(((AstWhileNode*)node)->body, name);
     }
-    if (node->node_type == AST_NODE_FOR_STAM) {
-        return mir_nested_control_writes_name(((AstForStmtNode*)node)->init, name) ||
-            mir_nested_control_writes_name(((AstForStmtNode*)node)->update, name) ||
-            mir_nested_control_writes_name(((AstForStmtNode*)node)->body, name);
-    }
-    // Lambda's own `for (x in xs) { ... }` is AST_NODE_FOR_EXPR, a different
-    // node from the JS-shaped AST_NODE_FOR_STAM handled above. Omitting it made
-    // every assignment inside a Lambda for-loop invisible to this scan, so
+    // The Lambda iterator `for` has one AST_NODE_FOR_EXPR layout. Omitting it
+    // made every assignment inside a Lambda for-loop invisible to this scan, so
     // `mir_binding_has_reassignment` reported "never reassigned" and the return
     // proof used the DECLARATION's initializer as its lane witness: an
     // accumulator declared `var s = 0` returned on the native int lane even
@@ -11078,7 +11072,7 @@ static bool mir_positive_sub_loop_candidate(MirTranspiler* mt,
         // Nested control flow could contain a second write that is not governed
         // by the loop header, so the first fast lane deliberately rejects it.
         if (item->node_type == AST_NODE_IF_EXPR || item->node_type == AST_NODE_WHILE_STAM ||
-                item->node_type == AST_NODE_FOR_STAM || item->node_type == AST_NODE_RETURN_STAM ||
+                item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_RETURN_STAM ||
                 item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_PROC ||
                 item->node_type == AST_NODE_FUNC_EXPR) {
             return false;
@@ -11187,7 +11181,7 @@ static bool mir_forward_compact_loop_candidate(MirTranspiler* mt,
         }
         if ((item->node_type == AST_NODE_WHILE_STAM ||
                 item->node_type == AST_NODE_DO_WHILE_STAM ||
-                item->node_type == AST_NODE_FOR_STAM) &&
+                item->node_type == AST_NODE_FOR_EXPR) &&
                 mir_nested_control_writes_name(item, counter_name)) {
             return false;
         }
@@ -11358,8 +11352,8 @@ static void mir_dense_scan_node(MirTranspiler* mt, AstNode* node,
             mir_dense_scan_node(mt, list->item, scan);
             break;
         }
-        case AST_NODE_ASSIGN:
-            mir_dense_scan_node(mt, ((AstNamedNode*)node)->as, scan);
+        case AST_NODE_VARIABLE_DECLARATOR:
+            mir_dense_scan_node(mt, ((AstDeclaratorNode*)node)->init, scan);
             break;
         case AST_NODE_ASSIGN_STAM:
             mir_dense_scan_node(mt, ((AstAssignStamNode*)node)->value, scan);
@@ -12136,11 +12130,11 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
     bool saved_tail_position = mt->in_tail_position;
     mt->in_tail_position = false;
     while (declare) {
-        if (declare->node_type == AST_NODE_ASSIGN) {
-            AstNamedNode* asn = (AstNamedNode*)declare;
-            if (asn->as) {
+        if (declare->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            AstDeclaratorNode* asn = (AstDeclaratorNode*)declare;
+            if (asn->init) {
                 bool saved_preserve_proc_if_result = mt->preserve_proc_if_result;
-                if (mt->in_proc && asn->as->node_type == AST_NODE_IF_EXPR) {
+                if (mt->in_proc && asn->init->node_type == AST_NODE_IF_EXPR) {
                     // let/var initializers consume the if-expression value; without
                     // this, proc-mode branch boxing treats it like a discarded statement.
                     mt->preserve_proc_if_result = true;
@@ -12165,10 +12159,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     bool native_u32_initializer = initializer_contract &&
                         initializer_contract->type_id == LMD_TYPE_NUM_SIZED &&
                         type_num_sized_kind(initializer_contract) == NUM_UINT32 &&
-                        mir_native_u32_initializer(mt, asn->as);
+                        mir_native_u32_initializer(mt, asn->init);
                     predicted_expr_tid = native_u32_initializer
-                        ? LMD_TYPE_INT : get_effective_type(mt, asn->as);
-                    AstNode* native_initializer = ast_unwrap_primary(asn->as);
+                        ? LMD_TYPE_INT : get_effective_type(mt, asn->init);
+                    AstNode* native_initializer = ast_unwrap_primary(asn->init);
                     // T19-4: a proven native int tree IS the int lane whether or
                     // not an annotation says so. Requiring the boxed carrier to
                     // already read `int` asked the wrong oracle -- `i + i`
@@ -12204,10 +12198,10 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // declaration boundary and the later raw store publishes
                     // the Item tag as numeric payload (D2.2.2, D3.2.2).
                     val = native_u32_initializer
-                        ? transpile_native_u32_initializer(mt, asn->as)
+                        ? transpile_native_u32_initializer(mt, asn->init)
                         : native_int_initializer
                         ? transpile_binary_out(mt, (AstBinaryNode*)native_initializer, true)
-                        : transpile_expr_with_map_contract(mt, asn->as,
+                        : transpile_expr_with_map_contract(mt, asn->init,
                             declaration_map_contract, &map_contract_constructed);
                 }
                 mt->preserve_proc_if_result = saved_preserve_proc_if_result;
@@ -12221,7 +12215,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // sentinel. The slow body may also return a non-int at
                 // runtime, so degrading to Item — never unboxing — is the only
                 // representation that keeps inference unobservable (D3.2.1).
-                if (mir_last_call_returned_boxed(mt, asn->as)) {
+                if (mir_last_call_returned_boxed(mt, asn->init)) {
                     expr_tid = LMD_TYPE_ANY;
                 }
                 // The AST retains the source annotation explicitly.  Inferring
@@ -12291,7 +12285,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     expr_tid = LMD_TYPE_ANY;
                 }
 
-                if (expr_tid == LMD_TYPE_ANY && mir_c14c_known_float_result(asn->as)) {
+                if (expr_tid == LMD_TYPE_ANY && mir_c14c_known_float_result(asn->init)) {
                     // C14c helpers deliberately return an Item, but their
                     // statically classified float result cannot fail. Recover
                     // the proven carrier before deciding whether this typed
@@ -12323,7 +12317,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                      declared_lane_desc.kind == LANE_STORAGE_SIZED_I64 ||
                      declared_lane_desc.kind == LANE_STORAGE_POINTER)));
                 bool declared_array_contract = declared_array_element != NULL;
-                AstNode* declaration_source = ast_unwrap_primary(asn->as);
+                AstNode* declaration_source = ast_unwrap_primary(asn->init);
                 bool declared_array_literal = declaration_source &&
                     declaration_source->node_type == AST_NODE_ARRAY;
                 bool bool_array_coercion_boundary = declared_array_element &&
@@ -12336,7 +12330,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                      // A total T[] read is physically an IntLane but
                      // semantically T?. Its null arm still needs admission at
                      // a plain-T declaration before the raw move below.
-                     (mir_expr_may_be_null(mt, asn->as) &&
+                     (mir_expr_may_be_null(mt, asn->init) &&
                       !lambda_type_accepts_null(declared_value_type)) ||
                      // C16: a numeric pair the static relation defers is
                      // admitted by membership, so the runtime check is the ONLY
@@ -12348,7 +12342,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                      declared_range_contract ||
                      (declared_value_type->type_id == LMD_TYPE_MAP &&
                       expr_tid == LMD_TYPE_MAP &&
-                      asn->as && asn->as->type != declared_value_type) ||
+                      asn->init && asn->init->type != declared_value_type) ||
                      (declared_array_contract && !bool_array_coercion_boundary &&
                       !declared_array_literal));
                 // T-A1: the check itself can be dropped when the relation is
@@ -12370,13 +12364,13 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 }
                 bool declaration_boundary_redundant = declaration_boundary_applies &&
                     (map_contract_constructed ||
-                     mir_boundary_is_redundant(mt, asn->as, declared_value_type));
+                     mir_boundary_is_redundant(mt, asn->init, declared_value_type));
                 bool native_scalar_declaration = declaration_boundary_applies &&
                     !declaration_boundary_redundant && declared_value_type &&
                     declared_value_type->kind == TYPE_KIND_SIMPLE &&
                     (declared_value_type->type_id == LMD_TYPE_INT ||
                      declared_value_type->type_id == LMD_TYPE_FLOAT) &&
-                    mir_expr_proves_native_return_lane(mt, asn->as,
+                    mir_expr_proves_native_return_lane(mt, asn->init,
                         declared_value_type->type_id);
                 // Nullable scalar arrays and all pointer arrays need an
                 // explicit conversion even when every source element is non-null.
@@ -12429,7 +12423,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // ARRAY_INT type_id tells downstream code what kind of container it is.
                 TypeId fill_elem_type = LMD_TYPE_ANY;  // P4-3.1: track fill element type
                 {
-                    AstNode* rhs = asn->as;
+                    AstNode* rhs = asn->init;
                     // Unwrap PRIMARY wrapper nodes (parenthesized expressions)
                     while (rhs && rhs->node_type == AST_NODE_PRIMARY) {
                         AstPrimaryNode* pri = (AstPrimaryNode*)rhs;
@@ -12593,12 +12587,12 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     val = emit_unbox_bool_lane(mt, val);
                 }
 
-                bool cow_owned = mir_expr_produces_cow_owner(mt, asn->as) &&
-                    ast_expr_may_return_container(asn->as, expr_tid, var_tid);
-                bool cow_binding = ast_expr_may_return_container(asn->as, expr_tid, var_tid) &&
-                    mir_expr_is_owned_binding_alias(mt, asn->as);
+                bool cow_owned = mir_expr_produces_cow_owner(mt, asn->init) &&
+                    ast_expr_may_return_container(asn->init, expr_tid, var_tid);
+                bool cow_binding = ast_expr_may_return_container(asn->init, expr_tid, var_tid) &&
+                    mir_expr_is_owned_binding_alias(mt, asn->init);
                 MirVarEntry* cow_source = cow_binding
-                    ? mir_direct_root_binding(mt, asn->as) : NULL;
+                    ? mir_direct_root_binding(mt, asn->init) : NULL;
                 if (cow_binding) {
                     // Any alias of an owned container is an ownership boundary:
                     // immutable snapshots must share the root before a later
@@ -12619,7 +12613,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                         var_tid == LMD_TYPE_ARRAY &&
                         fill_elem_type == LMD_TYPE_ANY && !cow_binding) {
                     TypeId literal_element =
-                        mir_inferred_numeric_array_literal_element(asn->as);
+                        mir_inferred_numeric_array_literal_element(asn->init);
                     if (literal_element != LMD_TYPE_ANY &&
                             (!mt->func_body || !has_elem_type_invalidation(
                                 name_buf, mt->func_body, literal_element))) {
@@ -12721,7 +12715,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // Alias declarations such as `tmp = prev` carry the
                     // source row's proven storage contract even when the
                     // initializer crossed the COW binding ABI as an Item.
-                    AstNode* source = ast_unwrap_primary(asn->as);
+                    AstNode* source = ast_unwrap_primary(asn->init);
                     if (source && source->node_type == AST_NODE_IDENT) {
                         MirVarEntry* source_var = mir_direct_root_binding(mt, source);
                         if (source_var && source_var->elem_type != LMD_TYPE_ANY) {
@@ -12740,9 +12734,9 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // every consumer re-checks the container and bails to the
                     // boxed arm on drift. This is what lets hashmap's
                     // field-to-local copies keep their element lane.
-                    AstNode* init = ast_unwrap_primary(asn->as);
+                    AstNode* init = ast_unwrap_primary(asn->init);
                     if (init && init->node_type == AST_NODE_MEMBER_EXPR) {
-                        TypeId member_elem = mir_guarded_array_num_witness(mt, asn->as);
+                        TypeId member_elem = mir_guarded_array_num_witness(mt, asn->init);
                         if (member_elem != LMD_TYPE_ANY) {
                             declared_var->elem_type = member_elem;
                             declared_var->elem_type_guarded = true;
@@ -12750,11 +12744,11 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     }
                 }
                 if (declared_var && var_tid == LMD_TYPE_INT &&
-                        mir_is_zero_int_literal(mt, asn->as)) {
+                        mir_is_zero_int_literal(mt, asn->init)) {
                     declared_var->compact_int_known_zero = true;
                 }
                 if (declared_var && var_tid == LMD_TYPE_INT &&
-                        mir_is_one_int_literal(mt, asn->as)) {
+                        mir_is_one_int_literal(mt, asn->init)) {
                     declared_var->compact_int_known_positive = true;
                 }
                 if (cow_binding) {
@@ -12787,7 +12781,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 if (!mt->in_lexical_list_declaration &&
                     var_tid == LMD_TYPE_ARRAY && fill_elem_type == LMD_TYPE_ANY) {
                     // Check AST nested type from array literal or typed array assignment
-                    AstNode* rhs = asn->as;
+                    AstNode* rhs = asn->init;
                     while (rhs && rhs->node_type == AST_NODE_PRIMARY)
                         rhs = ((AstPrimaryNode*)rhs)->expr;
                     Type* rhs_type = rhs ? rhs->type : nullptr;
@@ -12921,7 +12915,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
         if (scan->node_type == AST_NODE_PIPE) {
             has_pipe_spread = true;
         }
-        if (scan->node_type == AST_NODE_ASSIGN) {
+        if (scan->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             has_let = true;
         }
         scan = scan->next;
@@ -13127,7 +13121,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
         MIR_reg_t val = const_folded ? 0 : transpile_expr(mt, item);
 
         // let bindings are transparent - evaluate for side effect but don't push to array
-        if (item->node_type == AST_NODE_ASSIGN) {
+        if (item->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             item = item->next;
             continue;
         }
@@ -13431,7 +13425,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                        is_proc_flow_side_effect_node(scan, last_executable)) {
                 stam_count++;
             } else if (scan->node_type == AST_NODE_WHILE_STAM ||
-                       scan->node_type == AST_NODE_FOR_STAM) {
+                       ast_for_discards_result(scan)) {
                 stam_count++;
             } else {
                 value_count++;
@@ -13451,7 +13445,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
         while (item) {
             if (transpile_content_decl_or_side_effect(mt, item)) {
             } else if (is_proc_flow_side_effect_node(item, last_value)) {
-                if (item->node_type == AST_NODE_FOR_STAM) {
+                if (ast_for_discards_result(item)) {
                     transpile_for(mt, (AstForNode*)item, false);
                 } else {
                     transpile_discard_expr(mt, item);
@@ -13461,7 +13455,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 result = transpile_content_tail_value(mt, item);
             } else if (item->node_type == AST_NODE_IF_EXPR ||
                        item->node_type == AST_NODE_WHILE_STAM ||
-                       item->node_type == AST_NODE_FOR_STAM) {
+                       ast_for_discards_result(item)) {
                 transpile_discard_expr(mt, item);
             } else {
                 // Non-last value expression in proc: side effect only
@@ -13476,17 +13470,16 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
 
     // Single value with declarations/statements: block expression
     // Process all items in order, return the single value expression result.
-    // Exclude FOR_EXPR/FOR_STAM — spreadable results need list_push_spread
+    // Exclude iterator-for results — spreadable values need list_push_spread
     if (value_count == 1 && last_value && (decl_count > 0 || stam_count > 0)
-        && last_value->node_type != AST_NODE_FOR_EXPR
-        && last_value->node_type != AST_NODE_FOR_STAM) {
+        && last_value->node_type != AST_NODE_FOR_EXPR) {
         push_scope(mt);
         MIR_reg_t result = 0;
         AstNode* item = list_node->item;
         while (item) {
             if (transpile_content_decl_or_side_effect(mt, item)) {
             } else if (is_proc_flow_side_effect_node(item, last_value)) {
-                if (item->node_type == AST_NODE_FOR_STAM) {
+                if (ast_for_discards_result(item)) {
                     transpile_for(mt, (AstForNode*)item, false);
                 } else {
                     transpile_discard_expr(mt, item);
@@ -13496,7 +13489,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 result = transpile_content_tail_value(mt, item);
             } else if (is_proc &&
                        (item->node_type == AST_NODE_WHILE_STAM ||
-                        item->node_type == AST_NODE_FOR_STAM)) {
+                        ast_for_discards_result(item))) {
                 transpile_discard_expr(mt, item); // proc context side effect
             }
             item = item->next;
@@ -13519,14 +13512,14 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
         while (item) {
             if (transpile_content_decl_or_side_effect(mt, item)) {
             } else if (is_proc_flow_side_effect_node(item, last_value)) {
-                if (item->node_type == AST_NODE_FOR_STAM) {
+                if (ast_for_discards_result(item)) {
                     transpile_for(mt, (AstForNode*)item, false);
                 } else {
                     transpile_discard_expr(mt, item);
                 }
             } else if (is_proc &&
                        (item->node_type == AST_NODE_WHILE_STAM ||
-                        item->node_type == AST_NODE_FOR_STAM)) {
+                        ast_for_discards_result(item))) {
                 transpile_discard_expr(mt, item); // proc context side effect
             }
             item = item->next;
@@ -13628,9 +13621,9 @@ static Type* mir_proven_map_field_contract(AstNode* value) {
         AstIdentNode* ident = (AstIdentNode*)primary;
         NameEntry* entry = ident->entry;
         AstNode* declaration = entry ? entry->node : NULL;
-        if (declaration && declaration->node_type == AST_NODE_ASSIGN &&
+        if (declaration && declaration->node_type == AST_NODE_VARIABLE_DECLARATOR &&
                 !entry->type_widened) {
-            AstNode* initializer = ((AstNamedNode*)declaration)->as;
+            AstNode* initializer = ((AstDeclaratorNode*)declaration)->init;
             AstNode* initializer_root = ast_unwrap_primary(initializer);
             // A local binding can retain an initializer's proven map result
             // until its type is widened; this recovers recursive call results
@@ -15789,8 +15782,8 @@ static Type* mir_ident_value_type(AstNode* node) {
     if (!unwrapped || unwrapped->node_type != AST_NODE_IDENT) return NULL;
     AstIdentNode* ident = (AstIdentNode*)unwrapped;
     AstNode* entry_node = ident->entry ? ident->entry->node : NULL;
-    if (!entry_node || entry_node->node_type != AST_NODE_ASSIGN) return NULL;
-    AstNode* value = ((AstNamedNode*)entry_node)->as;
+    if (!entry_node || entry_node->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
+    AstNode* value = ((AstDeclaratorNode*)entry_node)->init;
     return value ? value->type : NULL;
 }
 
@@ -20910,7 +20903,6 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
     case AST_NODE_MATCH_EXPR:
         return transpile_match(mt, (AstMatchNode*)node);
     case AST_NODE_FOR_EXPR:
-    case AST_NODE_FOR_STAM:
         return transpile_for(mt, (AstForNode*)node, true);
     case AST_NODE_WHILE_STAM:
         return transpile_while(mt, (AstWhileNode*)node);
@@ -22176,16 +22168,16 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
             MIR_T_I64, MIR_new_reg_op(mt->ctx, data),
             MIR_T_I64, MIR_new_reg_op(mt->ctx, target));
     }
-    case AST_NODE_ASSIGN: {
-        AstNamedNode* asn = (AstNamedNode*)node;
-        if (asn->as) {
-            MIR_reg_t val = transpile_expr(mt, asn->as);
+    case AST_NODE_VARIABLE_DECLARATOR: {
+        AstDeclaratorNode* asn = (AstDeclaratorNode*)node;
+        if (asn->init) {
+            MIR_reg_t val = transpile_expr(mt, asn->init);
             char name_buf[128];
             snprintf(name_buf, sizeof(name_buf), "%.*s", (int)asn->name->len, asn->name->chars);
             // Register the binding with the carrier its initializer actually
             // produced, not with the initializer's semantic type [T19-1]: the
             // two diverge for every boxed producer with a precise static type.
-            TypeId tid = get_effective_type(mt, asn->as);
+            TypeId tid = get_effective_type(mt, asn->init);
             set_var(mt, name_buf, val, type_to_mir(tid), tid);
             return val;
         }
@@ -22943,11 +22935,11 @@ static void find_aliases_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_cou
             find_aliases_multi(let_node->declare, ctxs, ctx_count);
             break;
         }
-        case AST_NODE_ASSIGN: {
-            AstNamedNode* named = (AstNamedNode*)node;
-            if (named->as && named->name) {
+        case AST_NODE_VARIABLE_DECLARATOR: {
+            AstDeclaratorNode* named = (AstDeclaratorNode*)node;
+            if (named->init && named->name) {
                 for (int c = 0; c < ctx_count; c++) {
-                    if (is_tracked_ref(named->as, &ctxs[c])) {
+                    if (is_tracked_ref(named->init, &ctxs[c])) {
                         add_alias(&ctxs[c], named->name);
                     }
                 }
@@ -22965,7 +22957,7 @@ static void find_aliases_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_cou
             find_aliases_multi(wh->body, ctxs, ctx_count);
             break;
         }
-        case AST_NODE_FOR_EXPR: case AST_NODE_FOR_STAM: {
+        case AST_NODE_FOR_EXPR: {
             // A loop body is ordinary body code. Skipping it here made every
             // param used only inside a `for` look unused, which is how an
             // int-only counter reached the emitter as `any` [T19-3].
@@ -23047,7 +23039,7 @@ static void gather_evidence_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_
             gather_evidence_multi(wh->body, ctxs, ctx_count);
             break;
         }
-        case AST_NODE_FOR_EXPR: case AST_NODE_FOR_STAM: {
+        case AST_NODE_FOR_EXPR: {
             AstForNode* fr = (AstForNode*)node;
             for (AstNode* lp = fr->loop; lp; lp = lp->next) {
                 AstLoopNode* loop = (AstLoopNode*)lp;
@@ -23128,9 +23120,9 @@ static void gather_evidence_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_
             gather_evidence_multi(let_node->declare, ctxs, ctx_count);
             break;
         }
-        case AST_NODE_ASSIGN: {
-            AstNamedNode* named = (AstNamedNode*)node;
-            gather_evidence_multi(named->as, ctxs, ctx_count);
+        case AST_NODE_VARIABLE_DECLARATOR: {
+            AstDeclaratorNode* named = (AstDeclaratorNode*)node;
+            gather_evidence_multi(named->init, ctxs, ctx_count);
             break;
         }
         case AST_NODE_CALL_EXPR: {
@@ -23407,13 +23399,13 @@ static bool declaration_may_check_boundary(AstNode* stam) {
         stam->node_type == AST_NODE_VAR_STAM || stam->node_type == AST_NODE_PUB_STAM
         ? ((AstLetNode*)stam)->declare : NULL;
     for (AstNode* d = declare; d; d = d->next) {
-        if (d->node_type != AST_NODE_ASSIGN) continue;
-        AstNamedNode* asn = (AstNamedNode*)d;
+        if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
+        AstDeclaratorNode* asn = (AstDeclaratorNode*)d;
         if (!asn->declared_type || asn->is_type_definition) continue;
         Type* declared = mir_unwrap_decl_type(asn->declared_type);
         if (!declared) return true;
-        if (!asn->as || !asn->as->type) return true;
-        if (!lambda_boundary_is_redundant(asn->as->type, declared)) return true;
+        if (!asn->init || !asn->init->type) return true;
+        if (!lambda_boundary_is_redundant(asn->init->type, declared)) return true;
     }
     return false;
 }
@@ -23431,7 +23423,7 @@ static bool function_body_may_check_boundary(AstFuncNode* fn_node) {
 }
 
 static bool mir_binding_has_reassignment(MirTranspiler* mt,
-        AstNamedNode* binding) {
+        AstDeclaratorNode* binding) {
     if (!mt || !binding || !binding->name) return true;
     AstNode* body = mt->func_body;
     if (!body && mt->native_return_analysis_fn) {
@@ -23588,7 +23580,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
                     (expected == LMD_TYPE_FLOAT && parameter_tid == LMD_TYPE_INT);
             }
         }
-        if (binding && binding->node_type == AST_NODE_ASSIGN) {
+        if (binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR) {
             MirVarEntry* variable = find_var(mt, ident->name->chars);
             if (!variable && mir_argument_is_module_binding(mt, node) &&
                     !mir_module_binding_has_native_lane(mt, node, expected)) {
@@ -23600,7 +23592,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
                 return false;
             }
             if (ident->entry && ident->entry->is_mutable &&
-                    mir_binding_has_reassignment(mt, (AstNamedNode*)binding)) {
+                    mir_binding_has_reassignment(mt, (AstDeclaratorNode*)binding)) {
                 Type* declared = variable && variable->full_type
                     ? mir_unwrap_decl_contract(variable->full_type) : NULL;
                 if (variable && declared && declared->kind == TYPE_KIND_SIMPLE &&
@@ -23617,7 +23609,7 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
                 // until mutation-aware lane tracking exists (D3.3.1).
                 return false;
             }
-            AstNode* initializer = ((AstNamedNode*)binding)->as;
+            AstNode* initializer = ((AstDeclaratorNode*)binding)->init;
             return mir_expr_proves_native_return_lane(mt, initializer, expected);
         }
         return false;
@@ -23785,8 +23777,7 @@ static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
                     loop->body, expected, return_count, wide_free)) return false;
             break;
         }
-        case AST_NODE_FOR_EXPR:
-        case AST_NODE_FOR_STAM: {
+        case AST_NODE_FOR_EXPR: {
             AstForNode* loop = (AstForNode*)current;
             if (loop->then && !mir_proc_return_values_prove(mt,
                     loop->then, expected, return_count, wide_free)) return false;
@@ -25893,10 +25884,10 @@ static bool mir_store_may_change_elem_type(TypeId elem, AstNode* value) {
         // witness merely because the parser node is stale (D2.2.2, D3.2.2).
         AstIdentNode* ident = (AstIdentNode*)value_node;
         AstNode* binding = ident->entry ? ident->entry->node : NULL;
-        if (binding && (binding->node_type == AST_NODE_ASSIGN ||
+        if (binding && (binding->node_type == AST_NODE_VARIABLE_DECLARATOR ||
                 binding->node_type == AST_NODE_PARAM)) {
             Type* contract = mir_unwrap_decl_contract(
-                mir_named_contract((AstNamedNode*)binding));
+                mir_binding_contract(binding));
             if (contract && (contract->type_id == LMD_TYPE_BOOL ||
                     contract->type_id == LMD_TYPE_FLOAT ||
                     is_integer_type_id(contract->type_id))) {
@@ -25954,10 +25945,10 @@ static bool mir_store_may_change_elem_type(TypeId elem, AstNode* value) {
             if (source_node && source_node->node_type == AST_NODE_IDENT) {
                 AstIdentNode* ident = (AstIdentNode*)source_node;
                 AstNode* binding = ident->entry ? ident->entry->node : NULL;
-                if (binding && (binding->node_type == AST_NODE_ASSIGN ||
+                if (binding && (binding->node_type == AST_NODE_VARIABLE_DECLARATOR ||
                         binding->node_type == AST_NODE_PARAM)) {
                     source_element = mir_array_occurrence_element(
-                        mir_named_contract((AstNamedNode*)binding));
+                        mir_binding_contract(binding));
                 }
             }
         }
@@ -26105,8 +26096,7 @@ static bool has_elem_type_invalidation(const char* var_name, AstNode* node, Type
             if (wh->body && has_elem_type_invalidation(var_name, wh->body, safe_elem)) return true;
             break;
         }
-        case AST_NODE_FOR_EXPR:
-        case AST_NODE_FOR_STAM: {
+        case AST_NODE_FOR_EXPR: {
             AstForNode* for_node = (AstForNode*)node;
             if (for_node->then && has_elem_type_invalidation(var_name, for_node->then, safe_elem)) return true;
             break;
@@ -26244,11 +26234,11 @@ static Type* mir_expr_candidate_shape(MirTranspiler* mt, AstNode* expr, int dept
         NameEntry* entry = ident->entry;
         if (!entry || !entry->node) return NULL;
         AstNode* decl = (AstNode*)entry->node;
-        if (decl->node_type == AST_NODE_ASSIGN) {
-            AstNamedNode* named = (AstNamedNode*)decl;
+        if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            AstDeclaratorNode* named = (AstDeclaratorNode*)decl;
             // A `var` rebound elsewhere may hold another shape; that is a guard
             // miss, not an error, so the initializer still names the candidate.
-            return mir_expr_candidate_shape(mt, named->as, depth - 1);
+            return mir_expr_candidate_shape(mt, named->init, depth - 1);
         }
         if (decl->node_type == AST_NODE_PARAM) {
             ShapeHintEntry key;
@@ -26443,11 +26433,11 @@ static TypeId mir_callsite_arg_elem_type_at(MirTranspiler* mt, AstNode* arg,
     if (unwrapped && unwrapped->node_type == AST_NODE_IDENT && depth < 4) {
         AstIdentNode* ident = (AstIdentNode*)unwrapped;
         AstNode* binding = ident->entry ? ident->entry->node : NULL;
-        if (binding && binding->node_type == AST_NODE_ASSIGN) {
-            AstNamedNode* named = (AstNamedNode*)binding;
+        if (binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+            AstDeclaratorNode* named = (AstDeclaratorNode*)binding;
             TypeId declared = mir_array_type_element_type(named->declared_type);
             if (declared != LMD_TYPE_ANY) return declared;
-            return mir_callsite_arg_elem_type_at(mt, named->as, depth + 1);
+            return mir_callsite_arg_elem_type_at(mt, named->init, depth + 1);
         }
     }
     return LMD_TYPE_ANY;
@@ -26787,7 +26777,11 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             mt->prepass_dispatched_fn = saved_dispatched;
             break;
         }
-        case AST_NODE_ASSIGN:
+        case AST_NODE_VARIABLE_DECLARATOR:
+            if (((AstDeclaratorNode*)node)->init) {
+                prepass_forward_declare(mt, ((AstDeclaratorNode*)node)->init);
+            }
+            break;
         case AST_NODE_KEY_EXPR:
         case AST_NODE_PARAM:
         case AST_NODE_NAMED_ARG: {
@@ -26849,8 +26843,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             if (if_node->otherwise) prepass_forward_declare(mt, if_node->otherwise);
             break;
         }
-        case AST_NODE_FOR_EXPR:
-        case AST_NODE_FOR_STAM: {
+        case AST_NODE_FOR_EXPR: {
             AstForNode* for_node = (AstForNode*)node;
             if (for_node->loop) prepass_forward_declare(mt, for_node->loop);
             if (for_node->let_clause) prepass_forward_declare(mt, for_node->let_clause);
@@ -27051,16 +27044,16 @@ static void prepass_create_global_vars(MirTranspiler* mt, AstNode* node) {
             AstLetNode* let_node = (AstLetNode*)node;
             AstNode* decl = let_node->declare;
             while (decl) {
-                if (decl->node_type == AST_NODE_ASSIGN) {
-                    AstNamedNode* asn = (AstNamedNode*)decl;
+                if (decl->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+                    AstDeclaratorNode* asn = (AstDeclaratorNode*)decl;
                     char name[128];
                     snprintf(name, sizeof(name), "%.*s", (int)asn->name->len, asn->name->chars);
 
                     MIR_item_t bss = create_global_var_bss(mt, name);
 
                     TypeId tid = decl->type ? decl->type->type_id : LMD_TYPE_ANY;
-                    if (tid == LMD_TYPE_ANY && asn->as && asn->as->type) {
-                        tid = asn->as->type->type_id;
+                    if (tid == LMD_TYPE_ANY && asn->init && asn->init->type) {
+                        tid = asn->init->type->type_id;
                     }
                     GlobalVarEntry entry;
                     memset(&entry, 0, sizeof(entry));
@@ -27560,7 +27553,11 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
             }
             break;
         }
-        case AST_NODE_ASSIGN:
+        case AST_NODE_VARIABLE_DECLARATOR:
+            if (((AstDeclaratorNode*)node)->init) {
+                prepass_define_functions(mt, ((AstDeclaratorNode*)node)->init);
+            }
+            break;
         case AST_NODE_KEY_EXPR:
         case AST_NODE_PARAM:
         case AST_NODE_NAMED_ARG: {
@@ -27599,8 +27596,7 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
             if (if_node->otherwise) prepass_define_functions(mt, if_node->otherwise);
             break;
         }
-        case AST_NODE_FOR_EXPR:
-        case AST_NODE_FOR_STAM: {
+        case AST_NODE_FOR_EXPR: {
             AstForNode* for_node = (AstForNode*)node;
             if (for_node->loop) prepass_define_functions(mt, for_node->loop);
             if (for_node->let_clause) prepass_define_functions(mt, for_node->let_clause);
@@ -28310,11 +28306,11 @@ static void register_module_pub_fns(AstImportNode* imp) {
             // so we register the lookup result under that key regardless of format.
             AstNode* declare = ((AstLetNode*)mod_child)->declare;
             while (declare) {
-                AstNamedNode* named = (AstNamedNode*)declare;
+                AstDeclaratorNode* named = (AstDeclaratorNode*)declare;
                 if (named->name) {
                     // Import key (what the consumer's MIR_new_import uses)
                     StrBuf* import_key = strbuf_new_cap(64);
-                    write_var_name(import_key, named, NULL);  // e.g. "_pi"
+                    write_var_name(import_key, declare, NULL);  // e.g. "_pi"
                     // MIR Direct BSS name: "_gvar_<rawname>"
                     char gvar[200];
                     snprintf(gvar, sizeof(gvar), "_gvar_%.*s", (int)named->name->len, named->name->chars);

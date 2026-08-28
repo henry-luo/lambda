@@ -140,7 +140,7 @@ void* alloc_const(Transpiler* tp, size_t size);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_fn_name_ex(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import, const char* suffix);
-void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import);
+void write_var_name(StrBuf *strbuf, AstNode *node, AstImportNode* import);
 bool needs_fn_call_wrapper(AstFuncNode* fn_node);
 
 // Shared AST/MIR helpers.

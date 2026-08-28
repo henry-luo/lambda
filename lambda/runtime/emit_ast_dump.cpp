@@ -168,6 +168,7 @@ static const char* ast_dump_kind_name(AstNodeType type) {
         case AST_NODE_MEMBER_ASSIGN_STAM: return "AST_NODE_MEMBER_ASSIGN_STAM";
         case AST_NODE_PIPE_FILE_STAM: return "AST_NODE_PIPE_FILE_STAM";
         case AST_NODE_TYPE_STAM: return "AST_NODE_TYPE_STAM";
+        case AST_NODE_VARIABLE_DECLARATOR: return "AST_NODE_VARIABLE_DECLARATOR";
         case AST_NODE_PATH_EXPR: return "AST_NODE_PATH_EXPR";
         case AST_NODE_PATH_INDEX_EXPR: return "AST_NODE_PATH_INDEX_EXPR";
         case AST_NODE_NAVIGATION_EXPR: return "AST_NODE_NAVIGATION_EXPR";
@@ -346,12 +347,16 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             emit_lambda_dump_field(source, "body", arm->body, indent + 1);
             break;
         }
-        case AST_NODE_LET_STAM:
-        case AST_NODE_PUB_STAM:
-        case AST_NODE_TYPE_STAM:
+        case AST_NODE_LET_STAM: case AST_NODE_VAR_STAM:
+        case AST_NODE_PUB_STAM: case AST_NODE_TYPE_STAM:
             emit_lambda_dump_list(source, "declare", ((AstLetNode*)node)->declare, indent + 1);
             break;
-        case AST_NODE_ASSIGN:
+        case AST_NODE_VARIABLE_DECLARATOR: {
+            AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
+            emit_dump_string_field("name", declarator->name);
+            emit_lambda_dump_field(source, "init", declarator->init, indent + 1);
+            break;
+        }
         case AST_NODE_KEY_EXPR:
         case AST_NODE_NAMED_ARG: {
             AstNamedNode* named = (AstNamedNode*)node;
@@ -396,8 +401,7 @@ static void emit_lambda_dump_node(const char* source, AstNode* node, int indent)
             emit_lambda_dump_field(source, "new", key->new_expr, indent + 1);
             break;
         }
-        case AST_NODE_FOR_EXPR:
-        case AST_NODE_FOR_STAM: {
+        case AST_NODE_FOR_EXPR: {
             AstForNode* for_node = (AstForNode*)node;
             emit_lambda_dump_list(source, "loop", for_node->loop, indent + 1);
             emit_lambda_dump_list(source, "let", for_node->let_clause, indent + 1);

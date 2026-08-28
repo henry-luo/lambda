@@ -492,14 +492,11 @@ typedef struct AstBinaryNode : AstNode {
 
 typedef AstBinaryNode AstPipeNode;
 
-// for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_PARAM
+// for AST_NODE_KEY_EXPR, AST_NODE_PARAM, and AST_NODE_NAMED_ARG
 typedef struct AstNamedNode : AstNode {
     String* name;
     AstNode *as;
     NameEntry* entry;
-    bool is_type_definition;
-    // Kept separately from AstNode::type so a declaration can retain both its
-    // source annotation and its initializer's inferred type (`as->type`).
     Type* declared_type;
 } AstNamedNode;
 
@@ -625,7 +622,7 @@ typedef struct AstAssignNode : AstNode {
     bool lhs_is_parenthesized;
 } AstAssignNode;
 
-// for AST_NODE_ASSIGN with decomposition (let a, b = expr / let a, b at expr)
+// for declaration decomposition (let a, b = expr / let a, b at expr)
 typedef struct AstDecomposeNode : AstNode {
     String** names;
     // `names` is source-facing; T0 binds through these resolved entries so a
@@ -790,6 +787,11 @@ typedef struct AstDeclaratorNode : AstNode {
     AstNode* id;
     AstNode* init;
     TsTypeAnnotationNode* ts_type;
+    // Lambda declarations retain binding metadata through the shared layout.
+    String* name;
+    NameEntry* entry;
+    bool is_type_definition;
+    Type* declared_type;
 } AstDeclaratorNode;
 
 typedef struct AstSpreadNode : AstNode {

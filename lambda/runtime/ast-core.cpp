@@ -202,6 +202,10 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
         case AST_NODE_BINARY: case AST_NODE_PIPE:
             AST_VISIT(((AstBinaryNode*)node)->left);
             AST_VISIT(((AstBinaryNode*)node)->right); break;
+        case AST_NODE_BINARY_TYPE:
+            AST_VISIT(((AstBinaryNode*)node)->left);
+            AST_VISIT(((AstBinaryNode*)node)->right); break;
+        case AST_NODE_UNARY_TYPE: AST_VISIT(((AstUnaryNode*)node)->operand); break;
         case AST_NODE_ASSIGN:
             AST_VISIT(((AstAssignNode*)node)->left);
             AST_VISIT(((AstAssignNode*)node)->right); break;
@@ -215,15 +219,21 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             AST_VISIT(((AstIfNode*)node)->cond);
             AST_VISIT(((AstIfNode*)node)->then);
             AST_VISIT(((AstIfNode*)node)->otherwise); break;
-        case AST_NODE_ARRAY: case AST_NODE_LIST: case AST_NODE_SEQ:
+        case AST_NODE_ARRAY: case AST_NODE_SEQ: case AST_NODE_CONTENT: case AST_NODE_CONTENT_TYPE:
             AST_VISIT(((AstArrayNode*)node)->item); break;
         case AST_NODE_MAP: case AST_NODE_OBJECT_LITERAL:
+            AST_VISIT(((AstMapNode*)node)->item); break;
+        case AST_NODE_LIST_TYPE: case AST_NODE_ARRAY_TYPE:
+            AST_VISIT(((AstArrayNode*)node)->item); break;
+        case AST_NODE_MAP_TYPE: case AST_NODE_ELMT_TYPE:
             AST_VISIT(((AstMapNode*)node)->item); break;
         case AST_NODE_PROPERTY:
             AST_VISIT(((AstPropertyNode*)node)->key);
             AST_VISIT(((AstPropertyNode*)node)->value); break;
-        case AST_NODE_KEY_EXPR: case AST_NODE_PARAM:
+        case AST_NODE_KEY_EXPR: case AST_NODE_PARAM: case AST_NODE_NAMED_ARG:
+        case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
             AST_VISIT(((AstNamedNode*)node)->as); break;
+        case AST_NODE_DECOMPOSE: AST_VISIT(((AstDecomposeNode*)node)->as); break;
         case AST_NODE_MATCH_EXPR:
             AST_VISIT(((AstMatchNode*)node)->scrutinee);
             AST_VISIT(((AstMatchNode*)node)->first_arm); break;
@@ -241,7 +251,15 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             AST_VISIT(((AstWhileNode*)node)->cond); AST_VISIT(((AstWhileNode*)node)->body); break;
         case AST_NODE_RETURN_STAM: case AST_NODE_RAISE_STAM: case AST_NODE_RAISE_EXPR:
             AST_VISIT(((AstReturnNode*)node)->value); break;
+        case AST_NODE_ASSIGN_STAM:
+            AST_VISIT(((AstAssignStamNode*)node)->value); break;
+        case AST_NODE_INDEX_ASSIGN_STAM: case AST_NODE_MEMBER_ASSIGN_STAM:
+            AST_VISIT(((AstCompoundAssignNode*)node)->object);
+            AST_VISIT(((AstCompoundAssignNode*)node)->key);
+            AST_VISIT(((AstCompoundAssignNode*)node)->value); break;
         case AST_NODE_VAR_STAM: AST_VISIT(((AstVarDeclNode*)node)->declarations); break;
+        case AST_NODE_LET_STAM: case AST_NODE_PUB_STAM: case AST_NODE_TYPE_STAM:
+            AST_VISIT(((AstLetNode*)node)->declare); break;
         case AST_NODE_VARIABLE_DECLARATOR:
             AST_VISIT(((AstDeclaratorNode*)node)->id); AST_VISIT(((AstDeclaratorNode*)node)->init); break;
         case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM:
@@ -254,6 +272,10 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             AST_VISIT(((AstCatchNode*)node)->param); AST_VISIT(((AstCatchNode*)node)->body); break;
         case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC: case AST_NODE_ARROW_FUNC:
             AST_VISIT(((AstFuncNode*)node)->param); AST_VISIT(((AstFuncNode*)node)->body); break;
+        case AST_NODE_HANDLER_EXPR: case AST_NODE_HANDLER_STAM:
+            AST_VISIT(((AstHandlerNode*)node)->operand); AST_VISIT(((AstHandlerNode*)node)->body);
+            AST_VISIT(((AstHandlerNode*)node)->value_body); break;
+        case AST_NODE_START: AST_VISIT(((AstStartNode*)node)->call); break;
         case AST_NODE_METHOD:
             AST_VISIT(((AstMethodNode*)node)->key); AST_VISIT(((AstMethodNode*)node)->param);
             AST_VISIT(((AstMethodNode*)node)->body); break;
