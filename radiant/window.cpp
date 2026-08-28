@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <strings.h>  // for strcasecmp
+#include <math.h>
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/log.h"
@@ -268,7 +269,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
     // For HTTP/HTTPS URLs, always route to HTML loader regardless of extension
     if (strncmp(filename, "http://", 7) == 0 || strncmp(filename, "https://", 8) == 0) {
         log_debug("Loading as remote HTML document (HTTP/HTTPS)");
-        return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
+        return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
     }
 
     DocFormat format = detect_doc_format(filename);
@@ -276,7 +277,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
     switch (format) {
         case DOC_FORMAT_HTML:
             log_debug("Loading as HTML document");
-            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
 
         case DOC_FORMAT_MARKDOWN: {
             log_debug("Loading as Markdown document");
@@ -293,12 +294,12 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
             log_debug("Loading as LaTeX document");
             // Use HTML conversion pipeline (LaTeX→HTML)
             log_info("Using LaTeX→HTML pipeline for LaTeX");
-            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
         }
 
         case DOC_FORMAT_XML:
             log_debug("Loading as XML document with CSS stylesheet");
-            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
 
         case DOC_FORMAT_RST:
             log_warn("RST format not yet implemented");
@@ -307,7 +308,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         case DOC_FORMAT_LAMBDA_SCRIPT:
             log_debug("Loading as Lambda script document");
             // load_html_doc will detect .ls extension and route to load_lambda_script_doc
-            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
 
         case DOC_FORMAT_WIKI: {
             log_debug("Loading as Wiki document");
@@ -323,17 +324,17 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
         case DOC_FORMAT_PDF:
             log_debug("Loading as PDF document");
             // load_html_doc will detect .pdf extension and route to load_pdf_doc
-            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
 
         case DOC_FORMAT_SVG:
             log_debug("Loading as SVG document");
             // load_html_doc will detect .svg extension and route to load_svg_doc
-            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
 
         case DOC_FORMAT_IMAGE:
             log_debug("Loading as image document");
             // load_html_doc will detect image extensions and route to load_image_doc
-            return load_html_doc(base_url, (char*)filename, width, height, 1.0f, js_host_config);
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config);
 
         case DOC_FORMAT_TEXT:
             log_debug("Loading as text document (source view)");
@@ -678,6 +679,14 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     do_redraw = 1;
 }
 
+void window_content_scale_callback(GLFWwindow* window, float scale_x, float scale_y) {
+    (void)window;
+    // Framebuffer and content-scale callbacks may arrive separately. The render
+    // turn queries both window and framebuffer sizes and publishes them once.
+    log_debug("Window content scale changed to: %.3f x %.3f", scale_x, scale_y);
+    do_redraw = 1;
+}
+
 void window_refresh_callback(GLFWwindow *window) {
     render(window);
     do_redraw = 0;
@@ -733,9 +742,12 @@ void repaint_window() {
 }
 
 void render(GLFWwindow* window) {
-    // get window size
+    // Query both domains in one turn so independently delivered platform
+    // notifications cannot expose half-updated metrics to layout or paint.
     int width, height;
+    int logical_width, logical_height;
     glfwGetFramebufferSize(window, &width, &height);
+    glfwGetWindowSize(window, &logical_width, &logical_height);
 
     // set up OpenGL viewport and projection for 2D rendering
     glViewport(0, 0, width, height);
@@ -807,19 +819,33 @@ void render(GLFWwindow* window) {
         }
     }
 
-    // reflow the document if window size has changed
-    if (width != ui_context.window_width || height != ui_context.window_height) {
-        log_debug("render: window size changed to %dx%d, reflowing", width, height);
+    float scale_x = logical_width > 0 ? (float)width / logical_width : 1.0f;
+    float scale_y = logical_height > 0 ? (float)height / logical_height : 1.0f;
+    bool scale_changed = ui_context_set_device_scale(&ui_context, scale_x, scale_y);
+    bool framebuffer_changed = width != ui_context.window_width ||
+        height != ui_context.window_height;
+    bool viewport_changed = logical_width != ui_context.viewport_width ||
+        logical_height != ui_context.viewport_height;
+
+    if (framebuffer_changed) {
+        ui_context.window_width = width;
+        ui_context.window_height = height;
+        ui_context_create_surface(&ui_context, width, height);
+        if (ui_context.document && ui_context.document->state) {
+            doc_state_mark_dirty(ui_context.document->state);
+        }
+    }
+
+    // Device scale only invalidates physical resources. Reflow is reserved for
+    // a real logical viewport change.
+    if (viewport_changed) {
+        log_debug("render: logical viewport changed to %dx%d, reflowing",
+                  logical_width, logical_height);
         double start_time = glfwGetTime();
-        ui_context.window_width = width;  ui_context.window_height = height;
-        // CRITICAL: Update viewport dimensions (CSS logical pixels) for layout
-        // This ensures vh/vw units and percentage heights use the correct window size
-        ui_context.viewport_width = (int)(width / ui_context.pixel_ratio);
-        ui_context.viewport_height = (int)(height / ui_context.pixel_ratio);
+        ui_context.viewport_width = logical_width;
+        ui_context.viewport_height = logical_height;
         log_debug("render: updated viewport to %dx%d CSS pixels",
                   (int)ui_context.viewport_width, (int)ui_context.viewport_height);
-        // resize the surface
-        ui_context_create_surface(&ui_context, width, height);
         // reflow the document
         if (ui_context.document) {
             reflow_html_doc(ui_context.document);
@@ -832,6 +858,8 @@ void render(GLFWwindow* window) {
             doc_state_mark_dirty(ui_context.document->state);
         }
         log_debug("Reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
+    } else if (scale_changed) {
+        log_debug("render: device scale changed; repainting without reflow");
     }
 
     // Check for incremental reflow due to state changes (pseudo-classes, etc.)
@@ -942,7 +970,26 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
     log_info("VIEW_DOC_IN_WINDOW STARTED with file: %s, source: %s, event_file: %s, headless: %d",
              doc_file ? doc_file : "NULL", doc_source ? "memory" : "file",
              event_file ? event_file : "NULL", headless);
-    ui_context_init(&ui_context, headless, 0.0f);
+
+    // Load fixture metrics before constructing fonts and the raster surface.
+    // Event coordinates remain logical; pixel_ratio controls only the device side.
+    EventSimContext* sim_ctx = NULL;
+    if (event_file) {
+        size_t event_file_len = strlen(event_file);
+        bool replay_jsonl = event_file_len >= 6 && strcmp(event_file + event_file_len - 6, ".jsonl") == 0;
+        sim_ctx = replay_jsonl ? event_sim_load_replay_log(event_file) : event_sim_load(event_file);
+        if (!sim_ctx) {
+            log_error("Failed to load event file: %s", event_file);
+        } else {
+            log_info("Event simulation loaded: %d events", sim_ctx->events->length);
+        }
+    }
+    float requested_device_scale = headless && sim_ctx ? sim_ctx->pixel_ratio : 0.0f;
+    if (ui_context_init(&ui_context, headless, requested_device_scale) != 0) {
+        if (sim_ctx) event_sim_free(sim_ctx);
+        log_cleanup();
+        return -1;
+    }
     ui_context.event_log_enabled = enable_event_log;
     ui_context.state_dump_enabled = enable_state_dump;
 
@@ -955,22 +1002,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
               ui_context.window_width, ui_context.window_height, ui_context.pixel_ratio);
     GLFWwindow* window = ui_context.window;
     if (!headless && !window) {
+        if (sim_ctx) event_sim_free(sim_ctx);
         ui_context_cleanup(&ui_context);
         return -1;
-    }
-
-    // Load event simulation if specified
-    EventSimContext* sim_ctx = NULL;
-    if (event_file) {
-        size_t event_file_len = strlen(event_file);
-        bool replay_jsonl = event_file_len >= 6 && strcmp(event_file + event_file_len - 6, ".jsonl") == 0;
-        sim_ctx = replay_jsonl ? event_sim_load_replay_log(event_file) : event_sim_load(event_file);
-        if (!sim_ctx) {
-            log_error("Failed to load event file: %s", event_file);
-            // Continue without simulation
-        } else {
-            log_info("Event simulation loaded: %d events", sim_ctx->events->length);
-        }
     }
 
     int width, height;
@@ -988,25 +1022,42 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         log_info("Mouse button callback registered: %p", mouse_button_callback);
         glfwSetScrollCallback(window, scroll_callback);  // receive mouse/touchpad scroll input
         glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+        glfwSetWindowContentScaleCallback(window, window_content_scale_callback);
         glfwSetWindowRefreshCallback(window, window_refresh_callback);
 
         glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light grey color
 
+        int logical_width = 0, logical_height = 0;
         glfwGetFramebufferSize(window, &width, &height);
+        glfwGetWindowSize(window, &logical_width, &logical_height);
         framebuffer_size_callback(window, width, height);
 
         // CRITICAL: Update ui_context dimensions to match actual framebuffer size
         // This ensures the initial layout uses the correct viewport dimensions
         ui_context.window_width = width;
         ui_context.window_height = height;
-        ui_context.viewport_width = (int)(width / ui_context.pixel_ratio);
-        ui_context.viewport_height = (int)(height / ui_context.pixel_ratio);
+        ui_context_set_device_scale(&ui_context,
+            logical_width > 0 ? (float)width / logical_width : 1.0f,
+            logical_height > 0 ? (float)height / logical_height : 1.0f);
+        ui_context.viewport_width = logical_width;
+        ui_context.viewport_height = logical_height;
         log_debug("view_doc_in_window: updated viewport to %dx%d CSS pixels (framebuffer %dx%d)",
                   (int)ui_context.viewport_width, (int)ui_context.viewport_height, width, height);
     } else {
         // Headless mode: use default dimensions from ui_context_init
         width = (int)ui_context.window_width;
         height = (int)ui_context.window_height;
+    }
+
+    if (sim_ctx && sim_ctx->viewport_width > 0 && sim_ctx->viewport_height > 0) {
+        ui_context.viewport_width = sim_ctx->viewport_width;
+        ui_context.viewport_height = sim_ctx->viewport_height;
+        width = (int)lroundf(sim_ctx->viewport_width * ui_context.device_scale_x); // INT_CAST_OK: physical surface width
+        height = (int)lroundf(sim_ctx->viewport_height * ui_context.device_scale_y); // INT_CAST_OK: physical surface height
+        ui_context.window_width = width;
+        ui_context.window_height = height;
+        log_info("event_sim: viewport override to %dx%d logical pixels, surface %dx%d",
+                 sim_ctx->viewport_width, sim_ctx->viewport_height, width, height);
     }
 
     // Recreate surface with correct dimensions
@@ -1047,17 +1098,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         }
 
         // CSS media queries should use CSS pixels (logical pixels), not physical pixels
-        int css_width = (int)(width / ui_context.pixel_ratio);
-        int css_height = (int)(height / ui_context.pixel_ratio);
-
-        // Apply viewport override from event simulation if specified
-        if (sim_ctx && sim_ctx->viewport_width > 0 && sim_ctx->viewport_height > 0) {
-            css_width = sim_ctx->viewport_width;
-            css_height = sim_ctx->viewport_height;
-            ui_context.viewport_width = css_width;
-            ui_context.viewport_height = css_height;
-            log_info("event_sim: viewport override to %dx%d CSS pixels", css_width, css_height);
-        }
+        int css_width = (int)ui_context.viewport_width;
+        int css_height = (int)ui_context.viewport_height;
 
         // Static headless smoke renders do not need retained JS event state after
         // load-time scripts have mutated the DOM. Interactive windows and event

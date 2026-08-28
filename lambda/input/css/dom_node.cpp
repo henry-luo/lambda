@@ -101,6 +101,66 @@ const char* DomNode::source_loc() const {
 // Tree Manipulation Implementation
 // ============================================================================
 
+static bool dom_node_is_generated_after(DomNode* node) {
+    return node && node->is_element() && node->node_name() &&
+        strcmp(node->node_name(), "::after") == 0;
+}
+
+void dom_append_to_sibling_chain(DomElement* parent, DomNode* child) {
+    if (!parent || !child) return;
+    dom_node_cancel_detached(parent->doc, child);
+    child->parent = parent;
+    child->next_sibling = nullptr;
+    if (!parent->first_child) {
+        parent->first_child = child;
+        parent->last_child = child;
+        child->prev_sibling = nullptr;
+        return;
+    }
+
+    DomNode* last = parent->last_child;
+    if (!last) {
+        last = parent->first_child;
+        while (last->next_sibling) last = last->next_sibling;
+    }
+    if (dom_node_is_generated_after(last)) {
+        DomNode* previous = last->prev_sibling;
+        child->prev_sibling = previous;
+        child->next_sibling = last;
+        if (previous) previous->next_sibling = child;
+        else parent->first_child = child;
+        last->prev_sibling = child;
+        return;
+    }
+    last->next_sibling = child;
+    child->prev_sibling = last;
+    parent->last_child = child;
+}
+
+void dom_move_generated_after_to_end(DomElement* parent) {
+    if (!parent || !parent->first_child || !parent->last_child) return;
+    DomNode* after = nullptr;
+    for (DomNode* child = parent->first_child; child; child = child->next_sibling) {
+        if (dom_node_is_generated_after(child)) {
+            after = child;
+            break;
+        }
+    }
+    if (!after || after == parent->last_child) return;
+
+    DomNode* previous = after->prev_sibling;
+    DomNode* next = after->next_sibling;
+    if (previous) previous->next_sibling = next;
+    else parent->first_child = next;
+    if (next) next->prev_sibling = previous;
+
+    DomNode* last = parent->last_child;
+    last->next_sibling = after;
+    after->prev_sibling = last;
+    after->next_sibling = nullptr;
+    parent->last_child = after;
+}
+
 bool DomNode::append_child(DomNode* child) {
     if (!child) {
         log_error("DomNode::append_child: NULL child");
@@ -123,29 +183,7 @@ bool DomNode::append_child(DomNode* child) {
 
     // Cast to DomElement to access first_child
     DomElement* element = static_cast<DomElement*>(this);
-
-    // Add to parent's child list
-    child->next_sibling = nullptr;
-    if (!element->first_child) {
-        // First child
-        element->first_child = child;
-        element->last_child = child;
-        child->prev_sibling = nullptr;
-    } else if (element->last_child) {
-        // Use last_child for O(1) append
-        element->last_child->next_sibling = child;
-        child->prev_sibling = element->last_child;
-        element->last_child = child;
-    } else {
-        // last_child not tracked — walk to end
-        DomNode* last = element->first_child;
-        while (last->next_sibling) {
-            last = last->next_sibling;
-        }
-        last->next_sibling = child;
-        child->prev_sibling = last;
-        element->last_child = child;
-    }
+    dom_append_to_sibling_chain(element, child);
 
     return true;
 }

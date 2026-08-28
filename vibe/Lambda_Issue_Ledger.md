@@ -922,7 +922,113 @@ single non-thread-local flag: concurrent compilation/execution that wants
 per-run dry-run semantics has no per-context override. Cross-link: RG1–RG14 in
 [Runtime globals audit].
 
-<a id="lr12-9"></a>**LR12-9 · Construction/insertion aliases instead of capturing by value (`S9.3.1`) · OPEN**
+<a id="lr12-9"></a>**LR12-9 · Construction/insertion aliases instead of capturing by value (`S9.3.1`) · IMPLEMENTED BEHIND A FLAG**
+
+**Update 2026-08-28.** Insertion capture is implemented on both tiers behind
+`LAMBDA_COW_CAPTURE` (default OFF). With the flag set, all four probes below
+return the ruled value, the two-node cycle is no longer constructible, and
+`awfy/richards3` still passes. Mechanism: capture is `cow_mark_shared` at the
+insertion site — the copy stays deferred to `cow_prepare_write`, so nothing is
+eagerly cloned. It is decided at COMPILE time and applied only to a *named*
+value (`ast_expr_insertion_needs_capture`): a freshly produced container has no
+second observer, and marking one would make `rows[i] = <fresh>` detach on the
+owner's first write. MIR Direct additionally needed the static half — it picks
+the store form from `MirVarEntry::cow_marked` at compile time, so an unflagged
+binding keeps emitting raw field stores that never read the runtime bit
+(`mir_note_value_captured` / `mir_emit_value_capture`).
+
+**Why it is not yet the default.** Insertion capture is sound alone, but element
+and field READS still borrow (the open C4.1 half). Once a slot holds a captured
+value, the get-modify idiom `c = owner[i]` … `c[j] = v` writes to a detached
+copy and the update is lost. Measured cost of flipping it: exactly **four**
+corpus scripts, all that idiom — `proc/proc_fill_gc_nested`,
+`awfy/{cd2_orig,deltablue,deltablue2}`. Three are benchmark sources (`cd2_orig`
+is a perf *control*), so the rewrite is a scoping decision, not a mechanical
+fix. The sanctioned rewrites are the path write (`owner[i][j] = v`, which
+`cow_path_set` already propagates correctly), mutate-then-insert, or the
+explicit read-modify-write handle store (`C4.2e`) that `richards3` uses.
+`S9.1.3` plain-parameter snapshots remain unimplemented and are still expected
+to land with this. The nested-mutation design that lets the flag become the
+default is now written:
+[`Lambda_Design_Nested_Mutation.md`](Lambda_Design_Nested_Mutation.md)
+(CW22–CW28, PROPOSED, owner of `SO14`). Its scheduling result is that the flip
+is gated on **CW24** — a compile error for a mutated place copy — which turns
+silent wrong answers into located, mechanical fixes.
+
+**CW24 implemented 2026-08-28** (worktree, not yet merged), gated on the same
+`LAMBDA_COW_CAPTURE` switch: `error[E232]`, raised in `build_ast` so both tiers
+share it. Two corrections fell out of building it, recorded in the design doc
+§6.1: (a) the check must DEFER to end-of-function, because read-modify-**write-
+back** (`p = w.pkts[i]` … `w.pkts[i] = p`) is the sanctioned C4.2e idiom and is
+indistinguishable from the bug at the mutation site — a mutation-site check
+rejects `awfy/richards3.ls`, the model's own worked example; (b) the migration
+is **nine** scripts, not four. The extra five (`proc_markup_mutation`,
+`proc_param_typed_container_write`, `proc_view_mutable`,
+`typed_map_write_child_ownership`, `r7rs/mbrot2`) still work today only because
+insertion capture marks named values only, so containers filled with fresh
+values still hand back borrowable children. `proc_view_mutable` is the notable
+one: it pins `var row = m[1]` as a write-through view *binding*, which S9.2.2
+already forbids, so CW24 enforces part of Stage-2's CW16.3 confinement early —
+and that family needs CW25 before it has a legal spelling.
+
+**CW25 implemented 2026-08-28** (same worktree, same flag). Path borrows
+(`f(var m.rows[i])`) now detach the whole spine before the call on BOTH tiers,
+via one new runtime helper `cow_path_borrow` plus a hook at each tier's
+argument site. Before this they aliased — a write through `m.rows` reached the
+original binding, a standing violation of the ratified S9.2.2 ("a mutable
+borrow over shared storage un-shares first"). Verified at depth 1 and 2 on both
+tiers; no new test failures (still exactly the 9 E232 from CW24), and the view
+family's migration is proven: `write_row(m[1])` produces the `99 5 88` that
+`proc_view_mutable` expects.
+
+The design's specified third step — install the leaf back on return — turned
+out to be **unnecessary** and was dropped (design doc rev 4). Both tiers run
+the borrow protocol as detach-then-mutate-in-place, and `var` parameters use
+the in-place checked setters, so a detached leaf is already installed where it
+belongs.
+
+**`E207` closed 2026-08-28**: annotated path borrows (`pn f(var r: any[])`
+called as `f(m.rows)`) now compile and borrow on both tiers. The exact-match
+rule for `var` arguments was NOT relaxed — it exists because a callee writes
+through the borrow and must not see a mismatched representation. The real
+defect was that a place's node type is `any` (a member read does not propagate
+its field's declared type, TIG1), so the check compared against a type nobody
+had computed. It now resolves the declared type *through the path* via
+`declared_compound_destination_type` — the walker the assignment side already
+uses for annotated destinations — before reporting. A genuine mismatch
+(`var r: int[]` against a declared `any[]` field) is still rejected. This
+covers annotated roots only; general TIG1 carrier-read propagation stays open.
+
+**Corpus migration 2026-08-28: 8 of 9 done, flag-on failures 9 → 1.** Goldens
+unchanged in every migrated case, each passing with the flag on and off:
+`r7rs/mbrot2` + `proc_fill_gc_nested` → path writes; `proc_view_mutable` → a
+`var`-parameter borrow (the CW25 spelling S9.2.2 requires of a write-through
+view); `proc_param_typed_container_write`, `typed_map_write_child_ownership`,
+`proc_markup_mutation` → read-modify-write-back (C4.2e).
+
+The remaining three were stopped deliberately, as they are structural rather
+than spelling problems (design doc §B.1). `awfy/cd2_orig` needs a cascading
+`var`-signature migration through every caller — attempted and reverted, and it
+is also the *comparable source* perf control for `cd2`. `awfy/deltablue` and
+`deltablue2` are constraint graphs needing the C4.2e handle-store rewrite.
+**`deltablue2.ls` has since been ported** (in place, golden unchanged): one `w`
+world owns `w.vars`/`w.cons`, every Variable-valued field (`out`, `v1`, `v2`,
+`sc`, `off`) holds a variable id, constraint lists and plans hold cids, planner
+state moved onto the world, and `w` is the single `var` parameter. Passes with
+the flag on, both tiers, zero `E232`. **`deltablue.ls` followed**, derived from
+that port with its annotations stripped, so the typed/untyped pair still
+differs only in signatures (138 lines, all annotations). Only `awfy/cd2_orig`
+remains.
+
+Two engine findings fell out, both pre-existing: **NM-O8** — a nested path
+write through a *plain* `pn` parameter is not published to the caller while a
+flat one is (both tiers agree; it is what makes `cd2_orig` cascade) — and a T0
+scratch-planner under-budget for the nested-path assignment branch
+(`interp: scratch overflow depth=5 cap=5`, write silently dropped), reproduced
+on pristine master and **fixed** here.
+
+Original record (behavior with the flag unset) follows.
+
 Probed 2026-08-27 on `ba7ce817c`, interpreter and `LAMBDA_TIER=jit` alike.
 `S9.3.1` rules that placing a value into a container captures it **by value** at
 every constructor and insertion point; none of them do:

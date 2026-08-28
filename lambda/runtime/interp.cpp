@@ -1801,6 +1801,10 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
         if (item->node_type == AST_NODE_PIPE) array_push_spread_all(arr, value);
         else if (has_spreadable || item->node_type == AST_NODE_SPREAD) {
             array_push_spread(arr, value);
+        } else if (ast_expr_insertion_needs_capture(item)) {
+            // S9.3.1: only a NAMED element needs capture; a fresh one has no
+            // second observer.
+            array_push_capture(arr, value);
         } else {
             array_push(arr, value);
         }
@@ -1831,7 +1835,12 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
     for (AstNode* item = node->item; item; item = item->next) {
         AstNode* value_node = item->node_type == AST_NODE_KEY_EXPR
             ? ((AstNamedNode*)item)->as : item;
-        words[vi++] = value_node ? eval_expr(f, value_node).item : ItemNull.item;
+        Item value = value_node ? eval_expr(f, value_node) : ItemNull;
+        // S9.3.1: a named field value is captured into the literal.
+        if (value_node && ast_expr_insertion_needs_capture(value_node)) {
+            cow_capture_value(value);
+        }
+        words[vi++] = value.item;
     }
     Map* built = map_with_type_tl(map_type, f->module->type_list);
     if (!built) return ItemError;
@@ -1852,7 +1861,10 @@ static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
     for (int index = 0; index < field_count && field; index++, field = field->next) {
         AstNode* value_node = ast_object_literal_value_for_shape(node, field);
         if (value_node) {
-            words[index] = eval_expr(f, value_node).item;
+            Item value = eval_expr(f, value_node);
+            // S9.3.1: a named field value is captured into the literal.
+            if (ast_expr_insertion_needs_capture(value_node)) cow_capture_value(value);
+            words[index] = value.item;
         } else if (spread_node && field->name) {
             // Preserve `*:source` fields before typed storage conversion; an
             // omitted float/int field must not be sent to set_field_value as a
@@ -2888,7 +2900,12 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
     for (AstNode* a = node->item; a; a = a->next) {
         AstNode* value_node = a->node_type == AST_NODE_KEY_EXPR
             ? ((AstNamedNode*)a)->as : a;
-        attr_words[ai++] = value_node ? eval_expr(f, value_node).item : ItemNull.item;
+        Item value = value_node ? eval_expr(f, value_node) : ItemNull;
+        // S9.3.1: a named attribute value is captured into the element.
+        if (value_node && ast_expr_insertion_needs_capture(value_node)) {
+            cow_capture_value(value);
+        }
+        attr_words[ai++] = value.item;
         if (interp_frame_pending(f)) return ItemNull;
     }
 
@@ -4199,6 +4216,12 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Item value = eval_expr(f, ca->value);
         if (interp_frame_pending(f)) return ItemNull;
         value_slot.set(value);
+        // S9.3.1: a named value stored into a container is captured, so later
+        // writes through the source binding detach instead of aliasing the slot.
+        // The setters below are shared with raw/host paths and carry no policy.
+        if (ast_expr_insertion_needs_capture(ca->value)) {
+            cow_capture_value(value_slot.get());
+        }
 
         if (ca->key && ca->key->next) {
             int64_t indices[AST_COW_PATH_MAX] = {};

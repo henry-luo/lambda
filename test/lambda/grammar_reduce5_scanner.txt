@@ -1,1 +1,1 @@
-[/.root.branch, .relative.branch, 1, 3, 2, 0.5, 0.123, 7, "ab"]
+[/.root.branch, \.relative.branch, 1, 3, 2, 0.5, 0.123, 7, "ab"]

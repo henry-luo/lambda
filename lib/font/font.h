@@ -55,6 +55,10 @@ typedef struct FontContextConfig {
 FontContext* font_context_create(FontContextConfig* config);
 void         font_context_destroy(FontContext* ctx);
 
+// Update the device raster scale without changing logical font sizes. Physical
+// face/glyph caches are invalidated; retained callers resolve new handles lazily.
+bool font_context_set_pixel_ratio(FontContext* ctx, float pixel_ratio);
+
 // trigger font directory scanning (auto-called on first lookup if needed)
 bool font_context_scan(FontContext* ctx);
 

@@ -14,9 +14,9 @@ This proposal targets **MIR Direct transpiler performance enhancements** — spe
 
 ### Prior Art
 
-- [Lambda_Transpile_Restructure.md](Lambda_Transpile_Restructure.md) — Dual-version function generation (`_n`/`_b`) in C2MIR, structured returns (`RetItem`)
-- [Lambda_Transpile_Restructure2.md](Lambda_Transpile_Restructure2.md) — JIT header diet, O(1) sys func lookup, config-driven code gen
-- [Lambda_Transpile_Restructure3.md](Lambda_Transpile_Restructure3.md) — P1/P5/B2/CSI/D1/D3-MIR optimizations, body-usage type inference
+- [Lambda_Transpile_Restructure (retired).md](Lambda_Transpile_Restructure%20(retired).md) — Dual-version function generation (`_n`/`_b`) in C2MIR, structured returns (`RetItem`)
+- [Lambda_Transpile_Restructure2 (retired).md](Lambda_Transpile_Restructure2%20(retired).md) — JIT header diet, O(1) sys func lookup, config-driven code gen
+- [Lambda_Transpile_Restructure3 (retired).md](Lambda_Transpile_Restructure3%20(retired).md) — P1/P5/B2/CSI/D1/D3-MIR optimizations, body-usage type inference
 
 This Phase 4 focuses on **MIR Direct calling convention optimization, function inlining, and additional hot-path improvements**.
 

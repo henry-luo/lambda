@@ -528,6 +528,13 @@ static Item node_process_getgroups(void) {
 }
 #endif
 
+// avoid Clang 14's designated-initializer failure in instantiated templates.
+static Item node_process_item_from_word(uint64_t word) {
+    Item result = {};
+    result.item = word;
+    return result;
+}
+
 template <typename Target>
 static bool node_process_install_method_on(Item owner, const char* name,
         Target target, int adapter_arity) {
@@ -550,8 +557,8 @@ static bool node_process_install_method_on(Item owner, const char* name,
         adapter_arity);
     *function_root = callback.item;
     // Both key and callback allocation can move process before publication.
-    node_process_host->value->property_set((Item){.item = *process_root},
-        (Item){.item = *key_root}, (Item){.item = *function_root});
+    node_process_host->value->property_set(node_process_item_from_word(*process_root),
+        node_process_item_from_word(*key_root), node_process_item_from_word(*function_root));
     node_process_host->node->roots->root_frame_end(&frame);
     return true;
 }

@@ -285,6 +285,9 @@ bool layout_element_inline_axis_is_vertical(DomElement* element);
 CssEnum layout_element_css_writing_mode(DomElement* element);
 WritingMode layout_element_writing_mode(DomElement* element);
 bool layout_inline_element_is_orthogonal(DomElement* element);
+// CSS 2.2 §9.2.1.1: block-in-inline fragments cannot collapse through a
+// parent when the inline box follows prior in-flow content.
+bool layout_inline_has_prior_in_flow_content(DomNode* inline_box);
 CssDeclaration* layout_specified_physical_size_declaration(DomElement* element,
                                                             bool horizontal);
 CssDeclaration* layout_specified_physical_minmax_size_declaration(DomElement* element,
@@ -299,6 +302,7 @@ float layout_resolve_intrinsic_size_keyword(CssEnum keyword, float min_size,
                                             float max_size, float available_outer_size);
 float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* element,
                                            bool horizontal, float inline_base);
+bool layout_display_contents_has_block_child(DomElement* element);
 
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
@@ -334,6 +338,9 @@ float compute_text_height_at_width(LayoutContext* lycon,
 
 IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement* element,
                                                  bool content_only = false);
+IntrinsicSizes flex_measure_display_contents_intrinsic_widths(
+    LayoutContext* lycon, ViewBlock* container, DomElement* contents,
+    bool row_flex, bool wrapping, int* item_count);
 void layout_resolve_intrinsic_horizontal_margins(LayoutContext* lycon,
                                                   DomElement* element,
                                                   bool include_logical,
@@ -692,7 +699,9 @@ typedef BoxEdges LayoutInlineDecorationEdges;
 
 inline LayoutInlineDecorationEdges layout_inline_decoration_edges(ViewSpan* span) {
     LayoutInlineDecorationEdges edges = {};
-    if (!span || !span->bound) return edges;
+    // CSS Display 3: display:contents suppresses the principal box, including
+    // its inline-axis border and padding decorations.
+    if (!span || !span->bound || span->display.outer == CSS_VALUE_CONTENTS) return edges;
     BoxEdges border = layout_boundary_border_edges(span->boundary());
     BoxEdges padding = layout_boundary_padding_edges(span->boundary());
     for (int side = CSS_BOX_SIDE_TOP; side <= CSS_BOX_SIDE_LEFT; side++) {
@@ -1741,6 +1750,8 @@ typedef struct BlockContext {
 
     float text_indent;
     bool is_first_line;
+    FontProp* first_line_font;
+    bool first_line_style_active;
     // CSS Inline 3 §7.7: an initial letter shortens following line boxes at
     // its inline-start margin edge while the letter occupies those lines.
     float initial_letter_exclusion_width;
@@ -2032,8 +2043,7 @@ inline bool layout_flex_declares_display(ViewElement* element,
 
 inline bool layout_is_flex_container(ViewElement* element) {
     return element && (element->display.inner == CSS_VALUE_FLEX ||
-        layout_flex_declares_display(element, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX) ||
-        layout_embedded_flex(element));
+        layout_flex_declares_display(element, CSS_VALUE_FLEX, CSS_VALUE_INLINE_FLEX));
 }
 
 inline LayoutFlexStyleInfo layout_flex_style_info(LayoutContext* lycon,
@@ -2101,6 +2111,10 @@ typedef struct FlexContainerLayout : FlexProp {
     float main_axis_size;
     float cross_axis_size;
     bool needs_reflow;
+    // The final direct-text pass owns text geometry for this flex container.
+    bool direct_text_geometry_handled;
+    // Original container used to distinguish direct text from flattened runs.
+    ViewBlock* container;
     // Sizing mode flags (CSS Flexbox spec §9.2)
     // When true, the axis size is indefinite (fit-content/shrink-to-fit)
     // and flex-grow should NOT distribute additional space
@@ -2121,6 +2135,7 @@ typedef struct FlexContainerLayout : FlexProp {
 bool flex_item_will_stretch_cross_axis(ViewElement* item, FlexContainerLayout* flex_layout);
 bool flex_item_has_content_flex_basis(ViewElement* item);
 bool flex_item_is_anonymous_text(ViewElement* item);
+bool flex_item_contains_anonymous_text(ViewElement* item, DomText* text);
 float flex_column_item_content_extent(LayoutContext* lycon,
                                       ViewElement* item,
                                       FlexContainerLayout* flex_layout);
@@ -2977,6 +2992,9 @@ char* grid_scratch_strdup(ScratchArena* scratch, const char* source);
 void destroy_grid_area(GridArea* area);
 void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_number, bool is_row);
 int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_row);
+int collect_grid_item_nodes(LayoutContext* lycon, struct ViewBlock* container,
+                            DomNode* first_child, DomNode** nodes, int capacity,
+                            bool initialize_contents);
 int collect_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, struct ViewBlock*** items);
 void determine_grid_size(GridContainerLayout* grid_layout);
 void initialize_track_sizes(GridContainerLayout* grid_layout);
@@ -3043,6 +3061,8 @@ typedef struct LayoutContext {
     // CSS Tables 3 §3.10.2 first cell-content layout uses special handling for
     // direct percentage-height descendants while row heights are provisional.
     bool table_cell_first_row_layout;
+    // HTML details rendering keeps closed content laid out but out of parent flow.
+    bool layout_hidden_details_content;
 
     // Total node count guard against pathological layouts (fuzzer-found timeouts)
     int node_count;
@@ -3205,6 +3225,7 @@ void layout_refresh_anonymous_table_fixup_inheritance(LayoutContext* lycon,
                                                        struct DomElement* parent,
                                                        const FontProp* inherited_font = nullptr);
 bool is_table_internal_display(CssEnum display);
+bool layout_element_contains_table_internal(DomElement* element);
 bool layout_element_is_anonymous_table_fixup(const struct DomElement* element);
 bool layout_view_uses_table_grid_coordinates(View* view);
 void layout_unwrap_anonymous_table_fixups_for_dom_mutation(struct DomElement* parent);
@@ -3482,6 +3503,9 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node);
 float map_lambda_font_size_keyword(CssEnum keyword_enum);
 CssEnum map_font_weight(const CssValue* value);
 int16_t map_font_weight_numeric(const CssValue* value);
+FontProp* layout_resolve_first_line_font(LayoutContext* lycon,
+                                          DomElement* element,
+                                          FontProp* base_font);
 
 struct LayoutFontSizeResult {
     float value;
@@ -3652,6 +3676,7 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  */
 
 void line_break(LayoutContext* lycon);
+void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* span);
 void line_consume_trailing_collapsible_space(LayoutContext* lycon,
                                              bool trim_text_bounds,
                                              bool update_ancestor_bounds);
@@ -3673,6 +3698,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode* node);
 // light-DOM children remain the DOM/API tree and are projected at <slot>.
 DomNode* layout_render_child_list(DomElement* element);
 DomNode* layout_rendered_first_child_node(DomElement* element);
+bool layout_is_inline_math_box(DomNode* node);
 // CSS Shadow DOM: expose the host as the formatting parent of a direct
 // shadow-tree child while preserving the fragment's DOM parentage.
 DomElement* layout_shadow_formatting_parent(DomNode* node);
@@ -3682,6 +3708,9 @@ DomElement* find_fieldset_rendered_legend(ViewBlock* fieldset);
 void layout_block(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 void layout_text(LayoutContext* lycon, DomNode* text_node);
 void layout_inline(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
+void layout_init_display_contents_view(LayoutContext* lycon, DomElement* elem);
+bool layout_optgroup_is_native_child(DomElement* elem);
+float layout_optgroup_anonymous_line_height(LayoutContext* lycon);
 bool layout_block_resolve_intrinsic_axis_constraints(LayoutContext* lycon,
                                                      ViewBlock* block,
                                                      LayoutAxis axis,
@@ -3707,14 +3736,27 @@ static inline bool layout_text_node_has_content(DomNode* node) {
 // items; one counter keeps both scratch-array bounds derived from the same walk.
 static inline int layout_count_potential_items(ViewBlock* container,
                                                 bool include_text) {
-    int count = 0;
-    for (DomNode* child = container ? container->first_child : nullptr;
-         child; child = child->next_sibling) {
-        if (child->is_element() || (include_text && layout_text_node_has_content(child))) {
-            count++;
+    auto count_children = [&](auto&& self, DomNode* first_child) -> int {
+        int count = 0;
+        for (DomNode* child = first_child; child; child = child->next_sibling) {
+            if (child->is_element()) {
+                DisplayValue display = resolve_display_value(child);
+                if (display.outer == CSS_VALUE_CONTENTS) {
+                    count += self(self, child->as_element()->first_child);
+                } else {
+                    count++;
+                }
+            } else if (include_text) {
+                // Flex separator text can become an anonymous item after
+                // display:contents flattening, so reserve every text slot.
+                count++;
+            }
         }
-    }
-    return count;
+        return count;
+    };
+
+    return count_children(count_children,
+        container ? container->first_child : nullptr);
 }
 
 inline bool layout_dom_text_has_non_whitespace(DomText* text) {
@@ -3924,6 +3966,22 @@ static inline bool layout_css_value_any(const CssValue* value, Predicate predica
 
 static inline bool layout_element_is_floated(const DomElement* element) {
     if (!element) return false;
+    if (element->specified_style) {
+        CssEnum specified_position = layout_specified_keyword(
+            const_cast<DomElement*>(element), CSS_PROPERTY_POSITION,
+            CSS_VALUE__UNDEF);
+        if (specified_position == CSS_VALUE_ABSOLUTE ||
+            specified_position == CSS_VALUE_FIXED) {
+            return false;
+        }
+        CssEnum specified_float = layout_specified_keyword(
+            const_cast<DomElement*>(element), CSS_PROPERTY_FLOAT,
+            CSS_VALUE__UNDEF);
+        if (specified_float != CSS_VALUE__UNDEF) {
+            return specified_float == CSS_VALUE_LEFT ||
+                specified_float == CSS_VALUE_RIGHT;
+        }
+    }
     // Intrinsic passes may run before PositionProp exists, so consult cascaded
     // position/float values instead of treating an unresolved element as static.
     if (element->position) {

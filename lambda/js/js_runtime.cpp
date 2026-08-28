@@ -24,6 +24,7 @@
 #include "../runtime/gc/gc_heap.h"
 #include "../../lib/lambda_alloca.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/re2_glue.hpp"
 #include "../../lib/utf.h"
 #include <stdarg.h>
 
@@ -1176,6 +1177,13 @@ extern "C" bool js_proxy_has_callable_target(Item obj) {
 extern "C" bool js_has_call_capability(Item target) {
     TypeId type = get_type_id(target);
     if (type == LMD_TYPE_FUNC) {
+        Function* lambda_fn = target.function;
+        if (lambda_fn && (lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_FUNCTION ||
+                lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_BOXED_PROCEDURE ||
+                lambda_fn->entry_abi == FN_ENTRY_ABI_HOST_ADAPTER ||
+                lambda_fn->entry_abi == FN_ENTRY_ABI_LAMBDA_INTERPRETED)) {
+            return lambda_fn->ptr != NULL;
+        }
         JsFunction* fn = (JsFunction*)target.function;
         return fn && fn->invoke;
     }
@@ -14717,6 +14725,7 @@ struct JsRegexData {
     bool needs_utf16_subject; // legacy surrogate escapes match UTF-16 code units
     bool literal_fast;
     bool cache_owned;         // compile cache retains native matcher lifetime
+    bool re2_permanent_owned; // permanent cache retains a shared direct matcher
 };
 
 struct JsRegexCacheEntry;
@@ -14727,6 +14736,8 @@ struct JsRegExpMapCarrier {
     JsRegexData* payload;
     uint32_t virtual_property_overrides;
 };
+
+static bool js_regex_permanent_cache_contains_re2(re2::RE2* re);
 
 static uint32_t js_regexp_virtual_property_bit(const char* name, int name_len) {
     if (!name) return 0;
@@ -14803,6 +14814,13 @@ extern "C" void js_regex_map_heap_destroy(Map* map, gc_native_seen_t* seen_nativ
         if (rd->re2 == wrapper->re2) rd->re2 = nullptr;
         js_regex_compiled_free(wrapper);
     }
+    if (rd->re2 && !rd->re2_permanent_owned &&
+            !js_regex_permanent_cache_contains_re2(rd->re2)) {
+        // Direct RE2 matchers belong to the RegExp payload unless the
+        // permanent cache has explicitly transferred that ownership.
+        lam::re2_glue_release(rd->re2);
+        rd->re2 = nullptr;
+    }
 }
 
 // Regex compilation cache: avoids re-compiling the same large regex literal in
@@ -14858,21 +14876,29 @@ static bool js_regex_permanent_cache_contains_re2(re2::RE2* re);
 static void js_regex_cache_entry_release_native(JsRegexCacheEntry* ce) {
     if (!ce || !ce->rd) return;
     ce->rd->cache_owned = false;
-    if (!ce->rd->wrapper) return;
-    JsRegexCompiled* wrapper = ce->rd->wrapper;
-    // Batch resets clear stale AST-keyed cache entries before the heap may run
-    // RegExp map finalizers; release wrapper native state here and poison the
-    // RegExp data pointer so a later finalizer cannot double-free it.
-    ce->rd->wrapper = nullptr;
-    if (js_regex_permanent_cache_contains_re2(wrapper->re2)) {
-        // A pass-through wrapper can share the permanent cache's compiled
-        // RE2. Detach its borrowed engine before releasing wrapper metadata.
-        // The permanent cache remains the sole owner through context teardown.
+    if (ce->rd->wrapper) {
+        JsRegexCompiled* wrapper = ce->rd->wrapper;
+        // Batch resets clear stale AST-keyed cache entries before the heap may run
+        // RegExp map finalizers; release wrapper native state here and poison the
+        // RegExp data pointer so a later finalizer cannot double-free it.
+        ce->rd->wrapper = nullptr;
+        if (js_regex_permanent_cache_contains_re2(wrapper->re2)) {
+            // A pass-through wrapper can share the permanent cache's compiled
+            // RE2. Detach its borrowed engine before releasing wrapper metadata.
+            // The permanent cache remains the sole owner through context teardown.
+            if (ce->rd->re2 == wrapper->re2) ce->rd->re2 = nullptr;
+            wrapper->re2 = nullptr;
+        }
         if (ce->rd->re2 == wrapper->re2) ce->rd->re2 = nullptr;
-        wrapper->re2 = nullptr;
+        js_regex_compiled_free(wrapper);
     }
-    if (ce->rd->re2 == wrapper->re2) ce->rd->re2 = nullptr;
-    js_regex_compiled_free(wrapper);
+    if (ce->rd->re2 && !ce->rd->re2_permanent_owned &&
+            !js_regex_permanent_cache_contains_re2(ce->rd->re2)) {
+        // Cache entries own direct matchers too; otherwise the pool can drop
+        // the JsRegexData while its RE2 allocation survives every reset.
+        lam::re2_glue_release(ce->rd->re2);
+        ce->rd->re2 = nullptr;
+    }
 }
 
 static void js_regex_cache_store(uint64_t key, const JsRegexCacheEntry& entry) {
@@ -17193,6 +17219,7 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
                 // reuse permanent RE2; create fresh JsRegexData (pool-allocated) for this test
                 JsRegexData* rd = (JsRegexData*)pool_calloc(js_input->pool, sizeof(JsRegexData));
                 rd->re2 = pe.re2;
+                rd->re2_permanent_owned = true;
                 rd->wrapper = nullptr;
                 rd->global = pe.global;
                 rd->ignore_case = pe.ignore_case;
@@ -17960,6 +17987,7 @@ static Item js_create_regex_impl(const char* pattern, int pattern_len,
                                             dot_all, has_unicode, compile_info.unicode_sets,
                                             compile_info.has_indices, perm_flags,
                                             (int)strlen(perm_flags), pattern_len};
+        rd->re2_permanent_owned = true;
     }
     // Store in regex compilation cache for future reuse
     if (cache_static_literal && special_property_kind == 0) {

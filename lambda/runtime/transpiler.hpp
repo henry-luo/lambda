@@ -158,6 +158,8 @@ AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal);
 bool has_fixed_shape(TypeMap* map_type);
 bool is_direct_access_type(TypeId type_id);
 bool static_literal_item_from_type(Type* type, Item* out);
+void decimal_payload_release(Decimal* dec);
+void decimal_constants_release(struct _ArrayList* constants);
 
 // Shape/type-graph helpers shared by the Lambda and JS AST builders.
 // `is_global_simple_type` answers whether a Type* is one of the compact global
@@ -225,6 +227,7 @@ void runtime_reset_heap(Runtime* runtime);  // reset heap between independent ev
 EvalContext* runtime_get_eval_context(Runtime* runtime);
 void runtime_register_script(Runtime* runtime, Script* script);
 void runtime_free_script(Runtime* runtime, Script* script, bool remove_index);
+bool runtime_type_list_is_script_owned(Runtime* runtime);
 // Free every Script a runtime owns, with its script list and path index.
 // runtime_cleanup calls this; hosts that tear a runtime down by hand must too.
 void runtime_free_all_scripts(Runtime* runtime);

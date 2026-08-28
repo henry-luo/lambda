@@ -15,7 +15,7 @@ These rules MUST be followed. Violations are considered errors.
 11. **In `radiant/` layout code, NEVER use `int` for position/dimension variables**. All layout dimensions are `float`. If an `(int)` cast is truly needed (e.g., string length, repeat count), mark it with `// INT_CAST_OK: <reason>`. Run `make lint ARGS='--rule ^no-int-cast-radiant$'` to verify (or `make lint` for the full sweep).
 12. Concisely comment any non-trivial code change. Do not add generic narration.
 13. **NEVER duplicate code.** Grep for an existing helper before writing one. At the 3rd near-identical variant (type/kind/case), extract the shared shape first. To reuse another file's `static`, promote it to the module header — never copy it.
-14. **The legacy C2MIR path is FROZEN.** and new runtime/ABI/design work do NOT need C2MIR support. New features may be unsupported under `--c2mir`.
+14. **The legacy C2MIR path is REMOVED.** `transpile.cpp`/`transpile-call.cpp` and the CLI flag that selected them are gone; MIR Direct (`transpile-mir.cpp`) is the only back end. Do not reintroduce a C-text back end or add C2MIR support to new runtime/ABI/design work.
 15. **NEVER restore or rely on conservative native-stack GC scanning.** It is retired. Fix GC lifetime bugs with precise `RootFrame` / `Rooted` ownership only.
 16. **NEVER patch third-party vendor code.** MIR (`lambda/mir/`), the Tree-sitter runtime (`lambda/tree-sitter/`) and its vendored language grammars (`lambda/tree-sitter-{bash,javascript,latex,latex-math,python,ruby,typescript}/`), ThorVG, re2, curl and every other vendored dependency are off limits — do not edit them in place. Fix the defect on the Lambda side instead. If the fix genuinely belongs upstream, STOP and ask for approval first, explaining the root cause. Once approved, record the change as a patch under `patches/` so the delta versus upstream stays auditable — see `lambda/mir/VENDOR.md` for the pattern. **`lambda/tree-sitter-lambda/` is NOT vendored** — it is Lambda's own grammar. Edit `grammar.js` and `src/scanner.c` there directly, then regenerate per rule 5; never hand-edit its generated `src/parser.c`.
 17. **Cite rulings by formal-spec ID.** `doc/Lambda_Formal_Semantics.md` (`S#`) and `doc/Lambda_Formal_Design.md` (`D#`) are the single sources of truth. In chat/discussion and in every new or updated design/impl doc, quote the `S#`/`D#` point when one covers the topic; only when none exists, quote the vibe design-doc ledger ID (e.g. TE-16, K13, CW9). When a semantics or design ruling changes, update BOTH the `./doc` formal spec (revise the ruling in place: `v2` suffix + doc semver bump) and the relevant `./vibe` working design doc. Documentation tiers, authority order, and style conventions: `doc/Doc_Convention.md`.
@@ -33,7 +33,7 @@ These rules MUST be followed. Violations are considered errors.
 | Copy a `static` helper into another file | Promote it to the module header, then call it |
 | Add a 3rd/4th copy of a per-type/kind/case block | Extract a parameterized helper or table first |
 | Cite only a vibe ledger ID when an `S#`/`D#` ruling exists | Quote `S#`/`D#` first; vibe IDs only for uncovered points |
-| Modify `transpile.cpp` or extend `--c2mir` | Evolve only MIR Direct (`transpile-mir.cpp`) |
+| Reintroduce a C-text back end (`transpile.cpp`) | Evolve only MIR Direct (`transpile-mir.cpp`) |
 | Edit `lambda/mir/`, `lambda/tree-sitter/`, a vendored `tree-sitter-<lang>/`, ThorVG, or any vendored dep | Fix it on the Lambda side; if it must be upstream, ask first, then record it under `patches/` |
 | Treat `lambda/tree-sitter-lambda/` as vendored | It is Lambda's own grammar: edit `grammar.js` / `src/scanner.c`, then `make generate-grammar` |
 
@@ -95,7 +95,6 @@ CSS layout and rendering engine for HTML/CSS document presentation.
 ./lambda.exe script.ls                # Run a functional Lambda script (JIT with MIR Direct)
 ./lambda.exe --help                   # Show help message for Lambda CLI
 ./lambda.exe run script.ls            # Run a procedural Lambda script with main() procedure
-./lambda.exe --c2mir script.ls        # Run with legacy C2MIR JIT compilation
 ./lambda.exe validate data.json -s schema.ls     # Validate against custom schema
 ./lambda.exe convert input.json -t yaml -o output.yaml      # Format conversion
 ./lambda.exe layout page.html                    # Run CSS layout, output view tree
@@ -181,5 +180,5 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
 - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
 - `doc/Lambda_Jube_Runtime.md` — Polyglot runtime build (Python, Bash, Ruby, C2MIR)
 - `doc/dev/radiant/RAD_00_Overview.md` — Radiant engine detailed design — view/DOM model, CSS resolution, layout (block/inline/flex/grid/table/positioned), the rendering pipeline (paint IR, display list, painters, PDF/SVG), vector graphics, events, animation, editing, forms, interaction state, application shell, JS scripting, and media/webview (index to the RAD_01–RAD_22 set)
-- `doc/dev/lambda/LR_00_Overview.md` — Lambda core-runtime detailed design — compilation pipeline, value & type model, the C and MIR-Direct transpilers, MIR JIT, memory & GC, runtime builtins, error handling, the Mark data API, the procedural runtime, and the schema validator (index to the LR_01–LR_13 set)
+- `doc/dev/lambda/LR_00_Overview.md` — Lambda core-runtime detailed design — compilation pipeline, value & type model, the MIR-Direct transpiler, MIR JIT, memory & GC, runtime builtins, error handling, the Mark data API, the procedural runtime, and the schema validator (index to the LR_01–LR_13 set)
 - `doc/dev/js/JS_00_Overview.md` — LambdaJS runtime detailed design — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility (index to the JS_01–JS_16 set)

@@ -1,8 +1,10 @@
 # Vendored MIR
 
 This is a vendored copy of [MIR](https://github.com/vnmakarov/mir), the JIT
-compiler backend Lambda uses for `transpile-mir.cpp` (MIR Direct) and the
-legacy `--c2mir` path.
+compiler backend Lambda uses for `transpile-mir.cpp` (MIR Direct). Its C
+frontend is no longer reachable from the Lambda CLI; it is retained because
+Jube hosts it as a guest runtime and the benchmark suite uses `c2m` as a
+native reference.
 
 | | |
 |---|---|

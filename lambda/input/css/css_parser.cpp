@@ -247,6 +247,7 @@ static CssSelectorType css_functional_pseudo_type(const char* func_name) {
     if (strcmp(func_name, "dir") == 0)               return CSS_SELECTOR_PSEUDO_DIR;
     if (strcmp(func_name, "host") == 0 || strcmp(func_name, "host-context") == 0)
         return CSS_SELECTOR_PSEUDO_IS;               // Shadow DOM — treat like :is()
+    if (strcmp(func_name, "slotted") == 0)           return CSS_SELECTOR_PSEUDO_SLOTTED;
     return CSS_SELECTOR_PSEUDO_NOT;                   // unknown — default fallback
 }
 
@@ -1595,7 +1596,8 @@ static bool css_apply_functional_pseudo(CssSimpleSelector* selector,
     } else if (selector->type == CSS_SELECTOR_PSEUDO_NOT ||
                selector->type == CSS_SELECTOR_PSEUDO_IS ||
                selector->type == CSS_SELECTOR_PSEUDO_WHERE ||
-               selector->type == CSS_SELECTOR_PSEUDO_HAS) {
+               selector->type == CSS_SELECTOR_PSEUDO_HAS ||
+               selector->type == CSS_SELECTOR_PSEUDO_SLOTTED) {
         int sub_pos = function->argument_start;
         CssSelectorGroup* sub_group = css_parse_selector_group_from_tokens(
             tokens, &sub_pos, function->argument_end, pool);
@@ -1767,13 +1769,18 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     if (!css_parse_selector_function(tokens, pos, token_count, pool, &function)) {
                         return NULL;
                     }
-                    // Functional pseudo-elements are valid selector-list members even when not rendered.
-                    selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC;
-                    selector->value = function.name;
-                    selector->argument = function.argument;
-                    log_debug(" Functional pseudo-element: '::%s(%s)'", function.name,
-                        function.argument ? function.argument : "");
-                    matched = true;
+                    if (strcmp(function.name, "slotted") == 0) {
+                        matched = css_apply_functional_pseudo(selector, &function, tokens,
+                            token_count, pool, false);
+                    } else {
+                        // Functional pseudo-elements are valid selector-list members even when not rendered.
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC;
+                        selector->value = function.name;
+                        selector->argument = function.argument;
+                        log_debug(" Functional pseudo-element: '::%s(%s)'", function.name,
+                            function.argument ? function.argument : "");
+                        matched = true;
+                    }
                 }
                 if (!matched) {
                     return NULL;

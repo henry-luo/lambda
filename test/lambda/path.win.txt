@@ -45,20 +45,20 @@ false
 "Path iteration - for loop over directory"
 false
 "Path iteration - collect typesRelative path with . scheme"
-.test.input.dir
+\.test.input.dir
 "exists() on relative path"
 true
 "len() on relative directory"
 3
 "Relative path iteration with single wildcard (*) - list paths"
-.test.input.dir.child_dir
-.test.input.dir.readme_link
-.test.input.dir.'test.txt'
+\.test.input.dir.child_dir
+\.test.input.dir.readme_link
+\.test.input.dir.'test.txt'
 "Relative path iteration with recursive wildcard (**) - list paths"
-.test.input.dir.child_dir
-.test.input.dir.child_dir.'child.txt'
-.test.input.dir.readme_link
-.test.input.dir.'test.txt'
+\.test.input.dir.child_dir
+\.test.input.dir.child_dir.'child.txt'
+\.test.input.dir.readme_link
+\.test.input.dir.'test.txt'
 "Wildcard finds nested items"
 true
 "Path property: nametest.jsonPath property: is_dir on directory"
@@ -80,16 +80,16 @@ true
 "Path property: filter using is_dir"
 true
 "Parent path with .~~ scheme"
-.~~
+\.~~
 "Parent path with segment"
-.~~.test.input.dir
+\.~~.test.input.dir
 "Parent path type checking"
 path
 'exists() on parent path'
 "Parent path in let binding"
-.~~.Lambda.test
+\.~~.Lambda.test
 "Parent path with quoted segment"
-.~~.Lambda.'README.md'
+\.~~.Lambda.'README.md'
 "Path ++ string: append segment"
 /.etc.hosts
 "Path ++ string: multiple appends"

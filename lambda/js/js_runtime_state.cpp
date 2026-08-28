@@ -4,6 +4,7 @@
 #include "../runtime/lambda-error.h"
 #include "../runtime/runtime-state.h"
 #include "../lambda.hpp"
+#include "../input/input.hpp"
 #include "../jube/jube_registry.h"
 
 __thread JsRuntimeState* js_active_runtime_state = NULL;
@@ -83,6 +84,7 @@ extern "C" void js_net_destroy_context(JsRuntimeState* state);
 extern "C" void js_atomics_destroy_context(JsRuntimeState* state);
 extern "C" void js_canvas_destroy_context(JsRuntimeState* state);
 extern "C" void js_dynfunc_cache_destroy_context(JsRuntimeState* state);
+static void js_release_input_resources(void);
 
 static bool js_runtime_state_init_well_known_refs(JsRuntimeState* state) {
     if (!state) return false;
@@ -224,6 +226,7 @@ void js_runtime_state_release_heap_resources(void) {
     js_fetch_reset();
     js_reset_template_registry();
     js_runtime_regex_cache_destroy_context(runtime_context->js_state);
+    js_release_input_resources();
 }
 
 void js_runtime_state_destroy_context(void) {
@@ -1096,7 +1099,7 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     // prototype snapshot can restore mutations in that same realm; full heap
     // teardown must leave the pointer cleared (D6.2.2v2).
     Input* retained_input = js_input;
-    js_reset_heap_bound_runtime_state();
+    js_reset_heap_bound_runtime_state(full_reset);
     if (!full_reset) js_input = retained_input;
     js_reset_cached_realm_objects();
     // A partial hot reset restores the same constructor/prototype snapshot;
@@ -1723,12 +1726,22 @@ void js_reset_transient_call_state() {
     js_eval_state_reset(&js_runtime_state.eval);
 }
 
-void js_reset_heap_bound_runtime_state() {
+static void js_release_input_resources() {
+    if (!js_input) return;
+    // JS compiler inputs are allocated directly from the runtime pool, so
+    // InputManager never sees them. Release their malloc-backed registries
+    // before the owning pool is destroyed.
+    input_release_auxiliary_resources(js_input);
+    js_input = NULL;
+}
+
+void js_reset_heap_bound_runtime_state(bool full_reset) {
     js_cached_object_proto = NULL;
     js_resolving_object_proto = false;
     js_private_field_initializing = false;
     js_deferred_instance_field_class = ItemNull;
-    js_input = NULL;
+    if (full_reset) js_release_input_resources();
+    else js_input = NULL;
 }
 
 void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_heap_bound) {

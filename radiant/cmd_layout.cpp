@@ -264,7 +264,7 @@ DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_heigh
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url,
-    int viewport_width, int viewport_height, float pixel_ratio,
+    int viewport_width, int viewport_height,
     const DocumentJsHostConfig* js_host_config);
 
 // Element-to-DOM map functions (from dom_element.cpp, Phase 12)
@@ -272,6 +272,29 @@ HashMap* element_dom_map_create(void);
 void element_dom_map_insert(HashMap* map, Element* elem, DomElement* dom_elem);
 DomElement* element_dom_map_lookup(HashMap* map, Element* elem);
 bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode* new_child);
+
+static HtmlVersion classify_html_doctype_identifiers(const char* name,
+                                                     const char* public_id,
+                                                     const char* system_id) {
+    // WHATWG: a doctype without a public identifier is the HTML5 doctype.
+    if (!public_id || public_id[0] == '\0') return HTML5;
+
+    int quirks_mode = html5_determine_quirks_mode(
+        name, public_id, system_id, false);
+    if (quirks_mode == 1) return HTML_QUIRKS;
+    if (quirks_mode == 2) return HTML4_01_STRICT;
+
+    if (strstr(public_id, "-//W3C//DTD HTML 4.01//EN") ||
+        strstr(public_id, "-//W3C//DTD HTML 4.0//EN")) {
+        return HTML4_01_STRICT;
+    }
+    if (strstr(public_id, "Transitional")) return HTML4_01_TRANSITIONAL;
+    if (strstr(public_id, "Frameset")) return HTML4_01_FRAMESET;
+    if (strstr(public_id, "-//W3C//DTD XHTML 1.0")) {
+        return HTML4_01_STRICT;
+    }
+    return HTML4_01_STRICT;
+}
 
 // Function to determine HTML version from Lambda CSS document DOCTYPE
 // This function examines the original Element tree to find DOCTYPE information
@@ -301,37 +324,8 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                         const char* system_id = extract_element_attribute(child_elem, "systemId", nullptr);
 
 
-                        // HTML5: <!DOCTYPE html> — name="html", no publicId
-                        if (!public_id || public_id[0] == '\0') {
-                            return HTML5;
-                        }
-
-                        int quirks_mode = html5_determine_quirks_mode(
-                            name, public_id, system_id, false);
-                        if (quirks_mode == 1) {
-                            return HTML_QUIRKS;
-                        }
-                        if (quirks_mode == 2) {
-                            return HTML4_01_STRICT;
-                        }
-
-                        // Check known public identifiers for HTML version
-                        if (strstr(public_id, "-//W3C//DTD HTML 4.01//EN") ||
-                            strstr(public_id, "-//W3C//DTD HTML 4.0//EN")) {
-                            return HTML4_01_STRICT;
-                        }
-                        if (strstr(public_id, "Transitional")) {
-                            return HTML4_01_STRICT;
-                        }
-                        if (strstr(public_id, "Frameset")) {
-                            return HTML4_01_FRAMESET;
-                        }
-                        if (strstr(public_id, "-//W3C//DTD XHTML 1.0")) {
-                            return HTML4_01_STRICT;
-                        }
-                        // Only identifiers in the WHATWG trigger lists enter quirks;
-                        // all other public identifiers are standards mode.
-                        return HTML4_01_STRICT;
+                        return classify_html_doctype_identifiers(
+                            name, public_id, system_id);
                     }
                 }
             }
@@ -351,8 +345,21 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
                 Element* elem = item.element;
                 TypeElmt* type = (TypeElmt*)elem->type;
 
-                // Check for DOCTYPE element (case-insensitive)
-                if (type && str_ieq_const(type->name.str, strlen(type->name.str), "!DOCTYPE")) {
+                bool is_attribute_doctype = type && str_ieq_const(
+                    type->name.str, strlen(type->name.str), "#doctype");
+                bool is_content_doctype = type && str_ieq_const(
+                    type->name.str, strlen(type->name.str), "!DOCTYPE");
+
+                // The HTML5 parser represents the doctype as #doctype with
+                // name/publicId/systemId attributes, while the legacy parser
+                // emits !DOCTYPE with a content child.
+                if (is_attribute_doctype) {
+                    const char* name = extract_element_attribute(elem, "name", nullptr);
+                    const char* public_id = extract_element_attribute(elem, "publicId", nullptr);
+                    const char* system_id = extract_element_attribute(elem, "systemId", nullptr);
+                    return classify_html_doctype_identifiers(name, public_id, system_id);
+                }
+                if (is_content_doctype) {
 
                     // Extract DOCTYPE content from the element's children
                     if (elem->length > 0) {
@@ -1473,6 +1480,7 @@ static bool dom_js_mutation_requires_inline_stylesheet_rescan(DomDocument* doc) 
                 return true;
             case DOM_JS_MUTATION_STYLE:
             case DOM_JS_MUTATION_STYLE_REPAINT:
+            case DOM_JS_MUTATION_CONTROL_VALUE:
             default:
                 break;
         }
@@ -2014,6 +2022,10 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
     // parsed HTML: the only page kind that may host a JS DOM script realm.
     dom_doc->page_kind = DOM_PAGE_KIND_HTML;
+    // Scripts may call getClientRects() during load. Preserve the parsed mode
+    // before that first layout so transient measurements use the same initial
+    // values as the eventual post-script layout.
+    dom_doc->html_version = (HtmlVersion)detected_version;
     log_debug("[page-kind] html document -> %s",
               dom_page_kind_name(dom_doc->page_kind));
     if (js_host_config) {
@@ -2497,7 +2509,7 @@ static DomDocument* load_layout_special_file(Url* url, const char* path,
 }
 
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int viewport_width,
-                                              int viewport_height, float pixel_ratio,
+                                              int viewport_height,
                                               const DocumentJsHostConfig* js_host_config) {
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
@@ -2535,7 +2547,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
 }
 
 DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int viewport_height,
-                           float pixel_ratio, const DocumentJsHostConfig* js_host_config) {
+                           const DocumentJsHostConfig* js_host_config) {
     const int max_redirects = 8;
     Url* current_base = base;
     char* current_doc_url = doc_url;
@@ -2543,7 +2555,7 @@ DomDocument* load_html_doc(Url *base, char* doc_url, int viewport_width, int vie
 
     for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
         DomDocument* doc = load_html_doc_no_redirect(current_base, current_doc_url,
-            viewport_width, viewport_height, pixel_ratio, js_host_config);
+            viewport_width, viewport_height, js_host_config);
         if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
             if (owned_doc_url) mem_free(owned_doc_url);
             return doc;

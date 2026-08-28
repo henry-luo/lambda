@@ -1563,7 +1563,11 @@ static void plan_handler(PlanCtx* outer, AstEventHandler* handler) {
     plan_assign_scope(&pc, handler->vars);
     plan_walk(handler->body, &pc);
 
-    uint32_t body_need = plan_need(handler->body);
+    // View-handler activation publishes the matched model in one additional
+    // frame home before evaluating the body (D5.3.3). Include that home in the
+    // handler plan or the first callee expression can exhaust the scratch
+    // window while the model is still live.
+    uint32_t body_need = 1 + plan_need(handler->body);
     if (body_need > pc.max_scratch) pc.max_scratch = body_need;
     plan_finish(&pc);
     if (pc.failed) {

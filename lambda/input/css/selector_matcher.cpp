@@ -435,6 +435,57 @@ DomElement* selector_matcher_find_first(SelectorMatcher* matcher,
 // Selector Component Matching
 // ============================================================================
 
+static DomElement* selector_slotted_host(DomElement* element) {
+    if (!element || !element->parent || !element->parent->is_element()) return nullptr;
+
+    DomElement* parent = element->parent->as_element();
+    DomElement* host = parent->shadow_root_element();
+    if (!host) {
+        if (!parent->tag_name || strcmp(parent->tag_name, "#document-fragment") != 0) {
+            return nullptr;
+        }
+        host = parent->shadow_host_element();
+    }
+    if (!host || !host->shadow_root_element()) return nullptr;
+
+    // ::slotted() only represents direct light-DOM children of this host.
+    for (DomNode* child = host->first_child; child; child = child->next_sibling) {
+        if (child == element) return host;
+    }
+    return nullptr;
+}
+
+static bool selector_slotted_has_slot(DomNode* node, DomElement* element) {
+    if (!node || !element) return false;
+    if (node->is_element()) {
+        DomElement* candidate = node->as_element();
+        if (candidate->tag_name && strcmp(candidate->tag_name, "slot") == 0) {
+            const char* slot_name = candidate->get_attribute("name");
+            const char* assigned_name = element->get_attribute("slot");
+            if (!slot_name) slot_name = "";
+            if (!assigned_name) assigned_name = "";
+            if (strcmp(slot_name, assigned_name) == 0) return true;
+        }
+        for (DomNode* child = candidate->first_child; child; child = child->next_sibling) {
+            if (selector_slotted_has_slot(child, element)) return true;
+        }
+    }
+    return false;
+}
+
+static bool selector_matcher_matches_slotted(SelectorMatcher* matcher,
+                                             CssSimpleSelector* simple_selector,
+                                             DomElement* element) {
+    DomElement* host = selector_slotted_host(element);
+    if (!host || !selector_slotted_has_slot(host->shadow_root_element(), element)) {
+        return false;
+    }
+    return selector_matcher_matches_is(matcher,
+        simple_selector->function_selectors,
+        (int)simple_selector->function_selector_count,
+        element);
+}
+
 bool selector_matcher_matches_simple(SelectorMatcher* matcher,
                                      CssSimpleSelector* simple_selector,
                                      DomElement* element) {
@@ -539,6 +590,8 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
                 simple_selector->function_selectors,
                 (int)simple_selector->function_selector_count,
                 element);
+        case CSS_SELECTOR_PSEUDO_SLOTTED:
+            return selector_matcher_matches_slotted(matcher, simple_selector, element);
 
         case CSS_SELECTOR_PSEUDO_SCOPE:
             // Element query APIs must bind :scope to their receiver; jQuery
@@ -1198,6 +1251,21 @@ CssSpecificity selector_matcher_calculate_specificity(SelectorMatcher* matcher,
                     spec.ids += argument_spec.ids;
                     spec.classes += argument_spec.classes;
                     spec.elements += argument_spec.elements;
+                    break;
+                }
+
+                case CSS_SELECTOR_PSEUDO_SLOTTED: {
+                    CssSpecificity argument_spec = {0, 0, 0, 0, false};
+                    for (size_t k = 0; k < simple->function_selector_count; k++) {
+                        CssSpecificity candidate = selector_matcher_calculate_specificity(
+                            matcher, simple->function_selectors[k]);
+                        if (css_specificity_compare(candidate, argument_spec) > 0) {
+                            argument_spec = candidate;
+                        }
+                    }
+                    spec.ids += argument_spec.ids;
+                    spec.classes += argument_spec.classes;
+                    spec.elements += argument_spec.elements + 1;
                     break;
                 }
 

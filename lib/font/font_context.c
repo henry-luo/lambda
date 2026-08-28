@@ -9,6 +9,7 @@
 
 #include "font_internal.h"
 #include <time.h>
+#include <math.h>
 #ifndef _WIN32
 #include <sys/mman.h>
 #else
@@ -268,6 +269,36 @@ void font_context_destroy(FontContext* ctx) {
     if (owns_glyph_arena && glyph_arena) arena_destroy(glyph_arena);
     if (owns_arena && arena) arena_destroy(arena);
     if (owns_pool  && pool)  pool_destroy(pool);
+}
+
+bool font_context_set_pixel_ratio(FontContext* ctx, float pixel_ratio) {
+    if (!ctx) return false;
+    if (pixel_ratio <= 0.0f) pixel_ratio = 1.0f;
+    if (fabsf(ctx->config.pixel_ratio - pixel_ratio) <= 0.0001f) return false;
+
+    float old_ratio = ctx->config.pixel_ratio;
+    ctx->config.pixel_ratio = pixel_ratio;
+
+    // Every object below contains or retains scale-dependent physical output.
+    // FontProp aliases keep old handles alive until setup_font replaces them.
+    font_context_reset_glyph_caches(ctx);
+    font_fallback_reset_platform_cache();
+    if (ctx->codepoint_fallback_cache) {
+        hashmap_clear(ctx->codepoint_fallback_cache, true);
+    }
+    if (ctx->cached_emoji_handle) {
+        font_handle_release(ctx->cached_emoji_handle);
+        ctx->cached_emoji_handle = NULL;
+    }
+    ctx->cached_emoji_size_px = 0.0f;
+    ctx->cached_emoji_physical_size = 0.0f;
+    if (ctx->face_cache) {
+        hashmap_clear(ctx->face_cache, true);
+    }
+    ctx->lru_counter = 0;
+
+    log_info("font_context_set_pixel_ratio: %.3f -> %.3f", old_ratio, pixel_ratio);
+    return true;
 }
 
 // ============================================================================

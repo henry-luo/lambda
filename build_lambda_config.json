@@ -488,6 +488,11 @@
           "wldap32"
         ]
       },
+      "linux": {
+        "additional_libraries": [
+          "gomp"
+        ]
+      },
       "defines": [
         "UTF8PROC_STATIC",
         "MEMPOOL_RUNTIME_VM_PROVIDER"
@@ -3005,6 +3010,7 @@
             ],
             "additional_sources": [
               "radiant/animation.cpp",
+              "radiant/css_display.cpp",
               "radiant/css_animation.cpp",
               "radiant/css_cascade.cpp",
               "radiant/css_prop_table.cpp",

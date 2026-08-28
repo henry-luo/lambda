@@ -820,18 +820,9 @@ interpretation aliases after in-tree recordings migrate. Reject a pre-cutover
 recording with a clear schema mismatch unless an intentional offline converter
 is supplied.
 
-`assert_editing_event` should filter and assert at least:
-
-- transaction/cascade ID;
-- route;
-- handler/action owner;
-- notification cancellation;
-- claim;
-- DOM/model mutation;
-- `input` dispatch;
-- unsupported fall-through;
-- contract violation;
-- exact ordering among correlated records.
+The separate structured editing-event assertion was retired. Editing fixtures
+use ordinary behavior assertions and the generic `assert_event_log` substring
+assertion when a JSONL record is part of the contract.
 
 ---
 
@@ -1216,7 +1207,6 @@ the snapshotted action remains valid through tombstoned lifetime.
 - log route/owner/result fields;
 - migrate active replay fixtures;
 - reject old schema clearly;
-- migrate `assert_editing_event`;
 - stop adding old log fields.
 
 Actual deletion of old aliases waits until Phase 8.

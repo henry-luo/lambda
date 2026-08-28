@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-18
 **Status:** Decided; current syntax/runtime scope implemented
-**Decision IDs:** PTH1v2, PTH2v2, PTH3–PTH15, PTH16v2, PTH17–PTH29
+**Decision IDs:** PTH1v2, PTH2v2, PTH3–PTH15, PTH16v3, PTH17–PTH29
 **Open issue IDs:** PTH-O1
 
 > **Normative anchors:** [S1.7](../doc/Lambda_Formal_Semantics.md#s1-core-principles)
@@ -171,9 +171,13 @@ In an element tag or attribute name position, namespace qualification is
 maximal. Once `ns.name` begins, the complete dotted name is consumed before
 element content is considered; whitespace is only a grammar extra and does not
 end the name. Therefore `<svg.rect>` and `<svg .rect>` both name `svg.rect`.
-Relative-path content uses the explicit element boundary: `<svg; .rect>`.
-This keeps a qualified name distinct from the relative-path plan `.rect`
-without a contextual scanner token or a runtime resolution guess.
+Relative-path content is spelled `<svg \.rect>` and needs no boundary at all
+(PTH16v3, S2.4.3v3): S16.9.4 respelled the relative path `\.a.b`, so `.rect`
+can no longer be a path and there is nothing left to disambiguate. The
+S16.9.3 boundary comma is a biconditional, so with no attributes present a
+comma is forbidden — `<svg, \.rect>` is an error, as is the retired
+`<svg; .rect>`. This keeps a qualified name distinct from the relative-path
+plan without a contextual scanner token or a runtime resolution guess.
 
 Lexical shadowing chooses the namespace/binding before lowering; it is not a
 runtime search through every namespace. Identifier spelling and symbol
@@ -771,7 +775,7 @@ At minimum, implementation tests must cover:
 | **PTH13** | Every hierarchical address is a typed root plus ordered operations; ordinary keys are `NameKey` or `IntKey`. |
 | **PTH14** | Names and symbols share `NameKey` identity in one scope; integer keys stay typed and `a.1` differs from `a.'1'`. |
 | **PTH15** | Paths, names, and symbols are static reference plans; member expressions have a runtime base and are dynamically resolved. Their forcing policies remain distinct. |
-| **PTH16v2** | A bare name is statically qualified to its selected lexical/import namespace (`a` → `ns.a`); in element tag/attribute name position the complete dotted namespace-qualified name is maximal, and relative-path content requires the explicit `;` boundary (`<svg; .rect>`). Global resolution never bypasses visibility or exports. |
+| **PTH16v3** | A bare name is statically qualified to its selected lexical/import namespace (`a` → `ns.a`); in element tag/attribute name position the complete dotted namespace-qualified name is maximal. Relative-path content is spelled `<svg \.rect>` and takes **no** boundary delimiter — S16.9.4 respelled the relative path `\.a.b` (dissolving the ambiguity that motivated the old `;`), and the S16.9.3 boundary comma is a biconditional that forbids a comma when the element has no attributes. Both `<svg; .rect>` (v2's spelling) and `<svg, \.rect>` are errors. Global resolution never bypasses visibility or exports. *(v3, 2026-08-28, with S2.4.3v3.)* |
 | **PTH17** | `/` and namespace aliases are deterministically qualified by an immutable per-context mount/resolver table; longest-prefix mounts are allowed and alias cycles reject. |
 | **PTH18** | The resolver is isolate/EvalContext-owned and capability-aware; no mutable process-global namespace or existence-based provider fallback participates in semantics. |
 | **PTH19** | Address resolution is pure canonicalization and performs no I/O; external target forcing remains a separate effectful operation. |

@@ -1,5 +1,5 @@
-// Mixed route probe: the template host owns its source model while the sibling
-// standard contenteditable host uses the DOM compatibility action.
+// mixed route probe: the template host owns its source model while the sibling
+// standard contenteditable host uses the dom package default.
 
 edit <mixed_template_editor> state text: "template", status: "ready" {
   <div id:"template-host", contenteditable:"true", tabindex:"0", text>
@@ -10,6 +10,7 @@ on beforeinput(evt) {
     text = evt.input_intent.data
     status = evt.input_type
   }
+  return 'prevent-default'
 }
 
 <html

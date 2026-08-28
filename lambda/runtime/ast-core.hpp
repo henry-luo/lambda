@@ -750,6 +750,23 @@ static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
     }
 }
 
+// S9.3.1: whether placing this expression's value into a container must capture
+// it. Only a value that ALREADY has an observer needs the mark -- a name, or a
+// borrow of one (member/index read). A freshly produced container (literal,
+// `new`, call result) has no second observer at the insertion point: anything a
+// callee also retained was captured by the site inside it that retained it.
+//
+// Marking freshly built values instead would be far more than wasted work. The
+// child would detach on the owner's first write, so the universal builder shape
+// `rows[i] = <fresh>` followed by `var r = rows[i]; r[j] = v` would write to a
+// detached copy while element reads still borrow (the open C4.1 half) -- turning
+// a conservative mark into lost updates.
+static inline bool ast_expr_insertion_needs_capture(AstNode* expr) {
+    AstNode* root_expr = ast_unwrap_primary(expr);
+    if (!root_expr) return false;
+    return !ast_expr_produces_owned_container(root_expr);
+}
+
 // Whether a binding's initializer may hand back a container the writer would
 // share with another root — the condition that makes an alias an ownership
 // boundary (cow_bind_var).

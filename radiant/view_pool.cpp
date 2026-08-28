@@ -40,6 +40,13 @@ static const char* inline_list_item_display_name(DisplayValue display) {
         ? "inline flow-root list-item" : "inline list-item";
 }
 
+static const char* block_display_name(DisplayValue display) {
+    if (display.inner == CSS_VALUE_FLOW_ROOT) {
+        return display.list_item ? "flow-root list-item" : "flow-root";
+    }
+    return nullptr;
+}
+
 // Helper function to get view type name for JSON
 const char* View::view_name() {
     switch (this->view_type) {
@@ -1582,16 +1589,19 @@ static void append_text_rect_layout(ViewText* text, StrBuf* buf, int indent,
 
 static void append_text_fragment_json(ViewText* text, StrBuf* buf, int indent,
                                       TextRect* rect, TextRect* previous_rect,
-                                      bool include_text_info) {
+                                      bool include_text_info,
+                                      const char* content_override = nullptr,
+                                      int content_length_override = -1) {
     append_text_object_header(buf, indent);
 
     unsigned char* text_data = text->text_data();
-    if (text_data && rect->length > 0) {
-        char content[2048];
-        int length = rect->length < 2048 ? rect->length : 2047;
-        memcpy(content, (char*)(text_data + rect->start_index), length);
-        content[length] = '\0';
-        append_json_string(buf, content);
+    if (content_override) {
+        size_t content_length = content_length_override >= 0
+            ? (size_t)content_length_override : strlen(content_override);
+        append_json_string_n(buf, content_override, content_length);
+    } else if (text_data && rect->length > 0) {
+        append_json_string_n(buf, (char*)(text_data + rect->start_index),
+                             (size_t)rect->length);
     } else {
         append_json_string(buf, "[empty]");
     }
@@ -1674,7 +1684,8 @@ static bool sideways_initial_letter_continuation(View* first_letter,
     return true;
 }
 
-static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent) {
+static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int indent,
+                                      ViewText* appended_text = nullptr) {
     // If text combination is disabled, just print this single text node
     if (!g_combine_text_nodes || white_space_preserves_space_advance(
             get_white_space_value(static_cast<DomNode*>(first_text)))) {
@@ -1700,6 +1711,14 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
         text_nodes[text_node_count].data = text->text_data();
         text_node_count++;
         current = current->next_sibling;
+    }
+
+    if (appended_text && text_node_count < 64) {
+        // ::first-letter is an internal split of one DOM text node; rejoin its
+        // continuation so snapshots retain the browser's original text node.
+        text_nodes[text_node_count].text = appended_text;
+        text_nodes[text_node_count].data = appended_text->text_data();
+        text_node_count++;
     }
 
     if (text_node_count > 1 && current && current->view_type == RDT_VIEW_INLINE) {
@@ -1745,10 +1764,12 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
                 }
             }
 
-            // Update bounding box using rect coordinates directly
-            // (rect->x/y are already in parent-relative coordinates)
-            float rect_x = rect->x;
-            float rect_y = rect->y;
+            // Text fragments from an internal pseudo split can have different
+            // local parents; normalize them before taking the union.
+            float rect_x = 0.0f;
+            float rect_y = 0.0f;
+            calculate_absolute_position(static_cast<View*>(text), rect,
+                                        &rect_x, &rect_y);
             float rect_right = rect_x + rect->width;
             float rect_bottom = rect_y + rect->height;
 
@@ -1783,20 +1804,10 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
         append_json_after_object(buf, indent + 2, "layout", "{\n");
     }
 
-    // Calculate absolute position by walking up parent chain (same as print_bounds_json)
-    // Start with the minimum rect position (already in parent-relative coords)
+    // The union coordinates are absolute after fragment normalization.
     float abs_x = min_x;
     float abs_y = min_y;
-    View* parent = first_text->parent_view();
-    while (parent) {
-        if (parent->is_block()) {
-            abs_x += parent->x;
-            abs_y += parent->y;
-        }
-        parent = parent->parent_view();
-    }
 
-    // Output directly (already in CSS logical pixels)
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"x\": %.1f,\n", abs_x);
     strbuf_append_char_n(buf, ' ', indent + 4);
@@ -1814,6 +1825,121 @@ static View* print_combined_text_json(ViewText* first_text, StrBuf* buf, int ind
 
     // Return the last text node processed
     return static_cast<View*>(text_nodes[text_node_count - 1].text);
+}
+
+static bool first_letter_original_text(ViewText* continuation,
+                                       const char** text, int* length,
+                                       int* prefix_length) {
+    if (!continuation || !text || !length || !prefix_length ||
+        !continuation->native_string) {
+        return false;
+    }
+    size_t native_length = continuation->native_string->len;
+    if (continuation->length > native_length) return false;
+    *text = continuation->native_string->chars;
+    *length = (int)native_length;
+    *prefix_length = (int)(native_length - continuation->length);
+    return true;
+}
+
+static View* print_first_letter_json(View* pseudo, StrBuf* buf, int indent,
+                                     bool* first_child) {
+    if (!pseudo || !first_child || !pseudo->is_element()) {
+        return pseudo ? pseudo->next_sibling : nullptr;
+    }
+
+    View* first = (lam::view_require_element(pseudo))->first_child;
+    View* continuation = pseudo->next_sibling;
+    InitialLetterInfo initial_letter = {};
+    bool has_initial_letter = layout_get_initial_letter_info(
+        lam::view_require_element(pseudo), &initial_letter);
+    ViewText* sideways_continuation = nullptr;
+    bool reorder_sideways_initial = sideways_initial_letter_continuation(
+        pseudo, &sideways_continuation);
+    if (reorder_sideways_initial && first &&
+        first->view_type == RDT_VIEW_TEXT) {
+        // sideways-lr exposes continuation fragments before the initial-letter
+        // fragment in Range geometry, despite the internal split order.
+        print_sideways_initial_fragments(
+            sideways_continuation, sideways_continuation->rect,
+            sideways_continuation->rect->start_index,
+            sideways_continuation->rect->start_index +
+            sideways_continuation->rect->length,
+            buf, indent, first_child);
+        if (!*first_child) strbuf_append_str(buf, ",\n");
+        *first_child = false;
+        print_combined_text_json(lam::view_require_text(first), buf, indent);
+        return sideways_continuation->next_sibling;
+    }
+    if (has_initial_letter && first && first->view_type == RDT_VIEW_TEXT &&
+        continuation && continuation->view_type == RDT_VIEW_TEXT) {
+        ViewText* initial_text = lam::view_require_text(first);
+        ViewText* continuation_text = lam::view_require_text(continuation);
+        TextRect* initial_rect = initial_text->rect;
+        TextRect* continuation_rect = continuation_text->rect;
+        const char* original_text = nullptr;
+        int original_length = 0;
+        int prefix_length = 0;
+        bool has_original_text = first_letter_original_text(
+            continuation_text, &original_text, &original_length, &prefix_length);
+        if (initial_rect && continuation_rect && has_original_text &&
+            text_has_visible_rect(initial_text) &&
+            text_has_visible_rect(continuation_text)) {
+            bool same_line = fabsf(initial_rect->y - continuation_rect->y) < 0.01f;
+            if (!*first_child) strbuf_append_str(buf, ",\n");
+            *first_child = false;
+            if (same_line) {
+                // CSSOM exposes one original text range for an initial letter
+                // sharing its line; its rect is the initial-letter fragment.
+                append_text_fragment_json(initial_text, buf, indent, initial_rect,
+                                          nullptr, false, original_text,
+                                          original_length);
+            } else {
+                // When margins or fragmentation separate the ranges, Chromium
+                // reports continuation geometry before the initial-letter range.
+                append_text_fragment_json(continuation_text, buf, indent,
+                                          continuation_rect, nullptr, false);
+                strbuf_append_str(buf, ",\n");
+                TextRect initial_fragment = *initial_rect;
+                append_text_fragment_json(initial_text, buf, indent,
+                                          &initial_fragment, nullptr, false,
+                                          original_text, prefix_length);
+            }
+            return continuation->next_sibling;
+        }
+    }
+    bool same_line_split = first && first->view_type == RDT_VIEW_TEXT &&
+        continuation && continuation->view_type == RDT_VIEW_TEXT &&
+        lam::view_require_text(first)->rect &&
+        lam::view_require_text(continuation)->rect &&
+        fabsf(lam::view_require_text(first)->rect->y -
+              lam::view_require_text(continuation)->rect->y) < 0.01f;
+    if (g_combine_text_nodes && same_line_split &&
+        first && first->view_type == RDT_VIEW_TEXT &&
+        !first->next_sibling && continuation &&
+        continuation->view_type == RDT_VIEW_TEXT &&
+        text_has_visible_rect(lam::view_require_text(continuation))) {
+        ViewText* continuation_text = lam::view_require_text(continuation);
+        if (!*first_child) strbuf_append_str(buf, ",\n");
+        *first_child = false;
+        print_combined_text_json(lam::view_require_text(first), buf, indent,
+                                 continuation_text);
+        return continuation->next_sibling;
+    }
+
+    while (first) {
+        if (first->view_type == RDT_VIEW_TEXT &&
+            text_has_visible_rect(lam::view_require_text(first))) {
+            if (!*first_child) strbuf_append_str(buf, ",\n");
+            *first_child = false;
+            View* last = print_combined_text_json(
+                lam::view_require_text(first), buf, indent);
+            first = last->next_sibling;
+        } else {
+            first = first->next_sibling;
+        }
+    }
+    return pseudo->next_sibling;
 }
 
 // Helper to check if an element is an anonymous table element (e.g., ::anon-tbody, ::anon-tr)
@@ -2112,6 +2238,60 @@ static void print_display_none_json(ViewElement* elem, StrBuf* buf, int indent) 
     strbuf_append_str(buf, "}");
 }
 
+static bool is_unrendered_shadow_dom_child(View* child) {
+    if (!child || child->view_type != RDT_VIEW_NONE || !child->is_element() ||
+        !child->parent || !child->parent->is_element()) {
+        return false;
+    }
+    DomElement* parent = child->parent->as_element();
+    DomElement* element = child->as_element();
+    // Shadow DOM hides unassigned light-DOM nodes from layout, but they remain
+    // observable DOM descendants and must stay in the reference tree.
+    return parent->shadow_root_element() && element->display.outer != CSS_VALUE_NONE;
+}
+
+static void print_unrendered_shadow_dom_json(DomElement* element,
+                                             StrBuf* buf, int indent) {
+    if (!element) return;
+    const char* tag_name = element->node_name() ? element->node_name() : "unknown";
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "{\n");
+    append_json_string_field(buf, indent + 2, "type", "inline", true);
+    append_json_key(buf, indent + 2, "tag");
+    append_json_string(buf, tag_name);
+    strbuf_append_str(buf, ",\n");
+    if (!layout_json_is_compact_v2()) {
+        append_json_key(buf, indent + 2, "selector");
+        append_element_selector_json(element, buf, tag_name);
+        strbuf_append_str(buf, ",\n");
+    }
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"layout\": {\n");
+    append_json_format_field(buf, indent + 4, "x", true, "0.0");
+    append_json_format_field(buf, indent + 4, "y", true, "0.0");
+    append_json_format_field(buf, indent + 4, "width", true, "0.0");
+    append_json_format_field(buf, indent + 4, "height", false, "0.0");
+    append_json_after_object(buf, indent + 2, "children", "[\n");
+
+    bool first_child = true;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* child_element = child->as_element();
+        if (should_skip_non_rendered_dom_tag(child_element->node_name()) ||
+            child_element->display.outer == CSS_VALUE_NONE) {
+            continue;
+        }
+        if (!first_child) strbuf_append_str(buf, ",\n");
+        first_child = false;
+        print_unrendered_shadow_dom_json(child_element, buf, indent + 4);
+    }
+    strbuf_append_str(buf, "\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "]\n");
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "}");
+}
+
 // Helper to print children, skipping anonymous wrapper elements
 static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool* first_child) {
     View* child = (lam::view_require_element(block))->first_child;
@@ -2121,6 +2301,13 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
                 if (!*first_child) { strbuf_append_str(buf, ",\n"); }
                 *first_child = false;
                 print_non_rendered_table_marker_json(child, buf, indent);
+                child = child->next_sibling;
+                continue;
+            }
+            if (is_unrendered_shadow_dom_child(child)) {
+                if (!*first_child) strbuf_append_str(buf, ",\n");
+                *first_child = false;
+                print_unrendered_shadow_dom_json(child->as_element(), buf, indent);
                 child = child->next_sibling;
                 continue;
             }
@@ -2160,41 +2347,7 @@ static void print_children_json(ViewBlock* block, StrBuf* buf, int indent, bool*
         // its children (text nodes) into the parent to match browser reference output.
         if (tag && strcmp(tag, "::first-letter") == 0) {
             log_debug("JSON: Unwrapping ::first-letter pseudo-element, outputting children directly");
-            View* fl_child = (lam::view_require_element(child))->first_child;
-            ViewText* sideways_continuation = nullptr;
-            bool reorder_sideways_initial = sideways_initial_letter_continuation(
-                child, &sideways_continuation);
-            if (reorder_sideways_initial && fl_child &&
-                fl_child->view_type == RDT_VIEW_TEXT) {
-                // sideways-lr exposes the continuation fragments in visual
-                // order, before the initial-letter fragment, in Range geometry.
-                print_sideways_initial_fragments(
-                    sideways_continuation, sideways_continuation->rect,
-                    sideways_continuation->rect->start_index,
-                    sideways_continuation->rect->start_index +
-                        sideways_continuation->rect->length,
-                    buf, indent, first_child);
-                if (!*first_child) strbuf_append_str(buf, ",\n");
-                *first_child = false;
-                print_combined_text_json(lam::view_require_text(fl_child), buf, indent);
-                child = sideways_continuation->next();
-                continue;
-            }
-            while (fl_child) {
-                if (fl_child->view_type == RDT_VIEW_TEXT) {
-                    if (!text_has_visible_rect(lam::view_require_text(fl_child))) {
-                        fl_child = fl_child->next_sibling;
-                        continue;
-                    }
-                    if (!*first_child) { strbuf_append_str(buf, ",\n"); }
-                    *first_child = false;
-                    View* last_text = print_combined_text_json(lam::view_require_text(fl_child), buf, indent);
-                    fl_child = last_text->next_sibling;
-                } else {
-                    fl_child = fl_child->next_sibling;
-                }
-            }
-            child = child->next();
+            child = print_first_letter_json(child, buf, indent, first_child);
             continue;
         }
 
@@ -2333,10 +2486,15 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, bool is_root) {
              parent_elem->display.inner == CSS_VALUE_GRID);
     }
     const char* inline_list_item_display = inline_list_item_display_name(block->display);
+    const char* block_flow_root_display = block_display_name(block->display);
     if (inline_list_item_display) {
         // CSS Display 3: serialize the computed multi-keyword list-item value;
         // its used atomic view role must not replace the CSSOM display value.
         display = inline_list_item_display;
+    } else if (block_flow_root_display) {
+        // CSS Display 3: flow-root is the computed single-keyword form for a
+        // block-level flow-root, including the list-item outer display.
+        display = block_flow_root_display;
     } else if (block->display.inner == CSS_VALUE_GRID) {
         // Flex/grid items are blockified, while standalone legacy inline grid/flex
         // values keep their inline outer display in CSSOM serialization.
@@ -2983,6 +3141,13 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
                 child = child->next_sibling;
                 continue;
             }
+            if (is_unrendered_shadow_dom_child(child)) {
+                if (!first_child) strbuf_append_str(buf, ",\n");
+                first_child = false;
+                print_unrendered_shadow_dom_json(child->as_element(), buf, indent + 4);
+                child = child->next_sibling;
+                continue;
+            }
             child = child->next_sibling;
             continue;  // skip the view
         }
@@ -2992,6 +3157,12 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
         if (tag && (strcmp(tag, "::before") == 0 || strcmp(tag, "::after") == 0 || strcmp(tag, "::marker") == 0)) {
             log_debug("JSON: Skipping pseudo-element %s from inline children", tag);
             child = child->next();
+            continue;
+        }
+
+        if (tag && strcmp(tag, "::first-letter") == 0) {
+            log_debug("JSON: Unwrapping ::first-letter pseudo-element from inline children");
+            child = print_first_letter_json(child, buf, indent + 4, &first_child);
             continue;
         }
 

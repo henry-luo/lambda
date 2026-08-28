@@ -33,6 +33,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <cmath>
 static double get_monotonic_time() {
     // Simulated input timestamps must share the virtual headless clock with JS
     // timers and rAF; wall time made otherwise identical fixtures nondeterministic.
@@ -174,6 +175,7 @@ static EventSimContext* event_sim_create_context() {
     ctx->pass_count = 0;
     ctx->fail_count = 0;
     ctx->test_name = NULL;
+    ctx->pixel_ratio = 1.0f;
     ctx->default_timeout = 2000;
     ctx->replay_assert_state = g_replay_assert_state;
     ctx->replay_expected_focus_id = -1;
@@ -950,7 +952,7 @@ static void sim_extract_text(View* view, StrBuf* buf) {
 
 // Resolve a target to (x,y) coordinates. Tries target_selector first, then target_text, then raw x/y.
 // Returns true if resolved, sets out_x, out_y.
-static bool resolve_target(SimEvent* ev, DomDocument* doc, int* out_x, int* out_y) {
+static bool resolve_target(SimEvent* ev, DomDocument* doc, float* out_x, float* out_y) {
     // Priority: selector > text > raw coordinates
     if (ev->target_selector && doc) {
         View* elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
@@ -958,18 +960,18 @@ static bool resolve_target(SimEvent* ev, DomDocument* doc, int* out_x, int* out_
             if (ev->has_target_offset) {
                 float ex, ey, ew, eh;
                 get_element_rect_abs(elem, &ex, &ey, &ew, &eh);
-                *out_x = (int)(ex + (float)ev->target_offset_x);
-                *out_y = (int)(ey + (float)ev->target_offset_y);
-                log_info("event_sim: resolved selector '%s'[%d] + offset (%d,%d) to (%d, %d)",
+                *out_x = ex + ev->target_offset_x;
+                *out_y = ey + ev->target_offset_y;
+                log_info("event_sim: resolved selector '%s'[%d] + offset (%.2f,%.2f) to (%.2f, %.2f)",
                          ev->target_selector, ev->target_index,
                          ev->target_offset_x, ev->target_offset_y, *out_x, *out_y);
                 return true;
             }
             float fx, fy;
             get_element_center_abs(elem, &fx, &fy);
-            *out_x = (int)fx;
-            *out_y = (int)fy;
-            log_info("event_sim: resolved selector '%s'[%d] to (%d, %d)", ev->target_selector, ev->target_index, *out_x, *out_y);
+            *out_x = fx;
+            *out_y = fy;
+            log_info("event_sim: resolved selector '%s'[%d] to (%.2f, %.2f)", ev->target_selector, ev->target_index, *out_x, *out_y);
             return true;
         }
         log_error("event_sim: selector '%s'[%d] not found", ev->target_selector, ev->target_index);
@@ -978,9 +980,9 @@ static bool resolve_target(SimEvent* ev, DomDocument* doc, int* out_x, int* out_
     if (ev->target_text && doc) {
         float fx, fy;
         if (find_text_position(doc, ev->target_text, &fx, &fy)) {
-            *out_x = (int)fx;
-            *out_y = (int)fy;
-            log_info("event_sim: resolved text '%s' to (%d, %d)", ev->target_text, *out_x, *out_y);
+            *out_x = fx;
+            *out_y = fy;
+            log_info("event_sim: resolved text '%s' to (%.2f, %.2f)", ev->target_text, *out_x, *out_y);
             return true;
         }
         log_error("event_sim: target_text '%s' not found", ev->target_text);
@@ -992,8 +994,8 @@ static bool resolve_target(SimEvent* ev, DomDocument* doc, int* out_x, int* out_
 }
 
 static bool resolve_drag_positions(SimEvent* ev, DomDocument* doc,
-                                   int* start_x, int* start_y,
-                                   int* end_x, int* end_y) {
+                                   float* start_x, float* start_y,
+                                   float* end_x, float* end_y) {
     *start_x = ev->x;
     *start_y = ev->y;
     if ((ev->target_selector || ev->target_text) &&
@@ -1014,8 +1016,8 @@ static bool resolve_drag_positions(SimEvent* ev, DomDocument* doc,
         }
         float x = 0.0f, y = 0.0f;
         get_element_center_abs(elem, &x, &y);
-        *end_x = (int)x; // INT_CAST_OK: native input coordinates are integral pixels
-        *end_y = (int)y; // INT_CAST_OK: native input coordinates are integral pixels
+        *end_x = x;
+        *end_y = y;
         return true;
     }
     if (ev->to_target_text && doc) {
@@ -1024,8 +1026,8 @@ static bool resolve_drag_positions(SimEvent* ev, DomDocument* doc,
             log_error("event_sim: to_target text '%s' not found", ev->to_target_text);
             return false;
         }
-        *end_x = (int)x; // INT_CAST_OK: native input coordinates are integral pixels
-        *end_y = (int)y; // INT_CAST_OK: native input coordinates are integral pixels
+        *end_x = x;
+        *end_y = y;
     }
     return true;
 }
@@ -1062,6 +1064,10 @@ static int parse_view_type_value(ItemReader value) {
     return view_type == 0 ? -1 : view_type;
 }
 
+static float sim_number_as_float(ItemReader value) {
+    return value.isFloat() ? (float)value.asFloat() : (float)value.asInt();
+}
+
 // Parse target object: {"selector": "...", "text": "..."}
 // Also reads legacy top-level target_text for backward compat
 static void parse_target(MapReader& reader, SimEvent* ev) {
@@ -1076,14 +1082,14 @@ static void parse_target(MapReader& reader, SimEvent* ev) {
         // target index: which nth matching element (0-based)
         if (target_map.has("index")) ev->target_index = target_map.get("index").asInt32();
         // target can also carry x,y
-        if (target_map.has("x")) ev->x = target_map.get("x").asInt32();
-        if (target_map.has("y")) ev->y = target_map.get("y").asInt32();
+        if (target_map.has("x")) ev->x = sim_number_as_float(target_map.get("x"));
+        if (target_map.has("y")) ev->y = sim_number_as_float(target_map.get("y"));
         // optional pixel offset from element top-left, applied when a
         // selector resolves (so tests can target a specific spot inside
         // a wide element such as <input type="text">).
         if (target_map.has("offset_x") || target_map.has("offset_y")) {
-            ev->target_offset_x = target_map.get("offset_x").asInt32();
-            ev->target_offset_y = target_map.get("offset_y").asInt32();
+            ev->target_offset_x = sim_number_as_float(target_map.get("offset_x"));
+            ev->target_offset_y = sim_number_as_float(target_map.get("offset_y"));
             ev->has_target_offset = true;
         }
     }
@@ -1121,8 +1127,8 @@ static void parse_assert_count(MapReader& reader, SimEvent* ev) {
 }
 
 static void parse_pointer_fields(MapReader& reader, SimEvent* ev) {
-    ev->x = reader.get("x").asInt32();
-    ev->y = reader.get("y").asInt32();
+    ev->x = sim_number_as_float(reader.get("x"));
+    ev->y = sim_number_as_float(reader.get("y"));
     ev->button = reader.get("button").asInt32();
     ev->mods = reader.get("mods").asInt32();
     const char* mods = reader.get("mods_str").cstring();
@@ -1175,12 +1181,6 @@ static void sim_event_free_owned_fields(SimEvent* ev) {
     if (ev->js_code) mem_free(ev->js_code);
     if (ev->frame_selector) mem_free(ev->frame_selector);
     if (ev->ime_phase) mem_free(ev->ime_phase);
-    if (ev->editing_event_type) mem_free(ev->editing_event_type);
-    if (ev->editing_input_type) mem_free(ev->editing_input_type);
-    if (ev->editing_surface_kind) mem_free(ev->editing_surface_kind);
-    if (ev->editing_surface_mode) mem_free(ev->editing_surface_mode);
-    if (ev->editing_operation) mem_free(ev->editing_operation);
-    if (ev->editing_owned_by) mem_free(ev->editing_owned_by);
     if (ev->replay_event_name) mem_free(ev->replay_event_name);
     if (ev->state_dump_reference) mem_free(ev->state_dump_reference);
     if (ev->expected_reconcile_mode) mem_free(ev->expected_reconcile_mode);
@@ -1225,33 +1225,33 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     }
     else if (strcmp(type_str, "mouse_drag") == 0) {
         ev->type = SIM_EVENT_MOUSE_DRAG;
-        ev->x = reader.get("from_x").asInt32();
-        ev->y = reader.get("from_y").asInt32();
-        ev->to_x = reader.get("to_x").asInt32();
-        ev->to_y = reader.get("to_y").asInt32();
+        ev->x = sim_number_as_float(reader.get("from_x"));
+        ev->y = sim_number_as_float(reader.get("from_y"));
+        ev->to_x = sim_number_as_float(reader.get("to_x"));
+        ev->to_y = sim_number_as_float(reader.get("to_y"));
         ev->button = reader.get("button").asInt32();
         // Relative delta form: with a `target` start and dx/dy, the destination
         // is start+(dx,dy). Lets a fixture drag a resolved element (e.g. a resize
         // handle whose absolute position isn't known statically) by an offset.
         if (reader.has("dx") || reader.has("dy")) {
             ev->has_drag_delta = true;
-            ev->drag_dx = reader.get("dx").asInt32();
-            ev->drag_dy = reader.get("dy").asInt32();
+            ev->drag_dx = sim_number_as_float(reader.get("dx"));
+            ev->drag_dy = sim_number_as_float(reader.get("dy"));
         }
         parse_target(reader, ev);
         parse_to_target(reader, ev, false);
     }
     else if (strcmp(type_str, "pointer_drag") == 0) {
         ev->type = SIM_EVENT_POINTER_DRAG;
-        ev->x = reader.get("from_x").asInt32();
-        ev->y = reader.get("from_y").asInt32();
-        ev->to_x = reader.get("to_x").asInt32();
-        ev->to_y = reader.get("to_y").asInt32();
+        ev->x = sim_number_as_float(reader.get("from_x"));
+        ev->y = sim_number_as_float(reader.get("from_y"));
+        ev->to_x = sim_number_as_float(reader.get("to_x"));
+        ev->to_y = sim_number_as_float(reader.get("to_y"));
         ev->button = reader.get("button").asInt32();
         if (reader.has("dx") || reader.has("dy")) {
             ev->has_drag_delta = true;
-            ev->drag_dx = reader.get("dx").asInt32();
-            ev->drag_dy = reader.get("dy").asInt32();
+            ev->drag_dx = sim_number_as_float(reader.get("dx"));
+            ev->drag_dy = sim_number_as_float(reader.get("dy"));
         }
         const char* pointer_type = reader.get("pointerType").cstring();
         ev->pointer_type = mem_strdup(pointer_type ? pointer_type : "touch", MEM_CAT_LAYOUT);
@@ -1356,8 +1356,8 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     else if (strcmp(type_str, "scroll") == 0) {
         ev->type = SIM_EVENT_SCROLL;
         parse_target(reader, ev);
-        ev->x = reader.get("x").asInt32();
-        ev->y = reader.get("y").asInt32();
+        ev->x = sim_number_as_float(reader.get("x"));
+        ev->y = sim_number_as_float(reader.get("y"));
         {
             ItemReader dx = reader.get("dx"); ev->scroll_dx = (float)(dx.isFloat() ? dx.asFloat() : dx.asInt());
             ItemReader dy = reader.get("dy"); ev->scroll_dy = (float)(dy.isFloat() ? dy.asFloat() : dy.asInt());
@@ -1466,10 +1466,18 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     }
     else if (strcmp(type_str, "resize") == 0) {
         ev->type = SIM_EVENT_RESIZE;
-        ev->x = reader.get("width").asInt32();
-        ev->y = reader.get("height").asInt32();
+        ev->x = sim_number_as_float(reader.get("width"));
+        ev->y = sim_number_as_float(reader.get("height"));
         if (ev->x <= 0 || ev->y <= 0) {
             log_error("event_sim: resize requires positive width and height");
+            return parse_sim_event_fail(ev);
+        }
+    }
+    else if (strcmp(type_str, "set_device_scale") == 0) {
+        ev->type = SIM_EVENT_SET_DEVICE_SCALE;
+        ev->device_scale = sim_number_as_float(reader.get("scale"));
+        if (ev->device_scale <= 0.0f) {
+            log_error("event_sim: set_device_scale requires a positive scale");
             return parse_sim_event_fail(ev);
         }
     }
@@ -1907,38 +1915,6 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
             return parse_sim_event_fail(ev);
         }
     }
-    else if (strcmp(type_str, "assert_editing_event") == 0) {
-        ev->type = SIM_EVENT_ASSERT_EDITING_EVENT;
-        const char* event_type = reader.get("event").cstring();
-        if (!event_type) event_type = reader.get("record").cstring();
-        if (event_type) ev->editing_event_type = mem_strdup(event_type, MEM_CAT_LAYOUT);
-        const char* input_type = reader.get("inputType").cstring();
-        if (!input_type) input_type = reader.get("input_type").cstring();
-        if (input_type) ev->editing_input_type = mem_strdup(input_type, MEM_CAT_LAYOUT);
-        const char* surface = reader.get("surface").cstring();
-        if (!surface) surface = reader.get("surface_kind").cstring();
-        if (surface) ev->editing_surface_kind = mem_strdup(surface, MEM_CAT_LAYOUT);
-        const char* mode = reader.get("mode").cstring();
-        if (!mode) mode = reader.get("surface_mode").cstring();
-        if (mode) ev->editing_surface_mode = mem_strdup(mode, MEM_CAT_LAYOUT);
-        const char* operation = reader.get("operation").cstring();
-        if (operation) ev->editing_operation = mem_strdup(operation, MEM_CAT_LAYOUT);
-        const char* owned_by = reader.get("owned_by").cstring();
-        if (owned_by) ev->editing_owned_by = mem_strdup(owned_by, MEM_CAT_LAYOUT);
-        if (reader.has("prevented")) {
-            ev->has_expected_prevented = true;
-            ev->expected_prevented = reader.get("prevented").asBool();
-        }
-        if (reader.has("redacted")) {
-            ev->has_expected_redacted = true;
-            ev->expected_redacted = reader.get("redacted").asBool();
-        }
-        parse_assert_count(reader, ev);
-        if (!ev->editing_event_type) {
-            log_error("event_sim: assert_editing_event requires 'event'");
-            return parse_sim_event_fail(ev);
-        }
-    }
     else if (strcmp(type_str, "navigate") == 0) {
         ev->type = SIM_EVENT_NAVIGATE;
         const char* url = reader.get("url").cstring();
@@ -2001,8 +1977,8 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     else if (strcmp(type_str, "assert_pixel") == 0) {
         ev->type = SIM_EVENT_ASSERT_PIXEL;
         parse_target(reader, ev);
-        if (reader.has("x")) ev->x = reader.get("x").asInt32();
-        if (reader.has("y")) ev->y = reader.get("y").asInt32();
+        if (reader.has("x")) ev->x = sim_number_as_float(reader.get("x"));
+        if (reader.has("y")) ev->y = sim_number_as_float(reader.get("y"));
         ev->pixel_min_r = ev->pixel_min_g = ev->pixel_min_b = ev->pixel_min_a = -1;
         ev->pixel_max_r = ev->pixel_max_g = ev->pixel_max_b = ev->pixel_max_a = -1;
         ev->pixel_force_render = reader.has("force_render") ? reader.get("force_render").asBool() : true;
@@ -2129,6 +2105,17 @@ EventSimContext* event_sim_load(const char* json_file) {
         log_info("event_sim: viewport %dx%d", ctx->viewport_width, ctx->viewport_height);
     }
 
+    ItemReader pixel_ratio_item = root_map.get("pixel_ratio");
+    if (pixel_ratio_item.isFloat() || pixel_ratio_item.isInt()) {
+        ctx->pixel_ratio = sim_number_as_float(pixel_ratio_item);
+        if (ctx->pixel_ratio <= 0.0f) {
+            log_error("event_sim: pixel_ratio must be positive");
+            event_sim_free(ctx);
+            return NULL;
+        }
+        log_info("event_sim: device scale %.3f", ctx->pixel_ratio);
+    }
+
     // Parse optional default_timeout (ms) for auto-waiting assertions.
     // Default 500ms ensures assertions reliably auto-wait for the prior input
     // event to propagate, even under heavy parallel CPU load (e.g. when the
@@ -2245,8 +2232,8 @@ static void replay_parse_expected_snapshot(EventSimContext* ctx, MapReader& root
     ItemReader doc_state_item = data.get("document_state");
     if (doc_state_item.isMap()) {
         MapReader doc_state = doc_state_item.asMap();
-        ctx->replay_expected_scroll_x = (float)doc_state.get("scroll_x").asFloat();
-        ctx->replay_expected_scroll_y = (float)doc_state.get("scroll_y").asFloat();
+        ctx->replay_expected_scroll_x = sim_number_as_float(doc_state.get("scroll_x"));
+        ctx->replay_expected_scroll_y = sim_number_as_float(doc_state.get("scroll_y"));
         ctx->replay_has_scroll = true;
     }
 }
@@ -2258,15 +2245,15 @@ static SimEvent* replay_input_raw_to_event(EventSimContext* ctx, MapReader& data
     if (!ev) return NULL;
     ev->type = SIM_EVENT_REPLAY_INPUT;
     ev->replay_event_name = mem_strdup(event_name, MEM_CAT_LAYOUT);
-    ev->x = data.get("x").asInt32();
-    ev->y = data.get("y").asInt32();
+    ev->replay_x = sim_number_as_float(data.get("x"));
+    ev->replay_y = sim_number_as_float(data.get("y"));
     ev->button = data.has("button") ? data.get("button").asInt32() : 0;
     ev->mods = data.has("mods") ? data.get("mods").asInt32() : 0;
     ev->click_count = data.has("clicks") ? data.get("clicks").asInt32() : 1;
     ev->key = data.get("key").asInt32();
     ev->replay_scancode = data.get("scancode").asInt32();
-    ev->scroll_dx = (float)data.get("xoffset").asFloat();
-    ev->scroll_dy = (float)data.get("yoffset").asFloat();
+    ev->scroll_dx = sim_number_as_float(data.get("xoffset"));
+    ev->scroll_dy = sim_number_as_float(data.get("yoffset"));
     ev->replay_codepoint = (uint32_t)data.get("codepoint").asInt32();
     ev->replay_preedit_caret = (uint32_t)data.get("preedit_caret").asInt32();
     const char* text = data.get("text").cstring();
@@ -2292,8 +2279,8 @@ static void replay_attach_hit_target(SimEvent* ev, MapReader& data) {
         }
     }
     if (data.has("offset_x") || data.has("offset_y")) {
-        ev->target_offset_x = (int)data.get("offset_x").asFloat();
-        ev->target_offset_y = (int)data.get("offset_y").asFloat();
+        ev->target_offset_x = sim_number_as_float(data.get("offset_x"));
+        ev->target_offset_y = sim_number_as_float(data.get("offset_y"));
         ev->has_target_offset = true;
     }
 }
@@ -2360,6 +2347,8 @@ EventSimContext* event_sim_load_replay_log(const char* jsonl_file) {
                         ctx->viewport_width = viewport.get("w").asInt32();
                         ctx->viewport_height = viewport.get("h").asInt32();
                     }
+                    double recorded_scale = sim_number_as_float(root_map.get("zoom"));
+                    if (recorded_scale > 0.0) ctx->pixel_ratio = (float)recorded_scale;
                 } else if (type && strcmp(type, "input.raw") == 0) {
                     ItemReader data_item = root_map.get("data");
                     if (data_item.isMap()) {
@@ -2430,94 +2419,6 @@ static int count_substring_occurrences(const char* haystack, const char* needle)
     while ((scan = strstr(scan, needle)) != NULL) {
         count++;
         scan += needle_len;
-    }
-    return count;
-}
-
-static bool sim_line_contains(const char* line, size_t len, const char* needle) {
-    if (!line || !needle) return false;
-    size_t needle_len = strlen(needle);
-    if (needle_len == 0) return true;
-    if (needle_len > len) return false;
-    size_t limit = len - needle_len;
-    for (size_t i = 0; i <= limit; i++) {
-        if (line[i] == needle[0] && strncmp(line + i, needle, needle_len) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static bool sim_line_contains_str_field(const char* line, size_t len,
-                                        const char* key,
-                                        const char* value) {
-    if (!value) return true;
-    char needle[256];
-    snprintf(needle, sizeof(needle), "\"%s\":\"%s\"", key, value);
-    return sim_line_contains(line, len, needle);
-}
-
-static bool sim_line_contains_bool_field(const char* line, size_t len,
-                                         const char* key,
-                                         bool value) {
-    char needle[64];
-    snprintf(needle, sizeof(needle), "\"%s\":%s",
-             key, value ? "true" : "false");
-    return sim_line_contains(line, len, needle);
-}
-
-static bool sim_editing_event_line_matches(const char* line, size_t len,
-                                           SimEvent* ev) {
-    if (!sim_line_contains_str_field(line, len, "type",
-                                     ev->editing_event_type)) {
-        return false;
-    }
-    if (ev->editing_input_type) {
-        bool has_snake = sim_line_contains_str_field(line, len, "input_type",
-                                                     ev->editing_input_type);
-        bool has_camel = sim_line_contains_str_field(line, len, "inputType",
-                                                     ev->editing_input_type);
-        if (!has_snake && !has_camel) return false;
-    }
-    if (!sim_line_contains_str_field(line, len, "kind",
-                                     ev->editing_surface_kind)) {
-        return false;
-    }
-    if (!sim_line_contains_str_field(line, len, "mode",
-                                     ev->editing_surface_mode)) {
-        return false;
-    }
-    if (!sim_line_contains_str_field(line, len, "operation",
-                                     ev->editing_operation)) {
-        return false;
-    }
-    if (!sim_line_contains_str_field(line, len, "owned_by",
-                                     ev->editing_owned_by)) {
-        return false;
-    }
-    if (ev->has_expected_prevented &&
-        !sim_line_contains_bool_field(line, len, "prevented",
-                                      ev->expected_prevented)) {
-        return false;
-    }
-    if (ev->has_expected_redacted &&
-        !sim_line_contains_bool_field(line, len, "redacted",
-                                      ev->expected_redacted)) {
-        return false;
-    }
-    return true;
-}
-
-static int count_editing_event_matches(const char* content, SimEvent* ev) {
-    if (!content || !ev) return 0;
-    int count = 0;
-    const char* line = content;
-    while (*line) {
-        const char* next = strchr(line, '\n');
-        size_t len = next ? (size_t)(next - line) : strlen(line);
-        if (sim_editing_event_line_matches(line, len, ev)) count++;
-        if (!next) break;
-        line = next + 1;
     }
     return count;
 }
@@ -2928,65 +2829,8 @@ static void assert_state_dump_impl(EventSimContext* ctx, UiContext* uicon, SimEv
     strbuf_free(actual_norm);
 }
 
-static void assert_editing_event_impl(EventSimContext* ctx, UiContext* uicon,
-                                      SimEvent* ev) {
-    if (!ctx || !uicon || !ev) return;
-    EventStateLog* event_log = uicon->event_log;
-    if (!event_state_log_enabled(event_log)) {
-        log_info("event_sim: assert_editing_event SKIP - event log disabled");
-        ctx->pass_count++;
-        return;
-    }
-
-    const char* path = event_state_log_path(event_log);
-    if (!path) {
-        log_error("event_sim: assert_editing_event FAIL - event log has no path");
-        ctx->fail_count++;
-        return;
-    }
-
-    char* content = read_text_file(path);
-    if (!content) {
-        log_error("event_sim: assert_editing_event FAIL - cannot read '%s'", path);
-        ctx->fail_count++;
-        return;
-    }
-
-    int actual = count_editing_event_matches(content, ev);
-    int expected = ev->assert_count_expected;
-    int min_count = ev->assert_count_min;
-    int max_count = ev->assert_count_max;
-    if (expected < 0 && min_count < 0 && max_count < 0) min_count = 1;
-
-    bool passed = true;
-    if (expected >= 0 && actual != expected) {
-        log_error("event_sim: assert_editing_event FAIL - event '%s' expected %d, got %d",
-                  ev->editing_event_type, expected, actual);
-        passed = false;
-    }
-    if (min_count >= 0 && actual < min_count) {
-        log_error("event_sim: assert_editing_event FAIL - event '%s' expected min %d, got %d",
-                  ev->editing_event_type, min_count, actual);
-        passed = false;
-    }
-    if (max_count >= 0 && actual > max_count) {
-        log_error("event_sim: assert_editing_event FAIL - event '%s' expected max %d, got %d",
-                  ev->editing_event_type, max_count, actual);
-        passed = false;
-    }
-
-    if (passed) {
-        log_info("event_sim: assert_editing_event PASS - event '%s' count=%d",
-                 ev->editing_event_type, actual);
-        ctx->pass_count++;
-    } else {
-        ctx->fail_count++;
-    }
-    mem_free(content);
-}
-
 // Simulate a mouse move event
-static void sim_mouse_move(UiContext* uicon, int x, int y) {
+static void sim_mouse_move(UiContext* uicon, float x, float y) {
     RdtEvent event;
     event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
     event.mouse_position.timestamp = get_monotonic_time();
@@ -2997,7 +2841,7 @@ static void sim_mouse_move(UiContext* uicon, int x, int y) {
 }
 
 // Simulate a mouse button event
-static void sim_mouse_button(UiContext* uicon, int x, int y, int button, int mods, bool is_down) {
+static void sim_mouse_button(UiContext* uicon, float x, float y, int button, int mods, bool is_down) {
     // First move to the position
     sim_mouse_move(uicon, x, y);
 
@@ -3027,7 +2871,7 @@ static void sim_key(UiContext* uicon, int key, int mods, bool is_down) {
 }
 
 // Simulate a scroll event
-static void sim_scroll(UiContext* uicon, int x, int y, float dx, float dy) {
+static void sim_scroll(UiContext* uicon, float x, float y, float dx, float dy) {
     RdtEvent event;
     event.scroll.type = RDT_EVENT_SCROLL;
     event.scroll.timestamp = get_monotonic_time();
@@ -3056,30 +2900,26 @@ static void sim_replay_input(UiContext* uicon, SimEvent* ev) {
 
     if (strcmp(ev->replay_event_name, "mouse_down") == 0 ||
         strcmp(ev->replay_event_name, "mouse_up") == 0) {
-        int x, y;
-        if (!resolve_target(ev, uicon->document, &x, &y)) return;
         event.mouse_button.type = strcmp(ev->replay_event_name, "mouse_down") == 0 ?
             RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP;
         event.mouse_button.timestamp = now;
-        event.mouse_button.x = x;
-        event.mouse_button.y = y;
+        event.mouse_button.x = ev->replay_x;
+        event.mouse_button.y = ev->replay_y;
         event.mouse_button.button = (uint8_t)ev->button;
         event.mouse_button.clicks = (uint8_t)(ev->click_count > 0 ? ev->click_count : 1);
         event.mouse_button.mods = ev->mods;
     } else if (strcmp(ev->replay_event_name, "mouse_move") == 0 ||
                strcmp(ev->replay_event_name, "mouse_drag") == 0) {
-        int x, y;
-        if (!resolve_target(ev, uicon->document, &x, &y)) return;
         event.mouse_position.type = strcmp(ev->replay_event_name, "mouse_drag") == 0 ?
             RDT_EVENT_MOUSE_DRAG : RDT_EVENT_MOUSE_MOVE;
         event.mouse_position.timestamp = now;
-        event.mouse_position.x = x;
-        event.mouse_position.y = y;
+        event.mouse_position.x = ev->replay_x;
+        event.mouse_position.y = ev->replay_y;
     } else if (strcmp(ev->replay_event_name, "scroll") == 0) {
         event.scroll.type = RDT_EVENT_SCROLL;
         event.scroll.timestamp = now;
-        event.scroll.x = ev->x;
-        event.scroll.y = ev->y;
+        event.scroll.x = ev->replay_x;
+        event.scroll.y = ev->replay_y;
         event.scroll.xoffset = ev->scroll_dx;
         event.scroll.yoffset = ev->scroll_dy;
     } else if (strcmp(ev->replay_event_name, "key_down") == 0 ||
@@ -3421,22 +3261,27 @@ static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* 
         return;
     }
 
-    int x = 0, y = 0;
-    if (!resolve_target(ev, doc, &x, &y)) {
+    float logical_x = 0.0f, logical_y = 0.0f;
+    if (!resolve_target(ev, doc, &logical_x, &logical_y)) {
         log_error("event_sim: assert_pixel FAIL - could not resolve target");
         ctx->fail_count++;
         return;
     }
-    if (x < 0 || y < 0 || x >= actual->width || y >= actual->height) {
-        log_error("event_sim: assert_pixel FAIL - coordinate (%d,%d) outside surface %dx%d",
-                  x, y, actual->width, actual->height);
+    float scale_x = uicon->device_scale_x > 0.0f ? uicon->device_scale_x : 1.0f;
+    float scale_y = uicon->device_scale_y > 0.0f ? uicon->device_scale_y : scale_x;
+    int device_x = (int)lroundf(logical_x * scale_x); // INT_CAST_OK: discrete surface sample
+    int device_y = (int)lroundf(logical_y * scale_y); // INT_CAST_OK: discrete surface sample
+    if (device_x < 0 || device_y < 0 ||
+        device_x >= actual->width || device_y >= actual->height) {
+        log_error("event_sim: assert_pixel FAIL - logical (%.2f,%.2f) maps outside surface at (%d,%d) in %dx%d",
+                  logical_x, logical_y, device_x, device_y, actual->width, actual->height);
         ctx->fail_count++;
         return;
     }
 
     int stride = actual->pitch / 4; // INT_CAST_OK: pitch is bytes, pixel rows are uint32_t
     uint32_t* pixels = (uint32_t*)actual->pixels;
-    uint32_t px = pixels[y * stride + x];
+    uint32_t px = pixels[device_y * stride + device_x];
     int r = px & 0xFF;
     int g = (px >> 8) & 0xFF;
     int b = (px >> 16) & 0xFF;
@@ -3449,12 +3294,12 @@ static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* 
     ok = pixel_component_in_range("a", a, ev->pixel_min_a, ev->pixel_max_a) && ok;
 
     if (ok) {
-        log_info("event_sim: assert_pixel PASS at (%d,%d) rgba=(%d,%d,%d,%d)",
-                 x, y, r, g, b, a);
+        log_info("event_sim: assert_pixel PASS at logical (%.2f,%.2f), device (%d,%d) rgba=(%d,%d,%d,%d)",
+                 logical_x, logical_y, device_x, device_y, r, g, b, a);
         ctx->pass_count++;
     } else {
-        log_error("event_sim: assert_pixel FAIL at (%d,%d) rgba=(%d,%d,%d,%d)",
-                  x, y, r, g, b, a);
+        log_error("event_sim: assert_pixel FAIL at logical (%.2f,%.2f), device (%d,%d) rgba=(%d,%d,%d,%d)",
+                  logical_x, logical_y, device_x, device_y, r, g, b, a);
         ctx->fail_count++;
     }
 }
@@ -3706,7 +3551,7 @@ static void sim_focus_typing_target(UiContext* uicon, SimEvent* ev) {
         return;
     }
 
-    int x, y;
+    float x, y;
     if (resolve_target(ev, uicon->document, &x, &y)) {
         sim_mouse_button(uicon, x, y, 0, 0, true);
         sim_mouse_button(uicon, x, y, 0, 0, false);
@@ -3823,38 +3668,38 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
 
         case SIM_EVENT_MOUSE_MOVE: {
-            int x, y;
+            float x, y;
             resolve_target(ev, uicon->document, &x, &y);
-            log_info("event_sim: mouse_move to (%d, %d)", x, y);
+            log_info("event_sim: mouse_move to (%.2f, %.2f)", x, y);
             sim_mouse_move(uicon, x, y);
             break;
         }
 
         case SIM_EVENT_MOUSE_DOWN: {
-            int x, y;
+            float x, y;
             resolve_target(ev, uicon->document, &x, &y);
-            log_info("event_sim: mouse_down at (%d, %d) button=%d", x, y, ev->button);
+            log_info("event_sim: mouse_down at (%.2f, %.2f) button=%d", x, y, ev->button);
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
             break;
         }
 
         case SIM_EVENT_MOUSE_UP: {
-            int x, y;
+            float x, y;
             resolve_target(ev, uicon->document, &x, &y);
-            log_info("event_sim: mouse_up at (%d, %d) button=%d", x, y, ev->button);
+            log_info("event_sim: mouse_up at (%.2f, %.2f) button=%d", x, y, ev->button);
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
             break;
         }
 
         case SIM_EVENT_MOUSE_DRAG: {
-            int drag_x = 0, drag_y = 0, drag_to_x = 0, drag_to_y = 0;
+            float drag_x = 0.0f, drag_y = 0.0f, drag_to_x = 0.0f, drag_to_y = 0.0f;
             if (!resolve_drag_positions(ev, uicon->document,
                                         &drag_x, &drag_y, &drag_to_x, &drag_to_y)) break;
-            log_info("event_sim: mouse_drag from (%d, %d) to (%d, %d)", drag_x, drag_y, drag_to_x, drag_to_y);
+            log_info("event_sim: mouse_drag from (%.2f, %.2f) to (%.2f, %.2f)", drag_x, drag_y, drag_to_x, drag_to_y);
             sim_mouse_button(uicon, drag_x, drag_y, ev->button, ev->mods, true);
             for (int step = 1; step <= 5; step++) {
-                int px = drag_x + (drag_to_x - drag_x) * step / 5;
-                int py = drag_y + (drag_to_y - drag_y) * step / 5;
+                float px = drag_x + (drag_to_x - drag_x) * step / 5.0f;
+                float py = drag_y + (drag_to_y - drag_y) * step / 5.0f;
                 sim_mouse_move(uicon, px, py);
                 // Browser drag libraries schedule hit-testing intervals during
                 // the gesture; pumping only after mouseup makes every move look
@@ -3866,7 +3711,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_POINTER_DRAG: {
-            int drag_x = 0, drag_y = 0, drag_to_x = 0, drag_to_y = 0;
+            float drag_x = 0.0f, drag_y = 0.0f, drag_to_x = 0.0f, drag_to_y = 0.0f;
             if (!resolve_drag_positions(ev, uicon->document,
                                         &drag_x, &drag_y, &drag_to_x, &drag_to_y)) break;
             View* target = resolve_target_element(ev, uicon->document);
@@ -3876,7 +3721,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             const char* pointer_type = ev->pointer_type ? ev->pointer_type : "touch";
-            log_info("event_sim: pointer_drag pointerType=%s from (%d, %d) to (%d, %d)",
+            log_info("event_sim: pointer_drag pointerType=%s from (%.2f, %.2f) to (%.2f, %.2f)",
                      pointer_type, drag_x, drag_y, drag_to_x, drag_to_y);
             int steps = ev->drag_steps > 0 ? ev->drag_steps : 5;
             if (strcmp(pointer_type, "mouse") == 0) {
@@ -3886,8 +3731,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 sim_mouse_button(uicon, drag_x, drag_y,
                                  ev->button, ev->mods, true);
                 for (int step = 1; step <= steps; step++) {
-                    int x = drag_x + (drag_to_x - drag_x) * step / steps;
-                    int y = drag_y + (drag_to_y - drag_y) * step / steps;
+                    float x = drag_x + (drag_to_x - drag_x) * step / (float)steps;
+                    float y = drag_y + (drag_to_y - drag_y) * step / (float)steps;
                     sim_mouse_move(uicon, x, y);
                     sim_input_turn_drain(uicon);
                 }
@@ -3908,8 +3753,8 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     gesture_timestamp_ms);
             }
             for (int step = 1; step <= steps; step++) {
-                int x = drag_x + (drag_to_x - drag_x) * step / steps;
-                int y = drag_y + (drag_to_y - drag_y) * step / steps;
+                float x = drag_x + (drag_to_x - drag_x) * step / (float)steps;
+                float y = drag_y + (drag_to_y - drag_y) * step / (float)steps;
                 radiant_dispatch_event_sim_pointer(uicon, target, "pointermove",
                     x, y, ev->button, 1, ev->mods, pointer_type);
                 if (dispatch_compat_mouse) {
@@ -3983,17 +3828,17 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             float src_fx, src_fy, dst_fx, dst_fy;
             get_element_center_abs(src_view, &src_fx, &src_fy);
             get_element_center_abs(dst_view, &dst_fx, &dst_fy);
-            int src_x = (int)src_fx, src_y = (int)src_fy;
-            int dst_x = (int)dst_fx, dst_y = (int)dst_fy;
-            log_info("event_sim: drag_and_drop from '%s' (%d,%d) to '%s' (%d,%d)",
+            float src_x = src_fx, src_y = src_fy;
+            float dst_x = dst_fx, dst_y = dst_fy;
+            log_info("event_sim: drag_and_drop from '%s' (%.2f,%.2f) to '%s' (%.2f,%.2f)",
                 ev->target_selector, src_x, src_y, ev->to_target_selector, dst_x, dst_y);
             // Dispatch: mouse_down on source
             sim_mouse_button(uicon, src_x, src_y, 0, 0, true);
             // Intermediate mouse_move steps
             int steps = ev->drag_steps > 0 ? ev->drag_steps : 5;
             for (int step = 1; step <= steps; step++) {
-                int px = src_x + (dst_x - src_x) * step / steps;
-                int py = src_y + (dst_y - src_y) * step / steps;
+                float px = src_x + (dst_x - src_x) * step / (float)steps;
+                float py = src_y + (dst_y - src_y) * step / (float)steps;
                 sim_mouse_move(uicon, px, py);
             }
             // Drop: mouse_up on destination
@@ -4089,14 +3934,14 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_SCROLL:
             {
-                int scroll_x = ev->x;
-                int scroll_y = ev->y;
+                float scroll_x = ev->x;
+                float scroll_y = ev->y;
                 // A selector-addressed wheel event targets that element's box;
                 // raw coordinates remain available for pointer-position tests.
                 if (ev->target_selector || ev->target_text) {
                     resolve_target(ev, uicon->document, &scroll_x, &scroll_y);
                 }
-                log_info("event_sim: scroll at (%d, %d) offset=(%.2f, %.2f)",
+                log_info("event_sim: scroll at (%.2f, %.2f) offset=(%.2f, %.2f)",
                          scroll_x, scroll_y, ev->scroll_dx, ev->scroll_dy);
                 sim_scroll(uicon, scroll_x, scroll_y, ev->scroll_dx, ev->scroll_dy);
             }
@@ -4113,9 +3958,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         // ===== High-level actions =====
 
         case SIM_EVENT_CLICK: {
-            int x, y;
+            float x, y;
             if (!resolve_target(ev, uicon->document, &x, &y)) break;
-            log_info("event_sim: click at (%d, %d) button=%d", x, y, ev->button);
+            log_info("event_sim: click at (%.2f, %.2f) button=%d", x, y, ev->button);
             sim_mouse_move(uicon, x, y);
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, false);
@@ -4132,12 +3977,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
         }
 
         case SIM_EVENT_DBLCLICK: {
-            int x, y;
+            float x, y;
             if (!resolve_target(ev, uicon->document, &x, &y)) break;
             // F2: click_count default = 2 (dblclick). 3 = tripleclick.
             int total_clicks = ev->click_count > 0 ? ev->click_count : 2;
             if (total_clicks < 2) total_clicks = 2;
-            log_info("event_sim: %sclick at (%d, %d) total_clicks=%d",
+            log_info("event_sim: %sclick at (%.2f, %.2f) total_clicks=%d",
                      total_clicks >= 3 ? "triple" : "dbl", x, y, total_clicks);
             // First (total_clicks - 1) plain clicks via sim_mouse_button.
             for (int c = 1; c < total_clicks; c++) {
@@ -4207,12 +4052,12 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 sim_input_turn_mark_pending();
                 break;
             }
-            int x, y;
+            float x, y;
             if (!resolve_target(ev, uicon->document, &x, &y)) break;
             // Focus fixtures historically model pointer focus. Preserve that
             // default so native form controls run their normal mouse path;
             // only widgets that cancel mousedown need programmatic fallback.
-            log_info("event_sim: focus via click at (%d, %d)", x, y);
+            log_info("event_sim: focus via click at (%.2f, %.2f)", x, y);
             sim_mouse_button(uicon, x, y, 0, 0, true);
             sim_mouse_button(uicon, x, y, 0, 0, false);
             // The click can cause an editor to rebuild its block subtree;
@@ -4258,9 +4103,9 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             // unchanged — this is still "ensure state X", it just gets there the
             // way a user would. A radio cannot be unchecked by clicking, which
             // the direct writer could not do either.
-            int cx, cy;
+            float cx, cy;
             if (!resolve_target(ev, doc, &cx, &cy)) break;
-            log_info("event_sim: check - clicking (%d, %d) to reach %s", cx, cy,
+            log_info("event_sim: check - clicking (%.2f, %.2f) to reach %s", cx, cy,
                      ev->expected_checked ? "checked" : "unchecked");
             sim_mouse_move(uicon, cx, cy);
             sim_mouse_button(uicon, cx, cy, ev->button, ev->mods, true);
@@ -4325,11 +4170,11 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_RESIZE: {
             // Resize viewport and trigger full relayout
-            int new_css_w = ev->x;
-            int new_css_h = ev->y;
+            int new_css_w = (int)lroundf(ev->x); // INT_CAST_OK: viewport API is discrete CSS pixels
+            int new_css_h = (int)lroundf(ev->y); // INT_CAST_OK: viewport API is discrete CSS pixels
             float pr = uicon->pixel_ratio > 0 ? uicon->pixel_ratio : 1.0f;
-            int new_phys_w = (int)(new_css_w * pr);
-            int new_phys_h = (int)(new_css_h * pr);
+            int new_phys_w = (int)lroundf(new_css_w * pr); // INT_CAST_OK: physical surface width
+            int new_phys_h = (int)lroundf(new_css_h * pr); // INT_CAST_OK: physical surface height
             log_info("event_sim: resize to %dx%d CSS pixels (%dx%d physical)", new_css_w, new_css_h, new_phys_w, new_phys_h);
             uicon->viewport_width = new_css_w;
             uicon->viewport_height = new_css_h;
@@ -4345,6 +4190,22 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 radiant_dispatch_window_event(uicon, uicon->document, "resize");
             }
             // Re-render after resize to update surface pixels
+            force_render_surface(uicon);
+            break;
+        }
+
+        case SIM_EVENT_SET_DEVICE_SCALE: {
+            float scale = ev->device_scale;
+            bool changed = ui_context_set_device_scale(uicon, scale, scale);
+            int physical_w = (int)lroundf(uicon->viewport_width * scale); // INT_CAST_OK: physical surface width
+            int physical_h = (int)lroundf(uicon->viewport_height * scale); // INT_CAST_OK: physical surface height
+            uicon->window_width = physical_w;
+            uicon->window_height = physical_h;
+            ui_context_create_surface(uicon, physical_w, physical_h);
+            log_info("event_sim: device scale %.3f (%s), logical viewport %.0fx%.0f, surface %dx%d",
+                     scale, changed ? "changed" : "unchanged",
+                     uicon->viewport_width, uicon->viewport_height,
+                     physical_w, physical_h);
             force_render_surface(uicon);
             break;
         }
@@ -4365,7 +4226,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                     sim_focus_element_with_js_runtime(uicon->document, focus_target)) {
                     sim_input_turn_mark_pending();
                 } else {
-                    int x, y;
+                    float x, y;
                     if (resolve_target(ev, uicon->document, &x, &y)) {
                         sim_mouse_button(uicon, x, y, 0, 0, true);
                         sim_mouse_button(uicon, x, y, 0, 0, false);
@@ -4434,7 +4295,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             // Optional target focus: click to focus first.
             if (ev->target_selector || ev->target_text) {
-                int x, y;
+                float x, y;
                 if (resolve_target(ev, doc, &x, &y)) {
                     sim_mouse_button(uicon, x, y, 0, 0, true);
                     sim_mouse_button(uicon, x, y, 0, 0, false);
@@ -5742,11 +5603,6 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             break;
         }
 
-        case SIM_EVENT_ASSERT_EDITING_EVENT: {
-            assert_editing_event_impl(ctx, uicon, ev);
-            break;
-        }
-
         case SIM_EVENT_ASSERT_STATE_DUMP: {
             assert_state_dump_impl(ctx, uicon, ev);
             break;
@@ -5842,7 +5698,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             Url* base_url = uicon->document ? uicon->document->url : nullptr;
             if (!base_url) base_url = get_current_dir();
             DomDocument* new_doc = load_html_doc(base_url, ev->navigate_url,
-                uicon->viewport_width, uicon->viewport_height, uicon->pixel_ratio);
+                uicon->viewport_width, uicon->viewport_height);
             if (!new_doc) {
                 log_error("event_sim: navigate FAIL - could not load '%s'", ev->navigate_url);
                 ctx->fail_count++;

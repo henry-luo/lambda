@@ -16,9 +16,9 @@ The original geometric mean slowdown vs Node.js across these five benchmarks was
 
 ### Prior Art
 
-- [Lambda_Transpile_Restructure.md](Lambda_Transpile_Restructure.md) — Dual-version function generation (`_n`/`_b`), structured returns (`RetItem`)
-- [Lambda_Transpile_Restructure2.md](Lambda_Transpile_Restructure2.md) — JIT header diet, O(1) sys func lookup, config-driven code gen
-- [Lambda_Box_Unbox.md](Lambda_Box_Unbox.md) / [Lambda_Box_Unbox2.md](Lambda_Box_Unbox2.md) — Boxing/unboxing uniformity
+- [Lambda_Transpile_Restructure (retired).md](Lambda_Transpile_Restructure%20(retired).md) — Dual-version function generation (`_n`/`_b`), structured returns (`RetItem`)
+- [Lambda_Transpile_Restructure2 (retired).md](Lambda_Transpile_Restructure2%20(retired).md) — JIT header diet, O(1) sys func lookup, config-driven code gen
+- [Lambda_Box_Unbox.md](../Lambda_Box_Unbox.md) / [Lambda_Box_Unbox2.md](../Lambda_Box_Unbox2.md) — Boxing/unboxing uniformity
 
 This Phase 3 focuses exclusively on **JIT code quality and runtime call elimination** — the hot-path optimizations that directly affect compute-bound benchmarks.
 
@@ -533,7 +533,7 @@ All five benchmarks now have concrete implementations with verified speedups. D1
 
 ## Appendix A: C2MIR vs MIR Direct Comparison
 
-The earlier benchmark data (from [Overall_Result.md](../test/benchmark/Overall_Result.md)) shows C2MIR is **1.24x faster** than MIR Direct in release builds. The key differences:
+The earlier benchmark data (from [Overall_Result.md](../../test/benchmark/Overall_Result.md)) shows C2MIR is **1.24x faster** than MIR Direct in release builds. The key differences:
 
 | Aspect | C2MIR | MIR Direct |
 |--------|-------|------------|

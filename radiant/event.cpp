@@ -46,6 +46,12 @@ extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind,
                                                void* target, void* parent,
                                                const char* attribute_name,
                                                const char* old_value);
+extern "C" DomElement* js_dom_find_form_owner(void* control);
+extern "C" bool js_dom_is_submit_button(void* dom_elem);
+extern "C" bool js_dom_is_reset_button(void* dom_elem);
+extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter_item);
+extern "C" bool js_dom_is_disabled(void* dom_elem);
+extern "C" bool js_dom_is_connected(void* dom_elem);
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
 #include <chrono>       // timing for reactive event dispatch
@@ -154,20 +160,20 @@ static void event_log_raw_input(EventStateLog* log, uint64_t cascade_id,
         switch (event->type) {
         case RDT_EVENT_MOUSE_DOWN:
         case RDT_EVENT_MOUSE_UP:
-            jw_kv_int(&w, "x", event->mouse_button.x);
-            jw_kv_int(&w, "y", event->mouse_button.y);
+            jw_kv_double(&w, "x", event->mouse_button.x);
+            jw_kv_double(&w, "y", event->mouse_button.y);
             jw_kv_int(&w, "button", event->mouse_button.button);
             jw_kv_int(&w, "clicks", event->mouse_button.clicks);
             jw_kv_int(&w, "mods", event->mouse_button.mods);
             break;
         case RDT_EVENT_MOUSE_MOVE:
         case RDT_EVENT_MOUSE_DRAG:
-            jw_kv_int(&w, "x", event->mouse_position.x);
-            jw_kv_int(&w, "y", event->mouse_position.y);
+            jw_kv_double(&w, "x", event->mouse_position.x);
+            jw_kv_double(&w, "y", event->mouse_position.y);
             break;
         case RDT_EVENT_SCROLL:
-            jw_kv_int(&w, "x", event->scroll.x);
-            jw_kv_int(&w, "y", event->scroll.y);
+            jw_kv_double(&w, "x", event->scroll.x);
+            jw_kv_double(&w, "y", event->scroll.y);
             jw_kv_double(&w, "xoffset", event->scroll.xoffset);
             jw_kv_double(&w, "yoffset", event->scroll.yoffset);
             break;
@@ -239,7 +245,7 @@ static void event_log_editing_surface(JsonWriter* w,
                                       const EditingSurface* surface) {
     jw_key(w, "surface");
     jw_obj_begin(w);
-        editing_log_write_surface_core_fields(w, surface, false);
+        event_log_write_surface_core_fields(w, surface, false);
     jw_obj_end(w);
 }
 
@@ -598,8 +604,6 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
 
     UiContext* uicon = evcon->ui_context;
     DomDocument* saved_doc = uicon->document;
-    float saved_window_width = uicon->window_width;
-    float saved_window_height = uicon->window_height;
     int saved_viewport_width = uicon->viewport_width;
     int saved_viewport_height = uicon->viewport_height;
 
@@ -610,11 +614,9 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
          iframe_container->view_type == RDT_VIEW_INLINE_BLOCK)) {
         ViewBlock* block = lam::view_require_block(iframe_container);
         if (block->width > 0) {
-            uicon->window_width = block->width;
             uicon->viewport_width = (int)block->width; // INT_CAST_OK: UiContext viewport dimensions are integer CSS pixels.
         }
         if (block->height > 0) {
-            uicon->window_height = block->height;
             uicon->viewport_height = (int)block->height; // INT_CAST_OK: UiContext viewport dimensions are integer CSS pixels.
         }
     }
@@ -625,8 +627,6 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
     }
 
     uicon->document = saved_doc;
-    uicon->window_width = saved_window_width;
-    uicon->window_height = saved_window_height;
     uicon->viewport_width = saved_viewport_width;
     uicon->viewport_height = saved_viewport_height;
 }
@@ -896,13 +896,13 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     float rect_right = x + rect_width;
     float rect_bottom = y + text_rect->height;
 
-    log_debug("target text:'%t' start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d",
+    log_debug("target text:'%t' start:%d, len:%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f, blk_x:%.1f",
         str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, evcon->block.x);
 
     // First check if mouse is within the text rect bounds (use rect height, not char height)
     if (x <= event->x && event->x < rect_right && y <= event->y && event->y < rect_bottom) {
         // Mouse is in this text rect - set target and return
-        log_debug("hit on text rect at (%d, %d)", event->x, event->y);
+        log_debug("hit on text rect at (%.1f, %.1f)", event->x, event->y);
         evcon->target = text;
         evcon->target_text_rect = text_rect;
         return;
@@ -1118,8 +1118,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     float tdx = 0.0f, tdy = 0.0f;
     bool translated = event_translate_only_transform(static_cast<View*>(block), &tdx, &tdy);
     if (translated) {
-        evcon->event.mouse_position.x -= (int)tdx;   // INT_CAST_OK: event coords are integer pixels
-        evcon->event.mouse_position.y -= (int)tdy;   // INT_CAST_OK: event coords are integer pixels
+        evcon->event.mouse_position.x -= tdx;
+        evcon->event.mouse_position.y -= tdy;
     }
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -1299,8 +1299,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     RETURN:
     if (translated) {
-        evcon->event.mouse_position.x += (int)tdx;   // INT_CAST_OK: event coords are integer pixels
-        evcon->event.mouse_position.y += (int)tdy;   // INT_CAST_OK: event coords are integer pixels
+        evcon->event.mouse_position.x += tdx;
+        evcon->event.mouse_position.y += tdy;
     }
     // Only restore block position if no target was found
     // When a target is found, keep block at the parent's position for coordinate calculations
@@ -1335,7 +1335,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             evcon->offset_y = event->y - y;
         }
         else {
-            log_debug("hit not on block: %s, x: %.1f, y: %.1f, ex: %d, ey: %d, right: %.1f, bottom: %.1f",
+            log_debug("hit not on block: %s, x: %.1f, y: %.1f, ex: %.1f, ey: %.1f, right: %.1f, bottom: %.1f",
                 block->node_name(), x, y, event->x, event->y, x + block->width, y + block->height);
         }
     }
@@ -1674,6 +1674,30 @@ static View* canonical_selection_focus_target(DocState* state) {
     return focus.node ? static_cast<View*>(focus.node) : nullptr;
 }
 
+static bool canonical_contenteditable_surface_from_state(DocState* state,
+                                                          EditingSurface* out) {
+    if (out) editing_surface_clear(out);
+    if (!state) return false;
+
+    EditingSurface surface;
+    state_store_refresh_editing_selection_shadow(state);
+    View* selection_target = canonical_selection_focus_target(state);
+    if (selection_target && editing_surface_from_target(selection_target, &surface) &&
+        editing_surface_is_rich(&surface) && surface.owner) {
+        if (out) *out = surface;
+        return true;
+    }
+
+    // composition start can have focus without a DOM range; use the current
+    // focus surface only after the canonical selection has declined.
+    if (editing_surface_from_focus(state, &surface) &&
+        editing_surface_is_rich(&surface) && surface.owner) {
+        if (out) *out = surface;
+        return true;
+    }
+    return false;
+}
+
 static View* rich_keyboard_target_from_selection(DocState* state,
                                                  View* preferred,
                                                  EditingSurface* out_surface) {
@@ -1750,6 +1774,14 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
     // intent, only the index the geometry resolved.
     if (intent && intent->option_index >= 0) {
         mb.put("option_index", (int64_t)intent->option_index);
+    }
+
+    // F14.1: an execCommand names a legacy command, not a WHATWG input type, so
+    // it too sits outside the guard. `value` is the call's third argument.
+    if (intent && intent->command) {
+        mb.put("command", intent->command);
+        if (intent->data) mb.put("value", intent->data);
+        else mb.putNull("value");
     }
 
     // F9: a caret-key notification carries no edit intent either — only the key
@@ -1847,8 +1879,8 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
 
     // mouse coordinates (from event context)
     if (evcon) {
-        mb.put("x", (int64_t)evcon->event.mouse_button.x);
-        mb.put("y", (int64_t)evcon->event.mouse_button.y);
+        mb.put("x", (double)evcon->event.mouse_button.x);
+        mb.put("y", (double)evcon->event.mouse_button.y);
     }
 
     // for "input" events: add typed character as UTF-8 string
@@ -1969,7 +2001,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
 
 
     if (event_uses_hit_source_pos && doc && doc->view_tree) {
-        int event_x = 0, event_y = 0;
+        float event_x = 0.0f, event_y = 0.0f;
         bool has_mouse_pos = false;
         if (evcon->event.type == RDT_EVENT_MOUSE_MOVE) {
             event_x = evcon->event.mouse_position.x;
@@ -1989,7 +2021,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
                 hit.node = static_cast<DomNode*>(hit_text);
                 hit.offset = dom_text_utf8_to_utf16(hit_text, (uint32_t)evcon->target_text_offset);
             } else {
-                hit = dom_hit_test_to_boundary(static_cast<View*>(doc->view_tree->root), (float)event_x, (float)event_y);
+                hit = dom_hit_test_to_boundary(static_cast<View*>(doc->view_tree->root), event_x, event_y);
             }
             SourcePosC hit_pos;
             if (hit.node && source_pos_from_dom_boundary(&hit, &hit_pos)) {
@@ -2059,14 +2091,8 @@ static DomNode* source_selection_scope_root(DomDocument* doc, DocState* state) {
         return doc && doc->root ? static_cast<DomNode*>(doc->root) : nullptr;
     }
 
-    EditingSurface resolved;
     const EditingSurface* surface = nullptr;
-    if (state->editing.rich_transaction_phase != EDITING_RICH_TX_IDLE &&
-        state->editing.rich_transaction_target &&
-        editing_surface_from_target(state->editing.rich_transaction_target, &resolved) &&
-        editing_surface_is_rich(&resolved) && resolved.owner) {
-        surface = &resolved;
-    } else if (state->editing.has_active_surface &&
+    if (state->editing.has_active_surface &&
                editing_surface_is_rich(&state->editing.active_surface) &&
                state->editing.active_surface.owner) {
         surface = &state->editing.active_surface;
@@ -2200,7 +2226,7 @@ extern "C" Item dispatch_emit(Item event_name_item, Item event_data) {
 /**
  * dispatch_set_selection — called from pn_set_selection() (lambda-proc.cpp).
  * Push a Lambda SourceSelection back to the live DomSelection so the
- * visual caret/highlight follows after a transaction. See
+ * visual caret/highlight follows after an edit. See
  * Radiant_Rich_Text_Editing.md §7.4 (Source → DOM sync).
  *
  * Resolves the active document via the thread-local handler context, then
@@ -2291,6 +2317,12 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     // the document's one shared script runtime: a behavior template governs
     // plain HTML pages too, where the Lambda runtime is the JS realm's.
     Runtime* rt = dom_document_script_runtime(doc);
+    if (!rt && context && context->runtime) {
+        // A synchronous JS bridge may execute before the loader retains the
+        // document realm. Use the already-bound caller runtime for the package
+        // load; the document must not borrow that stack-owned host pointer.
+        rt = context->runtime;
+    }
     Context* saved_input_context = input_context;
     if (rt && rt->heap) {
         handler_ctx = runtime_get_eval_context(rt);
@@ -2509,6 +2541,12 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     // radiant_document_ensure_evaluator() — which runs after the loader has
     // executed the page's scripts, so js_has_dom_realm is already settled.
     Runtime* rt = dom_document_script_runtime(doc);
+    if (!rt && context && context->runtime) {
+        // A synchronous JS bridge may execute before the loader retains the
+        // document realm. The current evaluator can load the package for this
+        // call; the document must not borrow that stack-owned host pointer.
+        rt = context->runtime;
+    }
     if (!rt) {
         // Create one here after all. EO4 moved creation to setup because at
         // dispatch time nothing could tell whether JS would start later — but
@@ -2590,7 +2628,8 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     return ok;
 }
 
-static void select_open_dropdown(DocState* state, View* select_view, float scale);
+static void select_open_dropdown(UiContext* uicon, DocState* state,
+                                 View* select_view);
 
 // Dropdown open/close for the dom package's `<select>` behavior template. The
 // policy of *when* to open belongs to the template; the overlay geometry,
@@ -2616,9 +2655,7 @@ extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open) {
     if (state->open_dropdown && state->open_dropdown != view) {
         doc_state_close_dropdown(state, state->open_dropdown);
     }
-    float scale = ctx->evcon->ui_context && ctx->evcon->ui_context->pixel_ratio > 0
-        ? ctx->evcon->ui_context->pixel_ratio : 1.0f;
-    select_open_dropdown(state, view, scale);
+    select_open_dropdown(ctx->evcon->ui_context, state, view);
     return true;
 }
 
@@ -2639,6 +2676,31 @@ extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* e
     bool ok = radiant_dispatch_simple_event(ctx->evcon, view, event_name, true, false);
     log_debug("dispatch-from-script: '%s' -> %s", event_name, ok ? "dispatched" : "no listener");
     return ok;
+}
+
+// F4: package submission policy uses this as the cancelable event waist. The
+// package handler already runs inside the document's live JS/Lambda batch, so
+// dispatch directly into EventTarget; opening a second evaluator here would
+// split submit listeners from the activation that raised them.
+extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
+                                                           void* submitter_node) {
+    if (!form_node) return false;
+    DomNode* node = static_cast<DomNode*>(form_node);
+    if (!node || !node->is_element()) return false;
+    DomElement* form = node->as_element();
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return false;
+    }
+    DomDocument* doc = g_emit_handler_ctx ? g_emit_handler_ctx->doc
+                                          : (DomDocument*)js_dom_get_document();
+    if (!doc || form->doc != doc) return false;
+
+    Item event = js_create_event("submit", true, true);
+    js_set_key_cstr(event, "isTrusted", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(event, "submitter", submitter_node
+        ? js_dom_wrap_element((DomElement*)submitter_node) : ItemNull);
+    Item dispatched = js_dom_dispatch_event(js_dom_wrap_element(form), event);
+    return dispatched.item != ITEM_FALSE;
 }
 
 // Does a behavior template own the default action for this event on this
@@ -2896,6 +2958,14 @@ extern "C" bool radiant_dispatch_behavior_key_intent(View* target,
     return dispatch_behavior_handler(nullptr, target, "keyintent", intent, nullptr);
 }
 
+// F14.1: the legacy command seam. Behavior-only and context-free like the two
+// above — `document.execCommand` is a method call, not an event, so there is no
+// EventContext and nothing has been preventDefault'd ahead of it.
+extern "C" bool radiant_dispatch_behavior_exec_command(View* target,
+                                                       const InputIntent* intent) {
+    return dispatch_behavior_handler(nullptr, target, "execcommand", intent, nullptr);
+}
+
 extern "C" const char* radiant_caret_operation_name(void) { return s_caret_op_name; }
 extern "C" bool radiant_caret_operation_extend(void) { return s_caret_op_extend; }
 
@@ -2972,6 +3042,19 @@ extern "C" bool radiant_dispatch_behavior_context_menu(EventContext* evcon,
 
 extern "C" bool radiant_dispatch_behavior_input(EventContext* evcon, View* target) {
     return dispatch_behavior_handler(evcon, target, "input", nullptr, nullptr);
+}
+
+// F4: submit/reset activation has no separate DOM event to expose to Lambda.
+// Keep it behavior-only so the ordinary click dispatch remains available to
+// author handlers and cancellation reaches this default-action seam first.
+extern "C" bool radiant_dispatch_behavior_submit_activation(EventContext* evcon,
+                                                             View* target) {
+    return dispatch_behavior_handler(evcon, target, "submitactivation", nullptr, nullptr);
+}
+
+extern "C" bool radiant_dispatch_behavior_reset_activation(EventContext* evcon,
+                                                            View* target) {
+    return dispatch_behavior_handler(evcon, target, "resetactivation", nullptr, nullptr);
 }
 
 // F5: the applier seam. A behavior template that handles this `beforeinput`
@@ -3062,14 +3145,6 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                                        out_model_reconciled);
 }
 
-bool editing_template_invoke_handler(EventContext* evcon, View* target,
-                                     const char* event_name,
-                                     const InputIntent* intent,
-                                     bool* out_model_reconciled) {
-    return dispatch_lambda_handler(evcon, target, event_name, intent,
-                                   out_model_reconciled);
-}
-
 // Forward declaration — CE-3 JS InputEvent dispatcher lives further down,
 // alongside the other radiant_dispatch_* JS bridges.
 static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
@@ -3101,34 +3176,9 @@ static bool event_document_has_js_runtime(EventContext* evcon) {
     return dom_document_has_js_realm(document);
 }
 
-static bool dispatch_editing_notification_beforeinput(
-        EventContext* evcon, const EditingPreparedTransaction* prepared,
-        void* user) {
-    (void)user;
-    // Lambda template documents do not own a JS event realm. The notification
-    // stage still completes, but it has no cancellation opinion; returning
-    // false preserves that distinction for the transaction gate.
-    if (!event_document_has_js_runtime(evcon)) return false;
-    return prepared && radiant_dispatch_input_event(evcon, prepared->surface.view,
-                                                     "beforeinput", &prepared->intent);
-}
-
-static void dispatch_editing_notification_input(
-        EventContext* evcon, const EditingPreparedTransaction* prepared,
-        void* user) {
-    (void)user;
-    if (!prepared) return;
-    // See beforeinput above: no JS document means no DOM input listener can
-    // observe this notification, while the template action owns the mutation.
-    if (!event_document_has_js_runtime(evcon)) return;
-    radiant_dispatch_input_event(evcon, prepared->surface.view, "input",
-                                 &prepared->intent);
-}
-
-static bool dispatch_contenteditable_transaction(EventContext* evcon, View* target,
-                                                  const InputIntent* intent,
-                                                  EditingTransactionResult* out_result);
-static bool dispatch_contenteditable_composition_transaction(
+static bool dispatch_contenteditable_event(EventContext* evcon, View* target,
+                                            const InputIntent* intent);
+static bool dispatch_contenteditable_composition_event(
         EventContext* evcon, const EditingSurface* surface,
         const EditingIntent* intent);
 
@@ -3158,9 +3208,9 @@ static void rich_select_all_sync_descendant_text_controls(DocState* state,
     }
 }
 
-static bool dispatch_contenteditable_consumer_transaction(EventContext* evcon,
-                                                          View* target,
-                                                          const InputIntent* intent) {
+static bool dispatch_contenteditable_consumer_event(EventContext* evcon,
+                                                    View* target,
+                                                    const InputIntent* intent) {
     if (!evcon || !target || !intent || intent->type == INPUT_INTENT_NONE) return false;
     EditingSurface surface;
     if (!editing_surface_from_target(target, &surface)) return false;
@@ -3170,7 +3220,7 @@ static bool dispatch_contenteditable_consumer_transaction(EventContext* evcon,
     event_log_editing_clipboard_intent(state, &surface, intent, nullptr);
     // Clipboard, drag, and physical-key callers share the same action gate;
     // a consumer operation must not regain the retired event-only rich path.
-    return dispatch_contenteditable_transaction(evcon, target, intent, nullptr);
+    return dispatch_contenteditable_event(evcon, target, intent);
 }
 
 static bool dispatch_rich_selection_snapshot(EventContext* evcon,
@@ -3289,8 +3339,7 @@ static bool dispatch_contenteditable_select_all(EventContext* evcon,
     }
 
     // Select-all is a selection operation, not a beforeinput/default-action
-    // transaction. Keep it outside the text action gate and do not emit input.
-    editing_dispatch_log_intent(evcon, &surface, intent);
+    // edit. Keep it outside the text action gate and do not emit input.
     bool selected = dispatch_contenteditable_select_all_default(evcon, state,
                                                                  target, intent);
     if (selected) evcon->need_repaint = true;
@@ -3624,8 +3673,6 @@ static bool dispatch_form_select_all(EventContext* evcon, DomElement* elem,
 
     InputIntent intent;
     intent.type = INPUT_INTENT_SELECT_ALL;
-    editing_dispatch_log_intent(evcon, &surface, &intent);
-
     uint32_t value_len = 0;
     form_control_live_value(elem, &value_len);
     state_store_selection_start_pointer(state, target, 0);
@@ -4231,7 +4278,7 @@ static bool editing_text_drag_dispatch_delete(EventContext* evcon,
     InputIntent intent;
     intent.type = INPUT_INTENT_DELETE_BY_DRAG;
     intent.data = "";
-    return dispatch_contenteditable_consumer_transaction(evcon, range_view, &intent);
+    return dispatch_contenteditable_consumer_event(evcon, range_view, &intent);
 }
 
 static bool editing_text_drag_dispatch_insert(EventContext* evcon,
@@ -4248,7 +4295,7 @@ static bool editing_text_drag_dispatch_insert(EventContext* evcon,
     uint32_t text_len = (uint32_t)strlen(text);
     // A cross-surface drop starts an editing intention in the destination.
     // Transfer focus before setting its range so an embedded source control
-    // cannot remain focused while a rich transaction targets its outer host.
+    // cannot remain focused while an edit targets its outer host.
     if (surface->owner) {
         update_focus_state(evcon, static_cast<View*>(surface->owner), false);
     }
@@ -4266,14 +4313,14 @@ static bool editing_text_drag_dispatch_insert(EventContext* evcon,
     intent.data = text;
     intent.html_data = html_payload && html_payload[0] ? html_payload : nullptr;
     intent.data_mime = intent.html_data ? "text/html" : "text/plain";
-    return dispatch_contenteditable_consumer_transaction(evcon, range_view, &intent);
+    return dispatch_contenteditable_consumer_event(evcon, range_view, &intent);
 }
 
-static bool dispatch_rich_drop_transaction_at_range(EventContext* evcon,
-                                                    View* target,
-                                                    const DomBoundary* start,
-                                                    const DomBoundary* end,
-                                                    const char* payload) {
+static bool dispatch_rich_drop_at_range(EventContext* evcon,
+                                        View* target,
+                                        const DomBoundary* start,
+                                        const DomBoundary* end,
+                                        const char* payload) {
     if (!evcon || !target || !start || !end ||
         !start->node || !end->node) {
         return false;
@@ -4288,7 +4335,7 @@ static bool dispatch_rich_drop_transaction_at_range(EventContext* evcon,
 
     const char* exc = nullptr;
     if (!state_store_set_selection(state, start, end, &exc)) {
-        log_debug("dispatch_rich_drop_transaction_at_range: drop range rejected: %s",
+        log_debug("dispatch_rich_drop_at_range: drop range rejected: %s",
                   exc ? exc : "?");
         return false;
     }
@@ -4297,7 +4344,7 @@ static bool dispatch_rich_drop_transaction_at_range(EventContext* evcon,
     dispatch_rich_selection_snapshot(evcon, state, target, "dropTarget",
                                      &intent);
 
-    return dispatch_contenteditable_consumer_transaction(evcon, target, &intent);
+    return dispatch_contenteditable_consumer_event(evcon, target, &intent);
 }
 
 extern "C" bool radiant_dispatch_editing_text_drag_drop(UiContext* uicon,
@@ -4670,7 +4717,7 @@ static bool dispatch_editing_composition_for_controller(EventContext* evcon,
 
     if (!editing_surface_is_rich(surface)) return false;
 
-    return dispatch_contenteditable_composition_transaction(evcon, surface, intent);
+    return dispatch_contenteditable_composition_event(evcon, surface, intent);
 }
 
 /**
@@ -4686,6 +4733,7 @@ static const char* dom_js_mutation_kind_name(DomJsMutationKind kind) {
         case DOM_JS_MUTATION_STYLE: return "style";
         case DOM_JS_MUTATION_TREE_REPLACE: return "tree-replace";
         case DOM_JS_MUTATION_STYLE_REPAINT: return "style-repaint";
+        case DOM_JS_MUTATION_CONTROL_VALUE: return "control-value";
         case DOM_JS_MUTATION_UNKNOWN:
         default: return "unknown";
     }
@@ -5024,6 +5072,7 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
                                      SelectorMatcher* matcher) {
     if (!doc || !root) return;
 
+    if (kind == DOM_JS_MUTATION_CONTROL_VALUE) return;
     if (kind == DOM_JS_MUTATION_STYLE ||
         kind == DOM_JS_MUTATION_STYLE_REPAINT ||
         kind == DOM_JS_MUTATION_TEXT) {
@@ -5048,6 +5097,12 @@ static bool dom_js_node_contains(DomNode* ancestor, DomNode* node) {
 }
 
 static bool dom_js_node_has_table_fixup_context(DomNode* node) {
+    if (node && node->is_element() &&
+        layout_element_contains_table_internal(node->as_element())) {
+        // CSS Tables 3 §2.2: a display mutation can expose table-internal
+        // descendants through a boxless wrapper, so reset their flow parent.
+        return true;
+    }
     for (DomNode* current = node; current; current = current->parent) {
         if (!current->is_element()) continue;
         DomElement* element = lam::dom_require_element(current);
@@ -5063,20 +5118,28 @@ static bool dom_js_node_has_table_fixup_context(DomNode* node) {
 
 static DomElement* dom_js_table_layout_root(DomNode* node) {
     DomElement* fixup_parent = nullptr;
+    DomElement* flow_parent = nullptr;
     for (DomNode* current = node; current; current = current->parent) {
         if (!current->is_element()) continue;
         DomElement* element = lam::dom_require_element(current);
+        DisplayValue display = resolve_display_value((void*)element);
         if (!element->is_table_fixup() &&
             (element->tag() == MARKUP_NAME_TABLE ||
-             resolve_display_value((void*)element).inner == CSS_VALUE_TABLE)) {
+             display.inner == CSS_VALUE_TABLE)) {
             return element;
         }
         if (!fixup_parent && element->is_table_fixup() && element->parent &&
             element->parent->is_element()) {
             fixup_parent = element->parent->as_element();
         }
+        if (!flow_parent && current != node &&
+            display.outer != CSS_VALUE_CONTENTS &&
+            (display.inner == CSS_VALUE_FLOW ||
+             display.inner == CSS_VALUE_FLOW_ROOT)) {
+            flow_parent = element;
+        }
     }
-    return fixup_parent;
+    return fixup_parent ? fixup_parent : flow_parent;
 }
 
 static void dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
@@ -5618,18 +5681,16 @@ struct JsDispatchScope {
         DomDocument* target_document = event_context_target_document(evcon);
         if (js_dispatch_batch_depth != 0 &&
             js_dispatch_batch_document == target_document) {
-            // Contenteditable notifications and actions share one JS batch:
-            // reconciling after beforeinput would invalidate the prepared
-            // action snapshot before the transaction reaches its default.
+            // nested ordinary events share the active document batch so
+            // reconcile cannot switch the evaluator underneath dispatch.
             js_dispatch_batch_depth++;
             active = true;
             reuses_batch = true;
             return;
         }
         if (allow_without_js && !event_document_has_js_runtime(evcon)) {
-            // A Lambda template is rendered by its own runtime and has no JS
-            // event realm. Keep its native transaction alive for the selected
-            // template action without making unrelated event dispatch JS-safe.
+            // a Lambda page has no JS event realm; its ordinary author handler
+            // still runs without opening a second evaluator scope.
             active = true;
             no_js_passthrough = true;
             return;
@@ -5662,10 +5723,170 @@ struct JsDispatchScope {
     }
 };
 
-static bool dispatch_contenteditable_transaction(EventContext* evcon, View* target,
-                                                  const InputIntent* intent,
-                                                  EditingTransactionResult* out_result) {
-    if (out_result) *out_result = {};
+static bool dispatch_contenteditable_plain_event(EventContext* evcon,
+                                                 View* target,
+                                                 const InputIntent* intent,
+                                                 const EditingSurface* surface) {
+    if (!evcon || !target || !intent || !surface ||
+        !editing_surface_is_rich(surface)) {
+        return false;
+    }
+    DocState* state = event_context_target_state(evcon);
+    if (!state || !surface->owner) return false;
+
+    // All rich editors use the same synchronous ordering: an ordinary
+    // beforeinput handler gets first refusal, the package supplies the
+    // unclaimed default, and input follows a committed edit.
+    JsDispatchScope dispatch_scope(evcon, true);
+    if (!dispatch_scope.active) return false;
+    editing_interaction_set_active_surface(state, surface);
+
+    bool has_js_runtime = event_document_has_js_runtime(evcon);
+    bool beforeinput_prevented = false;
+    bool author_handled = false;
+    bool author_model_reconciled = false;
+    if (input_intent_is_dispatchable(intent->type)) {
+        if (has_js_runtime) {
+            beforeinput_prevented = radiant_dispatch_input_event(
+                evcon, target, "beforeinput", intent);
+        } else {
+            // Lambda edit templates are ordinary author handlers now. Keeping
+            // behavior dispatch disabled here prevents the UA default from
+            // being selected before the author handler has declined.
+            author_handled = dispatch_lambda_handler(
+                evcon, target, "beforeinput", intent,
+                &author_model_reconciled, false);
+        }
+    }
+
+    // author code may replace the original host or move the selection. The
+    // canonical DOM selection/focus now decides where the default can apply.
+    EditingSurface canonical_surface;
+    if (!canonical_contenteditable_surface_from_state(state,
+                                                      &canonical_surface)) {
+        return true;
+    }
+    DomElement* canonical_host = canonical_surface.owner;
+    editing_interaction_set_active_surface(state, &canonical_surface);
+    if (beforeinput_prevented) return true;
+    if (author_handled) {
+        if (author_model_reconciled) {
+            bool input_model_reconciled = false;
+            dispatch_lambda_handler(
+                evcon, static_cast<View*>(canonical_host), "input", intent,
+                &input_model_reconciled, false);
+            evcon->need_repaint = true;
+        }
+        return true;
+    }
+
+    EditingTargetRange target_ranges[4] = {};
+    uint32_t target_range_count = editing_compute_target_ranges(
+        state, &canonical_surface, intent, target_ranges, 4);
+    if (target_range_count > 4) return true;
+    for (uint32_t i = 0; i < target_range_count; i++) {
+        if (!editing_geometry_surface_contains_target_range(
+                &canonical_surface, &target_ranges[i])) {
+            return true;
+        }
+    }
+
+    DomSelection* selection = state->dom_selection;
+    DomBoundary start = {};
+    DomBoundary end = {};
+    bool have_range = target_range_count > 0;
+    if (have_range) {
+        start = target_ranges[0].start;
+        end = target_ranges[0].end;
+    } else if (selection && selection->range_count == 1 &&
+               selection->ranges[0]) {
+        // some intents intentionally have no StaticRange target (formatting,
+        // replacement, history). Their live Selection is still the package's
+        // current mechanism input.
+        start = selection->ranges[0]->start;
+        end = selection->ranges[0]->end;
+        have_range = true;
+    }
+
+    if (have_range) {
+        bool prepared = dom_edit_prepare_pending_range(
+            state, canonical_host, start, end);
+        if (!prepared) {
+            return true;
+        }
+    } else if (intent->type == INPUT_INTENT_COMPOSITION_START) {
+        // starting composition reserves state but has no replacement range yet.
+        dom_edit_set_pending_range(state, canonical_host, nullptr, 0, 0,
+                                   nullptr, 0);
+    } else {
+        return true;
+    }
+
+    uint64_t apply_epoch_before = dom_edit_apply_epoch();
+    bool claimed = radiant_dispatch_behavior_dom_edit(
+        static_cast<View*>(canonical_host), intent);
+    bool applied = dom_edit_apply_epoch() != apply_epoch_before;
+    DomNode* caret_node = dom_edit_caret_node();
+    uint32_t caret_offset = dom_edit_caret_offset_u16();
+    dom_edit_clear_pending_range(state);
+
+    if (applied && caret_node && selection) {
+        const char* exception = nullptr;
+        if (!dom_selection_collapse(selection, caret_node, caret_offset,
+                                    &exception)) {
+            log_error("F14.3: failed to collapse package editing caret: %s",
+                      exception ? exception : "unknown");
+        }
+    }
+
+    if (applied && intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT &&
+        caret_node && caret_node->is_text()) {
+        // the next IME update replaces the provisional run, not the caret that
+        // the package just left behind. Keep its start in UTF-8 byte space,
+        // which is the composition anchor's native representation.
+        DomText* caret_text = lam::dom_require_text(caret_node);
+        uint32_t data_u16 = tc_utf8_to_utf16_length(
+            intent->data ? intent->data : "",
+            intent->data ? (uint32_t)strlen(intent->data) : 0);
+        // The package caret may sit inside the new run, so derive the anchor
+        // from the range it replaced whenever that start is still the caret's
+        // text node. Subtracting the preedit length only works when the caret
+        // is at the run's end; a second composition at offset four would
+        // otherwise anchor at one.
+        uint32_t anchor_u16 = 0;
+        if (start.node == caret_node && start.node->is_text()) {
+            anchor_u16 = start.offset;
+        } else if (caret_offset >= data_u16) {
+            anchor_u16 = caret_offset - data_u16;
+        }
+        state->editing.composition.surface = canonical_surface;
+        state->editing.composition.anchor_view = static_cast<View*>(caret_text);
+        state->editing.composition.anchor_offset = (int)dom_text_utf16_to_utf8(
+            caret_text, anchor_u16); // INT_CAST_OK: DOM offsets fit the composition anchor.
+        state->editing.composition.dom_preedit_len = data_u16;
+    }
+
+    if (claimed || applied) {
+        bool composition_cancel =
+            intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
+        if (input_intent_is_dispatchable(intent->type) && !composition_cancel) {
+            if (has_js_runtime) {
+                radiant_dispatch_input_event(evcon, static_cast<View*>(canonical_host),
+                                             "input", intent);
+            } else {
+                bool input_model_reconciled = false;
+                dispatch_lambda_handler(
+                    evcon, static_cast<View*>(canonical_host), "input", intent,
+                    &input_model_reconciled, false);
+            }
+        }
+        evcon->need_repaint = true;
+    }
+    return true;
+}
+
+static bool dispatch_contenteditable_event(EventContext* evcon, View* target,
+                                            const InputIntent* intent) {
     if (!evcon || !target || !intent || intent->type == INPUT_INTENT_NONE) {
         return false;
     }
@@ -5674,28 +5895,11 @@ static bool dispatch_contenteditable_transaction(EventContext* evcon, View* targ
         !editing_surface_is_rich(&surface) || !surface.owner) {
         return false;
     }
-    JsDispatchScope dispatch_scope(evcon, true);
-    if (!dispatch_scope.active) {
-        log_debug("editing_transaction: JS scope unavailable for target=%p", target);
-        return false;
-    }
-
-    EditingRouteSnapshot route = editing_route_snapshot(&surface);
-    EditingNotificationHooks notifications = {};
-    notifications.dispatch_beforeinput = dispatch_editing_notification_beforeinput;
-    notifications.dispatch_input = dispatch_editing_notification_input;
-    EditingTransactionResult result = {};
-    bool ran = editing_run_contenteditable_transaction(evcon, &surface, intent,
-        &route, &notifications, &result);
-    if (out_result) *out_result = result;
-    if (ran && (result.dom_mutated || result.model_reconciled ||
-                result.selection_changed || result.input_dispatched)) {
-        evcon->need_repaint = true;
-    }
-    return ran;
+    return dispatch_contenteditable_plain_event(evcon, target, intent,
+                                                &surface);
 }
 
-static bool dispatch_contenteditable_composition_transaction(
+static bool dispatch_contenteditable_composition_event(
         EventContext* evcon, const EditingSurface* surface,
         const EditingIntent* intent) {
     if (!evcon || !surface || !intent || !editing_surface_is_rich(surface)) {
@@ -5706,7 +5910,7 @@ static bool dispatch_contenteditable_composition_transaction(
 
     // Composition event listeners, beforeinput, the selected action, and input
     // share one JavaScript batch so an editor cannot observe a preedit event
-    // without being able to synchronously handle its following transaction.
+    // without being able to synchronously handle its following edit.
     JsDispatchScope dispatch_scope(evcon, true);
     if (!dispatch_scope.active) return false;
 
@@ -5737,7 +5941,7 @@ static bool dispatch_contenteditable_composition_transaction(
     bool composing = intent->type == INPUT_INTENT_COMPOSITION_START ||
         intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT;
     editing_interaction_set_composing(state, surface, composing);
-    bool handled = dispatch_contenteditable_consumer_transaction(evcon, target, intent);
+    bool handled = dispatch_contenteditable_consumer_event(evcon, target, intent);
     if (handled) evcon->need_repaint = true;
     return true;
 }
@@ -5817,8 +6021,8 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
  */
 typedef struct {
     const char* type;
-    int client_x;
-    int client_y;
+    double client_x;
+    double client_y;
     int button;
     int buttons;
     bool ctrl;
@@ -5840,8 +6044,17 @@ static Item build_mouse_event_item(void* userdata) {
     return event;
 }
 
+// Native pointer/keyboard activation enters JS through this wrapper. The
+// marker lets the JS activation pass defer to the package/native waist without
+// confusing it with a script-created HTMLElement.click().
+static __thread bool s_native_click_dispatch_active = false;
+
+extern "C" bool radiant_native_click_dispatch_active(void) {
+    return s_native_click_dispatch_active;
+}
+
 static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
-                                         const char* type, int client_x, int client_y,
+                                         const char* type, double client_x, double client_y,
                                          int button, int buttons,
                                          bool ctrl, bool shift, bool alt, bool meta,
                                          int detail,
@@ -5851,12 +6064,17 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
         type, client_x, client_y, button, buttons,
         ctrl, shift, alt, meta, detail, -1.0
     };
-    return radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
+    bool is_click = type && strcmp(type, "click") == 0;
+    bool saved_click = s_native_click_dispatch_active;
+    if (is_click) s_native_click_dispatch_active = true;
+    bool prevented = radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
         &args, true, dispatched);
+    s_native_click_dispatch_active = saved_click;
+    return prevented;
 }
 
 extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
-    const char* type, int client_x, int client_y, int button, int buttons,
+    const char* type, double client_x, double client_y, int button, int buttons,
     int mods, int detail, double timestamp_ms)
 {
     if (!uicon || !uicon->document || !target || !type) return false;
@@ -5875,8 +6093,8 @@ extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
 
 typedef struct {
     const char* type;
-    int client_x;
-    int client_y;
+    double client_x;
+    double client_y;
     int button;
     int buttons;
     bool ctrl;
@@ -5894,8 +6112,8 @@ static Item build_pointer_event_item(void* userdata) {
 }
 
 static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
-                                           const char* type, int client_x,
-                                           int client_y, int button, int buttons,
+                                           const char* type, double client_x,
+                                           double client_y, int button, int buttons,
                                            bool ctrl, bool shift, bool alt,
                                            bool meta, const char* pointer_type,
                                            bool* dispatched = nullptr) {
@@ -5908,7 +6126,7 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
 }
 
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
-    const char* type, int client_x, int client_y, int button, int buttons,
+    const char* type, double client_x, double client_y, int button, int buttons,
     int mods, const char* pointer_type)
 {
     if (!uicon || !uicon->document || !target || !type) return false;
@@ -6053,7 +6271,7 @@ static Item build_input_event_item(void* userdata) {
         range_snapshot = args->evcon->editing_target_ranges;
         n_ranges = args->evcon->editing_target_range_count;
     } else {
-        // Non-transaction fallback: compute the StaticRange[] snapshot before
+        // Without a saved range, compute the StaticRange[] snapshot before
         // dispatch so handlers see the current pre-dispatch ranges.
         DocState* state = event_context_target_state(args->evcon);
         n_ranges = args->has_surface
@@ -6265,10 +6483,10 @@ static bool radiant_dispatch_clipboard_event(EventContext* evcon, View* target,
 extern "C" void js_drag_session_begin(void);
 extern "C" void js_drag_session_end(void);
 extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
-        const char* type, int client_x, int client_y);
+        const char* type, double client_x, double client_y);
 
 static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
-                                        const char* type, int cx, int cy)
+                                        const char* type, double cx, double cy)
 {
     DomElement* dom_target = radiant_view_to_dom_element(target);
     if (!dom_target) return false;
@@ -6276,7 +6494,7 @@ static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
     if (!dispatch_scope.active) return false;
     Item target_item = js_dom_wrap_element(dom_target);
     bool prevented = js_dispatch_drag_event_to_element(target_item, type, cx, cy);
-    log_debug("JSDND: dispatched '%s' at (%d,%d) prevented=%d", type, cx, cy, prevented);
+    log_debug("JSDND: dispatched '%s' at (%.1f,%.1f) prevented=%d", type, cx, cy, prevented);
     return prevented;
 }
 
@@ -6286,8 +6504,8 @@ static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
  * suppressed (event.preventDefault()).
  */
 typedef struct {
-    int client_x;
-    int client_y;
+    double client_x;
+    double client_y;
     double delta_x;
     double delta_y;
     int mods;
@@ -6304,7 +6522,7 @@ static Item build_wheel_event_item(void* userdata) {
 }
 
 static bool radiant_dispatch_wheel_event(EventContext* evcon, View* target,
-                                         int client_x, int client_y,
+                                         double client_x, double client_y,
                                          double delta_x, double delta_y,
                                          int mods)
 {
@@ -6776,6 +6994,111 @@ static View* find_checkbox_radio_input(View* target) {
     return nullptr;
 }
 
+// Resolve the activation control from a hit inside a button/input, then use
+// the form subtree's document order for implicit submission. The tree walk is
+// mechanism; submitter selection stays in the form behavior.
+static View* find_form_activation_button(View* target, bool reset) {
+    for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+        if (!node->is_element()) continue;
+        bool match = reset
+            ? js_dom_is_reset_button((void*)node)
+            : js_dom_is_submit_button((void*)node);
+        if (match) return static_cast<View*>(node);
+    }
+    return nullptr;
+}
+
+static View* find_first_form_submitter_in_tree(DomNode* node, DomElement* form) {
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!current->is_element()) continue;
+        DomElement* current_elem = current->as_element();
+        if (js_dom_is_submit_button((void*)current) &&
+            js_dom_find_form_owner((void*)current) == form &&
+            !js_dom_is_disabled((void*)current)) {
+            return static_cast<View*>(current);
+        }
+        View* nested = find_first_form_submitter_in_tree(current_elem->first_child, form);
+        if (nested) return nested;
+    }
+    return nullptr;
+}
+
+static View* find_first_form_submitter(DomElement* form) {
+    if (!form) return nullptr;
+    DomDocument* doc = form->doc;
+    bool connected = false;
+    if (doc && doc->root) {
+        for (DomNode* node = (DomNode*)form; node; node = node->parent) {
+            if (node == (DomNode*)doc->root) {
+                connected = true;
+                break;
+            }
+        }
+    }
+    return find_first_form_submitter_in_tree(
+        connected ? (DomNode*)doc->root : form->first_child, form);
+}
+
+// Run the package policy for a submitter or an implicit form target. A direct
+// bridge remains only for package-off documents, preserving script-less HTML
+// behavior while the migrated class is still being staged.
+static bool run_form_submit_activation(EventContext* evcon, View* target) {
+    if (!target || !target->is_element()) return false;
+    DomElement* elem = lam::dom_require_element(target);
+    DomElement* owner = nullptr;
+    bool has_submitter = js_dom_is_submit_button((void*)elem);
+    if (has_submitter) {
+        if (js_dom_is_disabled((void*)elem) || !js_dom_is_connected((void*)elem)) {
+            return false;
+        }
+        owner = js_dom_find_form_owner((void*)elem);
+    } else if (elem->tag_name && strcasecmp(elem->tag_name, "form") == 0) {
+        owner = elem;
+    }
+    if (!owner) return false;
+
+    bool claimed = radiant_behavior_claims_event(
+        evcon, target, "submitactivation");
+    if (claimed) {
+        radiant_dispatch_behavior_submit_activation(evcon, target);
+    } else {
+        Item submitter = has_submitter ? js_dom_wrap_element(elem)
+                                       : make_js_undefined();
+        js_dom_form_request_submit_bridge(js_dom_wrap_element(owner), submitter);
+    }
+    return true;
+}
+
+static bool run_form_reset_activation(EventContext* evcon, View* target) {
+    if (!target || !target->is_element()) return false;
+    DomElement* elem = lam::dom_require_element(target);
+    if (!js_dom_is_reset_button((void*)elem) ||
+        js_dom_is_disabled((void*)elem) || !js_dom_is_connected((void*)elem)) {
+        return false;
+    }
+    DomElement* owner = js_dom_find_form_owner((void*)elem);
+    if (!owner) return false;
+
+    bool claimed = radiant_behavior_claims_event(
+        evcon, target, "resetactivation");
+    if (claimed) {
+        radiant_dispatch_behavior_reset_activation(evcon, target);
+    } else {
+        radiant_dom_element_operation(js_dom_wrap_element(owner), JUBE_DOM_RESET,
+                                      nullptr, 0);
+    }
+    return true;
+}
+
+static void run_form_button_default(EventContext* evcon, View* target) {
+    if (!evcon || !target || evcon->default_prevented) return;
+    if (find_form_activation_button(target, true)) {
+        run_form_reset_activation(evcon, target);
+    } else if (find_form_activation_button(target, false)) {
+        run_form_submit_activation(evcon, target);
+    }
+}
+
 
 static bool click_target_is_disabled_control(DocState* state, View* target) {
     for (View* current = target; current; current = current->parent) {
@@ -6798,7 +7121,8 @@ static bool click_target_is_disabled_control(DocState* state, View* target) {
 /**
  * Calculate dropdown popup dimensions
  */
-static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, float scale) {
+static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state,
+                                           float logical_width) {
     if (!select || !state || !select->form) return;
 
     int option_count = select->form->option_count;
@@ -6813,7 +7137,7 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, fl
 
     // Calculate popup dimensions
     doc_state_set_dropdown_geometry(state, state->dropdown_x, state->dropdown_y,
-        select->width * scale, visible_count * option_height * scale);
+        logical_width, visible_count * option_height);
 }
 
 /**
@@ -6822,21 +7146,28 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, fl
 // Opening a dropdown is mechanism: overlay placement and sizing come from
 // layout geometry. Both the native activation path and the dom package's
 // `open_dropdown` primitive go through here so the geometry is computed once.
-static void select_open_dropdown(DocState* state, View* select_view, float scale) {
-    if (!state || !select_view) return;
+static void select_open_dropdown(UiContext* uicon, DocState* state,
+                                 View* select_view) {
+    if (!uicon || !state || !select_view) return;
     ViewBlock* select = lam::view_require_block(select_view);
     if (!select || !select->form) return;
     log_debug("select_open_dropdown: opening with %d options", select->form->option_count);
     doc_state_open_dropdown(state, select_view);
 
-    float abs_x = 0.0f, abs_y = 0.0f;
-    view_to_absolute_position(select_view, select->x,
-                              select->y + form_select_dropdown_row_height(select->form),
-                              0.0f, 0.0f, &abs_x, &abs_y);
+    float visual_x = 0.0f, visual_y = 0.0f;
+    float visual_width = 0.0f, visual_height = 0.0f;
+    view_get_visual_bounds(select_view, &visual_x, &visual_y,
+                           &visual_width, &visual_height);
+    float doc_x = 0.0f, doc_y = 0.0f;
+    radiant_document_viewport_offset(uicon, select->doc, &doc_x, &doc_y);
 
-    doc_state_set_dropdown_geometry(state, abs_x * scale, abs_y * scale,
-        state->dropdown_width, state->dropdown_height);
-    calculate_dropdown_dimensions(select, state, scale);
+    // Popup state stays in the top-level logical viewport. Rendering performs
+    // the sole logical-to-surface conversion, so event hit-testing never needs
+    // to know the monitor scale.
+    doc_state_set_dropdown_geometry(state, doc_x + visual_x,
+        doc_y + visual_y + visual_height, state->dropdown_width,
+        state->dropdown_height);
+    calculate_dropdown_dimensions(select, state, visual_width);
 }
 
 
@@ -6851,7 +7182,7 @@ static ViewBlock* event_open_dropdown_select(EventContext* evcon,
 
 /**
  * Handle click on a dropdown option
- * @param mouse_y Mouse Y position in physical pixels
+ * @param mouse_x/mouse_y Pointer position in logical window pixels
  * @return true if an option was selected
  */
 static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, float mouse_y) {
@@ -6859,9 +7190,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
     ViewBlock* select = event_open_dropdown_select(evcon, &state);
     if (!select) return false;
 
-    float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
-
-    log_debug("handle_dropdown_option_click: mouse=(%.1f, %.1f), dropdown=(%.1f, %.1f, %.1f, %.1f)",
+    log_debug("handle_dropdown_option_click: pointer=(%.1f, %.1f), dropdown=(%.1f, %.1f, %.1f, %.1f)",
              mouse_x, mouse_y, state->dropdown_x, state->dropdown_y,
              state->dropdown_width, state->dropdown_height);
 
@@ -6876,8 +7205,8 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
     }
 
     // Calculate which option was clicked
-    float option_height = form_select_dropdown_row_height(select->form) * scale;
-    int clicked_index = (int)((mouse_y - state->dropdown_y) / option_height);
+    float option_height = form_select_dropdown_row_height(select->form);
+    int clicked_index = (int)((mouse_y - state->dropdown_y) / option_height); // INT_CAST_OK: option array index
 
     log_debug("handle_dropdown_option_click: option_height=%.1f, clicked_index=%d, option_count=%d",
              option_height, clicked_index, select->form->option_count);
@@ -6905,8 +7234,6 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     ViewBlock* select = event_open_dropdown_select(evcon, &state);
     if (!select) return;
 
-    float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
-
     // Check if mouse is within dropdown popup
     if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width ||
         mouse_y < state->dropdown_y || mouse_y > state->dropdown_y + state->dropdown_height) {
@@ -6917,8 +7244,8 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     }
 
     // Calculate which option is hovered
-    float option_height = form_select_dropdown_row_height(select->form) * scale;
-    int hover_index = (int)((mouse_y - state->dropdown_y) / option_height);
+    float option_height = form_select_dropdown_row_height(select->form);
+    int hover_index = (int)((mouse_y - state->dropdown_y) / option_height); // INT_CAST_OK: option array index
 
     if (hover_index >= 0 && hover_index < select->form->option_count) {
         if (form_control_get_hover_index(state, static_cast<View*>(select)) != hover_index) {
@@ -6980,24 +7307,15 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
     ViewBlock* select = event_open_dropdown_select(evcon, &state);
     if (!select) return;
 
-    float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
-
-    // Calculate select box absolute position
-    float select_abs_x = select->x;
-    float select_abs_y = select->y;
-    View* parent = select->parent;
-    while (parent) {
-        if (parent->is_block()) {
-            ViewBlock* pblock = lam::view_require_block(parent);
-            select_abs_x += pblock->x;
-            select_abs_y += pblock->y;
-        }
-        parent = parent->parent;
-    }
-    select_abs_x *= scale;
-    select_abs_y *= scale;
-    float select_w = select->width * scale;
-    float select_h = select->height * scale;
+    float select_abs_x = 0.0f, select_abs_y = 0.0f;
+    float select_w = 0.0f, select_h = 0.0f;
+    view_get_visual_bounds(static_cast<View*>(select), &select_abs_x,
+                           &select_abs_y, &select_w, &select_h);
+    float doc_x = 0.0f, doc_y = 0.0f;
+    radiant_document_viewport_offset(evcon->ui_context, select->doc,
+                                     &doc_x, &doc_y);
+    select_abs_x += doc_x;
+    select_abs_y += doc_y;
 
     // Check if click is on the select itself (toggle handled elsewhere)
     if (mouse_x >= select_abs_x && mouse_x <= select_abs_x + select_w &&
@@ -7415,7 +7733,7 @@ static bool event_text_glyph_advance(FontBox* font, unsigned char* p, unsigned c
  * Returns the byte offset closest to the click position, aligned to UTF-8 character boundaries
  */
 int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
-    TextRect* rect, int mouse_x, int mouse_y) {
+    TextRect* rect, float mouse_x, float mouse_y) {
     unsigned char* str = text->text_data();
     float x = evcon->block.x + rect->x;
 
@@ -7436,14 +7754,14 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     if (run.is_pdf && run.pdf_width > 0.0f) {
         float visible_width = pdf_text_run_visible_natural_width(evcon, rect, run.pdf_copy_space);
         if (visible_width > 0.0f) {
-            float local_pdf_x = (float)mouse_x - x;
+            float local_pdf_x = mouse_x - x;
             if (local_pdf_x <= 0.0f) return rect->start_index;
             if (local_pdf_x >= run.pdf_width) return run.visible_end_offset;
-            mouse_x = (int)(x + (local_pdf_x * visible_width / run.pdf_width)); // INT_CAST_OK: event mouse coordinate API is integer-based
+            mouse_x = x + local_pdf_x * visible_width / run.pdf_width;
         }
     }
 
-    log_debug("calculate_char_offset: mouse_x=%d, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
+    log_debug("calculate_char_offset: mouse_x=%.1f, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
               mouse_x, x, rect->width, rect->length, evcon->block.x, rect->x);
 
     // Skip leading collapsed whitespace (spaces, tabs, newlines at the start)
@@ -7981,15 +8299,15 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     // Phase 6 (single source of truth): view/offset selection helpers route
     // through DomSelection plus state-machine transitions. Event code may
     // compute glyph-precise visual geometry, but new rich DOM mutations should
-    // use canonical StateStore selection boundaries or editing transactions.
+    // use canonical StateStore selection boundaries or editing operations.
     // ------------------------------------------------------------------
 
     // find target view based on mouse position
-    int mouse_x, mouse_y;
+    float mouse_x = 0.0f, mouse_y = 0.0f;
     switch (event->type) {
     case RDT_EVENT_MOUSE_MOVE: {
         MousePositionEvent* motion = &event->mouse_position;
-        log_debug("Mouse event at (%d, %d)", motion->x, motion->y);
+        log_debug("Mouse event at (%.1f, %.1f)", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
         target_html_doc(&evcon, doc->view_tree);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
@@ -7998,10 +8316,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         update_hover_state(&evcon, evcon.target);
 
         // Update dropdown hover if open
-        update_dropdown_hover(&evcon, (float)mouse_x, (float)mouse_y);
+        update_dropdown_hover(&evcon, mouse_x, mouse_y);
 
         if (evcon.target) {
-            log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("Target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
             int buttons = uicon->mouse_state.is_mouse_down ? 1 : 0;
             // Native mouse input has a compatibility PointerEvent stream. JS
             // drag libraries select that stream when PointerEvent exists, so
@@ -8020,7 +8338,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
         } else {
-            log_debug("No target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("No target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
         }
 
         // fire drag event if dragging in progress
@@ -8033,7 +8351,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             drag_transition(state, DRAG_TRANSITION_UPDATE_DROP_MOTION, &motion_args);
 
             if (dd->pending && !dd->active) {
-                // check movement threshold (5px in physical pixels)
+                // check movement threshold in logical pixels
                 float dx = dd->current_x - dd->start_x;
                 float dy = dd->current_y - dd->start_y;
                 if (dx * dx + dy * dy > 25.0f) {
@@ -8050,7 +8368,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // flags) now survives handler-driven DOM mutation via
                     // fallback retention, so JS DnD rides on it directly.
                     radiant_dispatch_drag_event(&evcon, dd->source_view, "dragstart",
-                                                (int)dd->current_x, (int)dd->current_y);
+                                                dd->current_x, dd->current_y);
                 }
             }
 
@@ -8122,7 +8440,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (evcon.target) {
                     radiant_dispatch_drag_event(&evcon,
                         static_cast<View*>(evcon.target), "dragover",
-                        (int)motion->x, (int)motion->y);
+                        motion->x, motion->y);
                 }
 
                 // set cursor to grabbing
@@ -8150,7 +8468,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         anchor_elem, (float)motion->x, (float)motion->y,
                         &hit_offset);
                     int char_offset = (int)hit_offset; // INT_CAST_OK: StateStore selection API uses int offsets.
-                    log_debug("[TA DRAG] motion=(%d,%d) char_offset=%d",
+                    log_debug("[TA DRAG] motion=(%.1f,%.1f) char_offset=%d",
                               motion->x, motion->y, char_offset);
 
                     dispatch_form_selection_extend(&evcon, anchor_elem, state,
@@ -8430,7 +8748,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     case RDT_EVENT_MOUSE_DOWN:   case RDT_EVENT_MOUSE_UP: {
         MouseButtonEvent* btn_event = &event->mouse_button;
-        log_debug("Mouse button event (%d, %d)", btn_event->x, btn_event->y);
+        log_debug("Mouse button event (%.1f, %.1f)", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
@@ -8485,7 +8803,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
         // F10: a right click asks the `<body>` behavior template whether a menu
         // belongs here and which items are live. Native still resolves the hit
-        // target and the popup position — physical pixels are mechanism and do
+        // target and the popup position — logical geometry is mechanism and does
         // not cross into policy — and records both so `radiant.open_context_menu`
         // can place the popup without the template ever handling coordinates.
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
@@ -8696,7 +9014,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     render_x += caret_iframe_offset_x;
                     render_y += caret_iframe_offset_y;
-                    log_info("[CARET FINAL] mouse=(%d,%d) local=(%.1f,%.1f) render=(%.1f,%.1f) offset=%d block=(%.1f,%.1f) rect=(%.1f,%.1f %.1fx%.1f)",
+                    log_info("[CARET FINAL] mouse=(%.1f,%.1f) local=(%.1f,%.1f) render=(%.1f,%.1f) offset=%d block=(%.1f,%.1f) rect=(%.1f,%.1f %.1fx%.1f)",
                         btn_event->x, btn_event->y, caret_x, caret_y,
                         render_x, render_y, char_offset, evcon.block.x, evcon.block.y,
                         rect->x, rect->y, rect->width, rect->height);
@@ -8951,16 +9269,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (evcon.target) {
                     bool ov = radiant_dispatch_drag_event(&evcon,
                         static_cast<View*>(evcon.target), "dragover",
-                        (int)btn_event->x, (int)btn_event->y);
+                        btn_event->x, btn_event->y);
                     if (ov) {
                         radiant_dispatch_drag_event(&evcon,
                             static_cast<View*>(evcon.target), "drop",
-                            (int)btn_event->x, (int)btn_event->y);
+                            btn_event->x, btn_event->y);
                     }
                 }
                 if (drag_src) {
                     radiant_dispatch_drag_event(&evcon, drag_src,
-                        "dragend", (int)btn_event->x, (int)btn_event->y);
+                        "dragend", btn_event->x, btn_event->y);
                 }
                 js_drag_session_end();
             }
@@ -8979,7 +9297,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         // CE-5 / ED2-2: lower drop-on-editable to
                         // beforeinput {insertFromDrop}. When dragover stored
                         // a DOM target range, run the same defaultable rich
-                        // transaction path used by simulated text drop.
+                        // edit path used by simulated text drop.
                         if (editing_host_lookup(static_cast<DomNode*>(dd->drop_target),
                                                 nullptr)) {
                             // Source deletion for element drag remains a
@@ -8991,10 +9309,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                                     nullptr)) {
                                 InputIntent del = {};
                                 del.type = INPUT_INTENT_DELETE_BY_DRAG;
-                                dispatch_contenteditable_consumer_transaction(&evcon, dd->source_view, &del);
+                                dispatch_contenteditable_consumer_event(&evcon, dd->source_view, &del);
                             }
                             bool inserted = dd->has_drop_range &&
-                                dispatch_rich_drop_transaction_at_range(&evcon,
+                                dispatch_rich_drop_at_range(&evcon,
                                     dd->drop_target, &dd->drop_start,
                                     &dd->drop_end,
                                     dd->drag_data ? dd->drag_data : "");
@@ -9007,7 +9325,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 // Files/custom drag item stores are still
                                 // deferred.
                                 ins.data = dd->drag_data ? dd->drag_data : "";
-                                dispatch_contenteditable_consumer_transaction(&evcon, dd->drop_target, &ins);
+                                dispatch_contenteditable_consumer_event(&evcon, dd->drop_target, &ins);
                             }
                         }
                     }
@@ -9082,8 +9400,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             }
 
+            // A secondary-button release emits mouseup/contextmenu, not the
+            // primary click activation that can toggle controls or submit forms.
+            bool primary_activation = btn_event->button == GLFW_MOUSE_BUTTON_LEFT;
             // Only process other click handlers if dropdown wasn't involved and not a drag
-            if (!dropdown_handled && !drag_handled && !text_selection_drag_handled) {
+            if (primary_activation && !dropdown_handled && !drag_handled &&
+                !text_selection_drag_handled) {
                 // Dispatch click through JS EventTarget before built-in default
                 // actions so listeners or IDL handlers can call preventDefault().
                 bool js_click_dispatched = false;
@@ -9268,6 +9590,28 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                                 behavior_may_activate)) {
                         evcon.need_repaint = true;
                     }
+
+                    // F4: submit/reset are separate default-action seams. The
+                    // ordinary click handler above remains the author hook;
+                    // only this post-click behavior event may activate the
+                    // form, and the old JS bridge is the package-off fallback.
+                    View* submit_target = find_form_activation_button(evcon.target, false);
+                    if (submit_target && !evcon.default_prevented &&
+                        !js_dom_is_disabled((void*)submit_target) &&
+                        js_dom_is_connected((void*)submit_target)) {
+                        if (run_form_submit_activation(&evcon, submit_target)) {
+                            evcon.need_repaint = true;
+                        }
+                    }
+
+                    View* reset_target = find_form_activation_button(evcon.target, true);
+                    if (reset_target && !evcon.default_prevented &&
+                        !js_dom_is_disabled((void*)reset_target) &&
+                        js_dom_is_connected((void*)reset_target)) {
+                        if (run_form_reset_activation(&evcon, reset_target)) {
+                            evcon.need_repaint = true;
+                        }
+                    }
                 }
             }
 
@@ -9283,7 +9627,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (evcon.target) {
-            log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("Target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
             if (evcon.event.type == RDT_EVENT_MOUSE_UP) {
                 dispatch_lambda_handler(&evcon, evcon.target, "mouseup");
             }
@@ -9294,7 +9638,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
         } else {
-            log_debug("No target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("No target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
         }
 
         // fire drag event if dragging in progress
@@ -9371,8 +9715,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             font_context_reset_glyph_caches(evcon.ui_context->font_ctx);
                         }
                         DomDocument* new_doc = block->embed->doc =
-                            load_html_doc(evcon.ui_context->document->url, evcon.new_url, css_vw, css_vh,
-                                          1.0f);  // Layout uses CSS pixels, pixel_ratio not needed
+                            load_html_doc(evcon.ui_context->document->url, evcon.new_url,
+                                          css_vw, css_vh);
                         if (new_doc) {
                             radiant_document_ensure_state(new_doc, "iframe_target_navigation");
                             // Set scale for nested document
@@ -9382,26 +9726,21 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                             if (new_doc->html_root) {
                                 // HTML/Markdown/XML documents: need CSS layout
-                                // Save parent document and window dimensions
+                                // Save the parent document and logical viewport.
+                                // The framebuffer remains the top-level physical surface.
                                 DomDocument* parent_doc = evcon.ui_context->document;
-                                float saved_window_width = evcon.ui_context->window_width;
-                                float saved_window_height = evcon.ui_context->window_height;
                                 // Set document context to iframe doc for proper URL resolution (e.g., images)
                                 evcon.ui_context->document = new_doc;
                                 // iframe dimensions are now in CSS pixels
                                 int saved_viewport_width = evcon.ui_context->viewport_width;
                                 int saved_viewport_height = evcon.ui_context->viewport_height;
-                                evcon.ui_context->window_width = (float)css_vw;
-                                evcon.ui_context->window_height = (float)css_vh;
                                 evcon.ui_context->viewport_width = css_vw;
                                 evcon.ui_context->viewport_height = css_vh;
                                 // Process @font-face rules before layout (critical for custom fonts)
                                 process_document_font_faces(evcon.ui_context, new_doc);
                                 layout_html_doc(evcon.ui_context, new_doc, false);
-                                // Restore parent document and window/viewport dimensions
+                                // Restore the parent document and logical viewport.
                                 evcon.ui_context->document = parent_doc;
-                                evcon.ui_context->window_width = saved_window_width;
-                                evcon.ui_context->window_height = saved_window_height;
                                 evcon.ui_context->viewport_width = saved_viewport_width;
                                 evcon.ui_context->viewport_height = saved_viewport_height;
                             }
@@ -9507,7 +9846,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (evcon.target) {
-            log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("Target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
             // Dispatch "wheel" through JS EventTarget before native scroll.
             bool wheel_prevented = radiant_dispatch_wheel_event(&evcon, evcon.target,
                 mouse_x, mouse_y,
@@ -9532,7 +9871,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 arraylist_free(parent_list);
             }
         } else {
-            log_debug("No target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("No target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
         }
         break;
     }
@@ -9603,10 +9942,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
              key_event->key == RDT_KEY_X);
         if (rich_keydown_dispatched && key_event->key != RDT_KEY_TAB) {
             // Selection can still identify the rich surface after a template
-            // rebuild clears focus; do not drop its beforeinput transaction.
+            // rebuild clears focus; do not drop its beforeinput edit.
             // Contenteditable keymaps own structural commands. Dispatch the
             // public keydown first so preventDefault suppresses this key's
-            // mapped beforeinput transaction instead of racing it afterward.
+            // mapped beforeinput edit instead of racing it afterward.
             bool prevented = radiant_dispatch_keyboard_event(&evcon, intent_target,
                 "keydown", key_event->key, key_event->mods, false);
             if (editing_key_may_emit_text(key_event)) {
@@ -9629,9 +9968,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                                 select_target, &intent);
                         }
                     } else {
-                        EditingTransactionResult transaction = {};
-                        dispatch_contenteditable_transaction(&evcon, intent_target,
-                            &intent, &transaction);
+                        dispatch_contenteditable_event(&evcon, intent_target,
+                            &intent);
                     }
                     evcon.need_repaint = true;
                     break;
@@ -9702,9 +10040,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (key_event->key == RDT_KEY_V) {
                     InputIntent paste_intent;
                     if (input_intent_from_key_event(state, key_event, &paste_intent)) {
-                        EditingTransactionResult transaction = {};
-                        dispatch_contenteditable_transaction(&evcon, intent_target,
-                            &paste_intent, &transaction);
+                        dispatch_contenteditable_event(&evcon, intent_target,
+                            &paste_intent);
                         evcon.need_repaint = true;
                         break;
                     }
@@ -9712,9 +10049,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     copy_current_selection_to_clipboard(state, "rich cut");
                     InputIntent cut_intent;
                     if (input_intent_from_key_event(state, key_event, &cut_intent)) {
-                        EditingTransactionResult transaction = {};
-                        dispatch_contenteditable_transaction(&evcon, intent_target,
-                            &cut_intent, &transaction);
+                        dispatch_contenteditable_event(&evcon, intent_target,
+                            &cut_intent);
                         evcon.need_repaint = true;
                         break;
                     }
@@ -9761,6 +10097,20 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (!disabled) {
                     radiant_dispatch_mouse_event(&evcon, focused, "click",
                         0, 0, 0, 0, false, false, false, false, 1);
+                    run_form_button_default(&evcon, focused);
+                    handled = true;
+                }
+            } else if (tag == MARKUP_NAME_INPUT &&
+                       key_event->key == RDT_KEY_ENTER &&
+                       (js_dom_is_submit_button((void*)focused) ||
+                        js_dom_is_reset_button((void*)focused))) {
+                DomElement* delem = lam::dom_require_element(focused);
+                bool disabled = delem->form_control() &&
+                    form_control_is_disabled(state, static_cast<View*>(delem));
+                if (!disabled) {
+                    radiant_dispatch_mouse_event(&evcon, focused, "click",
+                        0, 0, 0, 0, false, false, false, false, 1);
+                    run_form_button_default(&evcon, focused);
                     handled = true;
                 }
             } else if (tag == MARKUP_NAME_SELECT) {
@@ -9809,7 +10159,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                 }
                 bool handled = false;
-                handled = dispatch_contenteditable_consumer_transaction(
+                handled = dispatch_contenteditable_consumer_event(
                     &evcon, intent_target, &intent);
                 if (handled) {
                     evcon.need_repaint = true;
@@ -9840,6 +10190,29 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 "keydown", key_event->key, key_event->mods, false);
             if (prevented) evcon.default_prevented = true;
             focused = focus_get(state);
+        }
+
+        // F4: a single-line text control's Enter is implicit submission, not
+        // text insertion. JS keydown cancellation remains authoritative; the
+        // package then chooses the first enabled submitter or the form itself.
+        if (focused && !evcon.default_prevented &&
+            key_event->key == RDT_KEY_ENTER &&
+            !(key_event->mods & (RDT_MOD_SHIFT | RDT_MOD_CTRL |
+                                 RDT_MOD_ALT | RDT_MOD_SUPER)) &&
+            focused->is_element()) {
+            DomElement* focus_elem = lam::dom_require_element(focused);
+            if (focus_elem->form_control() &&
+                focus_elem->form->control_type == FORM_CONTROL_TEXT) {
+                DomElement* owner = js_dom_find_form_owner((void*)focus_elem);
+                if (owner) {
+                    View* submitter = find_first_form_submitter(owner);
+                    View* activation = submitter ? submitter : static_cast<View*>(owner);
+                    if (run_form_submit_activation(&evcon, activation)) {
+                        evcon.need_repaint = true;
+                        break;
+                    }
+                }
+            }
         }
 
         // Handle arrow keys and caret adjustment for text input form controls
@@ -10040,7 +10413,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
 
                 // Cmd/Ctrl+X: cut selected textarea text through the same
-                // deleteByCut transaction used by context-menu Cut.
+                // deleteByCut edit used by context-menu Cut.
                 if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
                     key_event->key == RDT_KEY_X) {
                     if (dispatch_form_cut_selection(&evcon, focus_elem, state,
@@ -10057,7 +10430,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
                     key_event->key == RDT_KEY_V) {
                     // Primary paste is platform-neutral even though the physical
-                    // modifier differs; both routes share the form transaction.
+                    // modifier differs; both routes share the form edit.
                     dispatch_form_keyboard_paste(&evcon, state, focused, true);
                     break;
                 }
@@ -10360,7 +10733,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
             if (!rich_nav_handled && !caret_in_rich_surface) {
                 // Non-rich compatibility branch only. Rich/editable mutation
-                // and selection ownership belongs to the intent transaction
+                // and selection ownership belongs to the intent edit
                 // path above plus the caretkey template dispatch.
                 //
                 // F11b: deliberately NOT migrated to the <body> template, unlike
@@ -10544,8 +10917,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 : (focused ? focused : caret_view);
             if (intent_target && input_intent_from_text_input(text_event->codepoint,
                     &intent, utf8_buf, sizeof(utf8_buf)) &&
-                dispatch_contenteditable_transaction(&evcon, intent_target,
-                                                     &intent, nullptr)) {
+                dispatch_contenteditable_event(&evcon, intent_target,
+                                               &intent)) {
                 evcon.need_repaint = true;
                 break;
             }

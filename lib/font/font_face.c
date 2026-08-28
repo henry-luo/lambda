@@ -250,15 +250,16 @@ FontHandle* font_face_load(FontContext* ctx, const FontFaceDesc* desc,
     const FontFaceEntry* entry = font_face_find_internal(
         ctx, desc->family, desc->weight, desc->slant);
 
-    // return cached handle if already loaded at this size
+    float pixel_ratio = ctx->config.pixel_ratio;
+    float physical_size = size_px * pixel_ratio;
+
+    // A logical size can survive a monitor move, but its raster face cannot.
     if (entry && entry->loaded_handle &&
-        entry->loaded_handle->size_px == size_px) {
+        entry->loaded_handle->size_px == size_px &&
+        entry->loaded_handle->physical_size_px == physical_size) {
         font_handle_retain(entry->loaded_handle);
         return entry->loaded_handle;
     }
-
-    float pixel_ratio = ctx->config.pixel_ratio;
-    float physical_size = size_px * pixel_ratio;
 
     // try each source in order
     FontHandle* fallback_handle = NULL;  // last successfully loaded font (may lack Latin chars)
