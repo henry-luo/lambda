@@ -591,6 +591,8 @@ MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
                                              JsConditionalNode* cond,
                                              TypeId target_type);
 JsFuncCollected* jm_find_collected_func_for_call(JsMirTranspiler* mt, JsCallNode* call);
+JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt, JsCallNode* call,
+        bool stable = false);
 JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
 bool jm_is_recursive_call(JsCallNode* call, JsFuncCollected* fc);
 bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, JsFuncCollected* fc);

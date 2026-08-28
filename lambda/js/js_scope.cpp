@@ -272,6 +272,7 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     // The shared indexer owns core edges. Install JavaScript's extension-only
     // adapter before any parse can publish an AstIndex for this profile.
     js_profile.visit_ext_children = js_ast_visit_extension_children;
+    js_profile.publish_ext_facts = js_ast_publish_extension_facts;
     tp->profile = &js_profile;
     tp->destroy_extension = js_script_destroy_extension;
     tp->runtime = runtime;

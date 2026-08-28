@@ -99,27 +99,35 @@ bool js_ast_has_direct_eval_call(JsAstNode* node) {
 // Phase 4: Native call resolution
 // ============================================================================
 
-static JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
-        JsCallNode* call) {
+JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
+        JsCallNode* call, bool stable) {
     if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
     // consume the binding resolved by the AST builder; MIR must not rebuild
     // compiler scope state after the indexed unit is sealed.
-    AstBindingId binding_id = id->entry ? id->entry->binding_id : AST_BINDING_ID_INVALID;
-    NameEntry* entry = ast_index_binding(mt && mt->tp ? &mt->tp->ast_index : NULL, binding_id);
-    if (!entry || !entry->node) return NULL;
+    AstIndex* index = mt && mt->tp ? &mt->tp->ast_index : NULL;
+    AstBindingId binding_id = ast_index_binding_id(index, (AstNode*)id);
+    NameEntry* entry = ast_index_binding(index, binding_id);
+    AstNode* definition = ast_index_binding_definition(index, binding_id);
+    if (!entry || !definition) return NULL;
 
     JsFunctionNode* fn = NULL;
-    JsAstNodeType ntype = ((JsAstNode*)entry->node)->node_type;
+    JsAstNodeType ntype = ((JsAstNode*)definition)->node_type;
     if (ntype == JS_AST_NODE_FUNCTION_DECLARATION) {
-        fn = (JsFunctionNode*)entry->node;
+        fn = (JsFunctionNode*)definition;
     } else if (ntype == JS_AST_NODE_VARIABLE_DECLARATOR) {
-        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)entry->node;
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)definition;
         if (decl->init && (decl->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION
             || decl->init->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
             fn = (JsFunctionNode*)decl->init;
         }
     }
+    if (stable && ntype == JS_AST_NODE_FUNCTION_DECLARATION &&
+            !jm_function_decl_is_direct_binding((JsFunctionNode*)definition, false)) return NULL;
+    if (stable && ntype == JS_AST_NODE_VARIABLE_DECLARATOR &&
+            (!entry->is_const || !fn ||
+             ((JsVariableDeclaratorNode*)definition)->init->source_span.end_byte >
+                call->source_span.start_byte)) return NULL;
     return fn;
 }
 

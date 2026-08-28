@@ -330,8 +330,6 @@ typedef AstImportSpecifierNode JsImportSpecifierNode;
 typedef void (*JsAstChildVisit)(JsAstNode* child, void* ctx);
 typedef bool (*JsAstChildPredicate)(JsAstNode* child, void* ctx);
 
-// True when the table describes this node kind (a leaf kind has no row).
-bool js_ast_has_child_table(JsAstNode* node);
 // Visit every child in source order; list-valued edges walk their ->next chain.
 void js_ast_visit_children(JsAstNode* node, JsAstChildVisit visit, void* ctx);
 // Short-circuiting variant: stops at the first child the predicate accepts.
@@ -349,6 +347,7 @@ bool js_ast_is_proto_literal_key(JsAstNode* key);
 // being duplicated.
 void js_ast_visit_extension_children(AstNode* node, AstChildVisitor visitor,
                                      void* ctx);
+bool js_ast_publish_extension_facts(AstNode* node, struct AstIndex* index);
 
 typedef AstExportDeclNode JsExportNode;
 

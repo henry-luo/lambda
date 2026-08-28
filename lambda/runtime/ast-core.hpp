@@ -284,7 +284,6 @@ typedef uint32_t AstClassId;
 
 // entry in the name_stack
 struct NameEntry {
-    AstBindingId binding_id;
     String* name;
     AstNode* node;
     NameEntry* next;
@@ -371,6 +370,9 @@ typedef struct AstIndex {
     AstNode** nodes;
     AstNode** parents;
     AstFunctionId* owner_functions;
+    // Each indexed node carries the binding edge resolved by the builder;
+    // invalid means the node is not a name use or declaration.
+    AstBindingId* node_bindings;
     NameScope** scopes;
     NameEntry** bindings;
     AstNode** classes;
@@ -410,17 +412,17 @@ enum AstNodeFactFlags : uint32_t {
 extern "C" {
 #endif
 void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx);
-bool ast_index_build(AstIndex* index, AstNode* root);
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
 // Adds a newly retained AST fragment without invalidating the stable IDs and
 // analysis facts already published for earlier REPL inputs (D8.2.4).
 bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
                               const LangProfile* profile);
 void ast_index_destroy(AstIndex* index);
+bool ast_index_publish_scope(AstIndex* index, NameScope* scope);
 AstNodeId ast_index_find(const AstIndex* index, const AstNode* node);
+AstBindingId ast_index_binding_id(const AstIndex* index, const AstNode* node);
 NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
-NameScope* ast_index_scope(const AstIndex* index, AstScopeId id);
-AstNode* ast_index_class(const AstIndex* index, AstClassId id);
+AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id);
 #ifdef __cplusplus
 }
 #endif
@@ -1184,6 +1186,7 @@ typedef struct LangProfile {
     void (*validate)(void* ctx, AstNode* root);
     void (*analyze)(void* ctx, AstNode* root);
     void (*lower)(void* ctx, AstNode* root);
+    bool (*publish_ext_facts)(AstNode* node, struct AstIndex* index);
     void (*visit_ext_children)(AstNode* node, AstChildVisitor visitor, void* ctx);
 } LangProfile;
 
@@ -1192,18 +1195,13 @@ static inline void lang_profile_noop_hook(void* ctx, AstNode* root) {
     (void)root;
 }
 
-static inline void lang_profile_noop_ext(AstNode* node, AstChildVisitor visitor, void* ctx) {
-    (void)node;
-    (void)visitor;
-    (void)ctx;
-}
-
 inline LangProfile lambda_profile = {
     "lambda",
     lang_profile_noop_hook,
     lang_profile_noop_hook,
     lang_profile_noop_hook,
-    lang_profile_noop_ext,
+    NULL,
+    NULL,
 };
 
 inline LangProfile js_profile = {
@@ -1211,7 +1209,8 @@ inline LangProfile js_profile = {
     lang_profile_noop_hook,
     lang_profile_noop_hook,
     lang_profile_noop_hook,
-    lang_profile_noop_ext,
+    NULL,
+    NULL,
 };
 
 static inline LangProfile* lang_profile_for_name(const char* name) {

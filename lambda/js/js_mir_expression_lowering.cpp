@@ -277,7 +277,8 @@ static const JsTest262Intercept* jm_test262_lookup(const JsTest262Intercept* tab
 // the harness fast path. Dynamic Function parameters can be MIR locals with no
 // useful scope node, so the MIR var table is checked too.
 static bool jm_test262_assert_is_local(JsMirTranspiler* mt, JsIdentifierNode* id) {
-    AstBindingId binding_id = id && id->entry ? id->entry->binding_id : AST_BINDING_ID_INVALID;
+    AstBindingId binding_id = ast_index_binding_id(
+        mt && mt->tp ? &mt->tp->ast_index : NULL, (AstNode*)id);
     NameEntry* entry = ast_index_binding(mt && mt->tp ? &mt->tp->ast_index : NULL, binding_id);
     if (entry && entry->node) return true;
     return jm_find_var(mt, "_js_assert") != NULL;
@@ -369,7 +370,8 @@ static bool jm_is_test262_global_assert_identifier(JsMirTranspiler* mt, JsAstNod
         return false;
     }
     JsIdentifierNode* id = (JsIdentifierNode*)node;
-    AstBindingId binding_id = id->entry ? id->entry->binding_id : AST_BINDING_ID_INVALID;
+    AstBindingId binding_id = ast_index_binding_id(
+        mt && mt->tp ? &mt->tp->ast_index : NULL, (AstNode*)id);
     NameEntry* assert_entry = ast_index_binding(mt && mt->tp ? &mt->tp->ast_index : NULL, binding_id);
     char assert_vname[16];
     snprintf(assert_vname, sizeof(assert_vname), "_js_assert");
@@ -474,16 +476,6 @@ bool js_ast_is_proto_literal_key(JsAstNode* key) {
             memcmp(value->chars, "__proto__", 9) == 0;
     }
     return false;
-}
-
-// True when this variable declarator was introduced by a `const` lexical
-// declaration. A `const` binding is immutable, so once the initializer has
-// executed the binding is permanently the value produced by that initializer —
-// which is exactly what the direct-dispatch fast path needs.
-static bool jm_declarator_is_const(JsVariableDeclaratorNode* dn) {
-    if (!dn || !dn->id || dn->id->node_type != JS_AST_NODE_IDENTIFIER) return false;
-    JsIdentifierNode* id = (JsIdentifierNode*)dn->id;
-    return id->entry && id->entry->is_const;
 }
 
 static JsFuncCollected* jm_find_direct_function_decl_by_vname(JsMirTranspiler* mt, const char* vname) {
@@ -5828,42 +5820,8 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             return jm_emit_eval_identifier_call(mt, call);
         }
 
-        // consume the binding resolved by the AST builder; the indexed unit is
-        // immutable during MIR lowering.
-        AstBindingId binding_id = id->entry ? id->entry->binding_id : AST_BINDING_ID_INVALID;
-        NameEntry* entry = ast_index_binding(mt && mt->tp ? &mt->tp->ast_index : NULL, binding_id);
-
-        // Resolve to a JsFunctionNode for direct call.  Two cases are safe:
-        //   1. A `function foo(){}` declaration (hoisted, always callable).
-        //   2. A `const f = function(){}` or `const f = () => {}` binding —
-        //      const is immutable, so once the initializer has run, the
-        //      binding is permanently that function. We additionally require
-        //      the call site to be textually after the initializer end so we
-        //      never devirtualise a call that is still inside the TDZ window.
-        // A `var x = function(){}` binding is hoisted as undefined until its
-        // initializer executes; calls before that point must keep the dynamic
-        // dispatch so they surface the right runtime error.
-        JsFunctionNode* resolved_fn = NULL;
-        if (entry && entry->node) {
-            JsAstNodeType ntype = ((JsAstNode*)entry->node)->node_type;
-            if (ntype == JS_AST_NODE_FUNCTION_DECLARATION) {
-                JsFunctionNode* fn = (JsFunctionNode*)entry->node;
-                if (jm_function_decl_is_direct_binding(fn, false)) {
-                    resolved_fn = fn;
-                }
-            } else if (ntype == JS_AST_NODE_VARIABLE_DECLARATOR) {
-                JsVariableDeclaratorNode* dn = (JsVariableDeclaratorNode*)entry->node;
-                if (dn->init &&
-                    (dn->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-                     dn->init->node_type == JS_AST_NODE_ARROW_FUNCTION) &&
-                    jm_declarator_is_const(dn)) {
-                    if (dn->init->source_span.end_byte <= call->source_span.start_byte) {
-                        resolved_fn = (JsFunctionNode*)dn->init;
-                    }
-                }
-            }
-
-        }
+        // consume the immutable binding/definition edge published by the AST index.
+        JsFunctionNode* resolved_fn = jm_resolve_direct_call_function(mt, call, true);
 
         if (resolved_fn) {
             const char* direct_vname = jm_var_name(id->name);
