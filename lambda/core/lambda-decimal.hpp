@@ -10,7 +10,8 @@
 // grammar. The two contexts below are arithmetic tools, not types:
 // the fixed context is the §2.4 division precision floor (34 digits
 // = IEEE 754-2008 decimal128, matching the TC39 Decimal proposal),
-// the unlimited context serves exact +/-/* and `integer` arithmetic.
+// the extended context serves inexact decimal operations, and exact +/-/*
+// operations use a local maximum-precision context.
 #pragma once
 
 // Forward declarations for mpdecimal types - mpdecimal.h is only included in lambda-decimal.cpp
@@ -26,6 +27,7 @@ struct Decimal;
 struct String;
 struct Item;
 struct EvalContext;
+struct _ArrayList;
 typedef uint8_t TypeId;
 
 // ─────────────────────────────────────────────────────────────────────
@@ -48,7 +50,7 @@ void decimal_cleanup();
 // Get the fixed-precision context (34 digits)
 mpd_context_t* decimal_fixed_context();
 
-// Get the unlimited-precision context
+// Get the extended context used for inexact operations
 mpd_context_t* decimal_unlimited_context();
 
 // Convert a double to its shortest round-trip decimal spelling.
@@ -68,10 +70,14 @@ bool lambda_numeric_to_canonical_string(Item item, char* out, int out_size);
 // Returns NULL on parse error
 mpd_t* decimal_parse_str(const char* str, mpd_context_t* ctx);
 
+// Parse a decimal string without applying a precision context.
+// Returns NULL on parse error; callers own the returned mpd_t.
+mpd_t* decimal_parse_str_exact(const char* str);
+
 // Parse using the fixed decimal context
 mpd_t* decimal_parse_fixed_str(const char* str);
 
-// Parse using the extended decimal context
+// Parse without applying an extended-tier precision limit
 mpd_t* decimal_parse_unlimited_str(const char* str);
 
 // ─────────────────────────────────────────────────────────────────────
@@ -87,7 +93,7 @@ Item decimal_from_uint64(uint64_t val);
 // Create fixed decimal Item from double
 Item decimal_from_double(double val);
 
-// Create fixed decimal Item from string (returns ItemError if parse fails)
+// Create decimal Item from string (returns ItemError if parse fails)
 Item decimal_from_string(const char* str);
 
 // Free mpdecimal string (wrapper for mpd_free)
@@ -97,7 +103,7 @@ void decimal_free_string(char* str);
 // Uses the provided arena or heap depending on allocation mode
 Item decimal_deep_copy(Item item, void* arena, bool is_unlimited);
 
-// Create a fixed decimal Item from a string, with Decimal struct arena-allocated.
+// Create a decimal Item from a string, with Decimal struct arena-allocated.
 // The mpd_t* inside is heap-allocated (not GC-managed) and will be freed on arena teardown.
 // Use this in input parsers where GC-heap allocation is not safe.
 // Returns ItemNull if str is null or parse fails.
@@ -138,6 +144,13 @@ void decimal_retain(Decimal* dec);
 
 // Decrement reference count, free if zero
 void decimal_release(Decimal* dec);
+
+// Release the external mpd_t owned by a pool-backed Decimal wrapper.
+void decimal_payload_release(Decimal* dec);
+
+// Release mpdecimal payloads tracked by a compiler-owned constant list.
+// The Decimal wrappers may live in a Pool, but their mpd_t payloads do not.
+void decimal_constants_release(struct _ArrayList* constants);
 
 // ─────────────────────────────────────────────────────────────────────
 // Type Conversion

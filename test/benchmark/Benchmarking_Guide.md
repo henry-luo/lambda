@@ -50,7 +50,7 @@ For the BENG suite, the convention is simpler: `binarytrees.ls` and `js/binarytr
 | Engine         | Key        | Type        | Command                              |
 | -------------- | ---------- | ----------- | ------------------------------------ |
 | **MIR Direct** | `mir`      | JIT         | `./lambda.exe run script.ls`         |
-| **C2MIR**      | `c2mir`    | JIT         | `./lambda.exe run --c2mir script.ls` |
+| **C2MIR**      | `c2mir`    | JIT         | `python3 test/benchmark/run_c2mir_benchmarks.py` |
 | **LambdaJS**   | `lambdajs` | JIT         | `./lambda.exe js script.js`          |
 | **QuickJS**    | `quickjs`  | Interpreter | `qjs --std -m wrapper.js`            |
 | **Node.js**    | `nodejs`   | JIT (V8)    | `node script.js`                     |
@@ -499,8 +499,8 @@ python3 test/benchmark/run_benchmarks.py -b fib -s r7rs --no-save --typed
 # Lambda MIR Direct
 ./lambda.exe run test/benchmark/r7rs/fib2.ls
 
-# Lambda C2MIR
-./lambda.exe run --c2mir test/benchmark/r7rs/fib2.ls
+# C2MIR native reference port (MIR's own C frontend, not a Lambda path)
+python3 test/benchmark/run_c2mir_benchmarks.py --suite r7rs
 
 # LambdaJS
 ./lambda.exe js test/benchmark/r7rs/fib2.js

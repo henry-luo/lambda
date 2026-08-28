@@ -59,9 +59,11 @@ the decision records.
 - **D1.5 — Precise GC everywhere, forever.** Conservative native-stack
   scanning is retired from every build and stays retired; a guest is
   precise iff it emits through the shared rooting primitives. [CR1–CR8]
-- **D1.6 — The legacy paths are frozen.** C2MIR (`transpile.cpp`, `--c2mir`)
-  is permanently compatibility-only: no edits, no new features, no
-  validation gates, exempt from every new protocol. [rule 14; SM14, CR7, U11]
+- **D1.6 — The legacy paths are frozen.** The C-text C2MIR back end
+  (`transpile.cpp`) was permanently compatibility-only — no edits, no new
+  features, no validation gates, exempt from every new protocol — and has
+  since been removed from the tree along with the CLI flag that selected it;
+  MIR Direct is the sole back end. [rule 14; SM14, CR7, U11]
 - **D1.7 — Source is the spec level.** Scripts distribute as source; MIR is
   a private in-memory IR, never a distribution format; every compiled
   artifact is a **local derived cache keyed by build ID + content hash** —
@@ -523,7 +525,7 @@ that carries them.
   transactionally, so on failure nothing changes (semantics S11.4.1).
   `let`-bound containers never transition (immutable); only
   `var`/procedural code can, and an annotated root must keep conforming.
-  [TE §6 B7b, Transpile_Map DD3]
+  [TE §6 B7b, Transpiler DD3]
 - **D3.4.6** Shapes carry the immutable `LaneStorageDesc` derived from the
   full `Type*` via the one shared descriptor resolver (D2.6.1); changing
   a field's *contract* re-derives layout, writing a null into a `T?`
@@ -1422,8 +1424,8 @@ label-excluding traversals under **D8.2.5**.
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
 | D2.6.5 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S16.7 does not run. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
-| D2.4.1–D2.4.3 | `MirValue`, demand, provenance, rooting-home, and `em_require_rep` infrastructure is shared and used at selected LambdaJS/emitter boundaries. The principal Lambda `transpile_expr` and LambdaJS `jm_transpile_expression` APIs still return bare `MIR_reg_t`, so full-contract propagation through every expression boundary remains open under `vibe/Lambda_Design_JS_Unified.md` P5. |
-| D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JavaScript reference/property lane lowering, mutable ArrayNum views, and vector/N-D kernels remain pending. |
+| D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering; remaining raw producers and the final legacy-shim ratchet stay open. |
+| D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
 | D2.6.3 | ELEM_INT i64 revert landed; SIMD kernels only partly re-enabled (C16-era gating comments remain). |
 | D2.7.2v2 | v2 (companion-lane entries) decided 2026-08-14, not implemented — the v1 trailing-home wrapper ABI ships until Return_Value P4. Ownerless-slot GC scalar fallback active and counted; removal gated on the per-boundary inventory reaching zero. SG2 OQ audits open (dispatch-helper enumeration, resume-path slot reads, RetItem census). |
@@ -1609,7 +1611,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
 | D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
 | D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
-| D3.4 | Shape_Pool §1–§8; Transpile_Map DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b | `Lambda_Shape_Pool.md`, `Lambda_Transpile_Map.md`, `Lambda_Design_Name_Identity.md` |
+| D3.4 | Shape_Pool §1–§8; Transpiler DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b | `Lambda_Shape_Pool.md`, `Lambda_Transpiler.md`, `Lambda_Design_Name_Identity.md` |
 | D4.1 | GC1 §2.10.4; CW8; SF16; CR8; Mem_Heap §1 (MP-12, MP-15) | `Lambda_Garbage_Collector.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.2 | Memory_Context stages; Mem_Heap §1.3–§1.4, §2, §9 (MP-13, MP-14, MP-16–MP-18) | `vibe/Memory_Context.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.3 | GC2 §4–§12 | `Lambda_Garbage_Collector2.md` |

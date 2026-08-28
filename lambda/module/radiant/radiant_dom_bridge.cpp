@@ -453,24 +453,6 @@ static bool radiant_dom_is_content_editable(DomElement* elem) {
     return false;
 }
 
-static bool radiant_dom_tree_has_contenteditable(DomNode* node) {
-    for (DomNode* current = node; current; current = current->next_sibling) {
-        if (!current->is_element()) continue;
-        DomElement* elem = current->as_element();
-        if (elem->has_attribute("contenteditable")) return true;
-        if (radiant_dom_tree_has_contenteditable(elem->first_child)) return true;
-    }
-    return false;
-}
-
-extern "C" int radiant_dom_document_legacy_command_enabled(Item object) {
-    (void)object;
-    DomDocument* doc = (DomDocument*)js_dom_get_document();
-    // the legacy command surface is an editor-only capability; exposing it on
-    // every document makes feature detection select an inert formatting path.
-    return doc && doc->root && radiant_dom_tree_has_contenteditable(doc->root) ? 1 : 0;
-}
-
 static String* radiant_dom_uppercase_name(const char* name) {
     if (!name) return heap_create_name("");
     size_t len = strlen(name);

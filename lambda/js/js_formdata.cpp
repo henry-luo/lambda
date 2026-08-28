@@ -45,6 +45,7 @@ extern "C" bool js_dom_get_checkedness(void* dom_elem);
 extern "C" const char* js_dom_input_type_lower(void* dom_elem);
 extern "C" const char* js_dom_tag_name_raw(void* dom_elem);
 extern "C" bool js_dom_is_disabled(void* dom_elem);
+extern "C" DomElement* js_dom_find_form_owner(void* control_ptr);
 
 // ============================================================================
 // Helpers
@@ -605,8 +606,9 @@ static void fd_append_select_entries(Item entries, DomElement* select_elem) {
 // forward declaration (defined after fd_install_methods)
 static Item fd_make_file_stub();
 
-// Recursively walk the form's DOM subtree, collecting form data entries.
-static void fd_walk_form_controls(Item entries, DomNode* node) {
+// Recursively walk document order, retaining only controls owned by `form`.
+// This includes controls associated through form="..." outside the subtree.
+static void fd_walk_form_controls(Item entries, DomNode* node, DomElement* form) {
     while (node) {
         if (!node->is_element()) {
             node = node->next_sibling;
@@ -614,6 +616,15 @@ static void fd_walk_form_controls(Item entries, DomNode* node) {
         }
         DomElement* elem = (DomElement*)node;
         const char* tag = elem->tag_name ? elem->tag_name : "";
+        bool is_form_control = strcasecmp(tag, "input") == 0 ||
+            strcasecmp(tag, "textarea") == 0 ||
+            strcasecmp(tag, "select") == 0 ||
+            strcasecmp(tag, "button") == 0;
+        if (is_form_control && form &&
+            js_dom_find_form_owner((void*)elem) != form) {
+            node = node->next_sibling;
+            continue;
+        }
 
         if (strcasecmp(tag, "input") == 0) {
             const char* name = elem->get_attribute("name");
@@ -711,7 +722,7 @@ static void fd_walk_form_controls(Item entries, DomNode* node) {
         } else if (strcasecmp(tag, "fieldset") == 0) {
             // recurse into fieldset unless it's disabled (disabled fieldset disables children)
             if (!elem->has_attribute("disabled")) {
-                fd_walk_form_controls(entries, elem->first_child);
+                fd_walk_form_controls(entries, elem->first_child, form);
             }
         }
 
@@ -722,11 +733,27 @@ static void fd_walk_form_controls(Item entries, DomNode* node) {
             strcasecmp(tag, "select") != 0 &&
             strcasecmp(tag, "textarea") != 0 &&
             strcasecmp(tag, "datalist") != 0) {
-            fd_walk_form_controls(entries, elem->first_child);
+            fd_walk_form_controls(entries, elem->first_child, form);
         }
 
         node = node->next_sibling;
     }
+}
+
+static void fd_collect_form_controls(Item entries, DomElement* form) {
+    if (!form) return;
+    DomDocument* doc = form->doc;
+    bool connected = false;
+    if (doc && doc->root) {
+        for (DomNode* node = (DomNode*)form; node; node = node->parent) {
+            if (node == (DomNode*)doc->root) {
+                connected = true;
+                break;
+            }
+        }
+    }
+    fd_walk_form_controls(entries,
+        connected ? doc->root->first_child : form->first_child, form);
 }
 
 // ============================================================================
@@ -880,7 +907,7 @@ static Item js_formdata_construct(Item first, Item submitter) {
         DomNode* node = (DomNode*)node_raw;
         if (node && node->is_element()) {
             DomElement* form_elem = (DomElement*)node;
-            fd_walk_form_controls(entries, form_elem->first_child);
+            fd_collect_form_controls(entries, form_elem);
             void* submitter_raw = js_dom_unwrap_element(submitter);
             DomNode* submitter_node = (DomNode*)submitter_raw;
             if (submitter_node && submitter_node->is_element()) {
@@ -901,7 +928,7 @@ extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitte
     if (!form_node || !form_node->is_element()) return entries;
 
     DomElement* form_dom = (DomElement*)form_node;
-    fd_walk_form_controls(entries, form_dom->first_child);
+    fd_collect_form_controls(entries, form_dom);
     if (submitter_elem) {
         DomNode* submitter_node = (DomNode*)submitter_elem;
         if (submitter_node->is_element()) {

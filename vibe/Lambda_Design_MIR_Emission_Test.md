@@ -528,18 +528,17 @@ emission size.
 ### MT8 — differential lanes. *(DEFERRED — documented only)*
 
 Decided 2026-07-22: worth keeping on record, **not implemented now** — its
-value is benchmarking, not gating. Motivating observation: some tests
-currently run **faster under `--c2mir` than under MIR-Direct**; explaining
-that requires digging in and comparing the MIR the two pipelines emit for the
-same script. This section records the recipe for when that investigation
-starts:
+value is benchmarking, not gating. Motivating observation *(recorded while
+both back ends existed)*: some tests ran **faster under the C-text C2MIR back
+end than under MIR-Direct**; explaining that required comparing the MIR the
+two pipelines emitted for the same script. This section records the recipe for
+when that investigation starts:
 
-1. **C2MIR vs MIR-Direct:** run the `test/lambda` corpus under `--c2mir` and
-   default MIR-Direct; diff stdout for semantics (CR7 keeps C2MIR alive
-   precisely as this oracle), and compare per-function MIR plus timings for the
-   performance-parity investigation. A C2MIR-side MIR dump hook is a
-   prerequisite; the current MIR-Direct dump contract must not be assumed to
-   expose C2MIR's generated MIR.
+1. ~~**C2MIR vs MIR-Direct:**~~ **No longer runnable.** The C-text back end and
+   the CLI flag that selected it have been removed, so this differential lane
+   has no second pipeline to diff against. The residual question — why those
+   scripts were slower under MIR-Direct — survives as a pure MIR-Direct
+   optimizer question; see §9.3 for the first concrete lead.
 2. **JIT vs `--mir-interp`:** same emitted MIR, two executions — separates
    lowering bugs (reproduce in both) from MIR-codegen bugs (JIT-only). This
    is the exact bisection recipe used on the Stage-4C bugs
@@ -766,9 +765,10 @@ references to any of them, and emits no native math call. A typed
 `x ** y` / `abs(x)` / `math.sin(x)` under MIR-Direct imports the boxed
 `fn_pow` / `fn_abs` / `fn_math_sin` entry points instead.
 
-This is a plausible contributor to the MT8 observation that some tests run
-faster under `--c2mir` than under MIR-Direct, and is the first concrete lead
-for that investigation. No fix is attempted here — this design owns the tests,
+This is a plausible contributor to the MT8 observation that some tests ran
+faster under the C-text back end than under MIR-Direct, and is the first
+concrete lead for that investigation — now the only tractable one, since the
+differential lane itself is gone. No fix is attempted here — this design owns the tests,
 not the optimizer. `test/mir/lambda/sys_func_specialization.{ls,mir-check}`
 records the current boxed emission and forbids the specialized symbols, so if
 the specializations are ported to MIR-Direct the fixture fails and is updated

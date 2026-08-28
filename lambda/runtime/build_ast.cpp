@@ -3306,6 +3306,19 @@ static Type* build_lit_datetime_from_span(Transpiler* tp, SourceSpan span) {
 static int decimal_literal_significant_digits(const char* str);
 static bool n_literal_is_integer(const char* str);
 
+static bool track_decimal_constant(Transpiler* tp, Decimal* decimal) {
+    if (!tp || !decimal) return false;
+    if (!tp->decimal_constants) {
+        tp->decimal_constants = arraylist_new(4);
+    }
+    if (!tp->decimal_constants ||
+            !arraylist_append(tp->decimal_constants, decimal)) {
+        decimal_payload_release(decimal);
+        return false;
+    }
+    return true;
+}
+
 static Type* build_lit_float_from_span(Transpiler* tp, SourceSpan span) {
     TypeFloat* item_type = (TypeFloat*)alloc_type(tp->pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
     // C supports inf and nan
@@ -3355,6 +3368,7 @@ static Type* build_lit_decimal_poison_from_span(Transpiler* tp,
     decimal->unlimited = 0;
     decimal->dec_val = decimal_parse_str(spelling, decimal_fixed_context());
     if (!decimal->dec_val) return &TYPE_ERROR;
+    if (!track_decimal_constant(tp, decimal)) return &TYPE_ERROR;
     item_type->decimal = decimal;
     arraylist_append(tp->const_list, decimal);
     item_type->const_index = tp->const_list->length - 1;
@@ -3440,10 +3454,16 @@ static Type* build_lit_decimal_from_span(Transpiler* tp, SourceSpan span) {
         (needs_unlimited_decimal ? 1 : 0);
 
     // literal digits are preserved exactly by selecting the necessary tier.
-    decimal->dec_val = decimal_parse_str(num_str,
-        decimal->unlimited ? decimal_unlimited_context() : decimal_fixed_context());
+    // parse the literal without a precision context; the selected tier must
+    // not round away source digits before runtime evaluation sees them.
+    decimal->dec_val = decimal_parse_str_exact(num_str);
     if (!decimal->dec_val) {
         log_error("Error: Failed to parse decimal: %s", num_str);
+        mem_free(num_str);
+        return &TYPE_ERROR;
+    }
+
+    if (!track_decimal_constant(tp, decimal)) {
         mem_free(num_str);
         return &TYPE_ERROR;
     }
@@ -4802,9 +4822,11 @@ AstNode* build_function_return_contract_node_from_span(Transpiler* tp,
 
 // todo: build reference type
 
-static ShapeEntry* build_map_shape_entry(Transpiler* tp, AstNode* item,
+static ShapeEntry* build_map_shape_entry(Transpiler* tp, TypeMap* owner, AstNode* item,
                                          bool is_spread, bool normalize_type) {
     ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->pool, sizeof(ShapeEntry));
+    // a nameless slot makes owner->length stop counting fields; see TypeMap::has_spread
+    if (is_spread && owner) owner->has_spread = true;
     if (!is_spread) {
         String* pooled_name = ((AstNamedNode*)item)->name;
         StrView* name_view = (StrView*)pool_calloc(tp->pool, sizeof(StrView));
@@ -4872,7 +4894,7 @@ AstNode* build_map_from_items(Transpiler* tp, SourceSpan span,
         else { prev_item->next = item; }
         prev_item = item;
 
-        ShapeEntry* shape_entry = build_map_shape_entry(tp, item, is_spread, true);
+        ShapeEntry* shape_entry = build_map_shape_entry(tp, type, item, is_spread, true);
         // Only syntactic type expressions produce a first-class Type* field.
         // Ordinary calls can carry a TypeType-shaped abstract contract while
         // still returning an Item; treating that carrier as `type` makes a
@@ -8459,7 +8481,7 @@ AstNode* build_element_from_parts(Transpiler* tp, SourceSpan span,
                 if (!node->item) node->item = item;
                 else prev->next = item;
                 prev = item;
-                ShapeEntry* shape = build_map_shape_entry(tp, item, spread, false);
+                ShapeEntry* shape = build_map_shape_entry(tp, type, item, spread, false);
                 shape->byte_offset = byte_offset;
                 if (!prev_shape) type->shape = shape;
                 else prev_shape->next = shape;

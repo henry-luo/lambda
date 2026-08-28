@@ -32,7 +32,16 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
                           Spacing* trg_spacing);
 
 static DomElement* dom_parent_element(DomElement* element) {
-    return (element && element->parent) ? lam::dom_require_element(element->parent) : nullptr;
+    if (!element || !element->parent) return nullptr;
+    DomElement* parent = lam::dom_require_element(element->parent);
+    if (parent && parent->tag_name &&
+        strcmp(parent->tag_name, "#document-fragment") == 0 &&
+        parent->shadow_host_element()) {
+        // CSS Shadow DOM: a shadow fragment inherits the host's computed style;
+        // projected light-DOM nodes must not fall back to UA defaults.
+        return parent->shadow_host_element();
+    }
+    return parent;
 }
 
 static BackgroundProp* parent_computed_background(LayoutContext* lycon) {
@@ -2949,145 +2958,13 @@ DisplayValue blockify_display(DisplayValue display) {
     return display;
 }
 
-static bool css_content_value_has_image_url(const CssValue* value) {
-    if (!value) return false;
-    if (value->type == CSS_VALUE_TYPE_URL) return true;
-    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-        value->data.function->name) {
-        const char* fn = value->data.function->name;
-        size_t fn_len = strlen(fn);
-        if (str_ieq_const(fn, fn_len, "url")) return true;
-    }
-    if (value->type == CSS_VALUE_TYPE_LIST) {
-        for (int i = 0; i < value->data.list.count; i++) {
-            if (css_content_value_has_image_url(value->data.list.values[i])) return true;
-        }
-    }
-    return false;
-}
-
-struct CssDisplayKeywordResult {
-    DisplayValue display;
-    bool handled;
-    bool blockify;
-};
-
-struct CssDisplayKeywordSpec {
-    CssEnum keyword;
-    CssEnum outer;
-    CssEnum inner;
-    bool blockify;
-    bool replaced_inner;
-    bool list_item;
-};
-
-static CssDisplayKeywordResult css_display_keyword_result(CssEnum keyword,
-                                                           bool is_replaced) {
-    static const CssDisplayKeywordSpec specs[] = {
-        {CSS_VALUE_FLEX, CSS_VALUE_BLOCK, CSS_VALUE_FLEX, false, false, false},
-        {CSS_VALUE_INLINE_FLEX, CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLEX, false, false, false},
-        {CSS_VALUE_GRID, CSS_VALUE_BLOCK, CSS_VALUE_GRID, false, false, false},
-        {CSS_VALUE_INLINE_GRID, CSS_VALUE_INLINE_BLOCK, CSS_VALUE_GRID, false, false, false},
-        {CSS_VALUE_BLOCK, CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false, true, false},
-        {CSS_VALUE_INLINE, CSS_VALUE_INLINE, CSS_VALUE_FLOW, true, true, false},
-        {CSS_VALUE_INLINE_BLOCK, CSS_VALUE_INLINE_BLOCK, CSS_VALUE_FLOW, true, true, false},
-        {CSS_VALUE_LIST_ITEM, CSS_VALUE_LIST_ITEM, CSS_VALUE_FLOW, false, false, true},
-        {CSS_VALUE_NONE, CSS_VALUE_NONE, CSS_VALUE_NONE, false, false, false},
-        {CSS_VALUE_CONTENTS, CSS_VALUE_CONTENTS, CSS_VALUE_CONTENTS, false, false, false},
-        {CSS_VALUE_FLOW_ROOT, CSS_VALUE_BLOCK, CSS_VALUE_FLOW_ROOT, false, false, false},
-        {CSS_VALUE_TABLE, CSS_VALUE_BLOCK, CSS_VALUE_TABLE, false, false, false},
-        {CSS_VALUE_INLINE_TABLE, CSS_VALUE_INLINE, CSS_VALUE_TABLE, true, false, false},
-        {CSS_VALUE_RUBY, CSS_VALUE_INLINE, CSS_VALUE_RUBY, true, false, false},
-        {CSS_VALUE_RUBY_BASE, CSS_VALUE_INLINE, CSS_VALUE_RUBY_BASE, false, false, false},
-        {CSS_VALUE_RUBY_TEXT, CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT, false, false, false},
-        {CSS_VALUE_RUBY_BASE_CONTAINER, CSS_VALUE_INLINE, CSS_VALUE_RUBY_BASE_CONTAINER, false, false, false},
-        {CSS_VALUE_RUBY_TEXT_CONTAINER, CSS_VALUE_INLINE, CSS_VALUE_RUBY_TEXT_CONTAINER, false, false, false},
-        {CSS_VALUE_TABLE_ROW, CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW, true, false, false},
-        {CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL, CSS_VALUE_TABLE_CELL, true, false, false},
-        {CSS_VALUE_TABLE_ROW_GROUP, CSS_VALUE_BLOCK, CSS_VALUE_TABLE_ROW_GROUP, true, false, false},
-        {CSS_VALUE_TABLE_HEADER_GROUP, CSS_VALUE_BLOCK, CSS_VALUE_TABLE_HEADER_GROUP, true, false, false},
-        {CSS_VALUE_TABLE_FOOTER_GROUP, CSS_VALUE_BLOCK, CSS_VALUE_TABLE_FOOTER_GROUP, true, false, false},
-        {CSS_VALUE_TABLE_COLUMN, CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN, true, false, false},
-        {CSS_VALUE_TABLE_COLUMN_GROUP, CSS_VALUE_BLOCK, CSS_VALUE_TABLE_COLUMN_GROUP, true, false, false},
-        {CSS_VALUE_TABLE_CAPTION, CSS_VALUE_BLOCK, CSS_VALUE_TABLE_CAPTION, true, false, false},
-    };
-    for (const CssDisplayKeywordSpec& spec : specs) {
-        if (spec.keyword != keyword) continue;
-        CssDisplayKeywordResult result = {
-            {spec.outer, spec.replaced_inner && is_replaced
-                ? RDT_DISPLAY_REPLACED : spec.inner}, false, spec.blockify};
-        result.display.list_item = spec.list_item;
-        result.handled = true;
-        return result;
-    }
-    return {{CSS_VALUE_BLOCK, CSS_VALUE_FLOW}, false, false};
-}
-
-static CssEnum css_display_list_inner(CssEnum keyword, bool is_replaced) {
-    if (keyword == CSS_VALUE_FLOW) {
-        return is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
-    }
-    if (keyword == CSS_VALUE_FLOW_ROOT || keyword == CSS_VALUE_FLEX ||
-        keyword == CSS_VALUE_GRID || keyword == CSS_VALUE_TABLE ||
-        keyword == CSS_VALUE_RUBY) {
-        return keyword;
-    }
-    return CSS_VALUE_FLOW;
-}
-
-static bool css_display_list_value(const CssValue* value, bool is_replaced,
-                                   DisplayValue* out_display) {
-    if (!value || value->type != CSS_VALUE_TYPE_LIST || !out_display) return false;
-    CssValue** values = value->data.list.values;
-    int count = value->data.list.count;
-    bool has_list_item = false;
-    CssEnum outer = CSS_VALUE__UNDEF;
-    CssEnum inner = CSS_VALUE__UNDEF;
-    for (int i = 0; i < count; i++) {
-        if (!values[i] || values[i]->type != CSS_VALUE_TYPE_KEYWORD) continue;
-        CssEnum keyword = values[i]->data.keyword;
-        if (keyword == CSS_VALUE_LIST_ITEM) has_list_item = true;
-        else if (keyword == CSS_VALUE_BLOCK || keyword == CSS_VALUE_INLINE ||
-                 keyword == CSS_VALUE_RUN_IN) outer = keyword;
-        else if (keyword == CSS_VALUE_FLOW || keyword == CSS_VALUE_FLOW_ROOT ||
-                 keyword == CSS_VALUE_FLEX || keyword == CSS_VALUE_GRID ||
-                 keyword == CSS_VALUE_TABLE || keyword == CSS_VALUE_RUBY) {
-            inner = keyword;
-        }
-    }
-
-    if (has_list_item) {
-        out_display->list_item = true;
-        // CSS Display 3: `inline list-item` remains an inline-level principal
-        // box; treating it as inline-block changes line participation and breaks
-        // marker placement for every following sibling.
-        out_display->outer = outer == CSS_VALUE_INLINE
-            ? CSS_VALUE_INLINE : CSS_VALUE_LIST_ITEM;
-        out_display->inner = inner == CSS_VALUE_FLOW_ROOT
-            ? CSS_VALUE_FLOW_ROOT
-            : (is_replaced && inner == CSS_VALUE_FLOW
-                ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW);
-        return true;
-    }
-    if (count >= 2 && outer != CSS_VALUE__UNDEF && inner != CSS_VALUE__UNDEF) {
-        out_display->outer = outer == CSS_VALUE_INLINE
-            ? CSS_VALUE_INLINE : CSS_VALUE_BLOCK;
-        out_display->inner = css_display_list_inner(inner, is_replaced);
-        return true;
-    }
-    if (count == 1 && values[0] && values[0]->type == CSS_VALUE_TYPE_KEYWORD) {
-        CssDisplayKeywordResult result = css_display_keyword_result(
-            values[0]->data.keyword, is_replaced);
-        if (result.handled) {
-            *out_display = result.display;
-            return true;
-        }
-    }
-    return false;
-}
-
 static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNode* node) {
     NameId tag_id = dom_elem ? dom_elem->tag_id : NAME_ID_NONE;
+    if (css_is_mathml_element(dom_elem)) {
+        return (dom_elem->tag_name && strcmp(dom_elem->tag_name, "math") == 0)
+            ? DisplayValue{CSS_VALUE_INLINE, CSS_VALUE_MATH}
+            : DisplayValue{CSS_VALUE_BLOCK, CSS_VALUE_MATH};
+    }
     static const NameId block_tags[] = {
         MARKUP_NAME_HTML, MARKUP_NAME_BODY, MARKUP_NAME_H1, MARKUP_NAME_H2,
         MARKUP_NAME_H3, MARKUP_NAME_H4, MARKUP_NAME_H5, MARKUP_NAME_H6,
@@ -3128,7 +3005,17 @@ static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNod
     if (layout_noscript_content_suppressed(dom_elem)) {
         return {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
     }
-    if (tag_id == MARKUP_NAME_LI || tag_id == MARKUP_NAME_SUMMARY) {
+    if (tag_id == MARKUP_NAME_LI) {
+        DisplayValue display = {CSS_VALUE_LIST_ITEM, CSS_VALUE_FLOW};
+        display.list_item = true;
+        return display;
+    }
+    if (tag_id == MARKUP_NAME_SUMMARY) {
+        // HTML details rendering gives the disclosure marker only to a direct
+        // summary child; nested summaries remain ordinary block flow content.
+        bool direct_details_child = node && node->parent && node->parent->is_element() &&
+            node->parent->as_element()->tag() == MARKUP_NAME_DETAILS;
+        if (!direct_details_child) return {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
         DisplayValue display = {CSS_VALUE_LIST_ITEM, CSS_VALUE_FLOW};
         display.list_item = true;
         return display;
@@ -3174,6 +3061,18 @@ static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNod
     return {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
 }
 
+static bool display_contents_child_of_flex_or_grid(DomNode* node) {
+    for (DomNode* ancestor = node ? node->parent : nullptr;
+         ancestor && ancestor->is_element(); ancestor = ancestor->parent) {
+        DisplayValue ancestor_display = resolve_display_value(ancestor);
+        if (ancestor_display.outer == CSS_VALUE_NONE) return false;
+        if (ancestor_display.outer == CSS_VALUE_CONTENTS) continue;
+        return ancestor_display.inner == CSS_VALUE_FLEX ||
+            ancestor_display.inner == CSS_VALUE_GRID;
+    }
+    return false;
+}
+
 DisplayValue resolve_display_value(void* child) {
     DisplayValue display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
     DomNode* node = static_cast<DomNode*>(child);
@@ -3181,7 +3080,20 @@ DisplayValue resolve_display_value(void* child) {
         // resolve display from CSS if available
         DomElement* dom_elem = node->as_element();
         NameId tag_id = dom_elem ? dom_elem->tag_id : NAME_ID_NONE;
+        bool is_mathml = css_is_mathml_element(dom_elem);
 
+        if (dom_elem && dom_elem->tag_name &&
+            strcmp(dom_elem->tag_name, "::first-letter") == 0) {
+            // CSS Pseudo §4.2: first-letter ignores authored display; float
+            // blockifies the pseudo, while an unfloated first letter is inline.
+            CssEnum first_letter_float = layout_specified_keyword(
+                dom_elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
+            if (first_letter_float == CSS_VALUE_LEFT ||
+                first_letter_float == CSS_VALUE_RIGHT) {
+                return {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
+            }
+            return {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
+        }
 
         // CSS 2.1 §9.7: Check for float and position - floated or absolutely positioned elements get blockified
         CssEnum float_value = layout_specified_keyword(
@@ -3191,16 +3103,22 @@ DisplayValue resolve_display_value(void* child) {
             dom_elem, CSS_PROPERTY_POSITION, CSS_VALUE_NONE);
         bool is_abspos = (position_value == CSS_VALUE_ABSOLUTE || position_value == CSS_VALUE_FIXED);
         // CSS Flexbox §4 / CSS Grid §6: Children of flex/grid containers have their
-        bool is_flex_or_grid_child = false;
-        if (node->parent && node->parent->is_element()) {
-            DomElement* parent_elem = node->parent->as_element();
-            if (parent_elem && parent_elem->display.inner != 0 && parent_elem->styles_resolved()) {
-                is_flex_or_grid_child = (parent_elem->display.inner == CSS_VALUE_FLEX ||
-                                         parent_elem->display.inner == CSS_VALUE_GRID);
-            }
-        }
+        // CSS Display 3 §2.5 / Flexbox §4 / Grid §9: display:contents
+        // removes the wrapper from the box tree, so blockification follows the
+        // flattened-tree ancestor rather than only the DOM parent.
+        bool is_flex_or_grid_child = display_contents_child_of_flex_or_grid(node);
         // CSS 2.1 §9.7 rule 2: absolute/fixed position also triggers blockification
         bool needs_blockify = is_floated || is_abspos || is_flex_or_grid_child;
+        CssDeclaration* specified_display_decl = nullptr;
+        if (dom_elem && dom_elem->specified_style && dom_elem->specified_style->tree) {
+            specified_display_decl = style_tree_get_declaration(
+                dom_elem->specified_style, CSS_PROPERTY_DISPLAY);
+        }
+        bool has_specified_display = specified_display_decl != nullptr;
+        bool specified_display_contents = specified_display_decl &&
+            specified_display_decl->value &&
+            specified_display_decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+            specified_display_decl->value->data.keyword == CSS_VALUE_CONTENTS;
         // HTML spec §14.3.1: The hidden attribute (UA stylesheet: [hidden] { display: none })
         // Must check before CSS cascade since it's a presentational hint
         if (dom_elem && dom_elem->has_attribute("hidden")) {
@@ -3213,7 +3131,9 @@ DisplayValue resolve_display_value(void* child) {
         if (node->parent && node->parent->is_element()) {
             DomElement* parent_elem = node->parent->as_element();
             if (parent_elem->tag() == MARKUP_NAME_DETAILS && !parent_elem->has_attribute(MARKUP_NAME_OPEN)) {
-                if (tag_id != MARKUP_NAME_SUMMARY) {
+                // CSS Display 3: contents exposes descendants before the closed-details
+                // suppression boundary is applied to the flattened children.
+                if (tag_id != MARKUP_NAME_SUMMARY && !specified_display_contents) {
                     DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
                     return none_display;
                 }
@@ -3227,11 +3147,6 @@ DisplayValue resolve_display_value(void* child) {
                 DisplayValue none_display = {CSS_VALUE_NONE, CSS_VALUE_NONE};
                 return none_display;
             }
-        }
-        bool has_specified_display = false;
-        if (dom_elem && dom_elem->specified_style && dom_elem->specified_style->tree) {
-            has_specified_display =
-                avl_tree_search(dom_elem->specified_style->tree, CSS_PROPERTY_DISPLAY) != nullptr;
         }
         if (dom_elem && dom_elem->has_attribute("popover") &&
             !dom_elem->is_popover_open() && !has_specified_display) {
@@ -3248,34 +3163,20 @@ DisplayValue resolve_display_value(void* child) {
                 object_fallback ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW};
             return needs_blockify ? blockify_display(popover_display) : popover_display;
         }
-        if (dom_elem && !has_specified_display &&
+        if (dom_elem && !has_specified_display && !is_mathml &&
             dom_elem->display.inner != CSS_VALUE_NONE &&
             dom_elem->display.inner != 0 && dom_elem->styles_resolved()) {
             // CSS 2.1 §9.7: Even pre-resolved elements must be blockified when
             return needs_blockify ? blockify_display(dom_elem->display) : dom_elem->display;
         }
-        // HTML §4.8.7: <object> is replaced only when it has a data attribute
-        // HTML §4.8.9: <audio> is replaced only when it has a controls attribute
-        // Note: <button> is NOT replaced — it contains flow content (text, spans, etc.)
-        // per HTML spec. Its children are laid out normally via CSS_VALUE_FLOW.
-        static const NameId replaced_tags[] = {
-            MARKUP_NAME_IMG, MARKUP_NAME_VIDEO, MARKUP_NAME_INPUT, MARKUP_NAME_SELECT,
-            MARKUP_NAME_TEXTAREA, MARKUP_NAME_IFRAME, MARKUP_NAME_HR, MARKUP_NAME_SVG,
-            MARKUP_NAME_METER, MARKUP_NAME_PROGRESS, MARKUP_NAME_CANVAS,
-            MARKUP_NAME_WEBVIEW, MARKUP_NAME_EMBED};
-        bool is_replaced = layout_tag_in_list(
-            tag_id, replaced_tags, sizeof(replaced_tags) / sizeof(*replaced_tags)) ||
-            (tag_id == MARKUP_NAME_OBJECT && dom_elem &&
-             dom_elem->get_attribute(MARKUP_NAME_DATA)) ||
-            (tag_id == MARKUP_NAME_AUDIO && dom_elem &&
-             dom_elem->has_attribute(MARKUP_NAME_CONTROLS));
-        if (dom_elem && dom_elem->specified_style) {
-            CssDeclaration* content_decl = style_tree_get_declaration(
-                dom_elem->specified_style, CSS_PROPERTY_CONTENT);
-            if (content_decl && css_content_value_has_image_url(content_decl->value)) {
-                // image-set() must not assign its intrinsic size to the DOM element.
-                is_replaced = true;
+        bool is_replaced = css_display_element_is_replaced(dom_elem);
+        if (dom_elem && dom_elem->has_animated_display()) {
+            DisplayValue animated = dom_elem->animated_display();
+            if (animated.outer == CSS_VALUE_CONTENTS &&
+                css_display_contents_suppresses_element(dom_elem)) {
+                return {CSS_VALUE_NONE, CSS_VALUE_NONE};
             }
+            return needs_blockify ? blockify_display(animated) : animated;
         }
         // first, try to get display from CSS
         if (dom_elem && dom_elem->specified_style) {
@@ -3298,27 +3199,23 @@ DisplayValue resolve_display_value(void* child) {
                             display.outer = CSS_VALUE_INLINE_BLOCK;
                             display.inner = is_replaced ? RDT_DISPLAY_REPLACED : CSS_VALUE_FLOW;
                             return needs_blockify ? blockify_display(display) : display;
-                        } else if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
-                            CssEnum keyword = decl->value->data.keyword;
-                            CssDisplayKeywordResult keyword_result =
-                                css_display_keyword_result(keyword, is_replaced);
-                            if (keyword_result.handled) {
-                                display = keyword_result.display;
-                                return keyword_result.blockify && needs_blockify
-                                    ? blockify_display(display) : display;
+                        } else if (decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+                                   decl->value->data.keyword == CSS_VALUE_INHERIT) {
+                            // CSS 2.1 §9.2.4: inherit from the parent's computed display.
+                            DomElement* parent_elem = dom_elem->parent_element();
+                            if (parent_elem) {
+                                DisplayValue parent_display = resolve_display_value((void*)parent_elem);
+                                return needs_blockify ? blockify_display(parent_display) : parent_display;
                             }
-                            if (keyword == CSS_VALUE_INHERIT) {
-                                // CSS 2.1 §9.2.4: inherit from the parent's computed display.
-                                DomElement* parent_elem = dom_elem->parent_element();
-                                if (parent_elem) {
-                                    DisplayValue parent_display = resolve_display_value((void*)parent_elem);
-                                    return needs_blockify ? blockify_display(parent_display) : parent_display;
-                                }
+                        } else if (css_resolve_display_css_value(
+                                       dom_elem, decl->value, &display)) {
+                            if (display.outer == CSS_VALUE_CONTENTS &&
+                                css_display_contents_suppresses_element(dom_elem)) {
+                                return {CSS_VALUE_NONE, CSS_VALUE_NONE};
                             }
-                        } else if (decl->value->type == CSS_VALUE_TYPE_LIST &&
-                                   css_display_list_value(decl->value, is_replaced, &display)) {
-                            // One-item lists preserve the historical no-blockification path.
-                            return display;
+                            // CSS Display 3: a parsed display value is blockified
+                            // only when its outer box participates in that rule.
+                            return needs_blockify ? blockify_display(display) : display;
                         }
                     }
                 }
@@ -3327,6 +3224,10 @@ DisplayValue resolve_display_value(void* child) {
         if (custom_layout_name_for_element(dom_elem)) {
             display.outer = CSS_VALUE_BLOCK;
             display.inner = CSS_VALUE_FLOW;
+            return needs_blockify ? blockify_display(display) : display;
+        }
+        if (!has_specified_display && is_mathml) {
+            display = css_default_display_for_element(dom_elem, node);
             return needs_blockify ? blockify_display(display) : display;
         }
         display = css_default_display_for_element(dom_elem, node);
@@ -4502,16 +4403,15 @@ static const char* placeholder_font_family_from_value(const CssValue* value) {
     return nullptr;
 }
 
-static void apply_placeholder_font_family(FontProp* font, const CssValue* raw_value) {
+static void apply_pseudo_font_family(LayoutContext* lycon, FontProp* font,
+                                     const CssValue* raw_value) {
     if (!font || !raw_value) return;
-    const CssValue* value = raw_value;
+    const CssValue* value = resolve_var_function(lycon, raw_value);
+    if (!value) return;
     if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-        for (int i = 0; i < value->data.list.count; i++) {
-            const char* family = placeholder_font_family_from_value(value->data.list.values[i]);
-            if (family && *family) {
-                radiant_retain_font_family(font, lam::PoolPtr<char>((char*)family));
-                return;
-            }
+        const char* family = css_select_font_family(lycon, value, true);
+        if (family && *family) {
+            radiant_retain_font_family(font, lam::PoolPtr<char>((char*)family));
         }
         return;
     }
@@ -4519,6 +4419,93 @@ static void apply_placeholder_font_family(FontProp* font, const CssValue* raw_va
     if (family && *family) {
         radiant_retain_font_family(font, lam::PoolPtr<char>((char*)family));
     }
+}
+
+static bool pseudo_longhand_overridden_by_font(StyleTree* style,
+                                               CssDeclaration* longhand) {
+    if (!style || !longhand) return false;
+    CssDeclaration* shorthand = style_tree_get_declaration(style, CSS_PROPERTY_FONT);
+    return shorthand && css_declaration_cascade_compare(shorthand, longhand) > 0;
+}
+
+FontProp* layout_resolve_first_line_font(LayoutContext* lycon,
+                                         DomElement* element,
+                                         FontProp* base_font) {
+    if (!lycon || !element || !base_font) return nullptr;
+    StyleTree* style = element->pseudo_style(PSEUDO_STYLE_FIRST_LINE);
+    if (!style || !style->tree || !css_style_tree_has_font_property(style, false)) {
+        return nullptr;
+    }
+
+    FontProp* first_line_font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+    font_prop_copy(first_line_font, base_font);
+    first_line_font->used_zoom = base_font->used_zoom;
+
+    CssDeclaration* font_decl = style_tree_get_declaration(style, CSS_PROPERTY_FONT);
+    if (font_decl && font_decl->value) {
+        const CssValue* value = resolve_var_function(lycon, font_decl->value);
+        LayoutFontShorthandParts parts;
+        if (value && layout_parse_font_shorthand(value, &parts)) {
+            first_line_font->font_variant = parts.small_caps
+                ? CSS_VALUE_SMALL_CAPS : CSS_VALUE_NORMAL;
+            if (parts.size) {
+                LayoutFontSizeResult resolved = layout_resolve_font_size_value(
+                    lycon, parts.size, base_font, true);
+                if (!isnan(resolved.value) && resolved.value >= 0.0f) {
+                    first_line_font->font_size = resolved.value;
+                    first_line_font->font_size_from_medium = resolved.from_medium;
+                }
+            }
+            if (parts.weight) {
+                first_line_font->font_weight = map_font_weight(parts.weight);
+                first_line_font->font_weight_numeric = map_font_weight_numeric(parts.weight);
+            }
+            if (parts.style && parts.style->type == CSS_VALUE_TYPE_KEYWORD) {
+                first_line_font->font_style = parts.style->data.keyword;
+            }
+            const char* family = css_select_font_shorthand_family(
+                lycon, value, parts.group, parts.family_start, true);
+            if (family && *family) {
+                radiant_retain_font_family(first_line_font,
+                    lam::PoolPtr<char>((char*)family));
+            }
+        }
+    }
+
+    CssDeclaration* font_size = style_tree_get_declaration(style, CSS_PROPERTY_FONT_SIZE);
+    if (font_size && font_size->value &&
+        !pseudo_longhand_overridden_by_font(style, font_size)) {
+        LayoutFontSizeResult resolved = layout_resolve_font_size_value(
+            lycon, font_size->value, base_font, true);
+        if (!isnan(resolved.value) && resolved.value >= 0.0f) {
+            first_line_font->font_size = resolved.value;
+            first_line_font->font_size_from_medium = resolved.from_medium;
+        }
+    }
+    CssDeclaration* font_weight = style_tree_get_declaration(style, CSS_PROPERTY_FONT_WEIGHT);
+    if (font_weight && font_weight->value &&
+        !pseudo_longhand_overridden_by_font(style, font_weight)) {
+        first_line_font->font_weight = map_font_weight(font_weight->value);
+        first_line_font->font_weight_numeric = map_font_weight_numeric(font_weight->value);
+    }
+    CssDeclaration* font_style = style_tree_get_declaration(style, CSS_PROPERTY_FONT_STYLE);
+    if (font_style && font_style->value &&
+        !pseudo_longhand_overridden_by_font(style, font_style) &&
+        font_style->value->type == CSS_VALUE_TYPE_KEYWORD) {
+        first_line_font->font_style = font_style->value->data.keyword;
+    }
+    CssDeclaration* font_family = style_tree_get_declaration(style, CSS_PROPERTY_FONT_FAMILY);
+    if (font_family && font_family->value &&
+        !pseudo_longhand_overridden_by_font(style, font_family)) {
+        apply_pseudo_font_family(lycon, first_line_font, font_family->value);
+    }
+    CssDeclaration* font_variant = style_tree_get_declaration(style, CSS_PROPERTY_FONT_VARIANT);
+    if (font_variant && font_variant->value &&
+        !pseudo_longhand_overridden_by_font(style, font_variant) &&
+        font_variant->value->type == CSS_VALUE_TYPE_KEYWORD) {
+        first_line_font->font_variant = font_variant->value->data.keyword;
+    }
+    return first_line_font;
 }
 
 static FontProp* ensure_placeholder_font(LayoutContext* lycon,
@@ -4624,7 +4611,7 @@ static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext
     if (font_family_decl && font_family_decl->value && base_font) {
         FontProp* placeholder_font = ensure_placeholder_font(lycon, form, base_font);
         if (placeholder_font) {
-            apply_placeholder_font_family(placeholder_font, font_family_decl->value);
+                apply_pseudo_font_family(lycon, placeholder_font, font_family_decl->value);
         }
     }
 }

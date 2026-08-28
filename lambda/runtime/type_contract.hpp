@@ -38,6 +38,15 @@ enum MapContractRelation {
     MAP_CONTRACT_NEEDS_REIFICATION,
 };
 
+// resolve the canonical Lambda carrier from the complete semantic contract.
+// this is a representation decision, not a physical MIR register query;
+// abstract and heterogeneous contracts stay boxed (D2.4.1–D2.4.2).
+ValueRep lambda_canonical_rep(Type* contract);
+// apply the same canonical resolver to a compact dispatch key used by legacy
+// compiler entry points; callers with a full contract must use the overload
+// above (D2.4.1–D2.4.2).
+ValueRep lambda_canonical_rep_for_type_id(TypeId type_id);
+
 // Compare a runtime map shape with a concrete map contract. The exact result
 // is reserved for the explicit compiler certificate; dynamic shapes never
 // become trusted merely because their current fields happen to line up.

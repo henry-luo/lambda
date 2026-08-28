@@ -574,23 +574,56 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
 
     grid_layout->needs_reflow = false;
 }
-// Collect grid items from container children
+// Collect the flattened-tree element nodes that can become grid items.
+int collect_grid_item_nodes(LayoutContext* lycon, ViewBlock* container,
+                            DomNode* first_child, DomNode** nodes, int capacity,
+                            bool initialize_contents) {
+    if (!container || !nodes || capacity <= 0) return 0;
+
+    int count = 0;
+    for (DomNode* child = first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+
+        DomElement* elem = child->as_element();
+        DisplayValue display = resolve_display_value(child);
+        if (layout_display_is_none(display)) {
+            elem->view_type = RDT_VIEW_NONE;
+            continue;
+        }
+        if (display.outer == CSS_VALUE_CONTENTS) {
+            // CSS Display 3: retain the DOM node as a boxless view while its
+            // descendants participate directly in the grid formatting context.
+            if (initialize_contents) {
+                layout_init_display_contents_view(lycon, elem);
+            }
+            count += collect_grid_item_nodes(
+                lycon, container, elem->first_child, nodes + count,
+                capacity - count, initialize_contents);
+            continue;
+        }
+        if (count < capacity) nodes[count++] = child;
+    }
+    return count;
+}
+
+// Collect grid items from the flattened container children.
 int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, ViewBlock*** items) {
     // validate before diagnostics; this helper is also called by empty-grid paths.
     if (!container || !items || !grid_layout) return 0;
 
+    int node_capacity = grid_layout->allocated_items > 0
+        ? grid_layout->allocated_items : 0;
+    DomNode** nodes = node_capacity > 0
+        ? (DomNode**)scratch_calloc(&grid_layout->lycon->scratch,
+            (size_t)node_capacity * sizeof(DomNode*)) : nullptr;
+    int node_count = nodes
+        ? collect_grid_item_nodes(grid_layout->lycon, container,
+            container->first_child, nodes, node_capacity, false) : 0;
     int count = 0;
-    DomNode* child_node = container->first_child;
-    while (child_node) {
-        if (!child_node->is_element()) {
-            layout_suppress_ignorable_container_text(child_node);
-            child_node = child_node->next_sibling;
-            continue;
-        }
-
+    for (int node_index = 0; node_index < node_count; node_index++) {
+        DomNode* child_node = nodes[node_index];
         ViewBlock* child = lam::view_require_block(child_node);
         if (layout_block_is_skipped_container_item(child)) {
-            child_node = child_node->next_sibling;
             continue;
         }
         // layout_count_potential_items supplies this scratch capacity; keep the
@@ -608,8 +641,9 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         if (child_gi && !has_explicit_placement) {
             child_gi->is_grid_auto_placed = true;
         }
-        child_node = child_node->next_sibling;
     }
+
+    if (nodes) scratch_free(&grid_layout->lycon->scratch, nodes);
 
     if (count == 0) {
         *items = nullptr;

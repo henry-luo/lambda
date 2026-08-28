@@ -1056,6 +1056,8 @@ void array_limit_inplace(Array* arr, int64_t n);  // limit to first n items in-p
 void array_limit_last_inplace(Array* arr, int64_t n);  // limit to last n items in-place
 Array* array_spreadable();  // constructs a spreadable empty array
 void array_push(Array* arr, Item item);  // push item to array
+// S9.3.1 capturing append for Lambda literals/comprehensions; array_push is raw.
+void array_push_capture(Array* arr, Item item);
 void array_push_spread(Array* arr, Item item);      // push item, spreading if spreadable array
 void array_push_spread_all(Array* arr, Item item);  // push item, spreading any array (for pipe exprs in array literals)
 Item array_end(Array* arr);  // finalize and return array as Item
@@ -2255,6 +2257,9 @@ extern "C" {
     bool path_is_property_name(const char* key);
     Item path_property_get(Path* path, const char* key);  // built-in Path properties (shared by fn_member/item_attr)
     SymbolKeyList* item_keys(Item data);     // get typed list of Symbol* attribute names
+    // Distinct-key field count of map-shaped storage (flattens spread slots,
+    // dedupes duplicate names) — the count for-iteration performs (S8.3.1).
+    int64_t map_flat_field_count(struct TypeMap* map_type, void* map_data);
     SymbolKeyList* symbol_key_list_new(int64_t initial_capacity);
     bool symbol_key_list_append(SymbolKeyList* keys_ptr, Symbol* symbol);
     int64_t symbol_key_list_len(void* keys_ptr);
@@ -2805,6 +2810,12 @@ extern "C" {
     Item fn_map_set(Item map, Item key, Item value);
     bool cow_item_is_container(Item value);
     Item cow_mark_shared(Item value);
+    Item cow_capture_value(Item value);
+    // Whether S9.3.1 insertion capture is active (LAMBDA_COW_CAPTURE). The
+    // transpiler reads it too, so flag-off emits the pre-capture code exactly.
+    bool cow_capture_enabled(void);
+    // Capture every field of a freshly built shaped literal (S9.3.1).
+    void cow_mark_shape_children(struct TypeMap* type, void* data);
     Item cow_bind_var(Item value);
     Item cow_prepare_write(Item old);
     // Optional release-safe COW instrumentation.  It stays dormant unless

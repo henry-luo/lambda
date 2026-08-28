@@ -567,9 +567,9 @@ void event_state_log_write_node_ref(JsonWriter* w, const char* key,
     jw_obj_end(w);
 }
 
-void editing_log_write_surface_core_fields(JsonWriter* w,
-                                           const EditingSurface* surface,
-                                           bool include_state_flags) {
+void event_log_write_surface_core_fields(JsonWriter* w,
+                                         const EditingSurface* surface,
+                                         bool include_state_flags) {
     jw_kv_str(w, "kind", editing_surface_kind_name(
         surface ? surface->kind : EDIT_SURFACE_NONE));
     jw_kv_str(w, "mode", editing_mode_name(

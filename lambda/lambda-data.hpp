@@ -354,6 +354,11 @@ typedef struct TypeMap : Type {
     int64_t length;  // no. of items in the map
     int64_t byte_size;  // byte size of the struct that the map is transpiled to
     int type_index;  // index of the type in the type list
+    // A spread (`{*:m}`, `<el *:attrs>`) is ONE nameless ShapeEntry holding a
+    // raw Map* link, so `length` counts it once however many fields it covers.
+    // Set when such an entry enters the shape; `len()` only pays for the
+    // flattening walk when it is on, and reads `length` directly otherwise.
+    bool has_spread;
     bool has_named_shape;  // shape was merged from a named type annotation (safe for direct stores)
     // only compiler-built named contracts set this certificate; dynamic/input/JS
     // shapes may have the same bytes but their writers do not enforce the contract.

@@ -53,6 +53,10 @@ public:
     friend void input_manager_destroy(InputManager* mgr);
 };
 
+// Release malloc-backed registries owned by an Input before its backing pool
+// or document context is destroyed.
+void input_release_auxiliary_resources(Input* input);
+
 // ============================================================================
 // InputManager Heap Factory (audited boundary)
 // ============================================================================

@@ -1820,17 +1820,36 @@ static DomText* prev_text_before(DomNode* n) {
 
 // Find the leftmost text descendant inside `n` (or `n` itself if it is text),
 // or NULL if no text descendant exists.
-static DomText* edge_text_in(DomNode* n, bool last) {
-    while (n) {
-        if (n->is_text()) return n->as_text();
-        if (n->is_element()) {
-            n = last ? n->as_element()->last_child : n->as_element()->first_child;
-            if (!n) return nullptr;
-            continue;
+// Search the whole subtree, not just the first/last-child chain. Descending the
+// chain alone gives up the moment it meets an element with no children, so an
+// empty leading inline hides everything after it: in
+// `<p><span></span>hello</p>` this returned null and
+// `selection.modify('move','backward','paragraphboundary')` left the caret
+// where it was. Two of the four callers papered over it — one with a
+// next_text_after_any fallback, two with a sibling loop that only covers empty
+// *siblings*, not an empty first child inside a child subtree — and the
+// paragraph-boundary caller had no cover at all.
+DomText* dom_range_edge_text(DomNode* n, bool last) {
+    if (!n) return nullptr;
+    if (n->is_text()) return n->as_text();
+    if (!n->is_element()) return nullptr;
+    DomElement* element = n->as_element();
+    if (last) {
+        for (DomNode* child = element->last_child; child; child = child->prev_sibling) {
+            DomText* text = dom_range_edge_text(child, true);
+            if (text) return text;
         }
-        return nullptr;
+    } else {
+        for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            DomText* text = dom_range_edge_text(child, false);
+            if (text) return text;
+        }
     }
     return nullptr;
+}
+
+static DomText* edge_text_in(DomNode* n, bool last) {
+    return dom_range_edge_text(n, last);
 }
 
 static DomText* leftmost_text_in(DomNode* n) {

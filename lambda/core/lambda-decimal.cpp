@@ -10,6 +10,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/arraylist.h"
 #include <mpdecimal.h>  // only included here
 #include <math.h>
 #include <stdio.h>
@@ -22,7 +23,7 @@
 // ─────────────────────────────────────────────────────────────────────
 
 static mpd_context_t g_fixed_ctx;      // 34-digit decimal128 precision
-static mpd_context_t g_unlimited_ctx;  // Max precision
+static mpd_context_t g_unlimited_ctx;  // extended inexact-operation context
 static bool g_initialized = false;
 
 // ─────────────────────────────────────────────────────────────────────
@@ -39,15 +40,14 @@ void decimal_init() {
     // abort before operations such as 0m * decimal.inf can produce decimal.nan.
     g_fixed_ctx.traps = 0;
     
-    // Initialize unlimited-precision context (high but practical precision)
-    // mpd_maxcontext has absurdly high precision (10^18) which crashes mpd_pow.
-    // Use 200 digits which is far more than needed for any practical computation.
+    // Initialize the context for inexact operations on the extended tier.
+    // Exact operations use a local max-precision context so storage can grow.
     mpd_maxcontext(&g_unlimited_ctx);
     g_unlimited_ctx.prec = 200;
     g_unlimited_ctx.traps = 0;
     
     g_initialized = true;
-    log_debug("decimal_init: fixed_prec=%d, unlimited_prec=%d",
+    log_debug("decimal_init: fixed_prec=%d, extended_prec=%d",
               (int)g_fixed_ctx.prec, (int)g_unlimited_ctx.prec);
 }
 
@@ -257,12 +257,31 @@ mpd_t* decimal_parse_str(const char* str, mpd_context_t* ctx) {
     return dec_val;
 }
 
+mpd_t* decimal_parse_str_exact(const char* str) {
+    if (!str) return NULL;
+
+    mpd_t* dec_val = mpd_new(decimal_unlimited_context());
+    if (!dec_val) {
+        log_error("decimal_parse_str_exact: failed to allocate mpd_t");
+        return NULL;
+    }
+
+    uint32_t status = 0;
+    mpd_qset_string_exact(dec_val, str, &status);
+    if (status != 0) {
+        log_error("decimal_parse_str_exact: failed to parse '%s' (status: %u)", str, status);
+        mpd_del(dec_val);
+        return NULL;
+    }
+    return dec_val;
+}
+
 mpd_t* decimal_parse_fixed_str(const char* str) {
     return decimal_parse_str(str, decimal_fixed_context());
 }
 
 mpd_t* decimal_parse_unlimited_str(const char* str) {
-    return decimal_parse_str(str, decimal_unlimited_context());
+    return decimal_parse_str_exact(str);
 }
 #endif
 
@@ -322,20 +341,13 @@ Item decimal_from_double(double val) {
 
 Item decimal_from_string(const char* str) {
     if (!str) return ItemError;
-    
-    mpd_context_t* dec_ctx = decimal_current_fixed_context();
-    mpd_t* dec_val = mpd_new(dec_ctx);
+
+    // decimal conversion preserves the source coefficient; the tier is an
+    // implementation detail selected after exact parsing.
+    mpd_t* dec_val = decimal_parse_str_exact(str);
     if (!dec_val) return ItemError;
-    
-    uint32_t status = 0;
-    mpd_qset_string(dec_val, str, dec_ctx, &status);
-    
-    if (status != 0) {
-        mpd_del(dec_val);
-        return ItemError;
-    }
-    
-    return decimal_push_result(dec_val, false);  // fixed precision
+    return decimal_push_result(dec_val,
+        dec_val->digits > DECIMAL_FIXED_PRECISION);
 }
 #endif
 
@@ -393,7 +405,9 @@ static Item decimal_from_string_arena_with_context(const char* str, void* arena_
     if (!dec_val) return ItemNull;
 
     uint32_t status = 0;
-    mpd_qset_string(dec_val, str, ctx, &status);
+    // input values and literals must not be rounded merely because their
+    // coefficient exceeds the fixed-tier precision.
+    mpd_qset_string_exact(dec_val, str, &status);
     if (status != 0 || mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
         mpd_del(dec_val);
         return ItemNull;
@@ -413,13 +427,17 @@ static Item decimal_from_string_arena_with_context(const char* str, void* arena_
     return result;
 }
 
-// Create a fixed-precision Decimal from a string, arena-allocated.
+// Create a decimal Item from a string, arena-allocated.
 // The Decimal struct lives in the arena; the mpd_t* is malloc'd by mpdecimal
 // (not GC-managed). Safe to use from input parsers where GC heap allocation
 // would cause the object to be collected before it can be traced.
+static int decimal_count_literal_significant_digits(const char* str);
+
 Item decimal_from_string_arena(const char* str, void* arena_ptr) {
+    uint8_t unlimited = decimal_count_literal_significant_digits(str) >
+        DECIMAL_FIXED_PRECISION;
     return decimal_from_string_arena_with_context(str, arena_ptr,
-        decimal_fixed_context(), 0);
+        decimal_fixed_context(), unlimited);
 }
 
 static int decimal_count_literal_significant_digits(const char* str) {
@@ -574,6 +592,21 @@ void decimal_retain(Decimal* dec) {
 void decimal_release(Decimal* dec) {
     // no-op: ref counting removed, gc_finalize_all_objects handles cleanup
 }
+
+void decimal_payload_release(Decimal* decimal) {
+    if (!decimal || !decimal->dec_val) return;
+    mpd_del(decimal->dec_val);
+    decimal->dec_val = NULL;
+}
+
+void decimal_constants_release(ArrayList* constants) {
+    if (!constants) return;
+    for (int i = 0; i < constants->length; i++) {
+        Decimal* decimal = (Decimal*)constants->data[i];
+        decimal_payload_release(decimal);
+    }
+    arraylist_free(constants);
+}
 #endif
 
 #ifndef LAMBDA_DECIMAL_RUNTIME_IMPLEMENTATION
@@ -599,6 +632,8 @@ mpd_t* decimal_item_to_mpd(Item item, mpd_context_t* ctx) {
     mpd_t* result = mpd_new(ctx);
     if (!result) return NULL;
     
+    // S4.7.1: mixed decimal arithmetic uses the one shortest round-trip
+    // spelling for every native float conversion.
     if (type == LMD_TYPE_INT) {
         // C16/G0: `int`'s native form is the IEEE double, and it shares `inf`
         // and `nan` with `float`. An i64 conversion cannot carry either, nor a
@@ -743,6 +778,18 @@ static bool decimal_binary_result_is_bigint(Item a, Item b) {
     return decimal_item_is_bigint(a) && decimal_item_is_bigint(b);
 }
 
+static void decimal_exact_context(mpd_context_t* context) {
+    mpd_maxcontext(context);
+    context->traps = 0;
+    context->status = 0;
+    context->newtrap = 0;
+}
+
+static bool decimal_result_needs_extended_tier(const mpd_t* value) {
+    return value && !mpd_isspecial(value) &&
+        value->digits > DECIMAL_FIXED_PRECISION;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Arithmetic Operations
 // ─────────────────────────────────────────────────────────────────────
@@ -779,13 +826,14 @@ static void cleanup_temp(mpd_t* dec, bool was_decimal) {
 static Item decimal_binary_arithmetic(Item a, Item b, DecimalMpdBinaryOp operation,
         const char* name) {
     bool is_unlimited = should_be_unlimited(a, b);
-    mpd_context_t* dec_ctx = get_decimal_context(a, b);
+    mpd_context_t dec_ctx;
+    decimal_exact_context(&dec_ctx);
     
     bool a_is_dec = decimal_is_any(a);
     bool b_is_dec = decimal_is_any(b);
     
-    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, dec_ctx);
-    mpd_t* b_dec = b_is_dec ? b.get_decimal()->dec_val : decimal_item_to_mpd(b, dec_ctx);
+    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, &dec_ctx);
+    mpd_t* b_dec = b_is_dec ? b.get_decimal()->dec_val : decimal_item_to_mpd(b, &dec_ctx);
     
     if (!a_dec || !b_dec) {
         if (!a_is_dec) cleanup_temp(a_dec, false);
@@ -794,20 +842,21 @@ static Item decimal_binary_arithmetic(Item a, Item b, DecimalMpdBinaryOp operati
         return ItemError;
     }
     
-    mpd_t* result = mpd_new(dec_ctx);
+    mpd_t* result = mpd_new(&dec_ctx);
     if (!result) {
         if (!a_is_dec) cleanup_temp(a_dec, false);
         if (!b_is_dec) cleanup_temp(b_dec, false);
         return ItemError;
     }
     
-    operation(result, a_dec, b_dec, dec_ctx);
+    operation(result, a_dec, b_dec, &dec_ctx);
     
     if (!a_is_dec) cleanup_temp(a_dec, false);
     if (!b_is_dec) cleanup_temp(b_dec, false);
     
     if (decimal_binary_result_is_bigint(a, b)) return decimal_push_bigint_result(result);
-    return decimal_push_result(result, is_unlimited);
+    return decimal_push_result(result, is_unlimited ||
+        decimal_result_needs_extended_tier(result));
 }
 
 Item decimal_add(Item a, Item b) {
@@ -951,30 +1000,32 @@ Item decimal_pow(Item a, Item b) {
 
 static Item decimal_unary_transform(Item a, bool absolute, const char* operation) {
     bool is_unlimited = decimal_is_unlimited(a);
-    mpd_context_t* dec_ctx = is_unlimited ? decimal_unlimited_context() : decimal_fixed_context();
+    mpd_context_t dec_ctx;
+    decimal_exact_context(&dec_ctx);
     
     bool a_is_dec = decimal_is_any(a);
-    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, dec_ctx);
+    mpd_t* a_dec = a_is_dec ? a.get_decimal()->dec_val : decimal_item_to_mpd(a, &dec_ctx);
     
     if (!a_dec) {
         log_error("%s: conversion failed", operation);
         return ItemError;
     }
     
-    mpd_t* result = mpd_new(dec_ctx);
+    mpd_t* result = mpd_new(&dec_ctx);
     if (!result) {
         if (!a_is_dec) mpd_del(a_dec);
         return ItemError;
     }
     
-    if (absolute) mpd_abs(result, a_dec, dec_ctx);
-    else mpd_minus(result, a_dec, dec_ctx);
+    if (absolute) mpd_abs(result, a_dec, &dec_ctx);
+    else mpd_minus(result, a_dec, &dec_ctx);
     
     if (!a_is_dec) mpd_del(a_dec);
     
     // unary integer transforms preserve the language-level integer type.
     if (decimal_item_is_bigint(a)) return decimal_push_bigint_result(result);
-    return decimal_push_result(result, is_unlimited);
+    return decimal_push_result(result, is_unlimited ||
+        decimal_result_needs_extended_tier(result));
 }
 
 Item decimal_neg(Item a) {

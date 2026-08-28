@@ -3,7 +3,7 @@
 path
 http.api.example.com
 https.secure.api
-.test.input.dir
+\.test.input.dir
 /.etc.'nginx.conf'
 /.home.user.'config.json'
 /.etc.config

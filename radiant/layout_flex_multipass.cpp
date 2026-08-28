@@ -486,13 +486,30 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
         }
     };
 
+    // CSS Flexbox §4.1: the flex alignment position is local to the flex
+    // container, then must be transferred into the abspos containing block.
+    float container_to_positioning_cb_x = 0.0f;
+    float container_to_positioning_cb_y = 0.0f;
+    if (!container_position_finalized_later) {
+        ViewBlock* positioning_cb = find_containing_block(
+            child_block, child_block->position->position);
+        if (positioning_cb) {
+            layout_parent_to_containing_block_offset(
+                child_block, positioning_cb,
+                &container_to_positioning_cb_x, &container_to_positioning_cb_y);
+        }
+    }
+
     if (is_reverse) {
         LayoutAxisRefs main_refs(child_block, main_axis);
         if (!main_refs.has_any_inset()) {
             float base = inline_container_position_finalized_later ? 0.0f
                 : (main_axis == LAYOUT_AXIS_X ? cb.content_x : cb.content_y);
-            set_static_position(main_axis, base + main_axis_size - item_main -
-                                axis_margin(main_axis, false));
+            float position = base + main_axis_size - item_main -
+                axis_margin(main_axis, false);
+            if (main_axis == LAYOUT_AXIS_X) position += container_to_positioning_cb_x;
+            else position += container_to_positioning_cb_y;
+            set_static_position(main_axis, position);
         }
         return;
     }
@@ -519,7 +536,10 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
         }
         float base = inline_container_position_finalized_later ? 0.0f
             : (main_axis == LAYOUT_AXIS_X ? cb.content_x : cb.content_y);
-        set_static_position(main_axis, base + main_offset);
+        float position = base + main_offset;
+        if (main_axis == LAYOUT_AXIS_X) position += container_to_positioning_cb_x;
+        else position += container_to_positioning_cb_y;
+        set_static_position(main_axis, position);
     }
 
     if (adjust_cross) {
@@ -548,7 +568,10 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
 
         float base = inline_container_position_finalized_later ? 0.0f
             : (cross_axis == LAYOUT_AXIS_X ? cb.content_x : cb.content_y);
-        set_static_position(cross_axis, base + cross_offset);
+        float position = base + cross_offset;
+        if (cross_axis == LAYOUT_AXIS_X) position += container_to_positioning_cb_x;
+        else position += container_to_positioning_cb_y;
+        set_static_position(cross_axis, position);
     }
 
 }
@@ -932,8 +955,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
                     DomDocument* doc = load_html_doc(lycon->ui_context->document->url, (char*)src_value,
                         // The embedded viewport excludes the flex item's border and padding.
-                        (int)iframe_content.width, (int)iframe_content.height, // INT_CAST_OK: viewport API expects int
-                        lycon->ui_context->pixel_ratio);
+                        (int)iframe_content.width, // INT_CAST_OK: viewport API expects int
+                        (int)iframe_content.height); // INT_CAST_OK: viewport API expects int
                     if (doc) {
                         radiant_document_ensure_state(doc, "layout_flex_iframe");
                         if (!flex_item->embed) {
@@ -1154,6 +1177,9 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     }
 
     if (has_text_content && flex) {
+        // Direct text is laid out against the flex container's resolved axes;
+        // the anonymous-item pass must not replace those physical rectangles.
+        flex->direct_text_geometry_handled = true;
         FlexProp* flex_prop = flex_container->embed ? flex_container->embedp()->flex : nullptr;
         int align_items = flex_prop ? flex_prop->align_items : CSS_VALUE_STRETCH;
         int justify_content = flex_prop ? flex_prop->justify : CSS_VALUE_FLEX_START;
@@ -1172,7 +1198,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         }
 
         bool handled_direct_text_br_run = false;
-        if (flex_container_has_only_direct_text_and_br(flex_container)) {
+        bool only_direct_text_and_br = flex_container_has_only_direct_text_and_br(flex_container);
+        if (only_direct_text_and_br) {
             // CSS Flexbox section 4: direct text runs in a flex container are wrapped in
             setup_line_height(lycon, flex_container);
             if (flex_container->blk) {
@@ -1370,7 +1397,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         bool text_is_anonymous_flex_item = false;
                         for (int i = 0; i < flex->item_count; i++) {
                             ViewElement* item = lam::view_as_element(flex->flex_items[i]);
-                            if (flex_item_is_anonymous_text(item) && item->fi->anonymous_text == child) {
+                            if (flex_item_contains_anonymous_text(item, child->as_text())) {
                                 text_is_anonymous_flex_item = true;
                                 break;
                             }
@@ -1689,22 +1716,23 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     });
 
                 if (max_item_height > 0) {
-                    if (flex_apply_auto_height_extent(
-                            flex_container, flex, max_item_height, false)) {
-                        flex_for_each_final_content_item(flex_container, flex,
-                            [&](ViewElement* item) {
-                                bool has_explicit_height = item->blk &&
-                                    item->block_mut()->given_height >= 0;
-                                int align_type = item->fi &&
-                                    (int)item->fi->align_self != ALIGN_AUTO
-                                    ? item->fi->align_self : flex->align_items;
-                                if (has_explicit_height || align_type != ALIGN_STRETCH) return;
-                                float margins = layout_axis_margin_start(
-                                    item->bound, LAYOUT_AXIS_Y) +
-                                    layout_axis_margin_end(item->bound, LAYOUT_AXIS_Y);
-                                item->height = max(max_item_height - margins, 0.0f);
-                            });
-                    }
+                    flex_apply_auto_height_extent(
+                        flex_container, flex, max_item_height, false);
+                    // CSS Flexbox §9.4: an auto-height single line still stretches
+                    // every auto cross-size item to the resolved line cross size.
+                    flex_for_each_final_content_item(flex_container, flex,
+                        [&](ViewElement* item) {
+                            bool has_explicit_height = item->blk &&
+                                item->block_mut()->given_height >= 0;
+                            int align_type = item->fi &&
+                                (int)item->fi->align_self != ALIGN_AUTO
+                                ? item->fi->align_self : flex->align_items;
+                            if (has_explicit_height || align_type != ALIGN_STRETCH) return;
+                            float margins = layout_axis_margin_start(
+                                item->bound, LAYOUT_AXIS_Y) +
+                                layout_axis_margin_end(item->bound, LAYOUT_AXIS_Y);
+                            item->height = max(max_item_height - margins, 0.0f);
+                        });
                 }
             }
         }

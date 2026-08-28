@@ -551,7 +551,7 @@ static bool render_batch_single(
     int layout_height = viewport_height > 0 ? viewport_height : 100;
 
     // update ui_context dimensions for this render
-    ui_context->pixel_ratio = pixel_ratio;
+    ui_context_set_device_scale(ui_context, pixel_ratio, pixel_ratio);
     int surface_width = (int)(layout_width * total_scale);
     int surface_height = (int)(layout_height * total_scale);
     ui_context_create_surface(ui_context, surface_width, surface_height);

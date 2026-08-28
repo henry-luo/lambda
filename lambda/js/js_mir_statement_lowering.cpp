@@ -3624,7 +3624,9 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         // Create labels
         MIR_label_t catch_label = has_catch ? jm_new_label(mt) : 0;
         MIR_label_t finally_label = has_finally ? jm_new_label(mt) : 0;
-        MIR_label_t end_label = jm_new_label(mt);
+        // A try/catch with no finally does not need a join when every path is
+        // abrupt; defer that label until a reachable fallthrough is found.
+        MIR_label_t end_label = has_finally ? jm_new_label(mt) : 0;
 
         // Create registers for delayed return handling
         MIR_reg_t return_val_reg = jm_new_reg(mt, "_try_ret", MIR_T_I64);
@@ -3709,6 +3711,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
         JsErrorLaneTrack try_exit_state = jm_error_lane_state(mt);
         if (try_exit_state != JS_ERROR_LANE_UNREACHABLE) {
             if (!has_finally) {
+                if (!end_label) {
+                    end_label = jm_new_label(mt);
+                    if (try_context) try_context->end_label = end_label;
+                }
                 end_label_has_edge = true;
                 end_label_error_lane_state = jm_error_lane_merge(
                     end_label_error_lane_state, try_exit_state);
@@ -3820,6 +3826,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             JsErrorLaneTrack catch_exit_state = jm_error_lane_state(mt);
             if (catch_exit_state != JS_ERROR_LANE_UNREACHABLE) {
                 if (!has_finally) {
+                    if (!end_label) {
+                        end_label = jm_new_label(mt);
+                        if (try_context) try_context->end_label = end_label;
+                    }
                     end_label_has_edge = true;
                     end_label_error_lane_state = jm_error_lane_merge(
                         end_label_error_lane_state, catch_exit_state);

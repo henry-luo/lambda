@@ -140,6 +140,7 @@ static TypeMap* js_typemap_clone_for_mutation_ex(Item obj, bool force_clone) {
     // Tune6: descriptor cloning preserves the immutable semantic family; a
     // shape mutation must never silently turn an instance into another class.
     clone->js_meta = tm->js_meta;
+    clone->has_spread = tm->has_spread;  // cloned chain keeps any nameless spread slot
     clone->has_array_index_shape = tm->has_array_index_shape;
 
     // Clone the shape chain: per-entry shallow copy with `next` rewired and

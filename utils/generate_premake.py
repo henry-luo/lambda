@@ -1423,7 +1423,6 @@ class PremakeGenerator:
                 target.get('name'): target for target in self.config.get('targets', [])
                 if target.get('name')
             }
-
             for dep in dependencies:
                 if dep in self.external_libraries:
                     external_deps.append(dep)
@@ -1666,11 +1665,31 @@ class PremakeGenerator:
                 # active runtime and Radiant provide symbols to each other, so
                 # the complete static internal closure must be rescanned.
                 linux_group_archives = []
+                linux_dynamic_libraries = []
+                linux_dynamic_rpaths = []
                 for dep in internal_deps:
                     target_name = dep[:-4] if dep.endswith('-cpp') else dep
                     target = configured_targets.get(target_name, {})
                     if target.get('link', 'static') != 'dynamic':
                         linux_group_archives.append(f'../lib/lib{dep}.a')
+                        continue
+                    target_dir = target.get('target_dir', 'build/lib').rstrip('/')
+                    target_prefix = target.get('target_prefix', 'lib')
+                    target_output = target.get('target_name', target_name)
+                    dynamic_suffix = '.so'
+                    dynamic_filename = f'{target_prefix}{target_output}{dynamic_suffix}'
+                    if os.path.isabs(target_dir):
+                        dynamic_path = f'{target_dir}/{dynamic_filename}'
+                    elif target_dir == 'build/lib':
+                        dynamic_path = f'../lib/{dynamic_filename}'
+                    else:
+                        dynamic_path = f'../../{target_dir}/{dynamic_filename}'
+                    linux_dynamic_libraries.append(dynamic_path)
+                    project_dir = lib.get('target_dir', '.') or '.'
+                    if not os.path.isabs(target_dir):
+                        runtime_dir = os.path.relpath(target_dir, start=project_dir)
+                        if runtime_dir not in linux_dynamic_rpaths:
+                            linux_dynamic_rpaths.append(runtime_dir)
                 if len(linux_group_archives) > 1:
                     # Keep the complete group in one linker option. Premake
                     # drops archive arguments that duplicate project links
@@ -1681,6 +1700,19 @@ class PremakeGenerator:
                         '    linkoptions {',
                         f'        "{group_option}",',
                     ])
+                    self.premake_content.extend([
+                        '    }',
+                        '    '
+                    ])
+                if linux_dynamic_libraries:
+                    self.premake_content.extend([
+                        '    linkoptions {',
+                    ])
+                    for dynamic_library in linux_dynamic_libraries:
+                        self.premake_content.append(f'        "{dynamic_library}",')
+                    for runtime_dir in linux_dynamic_rpaths:
+                        self.premake_content.append(
+                            '        "-Wl,-rpath,\'$$ORIGIN/' + runtime_dir + '\'",')
                     self.premake_content.extend([
                         '    }',
                         '    '
@@ -2515,6 +2547,10 @@ class PremakeGenerator:
             for host_dependency in ('lambda-rt', 'radiant'):
                 if host_dependency not in dependencies:
                     dependencies.append(host_dependency)
+            if self.use_linux_config and 'node-core' not in dependencies:
+                # Linux runtime archives reference the trace-events provider;
+                # tests need the dynamic Node host that the CLI links at load time.
+                dependencies.append('node-core')
         configured_targets = {
             target.get('name'): target for target in self.config.get('targets', [])
             if target.get('name')
@@ -2537,11 +2573,20 @@ class PremakeGenerator:
 
         def internal_project_artifact(project_name: str) -> str:
             # split test dependencies inherit the source target's link mode;
-            # dynamic runtime targets produce .so, not a nonexistent .a.
+            # dynamic targets use their configured output directory and prefix.
             target_name = project_name[:-4] if project_name.endswith('-cpp') else project_name
             target = configured_targets.get(target_name, {})
             if target.get('link') == 'dynamic':
                 suffix = '.so' if self.use_linux_config else '.dylib'
+                prefix = target.get('target_prefix', 'lib')
+                output_name = target.get('target_name', project_name)
+                filename = f'{prefix}{output_name}{suffix}'
+                target_dir = target.get('target_dir', 'build/lib').rstrip('/')
+                if target_dir == 'build/lib':
+                    return f'../lib/{filename}'
+                if os.path.isabs(target_dir):
+                    return f'{target_dir}/{filename}'
+                return f'../../{target_dir}/{filename}'
             else:
                 suffix = '.a'
             if self.use_linux_config and suffix == '.a':
@@ -2851,11 +2896,28 @@ class PremakeGenerator:
                     project_name[:-4] if project_name.endswith('-cpp') else project_name,
                     {}).get('link') == 'dynamic'
                 for project_name in internal_project_links):
-            # Test DSOs live beside build/lib; embed a self-relative search path
-            # so the runner does not depend on a shell-specific LD_LIBRARY_PATH.
+            # Embed self-relative search paths for every test-linked dynamic
+            # target so the runner does not depend on LD_LIBRARY_PATH.
+            rpath_dirs = ['../build/lib']
+            for project_name in internal_project_links:
+                target_name = project_name[:-4] if project_name.endswith('-cpp') else project_name
+                target = configured_targets.get(target_name, {})
+                if target.get('link') != 'dynamic':
+                    continue
+                target_dir = target.get('target_dir', 'build/lib').rstrip('/')
+                if target_dir == 'build/lib' or os.path.isabs(target_dir):
+                    continue
+                rpath = f'../{target_dir}'
+                if rpath not in rpath_dirs:
+                    rpath_dirs.append(rpath)
             self.premake_content.extend([
                 '    linkoptions {',
-                '        "-Wl,-rpath,\'$$ORIGIN/../build/lib\'",',
+            ])
+            for rpath_dir in rpath_dirs:
+                self.premake_content.append(
+                    '        "-Wl,-rpath,\'$$ORIGIN/' + rpath_dir + '\'",'
+                )
+            self.premake_content.extend([
                 '    }',
                 '    '
             ])

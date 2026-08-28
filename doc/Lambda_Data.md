@@ -65,7 +65,7 @@ Lambda Script has a rich type system with both primitive and composite types:
 | ---------- | --------------------------- | --------------------------------------- |
 | `array`    | Ordered collections         | `[1, 2, 3]`                             |
 | `map`      | Key-value mappings          | `{key: "value"}`                        |
-| `element`  | Structured markup elements  | `<tag attr: value; content>`            |
+| `element`  | Structured markup elements  | `<tag attr: value, content>`            |
 | `range`    | Integer or character ranges | `1 to 10`, `"a" to "z"`                 |
 | `path`     | File paths and URLs         | `/.etc.hosts`, `https.'api.example.com'` |
 | `function` | Functions                   | `(x) => x + 1`                          |
@@ -843,17 +843,17 @@ Structured markup elements with attributes and content, used for document proces
 // Element with attributes
 <div id: "main", class: "container">
 
-// Element with content (after semicolon)
+// Element with content (no attributes, so no boundary comma)
 <p "Hello, world!">
 
-// Element with attributes and content
-<div class: "header"
+// Element with attributes and content (boundary comma required)
+<div class: "header",
     "Page Title"
     <span "Subtitle">
 >
 
 // Complex elements
-<article title: "My Article", author: "John Doe"
+<article title: "My Article", author: "John Doe",
     <h1 "Introduction">
     <p "This is the first paragraph.">
     <p "This is the second paragraph.">
@@ -863,7 +863,7 @@ Structured markup elements with attributes and content, used for document proces
 #### Element Access
 
 ```lambda
-let el = <div class: "main"; "content">;
+let el = <div class: "main", "content">;
 el.name      // 'div' (built-in: element tag name)
 el.class     // "main" (attribute access)
 el[0]        // "content" (content/child access)
@@ -881,9 +881,9 @@ Use `map(element)` to copy an element's attribute facet into a map. Element
 children are not included, so the result can be spread into a rebuilt element:
 
 ```lambda
-let source = <node id: "a", custom: 42; "old content">
+let source = <node id: "a", custom: 42, "old content">
 let attrs = map(source)
-let rebuilt = <node *:attrs; "new content">
+let rebuilt = <node *:attrs, "new content">
 ```
 
 ### Ranges

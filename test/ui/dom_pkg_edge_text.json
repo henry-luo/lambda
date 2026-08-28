@@ -1,0 +1,16 @@
+{
+  "html": "test/ui/dom_pkg_edge_text.html",
+  "description": "selection.modify paragraphboundary must reach text hidden behind an empty leading inline; a chain-only edge-text walk stopped at the empty <span> and left the caret unmoved",
+  "events": [
+    {
+      "type": "render_pending"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#log"
+      },
+      "contains": "node=hello off=0"
+    }
+  ]
+}

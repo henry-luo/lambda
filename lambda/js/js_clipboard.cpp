@@ -1046,7 +1046,7 @@ extern "C" void js_drag_session_end(void) {
 // allowed, per HTML5: drop fires only when the preceding dragover was
 // canceled).
 extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
-        const char* type, int client_x, int client_y) {
+        const char* type, double client_x, double client_y) {
     if (!js_active_runtime_state) return false;
     // The session DataTransfer must be allocated inside the JS runtime context
     // (js_new_object needs the active runtime heap), so open it here — the

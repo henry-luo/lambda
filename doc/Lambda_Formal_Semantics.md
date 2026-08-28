@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 18.0.1 (2026-08-27)
+**Spec version:** 18.0.2 (2026-08-28)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -41,7 +41,7 @@ R1–R5 and the effect doctrine
 C4/CW ([`Lambda_Design_Runtime_COW.md`](../vibe/Lambda_Design_Runtime_COW.md));
 surface syntax
 ([`Lambda_Design_Syntax.md`](../vibe/Lambda_Design_Syntax.md)).
-PTH1v2, PTH2v2, PTH3–PTH15, PTH16v2, PTH17–PTH29
+PTH1v2, PTH2v2, PTH3–PTH15, PTH16v3, PTH17–PTH29
 ([`Lambda_Type_Path.md`](../vibe/Lambda_Type_Path.md)).
 Appendix C maps sections to records.
 
@@ -229,7 +229,7 @@ harnesses.
   hashing, printing, target resolution, and
   `base ++ relative_suffix` observe the same normalization. [S1.6, S8.2.1v2,
   PTH7–PTH9, PTH12–PTH14, PTH25, PTH28]
-- **S2.4.3v2*** Paths, names, symbols, and member expressions use this one
+- **S2.4.3v3*** Paths, names, symbols, and member expressions use this one
   reference scheme but retain distinct evaluation contracts. Paths are
   static root-selected plans and produce lazy target handles; names are
   statically namespace-qualified (`a` may become `ns.a`) and read bindings;
@@ -239,18 +239,23 @@ harnesses.
   Name-position parsing is maximal: once an element tag or attribute name has
   the namespace-qualified `ns.name` form, the complete dotted name is consumed
   before element content is considered, and whitespace does not terminate it.
-  Thus `<svg.rect>` and `<svg .rect>` name the same qualified tag; a relative
-  path child requires the explicit content boundary `<svg; .rect>`.
+  Thus `<svg.rect>` and `<svg .rect>` name the same qualified tag. A relative
+  path child needs no boundary at all: S16.9.4 respells the relative path
+  `\.a.b`, so `.rect` can no longer be a path and `<svg \.rect>` is
+  unambiguously tag `svg` with a path child. It takes **no comma** — the
+  S16.9.3 boundary comma is a biconditional and this element has no
+  attributes; `<svg, \.rect>` is an error, and the former `<svg; .rect>`
+  spelling is retired with the divider `;`.
   Static specialization and generic dynamic lookup must be semantically
   identical; the scheme introduces no mutable reference identity. [S1.6,
-  S5.1.4, S8.2.2v2, S9.1.5, PTH13–PTH15, PTH16v2, PTH20]
+  S5.1.4, S8.2.2v2, S9.1.5, S16.9.3, S16.9.4, PTH13–PTH15, PTH16v3, PTH20]
 - **S2.4.4*** Each evaluation's immutable resolver deterministically maps
   logical `/` prefixes, namespaces, and provider aliases to qualified roots.
   Resolution obeys lexical visibility, exports, sandboxing, and capabilities;
   it never uses mutable process-global bindings or existence/failure-based
   provider fallback. Address resolution performs no I/O; forcing an external
   target is a separate operation with its declared effect/error contract.
-  [S1.10, PTH16v2, PTH17–PTH19]
+  [S1.10, PTH16v3, PTH17–PTH19]
 - **S2.4.5v2*** Paths have three root forms: rooted `/.a.b`, relative `.a.b`,
   and absolute `SchemeName...`. Rooted paths qualify logical `/` through the
   active resolver; absolute paths name their provider/authority directly and
@@ -914,7 +919,7 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   `len({a: null, b: 2})` = 2; `len(null)` = 0 (absence is the empty
   sequence); `len(err)` = **error** (iterating an error yields an error, not
   nothing — collapsing it onto 0 would make a failed computation
-  indistinguishable from an empty one); `len(<e a:1, b:2; "t">)` = **3**
+  indistinguishable from an empty one); `len(<e a:1, b:2, "t">)` = **3**
   (attributes + children). [§8.1 record]
 - **S8.3.2*** Lazy sequences: a forceable stream's `len` forces and returns
   the actual size; a non-forceable/infinite stream's `len` is **`inf`** — the
@@ -1865,7 +1870,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 
 | Ruling | Status |
 |---|---|
-| S2.4.1v2, S2.4.2v4, S2.4.3v2–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19: maximal namespace-qualified element/attribute names, explicit `;` before a relative-path element child, logical `/.a`, relative `.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, network hostname discovery, and complete S8.2.1v2 key normalization remain deferred. |
+| S2.4.1v2, S2.4.2v4, S2.4.3v3–S2.4.4, S2.4.5v2, S10.4.1–S10.4.3, S10.5.1–S10.5.3 | Implemented for the current path/name scope on 2026-08-19, with the S2.4.3v3 spelling re-verified on 2026-08-28: maximal namespace-qualified element/attribute names, the undelimited relative-path element child `<svg \.rect>` (no `;`, no comma), logical `/.a`, relative `\.a`, absolute `file./.a`/`file.host.a`/`http.host.a`, root `./`, parent `.~~`, contextual `~~`, typed key operations, and interpreter/MIR Direct occurrence carriers. The default resolver qualifies logical roots to local `file./`; generalized immutable mount tables, remote transport, network hostname discovery, and complete S8.2.1v2 key normalization remain deferred. |
 | S4.8.1 | Float printer is not yet shortest-round-trip (`0.1 + 0.2` prints `0.3`). |
 | S5.3.1 | `ArrayNum ==` is representation-sensitive in known cases — ruled a bug; also gates the data-processing engines (P0/FC8). |
 | S5.4.3 | Element `==` defect (map-cast layout bug) — priority fix in the C8.5 bug list. |
@@ -1887,7 +1892,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S8.1.3 | **Conformant as of 2026-08-24.** The paired `at` form bound both names to the key (a silent wrong answer); fixed in `build_ast`, one fix covering both tiers. Full record: [LR02-R9](../vibe/Lambda_Issue_Ledger.md). |
 | S8.3.2 | Streams (and hence stream `len`) not implemented. |
 | S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap). Stage 2 pending: `var`-param grammar + exclusivity checks (all four faces), capture-assignment compile errors, view-borrow confinement, module-`var` rule, snapshot iteration. `var` params parse and mutate the caller's value today, but a *plain* param does so too — the snapshot half of S9.1.3 is unenforced, so the annotation is currently documentation rather than a gate. |
-| S9.3.1 | **Not implemented** (probed 2026-08-27, both tiers). Insertion aliases instead of copying, at every point the ruling names: array element store (`arr[0] = t; t.n = 55` → `arr[0].n == 55`), array literal (`[u]`), map field store (`a.peer = b`), and map literal (`{peer: c}`). Binding copy (S9.1.2) is the only half that landed, which is why the aliasing is easy to miss — `var b = a` copies while `xs[0] = a` does not. Cycles are therefore constructible today, so `==`/print/serialize are not total over reachable state in the way S9.1.5 assumes. Full record: [LR12-9](../vibe/Lambda_Issue_Ledger.md#lr12-9). |
+| S9.3.1 | **Implemented behind `LAMBDA_COW_CAPTURE`, default OFF** (2026-08-28). With the flag set, insertion captures by value at every point the ruling names — array element store, array literal, map field store, map/object/element literal — on both tiers: all four probes return the ruled `1`, and the two-node cycle is no longer constructible, restoring the totality S9.1.5 assumes. Capture is a *compile-time* decision, and only a NAMED value (identifier, or member/index read) is marked: a freshly produced container has no second observer at the insertion point, and marking one would make the universal builder shape `rows[i] = <fresh>` detach on first write. **Why it is opt-in:** element/field reads still borrow (the open C4.1 half), so once a slot holds a captured value the get-modify idiom `c = owner[i]` … `c[j] = v` writes a detached copy. Exactly four corpus scripts depend on that idiom (`proc_fill_gc_nested`, `awfy/{cd2_orig,deltablue,deltablue2}`); `awfy/richards3` — the sanctioned rewrite — passes with capture on. The nested-mutation design (§9.5.2, COW Appendix B.2) is what lets the flag become the default. With the flag unset, behavior is exactly the aliasing recorded below. Full record: [LR12-9](../vibe/Lambda_Issue_Ledger.md#lr12-9). |
 | S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
 | S11.1.1 | Array-pattern composition unbuilt; `is [T]` inline parse crash open. |
 | S11.2.3 | Match exhaustiveness checking unverified in the implementation. |
@@ -1935,7 +1940,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 
 **Values, COW, resources**
 - **SO13** COW granularity on large documents: node representation for spine-copying, refcount discipline for unique-path in-place update, and the gating benchmark. [C4.3]
-- **SO14** Nested-mutation ergonomics (`t.nodes[i].value`): path-shaped `var` borrows, `_modify`-style accessors, or guaranteed get-modify-put — no owner document yet. [C4.4]
+- **SO14** Nested-mutation ergonomics (`t.nodes[i].value`): path-shaped `var` borrows, `_modify`-style accessors, or guaranteed get-modify-put. **Owner document as of 2026-08-28: [`vibe/Lambda_Design_Nested_Mutation.md`](../vibe/Lambda_Design_Nested_Mutation.md)** (CW22–CW28, PROPOSED). It rules that a place is a borrow and never a value (S9.2.2 generalized from slices to paths), that `var b = <place>` keeps copying, and that a mutated place copy becomes a compile error — the last being what gates the S9.3.1 default flip. On ratification these become S9.4 and this entry is struck. [C4.4]
 - **SO15** Exclusivity granularity endpoint (whole-base vs blessed splitters vs dynamic bookkeeping); module-`var`-as-borrow final rule (forbid vs dynamic bit).
 - **SO16** Close-error routing (double fault): proposed — normal-exit close failure becomes the `pn`'s error; on error exit the original wins, close error attached suppressed. To confirm. [Features §3.5.2]
 - **SO17** Resource-carrying-type containment rules (when a wrapping value is itself resource-typed). [R3]

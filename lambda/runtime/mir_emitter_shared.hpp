@@ -324,7 +324,10 @@ struct MirValue {
     MIR_reg_t pending_companion;
     bool maybe_pending;
     MIR_type_t mir_type;
-    Type* contract_type;
+    // full semantic contract. TypeId below is only the compact dispatch key;
+    // nullable, constrained, and heterogeneous contracts remain here for
+    // representation-preserving conversions (D2.4.1–D2.4.3).
+    Type* semantic_contract;
     TypeId semantic_type;
     ValueRep rep;
     JitValueClass value_class;
@@ -985,13 +988,14 @@ static inline int em_return_nres(FnCompanionTransport companion) {
 }
 
 static inline MirValue em_value(MIR_reg_t reg, MIR_type_t mir_type,
-        TypeId semantic_type, ValueRep rep, JitValueClass value_class) {
+        TypeId semantic_type, ValueRep rep, JitValueClass value_class,
+        Type* semantic_contract = NULL) {
     MirValue value = {};
     value.reg = reg;
     value.pending_companion = 0;
     value.maybe_pending = false;
     value.mir_type = mir_type;
-    value.contract_type = NULL;
+    value.semantic_contract = semantic_contract;
     value.semantic_type = semantic_type;
     value.rep = rep;
     value.value_class = value_class;
@@ -1739,10 +1743,12 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
         size_t number_limit_offset, size_t root_commit_limit_offset,
         size_t number_commit_limit_offset) {
     MirFrameState* frame = &em->frame;
-    MIR_label_t overflow_label = em_new_label(em);
-    MIR_label_t grow_label = em_new_label(em);
-    MIR_label_t retry_label = em_new_label(em);
     bool needs_reserve = frame->root_slot_count > 0 || frame->fixed_number_slots > 0;
+    MIR_label_t overflow_label = em_new_label(em);
+    // grow/retry are only reachable when the frame has stack reservations;
+    // unattached MIR labels otherwise survive context teardown.
+    MIR_label_t grow_label = needs_reserve ? em_new_label(em) : NULL;
+    MIR_label_t retry_label = needs_reserve ? em_new_label(em) : NULL;
     (void)root_limit_offset; (void)number_limit_offset;
     if (frame->root_slot_count == 0) {
         MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns);
@@ -3830,8 +3836,8 @@ static inline void em_call_void_with_args(MirEmitter* em,
 }
 
 static inline MIR_type_t em_mir_type_for_rep(ValueRep rep) {
-    // MIR's virtual register file has one canonical 64-bit integer carrier.
-    // VALUE_REP_U64 preserves signedness for opcode/conversion selection.
+    // MIR's virtual register file has one canonical 64-bit integer carrier;
+    // logical lane distinctions remain in ValueRep, not in the physical type.
     return rep == VALUE_REP_F64 ? MIR_T_D : rep == VALUE_REP_RAW_GC_POINTER ||
         rep == VALUE_REP_RAW_NON_GC_POINTER ? MIR_T_P : MIR_T_I64;
 }

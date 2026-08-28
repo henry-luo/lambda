@@ -486,6 +486,9 @@ enum PseudoStyleKind : uint8_t {
     PSEUDO_STYLE_MARKER,
     PSEUDO_STYLE_PLACEHOLDER,
     PSEUDO_STYLE_BACKDROP,
+    // keep existing slot indices stable; first-line was added after the
+    // originally supported pseudo-style slots.
+    PSEUDO_STYLE_FIRST_LINE,
     PSEUDO_STYLE_COUNT,
 };
 
@@ -511,6 +514,8 @@ struct DomElementExt {
     bool has_last_remembered_width;
     bool has_last_remembered_height;
     void* web_animation_state;
+    DisplayValue animated_display;
+    bool has_animated_display;
     DomElement* shadow_host;
     DomElement* shadow_root;
     float pending_element_scroll_x;
@@ -528,6 +533,10 @@ struct DomElementExt {
     bool has_empty_ruby_base;
     bool popover_open;
     bool dialog_modal;
+    // Deferred text-control events are DOM task state, so their queue links
+    // outlive layout-property teardown while a control is detached.
+    uint8_t selectionchange_event_pending;
+    DomElement* selectionchange_event_next;
 };
 
 /**
@@ -884,6 +893,20 @@ struct DomElement : DomNode {
     void* web_animation_state() const { return ext ? ext->web_animation_state : nullptr; }
     void set_web_animation_state(void* value) {
         if (value || ext) ensure_ext()->web_animation_state = value;
+    }
+    bool has_animated_display() const { return ext && ext->has_animated_display; }
+    DisplayValue animated_display() const {
+        return ext ? ext->animated_display : DisplayValue{CSS_VALUE__UNDEF, CSS_VALUE__UNDEF};
+    }
+    void set_animated_display(DisplayValue value) {
+        DomElementExt* data = ensure_ext();
+        if (data) {
+            data->animated_display = value;
+            data->has_animated_display = true;
+        }
+    }
+    void clear_animated_display() {
+        if (ext) ext->has_animated_display = false;
     }
     DomElement* shadow_host_element() const { return ext ? ext->shadow_host : nullptr; }
     void set_shadow_host_element(DomElement* value) { if (value || ext) ensure_ext()->shadow_host = value; }
