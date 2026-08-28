@@ -1254,19 +1254,19 @@ TEST(JsInterpreter, DefinesClassAccessorsThroughTheSharedPropertyKernel) {
     runtime_cleanup(&runtime);
 }
 
-TEST(JsInterpreter, RejectsUnsupportedFormsBeforeExecution) {
+TEST(JsInterpreter, ExecutesSupportedAsyncGeneratorForm) {
     Runtime runtime = {};
     runtime_init(&runtime);
 
     const char source[] = "let sideEffect = 0; async function* work() { yield sideEffect; } sideEffect;";
     Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
-        "unsupported-async.js", NULL);
+        "async-generator.js", NULL);
 
-    EXPECT_TRUE(item_is_error(result));
+    EXPECT_FALSE(item_is_error(result));
     ASSERT_NE(runtime.scripts, nullptr);
     EXPECT_EQ(runtime.scripts->length, 1);
     EXPECT_NE(runtime.eval_context, nullptr);
-    EXPECT_EQ(js_global_binding_exists(js_make_string("sideEffect")), 0);
+    EXPECT_EQ(js_global_binding_exists(js_make_string("sideEffect")), 1);
 
     runtime_cleanup(&runtime);
 }

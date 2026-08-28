@@ -48,8 +48,6 @@ typedef enum AstNodeType : uint16_t {
 
     // L2/L3 declarations, statements, patterns, and control flow
     AST_NODE_PARAM = 150,
-    AST_NODE_FOR_STAM = 151,
-    AST_NODE_WHILE_STAM = 152,
     AST_NODE_BREAK_STAM = 153,
     AST_NODE_CONTINUE_STAM = 154,
     AST_NODE_RETURN_STAM = 155,
@@ -69,7 +67,6 @@ typedef enum AstNodeType : uint16_t {
     AST_NODE_REST_ELEMENT = 169,
     AST_NODE_REST_PROPERTY = 170,
     AST_NODE_VARIABLE_DECLARATOR = 171,
-    AST_NODE_DO_WHILE_STAM = 172,
     AST_NODE_FOR_OF_STAM = 173,
     AST_NODE_FOR_IN_STAM = 174,
     AST_NODE_TRY_STAM = 175,
@@ -145,7 +142,16 @@ typedef enum AstNodeType : uint16_t {
     // prevents generic AST visitors from casting its smaller layout as the
     // enclosing AstGroupClause.
     AST_NODE_GROUP_KEY = 547,
+    // Iterator/query `for` clauses remain an AST_FOR extension edge; the
+    // shared AST_NODE_LOOP tag is reserved for condition loops (D8.2.2).
+    AST_NODE_FOR_CLAUSE = 548,
 } AstNodeType;
+
+typedef enum LoopForm {
+    LOOP_FORM_WHILE = 0,
+    LOOP_FORM_DO_WHILE = 1,
+    LOOP_FORM_FOR_C = 2,
+} LoopForm;
 
 typedef enum Operator {
     // unary
@@ -264,6 +270,18 @@ typedef enum ScopeKind {
     SCOPE_KIND_BLOCK,
 } ScopeKind;
 
+// Stable compiler identities shared by binding and lowering passes.
+typedef uint32_t AstNodeId;
+typedef uint32_t AstFunctionId;
+typedef uint32_t AstScopeId;
+typedef uint32_t AstBindingId;
+typedef uint32_t AstClassId;
+#define AST_NODE_ID_INVALID UINT32_MAX
+#define AST_FUNCTION_ID_INVALID UINT32_MAX
+#define AST_SCOPE_ID_INVALID UINT32_MAX
+#define AST_BINDING_ID_INVALID UINT32_MAX
+#define AST_CLASS_ID_INVALID UINT32_MAX
+
 // entry in the name_stack
 struct NameEntry {
     String* name;
@@ -332,6 +350,7 @@ typedef struct FnFramePlan {
 
 // name_scope
 struct NameScope {
+    AstScopeId scope_id;
     NameEntry* first;
     NameEntry* last;
     bool is_proc;
@@ -354,20 +373,20 @@ struct AstNode {
     SourceSpan source_span;
 };
 
-// Stable compiler identities and one authoritative child/index contract. The
-// index is deliberately representation-neutral: language profiles add only
-// extension children, while all core passes use these dense IDs.
-typedef uint32_t AstNodeId;
-typedef uint32_t AstFunctionId;
-#define AST_NODE_ID_INVALID UINT32_MAX
-#define AST_FUNCTION_ID_INVALID UINT32_MAX
-
+// One identity/index table for all post-parse passes. Language profiles add
+// extension children, while core passes consume these dense IDs.
 typedef void (*AstChildVisitor)(AstNode* child, AstNode* parent, void* ctx);
 
 typedef struct AstIndex {
     AstNode** nodes;
     AstNode** parents;
     AstFunctionId* owner_functions;
+    // Each indexed node carries the binding edge resolved by the builder;
+    // invalid means the node is not a name use or declaration.
+    AstBindingId* node_bindings;
+    NameScope** scopes;
+    NameEntry** bindings;
+    AstNode** classes;
     // Dense function roots make FunctionId the shared authority for Lambda
     // and JS lowering instead of requiring each frontend to rescan nodes.
     AstNode** functions;
@@ -376,6 +395,9 @@ typedef struct AstIndex {
     uint32_t capacity;
     uint32_t function_count;
     uint32_t function_capacity;
+    uint32_t scope_count;
+    uint32_t binding_count;
+    uint32_t class_count;
     AstNode** slots;
     AstNodeId* slot_ids;
     uint32_t slot_capacity;
@@ -401,14 +423,17 @@ enum AstNodeFactFlags : uint32_t {
 extern "C" {
 #endif
 void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx);
-bool ast_index_build(AstIndex* index, AstNode* root);
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
 // Adds a newly retained AST fragment without invalidating the stable IDs and
 // analysis facts already published for earlier REPL inputs (D8.2.4).
 bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
                               const LangProfile* profile);
 void ast_index_destroy(AstIndex* index);
+bool ast_index_publish_scope(AstIndex* index, NameScope* scope);
 AstNodeId ast_index_find(const AstIndex* index, const AstNode* node);
+AstBindingId ast_index_binding_id(const AstIndex* index, const AstNode* node);
+NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
+AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id);
 #ifdef __cplusplus
 }
 #endif
@@ -503,14 +528,11 @@ typedef struct AstBinaryNode : AstNode {
 
 typedef AstBinaryNode AstPipeNode;
 
-// for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_PARAM
+// for AST_NODE_KEY_EXPR, AST_NODE_PARAM, and AST_NODE_NAMED_ARG
 typedef struct AstNamedNode : AstNode {
     String* name;
     AstNode *as;
     NameEntry* entry;
-    bool is_type_definition;
-    // Kept separately from AstNode::type so a declaration can retain both its
-    // source annotation and its initializer's inferred type (`as->type`).
     Type* declared_type;
 } AstNamedNode;
 
@@ -519,9 +541,17 @@ typedef struct AstIdentNode : AstNode {
     NameEntry *entry;
 } AstIdentNode;
 
-typedef struct AstLetNode : AstNode {
-    AstNode *declare;
-} AstLetNode;
+typedef struct AstVarDeclNode : AstNode {
+    union {
+        AstNode* declarations;
+        AstNode* declare; // Lambda statement spelling of the declaration list
+    };
+    int kind;
+    bool is_using;
+    bool is_await_using;
+} AstVarDeclNode;
+
+typedef AstVarDeclNode AstLetNode;
 
 typedef struct AstIfNode : AstNode {
     union {
@@ -566,23 +596,21 @@ typedef struct AstMatchNode : AstNode {
     int arm_count;
 } AstMatchNode;
 
-typedef struct AstWhileNode : AstNode {
+typedef struct AstLoopControlNode : AstNode {
+    LoopForm form;
+    AstNode *init;
     union {
         AstNode *cond;
         AstNode *test;
     };
+    AstNode *update;
     AstNode *body;
     NameScope *vars;
-} AstWhileNode;
+} AstLoopControlNode;
 
-typedef AstWhileNode AstDoWhileNode;
-
-typedef struct AstForStmtNode : AstNode {
-    AstNode* init;
-    AstNode* test;
-    AstNode* update;
-    AstNode* body;
-} AstForStmtNode;
+typedef AstLoopControlNode AstForStmtNode;
+typedef AstLoopControlNode AstWhileNode;
+typedef AstLoopControlNode AstDoWhileNode;
 
 typedef struct AstBreakContinueNode : AstNode {
     const char* label;
@@ -632,11 +660,21 @@ typedef struct AstPropertyNode : AstNode {
 typedef struct AstAssignNode : AstNode {
     Operator op;
     AstNode *left;
-    AstNode *right;
+    union {
+        AstNode *right;
+        AstNode *value; // Lambda statement spelling of the shared RHS
+    };
     bool lhs_is_parenthesized;
+    // Lambda statement forms carry resolved binding and compound-target
+    // metadata on this same assignment record (D8.2.2).
+    String* target;
+    AstNode *target_node;
+    struct NameEntry* target_entry;
+    AstNode *object; // optional compound-target owner
+    AstNode *key; // optional compound-target key
 } AstAssignNode;
 
-// for AST_NODE_ASSIGN with decomposition (let a, b = expr / let a, b at expr)
+// for declaration decomposition (let a, b = expr / let a, b at expr)
 typedef struct AstDecomposeNode : AstNode {
     String** names;
     // `names` is source-facing; T0 binds through these resolved entries so a
@@ -647,20 +685,10 @@ typedef struct AstDecomposeNode : AstNode {
     bool is_named;
 } AstDecomposeNode;
 
-// assignment statement (procedural only)
-typedef struct AstAssignStamNode : AstAssignNode {
-    String* target;
-    AstNode *target_node;
-    AstNode *value;
-    struct NameEntry* target_entry;
-} AstAssignStamNode;
-
-// compound assignment statement: arr[i] = val or obj.field = val (procedural only)
-typedef struct AstCompoundAssignNode : AstAssignNode {
-    AstNode *object;
-    AstNode *key;
-    AstNode *value;
-} AstCompoundAssignNode;
+// Statement spellings retain aliases while their physical contract is the
+// shared assignment record above; no language-specific layout remains.
+typedef AstAssignNode AstAssignStamNode;
+typedef AstAssignNode AstCompoundAssignNode;
 
 // A vector comparison produces an ArrayNum bool mask, while a source numeric
 // literal may still carry the general ARRAY AST type until it is constructed.
@@ -789,7 +817,7 @@ static inline bool ast_expr_may_return_container(AstNode* expr, TypeId expr_tid,
     case AST_NODE_IF_EXPR:
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_FOR_EXPR:
-    case AST_NODE_FOR_STAM:
+    case AST_NODE_LOOP:
         return true;
     default:
         // `any` arithmetic/comparison paths are scalar in practice; cloning
@@ -807,17 +835,15 @@ typedef struct AstExprStmtNode : AstNode {
     AstNode* expression;
 } AstExprStmtNode;
 
-typedef struct AstVarDeclNode : AstNode {
-    AstNode* declarations;
-    int kind;
-    bool is_using;
-    bool is_await_using;
-} AstVarDeclNode;
-
 typedef struct AstDeclaratorNode : AstNode {
     AstNode* id;
     AstNode* init;
     TsTypeAnnotationNode* ts_type;
+    // Lambda declarations retain binding metadata through the shared layout.
+    String* name;
+    NameEntry* entry;
+    bool is_type_definition;
+    Type* declared_type;
 } AstDeclaratorNode;
 
 typedef struct AstSpreadNode : AstNode {
@@ -967,6 +993,7 @@ typedef struct AstScript : AstNode {
 } AstScript;
 
 typedef struct AstClassNode : AstNode {
+    AstClassId class_id;
     String* name;
     AstNode* superclass;
     AstNode* body;
@@ -1187,6 +1214,7 @@ typedef struct LangProfile {
     void (*validate)(void* ctx, AstNode* root);
     void (*analyze)(void* ctx, AstNode* root);
     void (*lower)(void* ctx, AstNode* root);
+    bool (*publish_ext_facts)(AstNode* node, struct AstIndex* index);
     void (*visit_ext_children)(AstNode* node, AstChildVisitor visitor, void* ctx);
 } LangProfile;
 
@@ -1195,18 +1223,13 @@ static inline void lang_profile_noop_hook(void* ctx, AstNode* root) {
     (void)root;
 }
 
-static inline void lang_profile_noop_ext(AstNode* node, AstChildVisitor visitor, void* ctx) {
-    (void)node;
-    (void)visitor;
-    (void)ctx;
-}
-
 inline LangProfile lambda_profile = {
     "lambda",
     lang_profile_noop_hook,
     lang_profile_noop_hook,
     lang_profile_noop_hook,
-    lang_profile_noop_ext,
+    NULL,
+    NULL,
 };
 
 inline LangProfile js_profile = {
@@ -1214,7 +1237,8 @@ inline LangProfile js_profile = {
     lang_profile_noop_hook,
     lang_profile_noop_hook,
     lang_profile_noop_hook,
-    lang_profile_noop_ext,
+    NULL,
+    NULL,
 };
 
 static inline LangProfile* lang_profile_for_name(const char* name) {

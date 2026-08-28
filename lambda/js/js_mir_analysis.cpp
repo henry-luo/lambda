@@ -419,8 +419,7 @@ void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) {
     case JS_AST_NODE_BLOCK_STATEMENT:
     case JS_AST_NODE_EXPRESSION_STATEMENT:
     case JS_AST_NODE_IF_STATEMENT:
-    case JS_AST_NODE_FOR_STATEMENT:
-    case JS_AST_NODE_WHILE_STATEMENT:
+    case AST_NODE_LOOP:
     case JS_AST_NODE_RETURN_STATEMENT:
     case JS_AST_NODE_VARIABLE_DECLARATION:
     case JS_AST_NODE_BINARY_EXPRESSION:
@@ -436,7 +435,6 @@ void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) {
     case JS_AST_NODE_THROW_STATEMENT:
     case JS_AST_NODE_SEQUENCE_EXPRESSION:
     case JS_AST_NODE_LABELED_STATEMENT:
-    case JS_AST_NODE_DO_WHILE_STATEMENT:
         js_ast_visit_children(node, jm_collect_func_assignments_child, names);
         break;
     default:
@@ -705,20 +703,10 @@ void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_on
         jm_collect_body_locals(ifn->alternate, locals, var_only);
         break;
     }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* f = (JsForNode*)node;
-        jm_collect_body_locals(f->init, locals, var_only);
-        jm_collect_body_locals(f->body, locals, var_only);
-        break;
-    }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* w = (JsWhileNode*)node;
-        jm_collect_body_locals(w->body, locals, var_only);
-        break;
-    }
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* dw = (JsDoWhileNode*)node;
-        jm_collect_body_locals(dw->body, locals, var_only);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        if (loop->form == LOOP_FORM_FOR_C) jm_collect_body_locals(loop->init, locals, var_only);
+        jm_collect_body_locals(loop->body, locals, var_only);
         break;
     }
     case JS_AST_NODE_FOR_OF_STATEMENT:
@@ -952,10 +940,12 @@ void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* n
         jm_collect_all_let_const_names_recursive(ifn->alternate, names);
         break;
     }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* f = (JsForNode*)node;
-        jm_collect_all_let_const_names_recursive(f->init, names);
-        jm_collect_all_let_const_names_recursive(f->body, names);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        if (loop->form == LOOP_FORM_FOR_C) {
+            jm_collect_all_let_const_names_recursive(loop->init, names);
+        }
+        jm_collect_all_let_const_names_recursive(loop->body, names);
         break;
     }
     case JS_AST_NODE_FOR_IN_STATEMENT:
@@ -972,16 +962,6 @@ void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* n
         }
         jm_collect_all_let_const_names_recursive(fi->left, names);
         jm_collect_all_let_const_names_recursive(fi->body, names);
-        break;
-    }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* w = (JsWhileNode*)node;
-        jm_collect_all_let_const_names_recursive(w->body, names);
-        break;
-    }
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* dw = (JsDoWhileNode*)node;
-        jm_collect_all_let_const_names_recursive(dw->body, names);
         break;
     }
     case JS_AST_NODE_SWITCH_STATEMENT: {

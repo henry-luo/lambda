@@ -252,8 +252,9 @@ typedef struct NameEntry {
 ```
 
 Back-pointers for transpiler access:
-- `AstNamedNode::entry` → the `NameEntry*` for var/let declarations
-- `AstAssignStamNode::target_entry` → the `NameEntry*` for assignment targets
+- `AstNamedNode::entry` → the `NameEntry*` for named/key/parameter bindings
+- `AstAssignNode::target_entry` → the `NameEntry*` for Lambda assignment targets
+  (the former `AstAssignStamNode` name is now an alias of the shared record)
 
 #### 4.1.3 AST Builder: Type Analysis in `build_assign_stam`
 
@@ -620,7 +621,7 @@ This ensures mutations in the closure are visible in the outer scope and vice ve
 | # | Task | Files | Status |
 |-|-|-|-|
 | 1.1 | Add `is_mutable`, `has_type_annotation`, `type_widened` to `NameEntry` | ast.hpp | ✅ Done |
-| 1.2 | Add `entry` back-pointer to `AstNamedNode`, `target_entry` to `AstAssignStamNode` | ast.hpp | ✅ Done |
+| 1.2 | Add `entry` back-pointer to `AstNamedNode`, `target_entry` to the shared `AstAssignNode` assignment record | ast-core.hpp | ✅ Done |
 | 1.3 | Set `is_mutable` and `has_type_annotation` in `build_var_stam` | build_ast.cpp | ✅ Done |
 | 1.4 | Validate mutability in `build_assign_stam` (reject `let` and param targets) | build_ast.cpp | ✅ Done |
 | 1.5 | Type analysis in `build_assign_stam` (widening for non-annotated, type checking for annotated) | build_ast.cpp | ✅ Done |
@@ -937,7 +938,7 @@ The following are now implemented and passing all 247 baseline tests:
 
 - **Immutability enforcement** (§4.2): `let` bindings and function parameters now produce a compile-time error (E211) if assigned to in procedural code. Only `var` variables are mutable.
 
-- **NameEntry tracking** (§4.1.2): Three new fields (`is_mutable`, `has_type_annotation`, `type_widened`) on `NameEntry` enable the type analysis without modifying AST types in place. Back-pointers (`AstNamedNode::entry`, `AstAssignStamNode::target_entry`) give the transpiler access to the analysis results.
+- **NameEntry tracking** (§4.1.2): Three new fields (`is_mutable`, `has_type_annotation`, `type_widened`) on `NameEntry` enable the type analysis without modifying AST types in place. Back-pointers (`AstNamedNode::entry`, `AstAssignNode::target_entry`) give the transpiler access to the analysis results; the statement-specific assignment struct names are aliases of this shared layout (P1c, **D8.2.2**).
 
 - **Array type conversion** (§4.3): `fn_array_set` now validates value types before storing. When assigning an incompatible type to a specialized array (e.g., float to `ArrayInt`), the array is converted to a generic `Array` in place — the struct pointer stays the same, only `type_id` and the items buffer change. Specialized getters (`array_int_get`, etc.) check `type_id` at runtime to handle converted arrays. Element and List children are also supported.
 

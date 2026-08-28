@@ -10408,7 +10408,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 
     // innerText: replace children while preserving line breaks as <br> nodes.
     if (prop_id == JS_DOM_PROP_INNER_TEXT) {
-        const char* text_str = fn_to_cstr(value);
+        // HTMLElement.innerText is a DOMString setter, so convert primitive values too.
+        const char* text_str = js_dom_to_dom_string_cstr(value);
         if (text_str) {
             js_dom_detach_all_children(elem);
 

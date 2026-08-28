@@ -309,24 +309,12 @@ static JsAstNode* ts_lower_expr_tree(TsTranspiler* tp, JsAstNode* node) {
         i->alternate = ts_lower_expr_tree(tp, i->alternate);
         break;
     }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* w = (JsWhileNode*)node;
-        w->test = ts_lower_expr_tree(tp, w->test);
-        w->body = ts_lower_expr_tree(tp, w->body);
-        break;
-    }
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* dw = (JsDoWhileNode*)node;
-        dw->body = ts_lower_expr_tree(tp, dw->body);
-        dw->test = ts_lower_expr_tree(tp, dw->test);
-        break;
-    }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* f = (JsForNode*)node;
-        f->init = ts_lower_expr_tree(tp, f->init);
-        f->test = ts_lower_expr_tree(tp, f->test);
-        f->update = ts_lower_expr_tree(tp, f->update);
-        f->body = ts_lower_expr_tree(tp, f->body);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        loop->init = ts_lower_expr_tree(tp, loop->init);
+        loop->test = ts_lower_expr_tree(tp, loop->test);
+        loop->update = ts_lower_expr_tree(tp, loop->update);
+        loop->body = ts_lower_expr_tree(tp, loop->body);
         break;
     }
     case JS_AST_NODE_FOR_OF_STATEMENT:

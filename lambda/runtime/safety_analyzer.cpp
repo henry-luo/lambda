@@ -304,19 +304,18 @@ static bool has_any_recursive_call(AstNode* expr, AstFuncNode* func_node) {
         return false;
     }
 
-    case AST_NODE_ASSIGN: {
-        AstNamedNode* asn = (AstNamedNode*)expr;
-        return has_any_recursive_call(asn->as, func_node);
+    case AST_NODE_VARIABLE_DECLARATOR: {
+        AstDeclaratorNode* declarator = (AstDeclaratorNode*)expr;
+        return has_any_recursive_call(declarator->init, func_node);
     }
 
-    case AST_NODE_FOR_EXPR:
-    case AST_NODE_FOR_STAM: {
+    case AST_NODE_FOR_EXPR: {
         AstForNode* for_node = (AstForNode*)expr;
         if (has_any_recursive_call(for_node->loop, func_node)) return true;
         return has_any_recursive_call(for_node->then, func_node);
     }
 
-    case AST_NODE_LOOP: {
+    case AST_NODE_FOR_CLAUSE: {
         AstLoopNode* loop = (AstLoopNode*)expr;
         return has_any_recursive_call(loop->as, func_node);
     }
@@ -443,10 +442,10 @@ static bool has_non_tail_recursive_call(AstNode* expr, AstFuncNode* func_node, b
         return false;
     }
 
-    case AST_NODE_ASSIGN: {
+    case AST_NODE_VARIABLE_DECLARATOR: {
         // The assigned expression is not in tail position
-        AstNamedNode* asn = (AstNamedNode*)expr;
-        return has_non_tail_recursive_call(asn->as, func_node, false);
+        AstDeclaratorNode* declarator = (AstDeclaratorNode*)expr;
+        return has_non_tail_recursive_call(declarator->init, func_node, false);
     }
 
     case AST_NODE_CONTENT: {

@@ -406,6 +406,35 @@ extern "C" bool js_prepare_eval_context(Runtime* runtime,
     return true;
 }
 
+// one compile unit owns one MIR transpiler and its module artifact.
+JsMirTranspiler* js_mir_open_compile_unit(
+        JsTranspiler* tp, const char* filename,
+        const char* module_name, bool is_module, uint32_t module_name_base,
+        unsigned int optimize_level, bool compact_storage,
+        const char* log_prefix, bool install_error_handler,
+        MIR_context_t* out_ctx) {
+    if (!out_ctx) return NULL;
+    *out_ctx = jit_init(optimize_level);
+    if (!*out_ctx) {
+        log_error("%s: MIR context init failed", log_prefix ? log_prefix : "js-mir");
+        return NULL;
+    }
+    if (install_error_handler && g_batch_mir_error_handler) {
+        MIR_set_error_func(*out_ctx, g_batch_mir_error_handler);
+    }
+    int import_capacity = compact_storage ? 16 : 64;
+    int local_func_capacity = compact_storage ? 8 : 32;
+    int var_scope_capacity = compact_storage ? 8 : 16;
+    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, *out_ctx, filename,
+        is_module, import_capacity, local_func_capacity, var_scope_capacity,
+        log_prefix);
+    if (!mt) return NULL;
+    jm_track_active_js_transpile(NULL, mt, NULL);
+    mt->module_name_base = module_name_base;
+    mt->module = MIR_new_module(*out_ctx, module_name);
+    return mt;
+}
+
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
                              const char* filename, uint64_t* result_home) {
     log_debug("js-mir-ast: transpiling pre-built AST for '%s'", filename ? filename : "<string>");
@@ -422,23 +451,14 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     Input* js_input = Input::create(context->pool);
     js_runtime_set_input(js_input);
 
-    // initialize MIR context
-    MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
-    if (!ctx) {
-        log_error("js-mir-ast: MIR context init failed");
-        return js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
-            runtime, js_context, reusing_context);
-    }
-
-    // set up MIR transpiler
-    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir-ast");
+    MIR_context_t ctx = NULL;
+    JsMirTranspiler* mt = js_mir_open_compile_unit(tp, filename,
+        "ts_script", false, js_preamble_consumer_name_base(g_jm_preamble_in),
+        g_js_mir_optimize_level, false, "js-mir-ast", false, &ctx);
     if (!mt) {
         return js_mir_compile_unit_fail(ctx, NULL, tp, NULL,
             runtime, js_context, reusing_context);
     }
-    mt->module_name_base = js_preamble_consumer_name_base(g_jm_preamble_in);
-
-    mt->module = MIR_new_module(ctx, "ts_script");
 
     // transpile AST to MIR
     if (!transpile_js_mir_ast(mt, ast)) {
@@ -518,6 +538,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     // pointer transfer is needed after execution.
 
     // cleanup
+    jm_clear_active_js_transpile(NULL, mt, NULL);
     jm_destroy_mir_transpiler(mt);
     jit_cleanup_mode(ctx, !g_mir_interp_mode);
     // the AST entry point owns the parser after delegation; its TypeScript
@@ -805,15 +826,11 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     g_last_js_mir_phase_timing.ast_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ast_built");
 
-    // Run early error detection (static semantic validation)
-    phase_start = js_mir_phase_now_us();
-    int early_errors = js_check_early_errors(tp, js_ast);
-    if (early_errors > 0) {
-        log_error("js-mir: %d early error(s) detected", early_errors);
+    if (tp->has_errors) {
+        log_error("js-mir: early error(s) detected");
         return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
             runtime, NULL, true);
     }
-    g_last_js_mir_phase_timing.early_us = js_mir_phase_now_us() - phase_start;
 
     if (js_ast_interpreter_requested()) {
         // The AST tier owns the retained JsScript, but uses the same source
@@ -873,41 +890,26 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         auto_interp_for_large_source = true;
         log_info("js-mir: large source (%zu bytes) uses MIR interpreter at opt=0", js_source_len);
     }
-    MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (auto_interp_for_large_source) {
         g_mir_interp_mode = saved_mir_interp_mode;
     }
-    if (!ctx) {
-        log_error("js-mir: MIR context init failed");
-        return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
-            runtime, js_context, reusing_context);
-    }
-    g_active_mir_ctx = ctx;  // track for batch timeout recovery
+    MIR_context_t ctx = NULL;
 
-    // Install batch error handler if set (prevents exit(1) on MIR errors)
-    if (g_batch_mir_error_handler) {
-        MIR_set_error_func(ctx, g_batch_mir_error_handler);
-    }
-
-    // Set up the compact MIR transpiler; source-sized collection storage is allocated after parsing.
-    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir");
+    JsMirTranspiler* mt = js_mir_open_compile_unit(tp, filename, "js_script", false,
+        js_preamble_consumer_name_base(g_jm_preamble_in), g_js_mir_optimize_level,
+        false, "js-mir", true, &ctx);
     if (!mt) {
         return js_mir_compile_unit_fail(ctx, NULL, tp, owned_source,
             runtime, js_context, reusing_context);
     }
-    jm_track_active_js_transpile(NULL, mt, NULL);
-    mt->module_name_base = js_preamble_consumer_name_base(g_jm_preamble_in);
+    g_active_mir_ctx = ctx;  // track for batch timeout recovery
 
-    // Preamble mode setup
     mt->preamble_mode = g_jm_preamble_mode;
     if (g_jm_preamble_in) {
         mt->preamble_entries = g_jm_preamble_in->entries;
         mt->preamble_entry_count = g_jm_preamble_in->entry_count;
         mt->preamble_var_count = g_jm_preamble_in->module_var_count;
     }
-
-    // Create module
-    mt->module = MIR_new_module(ctx, "js_script");
 
     // Transpile AST to MIR
     phase_start = js_mir_phase_now_us();
@@ -969,20 +971,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Count finalized executable MIR instructions (drives the interpreter
     // policy and the AST-tuning volume gate). Labels are structural and must
     // match the MT7 artifact counter used by test_mir_ratchet_gtest.
-    unsigned long total_insns = 0;
-    unsigned long total_functions = 0;
-    for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
-         m = DLIST_NEXT(MIR_module_t, m)) {
-        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
-             item = DLIST_NEXT(MIR_item_t, item)) {
-            if (item->item_type != MIR_func_item) continue;
-            total_functions++;
-            for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, item->u.func->insns);
-                    insn != NULL; insn = DLIST_NEXT(MIR_insn_t, insn)) {
-                if (insn->code != MIR_LABEL) total_insns++;
-            }
-        }
-    }
+    uint64_t total_functions = 0;
+    uint64_t total_insns = 0;
+    mir_count_module_volume(ctx, NULL, &total_functions, &total_insns);
     js_mir_volume_counters_set((long)total_functions, (long)total_insns);
     // Tune6 (see vibe/jube/Transpile_Js_Tune6_AST.md §0.2a–§0.2d): the dominant JS
     // startup cost is eager per-function MIR_gen during MIR_link. For large modules
@@ -1118,31 +1109,17 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // eval()/new Function() called during js_main can resolve outer-scope
     // var declarations via the active context-owned module slab.
     if (mt->module_consts && !g_jm_preamble_mode) {
-        int ecount = (int)hashmap_count(mt->module_consts);
         JsModuleConstEntry* next_entries = NULL;
-        if (ecount > 0) {
-            next_entries = (JsModuleConstEntry*)mem_calloc(
-                (size_t)ecount, sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
-        }
         int next_entry_count = 0;
-        bool copy_succeeded = ecount == 0 || next_entries != NULL;
-        size_t eiter = 0; void* eitem;
-        while (copy_succeeded && hashmap_iter(mt->module_consts, &eiter, &eitem)) {
-            JsModuleConstEntry* source_entry = (JsModuleConstEntry*)eitem;
-            copy_succeeded = js_preamble_entry_copy(
-                source_entry, &next_entries[next_entry_count]);
-            if (copy_succeeded) next_entry_count++;
-        }
+        bool copy_succeeded = js_preamble_entries_from_module_consts(
+            mt->module_consts, &next_entry_count, &next_entries);
         if (copy_succeeded) {
-            // defer releasing the previous slab until every shallow map entry
-            // has been copied; freeing it before this loop leaves source_entry
-            // names dangling in the current transpiler.
+            // retain the old slab until all shallow entries are copied.
             js_eval_preamble_entries_free();
             g_eval_preamble_entries = next_entries;
             g_eval_preamble_entry_count = next_entry_count;
             g_eval_preamble_var_count = mt->module_var_count;
         } else {
-            js_preamble_entries_free(next_entries, ecount);
             // The old slab was only needed while constructing this replacement.
             // Do not leave a failed replacement visible to a nested eval.
             js_eval_preamble_entries_free();
@@ -1177,25 +1154,14 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         g_jm_preamble_out->entries = NULL;
         g_jm_preamble_out->entry_count = 0;
         g_jm_preamble_out->module_var_count = mt->module_var_count;
-        int count = (int)hashmap_count(mt->module_consts);
         JsModuleConstEntry* entries = NULL;
-        if (count > 0) {
-            entries = (JsModuleConstEntry*)mem_calloc(
-                (size_t)count, sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
-        }
-        bool copy_succeeded = count == 0 || entries != NULL;
         int entry_count = 0;
-        size_t snap_iter = 0; void* snap_item;
-        while (copy_succeeded && hashmap_iter(mt->module_consts, &snap_iter, &snap_item)) {
-            copy_succeeded = js_preamble_entry_copy(
-                (JsModuleConstEntry*)snap_item, &entries[entry_count]);
-            if (copy_succeeded) entry_count++;
-        }
+        bool copy_succeeded = js_preamble_entries_from_module_consts(
+            mt->module_consts, &entry_count, &entries);
         if (copy_succeeded) {
             g_jm_preamble_out->entries = entries;
             g_jm_preamble_out->entry_count = entry_count;
         } else {
-            js_preamble_entries_free(entries, count);
             g_jm_preamble_out->module_var_count = 0;
         }
         log_debug("js-mir: preamble snapshot: %d entries, %d module vars",

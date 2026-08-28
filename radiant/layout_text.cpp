@@ -3643,6 +3643,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     cjk_boundary_wrap) && !leading_zero_width_attachment &&
                 (!leading_no_break_punctuation || lycon->line.wrap_opportunity_before_nowrap) &&
                 !leading_pre_wrap_space) {
+            // A decorated inline beginning at this wrap still generates its
+            // sliced/clone fragment on the line that accepted the separator.
+            record_inline_box_decoration_fragment(lycon, text_node);
             line_break(lycon);
             if (collapse_spaces && is_space(*str)) {
                 if (skip_collapsible_text_edge(lycon, text_node, &str, collapse_newlines,

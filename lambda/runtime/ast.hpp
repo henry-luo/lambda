@@ -83,9 +83,9 @@ static inline AstConstrainedTypeNode* ast_constrained_type_node(AstNode* node) {
     if (node->node_type != AST_NODE_IDENT) return NULL;
     AstIdentNode* ident = (AstIdentNode*)node;
     AstNode* declaration = ident->entry ? ident->entry->node : NULL;
-    if (!declaration || declaration->node_type != AST_NODE_ASSIGN ||
-            !((AstNamedNode*)declaration)->is_type_definition) return NULL;
-    AstNode* value = ast_unwrap_primary(((AstNamedNode*)declaration)->as);
+    if (!declaration || declaration->node_type != AST_NODE_VARIABLE_DECLARATOR ||
+            !((AstDeclaratorNode*)declaration)->is_type_definition) return NULL;
+    AstNode* value = ast_unwrap_primary(((AstDeclaratorNode*)declaration)->init);
     return value && value->node_type == AST_NODE_CONSTRAINED_TYPE
         ? (AstConstrainedTypeNode*)value : NULL;
 }
@@ -280,7 +280,7 @@ enum LoopKeyFilter {
     LOOP_KEY_SYMBOL = 2,  // keyed only: for k:symbol, v in container
 };
 
-// for AST_NODE_LOOP - extended with index variable and key filter
+// for AST_NODE_FOR_CLAUSE - extended with index variable and key filter
 typedef struct AstJoinKey : AstNode {
     AstNode* prior_expr;        // key expression evaluated against the tuple stream so far
     AstNode* new_expr;          // key expression evaluated against this loop source
@@ -328,6 +328,7 @@ typedef struct AstForNode : AstNode {
     AstNode *offset;     // offset count expression (or NULL)
     AstNode *then;       // body expression
     NameScope *vars;     // scope for the variables in the loop
+    bool discard_result; // statement form executes its stream for effects only
 } AstForNode;
 
 typedef struct AstListNode : AstArrayNode {
@@ -543,7 +544,7 @@ static inline bool is_procedural_only_stam(int node_type) {
     case AST_NODE_ASSIGN_STAM:
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
-    case AST_NODE_WHILE_STAM:
+    case AST_NODE_LOOP:
         return true;
     default:
         return false;
@@ -585,11 +586,16 @@ static inline bool side_effect_result_can_error(int node_type) {
 // A control-flow node in a content block that is not the block's value
 // expression runs for its side effects only. Shared so both tiers decide
 // "does this `for` / `if` / `while` contribute a value here?" identically.
+static inline bool ast_for_discards_result(AstNode* node) {
+    return node && node->node_type == AST_NODE_FOR_EXPR &&
+        ((AstForNode*)node)->discard_result;
+}
+
 static inline bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_value) {
     return node && node != last_value &&
            (node->node_type == AST_NODE_IF_EXPR ||
-            node->node_type == AST_NODE_WHILE_STAM ||
-            node->node_type == AST_NODE_FOR_STAM);
+            node->node_type == AST_NODE_LOOP ||
+            ast_for_discards_result(node));
 }
 
 typedef Item (*main_func_t)(Context*);

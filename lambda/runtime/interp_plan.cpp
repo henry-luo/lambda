@@ -7,12 +7,9 @@
 //      Script can run under T0 at all, so an unsupported kind produces a
 //      counted whole-module fallback instead of a silent wrong answer (R4).
 //
-// The traversal is interpreter-owned rather than `ast_visit_core_children`:
-// that visitor is the core cross-language contract feeding AstIndex, and it
-// stops at `default:` for most Lambda-only kinds (CONTENT, LET_STAM, ELEMENT,
-// FOR_EXPR, …). Extending it would change AstIndex on the default path, which
-// P0/P1 must leave untouched; `LangProfile::visit_ext_children` is the
-// designated seam for unifying the two later (design §9).
+// The traversal owns Lambda extension edges and delegates shared layouts to
+// `ast_visit_core_children`; `LangProfile::visit_ext_children` remains the
+// seam for language-specific children (D8.2.4).
 
 #include "interp.hpp"
 #include "re2_wrapper.hpp"
@@ -24,9 +21,16 @@
 // Complete Lambda child traversal
 // ---------------------------------------------------------------------------
 
-// Visits every structural child edge of `node`, excluding `node->next` (the
-// caller owns sibling iteration) and excluding NameEntry->node declaration
-// links — the AST is a DAG and those links are reads, never evaluation edges.
+typedef struct InterpCoreChildAdapter { InterpAstChildVisitor visit; void* ctx; } InterpCoreChildAdapter;
+
+static void interp_visit_core_child(AstNode* child, AstNode* parent, void* opaque) {
+    InterpCoreChildAdapter* adapter = (InterpCoreChildAdapter*)opaque;
+    if (!adapter || !adapter->visit || !child || child == parent->next) return;
+    for (AstNode* item = child; item; item = item->next) {
+        adapter->visit(item, adapter->ctx);
+    }
+}
+
 void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx) {
     if (!node || !visit) return;
 #define V(field) do { AstNode* _c = (AstNode*)(field); if (_c) visit(_c, ctx); } while (0)
@@ -34,82 +38,10 @@ void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx
         for (AstNode* _i = (AstNode*)(field); _i; _i = _i->next) visit(_i, ctx); \
     } while (0)
     switch (node->node_type) {
-    case AST_SCRIPT:                VLIST(((AstScript*)node)->child); break;
-    case AST_NODE_PRIMARY:          V(((AstPrimaryNode*)node)->expr); break;
-    case AST_NODE_UNARY:            V(((AstUnaryNode*)node)->operand); break;
-    case AST_NODE_SPREAD:           V(((AstSpreadNode*)node)->argument); break;
-    case AST_NODE_BINARY:
-    case AST_NODE_PIPE:
-        V(((AstBinaryNode*)node)->left);
-        V(((AstBinaryNode*)node)->right);
-        break;
-    case AST_NODE_ASSIGN:
-    case AST_NODE_KEY_EXPR:
-    case AST_NODE_PARAM:
-    case AST_NODE_NAMED_ARG:
-    case AST_NODE_STRING_PATTERN:
-    case AST_NODE_SYMBOL_PATTERN:
-        V(((AstNamedNode*)node)->as);
-        break;
-    case AST_NODE_DECOMPOSE:        V(((AstDecomposeNode*)node)->as); break;
-    case AST_NODE_CALL_EXPR:
-    case AST_NODE_NEW_EXPR:
-        V(((AstCallNode*)node)->function);
-        VLIST(((AstCallNode*)node)->argument);
-        break;
-    case AST_NODE_MEMBER_EXPR:
-    case AST_NODE_INDEX_EXPR:
-        V(((AstFieldNode*)node)->object);
-        V(((AstFieldNode*)node)->field);
-        break;
-    case AST_NODE_IF_EXPR:
-    case AST_NODE_CONDITIONAL_EXPR:
-        V(((AstIfNode*)node)->cond);
-        V(((AstIfNode*)node)->then);
-        V(((AstIfNode*)node)->otherwise);
-        break;
-    case AST_NODE_ARRAY:
-    case AST_NODE_SEQ:
-    case AST_NODE_CONTENT:
-    case AST_NODE_CONTENT_TYPE:
-        VLIST(((AstArrayNode*)node)->item);
-        break;
-    case AST_NODE_LIST:
-        // A list block keeps its `(let x = …, body)` bindings in `declare`,
-        // separate from its value items.
-        VLIST(((AstListNode*)node)->declare);
-        VLIST(((AstListNode*)node)->item);
-        break;
-    case AST_NODE_MAP:
-    case AST_NODE_OBJECT_LITERAL:
-        VLIST(((AstMapNode*)node)->item);
-        break;
     case AST_NODE_ELEMENT:
         VLIST(((AstElementNode*)node)->item);
         VLIST(((AstElementNode*)node)->content);
         break;
-    case AST_NODE_MATCH_EXPR:
-        V(((AstMatchNode*)node)->scrutinee);
-        VLIST(((AstMatchNode*)node)->first_arm);
-        break;
-    case AST_NODE_MATCH_ARM:
-        V(((AstMatchArm*)node)->pattern);
-        V(((AstMatchArm*)node)->body);
-        break;
-    case AST_NODE_BLOCK:            VLIST(((AstBlockNode*)node)->statements); break;
-    case AST_NODE_EXPR_STMT:        V(((AstExprStmtNode*)node)->expression); break;
-    case AST_NODE_LET_STAM:
-    case AST_NODE_PUB_STAM:
-    case AST_NODE_VAR_STAM:
-    case AST_NODE_TYPE_STAM:
-        VLIST(((AstLetNode*)node)->declare);
-        break;
-    case AST_NODE_WHILE_STAM:
-    case AST_NODE_DO_WHILE_STAM:
-        V(((AstWhileNode*)node)->cond);
-        V(((AstWhileNode*)node)->body);
-        break;
-    case AST_NODE_FOR_STAM:
     case AST_NODE_FOR_EXPR: {
         AstForNode* fr = (AstForNode*)node;
         VLIST(fr->loop);
@@ -122,7 +54,7 @@ void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx
         V(fr->then);
         break;
     }
-    case AST_NODE_LOOP: {
+    case AST_NODE_FOR_CLAUSE: {
         AstLoopNode* lp = (AstLoopNode*)node;
         V(lp->as);
         V(lp->on);
@@ -136,44 +68,16 @@ void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx
     case AST_NODE_ORDER_SPEC:       V(((AstOrderSpec*)node)->expr); break;
     case AST_NODE_GROUP_CLAUSE:     VLIST(((AstGroupClause*)node)->keys); break;
     case AST_NODE_GROUP_KEY:        V(((AstGroupKey*)node)->expr); break;
-    case AST_NODE_RETURN_STAM:
-    case AST_NODE_RAISE_STAM:
-    case AST_NODE_RAISE_EXPR:
-        V(((AstReturnNode*)node)->value);
-        break;
-    case AST_NODE_ASSIGN_STAM:
-        V(((AstAssignStamNode*)node)->value);
-        break;
-    case AST_NODE_INDEX_ASSIGN_STAM:
-    case AST_NODE_MEMBER_ASSIGN_STAM:
-        V(((AstCompoundAssignNode*)node)->object);
-        V(((AstCompoundAssignNode*)node)->key);
-        V(((AstCompoundAssignNode*)node)->value);
-        break;
-    case AST_NODE_PIPE_FILE_STAM:
-        V(((AstBinaryNode*)node)->left);
-        V(((AstBinaryNode*)node)->right);
-        break;
-    case AST_NODE_HANDLER_EXPR:
-    case AST_NODE_HANDLER_STAM:
-        V(((AstHandlerNode*)node)->operand);
-        V(((AstHandlerNode*)node)->body);
-        V(((AstHandlerNode*)node)->value_body);
-        break;
-    case AST_NODE_FUNC:
-    case AST_NODE_FUNC_EXPR:
-    case AST_NODE_PROC:
-    case AST_NODE_ARROW_FUNC:
-        VLIST(((AstFuncNode*)node)->params);
-        V(((AstFuncNode*)node)->body);
-        break;
-    case AST_NODE_START:            V(((AstStartNode*)node)->call); break;
     case AST_NODE_PATH_INDEX_EXPR:
         V(((AstPathIndexNode*)node)->base_path);
         V(((AstPathIndexNode*)node)->segment_expr);
         break;
     case AST_NODE_NAVIGATION_EXPR:  V(((AstNavigationNode*)node)->object); break;
     case AST_NODE_QUERY_EXPR:       V(((AstQueryNode*)node)->object); break;
+    case AST_NODE_LIST:
+        VLIST(((AstListNode*)node)->declare);
+        VLIST(((AstListNode*)node)->item);
+        break;
     case AST_NODE_CONSTRAINED_TYPE:
         V(((AstConstrainedTypeNode*)node)->base);
         V(((AstConstrainedTypeNode*)node)->constraint);
@@ -187,15 +91,6 @@ void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx
         VLIST(ot->constraints);
         break;
     }
-    case AST_NODE_BINARY_TYPE:
-        V(((AstBinaryNode*)node)->left);
-        V(((AstBinaryNode*)node)->right);
-        break;
-    case AST_NODE_UNARY_TYPE:       V(((AstUnaryNode*)node)->operand); break;
-    case AST_NODE_LIST_TYPE:
-    case AST_NODE_ARRAY_TYPE:       VLIST(((AstArrayNode*)node)->item); break;
-    case AST_NODE_MAP_TYPE:
-    case AST_NODE_ELMT_TYPE:        VLIST(((AstMapNode*)node)->item); break;
     case AST_NODE_PATTERN_SEQ:      VLIST(((AstPatternSeqNode*)node)->first); break;
     case AST_NODE_PATTERN_RANGE:
         V(((AstPatternRangeNode*)node)->start);
@@ -216,11 +111,11 @@ void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx
         VLIST(((AstEventHandler*)node)->param);
         V(((AstEventHandler*)node)->body);
         break;
-    case AST_NODE_IMPORT:           VLIST(((AstImportNode*)node)->specifiers); break;
-    default:
-        // Leaves: IDENT, LITERAL, SYS_FUNC, TYPE, CURRENT_*, BREAK/CONTINUE,
-        // PATH_EXPR, PATTERN_CHAR_CLASS, IMPORT_SPECIFIER.
+    default: {
+        InterpCoreChildAdapter adapter = {visit, ctx};
+        ast_visit_core_children(node, interp_visit_core_child, &adapter);
         break;
+    }
     }
 #undef VLIST
 #undef V
@@ -240,7 +135,7 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_BINARY:
     case AST_NODE_IF_EXPR:
     case AST_NODE_LET_STAM:
-    case AST_NODE_ASSIGN:
+    case AST_NODE_VARIABLE_DECLARATOR:
     case AST_NODE_DECOMPOSE:
     case AST_NODE_CALL_EXPR:
     case AST_NODE_FUNC:
@@ -258,8 +153,7 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_PROC:
     case AST_NODE_VAR_STAM:
     case AST_NODE_ASSIGN_STAM:
-    case AST_NODE_WHILE_STAM:
-    case AST_NODE_DO_WHILE_STAM:
+    case AST_NODE_LOOP:
     case AST_NODE_BREAK_STAM:
     case AST_NODE_CONTINUE_STAM:
     case AST_NODE_RETURN_STAM:
@@ -270,8 +164,7 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_PIPE_FILE_STAM:
     // --- P1.1: comprehensions ---
     case AST_NODE_FOR_EXPR:
-    case AST_NODE_FOR_STAM:
-    case AST_NODE_LOOP:
+    case AST_NODE_FOR_CLAUSE:
     case AST_NODE_ORDER_SPEC:
     case AST_NODE_GROUP_CLAUSE:
     case AST_NODE_GROUP_KEY:
@@ -340,18 +233,18 @@ const char* interp_node_kind_name(AstNodeType kind) {
 #define K(name) case name: return #name;
     K(AST_NODE_NULL) K(AST_SCRIPT) K(AST_NODE_PRIMARY) K(AST_NODE_LITERAL)
     K(AST_NODE_IDENT) K(AST_NODE_UNARY) K(AST_NODE_SPREAD) K(AST_NODE_BINARY)
-    K(AST_NODE_ASSIGN) K(AST_NODE_CALL_EXPR) K(AST_NODE_MEMBER_EXPR)
+    K(AST_NODE_VARIABLE_DECLARATOR) K(AST_NODE_CALL_EXPR) K(AST_NODE_MEMBER_EXPR)
     K(AST_NODE_INDEX_EXPR) K(AST_NODE_IF_EXPR) K(AST_NODE_ARRAY) K(AST_NODE_MAP)
     K(AST_NODE_KEY_EXPR) K(AST_NODE_MATCH_EXPR) K(AST_NODE_MATCH_ARM)
     K(AST_NODE_SEQ) K(AST_NODE_LIST) K(AST_NODE_BLOCK) K(AST_NODE_PARAM)
-    K(AST_NODE_FOR_STAM) K(AST_NODE_WHILE_STAM) K(AST_NODE_BREAK_STAM)
+    K(AST_NODE_LOOP) K(AST_NODE_BREAK_STAM)
     K(AST_NODE_CONTINUE_STAM) K(AST_NODE_RETURN_STAM) K(AST_NODE_RAISE_STAM)
     K(AST_NODE_RAISE_EXPR) K(AST_NODE_VAR_STAM) K(AST_NODE_ASSIGN_STAM)
     K(AST_NODE_LET_STAM) K(AST_NODE_PUB_STAM) K(AST_NODE_IMPORT)
-    K(AST_NODE_DO_WHILE_STAM) K(AST_NODE_FUNC) K(AST_NODE_FUNC_EXPR)
+    K(AST_NODE_FUNC) K(AST_NODE_FUNC_EXPR)
     K(AST_NODE_PROC) K(AST_NODE_PIPE) K(AST_NODE_CURRENT_ITEM)
     K(AST_NODE_CURRENT_INDEX) K(AST_NODE_LAST_INDEX) K(AST_NODE_CONTENT)
-    K(AST_NODE_ELEMENT) K(AST_NODE_DECOMPOSE) K(AST_NODE_LOOP)
+    K(AST_NODE_ELEMENT) K(AST_NODE_DECOMPOSE) K(AST_NODE_FOR_CLAUSE)
     K(AST_NODE_ORDER_SPEC) K(AST_NODE_GROUP_CLAUSE) K(AST_NODE_GROUP_KEY) K(AST_NODE_JOIN_KEY)
     K(AST_NODE_FOR_EXPR) K(AST_NODE_INDEX_ASSIGN_STAM) K(AST_NODE_MEMBER_ASSIGN_STAM)
     K(AST_NODE_PIPE_FILE_STAM) K(AST_NODE_TYPE_STAM) K(AST_NODE_PATH_EXPR)
@@ -380,13 +273,13 @@ typedef struct ScanCtx {
 // not admit a generic COW setter for a shape it cannot preserve.
 static bool interp_binding_is_ndim_array(NameEntry* entry, int depth) {
     if (!entry || depth >= AST_COW_PATH_MAX || !entry->node ||
-            entry->node->node_type != AST_NODE_ASSIGN) {
+            entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR) {
         return false;
     }
     // The any[] declaration boundary widens an N-D numeric literal to a boxed
     // Array, so its later scalar index writes do not need row-aware admission.
     if (ast_declared_type_is_open_any_array(entry->declared_type)) return false;
-    AstNode* init = ast_unwrap_primary(((AstNamedNode*)entry->node)->as);
+    AstNode* init = ast_unwrap_primary(((AstDeclaratorNode*)entry->node)->init);
     if (!init) return false;
     if (init->node_type == AST_NODE_IDENT) {
         return interp_binding_is_ndim_array(((AstIdentNode*)init)->entry, depth + 1);
@@ -437,10 +330,10 @@ static bool interp_array_num_expr(AstNode* node, int depth) {
     }
     if (node->node_type == AST_NODE_IDENT) {
         NameEntry* entry = ((AstIdentNode*)node)->entry;
-        if (!entry || !entry->node || entry->node->node_type != AST_NODE_ASSIGN) {
+        if (!entry || !entry->node || entry->node->node_type != AST_NODE_VARIABLE_DECLARATOR) {
             return false;
         }
-        return interp_array_num_expr(((AstNamedNode*)entry->node)->as, depth + 1);
+        return interp_array_num_expr(((AstDeclaratorNode*)entry->node)->init, depth + 1);
     }
     if (node->node_type != AST_NODE_CALL_EXPR) return false;
     AstCallNode* call = (AstCallNode*)node;
@@ -476,7 +369,7 @@ static bool interp_range_loop_index_expr(AstNode* node) {
     if (!node) return false;
     if (node->node_type == AST_NODE_IDENT) {
         NameEntry* entry = ((AstIdentNode*)node)->entry;
-        if (!entry || !entry->node || entry->node->node_type != AST_NODE_LOOP) {
+        if (!entry || !entry->node || entry->node->node_type != AST_NODE_FOR_CLAUSE) {
             return false;
         }
         AstLoopNode* loop = (AstLoopNode*)entry->node;
@@ -511,8 +404,8 @@ static AstFuncNode* interp_static_proc_binding(NameEntry* entry, int depth) {
     AstNode* declaration = entry->node;
     if (!declaration) return NULL;
     if (declaration->node_type == AST_NODE_PROC) return (AstFuncNode*)declaration;
-    if (declaration->node_type != AST_NODE_ASSIGN) return NULL;
-    AstNode* value = ast_unwrap_primary(((AstNamedNode*)declaration)->as);
+    if (declaration->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
+    AstNode* value = ast_unwrap_primary(((AstDeclaratorNode*)declaration)->init);
     if (!value) return NULL;
     if (value->node_type == AST_NODE_PROC) return (AstFuncNode*)value;
     if (value->node_type != AST_NODE_IDENT) return NULL;
@@ -809,13 +702,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // A direct untyped non-loop binding reaches the same runtime int64
         // conversion in T0 and MIR. Loop values stay with the range proof
         // below: `to` also produces character ranges, so admitting an
-        // AST_NODE_LOOP here would turn a character key into an int index.
+        // AST_NODE_FOR_CLAUSE here would turn a character key into an int index.
         // Derived expressions remain outside this bridge to keep mask/slice
         // keys from entering the scalar COW setter.
         bool direct_untyped_binding_index = dynamic_index_entry &&
             !dynamic_index_entry->declared_type &&
             (!dynamic_index_entry->node ||
-             dynamic_index_entry->node->node_type != AST_NODE_LOOP);
+             dynamic_index_entry->node->node_type != AST_NODE_FOR_CLAUSE);
         // MIR routes a typed numeric-array key through fn_index_assign, whose
         // runtime mask validation owns the bool-lane and shape checks. Source
         // numeric literals retain ARRAY AST type until their ArrayNum builds.
@@ -865,8 +758,8 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         if (!has_path || !entry || entry->import || !indexed_key ||
                 (ndim_row_write && !direct_numeric_mask_assignment &&
                  !direct_ndim_scalar_assignment) ||
-                (entry->node && entry->node->node_type == AST_NODE_ASSIGN &&
-                 ((AstNamedNode*)entry->node)->declared_type &&
+                (entry->node && entry->node->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+                 ((AstDeclaratorNode*)entry->node)->declared_type &&
                  !open_item_binding && !open_any_array && !typed_map_root &&
                  !direct_typed_array)) {
             // An `any` / `any[]` root has no narrower contract to validate;
@@ -902,7 +795,7 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
     // Comprehension clauses with their own lowering shapes. Ordered streams,
     // grouped rows, and equi-join tuple streams share the runtime helpers MIR
     // uses; only malformed group bindings remain fail-closed.
-    if (node->node_type == AST_NODE_FOR_EXPR || node->node_type == AST_NODE_FOR_STAM) {
+    if (node->node_type == AST_NODE_FOR_EXPR) {
         AstForNode* fr = (AstForNode*)node;
         if (fr->group && !fr->group->entry) {
             // Every grouped form needs a real post-group binding; joined rows
@@ -1149,8 +1042,8 @@ typedef struct PlanCtx {
 // visited in source order, so the source binding is always decided first.
 static void plan_mark_cow_owned(NameEntry* entry) {
     AstNode* decl = entry ? entry->node : NULL;
-    if (!decl || decl->node_type != AST_NODE_ASSIGN) return;
-    AstNode* init = ast_unwrap_primary(((AstNamedNode*)decl)->as);
+    if (!decl || decl->node_type != AST_NODE_VARIABLE_DECLARATOR) return;
+    AstNode* init = ast_unwrap_primary(((AstDeclaratorNode*)decl)->init);
     if (!init) return;
     if (init->node_type == AST_NODE_IDENT) {
         NameEntry* src = ((AstIdentNode*)init)->entry;
@@ -1188,7 +1081,15 @@ static void plan_backlink_entry(PlanCtx* pc, NameEntry* entry) {
     AstNode* decl = entry ? entry->node : NULL;
     if (!decl) return;
     switch (decl->node_type) {
-    case AST_NODE_ASSIGN:
+    case AST_NODE_VARIABLE_DECLARATOR: {
+        AstDeclaratorNode* declarator = (AstDeclaratorNode*)decl;
+        if (!declarator->entry) declarator->entry = entry;
+        if (declarator->id && declarator->id->node_type == AST_NODE_IDENT &&
+                !((AstIdentNode*)declarator->id)->entry) {
+            ((AstIdentNode*)declarator->id)->entry = entry;
+        }
+        break;
+    }
     case AST_NODE_PARAM:
     case AST_NODE_KEY_EXPR: {
         AstNamedNode* named = (AstNamedNode*)decl;
@@ -1430,7 +1331,6 @@ static uint32_t plan_need(AstNode* node) {
         uint32_t items = 1 + plan_need_max_siblings(block->item);
         return decls > items ? decls : items;
     }
-    case AST_NODE_FOR_STAM:
     case AST_NODE_FOR_EXPR: {
         AstForNode* fr = (AstForNode*)node;
         bool has_join = false;
@@ -1519,7 +1419,11 @@ static uint32_t plan_need(AstNode* node) {
         }
         return need;
     }
-    case AST_NODE_ASSIGN:
+    case AST_NODE_VARIABLE_DECLARATOR: {
+        AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
+        uint32_t need = plan_need(declarator->init);
+        return declarator->declared_type && need < 1 ? 1 : need;
+    }
     case AST_NODE_PARAM: {
         AstNamedNode* named = (AstNamedNode*)node;
         uint32_t need = plan_need(named->as);
@@ -1732,7 +1636,9 @@ static void plan_walk(AstNode* node, void* ctx) {
     case AST_NODE_EVENT_HANDLER:
         plan_handler(pc, (AstEventHandler*)node);
         return;
-    case AST_NODE_ASSIGN:
+    case AST_NODE_VARIABLE_DECLARATOR:
+        plan_assign_entry(pc, ((AstDeclaratorNode*)node)->entry);
+        break;
     case AST_NODE_PARAM:
     case AST_NODE_KEY_EXPR:
         plan_assign_entry(pc, ((AstNamedNode*)node)->entry);
@@ -1741,7 +1647,6 @@ static void plan_walk(AstNode* node, void* ctx) {
     case AST_NODE_CONTENT:
         plan_assign_scope(pc, ((AstListNode*)node)->vars);
         break;
-    case AST_NODE_FOR_STAM:
     case AST_NODE_FOR_EXPR:
         plan_assign_scope(pc, ((AstForNode*)node)->vars);
         break;
@@ -1750,8 +1655,7 @@ static void plan_walk(AstNode* node, void* ctx) {
         // so it is not reached by the owning for scope walk above.
         plan_assign_entry(pc, ((AstGroupClause*)node)->entry);
         break;
-    case AST_NODE_WHILE_STAM:
-    case AST_NODE_DO_WHILE_STAM:
+    case AST_NODE_LOOP:
         plan_assign_scope(pc, ((AstWhileNode*)node)->vars);
         break;
     case AST_NODE_BLOCK:

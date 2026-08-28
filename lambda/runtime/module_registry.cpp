@@ -577,10 +577,11 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             pub_node->next = NULL;
             pub_node->type = &TYPE_NULL;
 
-            AstNamedNode* named = (AstNamedNode*)pool_calloc(pool, sizeof(AstNamedNode));
-            named->node_type = AST_NODE_ASSIGN;
+            AstDeclaratorNode* named = (AstDeclaratorNode*)pool_calloc(pool,
+                sizeof(AstDeclaratorNode));
+            named->node_type = AST_NODE_VARIABLE_DECLARATOR;
             named->next = NULL;
-            named->as = NULL;
+            named->init = NULL;
             named->type = &TYPE_ANY;
 
             // Create name in pool
@@ -589,6 +590,11 @@ void* create_module_import_script(const char* resolved_path, Item namespace_obj,
             named->name->is_ascii = 1;
             memcpy(named->name->chars, shape->name->str, shape->name->length);
             named->name->chars[shape->name->length] = '\0';
+
+            AstIdentNode* id = (AstIdentNode*)pool_calloc(pool, sizeof(AstIdentNode));
+            id->node_type = AST_NODE_IDENT;
+            id->name = named->name;
+            named->id = (AstNode*)id;
 
             pub_node->declare = (AstNode*)named;
 

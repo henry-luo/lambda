@@ -939,36 +939,23 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
             break;
         }
 
-        case JS_AST_NODE_WHILE_STATEMENT: {
-            JsWhileNode* wn = (JsWhileNode*)node;
-            walk_expression(ctx, wn->test);
+        case AST_NODE_LOOP: {
+            AstLoopControlNode* loop = (AstLoopControlNode*)node;
+            if (loop->form == LOOP_FORM_FOR_C) {
+                // preserve the source-order checks of the former dedicated
+                // C-style loop case: initializer, test, update, body.
+                walk_statement(ctx, loop->init);
+                walk_expression(ctx, loop->init);
+                walk_expression(ctx, loop->test);
+                walk_expression(ctx, loop->update);
+            } else if (loop->form == LOOP_FORM_WHILE) {
+                walk_expression(ctx, loop->test);
+            }
             bool saved_in_iteration = ctx->in_iteration;
             ctx->in_iteration = true;
-            walk_statement(ctx, wn->body);
+            walk_statement(ctx, loop->body);
             ctx->in_iteration = saved_in_iteration;
-            break;
-        }
-
-        case JS_AST_NODE_DO_WHILE_STATEMENT: {
-            JsDoWhileNode* dn = (JsDoWhileNode*)node;
-            bool saved_in_iteration = ctx->in_iteration;
-            ctx->in_iteration = true;
-            walk_statement(ctx, dn->body);
-            ctx->in_iteration = saved_in_iteration;
-            walk_expression(ctx, dn->test);
-            break;
-        }
-
-        case JS_AST_NODE_FOR_STATEMENT: {
-            JsForNode* fn = (JsForNode*)node;
-            walk_statement(ctx, fn->init); // may be var decl
-            walk_expression(ctx, fn->init); // may be expression
-            walk_expression(ctx, fn->test);
-            walk_expression(ctx, fn->update);
-            bool saved_in_iteration = ctx->in_iteration;
-            ctx->in_iteration = true;
-            walk_statement(ctx, fn->body);
-            ctx->in_iteration = saved_in_iteration;
+            if (loop->form == LOOP_FORM_DO_WHILE) walk_expression(ctx, loop->test);
             break;
         }
 
@@ -1114,11 +1101,9 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
                 }
                 // Track whether this label is on an iteration statement
                 // (for continue target validation per ContainsUndefinedContinueTarget)
-                bool is_iteration = ls->body->node_type == JS_AST_NODE_FOR_STATEMENT ||
+                bool is_iteration = ls->body->node_type == AST_NODE_LOOP ||
                                     ls->body->node_type == JS_AST_NODE_FOR_IN_STATEMENT ||
-                                    ls->body->node_type == JS_AST_NODE_FOR_OF_STATEMENT ||
-                                    ls->body->node_type == JS_AST_NODE_WHILE_STATEMENT ||
-                                    ls->body->node_type == JS_AST_NODE_DO_WHILE_STATEMENT;
+                                    ls->body->node_type == JS_AST_NODE_FOR_OF_STATEMENT;
                 int saved_count = ctx->iteration_label_count;
                 if (is_iteration && ls->label && ctx->iteration_label_count < 32) {
                     ctx->iteration_labels[ctx->iteration_label_count] = ls->label;
