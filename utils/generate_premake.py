@@ -2537,11 +2537,20 @@ class PremakeGenerator:
 
         def internal_project_artifact(project_name: str) -> str:
             # split test dependencies inherit the source target's link mode;
-            # dynamic runtime targets produce .so, not a nonexistent .a.
+            # dynamic targets use their configured output directory and prefix.
             target_name = project_name[:-4] if project_name.endswith('-cpp') else project_name
             target = configured_targets.get(target_name, {})
             if target.get('link') == 'dynamic':
                 suffix = '.so' if self.use_linux_config else '.dylib'
+                prefix = target.get('target_prefix', 'lib')
+                output_name = target.get('target_name', project_name)
+                filename = f'{prefix}{output_name}{suffix}'
+                target_dir = target.get('target_dir', 'build/lib').rstrip('/')
+                if target_dir == 'build/lib':
+                    return f'../lib/{filename}'
+                if os.path.isabs(target_dir):
+                    return f'{target_dir}/{filename}'
+                return f'../../{target_dir}/{filename}'
             else:
                 suffix = '.a'
             if self.use_linux_config and suffix == '.a':
@@ -2851,11 +2860,28 @@ class PremakeGenerator:
                     project_name[:-4] if project_name.endswith('-cpp') else project_name,
                     {}).get('link') == 'dynamic'
                 for project_name in internal_project_links):
-            # Test DSOs live beside build/lib; embed a self-relative search path
-            # so the runner does not depend on a shell-specific LD_LIBRARY_PATH.
+            # Embed self-relative search paths for every test-linked dynamic
+            # target so the runner does not depend on LD_LIBRARY_PATH.
+            rpath_dirs = ['../build/lib']
+            for project_name in internal_project_links:
+                target_name = project_name[:-4] if project_name.endswith('-cpp') else project_name
+                target = configured_targets.get(target_name, {})
+                if target.get('link') != 'dynamic':
+                    continue
+                target_dir = target.get('target_dir', 'build/lib').rstrip('/')
+                if target_dir == 'build/lib' or os.path.isabs(target_dir):
+                    continue
+                rpath = f'../{target_dir}'
+                if rpath not in rpath_dirs:
+                    rpath_dirs.append(rpath)
             self.premake_content.extend([
                 '    linkoptions {',
-                '        "-Wl,-rpath,\'$$ORIGIN/../build/lib\'",',
+            ])
+            for rpath_dir in rpath_dirs:
+                self.premake_content.append(
+                    '        "-Wl,-rpath,\'$$ORIGIN/' + rpath_dir + '\'",'
+                )
+            self.premake_content.extend([
                 '    }',
                 '    '
             ])
