@@ -802,6 +802,18 @@ static inline void dom_pre_remove(DomNode* child, bool record_mutation = true) {
                                       child ? child->parent : nullptr, 0);
     }
 }
+
+static bool js_dom_detach_dom_node(DomNode* node) {
+    if (!node || !node->parent) return true;
+    dom_pre_remove(node);
+    DomNode* old_parent = node->parent;
+    return old_parent->remove_child(node);
+}
+
+static void js_dom_pre_remove_if_attached(DomNode* node) {
+    if (node && node->parent) dom_pre_remove(node);
+}
+
 static inline void dom_post_insert(DomNode* parent, DomNode* node,
                                    bool record_mutation = true) {
     DocState* st = js_dom_state_for_nodes(node, parent);
@@ -2890,11 +2902,10 @@ static bool js_dom_prepare_cross_document_insertion(DomNode* node,
     bool cross_document = source != destination;
     if (cross_document &&
         !js_dom_transfer_document_storage(source, destination)) return false;
-    // Detach while the source document and lifecycle ids are still current;
-    // rebinding first makes removal pins target two incompatible registries.
-    if (node->parent) {
-        dom_pre_remove(node);
-        node->parent->remove_child(node);
+    // Detach only for adoption; same-document backed paths must retain the
+    // source parent so they can remove the corresponding Mark child too.
+    if (cross_document && node->parent && !js_dom_detach_dom_node(node)) {
+        return false;
     }
     if (cross_document &&
         !js_dom_rebind_subtree_document(node, source, destination)) return false;
@@ -13267,11 +13278,12 @@ static bool js_dom_append_backed_element(DomElement* parent, DomNode* child) {
     if (!parent || !child || !child->is_element()) return false;
     parent = js_dom_prepare_children_for_mutation(parent);
     if (!parent) return false;
+    if (child->parent == (DomNode*)parent && parent->last_child == child) return true;
+    if (child->parent) dom_pre_remove(child);
     DomElement* child_elem = child->as_element();
     int64_t backed_index = js_dom_backed_child_index(parent, child_elem);
     if (backed_index >= 0) {
         if (child->parent == parent) {
-            if (parent->last_child == child) return true;
             // Move an existing sibling through both trees so the backing order
             // stays aligned with the DOM appendChild() ordering rule.
             if (!js_dom_remove_backed_child(parent, child)) return false;
@@ -13453,10 +13465,12 @@ static bool js_dom_append_fragment_children(DomElement* parent,
             // keep the backing Element order aligned with the live DOM chain.
             if (!js_dom_append_backed_element(parent, child)) return false;
         } else if (child->is_text()) {
+            js_dom_pre_remove_if_attached(child);
             if (!js_dom_insert_backed_text(parent, child->as_text(), nullptr)) {
                 return false;
             }
-        } else if (!((DomNode*)parent)->append_child(child)) {
+        } else if (!js_dom_detach_dom_node(child) ||
+                   !((DomNode*)parent)->append_child(child)) {
             return false;
         }
         dom_post_insert((DomNode*)parent, child);
@@ -13723,8 +13737,10 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         // DomElement to preserve the renderer's tree as well as DOM links.
         if (!js_dom_append_backed_element(elem, child_node)) return ItemNull;
     } else if (child_node->is_text()) {
+        js_dom_pre_remove_if_attached(child_node);
         if (!js_dom_insert_backed_text(elem, child_node->as_text(), nullptr)) return ItemNull;
-    } else if (!((DomNode*)elem)->append_child(child_node)) {
+    } else if (!js_dom_detach_dom_node(child_node) ||
+               !((DomNode*)elem)->append_child(child_node)) {
         return ItemNull;
     }
     dom_post_insert((DomNode*)elem, child_node);
@@ -14008,6 +14024,7 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
         int64_t old_index = js_dom_backed_child_index(elem, old_elem);
         if (new_elem && old_elem && old_index >= 0) {
             if (new_child->parent && new_child->parent != (DomNode*)elem) {
+                dom_pre_remove(new_child);
                 if (!new_child->parent->is_element() ||
                     !js_dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
                     return ItemNull;
@@ -14269,7 +14286,18 @@ extern "C" Item js_dom_append_variadic_bridge(void* elem_ptr, Item* args, int ar
             if (!js_dom_prepare_cross_document_insertion(child_node, elem)) {
                 return (Item){.item = ITEM_JS_UNDEFINED};
             }
-            ((DomNode*)elem)->append_child(child_node);
+            bool inserted = false;
+            if (child_node->is_element()) {
+                inserted = js_dom_append_backed_element(elem, child_node);
+            } else if (child_node->is_text()) {
+                js_dom_pre_remove_if_attached(child_node);
+                inserted = js_dom_insert_backed_text(
+                    elem, child_node->as_text(), nullptr);
+            } else {
+                inserted = js_dom_detach_dom_node(child_node) &&
+                    ((DomNode*)elem)->append_child(child_node);
+            }
+            if (!inserted) return (Item){.item = ITEM_JS_UNDEFINED};
             dom_post_insert((DomNode*)elem, child_node);
         } else {
             const char* text = fn_to_cstr(args[i]);
@@ -14293,7 +14321,18 @@ extern "C" Item js_dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int a
             if (!js_dom_prepare_cross_document_insertion(child_node, elem)) {
                 return (Item){.item = ITEM_JS_UNDEFINED};
             }
-            ((DomNode*)elem)->insert_before(child_node, ref);
+            bool inserted = false;
+            if (child_node->is_element()) {
+                inserted = js_dom_insert_before_child(elem, child_node, ref);
+            } else if (child_node->is_text()) {
+                js_dom_pre_remove_if_attached(child_node);
+                inserted = js_dom_insert_backed_text(
+                    elem, child_node->as_text(), ref);
+            } else {
+                inserted = js_dom_detach_dom_node(child_node) &&
+                    ((DomNode*)elem)->insert_before(child_node, ref);
+            }
+            if (!inserted) return (Item){.item = ITEM_JS_UNDEFINED};
             dom_post_insert((DomNode*)elem, child_node);
             if (elem->tag() == MARKUP_NAME_SELECT && child_node->is_element() &&
                 child_node->as_element()->tag() == MARKUP_NAME_OPTION) {

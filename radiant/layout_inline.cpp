@@ -319,6 +319,14 @@ static bool has_following_content(DomNode* node, bool inline_only) {
     return false;
 }
 
+static bool inline_boundary_allows_soft_wrap(DomNode* inline_node) {
+    if (!inline_node) return false;
+    CssEnum white_space = get_white_space_value(inline_node);
+    return white_space == CSS_VALUE_NORMAL || white_space == CSS_VALUE_PRE_LINE ||
+        white_space == CSS_VALUE_PRE_WRAP || white_space == CSS_VALUE_BREAK_SPACES ||
+        white_space == 0;
+}
+
 bool layout_inline_has_prior_in_flow_content(DomNode* inline_box) {
     if (!inline_box || !inline_box->is_element() ||
         inline_box->view_type != RDT_VIEW_INLINE) {
@@ -1009,6 +1017,19 @@ static void span_record_current_split_line_fragment(LayoutContext* lycon, ViewSp
                                       fragment_y, fragment_y + fragment_height);
 }
 
+static bool inline_span_has_content_before(ViewSpan* ancestor, View* descendant) {
+    if (!ancestor || !descendant) return false;
+    for (View* child = ancestor->first_child; child; child = child->next()) {
+        if (child == descendant) return false;
+        if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child) ||
+            view_is_collapsed_whitespace_text(child, ancestor)) {
+            continue;
+        }
+        if (view_has_non_trailing_line_content(child, ancestor)) return true;
+    }
+    return false;
+}
+
 static void record_block_in_inline_split_chain(ViewSpan* span) {
     if (!span || span->width < 0.0f || span->height < 0.0f) return;
 
@@ -1020,15 +1041,27 @@ static void record_block_in_inline_split_chain(ViewSpan* span) {
     float fragment_min_y = span->y + top_edge;
     float fragment_max_y = span->y + span->height - bottom_edge;
     if (fragment_max_y < fragment_min_y) fragment_max_y = fragment_min_y;
+    View* split_descendant = static_cast<View*>(span);
     DomNode* ancestor = span->parent;
     while (ancestor && ancestor->is_element()) {
         if (ancestor->view_type != RDT_VIEW_INLINE) break;
         ViewSpan* ancestor_span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
         // CSS 2.1 §9.2.1.1: a nested split inline keeps its ancestor's
         // first-line decoration fragment even when the text is indirect.
-        float ancestor_min_y = min(ancestor_span->y, fragment_min_y);
+        LayoutInlineDecorationEdges ancestor_edges =
+            layout_inline_decoration_edges(ancestor_span);
+        bool has_prior_content = inline_span_has_content_before(
+            ancestor_span, split_descendant);
+        bool has_inline_decoration = ancestor_edges.left > 0.0f ||
+            ancestor_edges.right > 0.0f || ancestor_edges.top > 0.0f ||
+            ancestor_edges.bottom > 0.0f;
+        // An undecorated inline containing only an indirect block has no
+        // generated first-line box to expose through CSSOM geometry.
+        float ancestor_min_y = has_prior_content || has_inline_decoration
+            ? min(ancestor_span->y, fragment_min_y) : fragment_min_y;
         span_record_split_inline_fragment(ancestor_span, fragment_min_x, fragment_max_x,
                                           ancestor_min_y, fragment_max_y);
+        split_descendant = static_cast<View*>(ancestor_span);
         ancestor = ancestor->parent;
     }
 }
@@ -2584,6 +2617,14 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         layout_relative_positioned(lycon, lam::unsafe_view_block_api_span(span));
     } else if (span->position && span->positionp()->position == CSS_VALUE_STICKY) {
         layout_sticky_positioned(lycon, lam::unsafe_view_block_api_span(span));
+    }
+
+    // CSS Text 3 §5.1: a boundary after a preformatted inline uses the
+    // nearest common ancestor's wrapping mode, not the inline's own mode.
+    if (span_is_unbreakable && !lycon->line.is_line_start &&
+        has_following_content(elmt, true) &&
+        inline_boundary_allows_soft_wrap(elmt)) {
+        lycon->line.wrap_opportunity_before_nowrap = true;
     }
 
     if (layout_inline_is_collapsed_whitespace_only(span)) {

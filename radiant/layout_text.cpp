@@ -990,6 +990,7 @@ static inline float get_unicode_space_width_em(uint32_t codepoint) {
         case 0x2004: return 1.0f/3; // THREE-PER-EM SPACE - 1/3 em
         case 0x2005: return 0.25f;  // FOUR-PER-EM SPACE - 1/4 em
         case 0x2006: return 1.0f/6; // SIX-PER-EM SPACE - 1/6 em
+        case 0x2007: return 0.0f;   // FIGURE SPACE - use the selected font metric
         case 0x2009: return 1.0f/5; // THIN SPACE - ~1/5 em (or 1/6 em)
         case 0x200A: return 1.0f/10; // HAIR SPACE - very thin (~1/10 to 1/16 em)
         default: return 0.0f;
@@ -1005,10 +1006,23 @@ static float layout_font_em_size(LayoutContext* lycon) {
         ? lycon->font.style->font_size : 0.0f;
 }
 
+static bool document_font_missing_figure_space(LayoutContext* lycon,
+                                               uint32_t codepoint) {
+    if (!lycon || codepoint != 0x2007) return false;
+    FontHandle* handle = font_box_handle(&lycon->font);
+    // CSS Fonts keeps a document face's missing-glyph advance when no
+    // fallback face supplies the character; this preserves Ahem's em cell.
+    return handle && font_handle_is_document_font(handle) &&
+        !font_has_codepoint(handle, codepoint);
+}
+
 static float measure_current_glyph_advance(LayoutContext* lycon, uint32_t codepoint,
                                            bool trim_cjk_spacing,
                                            uint32_t previous_codepoint = 0) {
     if (!lycon || !lycon->font.style) return 0.0f;
+    if (document_font_missing_figure_space(lycon, codepoint)) {
+        return layout_font_em_size(lycon);
+    }
     FontHandle* handle = font_box_handle(&lycon->font) ? font_box_handle(&lycon->font) : lycon->font.style->font_handle;
     if (handle) {
         FontStyleDesc sd = font_style_desc_from_prop(lycon->font.style);
@@ -3197,6 +3211,37 @@ static bool whitespace_only_text_before_forced_break(DomNode* text_node) {
     return true;
 }
 
+static bool collapsed_space_followed_by_fitting_atomic(
+        LayoutContext* lycon, DomNode* text_node, float line_right) {
+    if (!lycon || !text_node || !text_node->next_sibling ||
+        !text_node->next_sibling->is_element() ||
+        lycon->line.is_line_start ||
+        lycon->line.advance_x < line_right - kTextLayoutSubpixelEpsilon) {
+        return false;
+    }
+    DomElement* next = text_node->next_sibling->as_element();
+    DisplayValue display = resolve_display_value(next);
+    bool inline_outer = display.outer == CSS_VALUE_INLINE ||
+        display.outer == CSS_VALUE_INLINE_BLOCK;
+    bool atomic = display.outer == CSS_VALUE_INLINE_BLOCK ||
+        (display.outer == CSS_VALUE_INLINE && display.inner == CSS_VALUE_TABLE) ||
+        (inline_outer && layout_element_is_replaced(next));
+    if (!atomic) return false;
+
+    IntrinsicSizes sizes = measure_element_intrinsic_widths(lycon, next);
+    LayoutIntrinsicMarginPair margins =
+        layout_intrinsic_horizontal_margin_pair(lycon, next);
+    float separator = layout_measure_space_advance(
+        lycon, font_box_handle(&lycon->font), lycon->font.style);
+    if (lycon->font.style) {
+        separator += lycon->font.style->word_spacing;
+        separator += text_letter_spacing(lycon->font.style, 0x20, true);
+    }
+    float margin_box = sizes.max_content + margins.left + margins.right;
+    return lycon->line.advance_x + separator + margin_box <=
+        line_right + kTextLayoutSubpixelEpsilon;
+}
+
 static inline bool line_is_at_collapsible_text_edge(LayoutContext* lycon) {
     if (!lycon) return true;
     if (lycon->line.is_line_start) return true;
@@ -3563,32 +3608,41 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                            lycon->line.effective_right : lycon->line.right;
         uint32_t first_codepoint = peek_codepoint(str);
         // CSS Text 3 §5.2: zero-advance attachment characters cannot create a
-        // break before themselves; soft hyphen and ZWSP remain break controls.
+        // break before themselves; ZWSP must first be placed, then records its
+        // break opportunity after the character.
         bool leading_zero_width_attachment =
             text_codepoint_has_zero_advance(first_codepoint) &&
-            first_codepoint != 0x00AD && first_codepoint != 0x200B;
+            first_codepoint != 0x00AD;
         // UAX #14 LB13: punctuation with no break-before opportunity must stay
         // with the preceding inline content even when word-break is break-all.
         bool leading_no_break_punctuation =
             is_line_break_cl(first_codepoint) ||
             is_line_break_ns(first_codepoint) ||
             is_line_break_ex_is_sy(first_codepoint);
+        // CSS Text 3 §4.1.3: preserved pre-wrap spaces hang at the line end;
+        // let the normal trailing-space path place the space before wrapping.
+        bool leading_pre_wrap_space = white_space == CSS_VALUE_PRE_WRAP &&
+            is_space(*str);
         bool cjk_boundary_wrap = wrap_lines && !lycon->line.is_line_start &&
             lycon->line.advance_x >= line_right - kTextLayoutSubpixelEpsilon &&
             has_id_line_break_class(lycon->line.prev_codepoint) &&
             has_id_line_break_class(first_codepoint) && !keep_all;
         bool whitespace_before_forced_break = collapse_spaces &&
             whitespace_only_text_before_forced_break(text_node);
+        bool next_atomic_fits = collapsed_space_followed_by_fitting_atomic(
+            lycon, text_node, line_right);
         if (wrap_lines && !whitespace_before_forced_break &&
             (lycon->line.advance_x >= line_right - kTextLayoutSubpixelEpsilon ||
              cjk_boundary_wrap) &&
             !lycon->line.is_line_start
-            && (lycon->line.last_space || lycon->line.wrap_opportunity_before_nowrap
+            && (lycon->line.last_space || (lycon->line.wrap_opportunity_before_nowrap &&
+                !next_atomic_fits)
                 // CSS Text 3 §4.1.2: a leading segment break transformed into
                 // collapsed space does not itself create a wrap opportunity.
-                || (had_explicit_leading_space && !whitespace_before_forced_break) || break_all ||
+                || (had_explicit_leading_space && !whitespace_before_forced_break) ||
                     cjk_boundary_wrap) && !leading_zero_width_attachment &&
-                !leading_no_break_punctuation) {
+                (!leading_no_break_punctuation || lycon->line.wrap_opportunity_before_nowrap) &&
+                !leading_pre_wrap_space) {
             line_break(lycon);
             if (collapse_spaces && is_space(*str)) {
                 if (skip_collapsible_text_edge(lycon, text_node, &str, collapse_newlines,
@@ -3920,7 +3974,9 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     ? font_load_glyph_emoji(font_box_handle(&lycon->font), &_sd, codepoint, false)
                     : font_load_glyph(font_box_handle(&lycon->font), &_sd, codepoint, false);
                 float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0) ? lycon->ui_context->pixel_ratio : 1.0f;
-                wd = glyph ? glyph->advance_x / pixel_ratio : layout_font_em_size(lycon);
+                wd = document_font_missing_figure_space(lycon, codepoint)
+                    ? layout_font_em_size(lycon)
+                    : (glyph ? glyph->advance_x / pixel_ratio : layout_font_em_size(lycon));
                 if (glyph && trim_cjk_spacing) {
                     float base_wd = wd;
                     wd += text_spacing_trim_halt_advance(
@@ -4347,8 +4403,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         else if (is_other_space_separator(codepoint) && codepoint != 0x3000
                  && codepoint != 0x00A0 && codepoint != 0x202F) {
             str = next_ch;
-            record_line_break_opportunity(
-                lycon, str - 1, rect->width, BRK_HYPHEN);
+            // UAX #14 GL: FIGURE SPACE glues to both adjacent inline runs.
+            if (codepoint != 0x2007) {
+                record_line_break_opportunity(
+                    lycon, str - 1, rect->width, BRK_HYPHEN);
+            }
             mark_line_non_space(&lycon->line);
         }
         else if (codepoint == 0x002D || codepoint == 0x2010 || codepoint == 0x2013 || codepoint == 0x2014) {

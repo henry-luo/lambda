@@ -365,7 +365,25 @@ static bool append_anonymous_flex_text_run(LayoutContext* lycon,
     return true;
 }
 
-static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon) {
+static void preserve_anonymous_flex_text_spacing(LayoutContext* lycon,
+                                                  ViewText* text,
+                                                  bool preserve_leading_space,
+                                                  bool preserve_trailing_space) {
+    if (!lycon || !text || !text->rect ||
+        (!preserve_leading_space && !preserve_trailing_space)) return;
+    float space_width = layout_measure_space_advance(
+        lycon, font_box_handle(&lycon->font), lycon->font.style);
+    if (preserve_leading_space) text->rect->width += space_width;
+    if (preserve_trailing_space) {
+        TextRect* last = text->rect;
+        while (last->next) last = last->next;
+        last->width += space_width;
+    }
+    adjust_text_bounds(text);
+}
+
+static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon,
+                                       ViewBlock* flex_container) {
     if (!item || !lycon || !item->fi || !item->fi->anonymous_text) return;
     FlexAnonymousTextRun* runs = item->fi->anonymous_text_runs;
     if (!runs) return;
@@ -388,6 +406,21 @@ static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon) 
         ViewText* text = text_node
             ? lam::view_require<RDT_VIEW_TEXT>(text_node) : nullptr;
         if (!text) continue;
+        if (flex_container && text_node->parent == static_cast<DomNode*>(flex_container) &&
+            !run->is_whitespace) {
+            // Direct text was laid out by layout_final_flex_content; advance
+            // past its existing geometry before laying out flattened runs.
+            preserve_anonymous_flex_text_spacing(
+                lycon, text, run->preserve_leading_space,
+                run->preserve_trailing_space);
+            float text_end = text->x + text->width;
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                text_end = max(text_end, rect->x + rect->width);
+            }
+            lycon->line.advance_x = max(lycon->line.advance_x, text_end);
+            lycon->line.is_line_start = false;
+            continue;
+        }
         if (run->is_whitespace) {
             TextRect* rect = lycon->doc && lycon->doc->view_tree
                 ? lycon->doc->view_tree->alloc_text_rect() : nullptr;
@@ -412,27 +445,16 @@ static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon) 
         }
 
         layout_text(lycon, static_cast<DomNode*>(text_node));
-        bool preserve_leading = run->preserve_leading_space;
-        bool preserve_trailing = run->preserve_trailing_space &&
-            flex_text_ends_with_collapsible_space(text_node);
-        if (text->rect && (preserve_leading || preserve_trailing)) {
-            float space_width = layout_measure_space_advance(
-                lycon, font_box_handle(&lycon->font), lycon->font.style);
-            if (preserve_leading) text->rect->width += space_width;
-            if (preserve_trailing) {
-                TextRect* last = text->rect;
-                while (last->next) last = last->next;
-                last->width += space_width;
-            }
-            adjust_text_bounds(text);
-        }
+        preserve_anonymous_flex_text_spacing(
+            lycon, text, run->preserve_leading_space,
+            run->preserve_trailing_space &&
+                flex_text_ends_with_collapsible_space(text_node));
     }
     *lycon = saved_context;
 }
 
 void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout) {
-    if (!flex_layout || !flex_layout->flex_items ||
-        flex_layout->direct_text_geometry_handled) return;
+    if (!flex_layout || !flex_layout->flex_items) return;
 
     for (int i = 0; i < flex_layout->item_count; i++) {
         ViewElement* item = lam::view_as_element(flex_layout->flex_items[i]);
@@ -441,7 +463,8 @@ void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout) {
         ViewText* first_text = first_run && first_run->text
             ? lam::view_require<RDT_VIEW_TEXT>(first_run->text) : nullptr;
         if (!first_text) continue;
-        layout_anonymous_flex_text(item, flex_layout->lycon);
+        layout_anonymous_flex_text(item, flex_layout->lycon,
+                                   flex_layout->container);
         bool preserve_text_align = false;
         DomNode* parent = first_text->parent;
         if (parent && parent->is_element()) {
@@ -733,11 +756,13 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     lycon->flex_container = flex;
     flex->scratch_mark = mark;
     flex->lycon = lycon;  // Store layout context for intrinsic sizing
+    flex->container = container;
     if (container->embed && container->embedp()->flex) {
         memcpy(flex, container->embedp()->flex, sizeof(FlexProp));
         flex->writing_mode = layout_block_writing_mode(container);
         flex->scratch_mark = mark;
         flex->lycon = lycon;  // Restore after memcpy
+        flex->container = container;
     }
     else {
         flex->direction = DIR_ROW;
