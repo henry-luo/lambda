@@ -4740,6 +4740,7 @@ static const char* dom_js_mutation_kind_name(DomJsMutationKind kind) {
         case DOM_JS_MUTATION_STYLE: return "style";
         case DOM_JS_MUTATION_TREE_REPLACE: return "tree-replace";
         case DOM_JS_MUTATION_STYLE_REPAINT: return "style-repaint";
+        case DOM_JS_MUTATION_CONTROL_VALUE: return "control-value";
         case DOM_JS_MUTATION_UNKNOWN:
         default: return "unknown";
     }
@@ -5078,6 +5079,7 @@ static void dom_js_recascade_subtree(DomDocument* doc, DomElement* root,
                                      SelectorMatcher* matcher) {
     if (!doc || !root) return;
 
+    if (kind == DOM_JS_MUTATION_CONTROL_VALUE) return;
     if (kind == DOM_JS_MUTATION_STYLE ||
         kind == DOM_JS_MUTATION_STYLE_REPAINT ||
         kind == DOM_JS_MUTATION_TEXT) {

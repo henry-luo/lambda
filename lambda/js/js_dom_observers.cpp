@@ -601,6 +601,8 @@ extern "C" void js_dom_observers_mutation_notify(DomJsMutationKind kind,
                      kind == DOM_JS_MUTATION_STYLE ||
                      kind == DOM_JS_MUTATION_STYLE_REPAINT;
     bool character = kind == DOM_JS_MUTATION_TEXT;
+    // Live control values affect rendering without mutating the observed DOM tree.
+    if (!child && !attribute && !character) return;
     DomNode* observed_node = child ? parent : target;
     if (!observed_node) return;
 

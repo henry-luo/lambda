@@ -5058,6 +5058,14 @@ static void collect_text_content(DomNode* node, StrBuf* sb) {
         }
     }
 }
+
+static Item js_dom_text_content_item(DomElement* elem) {
+    StrBuf* sb = strbuf_new_cap(32);
+    collect_text_content((DomNode*)elem, sb);
+    String* text = heap_create_name(sb->str ? sb->str : "");
+    strbuf_free(sb);
+    return (Item){.item = s2it(text)};
+}
 JS_FORWARD_STATIC_EXPRESSION(bool, js_dom_ascii_space, (char ch), (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\f'))
 
 static bool js_dom_style_decl_name_matches(const char* seg, const char* end,
@@ -5559,6 +5567,21 @@ static bool js_dom_replace_inner_html(DomElement* elem, const char* html_str,
     }
     log_debug("js_dom_replace_inner_html: replaced <%s>",
               elem->tag_name ? elem->tag_name : "?");
+    return true;
+}
+
+static bool js_dom_replace_text_content(DomElement* elem, const char* text) {
+    // Replace through the Mark-aware path so DOM links and backing children stay aligned.
+    if (!elem || !text || !js_dom_replace_inner_html(elem, "", false)) return false;
+    if (text[0] != '\0') {
+        DomText* text_node = elem->append_text(text);
+        if (!text_node) return false;
+        dom_post_insert((DomNode*)elem, (DomNode*)text_node, false);
+    }
+    // Stylesheet text changes CSS globally; ordinary text is subtree-local.
+    DomJsMutationKind kind = elem->tag_name && strcasecmp(elem->tag_name, "style") == 0
+        ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
+    js_dom_mutation_notify(kind, (DomNode*)elem, (DomNode*)elem);
     return true;
 }
 
@@ -7129,6 +7152,30 @@ JS_FORWARD_STATIC_RETURN(bool, _select_is_dirty, (DomElement* sel), js_dom_expan
 // defaultValue". Cleared by form reset.
 JS_FORWARD_STATIC_RETURN(bool, _value_is_dirty, (DomElement* elem), js_dom_expando_flag_is, (elem, "__valueDirty"))
 
+static bool js_dom_output_is_value_mode(DomElement* elem) {
+    return js_dom_expando_flag_is(elem, "__outputValueMode");
+}
+
+static Item js_dom_output_default_value(DomElement* elem) {
+    if (js_dom_output_is_value_mode(elem)) {
+        Item exp = expando_get_map((DomNode*)elem);
+        if (exp.item != ITEM_NULL) {
+            Item stored = js_get_name_key(exp, "__outputDefaultValue");
+            if (get_type_id(stored) == LMD_TYPE_STRING) return stored;
+        }
+    }
+    return js_dom_text_content_item(elem);
+}
+
+static bool js_dom_output_set_text(DomElement* elem, Item value) {
+    const char* raw = js_dom_to_dom_string_cstr(value);
+    char* text = mem_strdup(raw ? raw : "", MEM_CAT_JS_RUNTIME);
+    if (!text) return false;
+    bool replaced = js_dom_replace_text_content(elem, text);
+    mem_free(text);
+    return replaced;
+}
+
 extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem || !tc_is_text_control_elem(elem)) return value;
@@ -7156,6 +7203,8 @@ extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value)
                     tc_set_value(elem, stripped, out);
                     mem_free(stripped);
                     js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
+                    js_dom_mutation_notify(DOM_JS_MUTATION_CONTROL_VALUE,
+                        (DomNode*)elem, elem->parent);
                     return value;
                 }
             }
@@ -7164,6 +7213,8 @@ extern "C" Item js_dom_text_control_set_value_bridge(void* dom_elem, Item value)
     // text-control value writes dirty live state without changing the default attribute.
     tc_set_value(elem, s, strlen(s));
     js_dom_expando_flag_set(elem, "__valueDirty", (Item){.item = b2it(true)});
+    js_dom_mutation_notify(DOM_JS_MUTATION_CONTROL_VALUE,
+        (DomNode*)elem, elem->parent);
     return value;
 }
 
@@ -8020,10 +8071,15 @@ static void _reset_form_control(DomElement* elem) {
         return;
     }
     if (strcasecmp(tag, "output") == 0) {
-        // For <output>: textContent := defaultValue. We do not track an
-        // explicit "default value override" (defaultValue setter); without
-        // an override, defaultValue == descendant text content, so reset
-        // is effectively a no-op. This matches WPT reset-form expectations.
+        Item default_value = js_dom_output_default_value(elem);
+        const char* raw = fn_to_cstr(default_value);
+        char* text = mem_strdup(raw ? raw : "", MEM_CAT_JS_RUNTIME);
+        if (!text) return;
+        // Reset restores the saved default and returns the output to default mode.
+        js_dom_replace_text_content(elem, text);
+        mem_free(text);
+        js_dom_expando_flag_set(elem, "__outputValueMode", ItemNull);
+        js_dom_expando_flag_set(elem, "__outputDefaultValue", ItemNull);
         return;
     }
 }
@@ -9764,25 +9820,14 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         const char* v = elem->get_attribute("for");
         return js_name_item(v ? v : "");
     }
-    // HTMLOutputElement.defaultValue — descendant text content if no override
-    // has been set. We do not yet track an explicit override (defaultValue
-    // setter), so this always returns current descendant text content. That
-    // matches WPT reset-form-html behavior where defaultValue tracks textContent.
+    // HTMLOutputElement.defaultValue tracks text in default mode and the saved
+    // reset value after a value setter switches the control to value mode.
     if (prop_id == JS_DOM_PROP_DEFAULT_VALUE && _is_tag(elem, "output")) {
-        StrBuf* sb = strbuf_new_cap(32);
-        collect_text_content((DomNode*)elem, sb);
-        String* s = heap_create_name(sb->str ? sb->str : "");
-        strbuf_free(sb);
-        return (Item){.item = s2it(s)};
+        return js_dom_output_default_value(elem);
     }
-    // HTMLOutputElement.value — descendant text content (getter); we do not
-    // track an explicit value override yet.
+    // HTMLOutputElement.value is always the current descendant text content.
     if (prop_id == JS_DOM_PROP_VALUE && _is_tag(elem, "output")) {
-        StrBuf* sb = strbuf_new_cap(32);
-        collect_text_content((DomNode*)elem, sb);
-        String* s = heap_create_name(sb->str ? sb->str : "");
-        strbuf_free(sb);
-        return (Item){.item = s2it(s)};
+        return js_dom_text_content_item(elem);
     }
     // tabIndex — reflects `tabindex` as integer, otherwise returns the HTML
     // default for elements that are naturally focusable.
@@ -10387,26 +10432,9 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         const char* text_str = value.item == ITEM_NULL
             ? "" : js_dom_to_dom_string_cstr(value);
         if (text_str) {
-            // Clear the Mark backing with the DOM chain. Clearing only the
-            // links leaves stale children in the parent Element, so a later
-            // library append relinks its new SVG below a detached wrapper.
-            if (!js_dom_replace_inner_html(elem, "", false)) return ItemNull;
-            // DOM string-replace-all uses no replacement node for empty strings.
-            if (text_str[0] != '\0') {
-                DomText* text_node = elem->append_text(text_str);
-                if (!text_node) return ItemNull;
-                dom_post_insert((DomNode*)elem, (DomNode*)text_node, false);
-            }
+            if (!js_dom_replace_text_content(elem, text_str)) return ItemNull;
             log_debug("js_dom_set_property: set textContent on <%s>",
                       elem->tag_name ? elem->tag_name : "?");
-            // textContent replaces children, but its impact is still known:
-            // stylesheet text changes CSS globally while ordinary text changes
-            // only the target subtree. TREE_REPLACE erased that distinction and
-            // incorrectly forced broad reconciliation for both cases.
-            DomJsMutationKind kind = elem->tag_name &&
-                strcasecmp(elem->tag_name, "style") == 0
-                ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
-            js_dom_mutation_notify(kind, (DomNode*)elem, (DomNode*)elem);
         }
         return value;
     }
@@ -10450,6 +10478,33 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         }
         if (!dirty) _set_checkedness(elem, t);
         return value;
+    }
+
+    if (_is_tag(elem, "output")) {
+        if (prop_id == JS_DOM_PROP_DEFAULT_VALUE) {
+            if (!js_dom_output_is_value_mode(elem)) {
+                return js_dom_output_set_text(elem, value) ? value : ItemNull;
+            }
+            const char* raw = js_dom_to_dom_string_cstr(value);
+            RootFrame roots(2);
+            Rooted<Item> value_root(roots, js_name_item(raw ? raw : ""));
+            Rooted<Item> exp_root(roots, expando_get_or_create_map((DomNode*)elem));
+            if (exp_root.get().item == ITEM_NULL) return ItemNull;
+            js_set_key_cstr(exp_root.get(), "__outputDefaultValue", value_root.get());
+            return value;
+        }
+        if (prop_id == JS_DOM_PROP_VALUE) {
+            if (!js_dom_output_is_value_mode(elem)) {
+                RootFrame roots(2);
+                Rooted<Item> exp_root(roots, expando_get_or_create_map((DomNode*)elem));
+                Rooted<Item> default_root(roots, js_dom_text_content_item(elem));
+                if (exp_root.get().item == ITEM_NULL) return ItemNull;
+                js_set_key_cstr(exp_root.get(), "__outputDefaultValue", default_root.get());
+                js_set_key_cstr(exp_root.get(), "__outputValueMode",
+                    (Item){.item = b2it(true)});
+            }
+            return js_dom_output_set_text(elem, value) ? value : ItemNull;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -10679,7 +10734,6 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // above, and setAttribute() remains the DOM attribute mutation path.
     {
         expando_set_property((DomNode*)elem, prop_name, value);
-        Item set_map = expando_get_map((DomNode*)elem);
         if (prop[0] == 'o' && prop[1] == 'n' && prop[2] != '\0') {
             // DOM host setters store on* values in the expando side table;
             // register the same write in the listener list so assignment
@@ -15127,8 +15181,8 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         bool append_at_end = true;
         if (argc >= 2 && args[1].item != ITEM_NULL && !is_js_undefined(args[1])) {
             TypeId bt = get_type_id(args[1]);
-            if (bt == LMD_TYPE_INT) {
-                int idx = (int)it2i(args[1]); // INT_CAST_OK: index
+            if (bt == LMD_TYPE_INT || bt == LMD_TYPE_INT64 || bt == LMD_TYPE_FLOAT) {
+                int idx = _select_index_from_item(args[1]);
                 if (idx >= 0) {
                     Item arr = js_array_new(0);
                     _collect_options(elem->first_child, arr);
@@ -15139,61 +15193,37 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
                 }
             } else {
                 DomElement* be = (DomElement*)js_dom_unwrap_element(args[1]);
-                if (be) { before_elem = be; append_at_end = false; }
+                if (be) {
+                    bool belongs_to_select = false;
+                    for (DomNode* p = (DomNode*)be; p; p = p->parent) {
+                        if (p == (DomNode*)elem) {
+                            belongs_to_select = true;
+                            break;
+                        }
+                    }
+                    if (!belongs_to_select) {
+                        Item n = js_name_item("NotFoundError");
+                        Item m = js_name_item(
+                            "Failed to execute 'add' on 'HTMLSelectElement': "
+                            "The node before which the new node is to be inserted is not a descendant.");
+                        return js_throw_value(js_new_error_with_name(n, m));
+                    }
+                    before_elem = be;
+                    append_at_end = false;
+                }
             }
         }
         // No-op if before == new_opt (per spec).
         if (before_elem == new_opt) return ItemNull;
-        // Detach new_opt from current parent first.
-        if (new_opt->parent) {
-            DomElement* op = (DomElement*)new_opt->parent;
-            if (new_opt->prev_sibling) new_opt->prev_sibling->next_sibling = new_opt->next_sibling;
-            else op->first_child = new_opt->next_sibling;
-            if (new_opt->next_sibling) new_opt->next_sibling->prev_sibling = new_opt->prev_sibling;
-            else op->last_child = new_opt->prev_sibling;
-            new_opt->next_sibling = nullptr;
-            new_opt->prev_sibling = nullptr;
-            new_opt->parent = nullptr;
-        }
-        // Insert into elem.
-        new_opt->parent = elem;
         if (append_at_end || !before_elem) {
-            if (!elem->first_child) {
-                elem->first_child = new_opt;
-                elem->last_child = new_opt;
-            } else {
-                DomNode* last = elem->last_child;
-                last->next_sibling = new_opt;
-                new_opt->prev_sibling = last;
-                elem->last_child = new_opt;
-            }
+            js_dom_append_child_bridge((void*)elem, args[0]);
         } else {
-            // Insert before before_elem (which must be a child of elem,
-            // or a descendant — for nested optgroup case we still insert
-            // before its position in the option list, but DOM-wise we
-            // insert before the closest ancestor that's a direct child).
-            DomNode* anchor = (DomNode*)before_elem;
-            while (anchor && anchor->parent != elem) anchor = anchor->parent;
-            if (!anchor) {
-                // Not in this select — append at end.
-                if (!elem->first_child) {
-                    elem->first_child = new_opt;
-                    elem->last_child = new_opt;
-                } else {
-                    DomNode* last = elem->last_child;
-                    last->next_sibling = new_opt;
-                    new_opt->prev_sibling = last;
-                    elem->last_child = new_opt;
-                }
-            } else {
-                new_opt->prev_sibling = anchor->prev_sibling;
-                new_opt->next_sibling = anchor;
-                if (anchor->prev_sibling) anchor->prev_sibling->next_sibling = new_opt;
-                else elem->first_child = new_opt;
-                anchor->prev_sibling = new_opt;
-            }
+            // The resolved option's parent can be an optgroup, not the select itself.
+            DomNode* insertion_parent = before_elem->parent;
+            if (!insertion_parent || !insertion_parent->is_element()) return ItemNull;
+            js_dom_insert_before_bridge((void*)insertion_parent->as_element(),
+                args[0], js_dom_wrap_element(before_elem));
         }
-        js_dom_mutation_notify();
         return ItemNull;
     }
     log_debug("js-dom-operation: unsupported operation %d", (int)operation);

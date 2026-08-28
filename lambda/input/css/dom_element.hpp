@@ -58,7 +58,8 @@ typedef enum DomJsMutationKind {
     DOM_JS_MUTATION_ATTRIBUTE = 4,
     DOM_JS_MUTATION_STYLE = 5,
     DOM_JS_MUTATION_TREE_REPLACE = 6,
-    DOM_JS_MUTATION_STYLE_REPAINT = 7
+    DOM_JS_MUTATION_STYLE_REPAINT = 7,
+    DOM_JS_MUTATION_CONTROL_VALUE = 8
 } DomJsMutationKind;
 
 // tier-1: doc-pool, survives relayout

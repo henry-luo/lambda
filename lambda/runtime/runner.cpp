@@ -1786,7 +1786,7 @@ void runtime_register_script(Runtime* runtime, Script* script) {
 
 // runtime::type_list can alias a Script's Input-owned list while a nested
 // Lambda package is evaluated. The Script remains the owner of that alias.
-static bool runtime_type_list_is_script_owned(Runtime* runtime) {
+bool runtime_type_list_is_script_owned(Runtime* runtime) {
     if (!runtime || !runtime->type_list || !runtime->scripts) return false;
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script* script = (Script*)runtime->scripts->data[i];

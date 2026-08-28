@@ -8265,8 +8265,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         float legend_shift = fieldset_box.border.top + fieldset_box.padding.top;
         if (is_vertical_writing && is_flow_fieldset) {
             DomElement* rendered_legend = find_fieldset_rendered_legend(block);
+            // Depth truncation can leave the selected legend without a generated box.
             ViewBlock* first_legend = rendered_legend
-                ? lam::view_require_block(static_cast<View*>(rendered_legend)) : nullptr;
+                ? lam::view_as_block(static_cast<View*>(rendered_legend)) : nullptr;
             if (first_legend && first_legend->view_type) {
                 float legend_content_width = 0.0f;
                 float legend_content_start = first_legend->x;
@@ -8307,7 +8308,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         if (legend_shift > 0 && !is_vertical_writing) {
             DomElement* rendered_legend = find_fieldset_rendered_legend(block);
             ViewBlock* first_legend = rendered_legend
-                ? lam::view_require_block(static_cast<View*>(rendered_legend)) : nullptr;
+                ? lam::view_as_block(static_cast<View*>(rendered_legend)) : nullptr;
             if (first_legend && first_legend->view_type) {
                 first_legend->y -= legend_shift;
                 bool passed_legend = false;
