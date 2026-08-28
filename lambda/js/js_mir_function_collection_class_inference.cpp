@@ -103,10 +103,9 @@ static JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
         JsCallNode* call) {
     if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-    // resolve the post-Annex-B scope entry before the AST fallback so both
-    // native eligibility and return-type propagation use the same callee.
-    NameEntry* entry = js_scope_lookup(mt->tp, id->name);
-    if (!entry) entry = id->entry;
+    // consume the binding resolved by the AST builder; MIR must not rebuild
+    // compiler scope state after the indexed unit is sealed.
+    NameEntry* entry = id->entry;
     if (!entry || !entry->node) return NULL;
 
     JsFunctionNode* fn = NULL;

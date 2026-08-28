@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-28
 
-**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, and P2a–P2b shared function identity are verified; P0b, P1e, P2c–P6 remain proposed.
+**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, P2a–P2b shared function identity, and the P2c lowering-binding handoff are verified; P0b, P1e, the P2c dense identity graph, and P3–P6 remain proposed.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -410,7 +410,7 @@ The cumulative numbers below are measured from the project-specific anchor, not 
 |---|---|---|---:|
 | P0 | P0a counters complete; P0b catalog assertions and timing manifests pending | stale assertions/helpers and any superseded catalog test code | `0` |
 | P1 | P1a iterator-for, P1b declarator, P1c assignment/declaration-wrapper, and P1d condition-loop layouts complete | private loop-layout casts, Lambda declaration-as-assignment casts, duplicate assignment/wrapper structs, old condition-loop tags, and migrated core-child cases | `-110` |
-| P2 | P2a/P2b source and synthetic `FunctionId` authority landed; remaining scope/binding/class IDs and one binding/index graph | lowering name repair, pointer indexes, lookup caches made obsolete, repeated identity walks | `<= -500` |
+| P2 | P2a/P2b source and synthetic `FunctionId` authority plus the P2c lowering-binding handoff landed; remaining scope/binding/class IDs and one binding/index graph | lowering name repair, pointer indexes, lookup caches made obsolete, repeated identity walks | `<= -500` |
 | P3 | one compilation unit, typed pass schedule, and one compile lifecycle | duplicated parse/build/validate/index/link/cleanup orchestration and false fact publication | `<= -800` |
 | P4 | `FunctionId`-owned analysis and graph worklists | duplicate `JsFuncCollected` analysis, count/fill scans, per-pass AST caches and propagation loops | `<= -1,200` |
 | P5 | full-contract `MirValue` core and shared structural MIR lowering | corresponding Lambda/JS bare-register cases, duplicate structural statement/expression/call plumbing | `<= -2,100` |
@@ -653,8 +653,37 @@ make build-release-compile                            # Errors: 0, Warnings: 37;
 git diff --check                                     # clean
 ```
 
-P2c now owns scope/binding/class IDs and the shared binding graph; no callable
-identity fallback remains in normal indexed compilation.
+P2c now owns the lowering binding handoff; no callable identity fallback or
+compiler-time scope re-resolution remains in normal indexed compilation. Dense
+scope/binding/class IDs and the shared binding graph are the remaining P2c work.
+
+#### P2c implementation record — lowering binding handoff, 2026-08-28
+
+**D8.2.4** requires lowering to consume resolved binding identity rather than
+rebuild compiler scope state. P2c makes the AST builder's `AstIdentNode::entry`
+the sole binding input for JS MIR direct-call resolution and Test262 assert
+classification. The MIR lane no longer calls `js_scope_lookup()` after the
+indexed unit is sealed, and the stale-scope parameter/capture repair scan is
+deleted. Runtime dynamic lookup remains in the JS runtime; this change only
+removes compiler-time name re-resolution.
+
+The independent P2c slice is C/C++ `+8/-75 = -67`; all hand source is also
+`+8/-75 = -67`. The governed candidate is 310,532 lines, 179 below the project
+anchor and 9,074 below the formal anchor. The remaining P2c work is the dense
+`ScopeId`/`BindingId`/`ClassId` graph and shared use/definition publication; the
+builder-only lookup cache stays until those consumers migrate.
+
+Focused evidence:
+
+```text
+make build                                           # Errors: 0, Warnings: 12
+./test/test_js_gtest.exe                             # 357/357 passed
+./test/test_js_opt_gtest.exe                         # 19/19 passed
+P2c shadow/closure/direct-call fixtures              # all passed in JS suite
+! rg 'js_scope_lookup\(' lambda/js/js_mir*          # no MIR compiler lookup
+./utils/check_ast_tune_loc.sh ... --cap 310690      # C/C++ -179; source -195; candidate -179
+git diff --check                                     # clean
+```
 
 ### 4.4 P3 — Make the pass manager and compile driver real
 

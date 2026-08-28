@@ -277,8 +277,7 @@ static const JsTest262Intercept* jm_test262_lookup(const JsTest262Intercept* tab
 // the harness fast path. Dynamic Function parameters can be MIR locals with no
 // useful scope node, so the MIR var table is checked too.
 static bool jm_test262_assert_is_local(JsMirTranspiler* mt, JsIdentifierNode* id) {
-    NameEntry* entry = js_scope_lookup(mt->tp, id->name);
-    if (!entry) entry = id->entry;
+    NameEntry* entry = id ? id->entry : NULL;
     if (entry && entry->node) return true;
     return jm_find_var(mt, "_js_assert") != NULL;
 }
@@ -369,8 +368,7 @@ static bool jm_is_test262_global_assert_identifier(JsMirTranspiler* mt, JsAstNod
         return false;
     }
     JsIdentifierNode* id = (JsIdentifierNode*)node;
-    NameEntry* assert_entry = js_scope_lookup(mt->tp, id->name);
-    if (!assert_entry) assert_entry = id->entry;
+    NameEntry* assert_entry = id->entry;
     char assert_vname[16];
     snprintf(assert_vname, sizeof(assert_vname), "_js_assert");
     bool is_local_assert = (assert_entry && assert_entry->node) ||
@@ -3297,18 +3295,6 @@ static bool jm_current_scope_has_var(JsMirTranspiler* mt, const char* vname) {
     return hashmap_get(scope, &key) != NULL;
 }
 
-static JsMirVarEntry* jm_current_scope_find_var_entry(JsMirTranspiler* mt, const char* vname) {
-    struct hashmap* scope = jm_var_scope_at(mt, mt ? mt->scope_depth : -1);
-    if (!mt || !vname || mt->scope_depth < 0 || !scope) {
-        return NULL;
-    }
-    JsVarScopeEntry key;
-    memset(&key, 0, sizeof(key));
-    key.name = vname;
-    JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(scope, &key);
-    return found ? &found->var : NULL;
-}
-
 static bool jm_current_param_pattern_declares(JsMirTranspiler* mt, const char* vname) {
     if (!mt || !vname || !mt->current_fc || !mt->current_fc->node) return false;
     struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
@@ -5853,9 +5839,9 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
             return jm_emit_eval_identifier_call(mt, call);
         }
 
-        NameEntry* entry = js_scope_lookup(mt->tp, id->name);
-        // Fallback: use pre-resolved entry from AST building if scope lookup fails
-        if (!entry && id->entry) entry = id->entry;
+        // consume the binding resolved by the AST builder; the indexed unit is
+        // immutable during MIR lowering.
+        NameEntry* entry = id->entry;
 
         // Resolve to a JsFunctionNode for direct call.  Two cases are safe:
         //   1. A `function foo(){}` declaration (hoisted, always callable).
@@ -5887,58 +5873,6 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                 }
             }
 
-            // Guard: if the resolved function is from an outer scope and a local
-            // variable (parameter or capture) shadows the name, skip direct call.
-            // js_scope_lookup uses stale AST scopes during MIR transpilation and may
-            // resolve to a function from a parent scope even when a parameter shadows it.
-            if (resolved_fn && mt->current_fc) {
-                JsFuncCollected* fc_check = jm_find_collected_func(mt, resolved_fn);
-                if (fc_check) {
-                    int current_fc_idx = (int)(mt->current_fc - mt->func_entries);
-                    if (fc_check->parent_index != current_fc_idx) {
-                        // Resolved function is not a direct child of current function.
-                        // Check if a parameter of the current function shadows the name.
-                        JsFunctionNode* cur_fn = mt->current_fc->node;
-                        if (cur_fn) {
-                            for (JsAstNode* p = cur_fn->params; p; p = p->next) {
-                                JsAstNode* pid = p;
-                                // Unwrap assignment pattern (default params): name = default
-                                if (pid->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN)
-                                    pid = ((JsAssignmentPatternNode*)pid)->left;
-                                // Unwrap rest element: ...name
-                                if (pid->node_type == JS_AST_NODE_REST_ELEMENT)
-                                    pid = ((JsSpreadElementNode*)pid)->argument;
-                                if (pid->node_type == JS_AST_NODE_IDENTIFIER) {
-                                    JsIdentifierNode* param_id = (JsIdentifierNode*)pid;
-                                    if (param_id->name->len == id->name->len &&
-                                        memcmp(param_id->name->chars, id->name->chars, id->name->len) == 0) {
-                                        resolved_fn = NULL;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        // Also check captures (from_env) for the same name
-                        const char* vname_check = jm_var_name(id->name);
-                        JsMirVarEntry* local_shadow =
-                            jm_current_scope_find_var_entry(mt, vname_check);
-                        if (resolved_fn && local_shadow && !local_shadow->from_env) {
-                            // Direct function-body declarations shadow outer
-                            // functions even when stale AST scope lookup resolves
-                            // the call name to the parent declaration.
-                            resolved_fn = NULL;
-                        }
-                        if (resolved_fn && mt->current_fc->capture_count > 0) {
-                            for (int ci = 0; ci < mt->current_fc->capture_count; ci++) {
-                                if (strcmp(mt->current_fc->captures[ci].name, vname_check) == 0) {
-                                    resolved_fn = NULL;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         if (resolved_fn) {
