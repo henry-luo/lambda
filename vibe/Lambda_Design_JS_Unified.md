@@ -742,7 +742,7 @@ Recommended order:
 
 Mode-specific policy is data on the unit: parse goal, module/eval/preamble flags, backend selection, execution policy, and artifact-retention policy. It is not a copy of the driver.
 
-The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. Manual phase timing and cleanup labels remain for the later driver slices.
+The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. P3b moves MIR context creation, error-handler installation, transpiler ownership, name-base setup, and module creation into one script-unit opener used by ordinary source and pre-built-AST entry points. Manual phase timing and cleanup labels remain for the later driver slices.
 
 #### P3a implementation record — truthful JavaScript validation pass, 2026-08-28
 
@@ -771,6 +771,37 @@ make build-test                                      # Errors: 0; Warnings: 40
                                                        # 51/51 passed
 ./utils/check_ast_tune_loc.sh --base 44b98dcebd19a548a14bbb75785091b545445f00 --cap 310711 --phase-base 068301268
                                                        # candidate 310,524; phase C/C++ -3; source -3
+git diff --check                                     # clean
+```
+
+#### P3b implementation record — shared script-unit opener, 2026-08-28
+
+**D8.2.5** requires compilation-unit policy and ownership to be explicit rather
+than copied across entry points. The ordinary source and pre-built-AST paths
+now call `js_mir_open_script_unit`, which creates the MIR context, installs the
+mode-selected batch error handler, creates and tracks `JsMirTranspiler`,
+publishes the preamble name base, and opens the script module. Their duplicated
+context/transpiler/module setup is retired immediately; the pre-built-AST
+success path also clears its active-transpile owner before destruction. The
+remaining preamble, import, link, execution, and retention policy stays in the
+caller until its own driver slice.
+
+The independent P3b slice is C/C++ `+33/-33 = 0`; all hand source is also
+`+33/-33 = 0`. The phase base is commit `79a1f1684`; the governed candidate is
+310,524 lines, unchanged from P3a and below the 310,711-line cap. This is a
+zero-growth migration: every new helper line retires an equivalent duplicated
+setup line in the two clients.
+
+Focused evidence:
+
+```text
+make build-test                                      # Errors: 0; Warnings: 36
+./test/test_js_gtest.exe                             # 357/357 passed
+./test/test_js_script_gtest.exe --gtest_filter='JsScriptOwnership.*:JsInterpreter.*'
+                                                       # 51/51 passed
+./test/test_js_opt_gtest.exe                         # 19/19 passed
+./utils/check_ast_tune_loc.sh --base 44b98dcebd19a548a14bbb75785091b545445f00 --cap 310711 --phase-base 79a1f1684
+                                                       # candidate 310,524; phase C/C++ 0; source 0
 git diff --check                                     # clean
 ```
 

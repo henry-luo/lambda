@@ -400,6 +400,30 @@ extern "C" bool js_prepare_eval_context(Runtime* runtime,
     return true;
 }
 
+// one script-shaped unit owns one MIR transpiler and its module artifact.
+static JsMirTranspiler* js_mir_open_script_unit(
+        JsTranspiler* tp, const char* filename,
+        const char* module_name, uint32_t module_name_base,
+        const char* log_prefix, bool install_error_handler,
+        MIR_context_t* out_ctx) {
+    if (!out_ctx) return NULL;
+    *out_ctx = jit_init(g_js_mir_optimize_level);
+    if (!*out_ctx) {
+        log_error("%s: MIR context init failed", log_prefix ? log_prefix : "js-mir");
+        return NULL;
+    }
+    if (install_error_handler && g_batch_mir_error_handler) {
+        MIR_set_error_func(*out_ctx, g_batch_mir_error_handler);
+    }
+    JsMirTranspiler* mt = jm_create_mir_transpiler(
+        tp, *out_ctx, filename, false, 64, 32, 16, log_prefix);
+    if (!mt) return NULL;
+    jm_track_active_js_transpile(NULL, mt, NULL);
+    mt->module_name_base = module_name_base;
+    mt->module = MIR_new_module(*out_ctx, module_name);
+    return mt;
+}
+
 Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
                              const char* filename, uint64_t* result_home) {
     log_debug("js-mir-ast: transpiling pre-built AST for '%s'", filename ? filename : "<string>");
@@ -416,23 +440,14 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     Input* js_input = Input::create(context->pool);
     js_runtime_set_input(js_input);
 
-    // initialize MIR context
-    MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
-    if (!ctx) {
-        log_error("js-mir-ast: MIR context init failed");
-        return js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
-            runtime, js_context, reusing_context);
-    }
-
-    // set up MIR transpiler
-    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir-ast");
+    MIR_context_t ctx = NULL;
+    JsMirTranspiler* mt = js_mir_open_script_unit(tp, filename,
+        "ts_script", js_preamble_consumer_name_base(g_jm_preamble_in),
+        "js-mir-ast", false, &ctx);
     if (!mt) {
         return js_mir_compile_unit_fail(ctx, NULL, tp, NULL,
             runtime, js_context, reusing_context);
     }
-    mt->module_name_base = js_preamble_consumer_name_base(g_jm_preamble_in);
-
-    mt->module = MIR_new_module(ctx, "ts_script");
 
     // transpile AST to MIR
     if (!transpile_js_mir_ast(mt, ast)) {
@@ -512,6 +527,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     // pointer transfer is needed after execution.
 
     // cleanup
+    jm_clear_active_js_transpile(NULL, mt, NULL);
     jm_destroy_mir_transpiler(mt);
     MIR_finish(ctx);
     // the AST entry point owns the parser after delegation; its TypeScript
@@ -869,41 +885,25 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         auto_interp_for_large_source = true;
         log_info("js-mir: large source (%zu bytes) uses MIR interpreter at opt=0", js_source_len);
     }
-    MIR_context_t ctx = jit_init(g_js_mir_optimize_level);
     if (auto_interp_for_large_source) {
         g_mir_interp_mode = saved_mir_interp_mode;
     }
-    if (!ctx) {
-        log_error("js-mir: MIR context init failed");
-        return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
-            runtime, js_context, reusing_context);
-    }
-    g_active_mir_ctx = ctx;  // track for batch timeout recovery
+    MIR_context_t ctx = NULL;
 
-    // Install batch error handler if set (prevents exit(1) on MIR errors)
-    if (g_batch_mir_error_handler) {
-        MIR_set_error_func(ctx, g_batch_mir_error_handler);
-    }
-
-    // Set up the compact MIR transpiler; source-sized collection storage is allocated after parsing.
-    JsMirTranspiler* mt = jm_create_mir_transpiler(tp, ctx, filename, false, 64, 32, 16, "js-mir");
+    JsMirTranspiler* mt = js_mir_open_script_unit(tp, filename, "js_script",
+        js_preamble_consumer_name_base(g_jm_preamble_in), "js-mir", true, &ctx);
     if (!mt) {
         return js_mir_compile_unit_fail(ctx, NULL, tp, owned_source,
             runtime, js_context, reusing_context);
     }
-    jm_track_active_js_transpile(NULL, mt, NULL);
-    mt->module_name_base = js_preamble_consumer_name_base(g_jm_preamble_in);
+    g_active_mir_ctx = ctx;  // track for batch timeout recovery
 
-    // Preamble mode setup
     mt->preamble_mode = g_jm_preamble_mode;
     if (g_jm_preamble_in) {
         mt->preamble_entries = g_jm_preamble_in->entries;
         mt->preamble_entry_count = g_jm_preamble_in->entry_count;
         mt->preamble_var_count = g_jm_preamble_in->module_var_count;
     }
-
-    // Create module
-    mt->module = MIR_new_module(ctx, "js_script");
 
     // Transpile AST to MIR
     phase_start = js_mir_phase_now_us();
