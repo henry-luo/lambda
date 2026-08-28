@@ -2,6 +2,7 @@
 #include "view.hpp"
 #include "event.hpp"
 #include "../lib/log.h"
+#include "../lib/strbuf.h"
 #include <string.h>
 #include <math.h>
 
@@ -23,10 +24,12 @@ struct FixedInputIntrinsicSize {
 
 static bool apply_fixed_input_intrinsic_size(FormControlProp* form, float pixel_ratio) {
     static const FixedInputIntrinsicSize sizes[] = {
-        {"date", 119.0f, 17.0f},
-        {"time", 96.0f, 17.0f},
-        {"month", 149.0f, 17.0f},
-        {"week", 141.0f, 17.0f},
+        // Chromium's native date/time editors retain fractional CSS-pixel
+        // field metrics that differ from the generic text-control box.
+        {"date", 121.33f, 17.33f},
+        {"time", 100.0f, 20.0f},
+        {"month", 151.33f, 17.33f},
+        {"week", 143.33f, 17.33f},
         {"color", 44.0f, 23.0f},
     };
     for (const FixedInputIntrinsicSize& size : sizes) {
@@ -50,6 +53,18 @@ static void set_form_child_box(DomElement* elem, float x, float y,
 
 static void zero_form_child_box(DomElement* elem) {
     set_form_child_box(elem, 0.0f, 0.0f, 0.0f, 0.0f);
+}
+
+float form_control_em_size(LayoutContext* lycon, ViewBlock* block, float em) {
+    float font_size = block && block->font && block->fontp()->font_size > 0.0f
+        ? block->fontp()->font_size : 0.0f;
+    if (font_size <= 0.0f && lycon) {
+        font_size = lycon->font.current_font_size > 0.0f
+            ? lycon->font.current_font_size
+            : (lycon->font.style ? lycon->font.style->font_size : 0.0f);
+    }
+    if (font_size <= 0.0f) font_size = 16.0f;
+    return font_size * em;
 }
 
 static void layout_form_option_child(DomElement* option, bool listbox,
@@ -119,6 +134,20 @@ static float textarea_used_line_height(LayoutContext* lycon, ViewBlock* block,
                                        FontProp* font, bool has_css_font) {
     if (!font || font->font_size <= 0.0f) return 0.0f;
 
+    if (!form_control_has_specified_line_height(block)) {
+        // The textarea UA rule supplies `normal`; inherited author line-height
+        // must not replace that specified control value.
+        if (lycon->ui_context) {
+            FontBox temp_font;
+            setup_font(lycon->ui_context, &temp_font, font);
+            if (font_box_handle(&temp_font)) {
+                float normal = calc_normal_line_height(font_box_handle(&temp_font));
+                if (normal > 0.0f) return normal;
+            }
+        }
+        return has_css_font ? font->font_size * 1.2f : 15.0f;
+    }
+
     float line_height = 0.0f;
     if (block && block->blk && block->block_mut()->line_height) {
         const CssValue* value = block->block()->line_height;
@@ -172,6 +201,59 @@ static int textarea_visual_line_count(LayoutContext* lycon, FontProp* font,
     return line_count;
 }
 
+static bool datetime_local_digits_have_nonzero_value(const char* part) {
+    if (!part) return false;
+    for (const char* cursor = part; *cursor && *cursor != '.'; cursor++) {
+        if (*cursor >= '1' && *cursor <= '9') return true;
+    }
+    return false;
+}
+
+static const char* datetime_local_time_part(const char* value) {
+    if (!value) return nullptr;
+    const char* time = strchr(value, 'T');
+    if (!time) time = strchr(value, ' ');
+    return time ? time + 1 : nullptr;
+}
+
+static bool datetime_local_value_has_nonzero_seconds(const char* value) {
+    const char* time = datetime_local_time_part(value);
+    if (!time) return false;
+    const char* minute_separator = strchr(time, ':');
+    const char* second_separator = minute_separator
+        ? strchr(minute_separator + 1, ':') : nullptr;
+    return second_separator &&
+        datetime_local_digits_have_nonzero_value(second_separator + 1);
+}
+
+static bool datetime_local_value_has_nonzero_fraction(const char* value) {
+    const char* time = datetime_local_time_part(value);
+    const char* fraction = time ? strchr(time, '.') : nullptr;
+    return fraction && datetime_local_digits_have_nonzero_value(fraction + 1);
+}
+
+static double datetime_local_step_seconds(ViewBlock* block) {
+    const char* step = block ? block->get_attribute("step") : nullptr;
+    if (!step || !*step || strcmp(step, "any") == 0) return 60.0;
+    double seconds = str_to_double_default(step, strlen(step), 60.0);
+    return seconds > 0.0 ? seconds : 60.0;
+}
+
+static float datetime_local_intrinsic_content_width(ViewBlock* block,
+                                                    FormControlProp* form) {
+    double step_seconds = datetime_local_step_seconds(block);
+    bool has_fractional_seconds = datetime_local_value_has_nonzero_fraction(
+        form ? form->value : nullptr) || step_seconds < 1.0;
+    bool has_seconds = has_fractional_seconds ||
+        datetime_local_value_has_nonzero_seconds(form ? form->value : nullptr) ||
+        step_seconds < 60.0;
+    if (has_fractional_seconds) {
+        return FormDefaults::DATETIME_LOCAL_MILLISECONDS_CONTENT_WIDTH;
+    }
+    return has_seconds ? FormDefaults::DATETIME_LOCAL_SECONDS_CONTENT_WIDTH
+                       : FormDefaults::DATETIME_LOCAL_CONTENT_WIDTH;
+}
+
 static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
                                  FormControlProp* form, FontProp* font) {
     float pr = lycon->ui_context->pixel_ratio;
@@ -180,20 +262,7 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
     // Chrome renders these at specific widths based on their picker format.
     if (form->input_type) {
         if (strcmp(form->input_type, "datetime-local") == 0) {
-            // Chrome: ~211px border-box for HH:MM format, ~271px with seconds/ms
-            // Width depends on the HTML value content attribute (not JS-set value).
-            // If seconds (.ss or .sss) present in value attr → wider to show seconds field.
-            float w = 205.0f;
-            if (form->value && *form->value) {
-                // Find the time part after 'T' and count colons there
-                const char* t = strchr(form->value, 'T');
-                if (t) {
-                    int colons = 0;
-                    for (const char* p = t + 1; *p; p++) if (*p == ':') colons++;
-                    if (colons >= 2) w = 265.0f;  // has seconds → wider
-                }
-            }
-            form->intrinsic_width = w * pr;
+            form->intrinsic_width = datetime_local_intrinsic_content_width(block, form) * pr;
             form->intrinsic_height = 17.0f * pr;
             return;
         }
@@ -201,51 +270,35 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
     }
 
     int size = form->size > 0 ? form->size : FormDefaults::TEXT_SIZE_CHARS;
-    // HTML spec §4.10.5.3.7: The size attribute specifies the width in "average character widths".
-    // Chrome uses the advance width of '0' (U+0030) in the input's resolved font (the CSS 'ch'
-    // unit). The calibrated default (145px for 20 chars at 13.3333px) matches Chrome's system
-    // font. When CSS sets a different font-family (e.g. monospace), the '0' advance differs
-    // significantly, so we measure the actual glyph and use it instead.
-    float def_bp_h = 2 * (FormDefaults::TEXT_PADDING_H + FormDefaults::TEXT_BORDER);
-    float default_content_w = FormDefaults::TEXT_WIDTH - def_bp_h;  // 145
+    // HTML Rendering §15.5.6 converts the size attribute as
+    // (size - 1) × average character width + maximum character width.
+    float default_content_w = FormDefaults::TEXT_CONTENT_WIDTH;
     float ua_font_size = 13.3333f;
-    float calibrated_char_w = default_content_w / FormDefaults::TEXT_SIZE_CHARS;  // 7.25
 
     float content_w = 0;
     bool uses_ua_default_width = size == FormDefaults::TEXT_SIZE_CHARS &&
         !form_control_has_specified_font(block);
     if (uses_ua_default_width) {
-        // Keep the UA calibration only when the control retains the UA font.
-        // With an author font, HTML's `size` is measured in that font's average
-        // character width, including the default value of 20.
+        // Preserve the calibrated UA preferred width for the unstyled control.
         content_w = default_content_w;
     } else if (font && font->font_size > 0 && lycon->ui_context) {
         FontBox temp_font;
         setup_font(lycon->ui_context, &temp_font, font);
         if (font_box_handle(&temp_font)) {
-            GlyphInfo zero_glyph = font_get_glyph(font_box_handle(&temp_font), '0');
-            if (zero_glyph.advance_x > 0) {
-                // HTML spec §4.10.5.3.7 + CSS Values §6.1.2 (ch unit):
-                // Use the actual advance width of '0' from the resolved font.
-                // However, font-family for unstyled inputs varies between
-                // platforms and font backends — Chrome's UA-default Arial
-                // gives '0' advance ≈ 7.25 at 13.3333px, but our font
-                // backend may resolve a slightly different metric (e.g.
-                // 7.4) producing border-box widths a few px wider than
-                // Chrome. When the measured advance is within ~5% of the
-                // calibrated UA value at the UA font size, snap to the
-                // calibrated value so unstyled inputs match Chrome's UA
-                // baseline. CSS-overridden fonts (monospace, bold, large
-                // sizes, etc.) deviate well outside this tolerance and
-                // continue to use the measured advance.
-                float measured = zero_glyph.advance_x;
-                if (font->font_size == ua_font_size) {
-                    float ratio = measured / calibrated_char_w;
-                    if (ratio >= 0.95f && ratio <= 1.05f) {
-                        measured = calibrated_char_w;
-                    }
-                }
-                content_w = measured * size;
+            float average_metric = font_get_text_control_avg_char_width(
+                font_box_handle(&temp_font));
+            float average_char_w = roundf(average_metric);
+            if (average_char_w <= 0.0f) {
+                GlyphInfo zero_glyph = font_get_glyph(font_box_handle(&temp_font), '0');
+                average_char_w = zero_glyph.advance_x;
+            }
+            float max_char_w = font_get_max_char_width(font->font_handle);
+            if (max_char_w > 0.0f && average_char_w > 0.0f) {
+                // Keep the maximum-width term separate from the average width:
+                // it preserves room for the widest character without treating
+                // the size attribute as a CSS `ch` length.
+                content_w = ceilf(average_char_w * size) +
+                    max_char_w - average_char_w;
             }
         }
     }
@@ -255,11 +308,6 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
         if (font && font->font_size > 0 && font->font_size != ua_font_size) {
             content_w = content_w * font->font_size / ua_font_size;
         }
-    }
-    if (!uses_ua_default_width && !form->appearance_none) {
-        // Native text controls reserve an inline editing gutter inside the CSS
-        // content box; `appearance:none` removes that UA-only geometry.
-        content_w += FormDefaults::TEXT_SIZE_CONTENT_GUTTER_H;
     }
     form->intrinsic_width = content_w;
     // Height: Chrome uses max(default_content_height, normal_line_height).
@@ -325,8 +373,12 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
         float char_w;
         float scrollbar_reserve;
         if (has_css_font) {
-            char_w = font->average_char_width > 0.0f
-                ? roundf(font->average_char_width)
+            FontBox temp_font;
+            setup_font(lycon->ui_context, &temp_font, font);
+            float average_metric = font_get_text_control_avg_char_width(
+                font_box_handle(&temp_font));
+            char_w = average_metric > 0.0f
+                ? roundf(average_metric)
                 : (font->space_width > 0.0f ? roundf(font->space_width) : roundf(font_size * 0.60f));
             scrollbar_reserve = 16.0f;
         } else {
@@ -362,6 +414,18 @@ const char* form_button_label_text(ViewBlock* block, FormControlProp* form) {
     return text;
 }
 
+static bool form_button_has_authored_vertical_box(ViewBlock* block) {
+    if (!block || !block->bound) return false;
+    float zoom = layout_effective_zoom((View*)block);
+    BoxMetrics box = layout_box_metrics(block);
+    float ua_padding = 2.0f * FormDefaults::BUTTON_PADDING_V * zoom;
+    float ua_border = 2.0f * FormDefaults::BUTTON_BORDER * zoom;
+    // Author vertical padding/border replaces the UA button box metric, so
+    // auto height must be based on the text cell plus the used decoration.
+    return fabsf(box.padding_v - ua_padding) > 0.01f ||
+        fabsf(box.border_v - ua_border) > 0.01f;
+}
+
 /**
  * Calculate intrinsic size for a button based on content/value.
  * Returns border-box dimensions matching Chrome's UA defaults.
@@ -387,7 +451,15 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
     {
         float def_bp_v = 2 * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER) * zoom;
         float content_height = (FormDefaults::TEXT_HEIGHT * zoom - def_bp_v) * pr;
-        if (block && block->display.inner == CSS_VALUE_FLEX &&
+        if (form_button_has_authored_vertical_box(block) &&
+            font && font->font_size > 0 && lycon->ui_context) {
+            FontBox temp_font;
+            setup_font(lycon->ui_context, &temp_font, font);
+            if (font_box_handle(&temp_font)) {
+                float cell_height = font_get_cell_height(font_box_handle(&temp_font));
+                if (cell_height > 0.0f) content_height = cell_height;
+            }
+        } else if (block && block->display.inner == CSS_VALUE_FLEX &&
             font && font->font_size > 0 && lycon->ui_context) {
             FontBox temp_font;
             setup_font(lycon->ui_context, &temp_font, font);
@@ -414,6 +486,10 @@ float layout_select_combo_intrinsic_width(float max_text_width, bool has_ua_arro
     return calculated > min_select_width ? calculated : min_select_width;
 }
 
+static float layout_select_option_text_intrinsic_width(LayoutContext* lycon,
+                                                       DomElement* option,
+                                                       bool use_min_content);
+
 float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
                                       bool use_min_content) {
     if (!select) return 0.0f;
@@ -421,8 +497,8 @@ float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
     float max_text_width = 0.0f;
     for (DomElement* option = dom_select_next_option(select, nullptr); option;
          option = dom_select_next_option(select, option)) {
-        float option_width = measure_direct_text_children_intrinsic_width(
-            lycon, option, use_min_content, CSS_VALUE_NONE);
+        float option_width = layout_select_option_text_intrinsic_width(
+            lycon, option, use_min_content);
         DomElement* parent = option->parent ? option->parent->as_element() : nullptr;
         if (parent && parent->tag() == MARKUP_NAME_OPTGROUP) {
             option_width += FormDefaults::OPTGROUP_OPTION_INDENT;
@@ -445,6 +521,48 @@ float layout_select_option_text_width(LayoutContext* lycon, DomElement* select,
         if (label_width > max_text_width) max_text_width = label_width;
     }
     return max_text_width;
+}
+
+static int layout_select_selected_count(DomElement* select) {
+    int selected_count = 0;
+    for (DomElement* option = dom_select_next_option(select, nullptr); option;
+         option = dom_select_next_option(select, option)) {
+        if (dom_option_is_selected(option)) selected_count++;
+    }
+    return selected_count;
+}
+
+static float layout_select_option_text_intrinsic_width(LayoutContext* lycon,
+                                                       DomElement* option,
+                                                       bool use_min_content) {
+    StrBuf* label = strbuf_new_cap(32);
+    if (!label) return 0.0f;
+    dom_option_text_normalized(option, label);
+    TextIntrinsicWidths widths = measure_text_intrinsic_widths(
+        lycon, label->str, label->length);
+    strbuf_free(label);
+    return use_min_content ? widths.min_content : widths.max_content;
+}
+
+static float layout_select_multiple_summary_width(LayoutContext* lycon,
+                                                  int selected_count) {
+    StrBuf* summary = strbuf_new_cap(24);
+    if (!summary) return 0.0f;
+    strbuf_append_int(summary, selected_count);
+    strbuf_append_str(summary, " selected");
+    TextIntrinsicWidths widths = measure_text_intrinsic_widths(
+        lycon, summary->str, summary->length);
+    float width = widths.max_content;
+    strbuf_free(summary);
+    return width;
+}
+
+static bool layout_select_field_sizing_content(ViewBlock* block) {
+    StyleTree* style = block ? block->specified_style : nullptr;
+    CssDeclaration* decl = style
+        ? style_tree_get_declaration(style, CSS_PROPERTY_FIELD_SIZING) : nullptr;
+    return decl && decl->value && decl->value->type == CSS_VALUE_TYPE_KEYWORD &&
+        decl->value->data.keyword == CSS_VALUE_CONTENT;
 }
 
 static float layout_select_listbox_row_height(const FormControlProp* form) {
@@ -476,17 +594,19 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
     int option_index = 0;
     for (DomElement* option = dom_select_next_option(block, nullptr); option;
          option = dom_select_next_option(block, option), option_index++) {
-        float width = measure_direct_text_children_intrinsic_width(
-            lycon, option, use_min_content, CSS_VALUE_NONE);
+        float width = layout_select_option_text_intrinsic_width(
+            lycon, option, use_min_content);
         if (option_index == selected_index) selected_text_width = width;
     }
     // Chrome select border-box width includes text + arrow area + internal padding.
     // Chrome uses the system font for select text, which differs from the page font.
     // backend metrics measure with the page font — sometimes wider, sometimes narrower than Chrome.
     // A moderate overhead balances both cases across the test suite.
-    // HTML §4.10.7: listbox mode when multiple attr is set OR size > 1
+    // HTML §4.10.7 permits a platform multi-select drop-down when multiple
+    // has display size 1; larger and default multi-selects remain list boxes.
+    bool is_multi_dropdown = form->multiple && form->select_size == 1;
     // Listbox: no arrow, width = text content; height = visible_rows * row_height + 2px border
-    bool is_listbox = form->multiple || form->select_size > 1;
+    bool is_listbox = form->select_size > 1 || (form->multiple && !is_multi_dropdown);
     if (is_listbox) {
         layout_materialize_pseudo_content(lycon, block);
         // HTML §4.10.7: visible rows = size if given, else 4 for multiple, else max(1, option_count)
@@ -524,8 +644,9 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
                 // native option metrics must not overwrite that wider contribution.
                 content_width = max(content_width, generated.max_content + box.pad_border_h);
             }
-            float min_listbox_width = FormDefaults::SELECT_HEIGHT; // at least square
-            form->intrinsic_width = content_width > min_listbox_width ? content_width : min_listbox_width;
+            // The listbox width is driven by option content; HTML does not add
+            // a square-control minimum when an option's label is empty.
+            form->intrinsic_width = content_width;
             form->intrinsic_height = visible_rows * row_height + 2.0f;
         }
     } else {
@@ -535,6 +656,20 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
         // In that case we must NOT add UA arrow overhead, otherwise the
         // border-box ends up wider than what the author intended.
         bool has_ua_arrow = !form->appearance_none;
+        if (is_multi_dropdown) {
+            int selected_count = layout_select_selected_count(block->as_element());
+            if (layout_select_field_sizing_content(block)) {
+                if (selected_count == 1) {
+                    max_text_width = selected_text_width;
+                } else {
+                    max_text_width = layout_select_multiple_summary_width(
+                        lycon, selected_count);
+                }
+            } else {
+                max_text_width = max(max_text_width,
+                    layout_select_multiple_summary_width(lycon, form->option_count));
+            }
+        }
         if (form->appearance_base_select) {
             // The base select button is an inline flex row: selected label,
             // UA gap, picker icon, padding, and border all contribute intrinsically.
@@ -595,12 +730,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
  * Called from layout_block when the element owns the form-control role.
  */
 void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
-    log_info("[FORM] layout_form_control ENTRY: block=%p, prop_type=%d, form=%p, tag=%s",
-             block, block ? block->item_prop_debug_kind() : -1, block ? block->form : nullptr,
-             (block && block->tag_name) ? block->tag_name : "?");
     if (!block || block->role_kind() != DomElement::ROLE_FORM || !block->form) {
-        log_info("[FORM] layout_form_control SKIP: block=%p, prop_type=%d, form=%p",
-                 block, block ? block->item_prop_debug_kind() : -1, block ? block->form : nullptr);
         return;
     }
 
@@ -735,8 +865,17 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
             select_baseline_offset = max(0.0f,
                 (block->content_height - natural_line_height) * 0.5f);
         }
-        lycon->block.last_line_ascender = border_top + pad_top + font_ascender +
-            select_baseline_offset;
+        if (form->control_type == FORM_CONTROL_TEXT) {
+            float native_vertical_reserve = 2.0f *
+                (FormDefaults::TEXT_BORDER + FormDefaults::TEXT_PADDING_V);
+            // Native text inputs expose a baseline inside their fixed control
+            // box; retain the UA vertical reserve when the box height varies.
+            lycon->block.last_line_ascender = max(
+                block->height - native_vertical_reserve, 0.0f);
+        } else {
+            lycon->block.last_line_ascender = border_top + pad_top + font_ascender +
+                select_baseline_offset;
+        }
         lycon->block.last_line_max_ascender = lycon->block.last_line_ascender;
 
         if (textarea_needs_baseline_set) {

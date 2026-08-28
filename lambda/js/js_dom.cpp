@@ -7061,30 +7061,10 @@ JS_FORWARD_STATIC_VOID( _collect_options, (DomNode* node, Item arr), _collect_op
 // of leading/trailing ASCII whitespace, with internal whitespace
 // collapsed per HTML spec for <option> label).
 static char* _option_text(DomElement* opt) {
-    StrBuf* sb = strbuf_new_cap(32);
-    collect_text_content((DomNode*)opt, sb);
-    // collapse whitespace
     StrBuf* out = strbuf_new_cap(32);
-    bool prev_ws = true;
-    if (sb->str) {
-        for (size_t i = 0; i < sb->length; i++) {
-            char c = sb->str[i];
-            bool ws = (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f');
-            if (ws) {
-                if (!prev_ws) strbuf_append_char(out, ' ');
-                prev_ws = true;
-            } else {
-                strbuf_append_char(out, c);
-                prev_ws = false;
-            }
-        }
-    }
-    // trim trailing
-    while (out->length > 0 && out->str[out->length - 1] == ' ') {
-        out->str[--out->length] = '\0';
-    }
+    if (!out) return mem_strdup("", MEM_CAT_JS_RUNTIME);
+    dom_option_text_normalized(opt, out);
     char* result = mem_strdup(out->str ? out->str : "", MEM_CAT_JS_RUNTIME);
-    strbuf_free(sb);
     strbuf_free(out);
     return result;
 }
@@ -13552,6 +13532,105 @@ static bool js_dom_remove_backed_child(DomElement* parent, DomNode* child) {
     return ((DomNode*)parent)->remove_child(child);
 }
 
+static bool js_dom_replace_document_element(DomElement* old_root,
+                                            DomElement* replacement) {
+    if (!old_root || !replacement || old_root == replacement ||
+        !old_root->doc || old_root->doc->root != old_root ||
+        replacement->is_synthetic()) {
+        return old_root == replacement;
+    }
+
+    DomDocument* doc = old_root->doc;
+    if (!doc->input || replacement->parent) return false;
+
+    // Use the document proxy as the logical parent for adoption and DOM links;
+    // the parser's #document Mark element remains the persistent backing root.
+    DomElement* document_node = (DomElement*)js_dom_get_or_create_doc_node(doc);
+    if (!document_node || !js_dom_prepare_cross_document_insertion(
+            (DomNode*)replacement, document_node)) {
+        return false;
+    }
+
+    Element* replacement_backing = dom_element_to_element(replacement);
+    Element* old_backing = dom_element_to_element(old_root);
+    if (!replacement_backing || !old_backing) return false;
+
+    Element* input_root = doc->input->root.element;
+    if (!input_root) return false;
+
+    int64_t old_index = -1;
+    bool input_is_document = false;
+    TypeElmt* input_root_type = (TypeElmt*)input_root->type;
+    if (input_root_type && input_root_type->name.str &&
+        strcmp(input_root_type->name.str, "#document") == 0) {
+        input_is_document = true;
+        for (int64_t i = 0; i < input_root->length; i++) {
+            Item child = input_root->items[i];
+            if (get_type_id(child) == LMD_TYPE_ELEMENT &&
+                child.element == old_backing) {
+                old_index = i;
+                break;
+            }
+        }
+    } else if (input_root == old_backing) {
+        old_index = 0;
+    }
+    if (old_index < 0) return false;
+
+    dom_pre_remove((DomNode*)old_root, false);
+    if (input_is_document) {
+        MarkEditor editor(doc->input, EDIT_MODE_INLINE);
+        Item result = editor.elmt_replace_child(
+            {.element = input_root}, (int)old_index,
+            {.element = replacement_backing});
+        if (get_type_id(result) != LMD_TYPE_ELEMENT ||
+            result.element != input_root) {
+            log_error("js_dom_replace_document_element: backing root changed identity");
+            return false;
+        }
+    } else {
+        doc->input->root = {.element = replacement_backing};
+    }
+
+    DomNode* old_parent = old_root->parent;
+    DomNode* old_next = old_root->next_sibling;
+    DomNode* link_prev = nullptr;
+    if (old_parent && old_parent->is_element()) {
+        DomElement* parent = old_parent->as_element();
+        for (DomNode* current = parent->first_child; current;
+             current = current->next_sibling) {
+            if (current == old_root) break;
+            link_prev = current;
+        }
+        if (link_prev) {
+            link_prev->next_sibling = (DomNode*)replacement;
+        } else {
+            parent->first_child = (DomNode*)replacement;
+        }
+        if (old_next) {
+            old_next->prev_sibling = (DomNode*)replacement;
+        } else {
+            parent->last_child = (DomNode*)replacement;
+        }
+    }
+    dom_node_cancel_detached(doc, (DomNode*)replacement);
+    replacement->parent = old_parent;
+    // Document proxies intentionally keep the documentElement's prev link
+    // null even when a synthetic doctype precedes it.
+    replacement->prev_sibling = old_root->prev_sibling;
+    replacement->next_sibling = old_next;
+    old_root->parent = nullptr;
+    old_root->prev_sibling = nullptr;
+    old_root->next_sibling = nullptr;
+
+    doc->root = replacement;
+    doc->html_root = replacement_backing;
+    dom_node_schedule_detached(doc, (DomNode*)old_root);
+    js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
+                           (DomNode*)replacement, old_parent);
+    return true;
+}
+
 extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
     DomElement* elem = (DomElement*)parent_ptr;
     if (!elem) return ItemNull;
@@ -13930,6 +14009,18 @@ typedef struct JsDomRelativeArgument {
 static Item js_dom_child_node_insert_relative(DomNode* node, Item* args, int argc,
                                                JsDomChildNodePlacement placement) {
     if (!node) return (Item){.item = ITEM_JS_UNDEFINED};
+    if (placement == JS_DOM_CHILD_NODE_REPLACE && node->is_element() &&
+        node->as_element()->doc &&
+        node->as_element()->doc->root == node->as_element()) {
+        if (argc != 1) return (Item){.item = ITEM_JS_UNDEFINED};
+        DomNode* replacement = (DomNode*)js_dom_unwrap_element(args[0]);
+        if (!replacement || !replacement->is_element() ||
+            !js_dom_replace_document_element(node->as_element(),
+                                              replacement->as_element())) {
+            return (Item){.item = ITEM_JS_UNDEFINED};
+        }
+        return (Item){.item = ITEM_JS_UNDEFINED};
+    }
     DomNode* parent_node = node->parent;
     DomElement* parent = parent_node ? parent_node->as_element() : nullptr;
     if (!parent || !parent->doc) return (Item){.item = ITEM_JS_UNDEFINED};

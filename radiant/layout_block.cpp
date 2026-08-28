@@ -6613,7 +6613,10 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     bool is_open_popover_object = elmt_name == MARKUP_NAME_OBJECT &&
         block->is_element() && block->as_element()->is_popover_open() &&
         !block->get_attribute(MARKUP_NAME_DATA);
-    if (elmt_name == MARKUP_NAME_IFRAME || is_open_popover_object) {
+    bool object_uses_default_size = block->is_element() &&
+        layout_object_uses_default_size(block->as_element());
+    if (elmt_name == MARKUP_NAME_IFRAME || is_open_popover_object ||
+        object_uses_default_size) {
         // Table-internal display resolution can skip BlockProp creation, but an
         // element's intrinsic fallback must persist on the box's used-size slots.
         block->ensure_block(lycon);
@@ -8599,6 +8602,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute("data")) ||
             block->tag() == MARKUP_NAME_TEXTAREA ||
             is_select_listbox);
+        bool form_control_margin_baseline = block->tag() == MARKUP_NAME_BUTTON ||
+            (block->tag() == MARKUP_NAME_INPUT && block->form &&
+             block->form->control_type == FORM_CONTROL_TEXT);
         bool is_broken_alt_image = block->tag() == MARKUP_NAME_IMG &&
             block->embed && block->embedp()->broken_alt_fallback;
         bool textarea_uses_explicit_baseline_source =
@@ -9064,9 +9070,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     lycon->line.max_descender = max(lycon->line.max_descender, descender_part);
                     // CSS 2.1 §10.8.1: The block container's strut is present
                     // below-baseline extent so an inline-table cannot collapse
-                    lycon->line.max_descender = max(
-                        lycon->line.max_descender,
-                        layout_strut_below_baseline(lycon));
+                    if (!form_control_margin_baseline) {
+                        lycon->line.max_descender = max(
+                            lycon->line.max_descender,
+                            layout_strut_below_baseline(lycon));
+                    }
                 } else {
                     // CSS 2.1 §10.8.1 says the baseline is the bottom MARGIN edge,
                     bool is_replaced_inline = (block->display.inner == RDT_DISPLAY_REPLACED);
@@ -9093,9 +9101,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                         lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
                     }
                     // CSS 2.1 §10.8.1: The strut defines minimum height above and
-                    lycon->line.max_descender = max(
-                        lycon->line.max_descender,
-                        layout_strut_below_baseline(lycon));
+                    if (!form_control_margin_baseline) {
+                        lycon->line.max_descender = max(
+                            lycon->line.max_descender,
+                            layout_strut_below_baseline(lycon));
+                    }
                 }
             }
             lycon->line.max_desc_before_last_text = max(lycon->line.max_desc_before_last_text,

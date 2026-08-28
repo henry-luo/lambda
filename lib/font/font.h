@@ -327,6 +327,14 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
 // For all other fonts, returns the font metrics cell height (ascent + descent).
 float font_get_cell_height(FontHandle* handle);
 
+// Get the maximum character width used by text-control intrinsic sizing.
+// Returns a CSS-pixel metric from the resolved primary font.
+float font_get_max_char_width(FontHandle* handle);
+
+// Get the average character width used by text-control intrinsic sizing.
+// On macOS this follows Blink's glyph-derived primary-font metric.
+float font_get_text_control_avg_char_width(FontHandle* handle);
+
 // Get the font content-area split used by explicit line-height inline boxes.
 // The returned values are positive distances above/below the alphabetic baseline
 // and sum to font_get_cell_height() when metrics are available.

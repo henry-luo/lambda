@@ -2147,6 +2147,13 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         log_mem_stage("load_html: after_scripts");
         auto t_script_exec = timing ? high_resolution_clock::now() : t_initial_cascade;
 
+        if (dom_doc->root != dom_root) {
+            // DOM scripts may replace documentElement; use the committed DOM
+            // roots for the post-script cascade instead of resurrecting HTML.
+            dom_root = dom_doc->root;
+            html_root = dom_doc->html_root;
+        }
+
         if (!dom_doc->pending_navigation_url) {
             char* refresh_url = find_meta_refresh_url(html_root);
             if (refresh_url && refresh_url[0]) {

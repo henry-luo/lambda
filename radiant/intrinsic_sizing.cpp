@@ -3715,14 +3715,18 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             replaced_width = 0;
         }
         else if (replaced_tag == MARKUP_NAME_EMBED ||
-                 (replaced_tag == MARKUP_NAME_OBJECT && element->get_attribute(MARKUP_NAME_DATA))) {
+                 (replaced_tag == MARKUP_NAME_OBJECT &&
+                  (element->get_attribute(MARKUP_NAME_DATA) ||
+                   layout_object_uses_default_size(element)))) {
             replaced_width = 300;
         }
         else if (replaced_tag == MARKUP_NAME_METER) {
-            replaced_width = FormDefaults::METER_WIDTH;
+            replaced_width = form_control_em_size(
+                lycon, view_block_replaced, FormDefaults::METER_INLINE_SIZE_EM);
         }
         else if (replaced_tag == MARKUP_NAME_PROGRESS) {
-            replaced_width = FormDefaults::PROGRESS_WIDTH;
+            replaced_width = form_control_em_size(
+                lycon, view_block_replaced, FormDefaults::PROGRESS_INLINE_SIZE_EM);
         }
 
         // Form controls (INPUT, SELECT, TEXTAREA) have intrinsic sizes.
@@ -6339,8 +6343,9 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     // CSS 2.1 §10.6.2: Replaced element intrinsic height
     // Size containment substitutes the fallback before a natural image ratio can
     // reintroduce the descendant contribution that containment removed.
-    if (view->display.inner == RDT_DISPLAY_REPLACED && !has_contain_intrinsic_height &&
-        !has_empty_size_containment) {
+    if ((view->display.inner == RDT_DISPLAY_REPLACED ||
+         layout_object_uses_default_size(element)) &&
+        !has_contain_intrinsic_height && !has_empty_size_containment) {
         NameId elem_tag = element->tag();
         if (elem_tag == MARKUP_NAME_IMG) {
             ImageSurface* img = layout_ensure_replaced_image_surface(lycon, view, element);
@@ -6370,7 +6375,10 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
             return 0.0f;  // no image loaded, no dimensions specified
         }
-        else if (elem_tag == MARKUP_NAME_IFRAME || elem_tag == MARKUP_NAME_VIDEO || elem_tag == MARKUP_NAME_CANVAS) {
+        else if (elem_tag == MARKUP_NAME_IFRAME || elem_tag == MARKUP_NAME_VIDEO ||
+                 elem_tag == MARKUP_NAME_CANVAS ||
+                 (elem_tag == MARKUP_NAME_OBJECT &&
+                  layout_object_uses_default_size(element))) {
             // try actual video dimensions for aspect-correct height
             if (elem_tag == MARKUP_NAME_VIDEO && view->embed && view->embedp()->video) {
                 int vw = rdt_video_get_width(view->embedp()->video);

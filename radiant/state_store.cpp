@@ -3303,6 +3303,9 @@ static int form_default_selected_index_from_tree(View* view) {
         option_count++;
     }
     if (selected_index >= 0) return selected_index;
+    // Multiple selects are allowed to have no selected option; only a
+    // single-select drop-down gets the first-option default.
+    if (element->has_attribute("multiple")) return -1;
     return option_count > 0 ? 0 : -1;
 }
 

@@ -84,7 +84,7 @@ line-break hyphens overflow-wrap word-wrap tab-size hanging-punctuation text-jus
 text-align-last list-style list-style-type list-style-position list-style-image counter-reset
 counter-increment counter-set content quotes font-stretch text-orientation text-combine-upright
 text-indent border-collapse border-spacing caption-side empty-cells table-layout resize accent-color
-caret-color caret-shape nav-index nav-up nav-right nav-down nav-left appearance user-select
+caret-color caret-shape nav-index nav-up nav-right nav-down nav-left appearance field-sizing user-select
 box-shadow border-image border-image-source border-image-slice border-image-width border-image-outset
 border-image-repeat outline outline-style outline-width outline-color outline-offset break-before
 break-after break-inside page-break-before page-break-after page-break-inside orphans widows container

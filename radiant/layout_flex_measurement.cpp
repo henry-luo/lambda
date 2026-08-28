@@ -590,17 +590,8 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
                 float text_width = measure_direct_text_children_intrinsic_width(
                     lycon, item, false, layout_inherited_text_transform(item));
                 if (text_width > 0.0f) {
-                    float button_height = FormDefaults::TEXT_HEIGHT -
-                        2.0f * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER);
-                    if (font_box_handle(&lycon->font)) {
-                        button_height = calc_normal_line_height(font_box_handle(&lycon->font));
-                    }
                     item->form->intrinsic_width = text_width;
-                    item->form->intrinsic_height = button_height;
                     content_width = measured_width = text_width;
-                    content_height = button_height;
-                    measured_height = layout_border_size_from_content_box(
-                        lam::view_as_block(item), button_height, false);
                 }
             }
             if (item->form->control_type == FORM_CONTROL_SELECT &&

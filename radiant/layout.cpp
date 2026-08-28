@@ -920,11 +920,16 @@ bool layout_element_was_inline(DomElement* element, bool include_replaced) {
                               sizeof(replaced_tags) / sizeof(replaced_tags[0]));
 }
 
+bool layout_object_uses_default_size(DomElement* element) {
+    return element && element->tag() == MARKUP_NAME_OBJECT &&
+        !element->get_attribute(MARKUP_NAME_DATA) && !element->first_child;
+}
+
 bool layout_element_is_replaced(DomElement* element) {
     if (!element) return false;
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
     NameId tag = element->tag();
-    // Object and audio become replaced only when they expose external content.
+    // An empty object reserves the default object box while CSSOM exposes inline display.
     return (view && view->display.inner == RDT_DISPLAY_REPLACED) ||
         tag == MARKUP_NAME_IMG || tag == MARKUP_NAME_VIDEO ||
         tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_HR ||
@@ -933,6 +938,7 @@ bool layout_element_is_replaced(DomElement* element) {
         tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA ||
         tag == MARKUP_NAME_METER || tag == MARKUP_NAME_PROGRESS ||
         (tag == MARKUP_NAME_OBJECT && element->get_attribute(MARKUP_NAME_DATA)) ||
+        layout_object_uses_default_size(element) ||
         (tag == MARKUP_NAME_AUDIO && element->has_attribute(MARKUP_NAME_CONTROLS)) ||
         (view && view->form_control());
 }
@@ -1124,8 +1130,18 @@ float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* val
         return value->data.number.value * target_font_size;
     }
     if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        return value->data.keyword == CSS_VALUE_NORMAL && font_box_handle(&lycon->font)
-            ? calc_normal_line_height(font_box_handle(&lycon->font)) : 0.0f;
+        FontBox owner_font_box = {};
+        FontHandle* handle = nullptr;
+        if (owner && owner->font && lycon->ui_context) {
+            setup_font(lycon->ui_context, &owner_font_box, owner->font);
+            handle = font_box_handle(&owner_font_box);
+        }
+        if (!handle && owner && owner->font) {
+            handle = owner->fontp()->font_handle;
+        }
+        if (!handle) handle = font_box_handle(&lycon->font);
+        return value->data.keyword == CSS_VALUE_NORMAL && handle
+            ? calc_normal_line_height(handle) : 0.0f;
     }
 
     float owner_font_size = owner && owner->font && owner->fontp()->font_size > 0.0f
@@ -1137,6 +1153,24 @@ float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* val
     }
     if (value->type == CSS_VALUE_TYPE_LENGTH) {
         CssUnit unit = value->data.length.unit;
+        if (unit == CSS_UNIT_LH) {
+            // CSS Values 4: `lh` resolves against this element's computed
+            // line-height; a self-referential line-height uses normal leading.
+            const CssValue* own_line_height = owner && owner->blk
+                ? owner->block()->line_height : nullptr;
+            float base_line_height = 0.0f;
+            if (own_line_height && own_line_height != value) {
+                base_line_height = layout_resolve_line_height_value(
+                    lycon, own_line_height, owner, target_font_size);
+            }
+            if (base_line_height <= 0.0f) {
+                FontHandle* handle = owner && owner->font && owner->fontp()->font_handle
+                    ? owner->fontp()->font_handle : font_box_handle(&lycon->font);
+                base_line_height = handle ? calc_normal_line_height(handle) :
+                    target_font_size * 1.2f;
+            }
+            return (float)value->data.length.value * base_line_height;
+        }
         if (unit == CSS_UNIT_EM || unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) {
             float multiplier = (float)value->data.length.value;
             if (unit == CSS_UNIT_EX || unit == CSS_UNIT_CH) multiplier *= 0.5f;
@@ -1317,8 +1351,13 @@ static bool block_has_declared_line_height(ViewBlock* block) {
 
 void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
     CssValue value;
+    bool has_declared_line_height = block_has_declared_line_height(block);
     if (block->blk && block->block_mut()->line_height) {
-        if (!block_has_declared_line_height(block) ||
+        bool button_ua_normal = block->tag() == MARKUP_NAME_BUTTON &&
+            !has_declared_line_height &&
+            block->block()->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
+            block->block()->line_height->data.keyword == CSS_VALUE_NORMAL;
+        if ((!has_declared_line_height && !button_ua_normal) ||
             (block->block()->line_height->type == CSS_VALUE_TYPE_KEYWORD &&
              block->block()->line_height->data.keyword == CSS_VALUE_INHERIT)) {
             value = inherit_line_height(lycon, block);
@@ -1329,7 +1368,14 @@ void setup_line_height(LayoutContext* lycon, ViewBlock* block) {
         value = inherit_line_height(lycon, block);
     }
     if (value.type == CSS_VALUE_TYPE_KEYWORD && value.data.keyword == CSS_VALUE_NORMAL) {
-        lycon->block.line_height = calc_normal_line_height(font_box_handle(&lycon->font));
+        float normal_line_height = calc_normal_line_height(font_box_handle(&lycon->font));
+        if (block->tag() == MARKUP_NAME_BUTTON) {
+            // Native button content uses the font cell for its anonymous line
+            // box; the font's full normal metric includes leading not painted here.
+            float cell_height = font_get_cell_height(font_box_handle(&lycon->font));
+            if (cell_height > 0.0f) normal_line_height = cell_height;
+        }
+        lycon->block.line_height = normal_line_height;
         lycon->block.line_height_is_normal = true;
     } else {
         const CssValue* resolved_value = resolve_var_function(lycon, &value);
@@ -1432,6 +1478,10 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             }
 
             resolve_css_styles(dom_elem, lycon);
+
+            // HTML Rendering sizes native meter/progress widgets in em units;
+            // apply the computed font after the author cascade has resolved.
+            layout_refresh_html_em_replaced_size(lycon, dom_elem);
 
             if (dom_elem->specified_style && dom_elem->specified_style->tree) {
                 AvlNode* display_node = avl_tree_search(dom_elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
@@ -3393,9 +3443,13 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             break;
         case CSS_VALUE_INLINE:
             // CSS 2.1 Section 10.3.2: Inline replaced elements (img, video, etc.)
-            if (display.inner == RDT_DISPLAY_REPLACED) {
-                display.outer = CSS_VALUE_INLINE_BLOCK;
-                layout_block(lycon, node, display);
+            if (display.inner == RDT_DISPLAY_REPLACED ||
+                (layout_object_uses_default_size(elem) &&
+                 display.inner == CSS_VALUE_FLOW)) {
+                DisplayValue used_display = display;
+                used_display.outer = CSS_VALUE_INLINE_BLOCK;
+                used_display.inner = RDT_DISPLAY_REPLACED;
+                layout_block(lycon, node, used_display);
                 layout_note_inline_atomic_wrap_opportunity(lycon, node);
             } else if (display.inner == CSS_VALUE_TABLE) {
                 // CSS 2.1 Section 17.2: inline-table elements
@@ -3502,6 +3556,13 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     dom_node_resolve_style(elmt, lycon);
 
+    bool root_is_form_control = html->form_control() != nullptr;
+    if (root_is_form_control) {
+        // Root layout normally seeds an ordinary element from the viewport;
+        // replaced form controls instead need their CSS auto-size intrinsic.
+        layout_form_control(lycon, html);
+    }
+
     if (html->position && html->positionp()->position == CSS_VALUE_ABSOLUTE) {
         // CSS Position 3 §4.1: resolve root insets against the initial containing block
         // before the root's used size is derived from opposing inset edges.
@@ -3554,7 +3615,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     bool root_has_explicit_width = false;
     float root_css_width = -1;  // content-box width from CSS
-    if (html->blk) {
+    if (!root_is_form_control && html->blk) {
         if (html->block()->given_width > 0) {
             root_css_width = html->block()->given_width;
             root_has_explicit_width = true;
@@ -3587,7 +3648,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     bool root_has_explicit_height = false;
     float root_css_height = -1;  // content-box height from CSS
-    if (html->blk) {
+    if (!root_is_form_control && html->blk) {
         if (html->block()->given_height > 0) {
             root_css_height = html->block()->given_height;
             root_has_explicit_height = true;
@@ -3673,7 +3734,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         if (!root_has_explicit_width) {
             float margin_h = 0;
             if (html->bound) margin_h = html->boundary()->margin.left + html->boundary()->margin.right;
-            if (margin_h > 0) {
+            if (margin_h > 0 && !root_is_form_control) {
                 float new_width = physical_width - margin_h;
                 html->width = new_width;
                 html->content_width = new_width;
@@ -3686,7 +3747,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         }
     }
     // CSS 2.1 §10.3.3: Apply root element border and padding to reduce content area
-    {
+    if (!root_is_form_control) {
         float bp_h = root_bp_left + root_bp_right;
         if (bp_h > 0) {
             float new_cw = lycon->block.content_width - bp_h;
@@ -3700,6 +3761,16 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             lycon->block.advance_y += root_bp_top;
         }
         line_init(lycon, root_bp_left, lycon->block.content_width + root_bp_left);
+    } else {
+        // Form sizing already resolved the border-box and content-box pair;
+        // keep the root formatting context in that same content coordinate
+        // space instead of applying root border/padding a second time.
+        lycon->block.content_width = html->content_width;
+        lycon->block.max_width = html->content_width;
+        lycon->block.given_width = html->content_width;
+        lycon->block.float_right_edge = html->content_width;
+        lycon->block.given_height = html->content_height;
+        line_init(lycon, root_bp_left, html->content_width + root_bp_left);
     }
     // CSS 2.1 §12.2: Generate pseudo-elements for the root <html> element
     if (elmt->is_element()) {

@@ -703,6 +703,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     }
 
     log_enter();
+
     // CRITICAL FIX: For nested flex containers without explicit width/height in a COLUMN parent,
     FlexContainerLayout* pa_flex = lycon->flex_container;
     if (pa_flex && flex_container->fi) {
@@ -1034,7 +1035,6 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         flex_item->content_width = lycon->block.max_width;
         flex_item->content_height = lycon->block.advance_y - content_y_offset;
     }
-
     if (flex_item_vertical && flex_item->display.inner == CSS_VALUE_FLOW &&
         flex_item->first_child) {
         BoxMetrics item_box = layout_box_metrics(flex_item);
