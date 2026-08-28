@@ -8,6 +8,7 @@
 #include "transpiler.hpp"
 #include "ast_build.hpp"          // lambda_rd_build_ast: the production C parser
 #include "type_contract.hpp"
+#include "../input/input.hpp"
 #include "../core/lambda-decimal.hpp"
 #include "../../lib/file.h"
 #include "../../lib/log.h"
@@ -16,6 +17,22 @@ struct EmitDirectParseState {
     char* source;
     Input* input;
 };
+
+static void emit_release_direct_parse(EmitDirectParseState* state) {
+    if (!state || !state->input) return;
+    Pool* pool = state->input->pool;
+    // The direct AST owns auxiliary registries outside the pool's arena; release
+    // them before destroying the pool that owns the parsed tree.
+    input_release_auxiliary_resources(state->input);
+    if (pool) pool_destroy(pool);
+    state->input = NULL;
+}
+
+static void emit_release_decimal_constants(Transpiler* tp) {
+    if (!tp || !tp->decimal_constants) return;
+    decimal_constants_release(tp->decimal_constants);
+    tp->decimal_constants = NULL;
+}
 
 static bool emit_prepare_direct_parse(const char* script_path,
         EmitDirectParseState* state) {
@@ -660,9 +677,7 @@ int emit_ast_dump_file(const char* script_path) {
     if (!import_directory) {
         if (directory) mem_free(directory);
         runtime_cleanup(&runtime);
-        // The AST pool is registered in the process memory context; destroying
-        // it here leaves its child arena nodes dangling for the common finish
-        // path. Let mem_context_shutdown destroy the registered allocator graph.
+        emit_release_direct_parse(&parse);
         mem_free(source);
         return 1;
     }
@@ -681,8 +696,8 @@ int emit_ast_dump_file(const char* script_path) {
         arraylist_free(tp.const_list);
         mem_free(import_directory);
         runtime_cleanup(&runtime);
-        // the registered AST pool is released by mem_context_shutdown after
-        // its child arenas and shape pools have been destroyed.
+        emit_release_decimal_constants(&tp);
+        emit_release_direct_parse(&parse);
         mem_free(source);
         return 1;
     }
@@ -692,8 +707,8 @@ int emit_ast_dump_file(const char* script_path) {
         arraylist_free(tp.const_list);
         mem_free(import_directory);
         runtime_cleanup(&runtime);
-        // the registered AST pool is released by mem_context_shutdown after
-        // its child arenas and shape pools have been destroyed.
+        emit_release_decimal_constants(&tp);
+        emit_release_direct_parse(&parse);
         mem_free(source);
         return 1;
     }
@@ -717,8 +732,8 @@ int emit_ast_dump_file(const char* script_path) {
     arraylist_free(tp.const_list);
     mem_free(import_directory);
     runtime_cleanup(&runtime);
-    // the registered AST pool is released by mem_context_shutdown after its
-    // child arenas and shape pools have been destroyed.
+    emit_release_decimal_constants(&tp);
+    emit_release_direct_parse(&parse);
     mem_free(source);
     return 0;
 }

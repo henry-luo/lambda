@@ -128,7 +128,7 @@ extern "C" void js_intrinsic_note_property_mutation(Item object, Item key);
 void js_regex_cache_reset();
 void js_module_cache_reset();
 void js_reset_transient_call_state();
-void js_reset_heap_bound_runtime_state();
+void js_reset_heap_bound_runtime_state(bool full_reset);
 void js_decimal_number_egress_warning_reset();
 void js_assert_batch_runtime_state_clear(const char* reset_name, bool include_heap_bound);
 void js_reset_math_object();

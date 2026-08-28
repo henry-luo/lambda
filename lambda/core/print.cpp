@@ -582,9 +582,15 @@ struct PrintItemVisitor {
             print_named_items(strbuf, (TypeMap*)elmt_type, element->data, depth + 1, indent, true);
         }
         if (element->length) {
-            strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
+            // S16.9.3: the attribute/content boundary comma is a biconditional —
+            // emit it exactly when the element has both attributes and content, in
+            // indent mode too (a bare newline is not a boundary; S16.1.1 gives line
+            // breaks no meaning). Content children then juxtapose: any separator
+            // between them would re-parse as a statement separator, not as siblings.
+            if (elmt_type->length) strbuf_append_char(strbuf, ',');
+            strbuf_append_str(strbuf, indent ? "\n" : " ");
             for (long i = 0; i < element->length; i++) {
-                if (i) strbuf_append_str(strbuf, indent ? "\n" : "; ");
+                if (i) strbuf_append_str(strbuf, indent ? "\n" : " ");
                 if (indent) { for (int i=0; i<depth+1; i++) strbuf_append_str(strbuf, indent); }
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }

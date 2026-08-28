@@ -5,7 +5,7 @@
 <svg.rect>
 "1b. explicit content boundary admits relative path child"
 <svg
-  .rect>
+  \.rect>
 "2. namespaced attributes (desugared to sub-maps)"
 <svg.rect svg: {
     width: 100,

@@ -181,7 +181,8 @@ JsMirTranspiler* jm_create_mir_transpiler(
 void jm_destroy_mir_transpiler(JsMirTranspiler* mt);
 Item js_mir_compile_unit_fail(MIR_context_t ctx, JsMirTranspiler* mt,
     JsTranspiler* tp, char* owned_source, Runtime* runtime,
-    EvalContext* js_context, bool reusing_context);
+    EvalContext* js_context, bool reusing_context,
+    int mir_gen_initialized = -1);
 bool js_link_compiled_name_table(const JsMirTranspiler* mt);
 bool js_append_compiled_name_table(const JsMirTranspiler* mt);
 bool js_capture_compiled_name_table(const JsMirTranspiler* mt, JsPreambleState* state);

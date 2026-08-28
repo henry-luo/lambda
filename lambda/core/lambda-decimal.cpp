@@ -10,6 +10,7 @@
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/arraylist.h"
 #include <mpdecimal.h>  // only included here
 #include <math.h>
 #include <stdio.h>
@@ -590,6 +591,21 @@ void decimal_retain(Decimal* dec) {
 
 void decimal_release(Decimal* dec) {
     // no-op: ref counting removed, gc_finalize_all_objects handles cleanup
+}
+
+void decimal_payload_release(Decimal* decimal) {
+    if (!decimal || !decimal->dec_val) return;
+    mpd_del(decimal->dec_val);
+    decimal->dec_val = NULL;
+}
+
+void decimal_constants_release(ArrayList* constants) {
+    if (!constants) return;
+    for (int i = 0; i < constants->length; i++) {
+        Decimal* decimal = (Decimal*)constants->data[i];
+        decimal_payload_release(decimal);
+    }
+    arraylist_free(constants);
 }
 #endif
 

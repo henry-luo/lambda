@@ -2636,8 +2636,7 @@ static Item build_process_env(void) {
     return env_root.get();
 }
 
-template <typename Target>
-static Item build_process_stdio(Target write_target, int fd) {
+static Item build_process_stdio(JsNativeP1 write_target, int fd) {
     RootFrame roots(1);
     Rooted<Item> stream_root(roots, js_new_object());
     js_set_key_cstr(stream_root.get(), "write", js_new_native_function(write_target));

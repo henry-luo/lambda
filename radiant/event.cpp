@@ -160,20 +160,20 @@ static void event_log_raw_input(EventStateLog* log, uint64_t cascade_id,
         switch (event->type) {
         case RDT_EVENT_MOUSE_DOWN:
         case RDT_EVENT_MOUSE_UP:
-            jw_kv_int(&w, "x", event->mouse_button.x);
-            jw_kv_int(&w, "y", event->mouse_button.y);
+            jw_kv_double(&w, "x", event->mouse_button.x);
+            jw_kv_double(&w, "y", event->mouse_button.y);
             jw_kv_int(&w, "button", event->mouse_button.button);
             jw_kv_int(&w, "clicks", event->mouse_button.clicks);
             jw_kv_int(&w, "mods", event->mouse_button.mods);
             break;
         case RDT_EVENT_MOUSE_MOVE:
         case RDT_EVENT_MOUSE_DRAG:
-            jw_kv_int(&w, "x", event->mouse_position.x);
-            jw_kv_int(&w, "y", event->mouse_position.y);
+            jw_kv_double(&w, "x", event->mouse_position.x);
+            jw_kv_double(&w, "y", event->mouse_position.y);
             break;
         case RDT_EVENT_SCROLL:
-            jw_kv_int(&w, "x", event->scroll.x);
-            jw_kv_int(&w, "y", event->scroll.y);
+            jw_kv_double(&w, "x", event->scroll.x);
+            jw_kv_double(&w, "y", event->scroll.y);
             jw_kv_double(&w, "xoffset", event->scroll.xoffset);
             jw_kv_double(&w, "yoffset", event->scroll.yoffset);
             break;
@@ -604,8 +604,6 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
 
     UiContext* uicon = evcon->ui_context;
     DomDocument* saved_doc = uicon->document;
-    float saved_window_width = uicon->window_width;
-    float saved_window_height = uicon->window_height;
     int saved_viewport_width = uicon->viewport_width;
     int saved_viewport_height = uicon->viewport_height;
 
@@ -616,11 +614,9 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
          iframe_container->view_type == RDT_VIEW_INLINE_BLOCK)) {
         ViewBlock* block = lam::view_require_block(iframe_container);
         if (block->width > 0) {
-            uicon->window_width = block->width;
             uicon->viewport_width = (int)block->width; // INT_CAST_OK: UiContext viewport dimensions are integer CSS pixels.
         }
         if (block->height > 0) {
-            uicon->window_height = block->height;
             uicon->viewport_height = (int)block->height; // INT_CAST_OK: UiContext viewport dimensions are integer CSS pixels.
         }
     }
@@ -631,8 +627,6 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
     }
 
     uicon->document = saved_doc;
-    uicon->window_width = saved_window_width;
-    uicon->window_height = saved_window_height;
     uicon->viewport_width = saved_viewport_width;
     uicon->viewport_height = saved_viewport_height;
 }
@@ -902,13 +896,13 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     float rect_right = x + rect_width;
     float rect_bottom = y + text_rect->height;
 
-    log_debug("target text:'%t' start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d",
+    log_debug("target text:'%t' start:%d, len:%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f, blk_x:%.1f",
         str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, evcon->block.x);
 
     // First check if mouse is within the text rect bounds (use rect height, not char height)
     if (x <= event->x && event->x < rect_right && y <= event->y && event->y < rect_bottom) {
         // Mouse is in this text rect - set target and return
-        log_debug("hit on text rect at (%d, %d)", event->x, event->y);
+        log_debug("hit on text rect at (%.1f, %.1f)", event->x, event->y);
         evcon->target = text;
         evcon->target_text_rect = text_rect;
         return;
@@ -1124,8 +1118,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     float tdx = 0.0f, tdy = 0.0f;
     bool translated = event_translate_only_transform(static_cast<View*>(block), &tdx, &tdy);
     if (translated) {
-        evcon->event.mouse_position.x -= (int)tdx;   // INT_CAST_OK: event coords are integer pixels
-        evcon->event.mouse_position.y -= (int)tdy;   // INT_CAST_OK: event coords are integer pixels
+        evcon->event.mouse_position.x -= tdx;
+        evcon->event.mouse_position.y -= tdy;
     }
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -1305,8 +1299,8 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
     RETURN:
     if (translated) {
-        evcon->event.mouse_position.x += (int)tdx;   // INT_CAST_OK: event coords are integer pixels
-        evcon->event.mouse_position.y += (int)tdy;   // INT_CAST_OK: event coords are integer pixels
+        evcon->event.mouse_position.x += tdx;
+        evcon->event.mouse_position.y += tdy;
     }
     // Only restore block position if no target was found
     // When a target is found, keep block at the parent's position for coordinate calculations
@@ -1341,7 +1335,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             evcon->offset_y = event->y - y;
         }
         else {
-            log_debug("hit not on block: %s, x: %.1f, y: %.1f, ex: %d, ey: %d, right: %.1f, bottom: %.1f",
+            log_debug("hit not on block: %s, x: %.1f, y: %.1f, ex: %.1f, ey: %.1f, right: %.1f, bottom: %.1f",
                 block->node_name(), x, y, event->x, event->y, x + block->width, y + block->height);
         }
     }
@@ -1885,8 +1879,8 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
 
     // mouse coordinates (from event context)
     if (evcon) {
-        mb.put("x", (int64_t)evcon->event.mouse_button.x);
-        mb.put("y", (int64_t)evcon->event.mouse_button.y);
+        mb.put("x", (double)evcon->event.mouse_button.x);
+        mb.put("y", (double)evcon->event.mouse_button.y);
     }
 
     // for "input" events: add typed character as UTF-8 string
@@ -2007,7 +2001,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
 
 
     if (event_uses_hit_source_pos && doc && doc->view_tree) {
-        int event_x = 0, event_y = 0;
+        float event_x = 0.0f, event_y = 0.0f;
         bool has_mouse_pos = false;
         if (evcon->event.type == RDT_EVENT_MOUSE_MOVE) {
             event_x = evcon->event.mouse_position.x;
@@ -2027,7 +2021,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
                 hit.node = static_cast<DomNode*>(hit_text);
                 hit.offset = dom_text_utf8_to_utf16(hit_text, (uint32_t)evcon->target_text_offset);
             } else {
-                hit = dom_hit_test_to_boundary(static_cast<View*>(doc->view_tree->root), (float)event_x, (float)event_y);
+                hit = dom_hit_test_to_boundary(static_cast<View*>(doc->view_tree->root), event_x, event_y);
             }
             SourcePosC hit_pos;
             if (hit.node && source_pos_from_dom_boundary(&hit, &hit_pos)) {
@@ -2634,7 +2628,8 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     return ok;
 }
 
-static void select_open_dropdown(DocState* state, View* select_view, float scale);
+static void select_open_dropdown(UiContext* uicon, DocState* state,
+                                 View* select_view);
 
 // Dropdown open/close for the dom package's `<select>` behavior template. The
 // policy of *when* to open belongs to the template; the overlay geometry,
@@ -2660,9 +2655,7 @@ extern "C" bool radiant_select_set_dropdown_open(void* dom_node, bool open) {
     if (state->open_dropdown && state->open_dropdown != view) {
         doc_state_close_dropdown(state, state->open_dropdown);
     }
-    float scale = ctx->evcon->ui_context && ctx->evcon->ui_context->pixel_ratio > 0
-        ? ctx->evcon->ui_context->pixel_ratio : 1.0f;
-    select_open_dropdown(state, view, scale);
+    select_open_dropdown(ctx->evcon->ui_context, state, view);
     return true;
 }
 
@@ -6028,8 +6021,8 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
  */
 typedef struct {
     const char* type;
-    int client_x;
-    int client_y;
+    double client_x;
+    double client_y;
     int button;
     int buttons;
     bool ctrl;
@@ -6061,7 +6054,7 @@ extern "C" bool radiant_native_click_dispatch_active(void) {
 }
 
 static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
-                                         const char* type, int client_x, int client_y,
+                                         const char* type, double client_x, double client_y,
                                          int button, int buttons,
                                          bool ctrl, bool shift, bool alt, bool meta,
                                          int detail,
@@ -6081,7 +6074,7 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
 }
 
 extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
-    const char* type, int client_x, int client_y, int button, int buttons,
+    const char* type, double client_x, double client_y, int button, int buttons,
     int mods, int detail, double timestamp_ms)
 {
     if (!uicon || !uicon->document || !target || !type) return false;
@@ -6100,8 +6093,8 @@ extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
 
 typedef struct {
     const char* type;
-    int client_x;
-    int client_y;
+    double client_x;
+    double client_y;
     int button;
     int buttons;
     bool ctrl;
@@ -6119,8 +6112,8 @@ static Item build_pointer_event_item(void* userdata) {
 }
 
 static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
-                                           const char* type, int client_x,
-                                           int client_y, int button, int buttons,
+                                           const char* type, double client_x,
+                                           double client_y, int button, int buttons,
                                            bool ctrl, bool shift, bool alt,
                                            bool meta, const char* pointer_type,
                                            bool* dispatched = nullptr) {
@@ -6133,7 +6126,7 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
 }
 
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
-    const char* type, int client_x, int client_y, int button, int buttons,
+    const char* type, double client_x, double client_y, int button, int buttons,
     int mods, const char* pointer_type)
 {
     if (!uicon || !uicon->document || !target || !type) return false;
@@ -6490,10 +6483,10 @@ static bool radiant_dispatch_clipboard_event(EventContext* evcon, View* target,
 extern "C" void js_drag_session_begin(void);
 extern "C" void js_drag_session_end(void);
 extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
-        const char* type, int client_x, int client_y);
+        const char* type, double client_x, double client_y);
 
 static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
-                                        const char* type, int cx, int cy)
+                                        const char* type, double cx, double cy)
 {
     DomElement* dom_target = radiant_view_to_dom_element(target);
     if (!dom_target) return false;
@@ -6501,7 +6494,7 @@ static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
     if (!dispatch_scope.active) return false;
     Item target_item = js_dom_wrap_element(dom_target);
     bool prevented = js_dispatch_drag_event_to_element(target_item, type, cx, cy);
-    log_debug("JSDND: dispatched '%s' at (%d,%d) prevented=%d", type, cx, cy, prevented);
+    log_debug("JSDND: dispatched '%s' at (%.1f,%.1f) prevented=%d", type, cx, cy, prevented);
     return prevented;
 }
 
@@ -6511,8 +6504,8 @@ static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
  * suppressed (event.preventDefault()).
  */
 typedef struct {
-    int client_x;
-    int client_y;
+    double client_x;
+    double client_y;
     double delta_x;
     double delta_y;
     int mods;
@@ -6529,7 +6522,7 @@ static Item build_wheel_event_item(void* userdata) {
 }
 
 static bool radiant_dispatch_wheel_event(EventContext* evcon, View* target,
-                                         int client_x, int client_y,
+                                         double client_x, double client_y,
                                          double delta_x, double delta_y,
                                          int mods)
 {
@@ -7128,7 +7121,8 @@ static bool click_target_is_disabled_control(DocState* state, View* target) {
 /**
  * Calculate dropdown popup dimensions
  */
-static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, float scale) {
+static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state,
+                                           float logical_width) {
     if (!select || !state || !select->form) return;
 
     int option_count = select->form->option_count;
@@ -7143,7 +7137,7 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, fl
 
     // Calculate popup dimensions
     doc_state_set_dropdown_geometry(state, state->dropdown_x, state->dropdown_y,
-        select->width * scale, visible_count * option_height * scale);
+        logical_width, visible_count * option_height);
 }
 
 /**
@@ -7152,21 +7146,28 @@ static void calculate_dropdown_dimensions(ViewBlock* select, DocState* state, fl
 // Opening a dropdown is mechanism: overlay placement and sizing come from
 // layout geometry. Both the native activation path and the dom package's
 // `open_dropdown` primitive go through here so the geometry is computed once.
-static void select_open_dropdown(DocState* state, View* select_view, float scale) {
-    if (!state || !select_view) return;
+static void select_open_dropdown(UiContext* uicon, DocState* state,
+                                 View* select_view) {
+    if (!uicon || !state || !select_view) return;
     ViewBlock* select = lam::view_require_block(select_view);
     if (!select || !select->form) return;
     log_debug("select_open_dropdown: opening with %d options", select->form->option_count);
     doc_state_open_dropdown(state, select_view);
 
-    float abs_x = 0.0f, abs_y = 0.0f;
-    view_to_absolute_position(select_view, select->x,
-                              select->y + form_select_dropdown_row_height(select->form),
-                              0.0f, 0.0f, &abs_x, &abs_y);
+    float visual_x = 0.0f, visual_y = 0.0f;
+    float visual_width = 0.0f, visual_height = 0.0f;
+    view_get_visual_bounds(select_view, &visual_x, &visual_y,
+                           &visual_width, &visual_height);
+    float doc_x = 0.0f, doc_y = 0.0f;
+    radiant_document_viewport_offset(uicon, select->doc, &doc_x, &doc_y);
 
-    doc_state_set_dropdown_geometry(state, abs_x * scale, abs_y * scale,
-        state->dropdown_width, state->dropdown_height);
-    calculate_dropdown_dimensions(select, state, scale);
+    // Popup state stays in the top-level logical viewport. Rendering performs
+    // the sole logical-to-surface conversion, so event hit-testing never needs
+    // to know the monitor scale.
+    doc_state_set_dropdown_geometry(state, doc_x + visual_x,
+        doc_y + visual_y + visual_height, state->dropdown_width,
+        state->dropdown_height);
+    calculate_dropdown_dimensions(select, state, visual_width);
 }
 
 
@@ -7181,7 +7182,7 @@ static ViewBlock* event_open_dropdown_select(EventContext* evcon,
 
 /**
  * Handle click on a dropdown option
- * @param mouse_y Mouse Y position in physical pixels
+ * @param mouse_x/mouse_y Pointer position in logical window pixels
  * @return true if an option was selected
  */
 static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, float mouse_y) {
@@ -7189,9 +7190,7 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
     ViewBlock* select = event_open_dropdown_select(evcon, &state);
     if (!select) return false;
 
-    float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
-
-    log_debug("handle_dropdown_option_click: mouse=(%.1f, %.1f), dropdown=(%.1f, %.1f, %.1f, %.1f)",
+    log_debug("handle_dropdown_option_click: pointer=(%.1f, %.1f), dropdown=(%.1f, %.1f, %.1f, %.1f)",
              mouse_x, mouse_y, state->dropdown_x, state->dropdown_y,
              state->dropdown_width, state->dropdown_height);
 
@@ -7206,8 +7205,8 @@ static bool handle_dropdown_option_click(EventContext* evcon, float mouse_x, flo
     }
 
     // Calculate which option was clicked
-    float option_height = form_select_dropdown_row_height(select->form) * scale;
-    int clicked_index = (int)((mouse_y - state->dropdown_y) / option_height);
+    float option_height = form_select_dropdown_row_height(select->form);
+    int clicked_index = (int)((mouse_y - state->dropdown_y) / option_height); // INT_CAST_OK: option array index
 
     log_debug("handle_dropdown_option_click: option_height=%.1f, clicked_index=%d, option_count=%d",
              option_height, clicked_index, select->form->option_count);
@@ -7235,8 +7234,6 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     ViewBlock* select = event_open_dropdown_select(evcon, &state);
     if (!select) return;
 
-    float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
-
     // Check if mouse is within dropdown popup
     if (mouse_x < state->dropdown_x || mouse_x > state->dropdown_x + state->dropdown_width ||
         mouse_y < state->dropdown_y || mouse_y > state->dropdown_y + state->dropdown_height) {
@@ -7247,8 +7244,8 @@ static void update_dropdown_hover(EventContext* evcon, float mouse_x, float mous
     }
 
     // Calculate which option is hovered
-    float option_height = form_select_dropdown_row_height(select->form) * scale;
-    int hover_index = (int)((mouse_y - state->dropdown_y) / option_height);
+    float option_height = form_select_dropdown_row_height(select->form);
+    int hover_index = (int)((mouse_y - state->dropdown_y) / option_height); // INT_CAST_OK: option array index
 
     if (hover_index >= 0 && hover_index < select->form->option_count) {
         if (form_control_get_hover_index(state, static_cast<View*>(select)) != hover_index) {
@@ -7310,24 +7307,15 @@ static void close_dropdown_if_outside(EventContext* evcon, float mouse_x, float 
     ViewBlock* select = event_open_dropdown_select(evcon, &state);
     if (!select) return;
 
-    float scale = evcon->ui_context->pixel_ratio > 0 ? evcon->ui_context->pixel_ratio : 1.0f;
-
-    // Calculate select box absolute position
-    float select_abs_x = select->x;
-    float select_abs_y = select->y;
-    View* parent = select->parent;
-    while (parent) {
-        if (parent->is_block()) {
-            ViewBlock* pblock = lam::view_require_block(parent);
-            select_abs_x += pblock->x;
-            select_abs_y += pblock->y;
-        }
-        parent = parent->parent;
-    }
-    select_abs_x *= scale;
-    select_abs_y *= scale;
-    float select_w = select->width * scale;
-    float select_h = select->height * scale;
+    float select_abs_x = 0.0f, select_abs_y = 0.0f;
+    float select_w = 0.0f, select_h = 0.0f;
+    view_get_visual_bounds(static_cast<View*>(select), &select_abs_x,
+                           &select_abs_y, &select_w, &select_h);
+    float doc_x = 0.0f, doc_y = 0.0f;
+    radiant_document_viewport_offset(evcon->ui_context, select->doc,
+                                     &doc_x, &doc_y);
+    select_abs_x += doc_x;
+    select_abs_y += doc_y;
 
     // Check if click is on the select itself (toggle handled elsewhere)
     if (mouse_x >= select_abs_x && mouse_x <= select_abs_x + select_w &&
@@ -7745,7 +7733,7 @@ static bool event_text_glyph_advance(FontBox* font, unsigned char* p, unsigned c
  * Returns the byte offset closest to the click position, aligned to UTF-8 character boundaries
  */
 int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
-    TextRect* rect, int mouse_x, int mouse_y) {
+    TextRect* rect, float mouse_x, float mouse_y) {
     unsigned char* str = text->text_data();
     float x = evcon->block.x + rect->x;
 
@@ -7766,14 +7754,14 @@ int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
     if (run.is_pdf && run.pdf_width > 0.0f) {
         float visible_width = pdf_text_run_visible_natural_width(evcon, rect, run.pdf_copy_space);
         if (visible_width > 0.0f) {
-            float local_pdf_x = (float)mouse_x - x;
+            float local_pdf_x = mouse_x - x;
             if (local_pdf_x <= 0.0f) return rect->start_index;
             if (local_pdf_x >= run.pdf_width) return run.visible_end_offset;
-            mouse_x = (int)(x + (local_pdf_x * visible_width / run.pdf_width)); // INT_CAST_OK: event mouse coordinate API is integer-based
+            mouse_x = x + local_pdf_x * visible_width / run.pdf_width;
         }
     }
 
-    log_debug("calculate_char_offset: mouse_x=%d, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
+    log_debug("calculate_char_offset: mouse_x=%.1f, start x=%.1f, rect.width=%.1f, rect.length=%d, block.x=%.1f, rect.x=%.1f",
               mouse_x, x, rect->width, rect->length, evcon->block.x, rect->x);
 
     // Skip leading collapsed whitespace (spaces, tabs, newlines at the start)
@@ -8315,11 +8303,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     // ------------------------------------------------------------------
 
     // find target view based on mouse position
-    int mouse_x, mouse_y;
+    float mouse_x = 0.0f, mouse_y = 0.0f;
     switch (event->type) {
     case RDT_EVENT_MOUSE_MOVE: {
         MousePositionEvent* motion = &event->mouse_position;
-        log_debug("Mouse event at (%d, %d)", motion->x, motion->y);
+        log_debug("Mouse event at (%.1f, %.1f)", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
         target_html_doc(&evcon, doc->view_tree);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
@@ -8328,10 +8316,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         update_hover_state(&evcon, evcon.target);
 
         // Update dropdown hover if open
-        update_dropdown_hover(&evcon, (float)mouse_x, (float)mouse_y);
+        update_dropdown_hover(&evcon, mouse_x, mouse_y);
 
         if (evcon.target) {
-            log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("Target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
             int buttons = uicon->mouse_state.is_mouse_down ? 1 : 0;
             // Native mouse input has a compatibility PointerEvent stream. JS
             // drag libraries select that stream when PointerEvent exists, so
@@ -8350,7 +8338,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
         } else {
-            log_debug("No target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("No target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
         }
 
         // fire drag event if dragging in progress
@@ -8363,7 +8351,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             drag_transition(state, DRAG_TRANSITION_UPDATE_DROP_MOTION, &motion_args);
 
             if (dd->pending && !dd->active) {
-                // check movement threshold (5px in physical pixels)
+                // check movement threshold in logical pixels
                 float dx = dd->current_x - dd->start_x;
                 float dy = dd->current_y - dd->start_y;
                 if (dx * dx + dy * dy > 25.0f) {
@@ -8380,7 +8368,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     // flags) now survives handler-driven DOM mutation via
                     // fallback retention, so JS DnD rides on it directly.
                     radiant_dispatch_drag_event(&evcon, dd->source_view, "dragstart",
-                                                (int)dd->current_x, (int)dd->current_y);
+                                                dd->current_x, dd->current_y);
                 }
             }
 
@@ -8452,7 +8440,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (evcon.target) {
                     radiant_dispatch_drag_event(&evcon,
                         static_cast<View*>(evcon.target), "dragover",
-                        (int)motion->x, (int)motion->y);
+                        motion->x, motion->y);
                 }
 
                 // set cursor to grabbing
@@ -8480,7 +8468,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         anchor_elem, (float)motion->x, (float)motion->y,
                         &hit_offset);
                     int char_offset = (int)hit_offset; // INT_CAST_OK: StateStore selection API uses int offsets.
-                    log_debug("[TA DRAG] motion=(%d,%d) char_offset=%d",
+                    log_debug("[TA DRAG] motion=(%.1f,%.1f) char_offset=%d",
                               motion->x, motion->y, char_offset);
 
                     dispatch_form_selection_extend(&evcon, anchor_elem, state,
@@ -8760,7 +8748,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
     }
     case RDT_EVENT_MOUSE_DOWN:   case RDT_EVENT_MOUSE_UP: {
         MouseButtonEvent* btn_event = &event->mouse_button;
-        log_debug("Mouse button event (%d, %d)", btn_event->x, btn_event->y);
+        log_debug("Mouse button event (%.1f, %.1f)", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
@@ -8815,7 +8803,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
         // F10: a right click asks the `<body>` behavior template whether a menu
         // belongs here and which items are live. Native still resolves the hit
-        // target and the popup position — physical pixels are mechanism and do
+        // target and the popup position — logical geometry is mechanism and does
         // not cross into policy — and records both so `radiant.open_context_menu`
         // can place the popup without the template ever handling coordinates.
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
@@ -9026,7 +9014,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     render_x += caret_iframe_offset_x;
                     render_y += caret_iframe_offset_y;
-                    log_info("[CARET FINAL] mouse=(%d,%d) local=(%.1f,%.1f) render=(%.1f,%.1f) offset=%d block=(%.1f,%.1f) rect=(%.1f,%.1f %.1fx%.1f)",
+                    log_info("[CARET FINAL] mouse=(%.1f,%.1f) local=(%.1f,%.1f) render=(%.1f,%.1f) offset=%d block=(%.1f,%.1f) rect=(%.1f,%.1f %.1fx%.1f)",
                         btn_event->x, btn_event->y, caret_x, caret_y,
                         render_x, render_y, char_offset, evcon.block.x, evcon.block.y,
                         rect->x, rect->y, rect->width, rect->height);
@@ -9281,16 +9269,16 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 if (evcon.target) {
                     bool ov = radiant_dispatch_drag_event(&evcon,
                         static_cast<View*>(evcon.target), "dragover",
-                        (int)btn_event->x, (int)btn_event->y);
+                        btn_event->x, btn_event->y);
                     if (ov) {
                         radiant_dispatch_drag_event(&evcon,
                             static_cast<View*>(evcon.target), "drop",
-                            (int)btn_event->x, (int)btn_event->y);
+                            btn_event->x, btn_event->y);
                     }
                 }
                 if (drag_src) {
                     radiant_dispatch_drag_event(&evcon, drag_src,
-                        "dragend", (int)btn_event->x, (int)btn_event->y);
+                        "dragend", btn_event->x, btn_event->y);
                 }
                 js_drag_session_end();
             }
@@ -9412,8 +9400,12 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             }
 
+            // A secondary-button release emits mouseup/contextmenu, not the
+            // primary click activation that can toggle controls or submit forms.
+            bool primary_activation = btn_event->button == GLFW_MOUSE_BUTTON_LEFT;
             // Only process other click handlers if dropdown wasn't involved and not a drag
-            if (!dropdown_handled && !drag_handled && !text_selection_drag_handled) {
+            if (primary_activation && !dropdown_handled && !drag_handled &&
+                !text_selection_drag_handled) {
                 // Dispatch click through JS EventTarget before built-in default
                 // actions so listeners or IDL handlers can call preventDefault().
                 bool js_click_dispatched = false;
@@ -9635,7 +9627,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (evcon.target) {
-            log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("Target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
             if (evcon.event.type == RDT_EVENT_MOUSE_UP) {
                 dispatch_lambda_handler(&evcon, evcon.target, "mouseup");
             }
@@ -9646,7 +9638,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
         } else {
-            log_debug("No target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("No target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
         }
 
         // fire drag event if dragging in progress
@@ -9723,8 +9715,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             font_context_reset_glyph_caches(evcon.ui_context->font_ctx);
                         }
                         DomDocument* new_doc = block->embed->doc =
-                            load_html_doc(evcon.ui_context->document->url, evcon.new_url, css_vw, css_vh,
-                                          1.0f);  // Layout uses CSS pixels, pixel_ratio not needed
+                            load_html_doc(evcon.ui_context->document->url, evcon.new_url,
+                                          css_vw, css_vh);
                         if (new_doc) {
                             radiant_document_ensure_state(new_doc, "iframe_target_navigation");
                             // Set scale for nested document
@@ -9734,26 +9726,21 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
                             if (new_doc->html_root) {
                                 // HTML/Markdown/XML documents: need CSS layout
-                                // Save parent document and window dimensions
+                                // Save the parent document and logical viewport.
+                                // The framebuffer remains the top-level physical surface.
                                 DomDocument* parent_doc = evcon.ui_context->document;
-                                float saved_window_width = evcon.ui_context->window_width;
-                                float saved_window_height = evcon.ui_context->window_height;
                                 // Set document context to iframe doc for proper URL resolution (e.g., images)
                                 evcon.ui_context->document = new_doc;
                                 // iframe dimensions are now in CSS pixels
                                 int saved_viewport_width = evcon.ui_context->viewport_width;
                                 int saved_viewport_height = evcon.ui_context->viewport_height;
-                                evcon.ui_context->window_width = (float)css_vw;
-                                evcon.ui_context->window_height = (float)css_vh;
                                 evcon.ui_context->viewport_width = css_vw;
                                 evcon.ui_context->viewport_height = css_vh;
                                 // Process @font-face rules before layout (critical for custom fonts)
                                 process_document_font_faces(evcon.ui_context, new_doc);
                                 layout_html_doc(evcon.ui_context, new_doc, false);
-                                // Restore parent document and window/viewport dimensions
+                                // Restore the parent document and logical viewport.
                                 evcon.ui_context->document = parent_doc;
-                                evcon.ui_context->window_width = saved_window_width;
-                                evcon.ui_context->window_height = saved_window_height;
                                 evcon.ui_context->viewport_width = saved_viewport_width;
                                 evcon.ui_context->viewport_height = saved_viewport_height;
                             }
@@ -9859,7 +9846,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         }
 
         if (evcon.target) {
-            log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("Target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
             // Dispatch "wheel" through JS EventTarget before native scroll.
             bool wheel_prevented = radiant_dispatch_wheel_event(&evcon, evcon.target,
                 mouse_x, mouse_y,
@@ -9884,7 +9871,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 arraylist_free(parent_list);
             }
         } else {
-            log_debug("No target view found at position (%d, %d)", mouse_x, mouse_y);
+            log_debug("No target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
         }
         break;
     }

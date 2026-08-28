@@ -4443,7 +4443,7 @@ static DomDocument* load_iframe_src_doc(LayoutContext* lycon,
     StrBuf* src_buf = strbuf_new_cap(src_len);
     strbuf_append_str_n(src_buf, src, src_len);
     DomDocument* doc = load_html_doc(lycon->ui_context->document->url,
-        src_buf->str, viewport_width, viewport_height, 1.0f);
+        src_buf->str, viewport_width, viewport_height);
     strbuf_free(src_buf);
     return doc;
 }
@@ -4452,20 +4452,14 @@ void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
                                 int iframe_width, int iframe_height) {
     if (!lycon || !lycon->ui_context || !doc || !doc->html_root) return;
     DomDocument* parent_doc = lycon->ui_context->document;
-    float saved_window_width = lycon->ui_context->window_width;
-    float saved_window_height = lycon->ui_context->window_height;
     int saved_viewport_width = lycon->ui_context->viewport_width;
     int saved_viewport_height = lycon->ui_context->viewport_height;
     lycon->ui_context->document = doc;
-    lycon->ui_context->window_width = (float)iframe_width;
-    lycon->ui_context->window_height = (float)iframe_height;
     lycon->ui_context->viewport_width = iframe_width;
     lycon->ui_context->viewport_height = iframe_height;
     process_document_font_faces(lycon->ui_context, doc);
     layout_html_doc(lycon->ui_context, doc, false);
     lycon->ui_context->document = parent_doc;
-    lycon->ui_context->window_width = saved_window_width;
-    lycon->ui_context->window_height = saved_window_height;
     lycon->ui_context->viewport_width = saved_viewport_width;
     lycon->ui_context->viewport_height = saved_viewport_height;
 }
@@ -4485,9 +4479,9 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             // The embedded viewport is the iframe content box; using the outer
             // border box creates false overflow and an inner scrollbar.
             int iframe_width = block->width > 0 ?
-                (int)iframe_content.width : (int)lycon->ui_context->window_width; // INT_CAST_OK: iframe viewport expects int
+                (int)iframe_content.width : (int)lycon->ui_context->viewport_width; // INT_CAST_OK: iframe viewport expects integer logical pixels
             int iframe_height = block->height > 0 ?
-                (int)iframe_content.height : (int)lycon->ui_context->window_height; // INT_CAST_OK: iframe viewport expects int
+                (int)iframe_content.height : (int)lycon->ui_context->viewport_height; // INT_CAST_OK: iframe viewport expects integer logical pixels
             lycon->ui_context->iframe_depth++;
             if (srcdoc && *srcdoc) {
                 doc = load_iframe_srcdoc_doc(lycon, srcdoc,

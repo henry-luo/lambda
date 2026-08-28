@@ -94,19 +94,19 @@ type Article = <article
     author: string,
     date: string?,
     tags: [string*];
-    <content>
+    <content>,
     <metadata id: string, status: string;>?
 >
 
 // HTML page schema
 type Page = <html;
     <head;
-        <title>
+        <title>,
         <meta name: string, content: string;>*
-    >
+    >,
     <body;
-        <h1>+
-        <p>*
+        <h1>+,
+        <p>*,
         <div class: string?;>*
     >
 >

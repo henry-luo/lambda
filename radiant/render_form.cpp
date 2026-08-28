@@ -1137,30 +1137,11 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
     int selected_index = form_control_get_selected_index(state, static_cast<View*>(select));
     int hover_index = form_control_get_hover_index(state, static_cast<View*>(select));
 
-    float abs_x = 0.0f, abs_y = 0.0f;
-    view_to_absolute_position(static_cast<View*>(select), select->x,
-                              select->y + form_select_dropdown_row_height(form),
-                              0.0f, 0.0f, &abs_x, &abs_y);
-    View* parent = select->parent;
-    while (parent) {
-        if (parent->is_block()) {
-            ViewBlock* pblock = lam::view_require_block(parent);
-            // Account for scroll in parent containers
-            if (pblock->scroller && pblock->scroll_mut()->pane) {
-                DocState* scroll_state = pblock->doc ? pblock->doc->state : NULL;
-                float scroll_x = 0.0f, scroll_y = 0.0f;
-                scroll_state_get_position_for_view(scroll_state, static_cast<View*>(pblock),
-                    pblock->scroll()->pane, &scroll_x, &scroll_y, NULL, NULL);
-                abs_y -= scroll_y;
-                abs_x -= scroll_x;
-            }
-        }
-        parent = parent->parent;
-    }
-
-    float x = rdcon->block.x + abs_x * s;
-    float y = rdcon->block.y + abs_y * s;
-    float w = select->width * s;
+    // Popup geometry is canonical interaction state in top-level logical
+    // viewport coordinates. This paint boundary performs the only conversion.
+    float x = state->dropdown_x * s;
+    float y = state->dropdown_y * s;
+    float w = state->dropdown_width * s;
 
     // native option rows keep their intrinsic metric when the closed control
     // has an author-specified height
@@ -1168,11 +1149,7 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
     int max_visible = 10;
     int visible_count = (form->option_count < max_visible) ? form->option_count : max_visible;
     if (visible_count <= 0) visible_count = 1;
-    float h = visible_count * option_height;
-
-    // Update state with actual dropdown position for hit testing
-    doc_state_set_dropdown_geometry(state, x, y, w, h);
-
+    float h = state->dropdown_height * s;
 
     // Override clip to full viewport for overlay rendering (dropdown should not be clipped by parent containers)
     Bound saved_clip = rdcon->block.clip;

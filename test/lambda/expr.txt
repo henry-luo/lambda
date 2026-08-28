@@ -32,7 +32,7 @@ inf
 nan
 234
 "Test element:"
-<elmt a: 3
+<elmt a: 3,
   9
   "hello world"
   true

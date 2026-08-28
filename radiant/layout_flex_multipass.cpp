@@ -955,8 +955,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
                     DomDocument* doc = load_html_doc(lycon->ui_context->document->url, (char*)src_value,
                         // The embedded viewport excludes the flex item's border and padding.
-                        (int)iframe_content.width, (int)iframe_content.height, // INT_CAST_OK: viewport API expects int
-                        lycon->ui_context->pixel_ratio);
+                        (int)iframe_content.width, // INT_CAST_OK: viewport API expects int
+                        (int)iframe_content.height); // INT_CAST_OK: viewport API expects int
                     if (doc) {
                         radiant_document_ensure_state(doc, "layout_flex_iframe");
                         if (!flex_item->embed) {

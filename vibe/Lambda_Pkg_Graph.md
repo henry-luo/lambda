@@ -357,8 +357,8 @@ values, and child placements should use the same `z` coordinate:
     {index: 1, x: 240.0, y: 120.0, z: 0}
   ],
   paint_layers: [
-    {z: -1, content: <svg; ...ordinary edge segments...>},
-    {z: 1, content: <svg; ...raised or selected segments...>}
+    {z: -1, content: <svg ...ordinary edge segments...>},
+    {z: 1, content: <svg ...raised or selected segments...>}
   ]
 }
 ```

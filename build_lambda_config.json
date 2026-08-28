@@ -488,6 +488,11 @@
           "wldap32"
         ]
       },
+      "linux": {
+        "additional_libraries": [
+          "gomp"
+        ]
+      },
       "defines": [
         "UTF8PROC_STATIC",
         "MEMPOOL_RUNTIME_VM_PROVIDER"

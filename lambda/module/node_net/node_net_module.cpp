@@ -20,6 +20,13 @@ static Item node_net_root_value(uint64_t* root) {
     return (Item){.item = root ? *root : ItemNull.item};
 }
 
+// avoid Clang 14's designated-initializer failure in instantiated templates.
+static Item node_net_item_from_word(uint64_t word) {
+    Item result = {};
+    result.item = word;
+    return result;
+}
+
 static Item node_net_property_key(uint64_t* key_root, const char* name) {
     if (!key_root || !node_net_host || !node_net_host->value ||
             !node_net_host->value->string_from_utf8_n || !name) return ItemNull;
@@ -357,8 +364,8 @@ static void node_net_bound_socket_set_method(uint64_t* object_root,
             !node_net_host->value || !node_net_host->value->property_set) return;
     Item key = node_net_property_key(key_root, name);
     *function_root = jube_new_function(node_net_host->script, target, 0).item;
-    if (key.item) node_net_host->value->property_set(node_net_root_value(object_root), key,
-        node_net_root_value(function_root));
+    if (key.item) node_net_host->value->property_set(node_net_item_from_word(*object_root), key,
+        node_net_item_from_word(*function_root));
 }
 
 static Item node_net_bound_socket_new(Item options) {
@@ -472,8 +479,8 @@ static void node_net_set_method(uint64_t* namespace_root, uint64_t* key_root,
     Item method = jube_new_function(node_net_host->script, target,
         adapter_arity);
     *function_root = method.item;
-    node_net_host->value->property_set((Item){.item = *namespace_root},
-        (Item){.item = *key_root}, (Item){.item = *function_root});
+    node_net_host->value->property_set(node_net_item_from_word(*namespace_root),
+        node_net_item_from_word(*key_root), node_net_item_from_word(*function_root));
 }
 
 static Item node_net_install_ip_helpers(Item namespace_item) {

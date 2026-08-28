@@ -23,7 +23,7 @@ struct FixedInputIntrinsicSize {
     float height;
 };
 
-static bool apply_fixed_input_intrinsic_size(FormControlProp* form, float pixel_ratio) {
+static bool apply_fixed_input_intrinsic_size(FormControlProp* form) {
     static const FixedInputIntrinsicSize sizes[] = {
         // Chromium's native date/time editors retain fractional CSS-pixel
         // field metrics that differ from the generic text-control box.
@@ -35,8 +35,8 @@ static bool apply_fixed_input_intrinsic_size(FormControlProp* form, float pixel_
     };
     for (const FixedInputIntrinsicSize& size : sizes) {
         if (strcmp(form->input_type, size.type) == 0) {
-            form->intrinsic_width = size.width * pixel_ratio;
-            form->intrinsic_height = size.height * pixel_ratio;
+            form->intrinsic_width = size.width;
+            form->intrinsic_height = size.height;
             return true;
         }
     }
@@ -278,17 +278,16 @@ static float datetime_local_intrinsic_content_width(ViewBlock* block,
 
 static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
                                  FormControlProp* form, FontProp* font) {
-    float pr = lycon->ui_context->pixel_ratio;
     // Special fixed widths for date/time control types (Chrome UA intrinsic widths)
     // These are content-area widths (border-box minus 6px border+padding).
     // Chrome renders these at specific widths based on their picker format.
     if (form->input_type) {
         if (strcmp(form->input_type, "datetime-local") == 0) {
-            form->intrinsic_width = datetime_local_intrinsic_content_width(block, form) * pr;
-            form->intrinsic_height = 17.0f * pr;
+            form->intrinsic_width = datetime_local_intrinsic_content_width(block, form);
+            form->intrinsic_height = 17.0f;
             return;
         }
-        if (apply_fixed_input_intrinsic_size(form, pr)) return;
+        if (apply_fixed_input_intrinsic_size(form)) return;
     }
 
     int size = form->size > 0 ? form->size : FormDefaults::TEXT_SIZE_CHARS;
@@ -337,7 +336,7 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
     // When font-size is larger than default, line-height dominates.
     {
         float def_bp_v = 2 * (FormDefaults::TEXT_PADDING_V + FormDefaults::TEXT_BORDER);
-        float default_content_h = (FormDefaults::TEXT_HEIGHT - def_bp_v) * pr;
+        float default_content_h = FormDefaults::TEXT_HEIGHT - def_bp_v;
         float line_h = default_content_h;
         if (font && font->font_size > 0 && lycon->ui_context) {
             FontBox temp_font;
@@ -377,8 +376,6 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
  * Fall back to Chrome UA defaults (monospace 13.333px) when no CSS overrides.
  */
 static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
-    float pr = lycon->ui_context->pixel_ratio;
-
     int cols = form->cols > 0 ? form->cols : FormDefaults::TEXTAREA_COLS;
     int rows = form->rows > 0 ? form->rows : FormDefaults::TEXTAREA_ROWS;
 
@@ -410,17 +407,17 @@ static void calc_textarea_size(LayoutContext* lycon, ViewBlock* block, FormContr
             scrollbar_reserve = 16.0f;
         }
         float content_w = ceilf(cols * char_w) + scrollbar_reserve;
-        form->intrinsic_width = content_w * pr;
+        form->intrinsic_width = content_w;
         // Height: rows × the same used line-height that establishes editable baselines.
         float line_ht = textarea_used_line_height(lycon, block, font, has_css_font);
         float content_h = rows * line_ht;
-        form->intrinsic_height = content_h * pr;
+        form->intrinsic_height = content_h;
     } else {
         // Fallback: content-area only (182x36 are border-box, subtract defaults)
         float def_bp_h = 2 * (FormDefaults::TEXTAREA_PADDING + FormDefaults::TEXTAREA_BORDER);
         float def_bp_v = 2 * (FormDefaults::TEXTAREA_PADDING + FormDefaults::TEXTAREA_BORDER);
-        form->intrinsic_width = (182.0f - def_bp_h) * pr;
-        form->intrinsic_height = (36.0f - def_bp_v) * pr;
+        form->intrinsic_width = 182.0f - def_bp_h;
+        form->intrinsic_height = 36.0f - def_bp_v;
     }
 }
 
@@ -454,7 +451,6 @@ static bool form_button_has_authored_vertical_box(ViewBlock* block) {
  * Chrome: padding 1px 6px, border 2px outset, height ~21px.
  */
 static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControlProp* form, FontProp* font) {
-    float pr = lycon->ui_context->pixel_ratio;
     float zoom = layout_effective_zoom((View*)block);
     // Get button text from live value, value attribute, or input-type default.
     const char* text = form_button_label_text(block, form);
@@ -472,7 +468,7 @@ static void calc_button_size(LayoutContext* lycon, ViewBlock* block, FormControl
     // CSS UA stylesheets size buttons to match text input height for visual consistency.
     {
         float def_bp_v = 2 * (FormDefaults::BUTTON_PADDING_V + FormDefaults::BUTTON_BORDER) * zoom;
-        float content_height = (FormDefaults::TEXT_HEIGHT * zoom - def_bp_v) * pr;
+        float content_height = FormDefaults::TEXT_HEIGHT * zoom - def_bp_v;
         if (form_button_has_authored_vertical_box(block) &&
             font && font->font_size > 0 && lycon->ui_context) {
             FontBox temp_font;
@@ -773,7 +769,6 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
 
     FormControlProp* form = block->form;
     FontProp* font = block->font ? block->font : lycon->font.style;
-    float pr = lycon->ui_context->pixel_ratio;
     bool textarea_needs_baseline_set =
         form->control_type == FORM_CONTROL_TEXTAREA &&
         radiant::layout_uses_explicit_baseline_source(block);
@@ -818,8 +813,8 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     case FORM_CONTROL_CHECKBOX:
     case FORM_CONTROL_RADIO:
         // Fixed size set in resolve_htm_style
-        form->intrinsic_width = FormDefaults::CHECK_SIZE * pr;
-        form->intrinsic_height = FormDefaults::CHECK_SIZE * pr;
+        form->intrinsic_width = FormDefaults::CHECK_SIZE;
+        form->intrinsic_height = FormDefaults::CHECK_SIZE;
         break;
 
     case FORM_CONTROL_RANGE:

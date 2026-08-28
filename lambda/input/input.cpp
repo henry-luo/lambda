@@ -302,6 +302,7 @@ static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
     clone->length = tm->length;
     clone->byte_size = tm->byte_size;
     clone->type_index = tm->type_index;
+    clone->has_spread = tm->has_spread;  // cloned chain keeps any nameless spread slot
     clone->has_named_shape = tm->has_named_shape;
     clone->is_trusted_contract = false;
     clone->struct_name = tm->struct_name;
@@ -351,6 +352,7 @@ static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
     clone->length = tm->length;
     clone->byte_size = tm->byte_size;
     clone->type_index = tm->type_index;
+    clone->has_spread = tm->has_spread;  // cloned chain keeps any nameless spread slot
     clone->has_named_shape = tm->has_named_shape;
     clone->is_trusted_contract = false;
     clone->struct_name = tm->struct_name;
@@ -437,6 +439,7 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     child->last = added;
     child->length = parent->length + 1;
     child->byte_size = added->byte_offset + type_info[type_id].byte_size;
+    child->has_spread = parent->has_spread;  // prefix clone keeps any nameless spread slot
     child->has_named_shape = parent->has_named_shape;
     child->is_trusted_contract = false;
     child->struct_name = parent->struct_name;
@@ -1450,6 +1453,22 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     return input;
 }
 
+void input_release_auxiliary_resources(Input* input) {
+    if (!input) return;
+    if (input->name_pool) {
+        name_pool_release(input->name_pool);
+        input->name_pool = nullptr;
+    }
+    if (input->shape_pool) {
+        shape_pool_release(input->shape_pool);
+        input->shape_pool = nullptr;
+    }
+    if (input->type_list) {
+        arraylist_free(input->type_list);
+        input->type_list = nullptr;
+    }
+}
+
 // Global singleton instance
 static InputManager* g_input_manager = nullptr;
 
@@ -1469,12 +1488,7 @@ InputManager::~InputManager() {
     if (inputs) {
         for (int i = 0; i < inputs->length; i++) {
             Input* input = (Input*)inputs->data[i];
-            if (input && input->name_pool) {
-                // Input name pools retain schema parents; release that edge
-                // before their backing pool/context is torn down.
-                name_pool_release(input->name_pool);
-                input->name_pool = nullptr;
-            }
+            input_release_auxiliary_resources(input);
             if (input && input->mem_ctx) {
                 // destroy the document-owned allocator context before process
                 // shutdown can walk stale arena or semantic-owner nodes.
@@ -1486,9 +1500,6 @@ InputManager::~InputManager() {
             if (input && input->url) {
                 url_destroy((Url*)input->url);
                 input->url = nullptr;
-            }
-            if (input && input->type_list) {
-                arraylist_free(input->type_list);
             }
         }
         arraylist_free(inputs);

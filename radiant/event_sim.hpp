@@ -8,6 +8,7 @@
  * JSON Format:
  * {
  *   "name": "Test name",
+ *   "pixel_ratio": 1.5,
  *   "events": [
  *     {"type": "wait", "ms": 500},
  *     {"type": "click", "target": {"selector": "#btn"}},
@@ -48,6 +49,7 @@
  *     {"type": "select_option", "target": {"selector": "select#country"}, "value": "us"},
  *     {"type": "select_option", "target": {"selector": "select#color"}, "label": "Blue"},
  *     {"type": "resize", "width": 800, "height": 600},
+ *     {"type": "set_device_scale", "scale": 2.0},
  *     {"type": "navigate", "url": "test/ui/page2.html"},
  *     {"type": "assert_rect", "target": {"selector": "#box"}, "x": 0, "y": 0, "width": 200, "height": 100, "tolerance": 2},
  *     {"type": "assert_style", "target": {"selector": "h1"}, "property": "font-size", "equals": "32px"},
@@ -106,6 +108,7 @@ enum SimEventType {
     SIM_EVENT_CHECK,           // toggle checkbox/radio to desired state
     SIM_EVENT_SELECT_OPTION,   // select an option from a <select> dropdown
     SIM_EVENT_RESIZE,          // resize viewport and trigger relayout
+    SIM_EVENT_SET_DEVICE_SCALE, // change raster scale without relayout
     SIM_EVENT_DRAG_AND_DROP,   // HTML5 drag-and-drop from source to target
     SIM_EVENT_EDITING_TEXT_DRAG_DROP, // editing deleteByDrag/insertFromDrop
     SIM_EVENT_FUZZ_SCHEMA,     // deterministic legal input fuzz + schema assertion
@@ -170,9 +173,9 @@ enum SimEventType {
 // Simulated event command
 struct SimEvent {
     SimEventType type;
-    int x, y;                    // mouse position
-    int to_x, to_y;              // for drag: destination
-    int drag_dx, drag_dy;        // for mouse_drag: relative delta from the resolved start (used when no to_x/to_y/to_target)
+    float x, y;                  // top-level viewport logical pointer position
+    float to_x, to_y;            // for drag: logical destination
+    float drag_dx, drag_dy;      // for mouse_drag: logical delta from the resolved start
     bool has_drag_delta;         // true if drag_dx/drag_dy were provided
     int button;                  // mouse button (0=left, 1=right, 2=middle)
     int mods;                    // modifier keys (RDT_MOD_*)
@@ -185,13 +188,14 @@ struct SimEvent {
     bool check_dom_selection;    // for assert_selection: also verify DomSelection (renderer source)
     bool negate_view_type;       // for assert_caret: assert view_type != expected_view_type
     float scroll_dx, scroll_dy;  // scroll offsets
+    float device_scale;          // set_device_scale target ratio
     char* message;               // for log events
     char* file_path;             // for render/dump_caret events
     char* target_text;           // for mouse events: find text and click on it
     char* target_selector;       // CSS selector for targeting elements
     int target_index;            // 0-based index: which matching element (default 0 = first)
-    int target_offset_x;         // optional pixel offset from element top-left (CSS px)
-    int target_offset_y;         // optional pixel offset from element top-left (CSS px)
+    float target_offset_x;       // optional logical offset from element top-left
+    float target_offset_y;       // optional logical offset from element top-left
     bool has_target_offset;      // true when offset_x/offset_y were specified
     char* to_target_selector;    // for mouse_drag: destination CSS selector
     char* to_target_text;        // for mouse_drag: destination text target
@@ -352,6 +356,8 @@ struct SimEvent {
     char* ime_phase;
     // Phase 7: replay input.raw fields
     char* replay_event_name;
+    float replay_x;
+    float replay_y;
     int replay_scancode;
     uint32_t replay_codepoint;
     uint32_t replay_preedit_caret;
@@ -374,6 +380,7 @@ struct EventSimContext {
     char* test_name;             // optional test name from JSON
     int viewport_width;          // 0 = use default (1200)
     int viewport_height;         // 0 = use default (800)
+    float pixel_ratio;           // device pixels per logical pixel; default 1
     int default_timeout;         // default assertion timeout in ms (0 = no retry)
     double current_time;         // deterministic host clock in seconds
     // Assertion retries must yield to the host loop so queued JS and layout work

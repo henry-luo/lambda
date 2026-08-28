@@ -27,6 +27,7 @@ struct Decimal;
 struct String;
 struct Item;
 struct EvalContext;
+struct _ArrayList;
 typedef uint8_t TypeId;
 
 // ─────────────────────────────────────────────────────────────────────
@@ -143,6 +144,13 @@ void decimal_retain(Decimal* dec);
 
 // Decrement reference count, free if zero
 void decimal_release(Decimal* dec);
+
+// Release the external mpd_t owned by a pool-backed Decimal wrapper.
+void decimal_payload_release(Decimal* dec);
+
+// Release mpdecimal payloads tracked by a compiler-owned constant list.
+// The Decimal wrappers may live in a Pool, but their mpd_t payloads do not.
+void decimal_constants_release(struct _ArrayList* constants);
 
 // ─────────────────────────────────────────────────────────────────────
 // Type Conversion

@@ -4,6 +4,7 @@
 #include "radiant.hpp"
 #include <locale.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include "../lib/log.h"
 #include "../lib/font/font.h"
@@ -74,6 +75,80 @@ void UiContext::create_surface(int pixel_width, int pixel_height) {
     }
 }
 
+static void ui_document_set_raster_scale(DomDocument* doc,
+                                         float device_scale,
+                                         uint8_t depth);
+
+static void ui_view_set_embedded_raster_scale(View* view,
+                                              float device_scale,
+                                              uint8_t depth) {
+    if (!view || depth > MAX_IFRAME_DEPTH) return;
+    if (view->is_block()) {
+        ViewBlock* block = lam::view_require_block(view);
+        if (block->embed && block->embedp()->doc) {
+            ui_document_set_raster_scale(block->embedp()->doc,
+                                         device_scale,
+                                         (uint8_t)(depth + 1));
+        }
+    }
+    if (!view->is_element()) return;
+    DomElement* element = lam::dom_require_element(view);
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        ui_view_set_embedded_raster_scale(static_cast<View*>(child),
+                                          device_scale, depth);
+    }
+}
+
+static void ui_document_set_raster_scale(DomDocument* doc,
+                                         float device_scale,
+                                         uint8_t depth) {
+    if (!doc || depth > MAX_IFRAME_DEPTH) return;
+    doc->viewport.scale = doc->viewport.given_scale * device_scale;
+    if (doc->state) {
+        // Retained paint/display data is physical and must be rebuilt, while
+        // the logical viewport and view tree remain valid.
+        doc_state_mark_dirty(doc->state);
+    }
+    if (doc->view_tree && doc->view_tree->root) {
+        ui_view_set_embedded_raster_scale(doc->view_tree->root,
+                                          device_scale, depth);
+    }
+}
+
+bool ui_context_set_device_scale(UiContext* uicon,
+                                 float scale_x,
+                                 float scale_y) {
+    if (!uicon) return false;
+    if (scale_x <= 0.0f) scale_x = 1.0f;
+    if (scale_y <= 0.0f) scale_y = 1.0f;
+    bool changed = fabsf(uicon->device_scale_x - scale_x) > 0.0001f ||
+        fabsf(uicon->device_scale_y - scale_y) > 0.0001f;
+    if (!changed) return false;
+
+    float old_scale = uicon->pixel_ratio > 0.0f ? uicon->pixel_ratio : 1.0f;
+    uicon->device_scale_x = scale_x;
+    uicon->device_scale_y = scale_y;
+    if (fabsf(scale_x - scale_y) > 0.01f) {
+        // The current raster backend is isotropic, but retaining both platform
+        // measurements prevents the unsupported axis from being silently lost.
+        log_warn("ui_context_set_device_scale: anisotropic scale %.3f x %.3f; raster uses X",
+                 scale_x, scale_y);
+    }
+    uicon->pixel_ratio = scale_x;
+
+    if (uicon->font_ctx) {
+        font_context_set_pixel_ratio(uicon->font_ctx, uicon->pixel_ratio);
+        font_prop_release_handle(&uicon->default_font);
+        font_prop_release_handle(&uicon->legacy_default_font);
+    }
+    if (uicon->document) {
+        ui_document_set_raster_scale(uicon->document, uicon->pixel_ratio, 0);
+    }
+    log_info("ui_context_set_device_scale: %.3f -> %.3f (y=%.3f)",
+             old_scale, uicon->pixel_ratio, scale_y);
+    return true;
+}
+
 int ui_context_init(UiContext* uicon, bool headless, float requested_pixel_ratio) {
     radiant_register_css_counter_hooks();
     radiant_register_css_symbol_hook();
@@ -130,8 +205,10 @@ int UiContext::init(bool next_headless, float requested_pixel_ratio) {
         }
         // pass the export ratio into font initialization before handles are resolved.
         pixel_ratio = requested_pixel_ratio > 0.0f ? requested_pixel_ratio : 1.0f;
-        this->window_width = window_width;
-        this->window_height = window_height;
+        device_scale_x = pixel_ratio;
+        device_scale_y = pixel_ratio;
+        this->window_width = window_width * pixel_ratio;
+        this->window_height = window_height * pixel_ratio;
         viewport_width = window_width;   // CSS pixels
         viewport_height = window_height; // CSS pixels
     } else {
@@ -158,16 +235,20 @@ int UiContext::init(bool next_headless, float requested_pixel_ratio) {
 
         // get logical and actual pixel ratio
         int pixel_w, pixel_h;
+        int logical_w, logical_h;
         glfwGetFramebufferSize(window, &pixel_w, &pixel_h);
-        float scale_x = (float)pixel_w / window_width;
-        float scale_y = (float)pixel_h / window_height;
+        glfwGetWindowSize(window, &logical_w, &logical_h);
+        float scale_x = logical_w > 0 ? (float)pixel_w / logical_w : 1.0f;
+        float scale_y = logical_h > 0 ? (float)pixel_h / logical_h : 1.0f;
         log_info("ui_context_init: scale factor: %.2f x %.2f, framebuffer size: %d x %d", scale_x, scale_y, pixel_w, pixel_h);
+        device_scale_x = scale_x;
+        device_scale_y = scale_y;
         pixel_ratio = scale_x;
         this->window_width = pixel_w;  this->window_height = pixel_h;
         // viewport_width/height store the intended CSS viewport (for vh/vw units)
         // These are the logical (CSS) pixels we requested, not the actual framebuffer size
-        viewport_width = window_width;   // CSS pixels (e.g., 1200)
-        viewport_height = window_height; // CSS pixels (e.g., 800)
+        viewport_width = logical_w;   // CSS pixels (e.g., 1200)
+        viewport_height = logical_h;  // CSS pixels (e.g., 800)
         log_info("ui_context_init: viewport=%dx%d (CSS), framebuffer=%dx%d (physical)",
                (int)viewport_width, (int)viewport_height,
                (int)this->window_width, (int)this->window_height);
@@ -244,7 +325,7 @@ int UiContext::init(bool next_headless, float requested_pixel_ratio) {
     rdt_set_font_context(font_ctx);
     // creates the surface for rendering
     create_surface(this->window_width, this->window_height);
-    scroll_config_init(pixel_ratio);
+    scroll_config_init();
 
     return EXIT_SUCCESS;
 }
