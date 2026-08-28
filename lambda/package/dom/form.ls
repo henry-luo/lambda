@@ -10,6 +10,7 @@ import ime: lambda.package.dom.ime
 import menu: lambda.package.dom.menu
 import caret: lambda.package.dom.caret
 import keymap: lambda.package.dom.keymap
+import dom_edit: lambda.package.dom.dom_edit
 
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).
@@ -142,6 +143,8 @@ on contextmenu(evt) { menu.open_for(~) }
 on caretkey(evt) { caret.navigate(~, evt) }
 // F11: key -> edit intent, one rule set for both surfaces.
 on keyintent(evt) { keymap.resolve(~, evt) }
+// F13: editing a plain contenteditable, the DOM twin of the text-control applier.
+on domedit(evt) { dom_edit.apply_fn(~, evt) }
 on compositionstart(evt)  { ime.begin(~) }
 on compositionupdate(evt) { ime.update(~, evt, null) }
 on compositionend(evt)    { ime.end(~) }

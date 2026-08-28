@@ -1,0 +1,19 @@
+<html><body>
+<div id="host" contenteditable="true"><p id="p1"><span></span>hello world</p></div>
+<div id="log">-</div>
+<script>
+function run() {
+  var t = document.getElementById('p1').lastChild;      // the "hello world" text node
+  var sel = window.getSelection();
+  var r = document.createRange();
+  r.setStart(t, 5); r.collapse(true);
+  sel.removeAllRanges(); sel.addRange(r);
+  sel.modify('move', 'backward', 'paragraphboundary');
+  var n = sel.anchorNode;
+  document.getElementById('log').textContent =
+    'node=' + (n && n.nodeType === 3 ? n.data.slice(0,5) : String(n && n.nodeName)) +
+    ' off=' + sel.anchorOffset;
+}
+run();
+</script>
+</body></html>

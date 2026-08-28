@@ -1491,6 +1491,134 @@ extern "C" int editing_controller_caret_surface_kind(DocState* state);
 // has no vertical motion, a rich surface has no value boundary.
 // F11: the dropdown's hover cursor — which option is highlighted while the
 // popup is open. Storage and paint stay native; which key moves it does not.
+// F13: the DOM-range waist. The DOM counts offsets in UTF-16 code units; every
+// Lambda-facing offset is a codepoint (ES9), so both primitives convert at this
+// boundary and nowhere else.
+bool dom_edit_replace_range_u16(DocState* state, DomText* text,
+                                uint32_t start_u16, uint32_t end_u16,
+                                const char* replacement, uint32_t* out_caret_u16);
+bool dom_edit_set_caret_u16(DocState* state, uint32_t caret_u16);
+bool dom_edit_insert_at_boundary_u16(DocState* state, const char* text_data,
+                                     uint32_t* out_caret_u16);
+
+static uint32_t radiant_u16_to_cp(const char* text, uint32_t u16) {
+    if (!text) return 0;
+    uint32_t bytes = (uint32_t)strlen(text);
+    uint32_t byte_off = tc_utf16_to_utf8_offset(text, bytes, u16);
+    return (uint32_t)str_utf8_byte_to_char(text, bytes, byte_off);
+}
+
+static uint32_t radiant_cp_to_u16(const char* text, uint32_t cp) {
+    if (!text) return 0;
+    uint32_t bytes = (uint32_t)strlen(text);
+    size_t byte_off = str_utf8_char_to_byte(text, bytes, cp);
+    if (byte_off == STR_NPOS || byte_off > bytes) byte_off = bytes;
+    return tc_utf8_to_utf16_length(text, (uint32_t)byte_off);
+}
+
+// The text node an editing transaction resolved to, and its range. Three scalar
+// accessors rather than one map, matching selection_start/selection_end: the
+// module has no map-building idiom, and a template reads these once each.
+// Null/-1 when the transaction did not land inside a single text node, which is
+// the only shape the DOM edit path has ever supported.
+RADIANT_C_API Item fn_radiant_dom_edit_node(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "DOM_EDIT_NODE", &elem);
+    if (!state || !state->editing.pending_dom_edit_text) return ItemNull;
+    return radiant_dom_wrap_node((void*)state->editing.pending_dom_edit_text);
+}
+
+static Item radiant_dom_edit_offset(Item node_item, const char* op, bool want_end) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, op, &elem);
+    if (!state) return ItemNull;
+    DomText* text = state->editing.pending_dom_edit_text;
+    if (!text) return ItemNull;
+    const char* data = text->text ? text->text : "";
+    uint32_t u16 = want_end ? state->editing.pending_dom_edit_end
+                            : state->editing.pending_dom_edit_start;
+    return radiant_int_item((int64_t)radiant_u16_to_cp(data, u16));
+}
+
+RADIANT_C_API Item fn_radiant_dom_edit_start(Item node_item) {
+    return radiant_dom_edit_offset(node_item, "DOM_EDIT_START", false);
+}
+
+RADIANT_C_API Item fn_radiant_dom_edit_end(Item node_item) {
+    return radiant_dom_edit_offset(node_item, "DOM_EDIT_END", true);
+}
+
+// The resolved node's current text, so a template can compute a delete range
+// without a second round trip through the DOM.
+RADIANT_C_API Item fn_radiant_dom_edit_text(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "DOM_EDIT_TEXT", &elem);
+    if (!state || !state->editing.pending_dom_edit_text) return ItemNull;
+    DomText* text = state->editing.pending_dom_edit_text;
+    return radiant_string_item(text->text ? text->text : "");
+}
+
+// Insert at the transaction's boundary, creating a text node when there is
+// none. A different operation from a range replacement — `dom_replace_range`
+// addresses an existing node — so it is named separately rather than folded in.
+// Returns the new caret offset in codepoints, or null.
+RADIANT_C_API Item fn_radiant_dom_insert_at_boundary(Item node_item, Item text_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "DOM_INSERT_AT_BOUNDARY", &elem);
+    if (!state) return ItemNull;
+    const char* data = fn_to_cstr(text_item);
+    uint32_t caret_u16 = 0;
+    if (!dom_edit_insert_at_boundary_u16(state, data ? data : "", &caret_u16)) {
+        return ItemNull;
+    }
+    DomNode* caret = dom_edit_caret_node();
+    const char* after = (caret && caret->is_text())
+        ? (static_cast<DomText*>(caret)->text ? static_cast<DomText*>(caret)->text : "")
+        : "";
+    return radiant_int_item((int64_t)radiant_u16_to_cp(after, caret_u16));
+}
+
+// Place the caret in the resolved text node without editing it. Two arguments,
+// deliberately: this exists because dom_replace_range could not grow a fifth.
+RADIANT_C_API Item fn_radiant_dom_set_caret(Item node_item, Item offset_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "DOM_SET_CARET", &elem);
+    if (!state) return (Item){.item = b2it(0)};
+    DomText* text = state->editing.pending_dom_edit_text;
+    if (!text) return (Item){.item = b2it(0)};
+    const char* data = text->text ? text->text : "";
+    int64_t cp = it2l(offset_item);
+    if (cp < 0) cp = 0;
+    bool ok = dom_edit_set_caret_u16(state, radiant_cp_to_u16(data, (uint32_t)cp));
+    return (Item){.item = b2it(ok ? 1 : 0)};
+}
+
+// Splice the resolved text node. Returns the new caret offset in codepoints, or
+// null when the splice did not happen.
+RADIANT_C_API Item fn_radiant_dom_replace_range(Item node_item, Item start_item,
+                                                Item end_item, Item text_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "DOM_REPLACE_RANGE", &elem);
+    if (!state) return ItemNull;
+    DomText* text = state->editing.pending_dom_edit_text;
+    if (!text) return ItemNull;
+    const char* data = text->text ? text->text : "";
+    int64_t cp_start = it2l(start_item), cp_end = it2l(end_item);
+    if (cp_start < 0) cp_start = 0;
+    if (cp_end < cp_start) cp_end = cp_start;
+    const char* repl = fn_to_cstr(text_item);
+    uint32_t caret_u16 = 0;
+    const char* repl_text = repl ? repl : "";
+    if (!dom_edit_replace_range_u16(state, text,
+                                    radiant_cp_to_u16(data, (uint32_t)cp_start),
+                                    radiant_cp_to_u16(data, (uint32_t)cp_end),
+                                    repl_text, &caret_u16)) {
+        return ItemNull;
+    }
+    const char* after = text->text ? text->text : "";
+    return radiant_int_item((int64_t)radiant_u16_to_cp(after, caret_u16));
+}
+
 extern "C" void radiant_key_intent_request(const char* name);
 
 // F11: the template names an edit intent; native resolves it to a type and
@@ -2136,6 +2264,20 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_replace_range},
     {"set_password_reveal", "fn(node: dom_node, start: int, end: int) -> bool", (fn_ptr)fn_radiant_set_password_reveal, JUBE_FN_NONE,
      "Item fn_radiant_set_password_reveal(Item node, Item start, Item end)", (fn_ptr)fn_radiant_set_password_reveal},
+    {"dom_set_caret", "fn(node: dom_node, offset: int) -> bool", (fn_ptr)fn_radiant_dom_set_caret, JUBE_FN_NONE,
+     "Item fn_radiant_dom_set_caret(Item node, Item offset)", (fn_ptr)fn_radiant_dom_set_caret},
+    {"dom_insert_at_boundary", "fn(node: dom_node, text: string) -> int|null", (fn_ptr)fn_radiant_dom_insert_at_boundary, JUBE_FN_NONE,
+     "Item fn_radiant_dom_insert_at_boundary(Item node, Item text)", (fn_ptr)fn_radiant_dom_insert_at_boundary},
+    {"dom_edit_node", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_dom_edit_node, JUBE_FN_NONE,
+     "Item fn_radiant_dom_edit_node(Item node)", (fn_ptr)fn_radiant_dom_edit_node},
+    {"dom_edit_start", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_dom_edit_start, JUBE_FN_NONE,
+     "Item fn_radiant_dom_edit_start(Item node)", (fn_ptr)fn_radiant_dom_edit_start},
+    {"dom_edit_end", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_dom_edit_end, JUBE_FN_NONE,
+     "Item fn_radiant_dom_edit_end(Item node)", (fn_ptr)fn_radiant_dom_edit_end},
+    {"dom_edit_text", "fn(node: dom_node) -> string|null", (fn_ptr)fn_radiant_dom_edit_text, JUBE_FN_NONE,
+     "Item fn_radiant_dom_edit_text(Item node)", (fn_ptr)fn_radiant_dom_edit_text},
+    {"dom_replace_range", "fn(node: dom_node, start: int, end: int, text: string) -> int|null", (fn_ptr)fn_radiant_dom_replace_range, JUBE_FN_NONE,
+     "Item fn_radiant_dom_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_dom_replace_range},
     {"key_intent", "fn(node: dom_node, name: string) -> bool", (fn_ptr)fn_radiant_key_intent, JUBE_FN_NONE,
      "Item fn_radiant_key_intent(Item node, Item name)", (fn_ptr)fn_radiant_key_intent},
     {"hover_index", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_hover_index, JUBE_FN_NONE,

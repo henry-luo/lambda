@@ -2885,6 +2885,12 @@ extern "C" void radiant_key_intent_request(const char* name) {
 
 // Behavior-only, and deliberately context-free — see the note on the seam in
 // editing_intent.cpp: a translation must still resolve after preventDefault.
+// F13: the DOM edit seam. Behavior-only and context-free, like keyintent.
+extern "C" bool radiant_dispatch_behavior_dom_edit(View* target,
+                                                   const InputIntent* intent) {
+    return dispatch_behavior_handler(nullptr, target, "domedit", intent, nullptr);
+}
+
 extern "C" bool radiant_dispatch_behavior_key_intent(View* target,
                                                      const InputIntent* intent) {
     return dispatch_behavior_handler(nullptr, target, "keyintent", intent, nullptr);

@@ -612,7 +612,7 @@ bool editing_run_contenteditable_transaction(
         EditingActionOutcome outcome = {EDITING_ACTION_ERROR, false, false};
         switch (prepared.route.kind) {
             case EDITING_ROUTE_DOM_SCRIPT:
-                outcome = editing_dom_action_handle(evcon, &prepared, nullptr);
+                outcome = editing_dom_route_apply(evcon, &prepared, nullptr);
                 break;
             case EDITING_ROUTE_RADIANT_TEMPLATE:
                 outcome = editing_template_action_handle(evcon, &prepared, nullptr);

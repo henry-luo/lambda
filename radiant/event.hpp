@@ -648,6 +648,11 @@ typedef struct DomRange {
 } DomRange;
 
 // Lifecycle ------------------------------------------------------------------
+// First (or last, when `last`) text descendant of `n` in document order, `n`
+// itself if it is text. Searches the whole subtree: a chain-only walk stops at
+// the first childless element, which hides text behind an empty leading inline.
+DomText* dom_range_edge_text(DomNode* n, bool last);
+
 DomRange* dom_range_create(DocState* state);
 void      dom_range_retain(DomRange* range);
 void      dom_range_release(DomRange* range);
@@ -791,6 +796,25 @@ void      dom_selection_remove_all_ranges(DomSelection* s);
 
 // Boundary mutation (spec methods)
 bool dom_selection_collapse(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception);
+
+// F13: the DOM-range waist. `_set_pending` is how the transaction hands the
+// resolved range to the template; `_epoch` reports whether the template applied.
+void dom_edit_set_pending_range(DocState* state, DomElement* host,
+                                struct DomText* text,
+                                uint32_t start_u16, uint32_t end_u16,
+                                DomNode* boundary_node, uint32_t boundary_offset);
+// Insert text at the stashed boundary, creating a text node when there is none.
+// A different operation from a range replacement, and named as one.
+bool dom_edit_insert_at_boundary_u16(DocState* state, const char* text_data,
+                                     uint32_t* out_caret_u16);
+bool dom_edit_replace_range_u16(DocState* state, struct DomText* text,
+                                uint32_t start_u16, uint32_t end_u16,
+                                const char* replacement, uint32_t* out_caret_u16);
+bool dom_edit_set_caret_u16(DocState* state, uint32_t caret_u16);
+struct DomNode* dom_edit_caret_node(void);
+uint32_t dom_edit_caret_offset_u16(void);
+uint64_t dom_edit_apply_epoch(void);
+bool radiant_dispatch_behavior_dom_edit(View* target, const InputIntent* intent);
 bool dom_selection_extend(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception);
 bool dom_selection_set_base_and_extent(DomSelection* s,
                                        DomNode* anchor_node, uint32_t anchor_offset,
@@ -1272,7 +1296,9 @@ struct EditingFormNotificationHooks {
 // F12: the two editing implementations, called directly by route. They were
 // reached through an EditingActionRegistry until 2026-08-28; see the note at
 // the switch in editing_dispatch.cpp for why that indirection retired.
-EditingActionOutcome editing_dom_action_handle(
+// Resolves the transaction's range and offers it to the dom package; makes no
+// editing decision of its own (F13).
+EditingActionOutcome editing_dom_route_apply(
         EventContext* evcon, const EditingPreparedTransaction* prepared, void* user);
 EditingActionOutcome editing_template_action_handle(
         EventContext* evcon, const EditingPreparedTransaction* prepared, void* user);
@@ -2407,6 +2433,20 @@ typedef struct EditingTargetRangeSnapshot {
 typedef struct EditingInteractionState {
     EditingSurface active_surface;
     bool has_active_surface;
+    // F13: the text-node range an editing transaction resolved to, stashed for
+    // `radiant.dom_edit_range` to read during the `domedit` dispatch. Native
+    // still does the resolution — element-offset-to-child, edge-text descent,
+    // host containment — because that is geometry over the tree, not policy.
+    // Offsets are UTF-16 here, as the DOM stores them; the waist converts.
+    struct DomText* pending_dom_edit_text;
+    uint32_t pending_dom_edit_start;
+    uint32_t pending_dom_edit_end;
+    // F13.4: the raw boundary, kept even when the range did not resolve to a
+    // text node — that is exactly the case where one has to be created, and it
+    // is the only editing operation the range waist structurally cannot express.
+    DomNode* pending_dom_edit_boundary_node;
+    uint32_t pending_dom_edit_boundary_offset;
+    DomElement* pending_dom_edit_host;
     bool pointer_selecting;
     bool selection_extending;
     EditingDragMode drag_mode;
