@@ -1120,31 +1120,17 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // eval()/new Function() called during js_main can resolve outer-scope
     // var declarations via the active context-owned module slab.
     if (mt->module_consts && !g_jm_preamble_mode) {
-        int ecount = (int)hashmap_count(mt->module_consts);
         JsModuleConstEntry* next_entries = NULL;
-        if (ecount > 0) {
-            next_entries = (JsModuleConstEntry*)mem_calloc(
-                (size_t)ecount, sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
-        }
         int next_entry_count = 0;
-        bool copy_succeeded = ecount == 0 || next_entries != NULL;
-        size_t eiter = 0; void* eitem;
-        while (copy_succeeded && hashmap_iter(mt->module_consts, &eiter, &eitem)) {
-            JsModuleConstEntry* source_entry = (JsModuleConstEntry*)eitem;
-            copy_succeeded = js_preamble_entry_copy(
-                source_entry, &next_entries[next_entry_count]);
-            if (copy_succeeded) next_entry_count++;
-        }
+        bool copy_succeeded = js_preamble_entries_from_module_consts(
+            mt->module_consts, &next_entry_count, &next_entries);
         if (copy_succeeded) {
-            // defer releasing the previous slab until every shallow map entry
-            // has been copied; freeing it before this loop leaves source_entry
-            // names dangling in the current transpiler.
+            // retain the old slab until all shallow entries are copied.
             js_eval_preamble_entries_free();
             g_eval_preamble_entries = next_entries;
             g_eval_preamble_entry_count = next_entry_count;
             g_eval_preamble_var_count = mt->module_var_count;
         } else {
-            js_preamble_entries_free(next_entries, ecount);
             // The old slab was only needed while constructing this replacement.
             // Do not leave a failed replacement visible to a nested eval.
             js_eval_preamble_entries_free();
@@ -1179,25 +1165,14 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         g_jm_preamble_out->entries = NULL;
         g_jm_preamble_out->entry_count = 0;
         g_jm_preamble_out->module_var_count = mt->module_var_count;
-        int count = (int)hashmap_count(mt->module_consts);
         JsModuleConstEntry* entries = NULL;
-        if (count > 0) {
-            entries = (JsModuleConstEntry*)mem_calloc(
-                (size_t)count, sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
-        }
-        bool copy_succeeded = count == 0 || entries != NULL;
         int entry_count = 0;
-        size_t snap_iter = 0; void* snap_item;
-        while (copy_succeeded && hashmap_iter(mt->module_consts, &snap_iter, &snap_item)) {
-            copy_succeeded = js_preamble_entry_copy(
-                (JsModuleConstEntry*)snap_item, &entries[entry_count]);
-            if (copy_succeeded) entry_count++;
-        }
+        bool copy_succeeded = js_preamble_entries_from_module_consts(
+            mt->module_consts, &entry_count, &entries);
         if (copy_succeeded) {
             g_jm_preamble_out->entries = entries;
             g_jm_preamble_out->entry_count = entry_count;
         } else {
-            js_preamble_entries_free(entries, count);
             g_jm_preamble_out->module_var_count = 0;
         }
         log_debug("js-mir: preamble snapshot: %d entries, %d module vars",

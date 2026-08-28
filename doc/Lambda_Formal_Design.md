@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.38.7 (2026-08-28)
+**Spec version:** 1.38.8 (2026-08-28)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1405,6 +1405,12 @@ loosely across the corpus — context disambiguates, and we live with it.
 ## Appendix A — Implementation Footnotes
 
 Status of `*`-marked rulings as of 2026-08-28.
+
+The D8.2.4–D8.2.6 implementation record now includes P3e (2026-08-28):
+eval-preamble publication and batch/preamble declaration snapshots share
+`js_preamble_entries_from_module_consts`, a single owned map-to-array copy with
+partial-copy unwind. This retires the two duplicated snapshot walks without
+changing the mode-specific module-variable policies.
 
 | Ruling | Status |
 |---|---|

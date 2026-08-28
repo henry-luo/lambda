@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-28
 
-**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, P2a–P2c shared identity publication/lowering, and P3a truthful JS validation/indexing are verified; P0b, P1e, and the remaining P3–P6 driver work remain proposed.
+**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, P2a–P2c shared identity publication/lowering, and P3a–P3e compile-unit migrations are verified; P0b, P1e, and the remaining P3–P6 driver work remain proposed.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -742,7 +742,7 @@ Recommended order:
 
 Mode-specific policy is data on the unit: parse goal, module/eval/preamble flags, backend selection, execution policy, and artifact-retention policy. It is not a copy of the driver.
 
-The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. P3b moves MIR context creation, error-handler installation, transpiler ownership, name-base setup, and module creation into one script-unit opener used by ordinary source and pre-built-AST entry points. P3c extends that opener to ES modules while retaining the module's private zero-based name image and registry/TLA policy. P3d extends it to direct eval and `new Function` with their compact storage and optimize-level policy. Manual phase timing and cleanup labels remain for the later driver slices.
+The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. P3b moves MIR context creation, error-handler installation, transpiler ownership, name-base setup, and module creation into one script-unit opener used by ordinary source and pre-built-AST entry points. P3c extends that opener to ES modules while retaining the module's private zero-based name image and registry/TLA policy. P3d extends it to direct eval and `new Function` with their compact storage and optimize-level policy. P3e routes eval-preamble publication and batch/preamble declaration snapshots through one owned map-to-array helper. Manual phase timing and cleanup labels remain for the later driver slices.
 
 #### P3a implementation record — truthful JavaScript validation pass, 2026-08-28
 
@@ -861,6 +861,34 @@ make build-test                                      # Errors: 0; Warnings: 40
                                                        # 1/1 passed
 ./utils/check_ast_tune_loc.sh --base 44b98dcebd19a548a14bbb75785091b545445f00 --cap 310711 --phase-base a234a0838
                                                        # candidate 310,497; phase C/C++ -20; source -20
+git diff --check                                     # clean
+```
+
+#### P3e implementation record — batch/preamble declaration snapshot, 2026-08-28
+
+**D8.2.5** requires compile-unit metadata publication to have one ownership
+path. `js_preamble_entries_from_module_consts` now performs the single
+map-to-owned-array copy, including partial-copy unwind. Eval-preamble
+publication and batch/preamble snapshots call it; the old duplicate allocation
+and iteration walks are retired while each caller retains its own replacement
+and module-variable policy.
+
+The independent P3e slice is C/C++ `+30/-30 = 0`; all hand source is also
+`+30/-30 = 0`. The phase base is commit `1d5f058a2`; the governed candidate is
+310,497 lines, unchanged from P3d and 214 below the 310,711-line project
+anchor. This is a zero-growth migration: the shared helper is funded entirely
+by the two retired map walks.
+
+Focused evidence:
+
+```text
+make build-test                                      # Errors: 0; Warnings: 40
+./test/test_js_script_gtest.exe --gtest_filter='JsScriptOwnership.*'
+                                                       # 1/1 passed
+./test/test_js_gtest.exe --gtest_filter='JavaScriptRegression.ModuleCompileCacheHonorsPermissionWriteGrants:JavaScriptRegression.ModuleEntryPrelinksOwnAndImportNameTables'
+                                                       # 2/2 passed
+./utils/check_ast_tune_loc.sh --base 44b98dcebd19a548a14bbb75785091b545445f00 --cap 310711 --phase-base 1d5f058a2
+                                                       # candidate 310,497; phase C/C++ 0; source 0
 git diff --check                                     # clean
 ```
 

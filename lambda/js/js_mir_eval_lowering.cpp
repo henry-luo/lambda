@@ -71,6 +71,29 @@ bool js_preamble_entries_copy(const JsModuleConstEntry* source, int count,
     return true;
 }
 
+bool js_preamble_entries_from_module_consts(struct hashmap* module_consts,
+        int* out_count, JsModuleConstEntry** out_entries) {
+    if (!out_count || !out_entries) return false;
+    *out_count = 0; *out_entries = NULL;
+    int count = module_consts ? (int)hashmap_count(module_consts) : 0;
+    if (count == 0) return true;
+    JsModuleConstEntry* entries = (JsModuleConstEntry*)mem_calloc((size_t)count,
+        sizeof(JsModuleConstEntry), MEM_CAT_JS_RUNTIME);
+    if (!entries) return false;
+    bool copy_succeeded = true; int entry_count = 0;
+    size_t iter = 0; void* item = NULL;
+    while (copy_succeeded && hashmap_iter(module_consts, &iter, &item)) {
+        copy_succeeded = js_preamble_entry_copy(
+            (JsModuleConstEntry*)item, &entries[entry_count]);
+        if (copy_succeeded) entry_count++;
+    }
+    if (!copy_succeeded) {
+        js_preamble_entries_free(entries, count); return false;
+    }
+    *out_count = entry_count; *out_entries = entries;
+    return true;
+}
+
 void js_eval_preamble_entries_free(void) {
     js_preamble_entries_free(g_eval_preamble_entries, g_eval_preamble_entry_count);
     g_eval_preamble_entries = NULL;
