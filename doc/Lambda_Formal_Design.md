@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.38.8 (2026-08-28)
+**Spec version:** 1.38.9 (2026-08-28)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1411,6 +1411,11 @@ eval-preamble publication and batch/preamble declaration snapshots share
 `js_preamble_entries_from_module_consts`, a single owned map-to-array copy with
 partial-copy unwind. This retires the two duplicated snapshot walks without
 changing the mode-specific module-variable policies.
+
+P3f (2026-08-28) extends that record to finalized MIR volume accounting:
+Lambda and LambdaJS now call the shared `mir_count_module_volume` walk for
+module, function, and executable-instruction counts, retiring their duplicate
+label-excluding traversals under **D8.2.5**.
 
 | Ruling | Status |
 |---|---|

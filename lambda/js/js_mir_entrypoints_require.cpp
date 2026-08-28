@@ -971,20 +971,9 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Count finalized executable MIR instructions (drives the interpreter
     // policy and the AST-tuning volume gate). Labels are structural and must
     // match the MT7 artifact counter used by test_mir_ratchet_gtest.
-    unsigned long total_insns = 0;
-    unsigned long total_functions = 0;
-    for (MIR_module_t m = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); m != NULL;
-         m = DLIST_NEXT(MIR_module_t, m)) {
-        for (MIR_item_t item = DLIST_HEAD(MIR_item_t, m->items); item != NULL;
-             item = DLIST_NEXT(MIR_item_t, item)) {
-            if (item->item_type != MIR_func_item) continue;
-            total_functions++;
-            for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, item->u.func->insns);
-                    insn != NULL; insn = DLIST_NEXT(MIR_insn_t, insn)) {
-                if (insn->code != MIR_LABEL) total_insns++;
-            }
-        }
-    }
+    uint64_t total_functions = 0;
+    uint64_t total_insns = 0;
+    mir_count_module_volume(ctx, NULL, &total_functions, &total_insns);
     js_mir_volume_counters_set((long)total_functions, (long)total_insns);
     // Tune6 (see vibe/jube/Transpile_Js_Tune6_AST.md §0.2a–§0.2d): the dominant JS
     // startup cost is eager per-function MIR_gen during MIR_link. For large modules

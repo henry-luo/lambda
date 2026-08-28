@@ -191,6 +191,12 @@ void register_dynamic_import(const char *name, void *addr);
 void clear_dynamic_imports(void);
 }
 
+// Count finalized MIR volume once for all language front ends. Labels are
+// structural and excluded from the executable-instruction total.
+void mir_count_module_volume(MIR_context_t ctx, uint64_t* out_module_count,
+                             uint64_t* out_function_count,
+                             uint64_t* out_instruction_count);
+
 // MIR transpiler functions
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
                       bool run_main = false);
