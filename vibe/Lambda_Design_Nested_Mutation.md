@@ -428,17 +428,29 @@ Piece 1 does not depend on 2 or 3. That is the point of §4.2.
   Pick-up trigger: migrated corpus code where threading enclosing locals
   through an extracted `pn`'s parameters (the C4.2a friction) is a repeated,
   demonstrated pain — not a hypothetical one. Adoption is additive.
-- **NM-O8 — Nested path writes through a plain `pn` parameter are not
-  published to the caller**, while flat member writes through the same
+- **NM-O8 — PARTLY FIXED 2026-08-28; the typed arm stays open.** Nested path
+  writes through a plain `pn` parameter were not published to the caller, while flat member writes through the same
   parameter are (`is_proc_param` selects the in-place checked setter only on
   the flat path; the nested path takes `cow_path_set` /
   `lambda_map_path_set_checked`, which publishes a replacement into the
   callee's own binding). Both tiers agree, so this is a flat-vs-nested
-  inconsistency rather than a tier mismatch. It is what makes `cd2_orig`'s
-  migration cascade into every caller. Fixing it means giving the nested branch
-  the same in-place selection the flat one has — which lands in S9.1.3
-  territory (what a plain parameter *is*), so it should be decided with that
-  ruling rather than ahead of it.
+  inconsistency rather than a tier mismatch.
+
+  **The untyped arm is fixed**: `cow_path_set_inplace` skips the ROOT detach
+  (children are still detached and reinstalled), selected on
+  `is_var_param || is_proc_param` — the same rule the flat store already used.
+  That unblocked `cd2_orig`.
+
+  **The typed arm was tried and reverted.** `lambda_map_path_set_checked`'s
+  publish runs `lambda_type_check` over the whole candidate, which *converts*
+  — a `3.5` admitted into an `int` field becomes `2`. An in-place write has no
+  candidate to convert, so an in-place typed variant silently skipped the
+  coercion; `proc_type_numeric_structural_admission` caught it (`3.5` where the
+  golden says `2`). Doing this properly means checking and converting the
+  *value* against the leaf field's declared type before the raw store — i.e.
+  resolving the leaf field type through the path at runtime, which is the flat
+  store's decomposition applied one level down. Until then, typed nested writes
+  through a parameter need the explicit read-modify-write-back spelling.
 
 ---
 
@@ -545,11 +557,11 @@ diagnostic's own fixtures.
 | `proc/proc_fill_gc_nested.ls` | `c1 = null16(); l0[i0] = c1; c2 = null32(); c1[i1] = c2; c2[i2] = val` | Mutate before storing (fill `c1` then insert), or write the path `l0[i0][i1][i2] = val`. The script is the *fill-after-storing* porting hazard S9.3.1 names by name. |
 | `awfy/deltablue2.ls` | Constraint/variable records read out of a vector, mutated locally | **Ported to the C4.2e handle store, 2026-08-28** — passes with the flag on, both tiers, zero `E232`. See §B.1. |
 | `awfy/deltablue.ls` | Same shape, untyped variant | **Ported 2026-08-28**, derived from the `deltablue2` port with the annotations stripped, so the pair still differs only in typing. |
-| `awfy/cd2_orig.ls` | Voxel vectors read, appended, discarded | **Needs a cascading `var`-signature migration** — see §B.1. `cd2_orig` is also a **perf control** for the `cd2` comparison. |
+| `awfy/cd2_orig.ls` | Voxel vectors read, appended, discarded | **Migrated 2026-08-28** once NM-O8 was fixed: trie path writes plus `var` on the eight genuinely-mutating parameters. Runtime unchanged (~40s debug, within noise of the original), so its role as the `cd2` perf control survives. |
 
 ### B.1 Migration outcome, 2026-08-28
 
-**Eight of the nine migrated (six spelling changes plus the deltablue handle-store pair); goldens unchanged in every case, and each passes
+**All nine migrated (six spelling changes, the deltablue handle-store pair, and cd2_orig after NM-O8 was fixed); goldens unchanged in every case, and each passes
 with the flag both on and off.** `r7rs/mbrot2` and `proc_fill_gc_nested` became
 path writes; `proc_view_mutable` became a `var`-parameter borrow (the CW25
 spelling, which is what S9.2.2 says a write-through view is);
@@ -560,14 +572,17 @@ went 9 → 3.
 **The remaining three are a different kind of problem, and stopping was
 deliberate:**
 
-- **`awfy/cd2_orig`** — the trie rewrite alone is not enough. Its mutating
-  helpers take *plain* parameters, and a nested path write through a plain
-  parameter does not reach the caller (see the defect note below), so the
-  migration cascades: `vec_add`, five `rbt_*` helpers, `voxel_hash_xy`, and
-  then every caller up the chain must become `var`. Attempted and reverted; the
-  file is back at its committed state. It is also the *comparable source*
-  control for the `cd2` benchmark, so restructuring it removes the thing it
-  exists to measure.
+- **`awfy/cd2_orig`** — **completed 2026-08-28, after NM-O8 was fixed.** The
+  first attempt failed because the trie rewrite alone was not enough: its
+  mutating helpers take *plain* parameters, and a nested path write through a
+  plain parameter did not reach the caller. Fixing NM-O8's untyped arm removed
+  that obstacle; the remaining work was marking the eight parameters that
+  genuinely mutate (`vec_add`, `arr_set`, six `rbt_*` helpers) as `var`, which
+  is the honest spelling under S9.1.3 regardless. No cascade into callers was
+  needed in the end. Correct on both tiers in both flag states
+  (`collisions=4305`), and — importantly for a perf control — the migrated file
+  runs within noise of the original (~40.3s vs ~39.7s, debug build), so it
+  still measures what it was there to measure.
 - **`awfy/deltablue`, `deltablue2`** — a constraint *graph*: one variable
   record is observed by many constraints, which is exactly the shape C4.2e says
   needs a handle store. A mechanical `var x = (c.f); x.m = v` → `c.f.m = v`
