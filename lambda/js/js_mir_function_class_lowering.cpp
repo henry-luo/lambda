@@ -884,16 +884,12 @@ static void jm_collect_lexical_decl_names(JsAstNode* node, struct hashmap* names
         jm_collect_lexical_decl_names(in->alternate, names);
         break;
     }
-    case JS_AST_NODE_WHILE_STATEMENT:
-        jm_collect_lexical_decl_names(((JsWhileNode*)node)->body, names);
-        break;
-    case JS_AST_NODE_DO_WHILE_STATEMENT:
-        jm_collect_lexical_decl_names(((JsDoWhileNode*)node)->body, names);
-        break;
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* fn = (JsForNode*)node;
-        jm_collect_lexical_decl_names(fn->init, names);
-        jm_collect_lexical_decl_names(fn->body, names);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        if (loop->form == LOOP_FORM_FOR_C) {
+            jm_collect_lexical_decl_names(loop->init, names);
+        }
+        jm_collect_lexical_decl_names(loop->body, names);
         break;
     }
     case JS_AST_NODE_FOR_IN_STATEMENT:

@@ -280,7 +280,7 @@ enum LoopKeyFilter {
     LOOP_KEY_SYMBOL = 2,  // keyed only: for k:symbol, v in container
 };
 
-// for AST_NODE_LOOP - extended with index variable and key filter
+// for AST_NODE_FOR_CLAUSE - extended with index variable and key filter
 typedef struct AstJoinKey : AstNode {
     AstNode* prior_expr;        // key expression evaluated against the tuple stream so far
     AstNode* new_expr;          // key expression evaluated against this loop source
@@ -544,7 +544,7 @@ static inline bool is_procedural_only_stam(int node_type) {
     case AST_NODE_ASSIGN_STAM:
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM:
-    case AST_NODE_WHILE_STAM:
+    case AST_NODE_LOOP:
         return true;
     default:
         return false;
@@ -594,7 +594,7 @@ static inline bool ast_for_discards_result(AstNode* node) {
 static inline bool is_proc_flow_side_effect_node(AstNode* node, AstNode* last_value) {
     return node && node != last_value &&
            (node->node_type == AST_NODE_IF_EXPR ||
-            node->node_type == AST_NODE_WHILE_STAM ||
+            node->node_type == AST_NODE_LOOP ||
             ast_for_discards_result(node));
 }
 

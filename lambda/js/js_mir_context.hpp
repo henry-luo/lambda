@@ -171,6 +171,7 @@ struct JsMirIteratorFrame {
 // Function entry for pre-pass collection
 struct JsFuncCollected {
     JsFunctionNode* node;
+    AstFunctionId function_id; // shared AstIndex identity; invalid for synthetic functions
     const char* name;       // NamePool-owned semantic/function identity
     const char* body_name;  // NamePool-owned backend body symbol
     MIR_item_t func_item;        // public checked wrapper
@@ -440,9 +441,8 @@ struct JsMirTranspiler {
     JsFuncCollected* func_entries;      // exact-sized after the shared count pass
     int func_capacity;
     int func_count;
-    JsFunctionNode** func_index_nodes;  // pointer-keyed identity index, built once after collection
-    int* func_index_ids;
-    int func_index_capacity;
+    JsFuncCollected** func_by_id;       // shared AstIndex function identity -> collected entry
+    uint32_t func_by_id_count;
 
     // Collected classes
     JsClassEntry* class_entries;        // exact-sized after the shared count pass

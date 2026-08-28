@@ -522,8 +522,19 @@ static bool jm_ast_loop_owns_binding_child(JsAstNode* child, void* data) {
 static bool jm_ast_loop_owns_binding(JsAstNode* root, JsAstNode* closure_node,
         uint32_t binding_start) {
     if (!root || !closure_node) return false;
-    if (root->node_type == JS_AST_NODE_FOR_STATEMENT ||
-            root->node_type == JS_AST_NODE_FOR_IN_STATEMENT ||
+    if (root->node_type == AST_NODE_LOOP) {
+        AstLoopControlNode* loop = (AstLoopControlNode*)root;
+        if (loop->form == LOOP_FORM_FOR_C && loop->body) {
+            uint32_t body_start = loop->body->source_span.start_byte;
+            uint32_t body_end = loop->body->source_span.end_byte;
+            uint32_t closure_start = closure_node->source_span.start_byte;
+            bool closure_in_body = closure_start >= body_start && closure_start < body_end;
+            bool binding_in_body = binding_start >= body_start && binding_start < body_end;
+            bool binding_in_header = binding_start >= root->source_span.start_byte &&
+                binding_start < body_start;
+            if (closure_in_body && (binding_in_body || binding_in_header)) return true;
+        }
+    } else if (root->node_type == JS_AST_NODE_FOR_IN_STATEMENT ||
             root->node_type == JS_AST_NODE_FOR_OF_STATEMENT) {
         JsForOfNode* loop = (JsForOfNode*)root;
         if (loop->body) {
@@ -666,20 +677,16 @@ static void jm_count_lexical_binding_name_for_slot(JsAstNode* node, const char* 
         jm_count_lexical_binding_name_for_slot(((JsIfNode*)node)->consequent, name, count);
         jm_count_lexical_binding_name_for_slot(((JsIfNode*)node)->alternate, name, count);
         return;
-    case JS_AST_NODE_FOR_STATEMENT:
-        jm_count_lexical_binding_name_for_slot(((JsForNode*)node)->init, name, count);
-        jm_count_lexical_binding_name_for_slot(((JsForNode*)node)->body, name, count);
+    case AST_NODE_LOOP:
+        if (((AstLoopControlNode*)node)->form == LOOP_FORM_FOR_C) {
+            jm_count_lexical_binding_name_for_slot(((AstLoopControlNode*)node)->init, name, count);
+        }
+        jm_count_lexical_binding_name_for_slot(((AstLoopControlNode*)node)->body, name, count);
         return;
     case JS_AST_NODE_FOR_OF_STATEMENT:
     case JS_AST_NODE_FOR_IN_STATEMENT:
         jm_count_lexical_binding_name_for_slot(((JsForOfNode*)node)->left, name, count);
         jm_count_lexical_binding_name_for_slot(((JsForOfNode*)node)->body, name, count);
-        return;
-    case JS_AST_NODE_WHILE_STATEMENT:
-        jm_count_lexical_binding_name_for_slot(((JsWhileNode*)node)->body, name, count);
-        return;
-    case JS_AST_NODE_DO_WHILE_STATEMENT:
-        jm_count_lexical_binding_name_for_slot(((JsDoWhileNode*)node)->body, name, count);
         return;
     case JS_AST_NODE_TRY_STATEMENT:
         jm_count_lexical_binding_name_for_slot(((JsTryNode*)node)->block, name, count);
@@ -877,24 +884,16 @@ static void jm_collect_duplicate_module_block_lexicals(JsAstNode* node,
         jm_collect_duplicate_module_block_lexicals(n->alternate, seen, duplicate_consts, false);
         return;
     }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* n = (JsWhileNode*)node;
-        jm_collect_duplicate_module_block_lexicals(n->body, seen, duplicate_consts, false);
-        return;
-    }
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* n = (JsDoWhileNode*)node;
-        jm_collect_duplicate_module_block_lexicals(n->body, seen, duplicate_consts, false);
-        return;
-    }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* n = (JsForNode*)node;
-        if (n->init && n->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-            jm_note_module_block_lexical_decl(seen, duplicate_consts, (JsVariableDeclarationNode*)n->init);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        if (loop->form == LOOP_FORM_FOR_C && loop->init &&
+                loop->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            jm_note_module_block_lexical_decl(seen, duplicate_consts,
+                (JsVariableDeclarationNode*)loop->init);
         } else {
-            jm_collect_duplicate_module_block_lexicals(n->init, seen, duplicate_consts, false);
+            jm_collect_duplicate_module_block_lexicals(loop->init, seen, duplicate_consts, false);
         }
-        jm_collect_duplicate_module_block_lexicals(n->body, seen, duplicate_consts, false);
+        jm_collect_duplicate_module_block_lexicals(loop->body, seen, duplicate_consts, false);
         return;
     }
     case JS_AST_NODE_FOR_OF_STATEMENT:
@@ -1025,22 +1024,13 @@ static void jm_collect_for_init_lexical_names(JsAstNode* node, struct hashmap* n
         jm_collect_for_init_lexical_names(n->alternate, names, in_loop);
         return;
     }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* n = (JsWhileNode*)node;
-        jm_collect_for_init_lexical_names(n->body, names, /*in_loop=*/true);
-        return;
-    }
-    case JS_AST_NODE_DO_WHILE_STATEMENT: {
-        JsDoWhileNode* n = (JsDoWhileNode*)node;
-        jm_collect_for_init_lexical_names(n->body, names, /*in_loop=*/true);
-        return;
-    }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* n = (JsForNode*)node;
-        if (n->init && n->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-            jm_collect_for_init_lexical_from_decl((JsVariableDeclarationNode*)n->init, names);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        if (loop->form == LOOP_FORM_FOR_C && loop->init &&
+                loop->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            jm_collect_for_init_lexical_from_decl((JsVariableDeclarationNode*)loop->init, names);
         }
-        jm_collect_for_init_lexical_names(n->body, names, /*in_loop=*/true);
+        jm_collect_for_init_lexical_names(loop->body, names, /*in_loop=*/true);
         return;
     }
     case JS_AST_NODE_FOR_OF_STATEMENT:
@@ -1429,20 +1419,21 @@ static bool jm_find_enclosing_lexical_key_for_target(JsAstNode* node, JsAstNode*
         }
         return found_here;
     }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* for_node = (JsForNode*)node;
-        if (for_node->init && for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION &&
-            jm_lexical_decl_matches_name(for_node->init, name, out_key)) {
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        if (loop->form == LOOP_FORM_FOR_C && loop->init &&
+                loop->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION &&
+            jm_lexical_decl_matches_name(loop->init, name, out_key)) {
             found_here = true;
         }
-        if (for_node->init && jm_ast_node_contains_target(for_node->init, target) &&
-            jm_find_enclosing_lexical_key_for_target(for_node->init, target, name, out_key)) return true;
-        if (for_node->test && jm_ast_node_contains_target(for_node->test, target) &&
-            jm_find_enclosing_lexical_key_for_target(for_node->test, target, name, out_key)) return true;
-        if (for_node->update && jm_ast_node_contains_target(for_node->update, target) &&
-            jm_find_enclosing_lexical_key_for_target(for_node->update, target, name, out_key)) return true;
-        if (for_node->body && jm_ast_node_contains_target(for_node->body, target) &&
-            jm_find_enclosing_lexical_key_for_target(for_node->body, target, name, out_key)) return true;
+        if (loop->init && jm_ast_node_contains_target(loop->init, target) &&
+            jm_find_enclosing_lexical_key_for_target(loop->init, target, name, out_key)) return true;
+        if (loop->test && jm_ast_node_contains_target(loop->test, target) &&
+            jm_find_enclosing_lexical_key_for_target(loop->test, target, name, out_key)) return true;
+        if (loop->update && jm_ast_node_contains_target(loop->update, target) &&
+            jm_find_enclosing_lexical_key_for_target(loop->update, target, name, out_key)) return true;
+        if (loop->body && jm_ast_node_contains_target(loop->body, target) &&
+            jm_find_enclosing_lexical_key_for_target(loop->body, target, name, out_key)) return true;
         return found_here;
     }
     case JS_AST_NODE_FOR_IN_STATEMENT:
@@ -1535,14 +1526,15 @@ static void jm_collect_enclosing_lexicals_for_target(JsAstNode* node,
             jm_collect_enclosing_lexicals_for_target(e, target, names);
         break;
     }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* for_node = (JsForNode*)node;
-        if (for_node->init && for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION)
-            jm_collect_var_decl_names_kind((JsVariableDeclarationNode*)for_node->init, names);
-        jm_collect_enclosing_lexicals_for_target(for_node->init, target, names);
-        jm_collect_enclosing_lexicals_for_target(for_node->test, target, names);
-        jm_collect_enclosing_lexicals_for_target(for_node->update, target, names);
-        jm_collect_enclosing_lexicals_for_target(for_node->body, target, names);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        if (loop->form == LOOP_FORM_FOR_C && loop->init &&
+                loop->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION)
+            jm_collect_var_decl_names_kind((JsVariableDeclarationNode*)loop->init, names);
+        jm_collect_enclosing_lexicals_for_target(loop->init, target, names);
+        jm_collect_enclosing_lexicals_for_target(loop->test, target, names);
+        jm_collect_enclosing_lexicals_for_target(loop->update, target, names);
+        jm_collect_enclosing_lexicals_for_target(loop->body, target, names);
         break;
     }
     case JS_AST_NODE_FOR_IN_STATEMENT:
@@ -1890,8 +1882,7 @@ void jm_callsite_scan_node(JsMirTranspiler* mt, JsAstNode* node) {
     case JS_AST_NODE_EXPRESSION_STATEMENT:
     case JS_AST_NODE_IF_STATEMENT:
     case JS_AST_NODE_BLOCK_STATEMENT:
-    case JS_AST_NODE_FOR_STATEMENT:
-    case JS_AST_NODE_WHILE_STATEMENT:
+    case AST_NODE_LOOP:
     case JS_AST_NODE_SWITCH_STATEMENT:
     case JS_AST_NODE_SWITCH_CASE:
     case JS_AST_NODE_TRY_STATEMENT:
@@ -2034,10 +2025,10 @@ static void jm_emit_evalscript_global_decl_prechecks(JsMirTranspiler* mt, JsAstN
             jm_emit_evalscript_global_decl_prechecks(mt, s);
         break;
     }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* for_node = (JsForNode*)node;
-        jm_emit_evalscript_global_decl_prechecks(mt, for_node->init);
-        jm_emit_evalscript_global_decl_prechecks(mt, for_node->body);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        jm_emit_evalscript_global_decl_prechecks(mt, loop->init);
+        jm_emit_evalscript_global_decl_prechecks(mt, loop->body);
         break;
     }
     case JS_AST_NODE_FOR_IN_STATEMENT:
@@ -2139,28 +2130,29 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         mt->collection_failed = true;
         return false;
     }
-    // Function collection is the sole producer of callable identity. Publish
-    // a pointer index once so all later analysis/lowering lookups are O(1).
-    if (mt->func_count > 0) {
-        int cap = 1;
-        while (cap < mt->func_count * 2) cap <<= 1;
-        mt->func_index_nodes = (JsFunctionNode**)pool_calloc(
-            mt->tp->pool, (size_t)cap * sizeof(JsFunctionNode*));
-        mt->func_index_ids = (int*)pool_calloc(
-            mt->tp->pool, (size_t)cap * sizeof(int));
-        mt->func_index_capacity = cap;
-        if (!mt->func_index_nodes || !mt->func_index_ids) {
-            log_error("js-mir: failed to allocate function identity index");
+    // Publish source callable identity through the shared AstIndex. Synthetic
+    // class-field initializers retain the bounded fallback in jm_find_collected_func.
+    mt->func_by_id_count = mt->tp ? mt->tp->ast_index.function_count : 0;
+    if (mt->func_by_id_count > 0) {
+        mt->func_by_id = (JsFuncCollected**)pool_calloc(mt->tp->pool,
+            (size_t)mt->func_by_id_count * sizeof(JsFuncCollected*));
+        if (!mt->func_by_id) {
+            log_error("js-mir: failed to allocate shared function identity table");
             return false;
         }
-        for (int fi = 0; fi < mt->func_count; fi++) {
-            JsFunctionNode* fn = mt->func_entries[fi].node;
-            uintptr_t key = (uintptr_t)fn >> 3;
-            key ^= key >> 17;
-            int slot = (int)(key & (uintptr_t)(cap - 1));
-            while (mt->func_index_nodes[slot]) slot = (slot + 1) & (cap - 1);
-            mt->func_index_nodes[slot] = fn;
-            mt->func_index_ids[slot] = fi;
+    }
+    for (int fi = 0; fi < mt->func_count; fi++) {
+        JsFuncCollected* e = &mt->func_entries[fi];
+        e->function_id = AST_FUNCTION_ID_INVALID;
+        AstNodeId node_id = mt->tp
+            ? ast_index_find(&mt->tp->ast_index, (AstNode*)e->node)
+            : AST_NODE_ID_INVALID;
+        if (node_id != AST_NODE_ID_INVALID) {
+            AstFunctionId function_id = mt->tp->ast_index.owner_functions[node_id];
+            if (function_id < mt->func_by_id_count) {
+                e->function_id = function_id;
+                mt->func_by_id[function_id] = e;
+            }
         }
     }
     log_debug("js-mir: collected %d functions, %d classes", mt->func_count, mt->class_count);

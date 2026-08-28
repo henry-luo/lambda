@@ -1885,7 +1885,7 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         // Note: loop variable is local, handled by fn_scope extension
         AstNode* loop = for_node->loop;
         while (loop) {
-            if (loop->node_type == AST_NODE_LOOP) {
+            if (loop->node_type == AST_NODE_FOR_CLAUSE) {
                 // Must cast to AstLoopNode (not AstNamedNode) — AstLoopNode has
                 // an extra index_name field before 'as', so the offset differs.
                 AstLoopNode* loop_var = (AstLoopNode*)loop;
@@ -1896,8 +1896,8 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
         collect_captures_from_node(tp, for_node->then, fn_scope, global_scope, captures);
         break;
     }
-    case AST_NODE_WHILE_STAM: {
-        AstWhileNode* while_node = (AstWhileNode*)node;
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* while_node = (AstLoopControlNode*)node;
         collect_captures_from_node(tp, while_node->cond, fn_scope, global_scope, captures);
         collect_captures_from_node(tp, while_node->body, fn_scope, global_scope, captures);
         break;
@@ -1957,7 +1957,7 @@ void collect_captures_from_node(Transpiler* tp, AstNode* node, NameScope* fn_sco
             fn_scope, global_scope, captures);
         break;
     case AST_NODE_KEY_EXPR:
-    case AST_NODE_LOOP: {
+    case AST_NODE_FOR_CLAUSE: {
         AstNamedNode* named = (AstNamedNode*)node;
         collect_captures_from_node(tp, named->as, fn_scope, global_scope, captures);
         break;
@@ -5051,7 +5051,7 @@ static void build_join_key_specs(Transpiler* tp, AstLoopNode* loop, AstNode* on_
 // Helper: build order_spec node
 
 
-// Helper: build for_let_clause node (reuses AstNamedNode)
+// Helper: build for_let_clause declarator
 
 
 static String* infer_group_key_alias(Transpiler* tp, AstNode* key_expr) {
@@ -5835,24 +5835,23 @@ static void scan_invalidated_bindings(InvalidatedBindingState* state, AstNode* n
             *state = merged;
             break;
         }
-        case AST_NODE_WHILE_STAM: {
-            AstWhileNode* loop = (AstWhileNode*)node;
-            scan_invalidated_bindings(state, loop->cond);
-            InvalidatedBindingState before_body = *state;
-            InvalidatedBindingState body_state = before_body;
-            scan_invalidated_bindings(&body_state, loop->body);
-            // A while body may execute zero times, so retain both the
-            // pre-loop state and every invalidation reachable from one pass.
-            invalidated_binding_union(state, &before_body, &body_state);
-            break;
-        }
-        case AST_NODE_DO_WHILE_STAM: {
-            AstWhileNode* loop = (AstWhileNode*)node;
-            InvalidatedBindingState before_body = *state;
-            scan_invalidated_bindings(state, loop->body);
-            scan_invalidated_bindings(state, loop->cond);
-            InvalidatedBindingState after_body = *state;
-            invalidated_binding_union(state, &before_body, &after_body);
+        case AST_NODE_LOOP: {
+            AstLoopControlNode* loop = (AstLoopControlNode*)node;
+            if (loop->form == LOOP_FORM_DO_WHILE) {
+                InvalidatedBindingState before_body = *state;
+                scan_invalidated_bindings(state, loop->body);
+                scan_invalidated_bindings(state, loop->cond);
+                InvalidatedBindingState after_body = *state;
+                invalidated_binding_union(state, &before_body, &after_body);
+            } else {
+                scan_invalidated_bindings(state, loop->cond);
+                InvalidatedBindingState before_body = *state;
+                InvalidatedBindingState body_state = before_body;
+                scan_invalidated_bindings(&body_state, loop->body);
+                // a while body may execute zero times, so retain both the
+                // pre-loop state and every invalidation reachable from one pass.
+                invalidated_binding_union(state, &before_body, &body_state);
+            }
             break;
         }
         case AST_NODE_FOR_EXPR: {
@@ -6295,8 +6294,8 @@ static void walk_lambda_ast(AstNode* node, LambdaAstVisitor visitor, void* data,
         walk_lambda_ast(field->field, visitor, data, descend_functions);
         break;
     }
-    case AST_NODE_WHILE_STAM: {
-        AstWhileNode* loop = (AstWhileNode*)node;
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
         walk_lambda_ast(loop->cond, visitor, data, descend_functions);
         walk_lambda_ast(loop->body, visitor, data, descend_functions);
         break;
@@ -8605,7 +8604,7 @@ AstNode* build_assignment_statement_from_parts(Transpiler* tp,
             alloc_ast_node_from_span(tp,
                 target->node_type == AST_NODE_INDEX_EXPR
                     ? AST_NODE_INDEX_ASSIGN_STAM : AST_NODE_MEMBER_ASSIGN_STAM,
-                span, sizeof(AstCompoundAssignNode));
+                span, sizeof(AstAssignNode));
         assignment->object = field->object;
         assignment->key = field->field;
         assignment->value = value;
@@ -8624,7 +8623,7 @@ AstNode* build_assignment_statement_from_parts(Transpiler* tp,
     NameEntry* entry = ident->entry ? ident->entry : lookup_name(tp,
         strview_init(ident->name->chars, ident->name->len));
     AstAssignStamNode* assignment = (AstAssignStamNode*)alloc_ast_node_from_span(
-        tp, AST_NODE_ASSIGN_STAM, span, sizeof(AstAssignStamNode));
+        tp, AST_NODE_ASSIGN_STAM, span, sizeof(AstAssignNode));
     assignment->target = ident->name;
     assignment->target_node = entry ? entry->node : NULL;
     assignment->target_entry = entry;
@@ -9092,7 +9091,7 @@ AstNode* build_loop_from_parts(Transpiler* tp, SourceSpan span,
         LambdaToken name_token, LambdaToken index_token, uint32_t flags,
         AstNode* index_type, AstNode* source, AstNode* join) {
     AstLoopNode* loop = (AstLoopNode*)alloc_ast_node_from_span(tp,
-        AST_NODE_LOOP, span, sizeof(AstLoopNode));
+        AST_NODE_FOR_CLAUSE, span, sizeof(AstLoopNode));
     StrView name = source_span_text(tp, name_token.span);
     loop->name = name_pool_create_strview(tp->name_pool, name);
     loop->index_name = index_token.kind
@@ -9122,7 +9121,7 @@ AstNode* build_loop_from_parts(Transpiler* tp, SourceSpan span,
     }
     if (loop->index_name) {
         AstNamedNode* index = (AstNamedNode*)alloc_ast_node_from_span(tp,
-            AST_NODE_LOOP, index_token.span, sizeof(AstNamedNode));
+            AST_NODE_FOR_CLAUSE, index_token.span, sizeof(AstNamedNode));
         index->name = loop->index_name;
         index->type = loop->key_filter == LOOP_KEY_INT ? &TYPE_INT :
             loop->key_filter == LOOP_KEY_SYMBOL ? &TYPE_SYMBOL :
@@ -9174,8 +9173,9 @@ AstNode* build_for_from_parts(Transpiler* tp, SourceSpan span,
 
 AstNode* build_while_from_parts(Transpiler* tp, SourceSpan span,
         AstNode* condition, AstNode* body, NameScope* loop_scope) {
-    AstWhileNode* node = (AstWhileNode*)alloc_ast_node_from_span(tp,
-        AST_NODE_WHILE_STAM, span, sizeof(AstWhileNode));
+    AstLoopControlNode* node = (AstLoopControlNode*)alloc_ast_node_from_span(tp,
+        AST_NODE_LOOP, span, sizeof(AstLoopControlNode));
+    node->form = LOOP_FORM_WHILE;
     node->vars = loop_scope;
     node->cond = condition;
     node->body = body;

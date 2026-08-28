@@ -969,8 +969,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         }
         break;
     }
-    case AST_NODE_FOR_EXPR:
-    case AST_NODE_FOR_STAM: {
+    case AST_NODE_FOR_EXPR: {
         log_debug("[for %s:%s]",
             node->node_type == AST_NODE_FOR_EXPR ? "expr" : "stam", type_name);
         AstNode *loop = ((AstForNode*)node)->loop;
@@ -995,7 +994,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         print_ast_node(script, key->as, indent + 1);
         break;
     }
-    case AST_NODE_LOOP:
+    case AST_NODE_FOR_CLAUSE:
         log_debug("[loop expr:%s]", type_name);
         print_ast_node(script, ((AstLoopNode*)node)->as, indent + 1);
         break;

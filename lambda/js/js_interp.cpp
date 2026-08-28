@@ -3309,9 +3309,9 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
             (JsAstNode*)(take_consequent ? conditional->consequent
                 : conditional->alternate));
     }
-    case AST_NODE_WHILE_STAM: {
-        JsWhileNode* loop = (JsWhileNode*)node;
-        for (;;) {
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        if (loop->form == LOOP_FORM_WHILE) for (;;) {
             JsInterpCompletion test = js_interp_eval(frame, (JsAstNode*)loop->test);
             if (test.kind != JS_INTERP_NORMAL) return test;
             if (!js_is_truthy(test.value)) return js_interp_normal(make_js_undefined());
@@ -3330,10 +3330,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                     !js_interp_completion_targets_active_label(&body, frame)) return body;
             if (body.kind == JS_INTERP_YIELD || body.kind == JS_INTERP_AWAIT) return body;
         }
-    }
-    case AST_NODE_DO_WHILE_STAM: {
-        JsDoWhileNode* loop = (JsDoWhileNode*)node;
-        for (;;) {
+        if (loop->form == LOOP_FORM_DO_WHILE) for (;;) {
             JsInterpFrame body_frame = *frame;
             body_frame.active_label = NULL;
             body_frame.active_label_len = 0;
@@ -3352,9 +3349,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
             if (test.kind != JS_INTERP_NORMAL) return test;
             if (!js_is_truthy(test.value)) return js_interp_normal(make_js_undefined());
         }
-    }
-    case AST_NODE_FOR_STAM: {
-        JsForNode* loop = (JsForNode*)node;
+        {
         JsInterpGeneratorLoopContinuation* resume = js_interp_generator_find_loop(frame,
             (JsAstNode*)loop);
         JsInterpEnv* env = resume ? resume->env
@@ -3446,6 +3441,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                 if (update.kind != JS_INTERP_NORMAL) return update;
             }
             resume_body = false;
+        }
         }
     }
     case JS_AST_NODE_SWITCH_STATEMENT:
@@ -3621,8 +3617,8 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
     case AST_NODE_NEW_EXPR:
     case AST_NODE_ARRAY: case AST_NODE_MAP:
     case AST_NODE_CONDITIONAL_EXPR: case AST_NODE_SEQ:
-    case AST_NODE_IF_EXPR: case AST_NODE_WHILE_STAM: case AST_NODE_DO_WHILE_STAM:
-    case AST_NODE_FOR_STAM: case AST_NODE_RETURN_STAM: case AST_NODE_RAISE_STAM:
+    case AST_NODE_IF_EXPR: case AST_NODE_LOOP:
+    case AST_NODE_RETURN_STAM: case AST_NODE_RAISE_STAM:
     case AST_NODE_BREAK_STAM: case AST_NODE_CONTINUE_STAM: case AST_NODE_TRY_STAM:
     case JS_AST_NODE_IMPORT_DECLARATION: case JS_AST_NODE_EXPORT_DECLARATION:
     case JS_AST_NODE_IMPORT_SPECIFIER: case JS_AST_NODE_EXPORT_SPECIFIER:

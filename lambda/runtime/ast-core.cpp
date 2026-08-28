@@ -207,6 +207,9 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             AST_VISIT(((AstBinaryNode*)node)->right); break;
         case AST_NODE_UNARY_TYPE: AST_VISIT(((AstUnaryNode*)node)->operand); break;
         case AST_NODE_ASSIGN:
+        case AST_NODE_ASSIGN_STAM:
+        case AST_NODE_INDEX_ASSIGN_STAM:
+        case AST_NODE_MEMBER_ASSIGN_STAM:
             AST_VISIT(((AstAssignNode*)node)->left);
             AST_VISIT(((AstAssignNode*)node)->right); break;
         case AST_NODE_CALL_EXPR: case AST_NODE_NEW_EXPR:
@@ -244,22 +247,21 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             if (node->node_type == AST_NODE_BLOCK) AST_VISIT(((AstBlockNode*)node)->statements);
             else AST_VISIT(((AstExprStmtNode*)node)->expression);
             break;
-        case AST_NODE_FOR_STAM:
-            AST_VISIT(((AstForStmtNode*)node)->init); AST_VISIT(((AstForStmtNode*)node)->test);
-            AST_VISIT(((AstForStmtNode*)node)->update); AST_VISIT(((AstForStmtNode*)node)->body); break;
-        case AST_NODE_WHILE_STAM: case AST_NODE_DO_WHILE_STAM:
-            AST_VISIT(((AstWhileNode*)node)->cond); AST_VISIT(((AstWhileNode*)node)->body); break;
+        case AST_NODE_LOOP: {
+            AstLoopControlNode* loop = (AstLoopControlNode*)node;
+            if (loop->form == LOOP_FORM_DO_WHILE) {
+                AST_VISIT(loop->body); AST_VISIT(loop->cond);
+            } else {
+                AST_VISIT(loop->init); AST_VISIT(loop->test);
+                AST_VISIT(loop->update); AST_VISIT(loop->body);
+            }
+            break;
+        }
         case AST_NODE_RETURN_STAM: case AST_NODE_RAISE_STAM: case AST_NODE_RAISE_EXPR:
             AST_VISIT(((AstReturnNode*)node)->value); break;
-        case AST_NODE_ASSIGN_STAM:
-            AST_VISIT(((AstAssignStamNode*)node)->value); break;
-        case AST_NODE_INDEX_ASSIGN_STAM: case AST_NODE_MEMBER_ASSIGN_STAM:
-            AST_VISIT(((AstCompoundAssignNode*)node)->object);
-            AST_VISIT(((AstCompoundAssignNode*)node)->key);
-            AST_VISIT(((AstCompoundAssignNode*)node)->value); break;
-        case AST_NODE_VAR_STAM: AST_VISIT(((AstVarDeclNode*)node)->declarations); break;
-        case AST_NODE_LET_STAM: case AST_NODE_PUB_STAM: case AST_NODE_TYPE_STAM:
-            AST_VISIT(((AstLetNode*)node)->declare); break;
+        case AST_NODE_VAR_STAM: case AST_NODE_LET_STAM:
+        case AST_NODE_PUB_STAM: case AST_NODE_TYPE_STAM:
+            AST_VISIT(((AstVarDeclNode*)node)->declarations); break;
         case AST_NODE_VARIABLE_DECLARATOR:
             AST_VISIT(((AstDeclaratorNode*)node)->id); AST_VISIT(((AstDeclaratorNode*)node)->init); break;
         case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM:

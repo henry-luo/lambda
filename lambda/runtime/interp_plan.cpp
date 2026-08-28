@@ -7,12 +7,9 @@
 //      Script can run under T0 at all, so an unsupported kind produces a
 //      counted whole-module fallback instead of a silent wrong answer (R4).
 //
-// The traversal is interpreter-owned rather than `ast_visit_core_children`:
-// that visitor is the core cross-language contract feeding AstIndex, and it
-// stops at `default:` for most Lambda-only kinds (CONTENT, LET_STAM, ELEMENT,
-// FOR_EXPR, …). Extending it would change AstIndex on the default path, which
-// P0/P1 must leave untouched; `LangProfile::visit_ext_children` is the
-// designated seam for unifying the two later (design §9).
+// The traversal owns Lambda extension edges and delegates shared layouts to
+// `ast_visit_core_children`; `LangProfile::visit_ext_children` remains the
+// seam for language-specific children (D8.2.4).
 
 #include "interp.hpp"
 #include "re2_wrapper.hpp"
@@ -57,7 +54,7 @@ void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx
         V(fr->then);
         break;
     }
-    case AST_NODE_LOOP: {
+    case AST_NODE_FOR_CLAUSE: {
         AstLoopNode* lp = (AstLoopNode*)node;
         V(lp->as);
         V(lp->on);
@@ -156,8 +153,7 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_PROC:
     case AST_NODE_VAR_STAM:
     case AST_NODE_ASSIGN_STAM:
-    case AST_NODE_WHILE_STAM:
-    case AST_NODE_DO_WHILE_STAM:
+    case AST_NODE_LOOP:
     case AST_NODE_BREAK_STAM:
     case AST_NODE_CONTINUE_STAM:
     case AST_NODE_RETURN_STAM:
@@ -168,7 +164,7 @@ static bool interp_kind_supported(AstNodeType kind) {
     case AST_NODE_PIPE_FILE_STAM:
     // --- P1.1: comprehensions ---
     case AST_NODE_FOR_EXPR:
-    case AST_NODE_LOOP:
+    case AST_NODE_FOR_CLAUSE:
     case AST_NODE_ORDER_SPEC:
     case AST_NODE_GROUP_CLAUSE:
     case AST_NODE_GROUP_KEY:
@@ -241,14 +237,14 @@ const char* interp_node_kind_name(AstNodeType kind) {
     K(AST_NODE_INDEX_EXPR) K(AST_NODE_IF_EXPR) K(AST_NODE_ARRAY) K(AST_NODE_MAP)
     K(AST_NODE_KEY_EXPR) K(AST_NODE_MATCH_EXPR) K(AST_NODE_MATCH_ARM)
     K(AST_NODE_SEQ) K(AST_NODE_LIST) K(AST_NODE_BLOCK) K(AST_NODE_PARAM)
-    K(AST_NODE_WHILE_STAM) K(AST_NODE_BREAK_STAM)
+    K(AST_NODE_LOOP) K(AST_NODE_BREAK_STAM)
     K(AST_NODE_CONTINUE_STAM) K(AST_NODE_RETURN_STAM) K(AST_NODE_RAISE_STAM)
     K(AST_NODE_RAISE_EXPR) K(AST_NODE_VAR_STAM) K(AST_NODE_ASSIGN_STAM)
     K(AST_NODE_LET_STAM) K(AST_NODE_PUB_STAM) K(AST_NODE_IMPORT)
-    K(AST_NODE_DO_WHILE_STAM) K(AST_NODE_FUNC) K(AST_NODE_FUNC_EXPR)
+    K(AST_NODE_FUNC) K(AST_NODE_FUNC_EXPR)
     K(AST_NODE_PROC) K(AST_NODE_PIPE) K(AST_NODE_CURRENT_ITEM)
     K(AST_NODE_CURRENT_INDEX) K(AST_NODE_LAST_INDEX) K(AST_NODE_CONTENT)
-    K(AST_NODE_ELEMENT) K(AST_NODE_DECOMPOSE) K(AST_NODE_LOOP)
+    K(AST_NODE_ELEMENT) K(AST_NODE_DECOMPOSE) K(AST_NODE_FOR_CLAUSE)
     K(AST_NODE_ORDER_SPEC) K(AST_NODE_GROUP_CLAUSE) K(AST_NODE_GROUP_KEY) K(AST_NODE_JOIN_KEY)
     K(AST_NODE_FOR_EXPR) K(AST_NODE_INDEX_ASSIGN_STAM) K(AST_NODE_MEMBER_ASSIGN_STAM)
     K(AST_NODE_PIPE_FILE_STAM) K(AST_NODE_TYPE_STAM) K(AST_NODE_PATH_EXPR)
@@ -373,7 +369,7 @@ static bool interp_range_loop_index_expr(AstNode* node) {
     if (!node) return false;
     if (node->node_type == AST_NODE_IDENT) {
         NameEntry* entry = ((AstIdentNode*)node)->entry;
-        if (!entry || !entry->node || entry->node->node_type != AST_NODE_LOOP) {
+        if (!entry || !entry->node || entry->node->node_type != AST_NODE_FOR_CLAUSE) {
             return false;
         }
         AstLoopNode* loop = (AstLoopNode*)entry->node;
@@ -706,13 +702,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         // A direct untyped non-loop binding reaches the same runtime int64
         // conversion in T0 and MIR. Loop values stay with the range proof
         // below: `to` also produces character ranges, so admitting an
-        // AST_NODE_LOOP here would turn a character key into an int index.
+        // AST_NODE_FOR_CLAUSE here would turn a character key into an int index.
         // Derived expressions remain outside this bridge to keep mask/slice
         // keys from entering the scalar COW setter.
         bool direct_untyped_binding_index = dynamic_index_entry &&
             !dynamic_index_entry->declared_type &&
             (!dynamic_index_entry->node ||
-             dynamic_index_entry->node->node_type != AST_NODE_LOOP);
+             dynamic_index_entry->node->node_type != AST_NODE_FOR_CLAUSE);
         // MIR routes a typed numeric-array key through fn_index_assign, whose
         // runtime mask validation owns the bool-lane and shape checks. Source
         // numeric literals retain ARRAY AST type until their ArrayNum builds.
@@ -1655,8 +1651,7 @@ static void plan_walk(AstNode* node, void* ctx) {
         // so it is not reached by the owning for scope walk above.
         plan_assign_entry(pc, ((AstGroupClause*)node)->entry);
         break;
-    case AST_NODE_WHILE_STAM:
-    case AST_NODE_DO_WHILE_STAM:
+    case AST_NODE_LOOP:
         plan_assign_scope(pc, ((AstWhileNode*)node)->vars);
         break;
     case AST_NODE_BLOCK:

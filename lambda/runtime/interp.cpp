@@ -2959,7 +2959,7 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
             if (is_declaration_node(item->node_type)) { decl_count++; continue; }
             if (is_side_effect_stam(item->node_type) ||
                     is_proc_flow_side_effect_node(item, last_executable) ||
-                    item->node_type == AST_NODE_WHILE_STAM ||
+                    item->node_type == AST_NODE_LOOP ||
                     ast_for_discards_result(item)) {
                 stam_count++;
                 continue;
@@ -4281,10 +4281,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         interp_write_binding(f, root, replacement);
         return ItemNull;
     }
-    case AST_NODE_WHILE_STAM:
-    case AST_NODE_DO_WHILE_STAM: {
-        AstWhileNode* loop = (AstWhileNode*)node;
-        bool test_first = node->node_type == AST_NODE_WHILE_STAM;
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        bool test_first = loop->form != LOOP_FORM_DO_WHILE;
         if (test_first) {
             Item fast_result = ItemNull;
             if (interp_fast_int_while(f, loop, &fast_result)) return fast_result;

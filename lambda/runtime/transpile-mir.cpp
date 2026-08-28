@@ -763,8 +763,7 @@ static int mir_explicit_return_count(AstNode* node) {
             count += mir_explicit_return_count(branch->otherwise);
             break;
         }
-        case AST_NODE_WHILE_STAM:
-        case AST_NODE_DO_WHILE_STAM:
+        case AST_NODE_LOOP:
             count += mir_explicit_return_count(((AstWhileNode*)current)->body);
             break;
         case AST_NODE_FOR_EXPR:
@@ -9949,13 +9948,13 @@ static void mir_emit_for_let_clause(MirTranspiler* mt, AstForNode* for_node) {
     if (!for_node->let_clause) return;
     AstNode* lc = for_node->let_clause;
     while (lc) {
-        AstNamedNode* let_node = (AstNamedNode*)lc;
-        if (let_node->as) {
-            MIR_reg_t val = transpile_expr(mt, let_node->as);
+        AstDeclaratorNode* let_node = (AstDeclaratorNode*)lc;
+        if (let_node->init) {
+            MIR_reg_t val = transpile_expr(mt, let_node->init);
             char lc_name[128];
             snprintf(lc_name, sizeof(lc_name), "%.*s",
                 (int)let_node->name->len, let_node->name->chars);
-            TypeId lc_tid = get_effective_type(mt, let_node->as);
+            TypeId lc_tid = get_effective_type(mt, let_node->init);
             MIR_type_t lc_mtype = type_to_mir(lc_tid);
             set_var(mt, lc_name, val, lc_mtype, lc_tid);
         }
@@ -10342,7 +10341,7 @@ static void mir_prewiden_loop_bindings(MirTranspiler* mt, AstNode* node,
         // A nested loop's own body assigns to the same outer bindings.
         mir_prewiden_loop_bindings(mt, ((AstForNode*)node)->then, depth + 1);
         break;
-    case AST_NODE_WHILE_STAM:
+    case AST_NODE_LOOP:
         mir_prewiden_loop_bindings(mt, ((AstWhileNode*)node)->body, depth + 1);
         break;
     default:
@@ -10494,12 +10493,12 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
         if (for_node->let_clause) {
             AstNode* lc = for_node->let_clause;
             while (lc) {
-                AstNamedNode* let_node = (AstNamedNode*)lc;
-                if (let_node->as) {
-                    MIR_reg_t val = transpile_expr(mt, let_node->as);
+                AstDeclaratorNode* let_node = (AstDeclaratorNode*)lc;
+                if (let_node->init) {
+                    MIR_reg_t val = transpile_expr(mt, let_node->init);
                     char lc_name[128];
                     snprintf(lc_name, sizeof(lc_name), "%.*s", (int)let_node->name->len, let_node->name->chars);
-                    TypeId lc_tid = get_effective_type(mt, let_node->as);
+                    TypeId lc_tid = get_effective_type(mt, let_node->init);
                     MIR_type_t lc_mtype = type_to_mir(lc_tid);
                     set_var(mt, lc_name, val, lc_mtype, lc_tid);
                 }
@@ -11018,8 +11017,7 @@ static bool mir_nested_control_writes_name(AstNode* node, const String* name) {
         return mir_nested_control_writes_name(if_node->then, name) ||
             mir_nested_control_writes_name(if_node->otherwise, name);
     }
-    if (node->node_type == AST_NODE_WHILE_STAM ||
-            node->node_type == AST_NODE_DO_WHILE_STAM) {
+    if (node->node_type == AST_NODE_LOOP) {
         return mir_nested_control_writes_name(((AstWhileNode*)node)->body, name);
     }
     // The Lambda iterator `for` has one AST_NODE_FOR_EXPR layout. Omitting it
@@ -11071,7 +11069,7 @@ static bool mir_positive_sub_loop_candidate(MirTranspiler* mt,
     for (AstNode* item = body->item; item; item = item->next) {
         // Nested control flow could contain a second write that is not governed
         // by the loop header, so the first fast lane deliberately rejects it.
-        if (item->node_type == AST_NODE_IF_EXPR || item->node_type == AST_NODE_WHILE_STAM ||
+        if (item->node_type == AST_NODE_IF_EXPR || item->node_type == AST_NODE_LOOP ||
                 item->node_type == AST_NODE_FOR_EXPR || item->node_type == AST_NODE_RETURN_STAM ||
                 item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_PROC ||
                 item->node_type == AST_NODE_FUNC_EXPR) {
@@ -11179,8 +11177,7 @@ static bool mir_forward_compact_loop_candidate(MirTranspiler* mt,
                 item->node_type == AST_NODE_FUNC_EXPR) {
             return false;
         }
-        if ((item->node_type == AST_NODE_WHILE_STAM ||
-                item->node_type == AST_NODE_DO_WHILE_STAM ||
+        if ((item->node_type == AST_NODE_LOOP ||
                 item->node_type == AST_NODE_FOR_EXPR) &&
                 mir_nested_control_writes_name(item, counter_name)) {
             return false;
@@ -11375,8 +11372,12 @@ static void mir_dense_scan_node(MirTranspiler* mt, AstNode* node,
             mir_dense_scan_node(mt, if_node->otherwise, scan);
             break;
         }
-        case AST_NODE_WHILE_STAM: {
-            AstWhileNode* while_node = (AstWhileNode*)node;
+        case AST_NODE_LOOP: {
+            AstLoopControlNode* while_node = (AstLoopControlNode*)node;
+            if (while_node->form != LOOP_FORM_WHILE) {
+                scan->complete = false;
+                break;
+            }
             AstNode* cond = ast_unwrap_primary(while_node->cond);
             if (!cond || cond->node_type != AST_NODE_BINARY ||
                     (((AstBinaryNode*)cond)->op != OPERATOR_LT &&
@@ -13424,7 +13425,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
             } else if (is_side_effect_stam(scan->node_type) ||
                        is_proc_flow_side_effect_node(scan, last_executable)) {
                 stam_count++;
-            } else if (scan->node_type == AST_NODE_WHILE_STAM ||
+            } else if (scan->node_type == AST_NODE_LOOP ||
                        ast_for_discards_result(scan)) {
                 stam_count++;
             } else {
@@ -13454,7 +13455,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 // Last value expression: this is the return value
                 result = transpile_content_tail_value(mt, item);
             } else if (item->node_type == AST_NODE_IF_EXPR ||
-                       item->node_type == AST_NODE_WHILE_STAM ||
+                       item->node_type == AST_NODE_LOOP ||
                        ast_for_discards_result(item)) {
                 transpile_discard_expr(mt, item);
             } else {
@@ -13488,7 +13489,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                 // This is the single value expression
                 result = transpile_content_tail_value(mt, item);
             } else if (is_proc &&
-                       (item->node_type == AST_NODE_WHILE_STAM ||
+                       (item->node_type == AST_NODE_LOOP ||
                         ast_for_discards_result(item))) {
                 transpile_discard_expr(mt, item); // proc context side effect
             }
@@ -13518,7 +13519,7 @@ static MIR_reg_t transpile_content(MirTranspiler* mt, AstListNode* list_node) {
                     transpile_discard_expr(mt, item);
                 }
             } else if (is_proc &&
-                       (item->node_type == AST_NODE_WHILE_STAM ||
+                       (item->node_type == AST_NODE_LOOP ||
                         ast_for_discards_result(item))) {
                 transpile_discard_expr(mt, item); // proc context side effect
             }
@@ -20904,7 +20905,7 @@ static MIR_reg_t transpile_expr(MirTranspiler* mt, AstNode* node) {
         return transpile_match(mt, (AstMatchNode*)node);
     case AST_NODE_FOR_EXPR:
         return transpile_for(mt, (AstForNode*)node, true);
-    case AST_NODE_WHILE_STAM:
+    case AST_NODE_LOOP:
         return transpile_while(mt, (AstWhileNode*)node);
     case AST_NODE_BREAK_STAM: {
         if (mt->loop_depth > 0) {
@@ -22952,7 +22953,7 @@ static void find_aliases_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_cou
             find_aliases_multi(ifn->otherwise, ctxs, ctx_count);
             break;
         }
-        case AST_NODE_WHILE_STAM: {
+        case AST_NODE_LOOP: {
             AstWhileNode* wh = (AstWhileNode*)node;
             find_aliases_multi(wh->body, ctxs, ctx_count);
             break;
@@ -23033,7 +23034,7 @@ static void gather_evidence_multi(AstNode* node, FnParamEvidence* ctxs, int ctx_
             gather_evidence_multi(ifn->otherwise, ctxs, ctx_count);
             break;
         }
-        case AST_NODE_WHILE_STAM: {
+        case AST_NODE_LOOP: {
             AstWhileNode* wh = (AstWhileNode*)node;
             gather_evidence_multi(wh->cond, ctxs, ctx_count);
             gather_evidence_multi(wh->body, ctxs, ctx_count);
@@ -23771,7 +23772,7 @@ static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
                     branch->otherwise, expected, return_count, wide_free)) return false;
             break;
         }
-        case AST_NODE_WHILE_STAM: {
+        case AST_NODE_LOOP: {
             AstWhileNode* loop = (AstWhileNode*)current;
             if (loop->body && !mir_proc_return_values_prove(mt,
                     loop->body, expected, return_count, wide_free)) return false;
@@ -26091,7 +26092,7 @@ static bool has_elem_type_invalidation(const char* var_name, AstNode* node, Type
             if (if_node->otherwise && has_elem_type_invalidation(var_name, if_node->otherwise, safe_elem)) return true;
             break;
         }
-        case AST_NODE_WHILE_STAM: {
+        case AST_NODE_LOOP: {
             AstWhileNode* wh = (AstWhileNode*)node;
             if (wh->body && has_elem_type_invalidation(var_name, wh->body, safe_elem)) return true;
             break;
@@ -26862,7 +26863,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             if (arm->body) prepass_forward_declare(mt, arm->body);
             break;
         }
-        case AST_NODE_LOOP: {
+        case AST_NODE_FOR_CLAUSE: {
             AstLoopNode* loop = (AstLoopNode*)node;
             if (loop->as) prepass_forward_declare(mt, loop->as);
             break;
@@ -26892,7 +26893,7 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             if (ret->value) prepass_forward_declare(mt, ret->value);
             break;
         }
-        case AST_NODE_WHILE_STAM: {
+        case AST_NODE_LOOP: {
             AstWhileNode* wh = (AstWhileNode*)node;
             if (wh->cond) prepass_forward_declare(mt, wh->cond);
             if (wh->body) prepass_forward_declare(mt, wh->body);
@@ -27615,7 +27616,7 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
             if (arm->body) prepass_define_functions(mt, arm->body);
             break;
         }
-        case AST_NODE_LOOP: {
+        case AST_NODE_FOR_CLAUSE: {
             AstLoopNode* loop = (AstLoopNode*)node;
             if (loop->as) prepass_define_functions(mt, loop->as);
             break;
@@ -27636,7 +27637,7 @@ static void prepass_define_functions(MirTranspiler* mt, AstNode* node) {
             if (ret->value) prepass_define_functions(mt, ret->value);
             break;
         }
-        case AST_NODE_WHILE_STAM: {
+        case AST_NODE_LOOP: {
             AstWhileNode* wh = (AstWhileNode*)node;
             if (wh->cond) prepass_define_functions(mt, wh->cond);
             if (wh->body) prepass_define_functions(mt, wh->body);

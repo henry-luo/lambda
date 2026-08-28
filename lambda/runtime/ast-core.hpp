@@ -48,8 +48,6 @@ typedef enum AstNodeType : uint16_t {
 
     // L2/L3 declarations, statements, patterns, and control flow
     AST_NODE_PARAM = 150,
-    AST_NODE_FOR_STAM = 151,
-    AST_NODE_WHILE_STAM = 152,
     AST_NODE_BREAK_STAM = 153,
     AST_NODE_CONTINUE_STAM = 154,
     AST_NODE_RETURN_STAM = 155,
@@ -69,7 +67,6 @@ typedef enum AstNodeType : uint16_t {
     AST_NODE_REST_ELEMENT = 169,
     AST_NODE_REST_PROPERTY = 170,
     AST_NODE_VARIABLE_DECLARATOR = 171,
-    AST_NODE_DO_WHILE_STAM = 172,
     AST_NODE_FOR_OF_STAM = 173,
     AST_NODE_FOR_IN_STAM = 174,
     AST_NODE_TRY_STAM = 175,
@@ -145,7 +142,16 @@ typedef enum AstNodeType : uint16_t {
     // prevents generic AST visitors from casting its smaller layout as the
     // enclosing AstGroupClause.
     AST_NODE_GROUP_KEY = 547,
+    // Iterator/query `for` clauses remain an AST_FOR extension edge; the
+    // shared AST_NODE_LOOP tag is reserved for condition loops (D8.2.2).
+    AST_NODE_FOR_CLAUSE = 548,
 } AstNodeType;
+
+typedef enum LoopForm {
+    LOOP_FORM_WHILE = 0,
+    LOOP_FORM_DO_WHILE = 1,
+    LOOP_FORM_FOR_C = 2,
+} LoopForm;
 
 typedef enum Operator {
     // unary
@@ -505,9 +511,17 @@ typedef struct AstIdentNode : AstNode {
     NameEntry *entry;
 } AstIdentNode;
 
-typedef struct AstLetNode : AstNode {
-    AstNode *declare;
-} AstLetNode;
+typedef struct AstVarDeclNode : AstNode {
+    union {
+        AstNode* declarations;
+        AstNode* declare; // Lambda statement spelling of the declaration list
+    };
+    int kind;
+    bool is_using;
+    bool is_await_using;
+} AstVarDeclNode;
+
+typedef AstVarDeclNode AstLetNode;
 
 typedef struct AstIfNode : AstNode {
     union {
@@ -552,23 +566,21 @@ typedef struct AstMatchNode : AstNode {
     int arm_count;
 } AstMatchNode;
 
-typedef struct AstWhileNode : AstNode {
+typedef struct AstLoopControlNode : AstNode {
+    LoopForm form;
+    AstNode *init;
     union {
         AstNode *cond;
         AstNode *test;
     };
+    AstNode *update;
     AstNode *body;
     NameScope *vars;
-} AstWhileNode;
+} AstLoopControlNode;
 
-typedef AstWhileNode AstDoWhileNode;
-
-typedef struct AstForStmtNode : AstNode {
-    AstNode* init;
-    AstNode* test;
-    AstNode* update;
-    AstNode* body;
-} AstForStmtNode;
+typedef AstLoopControlNode AstForStmtNode;
+typedef AstLoopControlNode AstWhileNode;
+typedef AstLoopControlNode AstDoWhileNode;
 
 typedef struct AstBreakContinueNode : AstNode {
     const char* label;
@@ -618,8 +630,18 @@ typedef struct AstPropertyNode : AstNode {
 typedef struct AstAssignNode : AstNode {
     Operator op;
     AstNode *left;
-    AstNode *right;
+    union {
+        AstNode *right;
+        AstNode *value; // Lambda statement spelling of the shared RHS
+    };
     bool lhs_is_parenthesized;
+    // Lambda statement forms carry resolved binding and compound-target
+    // metadata on this same assignment record (D8.2.2).
+    String* target;
+    AstNode *target_node;
+    struct NameEntry* target_entry;
+    AstNode *object; // optional compound-target owner
+    AstNode *key; // optional compound-target key
 } AstAssignNode;
 
 // for declaration decomposition (let a, b = expr / let a, b at expr)
@@ -633,20 +655,10 @@ typedef struct AstDecomposeNode : AstNode {
     bool is_named;
 } AstDecomposeNode;
 
-// assignment statement (procedural only)
-typedef struct AstAssignStamNode : AstAssignNode {
-    String* target;
-    AstNode *target_node;
-    AstNode *value;
-    struct NameEntry* target_entry;
-} AstAssignStamNode;
-
-// compound assignment statement: arr[i] = val or obj.field = val (procedural only)
-typedef struct AstCompoundAssignNode : AstAssignNode {
-    AstNode *object;
-    AstNode *key;
-    AstNode *value;
-} AstCompoundAssignNode;
+// Statement spellings retain aliases while their physical contract is the
+// shared assignment record above; no language-specific layout remains.
+typedef AstAssignNode AstAssignStamNode;
+typedef AstAssignNode AstCompoundAssignNode;
 
 // A vector comparison produces an ArrayNum bool mask, while a source numeric
 // literal may still carry the general ARRAY AST type until it is constructed.
@@ -758,7 +770,7 @@ static inline bool ast_expr_may_return_container(AstNode* expr, TypeId expr_tid,
     case AST_NODE_IF_EXPR:
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_FOR_EXPR:
-    case AST_NODE_FOR_STAM:
+    case AST_NODE_LOOP:
         return true;
     default:
         // `any` arithmetic/comparison paths are scalar in practice; cloning
@@ -775,13 +787,6 @@ typedef struct AstBlockNode : AstNode {
 typedef struct AstExprStmtNode : AstNode {
     AstNode* expression;
 } AstExprStmtNode;
-
-typedef struct AstVarDeclNode : AstNode {
-    AstNode* declarations;
-    int kind;
-    bool is_using;
-    bool is_await_using;
-} AstVarDeclNode;
 
 typedef struct AstDeclaratorNode : AstNode {
     AstNode* id;

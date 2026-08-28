@@ -76,8 +76,8 @@ static const JsAstNodeType JS_AST_NODE_VARIABLE_DECLARATION = AST_NODE_VAR_STAM;
 static const JsAstNodeType JS_AST_NODE_EXPRESSION_STATEMENT = AST_NODE_EXPR_STMT;
 static const JsAstNodeType JS_AST_NODE_BLOCK_STATEMENT = AST_NODE_BLOCK;
 static const JsAstNodeType JS_AST_NODE_IF_STATEMENT = AST_NODE_IF_EXPR;
-static const JsAstNodeType JS_AST_NODE_WHILE_STATEMENT = AST_NODE_WHILE_STAM;
-static const JsAstNodeType JS_AST_NODE_FOR_STATEMENT = AST_NODE_FOR_STAM;
+static const JsAstNodeType JS_AST_NODE_WHILE_STATEMENT = AST_NODE_LOOP;
+static const JsAstNodeType JS_AST_NODE_FOR_STATEMENT = AST_NODE_LOOP;
 static const JsAstNodeType JS_AST_NODE_RETURN_STATEMENT = AST_NODE_RETURN_STAM;
 static const JsAstNodeType JS_AST_NODE_BREAK_STATEMENT = AST_NODE_BREAK_STAM;
 static const JsAstNodeType JS_AST_NODE_CONTINUE_STATEMENT = AST_NODE_CONTINUE_STAM;
@@ -117,7 +117,7 @@ static const JsAstNodeType JS_AST_NODE_REST_ELEMENT = AST_NODE_REST_ELEMENT;
 static const JsAstNodeType JS_AST_NODE_REST_PROPERTY = AST_NODE_REST_PROPERTY;
 static const JsAstNodeType JS_AST_NODE_SWITCH_STATEMENT = AST_NODE_MATCH_EXPR;
 static const JsAstNodeType JS_AST_NODE_SWITCH_CASE = AST_NODE_MATCH_ARM;
-static const JsAstNodeType JS_AST_NODE_DO_WHILE_STATEMENT = AST_NODE_DO_WHILE_STAM;
+static const JsAstNodeType JS_AST_NODE_DO_WHILE_STATEMENT = AST_NODE_LOOP;
 static const JsAstNodeType JS_AST_NODE_FOR_OF_STATEMENT = AST_NODE_FOR_OF_STAM;
 static const JsAstNodeType JS_AST_NODE_FOR_IN_STATEMENT = AST_NODE_FOR_IN_STAM;
 static const JsAstNodeType JS_AST_NODE_IMPORT_SPECIFIER = AST_NODE_IMPORT_SPECIFIER;
@@ -217,12 +217,7 @@ typedef struct JsIfNode : AstIfNode {
 } JsIfNode;
 typedef AstWhileNode JsWhileNode;
 
-typedef struct JsForNode : AstForStmtNode {
-    // The loop header owns let/const bindings independently of the enclosing
-    // block. The AST interpreter needs this retained scope for its lexical
-    // environment; core traversal still sees the AstForStmtNode prefix.
-    NameScope* vars;
-} JsForNode;
+typedef AstForStmtNode JsForNode;
 
 typedef AstReturnNode JsReturnNode;
 typedef AstBlockNode JsBlockNode;

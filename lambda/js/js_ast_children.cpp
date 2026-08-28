@@ -55,10 +55,8 @@ const ChildRow kChildRows[] = {
     { JS_AST_NODE_CONDITIONAL_EXPRESSION, 3, { N(JsConditionalNode, test),
                                               N(JsConditionalNode, consequent),
                                               N(JsConditionalNode, alternate) } },
-    { JS_AST_NODE_WHILE_STATEMENT,       2, { N(JsWhileNode, test), N(JsWhileNode, body) } },
-    { JS_AST_NODE_DO_WHILE_STATEMENT,    2, { N(JsDoWhileNode, body), N(JsDoWhileNode, test) } },
-    { JS_AST_NODE_FOR_STATEMENT,         4, { N(JsForNode, init), N(JsForNode, test),
-                                              N(JsForNode, update), N(JsForNode, body) } },
+    { AST_NODE_LOOP,                     4, { N(AstLoopControlNode, init), N(AstLoopControlNode, test),
+                                              N(AstLoopControlNode, update), N(AstLoopControlNode, body) } },
     { JS_AST_NODE_FOR_OF_STATEMENT,      3, { N(JsForOfNode, left), N(JsForOfNode, right),
                                               N(JsForOfNode, body) } },
     { JS_AST_NODE_FOR_IN_STATEMENT,      3, { N(JsForInNode, left), N(JsForInNode, right),
@@ -135,6 +133,14 @@ void js_ast_visit_children(JsAstNode* node, JsAstChildVisit visit, void* ctx) {
     if (!node || !visit) return;
     const ChildRow* row = row_for(node->node_type);
     if (!row) return;
+    if (node->node_type == AST_NODE_LOOP &&
+            ((AstLoopControlNode*)node)->form == LOOP_FORM_DO_WHILE) {
+        JsAstNode* body = child_at(node, row->slots[3]);
+        JsAstNode* test = child_at(node, row->slots[1]);
+        if (body) visit(body, ctx);
+        if (test) visit(test, ctx);
+        return;
+    }
     for (uint8_t i = 0; i < row->count; i++) {
         JsAstNode* child = child_at(node, row->slots[i]);
         if (row->slots[i].kind == CHILD_LIST) {

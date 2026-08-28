@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-28
 
-**Status:** ACTIVE — P0a LOC gates and P1a–P1b core-layout migrations are verified; P0b and P1c–P6 remain proposed.
+**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, and P2a shared function identity are verified; P0b, P1e, P2b–P6 remain proposed.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -137,9 +137,9 @@ This is the correct **D1.3** boundary. The proposal does not flatten `JsRuntimeS
 
 The common node catalog is only partially converged.
 
-P1a repaired the iterator-loop example: JavaScript alone publishes C-style `AST_NODE_FOR_STAM`/`AstForStmtNode`, while Lambda iterator loops publish `AST_NODE_FOR_EXPR`/`AstForNode`; the procedural spelling is a `discard_result` form flag. The common child row is now truthful for its tag.
+P1a repaired the iterator-loop example: JavaScript alone initially published C-style `AST_NODE_FOR_STAM`/`AstForStmtNode`, while Lambda iterator loops published `AST_NODE_FOR_EXPR`/`AstForNode`; the procedural spelling was a `discard_result` form flag. P1d subsequently replaced the condition-loop tag with `AST_NODE_LOOP`/`AstLoopControlNode`; the P1a record is retained as the historical intermediate, not as a current tag contract.
 
-P1b repaired the declaration example: JavaScript alone publishes `AST_NODE_ASSIGN` as `AstAssignNode {left, right, op}`, while Lambda declarations now publish `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode {id, init, ts_type, name, entry, ...}`. A declaration owns a real identifier child and initializer, rather than borrowing the JavaScript assignment layout.
+P1b repaired the declaration example: JavaScript alone publishes `AST_NODE_ASSIGN` as `AstAssignNode {left, right, op}`, while Lambda declarations now publish `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode {id, init, ts_type, name, entry, ...}`. A declaration owns a real identifier child and initializer, rather than borrowing the JavaScript assignment layout. P1c extends that physical contract to Lambda's procedural assignment spellings: `AST_NODE_ASSIGN_STAM`, `AST_NODE_INDEX_ASSIGN_STAM`, and `AST_NODE_MEMBER_ASSIGN_STAM` now use the same `AstAssignNode` storage as JavaScript assignment expressions; only the node tag and Lambda semantic metadata distinguish the statement forms.
 
 `interp_visit_children()` now delegates all catalogued core edges to `ast_visit_core_children()` and retains only Lambda-extension layouts (including the still-extension-owned `AstListNode`). JavaScript retains its extension visitor until its remaining families are migrated, but the shared assignment tag no longer needs a language-dependent cast.
 
@@ -409,8 +409,8 @@ The cumulative numbers below are measured from the project-specific anchor, not 
 | Phase | Consolidation | Same-phase retirement | Planned cumulative governed delta |
 |---|---|---|---:|
 | P0 | P0a counters complete; P0b catalog assertions and timing manifests pending | stale assertions/helpers and any superseded catalog test code | `0` |
-| P1 | P1a iterator-for and P1b declaration layouts complete; P1c assignment/wrapper families pending | private loop-layout casts, Lambda declaration-as-assignment casts, and migrated Lambda core-child cases | `-21` |
-| P2 | stable scope/binding/class IDs and one binding/index graph | lowering name repair, pointer indexes, lookup caches made obsolete, repeated identity walks | `<= -500` |
+| P1 | P1a iterator-for, P1b declarator, P1c assignment/declaration-wrapper, and P1d condition-loop layouts complete | private loop-layout casts, Lambda declaration-as-assignment casts, duplicate assignment/wrapper structs, old condition-loop tags, and migrated core-child cases | `-110` |
+| P2 | P2a source-function `FunctionId` authority landed; remaining scope/binding/class IDs and one binding/index graph | lowering name repair, pointer indexes, lookup caches made obsolete, repeated identity walks | `<= -500` |
 | P3 | one compilation unit, typed pass schedule, and one compile lifecycle | duplicated parse/build/validate/index/link/cleanup orchestration and false fact publication | `<= -800` |
 | P4 | `FunctionId`-owned analysis and graph worklists | duplicate `JsFuncCollected` analysis, count/fill scans, per-pass AST caches and propagation loops | `<= -1,200` |
 | P5 | full-contract `MirValue` core and shared structural MIR lowering | corresponding Lambda/JS bare-register cases, duplicate structural statement/expression/call plumbing | `<= -2,100` |
@@ -458,7 +458,7 @@ The final project cap of 308,711 is intentionally not claimed: the current candi
 
 **D8.2.2** requires syntax variance to live in fields/flags rather than reinterpret a core tag. Lambda's iterator `for` previously allocated `AstForNode` under `AST_NODE_FOR_STAM`, even though that tag's sole common child contract is the JavaScript C-style `AstForStmtNode {init, test, update, body}`. This made every Lambda private traversal either cast a JS tag as `AstForNode` or avoid the common walk.
 
-P1a makes `AST_NODE_FOR_STAM` exclusively the JS C-style loop tag. The Lambda builder now always publishes its iterator loop as `AST_NODE_FOR_EXPR`/`AstForNode`; its braced procedural spelling is a `discard_result` form flag, retaining the existing stream-discard behavior without a second physical layout. The Lambda builder, MIR lowering/analysis, T0 interpreter/planner, safety analysis, and Lambda AST dumper simultaneously retired their `AST_NODE_FOR_STAM`/`AstForNode` cases. The common `ast_visit_core_children()` C-style loop row is therefore truthful for its only producer. This is a structural migration, not a compatibility alias or a language-semantic change.
+P1a made `AST_NODE_FOR_STAM` exclusively the JS C-style loop tag. The Lambda builder then published iterator loops as `AST_NODE_FOR_EXPR`/`AstForNode`, with procedural stream discard as a form flag. P1d retired that intermediate C-style tag in favor of the shared condition-loop contract. The Lambda builder, MIR lowering/analysis, T0 interpreter/planner, safety analysis, and Lambda AST dumper retired their old `AST_NODE_FOR_STAM`/`AstForNode` cases as part of the two-step migration. This is a structural migration, not a compatibility alias or a language-semantic change.
 
 The independently measured P1a diff, excluding completed P0a checker work, is `C/C++ +41/-62 = -21` and all hand source `+42/-63 = -21`; its governed scope is 310,690 lines (`-21` from the project anchor). The post-migration combined checker result is C/C++ `+41/-62 = -21` and all source `+73/-97 = -24`, including P0a's separately completed `-3`. P1a does not borrow that earlier deletion credit.
 
@@ -498,13 +498,75 @@ make test-lambda-baseline                            # 3978/3978 passed
 git diff --check                                    # clean
 ```
 
+#### P1c implementation record — assignment/declaration-wrapper storage and stale declarator consumer, 2026-08-28
+
+**D8.2.2** requires one physical layout per shared tag, and **D8.2.4** requires child ownership to be published once. Lambda procedural assignment nodes previously extended `AstAssignNode` with a separate `AstAssignStamNode` or `AstCompoundAssignNode` layout: the former carried `target`/`target_node`/`target_entry`/`value`, while the latter carried `object`/`key`/`value`. P1c folds those optional fields into one `AstAssignNode`; `right` and Lambda's `value` spelling share one union slot, and the old type names are aliases rather than layouts. The builder allocates the shared size for identifier and compound assignments. `ast_visit_core_children()` now walks all four assignment tags through `left/right`, so a compound target's existing field node owns its object/key edges exactly once.
+
+The focused migration also repaired the stale P1b consumer found by the differential gate: both MIR `for`-`let` emitters were still blind-casting `AST_NODE_VARIABLE_DECLARATOR` to `AstNamedNode`, which read the initializer through the wrong field contract and produced `inf`/`9` for grouped queries under explicit `LAMBDA_TIER=jit`. They now consume `AstDeclaratorNode::init`; no compatibility cast remains on that path. This is a root-cause correction, not a test relaxation (**D8.2.2**, **D8.2.4**).
+
+The same rule now covers declaration wrappers. `AstVarDeclNode` is the sole wrapper layout; its `declarations` and Lambda's `declare` spellings share one union slot, and `AstLetNode` is an alias. `let`, `var`, `pub`, and `type` child ownership therefore runs through one `AstVarDeclNode` row in the common visitor, while JavaScript's `kind`/`using` flags remain available on the same record.
+
+The independent P1c source delta is C/C++ `+46/-51 = -5`; it does not spend P1a/P1b deletion credit. The combined governed result from the project anchor is C/C++ `+460/-486 = -26` and all hand source `+492/-521 = -29`, with candidate 310,685 under the 310,690 cap. Every replacement and the stale layout retirement landed in the same slice.
+
+Focused evidence:
+
+```text
+make build-release-compile                          # Errors: 0
+InterpWalker assignment/for differential controls   # 14/14 passed
+LAMBDA_TIER=jit grouped_for                         # key 1/0, total 3/6
+LAMBDA_TIER=interp grouped_for                      # identical key 1/0, total 3/6
+make test-lambda-baseline                            # 3978/3978 passed
+./utils/check_ast_tune_loc.sh ... --cap 310690      # C/C++ -26; all source -29
+git diff --check                                    # clean
+```
+
+#### P1d implementation record — condition loops, 2026-08-28
+
+**D8.2.2**/**U19** require semantically unified loop forms to share one core
+kind while retaining surface syntax as a form field; **D8.2.4** requires one
+child-ownership contract. P1d therefore promotes `AST_NODE_LOOP` to the shared
+`AstLoopControlNode {form, init, test/cond, update, body, vars}` contract. The
+three forms are `LOOP_FORM_WHILE`, `LOOP_FORM_DO_WHILE`, and
+`LOOP_FORM_FOR_C`. JavaScript builders now publish all three through that tag;
+Lambda `while` uses the same record. The former `AST_NODE_FOR_STAM`,
+`AST_NODE_WHILE_STAM`, and `AST_NODE_DO_WHILE_STAM` tags and their duplicate
+consumer cases were deleted. Lambda iterator/query clauses moved to the new
+`AST_NODE_FOR_CLAUSE` extension tag, so `AST_NODE_LOOP` is not overloaded.
+
+The core visitor owns condition-loop children in source order (including the
+body-before-test order of `do...while`); the JS child table uses the same row.
+JS early-error, AST-interpreter, MIR-lowering, module-lexical, capture, type,
+and return analyses now dispatch on `form` instead of maintaining three node
+switches. The JS and Lambda semantic execution frames remain separate as
+required by **D8.1.3v9**; only structural storage and traversal were unified.
+
+The independent P1d source delta, measured after the already-landed P1c
+changes, is C/C++ `+273/-369 = -96`; all hand source is also `+273/-369 = -96`.
+The final governed result after the source-order correction is C/C++
+`+738/-861 = -123` and all hand source `+770/-896 = -126`, with candidate
+310,601 (delta `-110`) under the 310,690 cap. No previous deletion credit is
+borrowed. The correction keeps C-style header checks in initializer, test,
+update order; it changes no node layout or runtime semantics.
+
+Focused evidence:
+
+```text
+make build                                           # Errors: 0, Warnings: 10
+Lambda while JIT/T0                                  # while_swap output identical
+JS MIR while/do/for                                   # 6, 6, 6
+JS AST backend while                                  # 6
+JS AST interpreter do                                 # 4
+./utils/check_ast_tune_loc.sh ... --cap 310690        # C/C++ -123; source -126; candidate -110
+make test-lambda-baseline                             # 3978/3978 passed
+make build-release-compile                            # Errors: 0, Warnings: 34
+git diff --check                                      # clean
+```
+
 Recommended order:
 
-1. assignments and declaration wrappers: one target/value/op layout for Lambda procedural assignment and JS assignment expression;
-2. condition loops: one `AST_LOOP {LoopForm}` including JS C-style `for`;
-3. iterator/query `for`: one `AST_FOR` contract with explicit form/iteration fields;
-4. labels and remaining block/match/try child edges;
-5. extension-only JS child visitor.
+1. labels and remaining block/match/try child edges;
+2. extension-only JS child visitor;
+3. catalog-completeness assertions over the migrated core forms.
 
 For each family, the same slice updates both producers and all consumers, switches the shared visitor, deletes the matching cases from `interp_visit_children()` and `js_ast_children.cpp`, and proves catalog completeness. No compatibility struct or second tag interpretation remains.
 
@@ -523,6 +585,44 @@ Migrate declarations and references by construct family. For each migrated famil
 The direct-call shadow workaround is an early target because its comment records the stale-scope root cause. The JS scope lookup cache is removed only after its last builder/binder consumer is migrated; it is not copied into `CompilationFacts`.
 
 P2 exits with a static check that lowering code cannot call builder scope lookup. Dynamic JavaScript environment lookup remains an explicit runtime operation; it is not confused with compiler name resolution.
+
+#### P2a implementation record — shared function identity, 2026-08-28
+
+**D8.2.4** requires one stable identity authority across compiler passes. The
+JS MIR lane previously built `func_index_nodes`/`func_index_ids`, a private
+pointer-hash table over the same source function nodes already indexed by the
+shared `AstIndex`. P2a deletes that table and publishes each source
+`JsFuncCollected` record through `AstFunctionId` and the pool-owned
+`func_by_id` table. `jm_find_collected_func()` now resolves the AST node through
+`ast_index_find()` and returns the collected entry by the shared ID. The
+collector's post-order array remains intact because parent/capture propagation
+still uses its semantic order; the ID table is the bridge, not a second identity
+scheme.
+
+Class-field initializer functions are synthesized after source indexing. They
+therefore retain a bounded linear fallback in `jm_find_collected_func()` and
+remain explicitly listed as P2b work; no false claim of complete FunctionId
+coverage is made. No source semantics or ABI changed.
+
+The independent P2a delta is C/C++ `+33/-35 = -2`; all hand source is also
+`+33/-35 = -2`. The governed candidate is 310,599 lines, two below the P1d
+candidate and below the 310,690 cap. The retired implementation is the private
+pointer-hash allocation and lookup; the surviving authority is
+`JsTranspiler::ast_index` plus `JsMirTranspiler::func_by_id`.
+
+Focused evidence:
+
+```text
+make build                                           # Errors: 0, Warnings: 12
+./test/test_js_gtest.exe                             # 357/357 passed
+./test/test_js_opt_gtest.exe                         # 19/19 passed
+make test-lambda-baseline                            # 3978/3978 passed
+./utils/check_ast_tune_loc.sh ... --cap 310690      # C/C++ -125; source -128; candidate -112
+git diff --check                                     # clean
+```
+
+P2b must promote synthetic functions and then migrate scope/binding identity;
+until that point, the fallback is residual duplication and not an exit claim.
 
 ### 4.4 P3 — Make the pass manager and compile driver real
 

@@ -1291,14 +1291,12 @@ static Item js_eval_var_conflicts_lexical_statement(JsAstNode* node) {
             JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(in->consequent));
             return js_eval_var_conflicts_lexical_statement(in->alternate);
         }
-        case JS_AST_NODE_WHILE_STATEMENT:
-            return js_eval_var_conflicts_lexical_statement(((JsWhileNode*)node)->body);
-        case JS_AST_NODE_DO_WHILE_STATEMENT:
-            return js_eval_var_conflicts_lexical_statement(((JsDoWhileNode*)node)->body);
-        case JS_AST_NODE_FOR_STATEMENT: {
-            JsForNode* fn = (JsForNode*)node;
-            JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(fn->init));
-            return js_eval_var_conflicts_lexical_statement(fn->body);
+        case AST_NODE_LOOP: {
+            AstLoopControlNode* loop = (AstLoopControlNode*)node;
+            if (loop->form == LOOP_FORM_FOR_C) {
+                JS_ASSIGN_OR_RETURN(status, js_eval_var_conflicts_lexical_statement(loop->init));
+            }
+            return js_eval_var_conflicts_lexical_statement(loop->body);
         }
         case JS_AST_NODE_FOR_IN_STATEMENT:
         case JS_AST_NODE_FOR_OF_STATEMENT: {
