@@ -417,10 +417,10 @@
       "description": "Tune6 C3 exact function/class storage beyond the former fixed caps and one bulk instance-metadata publication, plus Tune7's three explicit receiver-analysis init bits per finalized function. The exact private-member case resolves class-owned unique NameIds instead of encoding private identity in a spelling. Tune4 re-baseline: atomic GC-aware callable finalization and precise class-metadata publication increase root stores while reducing finalized instructions and safepoints; D1.3's shared JS property kernels add their required rooted carrier at this fixture (D5.4.3).",
       "budgets": {
         "linux-debug": {
-          "module_insns": 6578,
+          "module_insns": 14166,
           "functions": {
             "js_main": {
-              "insns": 3869
+              "insns": 5652
             },
             "Tune6ExactCollection_m128_128": {
               "insns": 10
@@ -429,11 +429,11 @@
           "frames": [
             {
               "name": "js_main",
-              "roots": 12,
-              "root_stores": 844,
-              "scalar_homes": 6,
+              "roots": 11,
+              "root_stores": 785,
+              "scalar_homes": 15,
               "number_scratch": 0,
-              "safepoints": 1877
+              "safepoints": 2102
             }
           ]
         },

@@ -163,14 +163,21 @@ static bool jm_emit_undefined_module_var_batch(JsMirTranspiler* mt,
         index++;
     }
 
-    MIR_item_t indices_data = MIR_new_data(mt->ctx, NULL, MIR_T_I32,
+    int table_id = mt->generated_data_counter++;
+    char indices_name[64];
+    char module_names_name[64];
+    char direct_names_name[64];
+    snprintf(indices_name, sizeof(indices_name), "js_undef_indices_%d", table_id);
+    snprintf(module_names_name, sizeof(module_names_name), "js_undef_module_names_%d", table_id);
+    snprintf(direct_names_name, sizeof(direct_names_name), "js_undef_direct_names_%d", table_id);
+    MIR_item_t indices_data = MIR_new_data(mt->ctx, indices_name, MIR_T_I32,
         (size_t)count, indices);
     MIR_item_t module_names_data = define_global_var_properties
-        ? MIR_new_data(mt->ctx, NULL, MIR_T_U32, (size_t)count,
+        ? MIR_new_data(mt->ctx, module_names_name, MIR_T_U32, (size_t)count,
             module_name_indices)
         : NULL;
     MIR_item_t direct_names_data = define_global_var_properties
-        ? MIR_new_data(mt->ctx, NULL, MIR_T_U32, (size_t)count,
+        ? MIR_new_data(mt->ctx, direct_names_name, MIR_T_U32, (size_t)count,
             direct_name_ids)
         : NULL;
     mem_free(indices);

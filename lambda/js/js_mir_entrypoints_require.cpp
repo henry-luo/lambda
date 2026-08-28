@@ -344,7 +344,8 @@ static void js_mir_destroy_unowned_eval_context(Runtime* runtime,
 
 Item js_mir_compile_unit_fail(MIR_context_t ctx,
         JsMirTranspiler* mt, JsTranspiler* tp, char* owned_source,
-        Runtime* runtime, EvalContext* js_context, bool reusing_context) {
+        Runtime* runtime, EvalContext* js_context, bool reusing_context,
+        int mir_gen_initialized) {
     // MIR failures must release the active transpiler before its context and source;
     // one cleanup order prevents stale owners on every compile-error lane.
     if (mt) {
@@ -352,7 +353,12 @@ Item js_mir_compile_unit_fail(MIR_context_t ctx,
         jm_destroy_mir_transpiler(mt);
     }
     g_active_mir_ctx = NULL;
-    if (ctx) MIR_finish(ctx);
+    if (ctx) {
+        // MIR_gen_init allocates a separate generator arena; MIR_finish does
+        // not release it, so pair teardown with the context's init mode.
+        jit_cleanup_mode(ctx,
+            mir_gen_initialized < 0 ? !g_mir_interp_mode : mir_gen_initialized);
+    }
     jm_clear_active_js_transpile(tp, NULL, NULL);
     js_transpiler_destroy(tp);
     jm_clear_active_js_transpile(NULL, NULL, owned_source);
@@ -513,7 +519,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
 
     // cleanup
     jm_destroy_mir_transpiler(mt);
-    MIR_finish(ctx);
+    jit_cleanup_mode(ctx, !g_mir_interp_mode);
     // the AST entry point owns the parser after delegation; its TypeScript
     // caller must not destroy the same Tree-sitter objects a second time.
     js_transpiler_destroy(tp);
@@ -1236,7 +1242,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         }
     } else {
         g_active_mir_ctx = NULL;
-        MIR_finish(ctx);
+        jit_cleanup_mode(ctx, !g_mir_interp_mode);
     }
     if (js_debug_info) {
         free_debug_info_table(js_debug_info);

@@ -151,6 +151,12 @@ static void lambda_region_destroy_caches(Heap* heap) {
 
 static void gc_destroy_external_payload(void* obj, uint16_t type_tag) {
     if (!obj) return;
+    if (type_tag == LMD_TYPE_DECIMAL) {
+        // Decimal wrappers can die during a collection; release the libmpdec
+        // payload before the sweep unlinks the wrapper from all_objects.
+        decimal_payload_release((Decimal*)obj);
+        return;
+    }
     if (type_tag == LMD_TYPE_BINARY) {
         Binary* binary = (Binary*)obj;
         if (binary->storage) binary_release_storage(binary);

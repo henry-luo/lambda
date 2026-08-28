@@ -1743,10 +1743,12 @@ static inline MIR_label_t em_finalize_frame_prologue(MirEmitter* em,
         size_t number_limit_offset, size_t root_commit_limit_offset,
         size_t number_commit_limit_offset) {
     MirFrameState* frame = &em->frame;
-    MIR_label_t overflow_label = em_new_label(em);
-    MIR_label_t grow_label = em_new_label(em);
-    MIR_label_t retry_label = em_new_label(em);
     bool needs_reserve = frame->root_slot_count > 0 || frame->fixed_number_slots > 0;
+    MIR_label_t overflow_label = em_new_label(em);
+    // grow/retry are only reachable when the frame has stack reservations;
+    // unattached MIR labels otherwise survive context teardown.
+    MIR_label_t grow_label = needs_reserve ? em_new_label(em) : NULL;
+    MIR_label_t retry_label = needs_reserve ? em_new_label(em) : NULL;
     (void)root_limit_offset; (void)number_limit_offset;
     if (frame->root_slot_count == 0) {
         MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns);

@@ -493,6 +493,7 @@ struct JsMirTranspiler {
     // Module-level constants: name -> value (for top-level const with literal init)
     struct hashmap* module_consts;   // name -> JsModuleConstEntry
     int module_var_count;            // next index for js_module_vars[]
+    int generated_data_counter;      // unique names for compiler-generated MIR data
 
     // Property-name literals are emitted as module-table lookups. The table
     // is linked to the active NamePool after the static compilation root is
