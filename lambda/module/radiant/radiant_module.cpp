@@ -18,6 +18,7 @@
 #include "../../../lib/url.h"
 #include <limits.h>
 #include <string.h>
+#include <stdio.h>
 
 String* heap_create_name(const char* name, size_t len);
 
@@ -46,6 +47,13 @@ RADIANT_C_API Item radiant_dom_document_host_prototype(Item object);
 const JubeHostAPI* radiant_host_api = nullptr;
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
+extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
+extern "C" Item js_dom_check_validity_bridge(Item elem_item);
+extern "C" bool js_dom_focus_first_invalid_form_control(void* form_elem);
+extern "C" Item js_dom_form_reset_bridge(Item form_item);
+extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
+extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
+                                                            void* submitter_node);
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -1321,6 +1329,102 @@ RADIANT_C_API Item fn_radiant_form_of(Item node_item) {
     return ItemNull;
 }
 
+static void* radiant_optional_dom_element(Item node_item) {
+    if (radiant_item_is_missing(node_item)) return nullptr;
+    DomNode* node = (DomNode*)radiant_dom_unwrap_node(node_item);
+    return node && node->is_element() ? (void*)node : nullptr;
+}
+
+// F4: form-data construction remains a native tree walk, but the package gets
+// the resulting entry list and owns serialization/order decisions.
+RADIANT_C_API Item fn_radiant_form_entries(Item form_item, Item submitter_item) {
+    DomElement* form = radiant_dom_element_from_item(form_item, "FORM_ENTRIES");
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return ItemNull;
+    }
+    return js_formdata_collect_form_entries(
+        (void*)form, radiant_optional_dom_element(submitter_item));
+}
+
+RADIANT_C_API Item fn_radiant_form_url(Item form_item) {
+    DomElement* form = radiant_dom_element_from_item(form_item, "FORM_URL");
+    if (!form || !form->doc || !form->doc->url) return radiant_string_item("");
+    return radiant_string_item(url_get_href(form->doc->url));
+}
+
+RADIANT_C_API Item fn_radiant_form_encode(Item value_item) {
+    const char* value = fn_to_cstr(value_item);
+    if (!value) value = "";
+    size_t value_len = strlen(value);
+    size_t encoded_len = url_encode_measure(value, value_len, URL_KEEP_FORM,
+                                            true, nullptr);
+    char* encoded = (char*)mem_alloc(encoded_len + 1, MEM_CAT_TEMP);
+    if (!encoded) return ItemNull;
+    url_encode_write(value, value_len, URL_KEEP_FORM, true, encoded);
+    encoded[encoded_len] = '\0';
+    Item result = radiant_string_item_n(encoded, encoded_len);
+    mem_free(encoded);
+    return result;
+}
+
+RADIANT_C_API Item fn_radiant_submit_event(Item form_item, Item submitter_item) {
+    DomElement* form = radiant_dom_element_from_item(form_item, "SUBMIT_EVENT");
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return radiant_bool_item(false);
+    }
+    bool ok = radiant_dispatch_submit_event_from_script(
+        (void*)form, radiant_optional_dom_element(submitter_item));
+    return radiant_bool_item(ok);
+}
+
+RADIANT_C_API Item fn_radiant_check_validity(Item form_item) {
+    DomElement* form = radiant_dom_element_from_item(form_item, "CHECK_VALIDITY");
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return radiant_bool_item(false);
+    }
+    Item valid = js_dom_check_validity_bridge(form_item);
+    if (!is_truthy(valid)) {
+        js_dom_focus_first_invalid_form_control((void*)form);
+    }
+    return radiant_bool_item(is_truthy(valid));
+}
+
+RADIANT_C_API Item fn_radiant_reset_form(Item form_item) {
+    DomElement* form = radiant_dom_element_from_item(form_item, "RESET_FORM");
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return radiant_bool_item(false);
+    }
+    js_dom_form_reset_bridge(form_item);
+    return radiant_bool_item(true);
+}
+
+static uint64_t g_radiant_form_boundary_serial = 1;
+
+RADIANT_C_API Item fn_radiant_form_boundary() {
+    char boundary[64];
+    snprintf(boundary, sizeof(boundary), "----LambdaFormBoundary-%llu",
+             (unsigned long long)g_radiant_form_boundary_serial++);
+    return radiant_string_item(boundary);
+}
+
+RADIANT_C_API Item fn_radiant_request_navigation(Item request_item) {
+    const char* target = fn_to_cstr(radiant_obj_get(request_item, "target"));
+    const char* url = fn_to_cstr(radiant_obj_get(request_item, "url"));
+    const char* method = fn_to_cstr(radiant_obj_get(request_item, "method"));
+    const char* enctype = fn_to_cstr(radiant_obj_get(request_item, "enctype"));
+    const char* body = fn_to_cstr(radiant_obj_get(request_item, "body"));
+    if (!target || !target[0]) target = "_self";
+    if (!method || !method[0]) method = "get";
+    if (!enctype || !enctype[0]) enctype = "application/x-www-form-urlencoded";
+    if (!url || !url[0]) return radiant_bool_item(false);
+
+    // The browsing layer owns network transport; this waist records the
+    // serialized request while handing its URL/target to document navigation.
+    log_info("FORM_NAVIGATION_HANDOFF method=%s enctype=%s target=%s url=%s body=%s",
+             method, enctype, target, url, body ? body : "");
+    return radiant_bool_item(js_dom_navigate_submit_target(target, url));
+}
+
 RADIANT_C_API Item fn_radiant_radio_group(Item node_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "RADIO_GROUP");
     if (!elem) return ItemNull;
@@ -1500,6 +1604,16 @@ bool dom_edit_replace_range_u16(DocState* state, DomText* text,
 bool dom_edit_set_caret_u16(DocState* state, uint32_t caret_u16);
 bool dom_edit_insert_at_boundary_u16(DocState* state, const char* text_data,
                                      uint32_t* out_caret_u16);
+bool dom_edit_range_in_format(DocState* state, const char* tag);
+bool dom_edit_wrap_range_u16(DocState* state, uint32_t start_u16,
+                             uint32_t end_u16, const char* tag);
+bool dom_edit_unwrap_range_u16(DocState* state, uint32_t start_u16,
+                               uint32_t end_u16, const char* tag);
+bool dom_edit_insert_html(DocState* state, const char* html);
+bool dom_edit_replace_pending_range(DocState* state, const char* replacement);
+bool dom_edit_delete_pending_range(DocState* state);
+bool dom_edit_insert_paragraph(DocState* state);
+bool dom_edit_insert_line_break(DocState* state);
 
 static uint32_t radiant_u16_to_cp(const char* text, uint32_t u16) {
     if (!text) return 0;
@@ -1516,11 +1630,11 @@ static uint32_t radiant_cp_to_u16(const char* text, uint32_t cp) {
     return tc_utf8_to_utf16_length(text, (uint32_t)byte_off);
 }
 
-// The text node an editing transaction resolved to, and its range. Three scalar
+// The text node an editing dispatch resolved to, and its range. Three scalar
 // accessors rather than one map, matching selection_start/selection_end: the
 // module has no map-building idiom, and a template reads these once each.
-// Null/-1 when the transaction did not land inside a single text node, which is
-// the only shape the DOM edit path has ever supported.
+// Null when the edit did not land inside a single text node. Structural
+// commands use the raw pending endpoints through their dedicated primitives.
 RADIANT_C_API Item fn_radiant_dom_edit_node(Item node_item) {
     DomElement* elem = nullptr;
     DocState* state = radiant_state_for_element(node_item, "DOM_EDIT_NODE", &elem);
@@ -1558,7 +1672,7 @@ RADIANT_C_API Item fn_radiant_dom_edit_text(Item node_item) {
     return radiant_string_item(text->text ? text->text : "");
 }
 
-// Insert at the transaction's boundary, creating a text node when there is
+// Insert at the edit's boundary, creating a text node when there is
 // none. A different operation from a range replacement — `dom_replace_range`
 // addresses an existing node — so it is named separately rather than folded in.
 // Returns the new caret offset in codepoints, or null.
@@ -1617,6 +1731,105 @@ RADIANT_C_API Item fn_radiant_dom_replace_range(Item node_item, Item start_item,
     }
     const char* after = text->text ? text->text : "";
     return radiant_int_item((int64_t)radiant_u16_to_cp(after, caret_u16));
+}
+
+// F14.1: the formatting primitives. All offsets in codepoints, like every
+// other Lambda-facing offset (ES9); the tag and the toggle decision come from
+// `commands.ls`, which is the whole point of the seam.
+RADIANT_C_API Item fn_radiant_dom_range_format(Item node_item, Item tag_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "DOM_RANGE_FORMAT", &elem);
+    const char* tag = fn_to_cstr(tag_item);
+    if (!state || !tag) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_range_in_format(state, tag) ? 1 : 0)};
+}
+
+// The codepoint offsets a wrap/unwrap addresses are converted against the
+// resolved node's *current* text, so this helper has to run before the splits.
+static bool radiant_dom_format_bounds(DocState* state, Item start_item,
+                                      Item end_item, uint32_t* out_start,
+                                      uint32_t* out_end) {
+    DomText* text = state ? state->editing.pending_dom_edit_text : nullptr;
+    if (!text) return false;
+    const char* data = text->text ? text->text : "";
+    int64_t cp_start = it2l(start_item), cp_end = it2l(end_item);
+    if (cp_start < 0) cp_start = 0;
+    if (cp_end < cp_start) cp_end = cp_start;
+    *out_start = radiant_cp_to_u16(data, (uint32_t)cp_start);
+    *out_end = radiant_cp_to_u16(data, (uint32_t)cp_end);
+    return true;
+}
+
+RADIANT_C_API Item fn_radiant_dom_wrap_range(Item node_item, Item start_item,
+                                             Item end_item, Item tag_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "DOM_WRAP_RANGE", &elem);
+    const char* tag = fn_to_cstr(tag_item);
+    uint32_t start = 0, end = 0;
+    if (!state || !tag || !radiant_dom_format_bounds(state, start_item, end_item,
+                                                     &start, &end)) {
+        return (Item){.item = b2it(0)};
+    }
+    return (Item){.item = b2it(dom_edit_wrap_range_u16(state, start, end, tag) ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_dom_unwrap_range(Item node_item, Item start_item,
+                                               Item end_item, Item tag_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "DOM_UNWRAP_RANGE", &elem);
+    const char* tag = fn_to_cstr(tag_item);
+    uint32_t start = 0, end = 0;
+    if (!state || !tag || !radiant_dom_format_bounds(state, start_item, end_item,
+                                                     &start, &end)) {
+        return (Item){.item = b2it(0)};
+    }
+    return (Item){.item = b2it(dom_edit_unwrap_range_u16(state, start, end, tag) ? 1 : 0)};
+}
+
+// insertHTML: the command formerly special-cased by the native bridge, now
+// reached through the same package command path as every other command.
+RADIANT_C_API Item fn_radiant_dom_insert_html(Item node_item, Item html_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item, "DOM_INSERT_HTML", &elem);
+    const char* html = fn_to_cstr(html_item);
+    if (!state || !html) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_insert_html(state, html) ? 1 : 0)};
+}
+
+// F14.2: structural range replacement. The pending endpoints stay in the
+// waist, so this Lambda-facing primitive needs only the host and payload.
+RADIANT_C_API Item fn_radiant_dom_replace_dom_range(Item node_item,
+                                                    Item text_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item,
+                                                "DOM_REPLACE_DOM_RANGE", &elem);
+    const char* text = fn_to_cstr(text_item);
+    if (!state || !text) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_replace_pending_range(state, text) ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_dom_delete_dom_range(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item,
+                                                "DOM_DELETE_DOM_RANGE", &elem);
+    if (!state) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_delete_pending_range(state) ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_dom_insert_paragraph(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item,
+                                                "DOM_INSERT_PARAGRAPH", &elem);
+    if (!state) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_insert_paragraph(state) ? 1 : 0)};
+}
+
+RADIANT_C_API Item fn_radiant_dom_insert_line_break(Item node_item) {
+    DomElement* elem = nullptr;
+    DocState* state = radiant_state_for_element(node_item,
+                                                "DOM_INSERT_LINE_BREAK", &elem);
+    if (!state) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(dom_edit_insert_line_break(state) ? 1 : 0)};
 }
 
 extern "C" void radiant_key_intent_request(const char* name);
@@ -2237,6 +2450,22 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_dispatch(Item node, Item name)", (fn_ptr)fn_radiant_dispatch},
     {"form_of", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_form_of, JUBE_FN_NONE,
      "Item fn_radiant_form_of(Item node)", (fn_ptr)fn_radiant_form_of},
+    {"form_entries", "fn(form: dom_node, submitter: dom_node|null) -> array", (fn_ptr)fn_radiant_form_entries, JUBE_FN_NONE,
+     "Item fn_radiant_form_entries(Item form, Item submitter)", (fn_ptr)fn_radiant_form_entries},
+    {"form_url", "fn(form: dom_node) -> string", (fn_ptr)fn_radiant_form_url, JUBE_FN_NONE,
+     "Item fn_radiant_form_url(Item form)", (fn_ptr)fn_radiant_form_url},
+    {"form_encode", "fn(value: string) -> string", (fn_ptr)fn_radiant_form_encode, JUBE_FN_NONE,
+     "Item fn_radiant_form_encode(Item value)", (fn_ptr)fn_radiant_form_encode},
+    {"submit_event", "fn(form: dom_node, submitter: dom_node|null) -> bool", (fn_ptr)fn_radiant_submit_event, JUBE_FN_NONE,
+     "Item fn_radiant_submit_event(Item form, Item submitter)", (fn_ptr)fn_radiant_submit_event},
+    {"check_validity", "fn(form: dom_node) -> bool", (fn_ptr)fn_radiant_check_validity, JUBE_FN_NONE,
+     "Item fn_radiant_check_validity(Item form)", (fn_ptr)fn_radiant_check_validity},
+    {"reset_form", "fn(form: dom_node) -> bool", (fn_ptr)fn_radiant_reset_form, JUBE_FN_NONE,
+     "Item fn_radiant_reset_form(Item form)", (fn_ptr)fn_radiant_reset_form},
+    {"form_boundary", "fn() -> string", (fn_ptr)fn_radiant_form_boundary, JUBE_FN_NONE,
+     "Item fn_radiant_form_boundary()", (fn_ptr)fn_radiant_form_boundary},
+    {"request_navigation", "fn(request: map) -> bool", (fn_ptr)fn_radiant_request_navigation, JUBE_FN_NONE,
+     "Item fn_radiant_request_navigation(Item request)", (fn_ptr)fn_radiant_request_navigation},
     {"radio_group", "fn(node: dom_node) -> array", (fn_ptr)fn_radiant_radio_group, JUBE_FN_NONE,
      "Item fn_radiant_radio_group(Item node)", (fn_ptr)fn_radiant_radio_group},
     {"dropdown_open", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dropdown_open, JUBE_FN_NONE,
@@ -2278,6 +2507,22 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_dom_edit_text(Item node)", (fn_ptr)fn_radiant_dom_edit_text},
     {"dom_replace_range", "fn(node: dom_node, start: int, end: int, text: string) -> int|null", (fn_ptr)fn_radiant_dom_replace_range, JUBE_FN_NONE,
      "Item fn_radiant_dom_replace_range(Item node, Item start, Item end, Item text)", (fn_ptr)fn_radiant_dom_replace_range},
+    {"dom_range_format", "fn(node: dom_node, tag: string) -> bool", (fn_ptr)fn_radiant_dom_range_format, JUBE_FN_NONE,
+     "Item fn_radiant_dom_range_format(Item node, Item tag)", (fn_ptr)fn_radiant_dom_range_format},
+    {"dom_wrap_range", "fn(node: dom_node, start: int, end: int, tag: string) -> bool", (fn_ptr)fn_radiant_dom_wrap_range, JUBE_FN_NONE,
+     "Item fn_radiant_dom_wrap_range(Item node, Item start, Item end, Item tag)", (fn_ptr)fn_radiant_dom_wrap_range},
+    {"dom_unwrap_range", "fn(node: dom_node, start: int, end: int, tag: string) -> bool", (fn_ptr)fn_radiant_dom_unwrap_range, JUBE_FN_NONE,
+     "Item fn_radiant_dom_unwrap_range(Item node, Item start, Item end, Item tag)", (fn_ptr)fn_radiant_dom_unwrap_range},
+    {"dom_insert_html", "fn(node: dom_node, html: string) -> bool", (fn_ptr)fn_radiant_dom_insert_html, JUBE_FN_NONE,
+     "Item fn_radiant_dom_insert_html(Item node, Item html)", (fn_ptr)fn_radiant_dom_insert_html},
+    {"dom_replace_dom_range", "fn(node: dom_node, text: string) -> bool", (fn_ptr)fn_radiant_dom_replace_dom_range, JUBE_FN_NONE,
+     "Item fn_radiant_dom_replace_dom_range(Item node, Item text)", (fn_ptr)fn_radiant_dom_replace_dom_range},
+    {"dom_delete_dom_range", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dom_delete_dom_range, JUBE_FN_NONE,
+     "Item fn_radiant_dom_delete_dom_range(Item node)", (fn_ptr)fn_radiant_dom_delete_dom_range},
+    {"dom_insert_paragraph", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dom_insert_paragraph, JUBE_FN_NONE,
+     "Item fn_radiant_dom_insert_paragraph(Item node)", (fn_ptr)fn_radiant_dom_insert_paragraph},
+    {"dom_insert_line_break", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dom_insert_line_break, JUBE_FN_NONE,
+     "Item fn_radiant_dom_insert_line_break(Item node)", (fn_ptr)fn_radiant_dom_insert_line_break},
     {"key_intent", "fn(node: dom_node, name: string) -> bool", (fn_ptr)fn_radiant_key_intent, JUBE_FN_NONE,
      "Item fn_radiant_key_intent(Item node, Item name)", (fn_ptr)fn_radiant_key_intent},
     {"hover_index", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_hover_index, JUBE_FN_NONE,

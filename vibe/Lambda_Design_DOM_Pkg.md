@@ -8,7 +8,10 @@
 > `vibe/Lambda_Design_Native_Module.md` (Jube modules, `radiant-dom` POC, VMap projections),
 > `vibe/Lambda_Design_DOM_State.md` (behavior templates — the concrete design executing the
 > decision-2 state-store / forms / default-action rows below; its **ES9** amends this doc's
-> text-editing rows, 2026-08-25).
+> text-editing rows, 2026-08-25),
+> `vibe/Lambda_Design_DOM_Default.md` (**the default-action ledger** — the per-event and
+> per-element inventory of what Radiant actually does after dispatch, with status; this doc
+> says where each default action *belongs*, that one says which ones *exist*).
 
 ---
 
@@ -106,6 +109,52 @@ expando properties on wrappers, `DOMException` subtypes, WebIDL argument coercio
 in the thin L4 adapter — which is generic machinery (route getter X of prototype Y to Lambda
 function F), not per-API C+ code. The per-API logic — what `observe()` records, when records
 deliver, how a TreeWalker filters — is Lambda.
+
+**Why "cannot express" is a ruling, not a gap.** The `A` placements are the one part of this
+proposal that looks like an admission of Lambda's immaturity, and they are the opposite: every
+item L4 owns is *JS object-model semantics*, and Lambda's formal semantics exclude each one **by
+decision**. The list is not waiting on Lambda features; a Lambda that grew these would be a
+worse Lambda. Item by item, against the ruling that forecloses a Lambda implementation:
+
+| L4 item | What JS requires | Ruling that forecloses it |
+|---|---|---|
+| **Wrapper identity** | `el.parentNode === el.parentNode`; `WeakMap` keyed on nodes; listener de-duplication by function identity | **S5.1.4** — "`==` is the only equality. Values have no identity; no `===`, `ref_eq`, or identity operator exists **or ever will** — reference identity is not observable (S1.6)." Lambda cannot even pose the question |
+| **Aliased mutable wrappers, expandos** | `el._myFlag = 1` persists on *that* node object, visible through every other reference to it | **S9.1.1** (`let` is final), **S9.1.2** (binding, assignment and construction copy observably), **S9.1.5** (no reference cells), **S9.3.1** (containers capture **by value**). A Lambda value handed to two places is two values |
+| **Accessor properties** | `el.innerHTML = x` is an *assignment* that must run code | Lambda has no getter/setter concept, and `fn` bodies are pure (**S12.1.3**). Lambda can supply `set_inner_html(el, x)`; only the engine's property-set path can make `=` call it |
+| **Prototype chains, `instanceof`** | `el instanceof HTMLDivElement`; `Element.prototype.foo = …` — real pages and jQuery patch prototypes | No ruling *grants* prototypes: **S11.3.1** makes `is` structural for maps/arrays/elements and nominal for object types, with no chain to walk and no constructor identity. **S12.3.7**'s aphorism ("no JS-style prototype or global mutation") records the same stance for name resolution |
+| **Descriptor reflection** | `Object.getOwnPropertyDescriptor` / `defineProperty` on a host object | No descriptor concept exists anywhere in Lambda's value model (**S2**) |
+| **Exotic lookup ops** | `'x' in el`, `delete el.x`, guaranteed enumeration order, expando fall-through after a projection miss | JS operators over a JS object. The VMap vtable needs `has`/`delete` ops and a defined order, resolved adapter-side |
+| **Live collections** | `el.children` reflecting later mutations through `length`, index access, `for..of` | **S9.2.2** — "read views are first-class values with **snapshot** semantics"; **S9.2.3** — iterating walks the **entry-time** value. Liveness is the exact inverse of Lambda's iteration contract |
+| **`DOMException` subtypes** | `catch (e) { if (e instanceof DOMException && e.name === 'NotFoundError') }` | Lambda's error model is `T^E` values with `raise` and postfix `^`, and **S5.1.2** makes error values never equal anything — a value lattice, not a throwable class hierarchy. The adapter maps between them (§9 Q2) |
+
+WebIDL argument coercion joins them for the same reason: `el.setAttribute(1, {})` must stringify
+per WebIDL, and `undefined` must be distinguishable from a missing argument — a JS→IDL boundary
+concern that Lambda's own type contracts (S11.4) would resolve differently and correctly for
+Lambda.
+
+Two properties keep this line honest rather than convenient. First, **the adapter is generic**:
+it is driven by the module's type table and, per `Lambda_Design_Native_Module.md` §8, "written
+once for *all* modules' native types, never per-module" — so it is a fixed cost that does not
+grow when an API is added, which is exactly what §3.3's rule polices (adapter code containing
+API-specific logic is in the wrong layer). Second, **the alternative is importing the JS object
+model into Lambda wholesale** — reference identity, prototypes, accessors, descriptors — to
+serve exactly one consumer, page JS. S5.1.4's "or ever will" forecloses that deliberately.
+
+**None of this is needed by a Lambda caller.** The package is one implementation with two faces:
+Lambda calls `dom.query(el, "div")` directly, and page JS reaches the same code as
+`el.querySelectorAll('div')` through the adapter. "Lambda cannot support it completely" is
+precise only about the *JS surface presentation*, never about the DOM behavior underneath.
+
+**Where the line is genuinely contested** — three of the eight deferred semantic items
+(`Lambda_Design_Native_Module.md` §8) are not pure shape, and are marked as such rather than
+argued away. **Live collections** are an acknowledged breach: §6.6 / §9 Q4 allow L4 to keep them
+native in shape *and* behavior, because liveness is hot (frequency test) and the VMap laziness
+model is unsettled. **Ownership** (`destroy` must be a non-owning no-op for DOM nodes) and
+**handler rooting** are filed with the eight but are really D4.5.1v3 memory-seam obligations, not
+JS-shape items. Of the remainder, `element.animate` (A/N) is not a placement argument at all —
+its behavior is native by the frequency and coupling tests, so L4 only presents it — and
+`StaticRange` (**L**/A) is the split working as intended: a value object in Lambda, a constructor
+and prototype at L4.
 
 Corollary: "implement all Obscura APIs in Lambda" means *all new per-API logic* is Lambda.
 The adapter is a bounded, one-time engine investment shared by every API, present and future.
@@ -244,8 +293,8 @@ normative catalog; a placement change is a design change and gets a ledger entry
 | Hit testing, target-path computation, pointer capture, shadow retargeting | N | coupling test (user decision 2) |
 | Listener storage, 3-phase dispatch loop, propagation/cancelation flags | N | frequency (user decision 2) |
 | Trusted event construction, hover/mousemove restyle, cursor | N | frequency; dispatch must run before/without any policy registration |
-| Default actions / activation behavior (link follow, checkbox/radio toggle, submit-on-Enter, button/space activation, `details` toggle, label forwarding) | **L** | policy (user decision 2) |
-| Sequential focus navigation (Tab order, focus delegation, `autofocus` processing) | **L** | policy, per-keypress cold |
+| Default actions / activation behavior (link follow, checkbox/radio toggle, submit-on-Enter, button/space activation, `details` toggle, label forwarding) | **L** | policy (user decision 2). **Per-behavior status: `Lambda_Design_DOM_Default.md` §3.9** — checkbox/radio/label/`select` and local submit/reset activation have landed as templates; link follow runs on the wrong event; POST transport, popover and `details` remain open |
+| Sequential focus navigation (Tab order, focus delegation, `autofocus` processing) | **L** | policy, per-keypress cold. Still native and **divergent** on two points — DOM order instead of `tabindex` order, and `autofocus` inspecting only the first `<input>` (`Lambda_Design_DOM_Default.md` §5.3/§5.5, ESO52/ESO60) |
 | Focusability computation (needs style/layout: visibility, `disabled`, `tabindex`) | M | layout-coupled query the policy calls |
 | Key→editing-command mapping policy | **L** (later) | with the editor migration. *Amended 2026-08-25 (ES9, `Lambda_Design_DOM_State.md`)*: "text-insertion mechanics stay N" now holds only for contenteditable — for **form text controls** the whole edit policy is **L** (see the Forms row below); only the buffer/splice mechanism stays N |
 | IME/composition, caret mechanics | N | coupling test. *ES9 amendment*: preedit sessions and caret mechanics stay N, but the IME **commit content** on form controls is applied by the Lambda `beforeinput` applier |
@@ -405,6 +454,15 @@ Rules that keep this split safe:
   quiescent dispatch state; anything they trigger (focus events, submit events) enters the
   pipeline as a fresh event.
 
+**The diagram is the target shape, not an inventory.** Which of the `[L]` behaviors it names
+exist today, which are native, which are divergent, and which are missing outright is tracked
+per event and per element in **`vibe/Lambda_Design_DOM_Default.md`** — the single source of
+truth for default-action status. `details` toggle and the `scroll_by` keyboard-scroll
+consumer still have no implementation on any path; F4's local submit/reset path exists, but
+the browsing layer does not yet transport POST bodies. The `fallback until registered` rule has since inverted for the migrated
+classes: once a native applier is deleted, a declining policy handler means the default action
+simply does not happen (DOM_Default §5.6). Add a row there before adding a behavior here.
+
 ### 4.5 What moves OUT of C+ — the net-reduction ledger
 
 Per the incumbency test, existing native code migrates only when earned. The candidates, in
@@ -412,7 +470,7 @@ rough order:
 
 | Candidate | Earned by | Precondition |
 |---|---|---|
-| Event default-action / activation policy in `event.cpp` | policy layer exists (§4.4); behaviors are spec-shaped and accreting | UI-automation baseline green per extracted behavior class |
+| Event default-action / activation policy in `event.cpp` | policy layer exists (§4.4); behaviors are spec-shaped and accreting; the per-behavior inventory is `Lambda_Design_DOM_Default.md` §3 | UI-automation baseline green per extracted behavior class |
 | Sequential focus navigation / tab-order logic | same policy layer; cold path | `is_focusable` M query |
 | Constraint validation logic | bug-prone spec logic; `ElementInternals` needs it Lambda-side anyway | form gtest coverage stays green |
 | Text-control value-edit policy in `text_edit.cpp` (applier, word/line scanners, history, paste, change-on-blur) | user decision 2026-08-25 (ES9, `Lambda_Design_DOM_State.md` F5/F6) | `replace_range` splice primitive; mirror collapse; typing-latency gate |

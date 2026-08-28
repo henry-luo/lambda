@@ -636,6 +636,15 @@ typedef struct {
     bool replaced_min_excludes_pad_border = false;
 } IntrinsicSizes;
 
+// A pass-local run in an anonymous flex item's flattened text sequence.
+typedef struct FlexAnonymousTextRun {
+    DomText* text;
+    bool preserve_leading_space;
+    bool preserve_trailing_space;
+    bool is_whitespace;
+    struct FlexAnonymousTextRun* next;
+} FlexAnonymousTextRun;
+
 // FlexItemProp definition (needed by flex.hpp)
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FlexItemProp {
@@ -681,8 +690,16 @@ typedef struct FlexItemProp {
     uint8_t main_size_from_flex : 1;   // True if parent flex grew/shrank this item's main-axis size
 
     // Direct text children are represented by a pass-local anonymous flex item;
-    // this points back to the text view that receives its final geometry.
+    // this points back to the first text view that receives its final geometry.
     DomText* anonymous_text;
+    // CSS Flexbox flattens display:contents descendants before creating
+    // anonymous items; this chain retains all text runs in one item.
+    FlexAnonymousTextRun* anonymous_text_runs;
+    // CSS Display flattening can leave a collapsed separator at an anonymous
+    // flex item's edge; retain the edge state for final text geometry.
+    bool anonymous_text_preserve_leading_space;
+    bool anonymous_text_preserve_trailing_space;
+    bool anonymous_text_is_whitespace;
 } FlexItemProp;
 
 // tier-2: view-pool, rebuilt each relayout
@@ -1648,8 +1665,6 @@ typedef struct {
     float v_scroll_position, h_scroll_position;
     float v_min_scroll, h_min_scroll;
     float v_max_scroll, h_max_scroll;
-    float v_handle_y, v_handle_height;
-    float h_handle_x, h_handle_width;
     void reset();
 } ScrollPane;
 
@@ -1968,10 +1983,18 @@ inline void ViewTable::each_cell(Fn fn) {
 
 template <typename Fn>
 inline void ViewTable::each_direct_block(Fn fn) {
-    for (View* child = static_cast<View*>(first_child); child;
-         child = static_cast<View*>(child->next_sibling)) {
-        if (child->is_block()) fn(static_cast<ViewBlock*>(child));
-    }
+    auto visit = [&](auto&& self, View* first) -> void {
+        for (View* child = first; child;
+             child = static_cast<View*>(child->next_sibling)) {
+            if (child->is_element() &&
+                child->as_element()->display.outer == CSS_VALUE_CONTENTS) {
+                self(self, static_cast<View*>(child->as_element()->first_child));
+            } else if (child->is_block()) {
+                fn(static_cast<ViewBlock*>(child));
+            }
+        }
+    };
+    visit(visit, static_cast<View*>(first_child));
 }
 
 template <typename Fn>
@@ -2577,7 +2600,7 @@ struct FormControlProp {
     int hover_index;            // Index of currently hovered option in dropdown (-1 if none)
     int select_size;            // Visible rows for select listbox (HTML size attr; 0 = not set)
 
-    // Computed intrinsic dimensions (in physical pixels)
+    // Computed intrinsic dimensions in CSS logical pixels.
     float intrinsic_width;
     float intrinsic_height;
 
@@ -2620,12 +2643,6 @@ struct FormControlProp {
     uint32_t selection_end;           // UTF-16 code units
     uint8_t  selection_direction;     // 0=none, 1=forward, 2=backward
     uint8_t  tc_initialized : 1;
-    uint8_t  tc_sc_pending : 1;       // queued in state->tc_selectionchange_head
-
-    // Phase 8E: per-text-control selectionchange coalescing list link.
-    // Single-linked through this pointer when the element is on the pending
-    // list; nullptr otherwise.
-    DomElement* tc_sc_next_pending;
 
     // Constraint Validation API (§4.10.20)
     // Custom validity error message set via setCustomValidity(msg).
@@ -2747,6 +2764,7 @@ typedef enum CssAnimValueType {
     ANIM_VAL_LENGTH,        // width, height, margin-*, padding-*, top/right/bottom/left
     ANIM_VAL_ASPECT_RATIO,  // aspect-ratio (positive ratios interpolate multiplicatively)
     ANIM_VAL_TRANSFORM,     // transform function list
+    ANIM_VAL_DISPLAY,       // display's discrete outer/inner box type
 } CssAnimValueType;
 
 // Forward declaration from view.hpp
@@ -2776,6 +2794,11 @@ typedef struct CssAnimatedProp {
             bool is_auto;
         } aspect_ratio;         // ANIM_VAL_ASPECT_RATIO
         TransformFunction* transform;  // ANIM_VAL_TRANSFORM (linked list)
+        struct {
+            CssValue* value;       // parsed keyframe value
+            DisplayValue used;     // captured underlying used value
+            bool has_used;         // true for a captured underlying value
+        } display;                  // ANIM_VAL_DISPLAY
     } value;
 } CssAnimatedProp;
 
@@ -3064,6 +3087,11 @@ const char* css_select_font_shorthand_family(LayoutContext* lycon,
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon);
 DisplayValue resolve_display_value(void* child);
+bool css_resolve_display_css_value(DomElement* element, const CssValue* value,
+                                   DisplayValue* out_display);
+bool css_display_contents_suppresses_element(DomElement* element);
+bool css_display_element_is_replaced(DomElement* element);
+bool css_is_mathml_element(const DomElement* element);
 bool layout_resolve_contain_intrinsic_size(LayoutContext* lycon, DomElement* element,
                                            float* out_width, float* out_height);
 DisplayValue blockify_display(DisplayValue display);
@@ -3205,7 +3233,9 @@ typedef struct UiContext {
     // image cache
     struct hashmap* image_cache;  // cache for images loaded
 
-    float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
+    float device_scale_x;   // physical framebuffer px per logical window px on X
+    float device_scale_y;   // physical framebuffer px per logical window px on Y
+    float pixel_ratio;      // compatibility scalar after validating X/Y agreement
     DomDocument* document;  // current document
     // Nested iframe layout belongs to this UI/document tree, not to the host
     // thread.  Recursive layout may construct short-lived LayoutContexts.
@@ -3235,6 +3265,12 @@ typedef struct UiContext {
     void destroy();
 } UiContext;
 
+// Publish coherent platform scale metrics. This invalidates physical resources
+// and requests repaint, but does not reflow logical layout.
+bool ui_context_set_device_scale(UiContext* uicon,
+                                 float scale_x,
+                                 float scale_y);
+
 // Loader-time host settings.  They are copied into DomDocument::js before
 // script execution creates its Runtime, so parallel views never share browser
 // clock or host-loop semantics through process-global setup state.
@@ -3254,7 +3290,6 @@ extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
 
 typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height,
-                           float pixel_ratio = 1.0f,
                            const DocumentJsHostConfig* js_host_config = nullptr);
 DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool);

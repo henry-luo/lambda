@@ -1,8 +1,8 @@
 # Lambda Compiler — Explicit Expression Representations
 
-- **Status:** REVISED PROPOSAL. The shared representation infrastructure already exists;
-  propagation through Lambda expression lowering has not started.
-- **Date:** 2026-08-05
+- **Status:** IMPLEMENTATION CHECKPOINT. D2.4.1–D2.4.3's L0–L4 first slice is landed;
+  remaining raw producers still pass through an explicitly named legacy register shim.
+- **Date:** 2026-08-28
 - **Scope:** how MIR Direct (`lambda/runtime/transpile-mir.cpp`) records and converts the
   representation of an emitted value. This proposal does not choose the native carrier for each
   Lambda type; those choices belong to [`Lambda_Semantics_Int_Type.md`](Lambda_Semantics_Int_Type.md)
@@ -12,6 +12,31 @@
 - **Sequencing:** land and verify the in-flight nullable-lane work before starting this
   refactor. Both efforts touch expression representation, typed boundaries, calls, returns, and
   `transpile-mir.cpp`; they must not be developed concurrently.
+
+### Implementation checkpoint — 2026-08-28
+
+The first migration slice is implemented in `value_rep.h`, `type_contract.cpp`,
+`mir_emitter_shared.hpp`, and `transpile-mir.cpp`:
+
+- `ValueRep` now distinguishes `INT_LANE`, `MACHINE_I64`, and `MACHINE_U64` from
+  Lambda full-width integer carriers.
+- `lambda_canonical_rep(Type*)` resolves concrete, nullable, pointer, abstract, and
+  heterogeneous contracts without consulting MIR register classes.
+- `MirValue` retains the full `semantic_contract`; its conversion router preserves that
+  contract/provenance and rejects machine or unsupported transitions.
+- `transpile_expr_value()` is the canonical metadata boundary. The first L4 slice migrates
+  arithmetic/float operands, branch joins, declarations/assignments, indexed stores, native
+  call arguments, the generic Item boundary, and function-body returns to `MirValue` or an
+  explicit `ValueRep`.
+- Direct transition fixtures now cover logical-versus-physical axes, identity preservation,
+  and fail-closed machine crossings.
+- The Lambda expression-lowering audit has zero semantic `MIR_reg_type()` uses. Ten remaining
+  probes in `transpile-mir.cpp` are confined to physical async-spill, return-ABI, root-slot,
+  and double/MIR-instruction helpers.
+
+The `ValueRepresentationTest` contract/transition regressions and the Lambda baseline pass.
+Remaining raw expression producers and the final legacy-shim ratchet stay open; this
+checkpoint does not close LR07-1/OI-5.
 
 ---
 
@@ -74,6 +99,11 @@ question. Four occur in GC-root bookkeeping and answer physical storage question
 line numbers drift; the migration must track symbols and lint rules rather than fixed source
 lines.
 
+Current Lambda Direct audit (2026-08-28): `transpile-mir.cpp` has ten textual
+`MIR_reg_type()` call sites, all annotated physical-only. They serve async spill typing,
+return-ABI adaptation, GC root-slot storage, or the double-register requirements of MIR
+boxing/reinterpretation helpers; semantic expression inference is at zero.
+
 The goal is not to delete all 144 type queries. Queries that choose lowering before emission are
 legitimate. The target is to delete post-emission re-derivation and to separate the remaining
 semantic-contract queries from carrier selection.
@@ -119,7 +149,7 @@ safe.
 
 ---
 
-## 3. The canonical infrastructure already exists
+## 3. The canonical infrastructure
 
 ### 3.1 `ValueRep`
 
@@ -129,6 +159,9 @@ safe.
 typedef enum ValueRep {
     VALUE_REP_NONE = 0,
     VALUE_REP_ITEM,
+    VALUE_REP_INT_LANE,
+    VALUE_REP_MACHINE_I64,
+    VALUE_REP_MACHINE_U64,
     VALUE_REP_I64,
     VALUE_REP_U64,
     VALUE_REP_F64,
@@ -147,6 +180,7 @@ struct MirValue {
     MIR_reg_t reg;
     MIR_type_t mir_type;
     TypeId semantic_type;
+    Type* semantic_contract;
     ValueRep rep;
     JitValueClass value_class;
     int gc_home_id;
@@ -168,14 +202,16 @@ Therefore this proposal must not add a parallel `Emitted {reg, rep, tid}` abstra
 
 ### 3.3 The remaining gaps
 
-1. `transpile_expr()` still returns only `MIR_reg_t`.
-2. `lambda_convert_rep()` currently covers mainly Item/native boxing boundaries, not the complete
-   set of representation-preserving transitions needed by expression lowering.
-3. `VALUE_REP_I64` conflates Lambda `int64`, the v5 int lane, and internal machine quantities.
-4. `MirValue.semantic_type` is only a `TypeId`. That is insufficient for `int` versus `int?`,
-   named shapes, constrained types, or heterogeneous unions.
-5. Several helpers combine representation movement with semantic coercion or use-specific error
-   policy, making them unsuitable for a universal representation matrix.
+1. The legacy expression implementation still returns `MIR_reg_t`, but it is now behind the
+   explicit `transpile_expr_value()`/`transpile_expr_reg_legacy()` boundary.
+2. `lambda_convert_rep()` now routes the supported carrier-only transitions and fails closed for
+   machine or contract-incompatible requests; direct identity/axis/fail-closed transition
+   fixtures are landed in `test_lambda_errors_gtest.cpp`.
+3. `ValueRep` no longer conflates Lambda `int64`, the v5 int lane, and internal machine quantities.
+4. `MirValue` retains the full `Type*` contract; the first producer/call-analysis migration
+   slice is landed, while remaining raw expression callers still need propagation.
+5. Several existing helpers still combine representation movement with semantic coercion or
+   use-specific error policy; L4 must separate those paths without changing their semantics.
 
 ---
 
@@ -316,10 +352,11 @@ root-slot bookkeeping that must form correctly typed MIR memory operations. New 
 uses `MirValue.mir_type`; new rooting/ownership code uses `MirValue.value_class` and provenance
 where available.
 
-The four current GC-root uses are a transitional physical exception, not a claim that MIR is the
-best long-term source. Once every root candidate is a `MirValue`, `value_class` can distinguish a
-boxed Item or raw GC pointer from an int lane or machine scalar more precisely than
-`MIR_T_I64` can.
+The four GC-root uses, together with async-spill typing, return-ABI adaptation, and the three
+double boxing/reinterpretation helper uses, are transitional physical exceptions, not a claim
+that MIR is the best long-term source. Once every root candidate is a `MirValue`, `value_class`
+can distinguish a boxed Item or raw GC pointer from an int lane or machine scalar more precisely
+than `MIR_T_I64` can.
 
 ---
 
@@ -454,6 +491,9 @@ Exercise supported transitions with values that distinguish the representations:
 The tests must verify both the resulting value and the resulting `MirValue` metadata. Emission
 fixtures are appropriate for instruction shape; executable probes are required for tag dispatch,
 sentinels, and boundary behavior.
+
+The current direct fixture names are `DirectTransitionsKeepLogicalAndPhysicalAxesSeparate` and
+`UnsupportedDirectTransitionFailsClosed` in `test_lambda_errors_gtest.cpp`.
 
 ### 6.2 Per-cluster gates
 

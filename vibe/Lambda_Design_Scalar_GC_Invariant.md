@@ -226,7 +226,8 @@ so the phrase “every `_b` wrapper” is not precise enough without this matrix
   decision 2026-07-22, recorded as CLAUDE.md/AGENTS.md rule 14). Its generated
   code has no watermark protocol, so its results are frame-scan-owned and
   never dangle, and no GC scalar cells are produced; it needs no ABI change,
-  ever. `--c2mir` simply does not gain new features.
+  ever. The retired C2MIR back end never gained new features, and has since
+  been removed outright.
 - **Cross-module direct calls**: the calling module's generated code binds a
   per-site home like any internal call — only the wrapper signature matters.
 

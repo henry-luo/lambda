@@ -5,11 +5,11 @@
 // that survives: inserts, replacements, both delete intents and every
 // composition intent belong to `lambda/package/dom/dom_edit.ls`.
 //
-// What is here is the geometry the template drives — resolving a transaction's
-// boundaries to a single text node, splicing that node, creating one at an
+// What is here is the geometry and mutation mechanism the package drives —
+// resolving boundaries to a text node, splicing that node, creating one at an
 // element boundary, placing the caret, and converting UTF-16 to the codepoints
-// every Lambda-facing offset uses. The entry point resolves the range, hands it
-// to the template, and reports what came back; it makes no editing decision.
+// every Lambda-facing offset uses. Dispatch decides ownership; this waist does
+// not select or invoke handlers.
 //
 // Renamed rather than deleted because that is what retiring the handler meant:
 // the decisions left, the mechanism stayed, and a file called `_handler` that
@@ -35,9 +35,9 @@ extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind,
                                                const char* attribute_name,
                                                const char* old_value);
 
-// F13: the DOM-range waist. The transaction stashes its resolved single-text
+// F13: the DOM-range waist. The edit dispatch stashes its resolved single-text
 // range here; `radiant.dom_edit_range` reads it and `radiant.dom_replace_range`
-// splices, bumping the epoch so the caller can tell the template applied.
+// splices, bumping the epoch so the caller can tell the package applied.
 static __thread uint64_t s_dom_edit_apply_epoch = 0;
 // Where the splice left the caret, so the caller can collapse the selection
 // there. Reported alongside the epoch rather than returned, because the value
@@ -81,6 +81,26 @@ void dom_edit_set_pending_range(DocState* state, DomElement* host, DomText* text
     state->editing.pending_dom_edit_end = end_u16;
     state->editing.pending_dom_edit_boundary_node = boundary_node;
     state->editing.pending_dom_edit_boundary_offset = boundary_offset;
+    state->editing.pending_dom_edit_range_end_node = nullptr;
+    state->editing.pending_dom_edit_range_end_offset = 0;
+    // Clear the caret channel with the range it belongs to. A primitive that
+    // moves the epoch without placing a caret (wrapping a range, for one) would
+    // otherwise leave the previous edit's node standing, and the dispatch
+    // reads both — it would collapse the selection into a node this edit never
+    // touched.
+    s_dom_edit_caret_node = nullptr;
+    s_dom_edit_caret_u16 = 0;
+}
+
+void dom_edit_set_pending_range_end(DocState* state, DomNode* boundary_node,
+                                    uint32_t boundary_offset) {
+    if (!state) return;
+    state->editing.pending_dom_edit_range_end_node = boundary_node;
+    state->editing.pending_dom_edit_range_end_offset = boundary_offset;
+}
+
+void dom_edit_clear_pending_range(DocState* state) {
+    dom_edit_set_pending_range(state, nullptr, nullptr, 0, 0, nullptr, 0);
 }
 
 // Splice a text node and leave the caret after the inserted text. Offsets in,
@@ -111,20 +131,11 @@ bool dom_edit_replace_range_u16(DocState* state, DomText* text,
     return changed;
 }
 
-static bool editing_dom_boundary_equal(DomBoundary left, DomBoundary right) {
-    return left.node == right.node && left.offset == right.offset;
-}
-
 static bool editing_dom_node_is_within(DomNode* node, DomNode* ancestor) {
     for (DomNode* current = node; current; current = current->parent) {
         if (current == ancestor) return true;
     }
     return false;
-}
-
-static DomElement* editing_dom_live_host(DomDocument* document,
-                                         const EditingPreparedTransaction* prepared) {
-    return editing_prepared_live_host(document, prepared);
 }
 
 static bool editing_dom_host_contains_boundary(DomElement* host,
@@ -135,35 +146,6 @@ static bool editing_dom_host_contains_boundary(DomElement* host,
     return editing_host_lookup(boundary.node, &boundary_host) &&
         boundary_host.host == host &&
         !boundary_host.target_in_false_island;
-}
-
-static bool editing_dom_live_selection_matches(
-        const EditingPreparedTransaction* prepared, DomSelection* selection) {
-    if (!prepared || !selection || selection->range_count != 1 ||
-        prepared->selection_before.kind != EDIT_SEL_DOM_RANGE) {
-        return false;
-    }
-    return editing_dom_boundary_equal(dom_selection_anchor_boundary(selection),
-                                      prepared->selection_before.anchor) &&
-        editing_dom_boundary_equal(dom_selection_focus_boundary(selection),
-                                   prepared->selection_before.focus);
-}
-
-static bool editing_dom_prepared_extended_range(
-        DomElement* host, const EditingPreparedTransaction* prepared,
-        EditingTargetRange* out_range) {
-    if (!host || !prepared || !out_range || prepared->target_range_count != 1) {
-        return false;
-    }
-    EditingTargetRange range = prepared->target_ranges[0];
-    if (!range.start.node || !range.end.node ||
-        editing_dom_boundary_equal(range.start, range.end) ||
-        !editing_dom_host_contains_boundary(host, range.start) ||
-        !editing_dom_host_contains_boundary(host, range.end)) {
-        return false;
-    }
-    *out_range = range;
-    return true;
 }
 
 static DomNode* editing_dom_element_child_at(DomElement* element,
@@ -216,6 +198,61 @@ static bool editing_dom_single_text_range(DomElement* host,
     *out_start = start_offset;
     *out_end = end_offset;
     return end_offset >= start_offset;
+}
+
+bool dom_edit_prepare_pending_range(DocState* state, DomElement* host,
+                                    DomBoundary start, DomBoundary end) {
+    if (!state || !host || !start.node || !end.node ||
+        !dom_boundary_is_valid(&start) || !dom_boundary_is_valid(&end) ||
+        !editing_dom_host_contains_boundary(host, start) ||
+        !editing_dom_host_contains_boundary(host, end)) {
+        return false;
+    }
+    DomBoundaryOrder order = dom_boundary_compare(&start, &end);
+    if (order == DOM_BOUNDARY_DISJOINT || order == DOM_BOUNDARY_AFTER) {
+        return false;
+    }
+    DomText* text = nullptr;
+    uint32_t text_start = 0;
+    uint32_t text_end = 0;
+    editing_dom_single_text_range(host, start, end, &text, &text_start,
+                                  &text_end);
+    dom_edit_set_pending_range(state, host, text, text_start, text_end,
+                               start.node, start.offset);
+    dom_edit_set_pending_range_end(state, end.node, end.offset);
+    return true;
+}
+
+// Reconstitute the raw pending range for a structural operation. The single
+// text cache remains the fast path for ordinary typing; F14.2 must retain both
+// DOM endpoints so a delete or replacement can cross formatting and block nodes.
+static bool editing_dom_pending_range(DocState* state, DomRange* out_range) {
+    if (!state || !out_range) return false;
+    DomElement* host = state->editing.pending_dom_edit_host;
+    DomBoundary start = {
+        state->editing.pending_dom_edit_boundary_node,
+        state->editing.pending_dom_edit_boundary_offset
+    };
+    DomBoundary end = {
+        state->editing.pending_dom_edit_range_end_node,
+        state->editing.pending_dom_edit_range_end_offset
+    };
+    if (!host || !start.node || !end.node ||
+        !editing_dom_host_contains_boundary(host, start) ||
+        !editing_dom_host_contains_boundary(host, end) ||
+        !dom_boundary_is_valid(&start) || !dom_boundary_is_valid(&end)) {
+        return false;
+    }
+    DomBoundaryOrder order = dom_boundary_compare(&start, &end);
+    if (order == DOM_BOUNDARY_DISJOINT || order == DOM_BOUNDARY_AFTER) {
+        return false;
+    }
+    *out_range = {};
+    out_range->state = state;
+    out_range->start = start;
+    out_range->end = end;
+    out_range->is_live = false;
+    return true;
 }
 
 static bool editing_dom_replace_text(DocState* state, DomSelection* selection,
@@ -316,215 +353,636 @@ bool dom_edit_insert_at_boundary_u16(DocState* state, const char* text_data,
 
 
 
-static bool editing_dom_collapse_selection(DomSelection* selection,
-                                           DomText* text,
-                                           uint32_t offset_u16) {
-    if (!selection || !text) return false;
-    const char* exception = nullptr;
-    if (dom_selection_collapse(selection, static_cast<DomNode*>(text),
-                               offset_u16, &exception)) {
-        return true;
+// ---------------------------------------------------------------------------
+// F14.1: the formatting primitives.
+//
+// Every waist primitive before these addressed one existing text node. Wrapping
+// a range in an element is the first *structural* one, and it is what full UA
+// editing needs: `bold` wraps, `unbold` unwraps, and the same pair underlies
+// every inline command. Which tag a command wraps in, and whether it toggles on
+// or off, stays in `lambda/package/dom/commands.ls` — what is here is the tree
+// surgery, mechanism the way the splice is.
+// ---------------------------------------------------------------------------
+
+// The formatting element of `tag` between `node` and the editing host. Stopping
+// at the host matters: a command toggles off only what it would itself have
+// created, and only inside the element being edited.
+static DomElement* editing_dom_format_ancestor(DomElement* host, DomNode* node,
+                                               const char* tag) {
+    if (!host || !node || !tag) return nullptr;
+    for (DomNode* cur = node; cur && cur != static_cast<DomNode*>(host);
+         cur = cur->parent) {
+        if (!cur->is_element()) continue;
+        DomElement* elem = cur->as_element();
+        if (elem->tag_name && strcasecmp(elem->tag_name, tag) == 0) return elem;
     }
-    log_error("editing_dom_action: failed to place composition caret: %s",
-              exception ? exception : "unknown");
-    return false;
+    return nullptr;
 }
 
-static bool editing_dom_composition_target(
-        DomElement* host, const EditingPreparedTransaction* prepared,
-        EditingTargetRange* out_target) {
-    if (!host || !prepared || !out_target || prepared->target_range_count != 1) {
-        return false;
+// ES16: formatting state is read off the tree, never cached. This is what
+// `queryCommandState('bold')` answers with, and it is also how the package
+// decides whether a command toggles on or off.
+bool dom_edit_range_in_format(DocState* state, const char* tag) {
+    if (!state || !tag) return false;
+    DomElement* host = state->editing.pending_dom_edit_host;
+    DomText* text = state->editing.pending_dom_edit_text;
+    if (!host || !text) return false;
+    return editing_dom_format_ancestor(host, static_cast<DomNode*>(text),
+                                       tag) != nullptr;
+}
+
+// Wrap [start, end) of the resolved text node in a fresh `tag` element.
+bool dom_edit_wrap_range_u16(DocState* state, uint32_t start_u16,
+                             uint32_t end_u16, const char* tag) {
+    if (!state || !tag || !*tag) return false;
+    DomElement* host = state->editing.pending_dom_edit_host;
+    DomText* text = state->editing.pending_dom_edit_text;
+    DomSelection* selection = state->dom_selection;
+    if (!host || !text || !text->parent || !selection) return false;
+    uint32_t total = dom_text_utf16_length(text);
+    if (end_u16 > total) end_u16 = total;
+    if (start_u16 >= end_u16) return false;
+    DomDocument* doc = host->doc;
+    if (!doc) return false;
+
+    // Split the tail off first. Splitting the head would move `end_u16` into the
+    // node the split produced, so the second offset would address the wrong node.
+    if (end_u16 < total && !dom_text_split_at(state, text, end_u16)) return false;
+    DomText* middle = start_u16 > 0 ? dom_text_split_at(state, text, start_u16)
+                                    : text;
+    if (!middle) return false;
+
+    DomElement* wrapper = dom_element_create(doc, tag, nullptr);
+    if (!wrapper) return false;
+    DomNode* wrapper_node = static_cast<DomNode*>(wrapper);
+    DomNode* middle_node = static_cast<DomNode*>(middle);
+    DomNode* parent = middle_node->parent;
+    if (!parent || !parent->insert_before(wrapper_node, middle_node)) return false;
+    dom_mutation_post_insert(state, parent, wrapper_node);
+    dom_mutation_pre_remove(state, middle_node);
+    parent->remove_child(middle_node);
+    wrapper_node->append_child(middle_node);
+    dom_mutation_post_insert(state, wrapper_node, middle_node);
+    js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, wrapper_node, parent);
+
+    // Formatting leaves the run selected, the way a browser does, so a second
+    // command applies to the same span. The caret channel is deliberately left
+    // clear: the dispatch collapses to it when it is set, which is exactly the
+    // wrong outcome for a command that changed no text.
+    const char* exception = nullptr;
+    if (!dom_selection_set_base_and_extent(selection, middle_node, 0,
+                                           middle_node,
+                                           dom_text_utf16_length(middle),
+                                           &exception)) {
+        log_error("dom_edit_wrap_range: failed to reselect wrapped run: %s",
+                  exception ? exception : "unknown");
     }
-    EditingTargetRange target = prepared->target_ranges[0];
-    if (!target.start.node || !target.end.node ||
-        !editing_dom_host_contains_boundary(host, target.start) ||
-        !editing_dom_host_contains_boundary(host, target.end)) {
-        return false;
-    }
-    bool text_range = target.start.node == target.end.node &&
-        target.start.node->is_text() && target.end.offset >= target.start.offset;
-    bool collapsed_element_boundary = editing_dom_boundary_equal(target.start, target.end) &&
-        target.start.node->is_element();
-    if (!text_range && !collapsed_element_boundary) return false;
-    *out_target = target;
+    s_dom_edit_apply_epoch++;
     return true;
 }
 
-static EditingActionOutcome editing_dom_handle_composition(
-        DocState* state, DomElement* host, DomSelection* selection,
-        const EditingPreparedTransaction* prepared) {
-    EditingActionOutcome outcome = {EDITING_ACTION_PASS, false, false};
-    if (!state || !host || !selection || !prepared) return outcome;
-    const EditingIntent* intent = &prepared->intent;
-    EditingCompositionState* composition = &state->editing.composition;
-    if (!composition->active || composition->surface.owner != host) return outcome;
+// Move a child between the raw DOM chains while keeping live Range boundaries
+// and the JS mutation ledger in step. The waist owns this structural move so a
+// package command does not accidentally invoke a second editing decision.
+static bool editing_dom_insert_child(DocState* state, DomElement* parent,
+                                     DomNode* child, DomNode* reference);
 
-    // The target may not resolve — COMPOSITION_START arrives before there is a
-    // range to name — so resolution is no longer a precondition for asking the
-    // template.
-    EditingTargetRange target = {};
-    bool have_target = editing_dom_composition_target(host, prepared, &target);
-
-    // F13.3: offer the composition edit to the template. The target comes from
-    // `prepared->target_ranges`, not the live selection — an IME names the range
-    // it is replacing — so this stashes that range rather than the one the
-    // insert/delete path resolves.
-    //
-    // Every composition intent is offered, COMPOSITION_START included: the
-    // dispatch now reports through two channels, so a template can claim a
-    // transaction it handled by doing nothing.
-    {
-        DomText* target_text = (have_target && target.start.node->is_text())
-            ? lam::dom_require_text(target.start.node) : nullptr;
-        dom_edit_set_pending_range(state, host, target_text,
-                                   have_target ? target.start.offset : 0,
-                                   have_target ? target.end.offset : 0,
-                                   have_target ? target.start.node : nullptr,
-                                   have_target ? target.start.offset : 0);
-        uint64_t apply_epoch_before = dom_edit_apply_epoch();
-        InputIntent comp_carrier;
-        comp_carrier.type = intent->type;
-        if (intent->data) comp_carrier.data = intent->data;
-        comp_carrier.composition_caret = intent->composition_caret;
-        // Two channels meaning different things. The epoch says an edit was
-        // *applied*; the dispatch's own return says the template *claimed* the
-        // transaction. Composition needs both, because two of its cases are
-        // legitimately handled by doing nothing — reserving the session on
-        // start, and an empty replacement at an element boundary — and the epoch
-        // alone cannot tell "handled, no change" from "declined".
-        bool claimed = radiant_dispatch_behavior_dom_edit(static_cast<View*>(host),
-                                                          &comp_carrier);
-        bool applied = dom_edit_apply_epoch() != apply_epoch_before;
-        DomNode* caret_node = dom_edit_caret_node();
-        uint32_t caret_off = dom_edit_caret_offset_u16();
-        dom_edit_set_pending_range(state, nullptr, nullptr, 0, 0, nullptr, 0);
-        if (applied && caret_node && caret_node->is_text()) {
-            DomText* caret_text = lam::dom_require_text(caret_node);
-            editing_dom_collapse_selection(selection, caret_text, caret_off);
-            // The session anchor stays native (ES18): the preedit run has to be
-            // findable again on the next update, and that is storage, not policy.
-            if (intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT) {
-                composition->anchor_view = static_cast<View*>(caret_text);
-                composition->anchor_offset = (int)dom_text_utf16_to_utf8(
-                    caret_text, target.start.offset);  // INT_CAST_OK: DOM offsets fit the controller's signed anchor.
-                composition->dom_preedit_len =
-                    (uint32_t)strlen(intent->data ? intent->data : "");
-            }
-            outcome.status = EDITING_ACTION_CLAIMED;
-            outcome.selection_changed = true;
-            return outcome;
-        }
-        if (claimed) {
-            // Handled without changing anything: no caret to move and no
-            // mutation to report, but the transaction is the template's.
-            outcome.status = EDITING_ACTION_CLAIMED;
-            return outcome;
-        }
-        if (!have_target) return outcome;
+static bool editing_dom_move_child(DocState* state, DomNode* child,
+                                   DomElement* destination, DomNode* reference) {
+    if (!state || !child || !destination || !child->parent) return false;
+    if (reference && reference->parent != static_cast<DomNode*>(destination)) {
+        return false;
     }
-
-    // Nothing left to decide here. Every composition transaction is the
-    // template's: the edits through the waist, and the two that are handled by
-    // doing nothing through the dispatch verdict. Reaching this point means the
-    // template declined, which for composition means no default action exists.
-    return outcome;
+    DomNode* source = child->parent;
+    dom_mutation_pre_remove(state, child);
+    if (!source->remove_child(child)) return false;
+    js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_REMOVE, child, source);
+    return editing_dom_insert_child(state, destination, child, reference);
 }
 
-EditingActionOutcome editing_dom_route_apply(
-        EventContext* evcon, const EditingPreparedTransaction* prepared,
-        void* user) {
-    (void)user;
-    EditingActionOutcome outcome = {EDITING_ACTION_PASS, false, false};
-    DomDocument* document = evcon ? evcon->target_document : nullptr;
-    DocState* state = document ? (DocState*)document->state : nullptr;
-    DomElement* host = editing_dom_live_host(document, prepared);
-    if (!document || !state || !prepared || !host) {
-        outcome.status = EDITING_ACTION_ERROR;
-        return outcome;
+// F14.2 keeps block surgery deliberately small: these are the paragraph-like
+// containers a contenteditable command may split or join. Lists and table
+// cells retain their own editing semantics and are left to the native target
+// range policy until a command explicitly covers them.
+static bool editing_dom_is_structural_block(const DomElement* element) {
+    if (!element || !element->tag_name) return false;
+    const char* tag = element->tag_name;
+    return strcasecmp(tag, "address") == 0 ||
+        strcasecmp(tag, "article") == 0 ||
+        strcasecmp(tag, "aside") == 0 ||
+        strcasecmp(tag, "blockquote") == 0 ||
+        strcasecmp(tag, "div") == 0 ||
+        strcasecmp(tag, "figcaption") == 0 ||
+        strcasecmp(tag, "figure") == 0 ||
+        strcasecmp(tag, "footer") == 0 ||
+        strcasecmp(tag, "header") == 0 ||
+        strcasecmp(tag, "h1") == 0 ||
+        strcasecmp(tag, "h2") == 0 ||
+        strcasecmp(tag, "h3") == 0 ||
+        strcasecmp(tag, "h4") == 0 ||
+        strcasecmp(tag, "h5") == 0 ||
+        strcasecmp(tag, "h6") == 0 ||
+        strcasecmp(tag, "main") == 0 ||
+        strcasecmp(tag, "nav") == 0 ||
+        strcasecmp(tag, "p") == 0 ||
+        strcasecmp(tag, "pre") == 0 ||
+        strcasecmp(tag, "section") == 0;
+}
+
+static DomElement* editing_dom_structural_block_ancestor(DomElement* host,
+                                                           DomNode* node) {
+    if (!host || !node) return nullptr;
+    for (DomNode* current = node;
+         current && current != static_cast<DomNode*>(host);
+         current = current->parent) {
+        if (current->is_element() &&
+            editing_dom_is_structural_block(current->as_element())) {
+            return current->as_element();
+        }
+    }
+    return nullptr;
+}
+
+static bool editing_dom_mergeable_blocks(DomElement* start_block,
+                                         DomElement* end_block) {
+    if (!start_block || !end_block ||
+        !editing_dom_is_structural_block(start_block) ||
+        !editing_dom_is_structural_block(end_block) ||
+        !start_block->tag_name || !end_block->tag_name) {
+        return false;
+    }
+    // Preserve the authored paragraph kind. Joining a <p> to a <div>, for
+    // example, would silently change the surviving block's semantics.
+    return strcasecmp(start_block->tag_name, end_block->tag_name) == 0;
+}
+
+static bool editing_dom_insert_child(DocState* state, DomElement* parent,
+                                     DomNode* child, DomNode* reference) {
+    if (!state || !parent || !child || child->parent ||
+        (reference && reference->parent != static_cast<DomNode*>(parent))) {
+        return false;
+    }
+    bool inserted = reference
+        ? static_cast<DomNode*>(parent)->insert_before(child, reference)
+        : static_cast<DomNode*>(parent)->append_child(child);
+    if (!inserted) return false;
+    dom_mutation_post_insert(state, static_cast<DomNode*>(parent), child);
+    js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, child,
+                           static_cast<DomNode*>(parent));
+    return true;
+}
+
+static bool editing_dom_append_empty_break(DocState* state, DomElement* parent,
+                                           DomNode* reference = nullptr) {
+    if (!state || !parent) return false;
+    DomElement* br = dom_element_create(parent->doc, "br", nullptr);
+    return br && editing_dom_insert_child(state, parent,
+                                          static_cast<DomNode*>(br), reference);
+}
+
+static bool editing_dom_remove_child(DocState* state, DomNode* child) {
+    if (!state || !child || !child->parent) return false;
+    DomNode* parent = child->parent;
+    dom_mutation_pre_remove(state, child);
+    if (!parent->remove_child(child)) return false;
+    js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_REMOVE, child, parent);
+    return true;
+}
+
+static bool editing_dom_move_fragment_children(DocState* state,
+                                               DomElement* fragment,
+                                               DomElement* destination) {
+    if (!state || !fragment || !destination) return false;
+    while (fragment->first_child) {
+        if (!editing_dom_move_child(state, fragment->first_child,
+                                    destination, nullptr)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Apply a raw pending DOM range and optionally insert text at its start. The
+// package chooses whether this means delete, typing, or replacement; this
+// helper only performs Range deletion, adjacent same-kind block merging, and
+// the resulting tree insertion.
+static bool editing_dom_apply_pending_range(DocState* state,
+                                            const char* replacement) {
+    DomRange operation = {};
+    if (!editing_dom_pending_range(state, &operation)) return false;
+    DomElement* host = state->editing.pending_dom_edit_host;
+    const char* repl = replacement ? replacement : "";
+    size_t repl_bytes = strlen(repl);
+    bool collapsed = dom_range_collapsed(&operation);
+    if (collapsed && repl_bytes == 0) return false;
+
+    DomBoundary original_start = operation.start;
+    DomElement* start_block = editing_dom_structural_block_ancestor(
+        host, operation.start.node);
+    DomElement* end_block = editing_dom_structural_block_ancestor(
+        host, operation.end.node);
+
+    if (!collapsed) {
+        const char* exception = nullptr;
+        if (!dom_range_delete_contents(&operation, &exception) || exception) {
+            log_debug("F14.2: pending DOM range delete rejected: %s",
+                      exception ? exception : "unknown");
+            return false;
+        }
     }
 
+    // Range deletion computes a legal collapsed boundary, but that boundary is
+    // allowed to move to the end of the partially-contained parent. For typing
+    // over a cross-node selection the caret must remain at the original start
+    // text offset, before the surviving suffix; use the computed boundary only
+    // when the original start node was removed.
+    DomBoundary caret = original_start;
+    if (!caret.node || !editing_dom_host_contains_boundary(host, caret)) {
+        caret = operation.start;
+    }
+    if (caret.node && caret.node->is_text()) {
+        uint32_t length = dom_text_utf16_length(caret.node->as_text());
+        if (caret.offset > length) caret.offset = length;
+    } else if (caret.node && caret.node->is_element()) {
+        uint32_t length = dom_node_boundary_length(caret.node);
+        if (caret.offset > length) caret.offset = length;
+    }
+    if (!caret.node || !dom_boundary_is_valid(&caret) ||
+        !editing_dom_host_contains_boundary(host, caret)) {
+        return false;
+    }
+
+    if (!collapsed && editing_dom_mergeable_blocks(start_block, end_block) &&
+        start_block->parent &&
+        start_block->parent == end_block->parent &&
+        start_block->next_sibling == static_cast<DomNode*>(end_block)) {
+        while (end_block->first_child) {
+            if (!editing_dom_move_child(state, end_block->first_child,
+                                        start_block, nullptr)) {
+                return false;
+            }
+        }
+        if (!editing_dom_remove_child(state, static_cast<DomNode*>(end_block))) {
+            return false;
+        }
+        if (!editing_dom_node_is_within(caret.node,
+                                        static_cast<DomNode*>(start_block))) {
+            caret = { static_cast<DomNode*>(start_block),
+                      dom_node_boundary_length(static_cast<DomNode*>(start_block)) };
+        }
+    }
+
+    if (repl_bytes > 0) {
+        DomText* inserted = DomText::create_detached_copy(host->doc, repl,
+                                                           repl_bytes);
+        if (!inserted) return false;
+        operation.start = caret;
+        operation.end = caret;
+        const char* exception = nullptr;
+        if (!dom_range_insert_node(&operation, static_cast<DomNode*>(inserted),
+                                   &exception) || exception) {
+            log_debug("F14.2: pending DOM range insertion rejected: %s",
+                      exception ? exception : "unknown");
+            return false;
+        }
+        caret = { static_cast<DomNode*>(inserted),
+                  dom_text_utf16_length(inserted) };
+    }
+
+    s_dom_edit_caret_node = caret.node;
+    s_dom_edit_caret_u16 = caret.offset;
+    s_dom_edit_apply_epoch++;
+    js_dom_notify_mutation(DOM_JS_MUTATION_TREE_REPLACE, host, host);
+    return true;
+}
+
+static bool editing_dom_prepare_structural_caret(DocState* state,
+                                                 DomBoundary* out_caret) {
+    if (!state || !out_caret) return false;
+    DomRange pending = {};
+    if (!editing_dom_pending_range(state, &pending)) return false;
+    if (!dom_range_collapsed(&pending)) {
+        if (!editing_dom_apply_pending_range(state, "")) return false;
+        out_caret->node = dom_edit_caret_node();
+        out_caret->offset = dom_edit_caret_offset_u16();
+    } else {
+        *out_caret = pending.start;
+    }
+    DomElement* host = state->editing.pending_dom_edit_host;
+    return out_caret->node && dom_boundary_is_valid(out_caret) &&
+        editing_dom_host_contains_boundary(host, *out_caret);
+}
+
+static bool editing_dom_split_block(DocState* state, DomElement* host,
+                                    DomBoundary caret, DomBoundary* out_caret) {
+    if (!state || !host || !out_caret || !caret.node) return false;
+    DomElement* block = editing_dom_structural_block_ancestor(host, caret.node);
+    DomElement* source = block ? block : host;
+    DomElement* parent = block && block->parent && block->parent->is_element()
+        ? block->parent->as_element() : host;
+    DomNode* source_node = static_cast<DomNode*>(source);
+    if (!parent || !source_node ||
+        !editing_dom_node_is_within(caret.node, source_node)) return false;
+
+    const char* tag = block && block->tag_name ? block->tag_name : "div";
+    DomElement* new_block = dom_element_create(host->doc, tag, nullptr);
+    if (!new_block) return false;
+    DomNode* reference = block
+        ? static_cast<DomNode*>(block)->next_sibling : nullptr;
+    if (!editing_dom_insert_child(state, parent, static_cast<DomNode*>(new_block),
+                                  reference)) {
+        return false;
+    }
+
+    DomRange suffix = {};
+    suffix.state = state;
+    suffix.start = caret;
+    suffix.end = { source_node, dom_node_boundary_length(source_node) };
+    if (dom_boundary_compare(&suffix.start, &suffix.end) == DOM_BOUNDARY_AFTER) {
+        editing_dom_remove_child(state, static_cast<DomNode*>(new_block));
+        return false;
+    }
+    const char* exception = nullptr;
+    DomElement* fragment = dom_range_extract_contents(&suffix, &exception);
+    if (!fragment || exception ||
+        !editing_dom_move_fragment_children(state, fragment, new_block)) {
+        editing_dom_remove_child(state, static_cast<DomNode*>(new_block));
+        return false;
+    }
+
+    if (!block) {
+        // When the host had no direct prefix, retain an explicit empty line
+        // before the newly-created block rather than losing the left caret.
+        if (new_block->prev_sibling == nullptr &&
+            !editing_dom_append_empty_break(state, host,
+                static_cast<DomNode*>(new_block))) {
+            return false;
+        }
+    } else if (!block->first_child &&
+               !editing_dom_append_empty_break(state, block, nullptr)) {
+        return false;
+    }
+    if (!new_block->first_child &&
+        !editing_dom_append_empty_break(state, new_block, nullptr)) {
+        return false;
+    }
+
+    DomText* first_text = dom_range_edge_text(static_cast<DomNode*>(new_block),
+                                              false);
+    if (first_text) {
+        *out_caret = { static_cast<DomNode*>(first_text), 0 };
+    } else {
+        *out_caret = { static_cast<DomNode*>(new_block), 0 };
+    }
+    return true;
+}
+
+static bool editing_dom_insert_break_at(DocState* state, DomBoundary caret,
+                                        DomBoundary* out_caret) {
+    if (!state || !out_caret || !caret.node) return false;
+    DomElement* parent = nullptr;
+    DomNode* reference = nullptr;
+    if (caret.node->is_text()) {
+        DomText* text = caret.node->as_text();
+        if (!text->parent || !text->parent->is_element()) return false;
+        parent = text->parent->as_element();
+        uint32_t length = dom_text_utf16_length(text);
+        if (caret.offset > length) return false;
+        if (caret.offset == 0) {
+            reference = static_cast<DomNode*>(text);
+        } else if (caret.offset == length) {
+            reference = text->next_sibling;
+        } else {
+            DomText* right = dom_text_split_at(state, text, caret.offset);
+            if (!right) return false;
+            reference = static_cast<DomNode*>(right);
+        }
+    } else if (caret.node->is_element()) {
+        parent = caret.node->as_element();
+        if (caret.offset > dom_node_boundary_length(caret.node)) return false;
+        reference = editing_dom_element_child_at(parent, caret.offset);
+    } else {
+        return false;
+    }
+
+    DomElement* br = dom_element_create(parent->doc, "br", nullptr);
+    if (!br || !editing_dom_insert_child(state, parent, static_cast<DomNode*>(br),
+                                         reference)) {
+        return false;
+    }
+    *out_caret = { static_cast<DomNode*>(parent),
+                   dom_node_child_index(static_cast<DomNode*>(br)) + 1 };
+    return true;
+}
+
+// F14.2 structural waist entry points. The package names the command; these
+// functions expose only the range/DOM mechanism and the post-edit caret.
+bool dom_edit_replace_pending_range(DocState* state, const char* replacement) {
+    return editing_dom_apply_pending_range(state, replacement);
+}
+
+bool dom_edit_delete_pending_range(DocState* state) {
+    return editing_dom_apply_pending_range(state, "");
+}
+
+bool dom_edit_insert_paragraph(DocState* state) {
+    if (!state) return false;
+    DomElement* host = state->editing.pending_dom_edit_host;
+    DomBoundary caret = {};
+    if (!host || !editing_dom_prepare_structural_caret(state, &caret)) {
+        return false;
+    }
+    DomBoundary new_caret = {};
+    if (!editing_dom_split_block(state, host, caret, &new_caret)) return false;
+    s_dom_edit_caret_node = new_caret.node;
+    s_dom_edit_caret_u16 = new_caret.offset;
+    s_dom_edit_apply_epoch++;
+    js_dom_notify_mutation(DOM_JS_MUTATION_TREE_REPLACE, host, host);
+    return true;
+}
+
+bool dom_edit_insert_line_break(DocState* state) {
+    if (!state) return false;
+    DomElement* host = state->editing.pending_dom_edit_host;
+    DomBoundary caret = {};
+    if (!host || !editing_dom_prepare_structural_caret(state, &caret)) {
+        return false;
+    }
+    DomBoundary new_caret = {};
+    if (!editing_dom_insert_break_at(state, caret, &new_caret)) return false;
+    s_dom_edit_caret_node = new_caret.node;
+    s_dom_edit_caret_u16 = new_caret.offset;
+    s_dom_edit_apply_epoch++;
+    js_dom_notify_mutation(DOM_JS_MUTATION_TREE_REPLACE, host, host);
+    return true;
+}
+
+// Remove the `tag` formatting over [start, end), promoting its children.
+// Partial ranges split the one-text-child formatting shell into left/right
+// formatted siblings and move the selected middle text between them. More
+// general nested, multi-child, and cross-node unwrap shapes remain future work.
+bool dom_edit_unwrap_range_u16(DocState* state, uint32_t start_u16,
+                               uint32_t end_u16, const char* tag) {
+    if (!state || !tag || !*tag) return false;
+    DomElement* host = state->editing.pending_dom_edit_host;
+    DomText* text = state->editing.pending_dom_edit_text;
     DomSelection* selection = state->dom_selection;
-    const EditingIntent* intent = &prepared->intent;
-    if (intent->type == INPUT_INTENT_COMPOSITION_START ||
-        intent->type == INPUT_INTENT_INSERT_COMPOSITION_TEXT ||
-        intent->type == INPUT_INTENT_INSERT_FROM_COMPOSITION ||
-        intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT) {
-        return editing_dom_handle_composition(state, host, selection, prepared);
-    }
-    bool live_selection_matches = editing_dom_live_selection_matches(prepared,
-                                                                      selection);
-    DomRange* range = selection->ranges[0];
-    if (!range || !editing_dom_host_contains_boundary(host, range->start) ||
-        !editing_dom_host_contains_boundary(host, range->end)) {
-        return outcome;
-    }
+    if (!host || !text || !selection) return false;
+    DomElement* fmt = editing_dom_format_ancestor(host,
+                                                  static_cast<DomNode*>(text), tag);
+    if (!fmt || !fmt->parent) return false;
+    DomNode* text_node = static_cast<DomNode*>(text);
+    if (fmt->first_child != text_node || text_node->next_sibling) return false;
+    uint32_t total = dom_text_utf16_length(text);
+    if (start_u16 >= end_u16 || end_u16 > total) return false;
 
-    EditingTargetRange prepared_range = {};
-    bool use_prepared_range = !live_selection_matches &&
-        editing_dom_prepared_extended_range(host, prepared, &prepared_range);
-    if (!live_selection_matches && !use_prepared_range) return outcome;
+    // Split the selected text before moving any node. The split envelope keeps
+    // all live ranges valid, and the resulting sibling identities let the
+    // structural move below preserve the exact selected text.
+    if (end_u16 < total && !dom_text_split_at(state, text, end_u16)) return false;
+    DomText* middle = start_u16 > 0 ? dom_text_split_at(state, text, start_u16)
+                                    : text;
+    if (!middle) return false;
 
-    DomBoundary action_start = use_prepared_range ? prepared_range.start
-                                                   : range->start;
-    DomBoundary action_end = use_prepared_range ? prepared_range.end
-                                                 : range->end;
+    DomNode* middle_node = static_cast<DomNode*>(middle);
+    DomNode* left = middle_node->prev_sibling;
+    DomNode* right = middle_node->next_sibling;
 
-    bool changed = false;
-    // F13.1: offer the transaction to the <body> template before applying it
-    // natively. The range is resolved here — element-offset-to-child, edge-text
-    // descent and host containment are geometry over the tree, not policy — and
-    // stashed for `radiant.dom_edit_*` to read. Dispatched with no EventContext
-    // for the reason F11 established: a script editor that prevents beforeinput
-    // still relies on the engine, so a translation-style hook must not be
-    // suppressed by default_prevented.
-    {
-        // The resolved range when the boundaries land in one text node, and the
-        // raw boundary always — the latter is what makes an insertion possible
-        // where no text node exists yet.
-        DomText* pending_text = nullptr;
-        uint32_t pending_start = 0, pending_end = 0;
-        editing_dom_single_text_range(host, action_start, action_end,
-                                      &pending_text, &pending_start, &pending_end);
-        dom_edit_set_pending_range(state, host, pending_text, pending_start,
-                                   pending_end, action_start.node, action_start.offset);
-        uint64_t apply_epoch_before = dom_edit_apply_epoch();
-        InputIntent dom_carrier;
-        dom_carrier.type = intent->type;
-        if (intent->data) dom_carrier.data = intent->data;
-        radiant_dispatch_behavior_dom_edit(static_cast<View*>(host), &dom_carrier);
-        bool applied = dom_edit_apply_epoch() != apply_epoch_before;
-        DomNode* caret_node = dom_edit_caret_node();
-        uint32_t caret_off = dom_edit_caret_offset_u16();
-        dom_edit_set_pending_range(state, nullptr, nullptr, 0, 0, nullptr, 0);
-        if (applied) {
-            // Collapse where the edit actually left the caret. Both waist
-            // operations report it, so this is uniform across a splice and a
-            // freshly created text node.
-            if (caret_node && caret_node->is_text()) {
-                editing_dom_collapse_selection(selection,
-                                               lam::dom_require_text(caret_node),
-                                               caret_off);
-            }
-            outcome.status = EDITING_ACTION_CLAIMED;
-            outcome.selection_changed = true;
-            return outcome;
-        }
+    DomNode* fmt_node = static_cast<DomNode*>(fmt);
+    DomNode* parent = fmt_node->parent;
+    DomNode* after_fmt = fmt_node->next_sibling;
+    DomElement* right_fmt = nullptr;
+
+    // If both sides remain formatted, preserve the formatting shell on the
+    // right as a fresh sibling. A command-created shell has no author attrs;
+    // the tag is the mechanism's only formatting state in this stage.
+    if (left && right) {
+        right_fmt = dom_element_create(host->doc, fmt->tag_name, nullptr);
+        if (!right_fmt) return false;
+        DomNode* right_fmt_node = static_cast<DomNode*>(right_fmt);
+        if (!parent->insert_before(right_fmt_node, after_fmt)) return false;
+        dom_mutation_post_insert(state, parent, right_fmt_node);
+        js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_INSERT, right_fmt_node,
+                               parent);
     }
 
-    // Every intent this handler once applied is now the template's: inserts and
-    // replacements through `dom_replace_range` and `dom_insert_at_boundary`,
-    // both delete intents through the same range waist. What is left below is
-    // composition (F13.3) and the dispatch above. `editing_dom_insert_at_boundary`
-    // survives as the *mechanism* behind the boundary primitive, not as a path
-    // this function takes.
-
-
-
-    if (changed) {
-        outcome.status = EDITING_ACTION_CLAIMED;
-        outcome.selection_changed = true;
+    // With a left side the unformatted middle follows the original shell. With
+    // no left side it must precede the shell, which now contains the right side.
+    DomNode* reference = left
+        ? (right_fmt ? static_cast<DomNode*>(right_fmt) : after_fmt)
+        : fmt_node;
+    if (!editing_dom_move_child(state, middle_node,
+                                lam::dom_require_element(parent), reference)) {
+        return false;
     }
-    return outcome;
+
+    if (right_fmt && !editing_dom_move_child(
+            state, right, right_fmt, nullptr)) {
+        return false;
+    }
+
+    // A full-range unwrap leaves an empty original shell after the selected
+    // text has moved before it; remove that shell rather than exposing an empty
+    // formatting element in innerHTML.
+    if (!left && !right) {
+        dom_mutation_pre_remove(state, fmt_node);
+        if (!parent->remove_child(fmt_node)) return false;
+        js_dom_notify_mutation(DOM_JS_MUTATION_CHILD_REMOVE, fmt_node, parent);
+    }
+
+    const char* exception = nullptr;
+    if (!dom_selection_set_base_and_extent(selection, middle_node, 0,
+                                           middle_node,
+                                           dom_text_utf16_length(middle),
+                                           &exception)) {
+        log_error("dom_edit_unwrap_range: failed to reselect unwrapped run: %s",
+                  exception ? exception : "unknown");
+    }
+    s_dom_edit_apply_epoch++;
+    return true;
 }
 
+extern "C" bool js_dom_exec_insert_html(DomDocument* doc, const char* html);
+
+// Insert a parsed fragment over the selection. The parse and the Range splice
+// are the JS DOM's own — this is the same mechanism the retired `insertHTML`
+// bridge drove, reached from the package instead of from a native special case.
+bool dom_edit_insert_html(DocState* state, const char* html) {
+    if (!state || !html) return false;
+    DomElement* host = state->editing.pending_dom_edit_host;
+    if (!host || !host->doc) return false;
+    // The fragment parser can move the heap, and `html` is a Lambda string the
+    // collector may relocate; copy before handing it over, as the bridge did.
+    char* stable = mem_strdup(html, MEM_CAT_TEMP);
+    if (!stable) return false;
+    bool inserted = js_dom_exec_insert_html(host->doc, stable);
+    mem_free(stable);
+    if (inserted) s_dom_edit_apply_epoch++;
+    return inserted;
+}
+
+extern "C" bool radiant_dispatch_behavior_exec_command(View* target,
+                                                       const InputIntent* intent);
+
+// F14.1: the `execCommand` entry point.
+//
+// `document.execCommand(cmd, _, value)` used to reach a native bridge that
+// implemented exactly one command, `insertHTML`. It now resolves the selection
+    // the way a `beforeinput` edit does, stashes the range for the waist, and
+// offers the command to the package — so `execCommand('bold')` and Cmd+B run one
+// implementation rather than two that can drift (the F9/F11 lesson: one rule
+// set, two entry points).
+extern "C" bool radiant_dom_exec_command(void* document_ptr, const char* command,
+                                         const char* value) {
+    DomDocument* document = static_cast<DomDocument*>(document_ptr);
+    DocState* state = document ? (DocState*)document->state : nullptr;
+    DomSelection* selection = state ? state->dom_selection : nullptr;
+    if (!command || !*command || !selection || selection->range_count != 1) {
+        return false;
+    }
+    DomRange* range = selection->ranges[0];
+    if (!range || !range->start.node) return false;
+    // Resolved from the live tree, never from `active_surface.view`: that can be
+    // a node from a superseded render generation whose parent chain no longer
+    // reaches <body> (§3.15's trap).
+    EditingHost host_info;
+    if (!editing_host_lookup(range->start.node, &host_info) || !host_info.host ||
+        host_info.target_in_false_island) {
+        return false;
+    }
+    DomElement* host = host_info.host;
+    if (!editing_dom_host_contains_boundary(host, range->start) ||
+        !editing_dom_host_contains_boundary(host, range->end)) {
+        return false;
+    }
+
+    DomText* text = nullptr;
+    uint32_t start = 0, end = 0;
+    editing_dom_single_text_range(host, range->start, range->end, &text,
+                                  &start, &end);
+    dom_edit_set_pending_range(state, host, text, start, end,
+                               range->start.node, range->start.offset);
+    dom_edit_set_pending_range_end(state, range->end.node, range->end.offset);
+    uint64_t epoch_before = dom_edit_apply_epoch();
+    InputIntent carrier;
+    carrier.command = command;
+    carrier.data = value;
+    bool claimed = radiant_dispatch_behavior_exec_command(
+        static_cast<View*>(host), &carrier);
+    bool applied = dom_edit_apply_epoch() != epoch_before;
+    DomNode* caret_node = dom_edit_caret_node();
+    uint32_t caret_off = dom_edit_caret_offset_u16();
+    dom_edit_set_pending_range(state, nullptr, nullptr, 0, 0, nullptr, 0);
+    if (applied && caret_node) {
+        const char* exception = nullptr;
+        if (!dom_selection_collapse(selection, caret_node, caret_off,
+                                    &exception)) {
+            log_error("radiant_dom_exec_command: failed to collapse selection: %s",
+                      exception ? exception : "unknown");
+        }
+    }
+    // Two channels, unchanged from F13.3: the epoch says an edit was applied,
+    // the dispatch verdict says the command was handled without one — which is
+    // what `queryCommandState`-shaped commands and a declined toggle both need.
+    return applied || claimed;
+}

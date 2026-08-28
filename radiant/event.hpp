@@ -35,10 +35,10 @@ void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value,
     double elapsed_time);
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
-    const char* type, int client_x, int client_y, int button, int buttons,
+    const char* type, double client_x, double client_y, int button, int buttons,
     int mods, const char* pointer_type);
 extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
-    const char* type, int client_x, int client_y, int button, int buttons,
+    const char* type, double client_x, double client_y, int button, int buttons,
     int mods, int detail, double timestamp_ms);
 #endif
 
@@ -94,8 +94,8 @@ typedef struct Event {
 
 // mouse/pointer motion event
 typedef struct MousePositionEvent : Event {
-    int x;      // X coordinate, relative to window
-    int y;      // Y coordinate, relative to window
+    float x;    // logical X coordinate, relative to the top-level viewport
+    float y;    // logical Y coordinate, relative to the top-level viewport
 } MousePositionEvent;
 
 // mouse click events
@@ -341,9 +341,9 @@ void event_state_log_write_node_ref(JsonWriter* w, const char* key,
 void event_state_log_node_stable_id(const struct DomNode* node,
                                     char* buf, size_t buf_sz);
 
-void editing_log_write_surface_core_fields(JsonWriter* w,
-                                           const struct EditingSurface* surface,
-                                           bool include_state_flags);
+void event_log_write_surface_core_fields(JsonWriter* w,
+                                         const struct EditingSurface* surface,
+                                         bool include_state_flags);
 
 /* ------------------------------------------------------------------ */
 /* Convenience record helpers.                                         */
@@ -454,6 +454,11 @@ typedef struct InputIntent {
     // target; native computes it from the dropdown geometry and hands it over.
     // -1 for every other intent.
     int option_index;
+    // F14.1: the legacy command a `document.execCommand` call named, with
+    // `data` carrying its value argument. Null for every other intent — the
+    // legacy surface is not the WHATWG beforeinput vocabulary, so it gets its
+    // own field rather than being folded into `type`.
+    const char* command;
 } InputIntent;
 
 typedef InputIntent EditingIntent;
@@ -524,7 +529,7 @@ bool editing_surface_is_text_control(const EditingSurface* surface);
 const char* editing_surface_kind_name(EditingSurfaceKind kind);
 const char* editing_mode_name(EditingMode mode);
 
-// Layer-A helper (formerly in the retired editing_rich_transaction.cpp):
+// Layer-A helper kept with the shared editing geometry:
 // `find_text_descendant` backs click-to-place-caret in a rich host.
 DomText* editing_find_text_descendant(DomNode* node, bool last);
 
@@ -718,7 +723,7 @@ char* dom_range_to_string_ex(const DomRange* r, DomStringifyMode mode);
 // details live in the StateStore projection while legacy render paths remain.
 //
 // The Selection API permits multiple ranges. Rich table editing uses one
-// range per selected cell, so keep a small bounded set for that transaction.
+// range per selected cell, so keep a small bounded set for that edit.
 
 typedef enum DomSelectionDirection {
     DOM_SEL_DIR_NONE     = 0,
@@ -797,12 +802,19 @@ void      dom_selection_remove_all_ranges(DomSelection* s);
 // Boundary mutation (spec methods)
 bool dom_selection_collapse(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception);
 
-// F13: the DOM-range waist. `_set_pending` is how the transaction hands the
-// resolved range to the template; `_epoch` reports whether the template applied.
+// F13: the DOM-range waist. `_set_pending` hands the resolved range to the
+// package edit; `_epoch` reports whether the package applied it.
 void dom_edit_set_pending_range(DocState* state, DomElement* host,
                                 struct DomText* text,
                                 uint32_t start_u16, uint32_t end_u16,
                                 DomNode* boundary_node, uint32_t boundary_offset);
+void dom_edit_set_pending_range_end(DocState* state, DomNode* boundary_node,
+                                    uint32_t boundary_offset);
+// Prepare the live DOM boundary pair that a package command will consume.
+// Resolution stays native geometry; the package still chooses the action.
+bool dom_edit_prepare_pending_range(DocState* state, DomElement* host,
+                                    DomBoundary start, DomBoundary end);
+void dom_edit_clear_pending_range(DocState* state);
 // Insert text at the stashed boundary, creating a text node when there is none.
 // A different operation from a range replacement, and named as one.
 bool dom_edit_insert_at_boundary_u16(DocState* state, const char* text_data,
@@ -811,10 +823,31 @@ bool dom_edit_replace_range_u16(DocState* state, struct DomText* text,
                                 uint32_t start_u16, uint32_t end_u16,
                                 const char* replacement, uint32_t* out_caret_u16);
 bool dom_edit_set_caret_u16(DocState* state, uint32_t caret_u16);
+// F14.1: the formatting half of the waist. Wrapping and unwrapping are the
+// first structural operations here; which tag a command uses, and whether it
+// toggles on or off, stays in the package.
+bool dom_edit_range_in_format(DocState* state, const char* tag);
+bool dom_edit_wrap_range_u16(DocState* state, uint32_t start_u16,
+                             uint32_t end_u16, const char* tag);
+bool dom_edit_unwrap_range_u16(DocState* state, uint32_t start_u16,
+                               uint32_t end_u16, const char* tag);
+bool dom_edit_insert_html(DocState* state, const char* html);
+bool dom_edit_replace_pending_range(DocState* state, const char* replacement);
+bool dom_edit_delete_pending_range(DocState* state);
+bool dom_edit_insert_paragraph(DocState* state);
+bool dom_edit_insert_line_break(DocState* state);
 struct DomNode* dom_edit_caret_node(void);
 uint32_t dom_edit_caret_offset_u16(void);
 uint64_t dom_edit_apply_epoch(void);
 bool radiant_dispatch_behavior_dom_edit(View* target, const InputIntent* intent);
+// F4: form activation is a behavior-only default action. The JS click pass
+// uses the same claim/dispatch seam so native and script-created clicks cannot
+// submit or reset twice.
+bool radiant_dispatch_behavior_submit_activation(EventContext* evcon, View* target);
+bool radiant_dispatch_behavior_reset_activation(EventContext* evcon, View* target);
+// F14.1: `document.execCommand` reaches the package's command set through here.
+bool radiant_dom_exec_command(void* document, const char* command,
+                              const char* value);
 bool dom_selection_extend(DomSelection* s, DomNode* node, uint32_t offset, const char** out_exception);
 bool dom_selection_set_base_and_extent(DomSelection* s,
                                        DomNode* anchor_node, uint32_t anchor_offset,
@@ -1118,6 +1151,13 @@ typedef void (*EditingGeometryRectCb)(float x, float y, float w, float h,
 void editing_boundary_clear(EditingBoundary* out);
 void editing_caret_rect_clear(EditingCaretRect* out);
 
+// Resolve a document's logical viewport origin into the top-level logical
+// viewport. The top-level document itself resolves to (0, 0).
+void radiant_document_viewport_offset(UiContext* uicon,
+                                      DomDocument* target_doc,
+                                      float* out_x,
+                                      float* out_y);
+
 bool editing_geometry_surface_contains_boundary(const EditingSurface* surface,
                                                 const EditingBoundary* boundary);
 
@@ -1188,97 +1228,6 @@ bool editing_geometry_caret_rect(UiContext* uicon,
 // shared editing event dispatch policy for form text controls and
 // standard contenteditable hosts.
 
-
-// Contenteditable action routing is independent of surface classification.
-// A JavaScript-created host in a Lambda document remains DOM-script owned.
-enum EditingRouteKind {
-    EDITING_ROUTE_NONE = 0,
-    EDITING_ROUTE_DOM_SCRIPT,
-    EDITING_ROUTE_RADIANT_TEMPLATE,
-};
-
-enum EditingActionRouteMask {
-    EDITING_ACTION_ROUTE_DOM_SCRIPT = 1u << EDITING_ROUTE_DOM_SCRIPT,
-    EDITING_ACTION_ROUTE_RADIANT_TEMPLATE = 1u << EDITING_ROUTE_RADIANT_TEMPLATE,
-};
-
-struct EditingRouteSnapshot {
-    EditingRouteKind kind;
-    void* owner;
-    uint64_t owner_generation;
-};
-
-struct EditingSelectionSnapshot {
-    EditingSelectionKind kind;
-    DomSelectionDirection direction;
-    uint32_t mutation_seq;
-    bool collapsed;
-    uint32_t range_count;
-    DomBoundary anchor;
-    DomBoundary focus;
-    DomElement* control;
-    uint32_t start_u16;
-    uint32_t end_u16;
-};
-
-// The gate owns the intent copy and captures only immutable range/selection
-// data so notification listeners cannot redirect the selected action.
-struct EditingPreparedTransaction {
-    uint64_t transaction_id;
-    EditingSurface surface;
-    EditingRouteSnapshot route;
-    EditingIntent intent;
-    EditingTargetRange target_ranges[4];
-    uint32_t target_range_count;
-    EditingSelectionSnapshot selection_before;
-    // DOM-backed hosts use their lifecycle reference. View-backed Lambda
-    // hosts live in a separately rebuilt pool, so retain the logical ID too.
-    DomNodeRef host_ref;
-    uint32_t host_view_id;
-    uint64_t mutation_epoch_before_notification;
-    const char* selected_handler_id;
-};
-
-void editing_prepared_transaction_dispose(EditingPreparedTransaction* prepared);
-
-// Re-resolve the prepared rich host after notification code. This is shared
-// by the transaction gate and the narrow DOM action so neither trusts a
-// view-pool pointer across a synchronous event callback.
-DomElement* editing_prepared_live_host(DomDocument* document,
-                                       const EditingPreparedTransaction* prepared);
-
-struct EditingTransactionResult {
-    uint64_t transaction_id;
-    EditingRouteKind route;
-    bool prepared;
-    bool beforeinput_dispatched;
-    bool beforeinput_prevented;
-    bool beforeinput_mutated_dom;
-    bool contract_violation;
-    bool action_selected;
-    bool action_invoked;
-    bool action_claimed;
-    bool dom_mutated;
-    bool model_reconciled;
-    bool selection_changed;
-    bool input_dispatched;
-    bool unsupported_fallthrough;
-    bool failed;
-    const char* action_handler_id;
-};
-
-enum EditingActionStatus {
-    EDITING_ACTION_PASS = 0,
-    EDITING_ACTION_CLAIMED,
-    EDITING_ACTION_ERROR,
-};
-
-struct EditingActionOutcome {
-    EditingActionStatus status;
-    bool model_reconciled;
-    bool selection_changed;
-};
-
 struct EventContext;
 struct DocState;
 
@@ -1293,57 +1242,7 @@ struct EditingFormNotificationHooks {
     void* user;
 };
 
-// F12: the two editing implementations, called directly by route. They were
-// reached through an EditingActionRegistry until 2026-08-28; see the note at
-// the switch in editing_dispatch.cpp for why that indirection retired.
-// Resolves the transaction's range and offers it to the dom package; makes no
-// editing decision of its own (F13).
-EditingActionOutcome editing_dom_route_apply(
-        EventContext* evcon, const EditingPreparedTransaction* prepared, void* user);
-EditingActionOutcome editing_template_action_handle(
-        EventContext* evcon, const EditingPreparedTransaction* prepared, void* user);
-
-typedef bool (*EditingNotifyBeforeinputFn)(
-        EventContext* evcon, const EditingPreparedTransaction* prepared,
-        void* user);
-typedef void (*EditingNotifyInputFn)(
-        EventContext* evcon, const EditingPreparedTransaction* prepared,
-        void* user);
-
-struct EditingNotificationHooks {
-    EditingNotifyBeforeinputFn dispatch_beforeinput;
-    EditingNotifyInputFn dispatch_input;
-    void* user;
-};
-
-bool editing_notify_beforeinput(EventContext* evcon,
-                                const EditingPreparedTransaction* prepared,
-                                const EditingNotificationHooks* hooks,
-                                bool* out_prevented);
-void editing_notify_input(EventContext* evcon,
-                          const EditingPreparedTransaction* prepared,
-                          const EditingNotificationHooks* hooks);
-
-bool editing_run_contenteditable_transaction(
-        EventContext* evcon, const EditingSurface* surface,
-        const EditingIntent* intent, const EditingRouteSnapshot* route,
-        const EditingNotificationHooks* notifications,
-        EditingTransactionResult* out_result);
-
-// Template routing/action logic is separate from the generic transaction
-// gate. The resolver is read-only and snapshots the owner before beforeinput.
-EditingRouteSnapshot editing_route_snapshot(const EditingSurface* surface);
-bool editing_template_invoke_handler(EventContext* evcon, View* target,
-                                     const char* event_name,
-                                     const InputIntent* intent,
-                                     bool* out_model_reconciled);
-
-
 struct EventContext;
-
-void editing_dispatch_log_intent(EventContext* evcon,
-                                 const EditingSurface* surface,
-                                 const EditingIntent* intent);
 
 // Splices performed by the dom package's editing waist (radiant.replace_range).
 // Sampled either side of a beforeinput dispatch to tell an applier that edited
@@ -1657,7 +1556,7 @@ void tc_set_selection_range(DomElement* elem,
                             uint8_t dir);
 
 // Phase 8E: queue a `selectionchange` event on this text control. Coalesced
-// per-element via FormControlProp::tc_sc_pending; dispatched as a microtask
+// per-element via DOM task state; dispatched as a microtask
 // (setTimeout(0)) by the JS-side strong impl.
 void tc_notify_selection_changed(DomElement* elem);
 
@@ -1835,7 +1734,7 @@ void         te_history_free(EditHistory* h);
 void te_history_push(DomElement* elem);
 
 // Set an ambient inputType label for history pushes performed inside a
-// unified editing transaction. Returns the previous label so callers can
+// unified editing operation. Returns the previous label so callers can
 // restore it after the mutation.
 const char* te_history_input_type_set(DocState* state, const char* input_type);
 void te_history_input_type_restore(DocState* state, const char* previous);
@@ -2056,7 +1955,7 @@ enum CtxMenuItem {
     CTX_MENU_SELECT_ALL = 4,
 };
 
-// Open the menu at the given screen-space (physical px) coordinates,
+// Open the menu at the given top-level logical viewport coordinates,
 // targeting the focused/clicked text control. No-op if `target` is not a
 // text control. Computes width/height and stores hit-test rect in state.
 void context_menu_open(DocState* state, View* target, float x, float y);
@@ -2115,7 +2014,7 @@ void context_menu_render(RenderContext* rdcon, DocState* state);
 
 struct EventContext;
 
-void scroll_config_init(int pixel_ratio);
+void scroll_config_init(void);
 
 void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
@@ -2369,8 +2268,8 @@ typedef struct CursorState {
 typedef struct DragDropState {
     View* source_view;             // the view being dragged
     uint32_t source_node_id;       // stable DOM id for fallback rebind/prune
-    float start_x, start_y;       // mousedown position (physical px)
-    float current_x, current_y;   // current drag position (physical px)
+    float start_x, start_y;       // mousedown position (logical viewport px)
+    float current_x, current_y;   // current drag position (logical viewport px)
     bool active;                   // true after movement exceeds threshold
     bool pending;                  // true between mousedown and threshold check
     View* drop_target;             // current drop target under cursor (has dropzone attr)
@@ -2416,24 +2315,10 @@ typedef struct EditingCompositionState {
     bool canceled;
 } EditingCompositionState;
 
-typedef enum EditingRichTransactionPhase {
-    EDITING_RICH_TX_IDLE = 0,
-    EDITING_RICH_TX_OPEN,
-    EDITING_RICH_TX_BEFOREINPUT,
-    EDITING_RICH_TX_MUTATED,
-    EDITING_RICH_TX_SELECTION_SET,
-    EDITING_RICH_TX_INPUT
-} EditingRichTransactionPhase;
-
-typedef struct EditingTargetRangeSnapshot {
-    DomBoundary start;
-    DomBoundary end;
-} EditingTargetRangeSnapshot;
-
 typedef struct EditingInteractionState {
     EditingSurface active_surface;
     bool has_active_surface;
-    // F13: the text-node range an editing transaction resolved to, stashed for
+    // F13: the text-node range an editing dispatch resolved to, stashed for
     // `radiant.dom_edit_range` to read during the `domedit` dispatch. Native
     // still does the resolution — element-offset-to-child, edge-text descent,
     // host containment — because that is geometry over the tree, not policy.
@@ -2446,6 +2331,10 @@ typedef struct EditingInteractionState {
     // is the only editing operation the range waist structurally cannot express.
     DomNode* pending_dom_edit_boundary_node;
     uint32_t pending_dom_edit_boundary_offset;
+    // F14.2: retain both raw endpoints for structural edits. A cross-node
+    // delete or replacement cannot be reduced to the single text node above.
+    DomNode* pending_dom_edit_range_end_node;
+    uint32_t pending_dom_edit_range_end_offset;
     DomElement* pending_dom_edit_host;
     bool pointer_selecting;
     bool selection_extending;
@@ -2457,28 +2346,10 @@ typedef struct EditingInteractionState {
     EditingScrollState autoscroll;
     // A physical printable key and its later text callback are separate
     // platform events. Keep their cancellation decision in the document so a
-    // prevented keydown cannot leak into a second contenteditable transaction.
+    // prevented keydown cannot leak into a second contenteditable edit.
     bool pending_text_input;
     bool pending_text_input_prevented;
     int pending_text_input_key;
-    EditingRichTransactionPhase rich_transaction_phase;
-    View* rich_transaction_target;
-    // Set while the substrate is synchronously dispatching a `beforeinput`
-    // event into a script handler (JS addEventListener / Lambda `on` handler).
-    // The script may reconcile the editable subtree re-entrantly inside that
-    // window (Stage 4B: the script owns the apply path), which transiently
-    // destroys/replaces the surface the native rich transaction references.
-    // The transaction is inert during script dispatch (the script
-    // preventDefaults) and re-syncs to the post-reconcile selection once
-    // dispatch returns, so the target-range invariant is suspended here.
-    bool rich_transaction_in_script_dispatch;
-    bool rich_transaction_target_ranges_active;
-    bool rich_transaction_target_ranges_required;
-    bool rich_transaction_target_ranges_valid;
-    uint32_t rich_transaction_input_type;
-    uint32_t rich_transaction_selection_seq;
-    uint32_t rich_transaction_target_range_count;
-    EditingTargetRangeSnapshot rich_transaction_target_ranges[4];
     uint32_t inline_format_state;
     uint32_t inline_format_state_mask;
 } EditingInteractionState;
@@ -2529,7 +2400,6 @@ typedef struct DocState {
     StateDumpLog* state_dump_log;
     uint64_t active_cascade_id;
     uint32_t active_cascade_depth;
-    uint64_t editing_transaction_next_id; // per-document editing event identity
     uint32_t state_batch_depth; // suppresses assertions during this document's batch mutation
     uint32_t text_control_history_guard; // undo/redo recursion guard for this document
     const char* text_edit_history_input_type; // ambient inputType for document history pushes
@@ -2575,7 +2445,7 @@ typedef struct DocState {
     uint32_t             selection_event_seq;
     bool                 selectionchange_pending;  // task queued and not yet fired
     // Phase 8E: per-text-control selectionchange coalescing. Linked list head
-    // through `FormControlProp::tc_sc_next_pending`. Drained by a single
+    // through the element's DOM task link. Drained by a single
     // setTimeout(0) callback queued via `js_dom_queue_textcontrol_selectionchange`.
     DomElement*          tc_selectionchange_head;
     bool                 tc_selectionchange_drain_scheduled;
@@ -2592,15 +2462,15 @@ typedef struct DocState {
     
     // Dropdown state (for select elements)
     View* open_dropdown;           // currently open select dropdown (null if none)
-    float dropdown_x, dropdown_y;  // dropdown popup position (absolute, in physical pixels)
-    float dropdown_width;          // dropdown popup width
-    float dropdown_height;         // dropdown popup height
+    float dropdown_x, dropdown_y;  // popup origin in the top-level logical viewport
+    float dropdown_width;          // logical popup width
+    float dropdown_height;         // logical popup height
 
     // F8 (Radiant_Design_Form_Input.md §3.10): native context menu for
     // text controls. Owned outside the focus state because right-click
     // can target any element. When `context_menu_target` is non-null the
     // overlay is drawn after the dropdown layer; `context_menu_x/y` is
-    // the popup origin in physical pixels; `context_menu_hover` is the
+    // the popup origin in the top-level logical viewport; `context_menu_hover` is the
     // 0-based index of the highlighted item or -1.
     View* context_menu_target;     // text control the menu acts upon
     float context_menu_x;
@@ -3813,7 +3683,6 @@ typedef enum SmFamily {
     SM_FAMILY_FORM_TEXT,
     SM_FAMILY_DROPDOWN,
     SM_FAMILY_CONTEXT_MENU,
-    SM_FAMILY_RICH_EDIT,
     SM_FAMILY__COUNT
 } SmFamily;
 
@@ -3911,15 +3780,6 @@ typedef enum ContextMenuFsmState {
     CM_HOVER
 } ContextMenuFsmState;
 
-typedef enum RichEditFsmState {
-    RICH_EDIT_IDLE = 0,
-    RICH_EDIT_TX_OPEN,
-    RICH_EDIT_BEFOREINPUT_DONE,
-    RICH_EDIT_MUTATED,
-    RICH_EDIT_SELECTION_SET,
-    RICH_EDIT_INPUT_DONE
-} RichEditFsmState;
-
 typedef enum SmEvent {
     SM_EV_DOC_LOAD = 0,
     SM_EV_DOC_COMMIT,
@@ -3980,14 +3840,6 @@ typedef enum SmEvent {
     SM_EV_CONTEXT_MENU_OPEN,
     SM_EV_CONTEXT_MENU_CLOSE,
     SM_EV_CONTEXT_MENU_HOVER,
-    SM_EV_RICH_TRANSACTION,
-    SM_EV_EDIT_TX_BEGIN,
-    SM_EV_EDIT_BEFOREINPUT,
-    SM_EV_EDIT_MUTATE_DOM,
-    SM_EV_EDIT_SET_SELECTION,
-    SM_EV_EDIT_INPUT,
-    SM_EV_EDIT_TX_COMMIT,
-    SM_EV_EDIT_TX_ABORT,
     SM_EV__COUNT
 } SmEvent;
 
@@ -4011,13 +3863,6 @@ typedef enum SmInvariantId {
     SM_INV_CONTEXT_MENU_OVERLAY,
     SM_INV_DIRTY_TRACKING,
     SM_INV_DOM_SELECTION,
-    SM_INV_EDITING_SURFACE,
-    SM_INV_EDITING_SELECTION_HOST,
-    SM_INV_EDITING_FALSE_ISLAND,
-    SM_INV_EDITING_TARGET_RANGES,
-    SM_INV_DOM_SELECTION_CACHE,
-    SM_INV_SELECTION_PROJECTION_CACHE,
-    SM_INV_INPUT_EVENT_ORDER,
     SM_INV__COUNT
 } SmInvariantId;
 
@@ -4352,7 +4197,7 @@ typedef struct EventContext {
     bool caret_pos_override_valid;
     int caret_pos_override;
 
-    // transient editing transaction target-range snapshot. When set,
+    // transient editing target-range snapshot. When set,
     // InputEvent.getTargetRanges() must use these pre-mutation ranges instead
     // of recomputing from the live post-mutation selection.
     bool editing_target_ranges_active;
@@ -4373,7 +4218,7 @@ typedef struct EventContext {
  * Returns the character offset closest to the click position
  */
 int calculate_char_offset_from_position(EventContext* evcon, ViewText* text,
-    TextRect* rect, int mouse_x, int mouse_y);
+    TextRect* rect, float mouse_x, float mouse_y);
 
 void view_to_absolute_position(View* view, float rel_x, float rel_y,
     float iframe_offset_x, float iframe_offset_y,

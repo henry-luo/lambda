@@ -96,6 +96,17 @@ static bool editing_geometry_find_document_offset(View* view,
 
     float here_x = base_x + view->x;
     float here_y = base_y + view->y;
+    float scroll_x = 0.0f;
+    float scroll_y = 0.0f;
+    if (view->is_block()) {
+        editing_geometry_block_scroll(lam::view_require_block(view),
+                                      &scroll_x, &scroll_y);
+    }
+    // Descendant viewports and ordinary children share the same scrolled
+    // content origin; omitting this made nested-document overlays drift when
+    // any outer ancestor, rather than only the iframe itself, was scrolled.
+    float child_base_x = here_x - scroll_x;
+    float child_base_y = here_y - scroll_y;
 
     if (view->is_block() &&
         view->is_element()) {
@@ -103,16 +114,14 @@ static bool editing_geometry_find_document_offset(View* view,
         if (block->embed && block->embedp()->doc) {
             DomDocument* embed_doc = block->embedp()->doc;
             if (embed_doc == target_doc) {
-                float scroll_x, scroll_y;
-                editing_geometry_block_scroll(block, &scroll_x, &scroll_y);
-                if (out_x) *out_x = here_x - scroll_x;
-                if (out_y) *out_y = here_y - scroll_y;
+                if (out_x) *out_x = child_base_x;
+                if (out_y) *out_y = child_base_y;
                 return true;
             }
             if (embed_doc->view_tree && embed_doc->view_tree->root &&
                 editing_geometry_find_document_offset(
                     embed_doc->view_tree->root, target_doc,
-                    here_x, here_y, out_x, out_y)) {
+                    child_base_x, child_base_y, out_x, out_y)) {
                 return true;
             }
         }
@@ -124,7 +133,7 @@ static bool editing_geometry_find_document_offset(View* view,
         View* child_view = static_cast<View*>(child);
         if (!child_view->view_type) continue;
         if (editing_geometry_find_document_offset(child_view, target_doc,
-                                                  here_x, here_y,
+                                                  child_base_x, child_base_y,
                                                   out_x, out_y)) {
             return true;
         }
@@ -132,10 +141,10 @@ static bool editing_geometry_find_document_offset(View* view,
     return false;
 }
 
-static void editing_geometry_document_viewport_offset(UiContext* uicon,
-                                                      DomDocument* target_doc,
-                                                      float* out_x,
-                                                      float* out_y) {
+void radiant_document_viewport_offset(UiContext* uicon,
+                                      DomDocument* target_doc,
+                                      float* out_x,
+                                      float* out_y) {
     if (out_x) *out_x = 0.0f;
     if (out_y) *out_y = 0.0f;
     if (!uicon || !target_doc || !uicon->document ||
@@ -463,7 +472,7 @@ bool editing_geometry_text_control_offset_for_point(UiContext* uicon,
     float abs_x = 0.0f, abs_y = 0.0f;
     editing_geometry_viewport_xy(static_cast<View*>(block), &abs_x, &abs_y);
     float doc_x = 0.0f, doc_y = 0.0f;
-    editing_geometry_document_viewport_offset(uicon, elem->doc, &doc_x, &doc_y);
+    radiant_document_viewport_offset(uicon, elem->doc, &doc_x, &doc_y);
     abs_x += doc_x;
     abs_y += doc_y;
 

@@ -6,16 +6,16 @@
 // with codepoint offsets versus a DOM tree of text nodes and boundaries — not
 // because the rules do.
 //
-// What stays native is the geometry: resolving the transaction's boundaries to a
+// What stays native is the geometry: resolving the edit's boundaries to a
 // single text node (element-offset-to-child, edge-text descent, host
 // containment), splicing that node, and the UTF-16 conversion. The waist hands
 // this module a resolved `{node, start, end}` in codepoints and takes a
 // replacement back.
 //
-// Scope: single-text-node ranges only. That is not a simplification — it is the
-// shape the native DOM edit path has always supported; a range spanning two text
-// nodes falls through unclaimed today and still does.
+// Ordinary text keeps the single-node fast path below. Structural commands and
+// a range that spans nodes use the raw range waist, which owns the tree surgery.
 import radiant
+import commands: lambda.package.dom.commands
 
 pub pn apply_fn(host, evt) {
     let t = evt.input_type;
@@ -24,6 +24,13 @@ pub pn apply_fn(host, evt) {
     // engine reports a claim through the dispatch verdict as well as through
     // the apply epoch, so "handled, no change" is expressible.
     if (t == "compositionStart") { 'prevent-default' }
+    else {
+    // F14.2. Paragraph and line-break commands are structural even when the
+    // selection currently resolves to one text node, so send both keyboard and
+    // execCommand paths through one package applier.
+    if (t == "insertParagraph" or t == "insertLineBreak") {
+        if (commands.run(host, t, evt.data)) { 'prevent-default' } else { 'pass' }
+    }
     else {
     let node = radiant.dom_edit_node(host);
     // No resolved text node means there is nothing to splice — the caret sits at
@@ -35,14 +42,22 @@ pub pn apply_fn(host, evt) {
                 t == "insertCompositionText" or t == "insertFromComposition") {
             let data = if (evt.data == null) "" else evt.data;
             // An empty composition replacement at an element boundary has
-            // nothing to insert and no text node to put a caret in. It is still
-            // this template's transaction, which the verdict channel can now say.
+            // nothing to insert and no text node to put a caret in. The package
+            // still claims it through the verdict channel.
             if (len(data) == 0) { 'prevent-default' }
+            else if ((t == "insertText" or t == "insertReplacementText") and
+                     radiant.dom_replace_dom_range(host, data)) {
+                'prevent-default'
+            }
+            else if (t == "insertText" or t == "insertReplacementText") { 'pass' }
             else if (radiant.dom_insert_at_boundary(host, data) == null) { 'pass' }
             // The caret lands at the end of what was created. Composition would
             // prefer it at `composition_caret`, but there is no node to address
             // until the insertion exists; native has the same limit here.
             else { 'prevent-default' }
+        }
+        else if (t == "deleteContentBackward" or t == "deleteContentForward") {
+            if (radiant.dom_delete_dom_range(host)) { 'prevent-default' } else { 'pass' }
         }
         else { 'pass' }
     }
@@ -99,7 +114,16 @@ pub pn apply_fn(host, evt) {
             else if (radiant.dom_replace_range(host, ds, de, "") == null) { 'pass' }
             else { 'prevent-default' }
         }
+        // F14.1. The formatting intents arrive here on the keyboard path — the
+        // ordinary edit dispatch sends them to `domedit` exactly as it does for
+        // an insert — and reaches the same applier `execCommand` does. Delegating
+        // rather than reimplementing is the whole point: Cmd+B and
+        // execCommand('bold') cannot drift if there is only one of them.
+        else if (commands.is_format(t)) {
+            if (commands.run(host, t, evt.data)) { 'prevent-default' } else { 'pass' }
+        }
         else { 'pass' }
+    }
     }
     }
 }

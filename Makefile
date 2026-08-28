@@ -154,6 +154,17 @@ else
 	RANLIB := ranlib
 endif
 
+# macOS ld64 requires 64-bit archive members to start on 8-byte boundaries;
+# cctools ar only guarantees even-byte member placement, so use libtool for
+# static archives on Darwin and keep ar for the other platforms.
+ifeq ($(OS),Darwin)
+	STATIC_ARCHIVER := libtool -static
+	STATIC_ARCHIVE_FLAGS := -o
+else
+	STATIC_ARCHIVER := $(AR)
+	STATIC_ARCHIVE_FLAGS := rcs
+endif
+
 # Enable ccache for faster builds if available.
 # MUST come after the CC/CXX detection block above; otherwise the platform
 # branches overwrite our `ccache <compiler>` wrap.
@@ -259,7 +270,7 @@ LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
 # output captured and shown only on failure, so a successful parser build is a
 # single status line. $(2) = extra sub-make args (e.g. TS=...).
 define ts_lib_build
-@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-$(1) libtree-sitter-$(1).a CC="$(CC)" CXX="$(CXX)" $(2) 2>&1) || { printf '%s\n' "$$out"; exit 1; }; \
+@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-$(1) libtree-sitter-$(1).a CC="$(CC)" CXX="$(CXX)" AR="$(STATIC_ARCHIVER)" ARFLAGS="$(STATIC_ARCHIVE_FLAGS)" $(2) 2>&1) || { printf '%s\n' "$$out"; exit 1; }; \
 echo "✅ tree-sitter-$(1) library built"
 endef
 
@@ -280,7 +291,7 @@ $(TREE_SITTER_LIB):
 		-O3 -Wall -Wextra -std=c11 -fPIC \
 		-D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
 		-o tree_sitter.o && \
-	$(AR) rcs libtree-sitter.a tree_sitter.o && \
+	$(STATIC_ARCHIVER) $(STATIC_ARCHIVE_FLAGS) libtree-sitter.a tree_sitter.o && \
 	rm -f tree_sitter.o
 	@echo "✅ tree-sitter library built: lambda/tree-sitter/libtree-sitter.a"
 
@@ -311,7 +322,8 @@ $(TREE_SITTER_PYTHON_LIB): generate-tree-sitter-python-parser
 	@echo "Building tree-sitter-python library..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python \
 		libtree-sitter-python.a TS="$(TREE_SITTER_CLI)" \
-		CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+		CC="$(CC)" CXX="$(CXX)" AR="$(STATIC_ARCHIVER)" \
+		ARFLAGS="$(STATIC_ARCHIVE_FLAGS)" V=1 VERBOSE=1
 
 # Generate TypeScript parser from grammar.js when it changes
 $(TS_PARSER_C): $(TS_GRAMMAR_JS)
@@ -548,7 +560,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
+	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui form-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-jube-node-net-crypto-dynamic
@@ -618,6 +630,7 @@ help:
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  editable-unit        - Run focused editable gate, DOM action, and cancellation fixtures"
 	@echo "  editable-ui          - Run contenteditable UI automation fixtures"
+	@echo "  form-ui              - Run focused form activation and submission fixtures"
 	@echo "  editable-editor-e2e  - Run offline CodeMirror, ProseMirror, and Editor.js probes"
 	@echo "  test-editable        - Run all focused editable and upstream editor checks"
 	@echo "  drawing-editor-e2e   - Run offline Raphaël, maxGraph, and JointJS SVG probes"
@@ -2445,6 +2458,8 @@ editable-unit: build
 	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_unsupported_transfer.json --headless --no-log
 	@./lambda.exe view test/html/editable-physical-keydown.html --event-file test/ui/test_editing_physical_keydown_cancellation.json --headless --no-log
 	@./lambda.exe view test/ui/editable-template-gate.ls --event-file test/ui/editable-template-gate.json --headless --no-log
+	@./lambda.exe view test/html/editable-dom-commands.html --event-file test/ui/test_editing_contenteditable_commands.json --headless --no-log
+	@./lambda.exe view test/html/editable-dom-structural.html --event-file test/ui/test_editing_contenteditable_structural.json --headless --no-log
 
 editable-ui: build
 	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_dom_action.json --headless --no-log
@@ -2455,8 +2470,12 @@ editable-ui: build
 	@./lambda.exe view test/ui/rte_prototype.ls --event-file test/ui/rte_typing_at_caret.json --headless --no-log
 	@./lambda.exe view test/ui/editable-mixed-routes.ls --event-file test/ui/editable-mixed-routes.json --headless --no-log
 
+form-ui: build
+	@./lambda.exe view test/html/form-submission.html --event-file test/ui/form-submission.json --headless --no-log
+
 editable-editor-e2e: build
 	@./lambda.exe view test/ui/dom_mutation_replacechild_notifies.html --event-file test/ui/dom_mutation_replacechild_notifies.json --headless --no-log
+	@./lambda.exe view test/html/editable-plain-event-guard.html --event-file test/ui/test_editing_contenteditable_plain_event_guard.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-operations.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-full.json --headless --no-log
@@ -3436,7 +3455,7 @@ capture-layout:
 		echo "  make capture-layout test=table_007 force=1"; \
 		echo "  make capture-layout suite=baseline platform=linux force=1"; \
 		echo ""; \
-		echo "Available suites: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists"; \
+		echo "Available suites: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists, wpt-css-display"; \
 		echo "Available platforms: linux, darwin, win32"; \
 		echo ""; \
 		exit 1; \
@@ -3464,7 +3483,7 @@ capture-layout:
 	            *) \
 	                TEST_FILE=""; \
 	                FOUND_SUITE=""; \
-	                for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists; do \
+	                for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-display; do \
 	                    if [ -f "data/$$dir/$${TEST_VAR}.htm" ]; then \
 	                        TEST_FILE="data/$$dir/$${TEST_VAR}.htm"; \
 	                        FOUND_SUITE="$$dir"; \
@@ -3576,7 +3595,7 @@ test-layout:
 				;; \
 			esac; \
 			echo "🎯 Running single test: $$TEST_FILE"; \
-			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE -v; \
+			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE --category $$SUITE_VAR -v; \
 		elif [ -n "$$PATTERN_VAR" ]; then \
 			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
 			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR $$CONCURRENCY_FLAG; \

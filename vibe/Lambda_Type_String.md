@@ -734,7 +734,7 @@ Register in `mir.c` for JIT:
 - [Lib_String.md](Lib_String.md) - Comprehensive string library design
 - [Lambda_Reference.md](../doc/Lambda_Reference.md) - Language reference
 - [Lambda_Sys_Func_Reference.md](../doc/Lambda_Sys_Func_Reference.md) - System functions
-- [Lamdba_Runtime.md](../doc/Lamdba_Runtime.md) - Runtime memory management
+- [LR_08_Memory_and_GC.md](../doc/dev/lambda/LR_08_Memory_and_GC.md) - Runtime memory management
 
 ---
 

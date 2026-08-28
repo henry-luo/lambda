@@ -58,6 +58,12 @@ static void layout_refresh_font_used_zoom(View* view, LayoutContext* lycon) {
 double g_text_layout_time = 0;
 double g_block_layout_time = 0;
 double g_inline_layout_time = 0;
+
+static inline float collapse_root_margins(float a, float b) {
+    if (a >= 0.0f && b >= 0.0f) return max(a, b);
+    if (a < 0.0f && b < 0.0f) return min(a, b);
+    return a + b;
+}
 double g_table_layout_time = 0;
 double g_flex_layout_time = 0;
 double g_grid_layout_time = 0;
@@ -385,12 +391,6 @@ static void layout_resolve_pending_scroll_into_view(DomDocument* doc,
     dom_node_unpin(doc, target_ref, DOM_NODE_PIN_RECONCILE);
 }
 
-static inline float collapse_root_margins(float a, float b) {
-    if (a >= 0.0f && b >= 0.0f) return max(a, b);
-    if (a < 0.0f && b < 0.0f) return min(a, b);
-    return a + b;
-}
-
 static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
     if (!block || block->height > 0.01f) return false;
     if (block->view_type == RDT_VIEW_TABLE ||
@@ -426,7 +426,9 @@ static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
             ViewBlock* child_block = lam::view_require_block(child);
             bool abs_or_fixed = layout_block_is_out_of_flow_positioned(child_block);
             if (abs_or_fixed) continue;
-            if (child_block->position && element_has_float(child_block)) return false;
+            // CSS 2.1 §8.3.1: out-of-flow floats do not separate adjoining
+            // vertical margins of an otherwise empty block container.
+            if (child_block->position && element_has_float(child_block)) continue;
             if (!root_child_margins_are_self_collapsing(child_block)) return false;
         } else if (child->height > 0.0f) {
             return false;
@@ -438,6 +440,11 @@ static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
 static float root_child_float_only_extent(ViewBlock* block, bool* has_float, bool* has_in_flow_content) {
     float extent = 0.0f;
     if (!block || !has_float || !has_in_flow_content) return extent;
+    if (block_context_establishes_bfc(block)) {
+        // CSS 2.2 §9.4.1: floats inside a nested BFC do not escape into the
+        // root's float-overflow calculation.
+        return extent;
+    }
 
     for (View* child = lam::view_require_element(block)->first_placed_child(); child;
          child = static_cast<View*>(child->next_sibling)) {
@@ -636,6 +643,16 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
 
     const char* str = (const char*)text_node->text_data();
     if (!is_only_whitespace(str)) return false;
+    if (text_node->prev_sibling && text_node->next_sibling &&
+        text_node->prev_sibling->is_element() &&
+        text_node->next_sibling->is_element()) {
+        // CSS Text 3 §4.1.1: retain a collapsed separator before an inline
+        // MathML box; a separator before a following block remains collapsed.
+        if (layout_is_inline_math_box(text_node->prev_sibling) &&
+            layout_is_inline_math_box(text_node->next_sibling)) {
+            return false;
+        }
+    }
     // CSS 2.1 §9.2.2.1: Whitespace between/around block-level elements is always
     if (!text_node->prev_sibling && text_node->next_sibling) {
         if (is_block_level_element(text_node->next_sibling)) {
@@ -667,6 +684,12 @@ static bool should_collapse_inter_element_whitespace(DomNode* text_node) {
     }
 
     return false;
+}
+
+bool layout_is_inline_math_box(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    DisplayValue display = resolve_display_value(node);
+    return display.outer == CSS_VALUE_INLINE && display.inner == CSS_VALUE_MATH;
 }
 // Run-in box helper functions (CSS 2.1 Section 9.2.3)
 
@@ -891,6 +914,29 @@ static bool layout_inline_display(CssEnum display) {
     return display == CSS_VALUE_INLINE || display == CSS_VALUE_INLINE_BLOCK ||
         display == CSS_VALUE_INLINE_FLEX || display == CSS_VALUE_INLINE_GRID ||
         display == CSS_VALUE_INLINE_TABLE;
+}
+
+bool layout_display_contents_has_block_child(DomElement* element) {
+    if (!element) return false;
+
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+
+        DomElement* child_element = child->as_element();
+        DisplayValue child_display = resolve_display_value(child_element);
+        if (layout_display_is_none(child_display) ||
+            layout_element_is_abs_or_fixed(child_element)) {
+            continue;
+        }
+
+        if (child_display.outer == CSS_VALUE_CONTENTS) {
+            if (layout_display_contents_has_block_child(child_element)) return true;
+        } else if (!layout_inline_display(child_display.outer)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool layout_element_was_inline(DomElement* element, bool include_replaced) {
@@ -3092,6 +3138,24 @@ static bool layout_slot_assignment_matches(DomElement* slot, DomNode* child) {
     return strcmp(slot_name, assigned_name) == 0;
 }
 
+static DomElement* layout_shadow_find_first_matching_slot(DomNode* node,
+                                                           const char* slot_name) {
+    if (!node || !node->is_element()) return nullptr;
+    DomElement* element = node->as_element();
+    if (element->tag() == MARKUP_NAME_SLOT) {
+        const char* candidate_name = element->get_attribute("name");
+        if (!candidate_name) candidate_name = "";
+        if (strcmp(candidate_name, slot_name ? slot_name : "") == 0) {
+            return element;
+        }
+    }
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        DomElement* matching_slot = layout_shadow_find_first_matching_slot(child, slot_name);
+        if (matching_slot) return matching_slot;
+    }
+    return nullptr;
+}
+
 static DomNode* layout_slot_assigned_sibling(DomElement* slot, DomNode* child,
                                               bool forward) {
     if (!slot || !child) return nullptr;
@@ -3117,9 +3181,16 @@ void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot) {
     DomElement* host = layout_shadow_tree_host((DomNode*)slot);
     if (!host) return;
 
+    const char* slot_name = slot->get_attribute("name");
+    if (!slot_name) slot_name = "";
+    // Shadow DOM: each slotable is assigned to the first matching slot in
+    // shadow-tree order; later same-name slots render only their fallback.
+    DomElement* first_matching_slot = layout_shadow_find_first_matching_slot(
+        host->shadow_root_element(), slot_name);
+    bool is_assignment_target = first_matching_slot == slot;
     bool has_assigned_nodes = false;
     for (DomNode* child = host->first_child; child; child = child->next_sibling) {
-        if (layout_slot_assignment_matches(slot, child)) {
+        if (is_assignment_target && layout_slot_assignment_matches(slot, child)) {
             has_assigned_nodes = true;
             DomNode* dom_parent = child->parent;
             DomNode* dom_prev = child->prev_sibling;
@@ -3170,6 +3241,198 @@ void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot) {
     }
 }
 
+void layout_init_display_contents_view(LayoutContext* lycon, DomElement* elem) {
+    if (!lycon || !elem) return;
+
+    elem->view_type = RDT_VIEW_INLINE;
+    elem->display.outer = CSS_VALUE_CONTENTS;
+    elem->display.inner = CSS_VALUE_CONTENTS;
+    elem->x = 0.0f;
+    elem->y = 0.0f;
+    elem->width = 0.0f;
+    elem->height = 0.0f;
+
+    LayoutViewScope view_scope(lycon);
+    lycon->view = static_cast<View*>(elem);
+    dom_node_resolve_style(static_cast<DomNode*>(elem), lycon);
+    // CSS Display 3 box generation: the principal box disappears, but the
+    // element's generated content still participates in the flattened flow.
+    layout_materialize_pseudo_content(lycon,
+        lam::unsafe_view_block_api_span(static_cast<ViewSpan*>(elem)));
+}
+
+static bool layout_mathml_tree_has_content(DomNode* node) {
+    if (!node || !node->is_element()) return false;
+    for (DomNode* child = node->as_element()->first_child; child;
+         child = child->next_sibling) {
+        if (child->is_text()) {
+            if (layout_dom_text_has_non_whitespace(child->as_text())) return true;
+            continue;
+        }
+        if (child->is_element() && layout_mathml_tree_has_content(child)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void layout_empty_mathml_tree(LayoutContext* lycon, DomNode* node,
+                                     DisplayValue display, float x, float y) {
+    if (!lycon || !node || !node->is_element()) return;
+    ViewType view_type = display.outer == CSS_VALUE_BLOCK
+        ? RDT_VIEW_BLOCK : RDT_VIEW_INLINE;
+    View* view = set_view(lycon, view_type, node);
+    if (!view) return;
+    if (view_type == RDT_VIEW_BLOCK) {
+        lam::view_require_block(view)->display = display;
+    } else {
+        lam::view_require<RDT_VIEW_INLINE>(view)->display = display;
+    }
+    LayoutViewScope view_scope(lycon);
+    lycon->view = view;
+    lycon->elmt = node;
+    dom_node_resolve_style(node, lycon);
+    node->as_element()->display = display;
+    view->x = x;
+    view->y = y;
+    view->width = 0.0f;
+    view->height = 0.0f;
+    node->as_element()->content_width = 0.0f;
+    node->as_element()->content_height = 0.0f;
+
+    for (DomNode* child = node->as_element()->first_child; child;
+         child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DisplayValue child_display = resolve_display_value(child);
+        if (layout_display_is_none(child_display)) {
+            child->as_element()->view_type = RDT_VIEW_NONE;
+            child->as_element()->x = 0.0f;
+            child->as_element()->y = 0.0f;
+            child->as_element()->width = 0.0f;
+            child->as_element()->height = 0.0f;
+            continue;
+        }
+        layout_empty_mathml_tree(lycon, child, child_display, x, y);
+    }
+}
+
+static bool layout_empty_mathml_element(LayoutContext* lycon, DomNode* node,
+                                        DisplayValue display) {
+    if (!lycon || !node || !node->is_element() ||
+        display.inner != CSS_VALUE_MATH ||
+        layout_mathml_tree_has_content(node)) {
+        return false;
+    }
+    // MathML Core §3.1.1 / §4.1: an empty math content box has no ink or size;
+    // generated pseudo-elements are not MathML children of that content box.
+    float x = lycon->line.advance_x;
+    float y = lycon->block.advance_y;
+    if (display.outer == CSS_VALUE_INLINE && lycon->line.trailing_space_width > 0.0f) {
+        // CSS Text 3 §4.1.1: a following inline box keeps the preceding
+        // collapsed separator from being treated as line-end whitespace.
+        lycon->line.trailing_space_width = 0.0f;
+        lycon->line.committed_trailing_rect = nullptr;
+        lycon->line.committed_trailing_view = nullptr;
+        lycon->line.committed_trailing_space = 0.0f;
+    }
+    bool math_line_has_no_content = display.outer == CSS_VALUE_INLINE &&
+        !lycon->line.last_text_rect && !lycon->line.has_replaced_content &&
+        !lycon->line.has_non_c1_text;
+    if (math_line_has_no_content) {
+        // CSS Inline 3: an empty line may retain a stale block fragment as its
+        // start marker; an inline math box must replace that marker.
+        lycon->line.start_view = nullptr;
+        lycon->line.is_line_start = true;
+    }
+    float inline_y = display.outer == CSS_VALUE_INLINE
+        ? y + line_baseline_position(lycon, nullptr) : y;
+    layout_empty_mathml_tree(lycon, node, display, x, inline_y);
+    if (display.outer == CSS_VALUE_INLINE) {
+        ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(
+            static_cast<View*>(node));
+        contribute_inline_strut(lycon, node, span);
+        span->y = inline_y;
+        span->content_height = 0.0f;
+        if (math_line_has_no_content) {
+            // CSS Inline 3: an empty inline box still establishes the line;
+            // keep the following separator from being treated as line-leading.
+            lycon->line.start_view = nullptr;
+            lycon->line.is_line_start = false;
+        }
+    }
+    return true;
+}
+
+bool layout_optgroup_is_native_child(DomElement* elem) {
+    if (!elem || !elem->parent || !elem->parent->is_element()) return false;
+    NameId parent_tag = elem->parent->as_element()->tag();
+    return parent_tag == MARKUP_NAME_SELECT ||
+        parent_tag == MARKUP_NAME_DATALIST ||
+        parent_tag == MARKUP_NAME_OPTGROUP;
+}
+
+float layout_optgroup_anonymous_line_height(LayoutContext* lycon) {
+    if (!lycon) return 0.0f;
+    float line_height = lycon->block.line_height;
+    FontHandle* font_handle = font_box_handle(&lycon->font);
+    if (!font_handle) return line_height;
+
+    // The fallback face can retain a fuller font-table line height than the
+    // rounded normal-line shortcut; HTML optgroup labels use that full metric.
+    const FontMetrics* metrics = font_get_metrics(font_handle);
+    if (metrics && metrics->line_height > line_height) {
+        line_height = metrics->line_height;
+    }
+    float cell_height = font_get_cell_height(font_handle);
+    return max(line_height, cell_height);
+}
+
+static void layout_move_display_contents_pseudo_to_edge(
+        DomElement* parent, DomElement* pseudo, bool before) {
+    if (!parent || !pseudo) return;
+    DomNode* previous = nullptr;
+    DomNode* found_previous = nullptr;
+    DomNode* last = nullptr;
+    bool found = false;
+    for (DomNode* child = parent->first_child; child;
+         child = child->next_sibling) {
+        if (child == static_cast<DomNode*>(pseudo)) {
+            found = true;
+            found_previous = previous;
+        }
+        previous = child;
+        last = child;
+    }
+    if (!found) return;
+    if ((before && parent->first_child == static_cast<DomNode*>(pseudo)) ||
+        (!before && last == static_cast<DomNode*>(pseudo))) {
+        parent->last_child = last;
+        return;
+    }
+
+    DomNode* next = pseudo->next_sibling;
+    if (found_previous) found_previous->next_sibling = next;
+    else parent->first_child = next;
+    if (next) next->prev_sibling = found_previous;
+    if (last == static_cast<DomNode*>(pseudo)) last = found_previous;
+
+    if (before) {
+        DomNode* old_first = parent->first_child;
+        pseudo->prev_sibling = nullptr;
+        pseudo->next_sibling = old_first;
+        if (old_first) old_first->prev_sibling = pseudo;
+        else last = static_cast<DomNode*>(pseudo);
+        parent->first_child = pseudo;
+    } else {
+        pseudo->prev_sibling = last;
+        pseudo->next_sibling = nullptr;
+        if (last) last->next_sibling = pseudo;
+        else parent->first_child = pseudo;
+        last = static_cast<DomNode*>(pseudo);
+    }
+    parent->last_child = last;
+}
+
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     if (lycon->depth >= MAX_LAYOUT_DEPTH) {
         log_error("layout_flow_node: max depth %d exceeded, skipping node %s",
@@ -3190,17 +3453,27 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     // hidden. CSS selectors cannot target text nodes, so this must be handled
     if (node->parent && node->parent->is_element()) {
         DomElement* parent_elem = node->parent->as_element();
-        if (parent_elem->tag() == MARKUP_NAME_DETAILS && !parent_elem->has_attribute(MARKUP_NAME_OPEN)) {
+        if (parent_elem->tag() == MARKUP_NAME_DETAILS &&
+            !parent_elem->has_attribute(MARKUP_NAME_OPEN) &&
+            !lycon->layout_hidden_details_content) {
             bool is_summary = node->is_element() && node->tag() == MARKUP_NAME_SUMMARY;
             if (!is_summary) {
-                if (node->is_element()) {
-                    DomElement* elem = node->as_element();
-                    elem->view_type = RDT_VIEW_NONE;
-                    elem->width = 0;
-                    elem->height = 0;
+                bool is_contents = node->is_element() &&
+                    resolve_display_value(node).outer == CSS_VALUE_CONTENTS;
+                if (!is_contents) {
+                    // HTML rendering §15.5.5: closed details content uses
+                    // content-visibility:hidden, so retain descendant boxes
+                    // while restoring the parent's flow state afterward.
+                    LayoutContextScope hidden_content_scope(lycon);
+                    bool saved_hidden_details_content =
+                        lycon->layout_hidden_details_content;
+                    lycon->layout_hidden_details_content = true;
+                    layout_flow_node(lycon, node);
+                    lycon->layout_hidden_details_content =
+                        saved_hidden_details_content;
+                    lycon->depth--;
+                    return;
                 }
-                lycon->depth--;
-                return;
             }
         }
     }
@@ -3366,6 +3639,10 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         }
 
         DisplayValue display = resolve_display_value(node);
+        if (layout_empty_mathml_element(lycon, node, display)) {
+            lycon->depth--;
+            return;
+        }
         if (display.outer == CSS_VALUE_INLINE && display.inner == CSS_VALUE_FLOW &&
             layout_inline_element_is_orthogonal(elem)) {
             // CSS Writing Modes 4 §7.3: a perpendicular inline flow is atomic so
@@ -3381,7 +3658,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                 elem, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
         }
 
-        if (float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) {
+        if ((float_value == CSS_VALUE_LEFT || float_value == CSS_VALUE_RIGHT) &&
+            display.outer != CSS_VALUE_CONTENTS) {
             if (!layout_display_is_none(display)) {
                 display.outer = CSS_VALUE_BLOCK;
                 if (is_table_internal_display(display.inner)) {
@@ -3479,24 +3757,39 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             elem->content_height = 0.0f;
             break;
         case CSS_VALUE_CONTENTS: {
-
-            elem->view_type = RDT_VIEW_INLINE;
-            elem->display.outer = CSS_VALUE_CONTENTS;
-            elem->display.inner = CSS_VALUE_CONTENTS;
-            elem->x = 0;
-            elem->y = 0;
-            elem->width = 0;
-            elem->height = 0;
-
-            {
-                LayoutViewScope view_scope(lycon);
-                lycon->view = (View*)elem;
-
-                dom_node_resolve_style(node, lycon);
+            // CSS Display 3: style resolution updates the transient font context;
+            // save the parent font before resolving the boxless element.
+            LayoutFontScope contents_font_scope(lycon);
+            float contents_advance_y = lycon->block.advance_y;
+            bool contents_line_start = lycon->line.is_line_start;
+            layout_init_display_contents_view(lycon, elem);
+            if (elem->font) {
+                elem->font->used_zoom = layout_effective_zoom(static_cast<View*>(elem));
+                // CSS Display 3: descendants of a boxless element inherit its
+                // computed font while participating in the parent flow.
+                setup_font(lycon->ui_context, &lycon->font, elem->font);
             }
-
-            for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            if (elem->pseudo) {
+                layout_move_display_contents_pseudo_to_edge(
+                    elem, elem->pseudo->before, true);
+                layout_move_display_contents_pseudo_to_edge(
+                    elem, elem->pseudo->after, false);
+            }
+            // CSS Shadow DOM: display:contents flattens the host's rendered
+            // tree, so a shadow root replaces light-DOM children here.
+            for (DomNode* child = layout_render_child_list(elem); child;
+                 child = child->next_sibling) {
                 layout_flow_node(lycon, child);
+            }
+            // HTML rendering gives an empty external optgroup an anonymous label
+            // line; display:contents removes its principal box but preserves that
+            // line contribution when its flattened subtree is empty.
+            if (elem->tag() == MARKUP_NAME_OPTGROUP &&
+                !layout_optgroup_is_native_child(elem) &&
+                contents_advance_y == lycon->block.advance_y &&
+                contents_line_start == lycon->line.is_line_start) {
+                float line_height = layout_optgroup_anonymous_line_height(lycon);
+                if (line_height > 0.0f) lycon->block.advance_y += line_height;
             }
             break;
         }
@@ -3506,7 +3799,9 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     }
     else if (node->is_text()) {
         // CSS 2.2: "When white space is contained at the end of a block's content,
-        if (should_collapse_inter_element_whitespace(node)) {
+        bool collapse_inter_element_whitespace =
+            should_collapse_inter_element_whitespace(node);
+        if (collapse_inter_element_whitespace) {
             node->view_type = RDT_VIEW_NONE;
         }
         else {
@@ -3556,6 +3851,50 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
 
     dom_node_resolve_style(elmt, lycon);
 
+    if (html->display.outer == CSS_VALUE_NONE) {
+        // CSS Display 3: a display:none root suppresses its principal box and
+        // the entire rendered subtree, including the body's UA margin box.
+        html->width = 0.0f;
+        html->height = 0.0f;
+        html->content_width = 0.0f;
+        html->content_height = 0.0f;
+        lycon->block.content_width = 0.0f;
+        lycon->block.content_height = 0.0f;
+        lycon->block.max_width = 0.0f;
+        lycon->block.advance_y = 0.0f;
+        line_init(lycon, 0.0f, 0.0f);
+
+        DomElement* body_element = nullptr;
+        if (elmt->is_element()) {
+            for (DomNode* child = elmt->as_element()->first_child;
+                 child; child = child->next_sibling) {
+                if (child->is_element() && child->tag() == MARKUP_NAME_BODY) {
+                    body_element = child->as_element();
+                    break;
+                }
+            }
+        }
+        if (body_element) {
+            ViewBlock* body = lam::view_require_block(set_view(
+                lycon, RDT_VIEW_BLOCK, body_element));
+            body->display = resolve_display_value(body_element);
+            body->x = 0.0f;
+            body->y = 0.0f;
+            body->width = 0.0f;
+            body->height = 0.0f;
+            body->content_width = 0.0f;
+            body->content_height = 0.0f;
+        }
+        return;
+    }
+
+    // CSS Display 3: the root element's display type is blockified, so
+    // display:contents on <html> establishes the root block formatting box.
+    if (html->display.outer == CSS_VALUE_CONTENTS) {
+        html->display.outer = CSS_VALUE_BLOCK;
+        html->display.inner = CSS_VALUE_FLOW;
+    }
+
     bool root_is_form_control = html->form_control() != nullptr;
     if (root_is_form_control) {
         // Root layout normally seeds an ordinary element from the viewport;
@@ -3599,6 +3938,11 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
         lycon->block.init_ascender = 12.0;  // Default ascender
         lycon->block.init_descender = 3.0;  // Default descender
     }
+    // CSS Inline 3: the initial containing block has a root inline strut, so
+    // root-level display:contents descendants inherit a real line-height.
+    setup_line_height(lycon, html);
+    lycon->block.lead_y = max(0.0f, (lycon->block.line_height -
+        (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f);
 
     DomNode* body_node = nullptr;
     // CSS 2.1 §10.3, §9.3: Root element explicit sizing and positioning.
@@ -3805,7 +4149,13 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
                 const char* tag_name = child->node_name();
                 DisplayValue child_display = resolve_display_value(child);
                 if (!layout_display_is_none(child_display)) {
-                    layout_block(lycon, child, child_display);
+                    if (child_display.outer == CSS_VALUE_CONTENTS) {
+                        // CSS Display 3: root-level boxless elements still
+                        // contribute their descendants to the root flow.
+                        layout_flow_node(lycon, child);
+                    } else {
+                        layout_block(lycon, child, child_display);
+                    }
                 }
                 if (strcmp(tag_name, "body") == 0) {
                     body_node = child;
@@ -3813,6 +4163,13 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             }
             child = child->next_sibling;
         }
+    }
+
+    // CSS 2.1 §10.8.1: a block container closes its pending final line box;
+    // this is needed when root-level display:contents bypasses body layout.
+    if (!lycon->line.is_line_start) {
+        lycon->line.is_last_line = true;
+        line_break(lycon);
     }
 
     auto t_body_find = high_resolution_clock::now();
@@ -3923,22 +4280,42 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
                 ViewBlock* child_block = lam::view_require_block(root_child);
                 bool out_of_flow = layout_block_is_out_of_flow_positioned(child_block);
                 if (!out_of_flow) {
-                    float margin_top = child_block->bound ? child_block->boundary()->margin.top : 0.0f;
                     float margin_bottom = child_block->bound ? child_block->boundary()->margin.bottom : 0.0f;
                     float child_extent = child_block->y + child_block->height + margin_bottom;
-                if (root_child_margins_are_self_collapsing(child_block)) {
-                    float collapsed_margin = collapse_root_margins(margin_top, margin_bottom);
-                    float collapsed_child_extent = child_block->y - margin_top + collapsed_margin;
+                    bool has_float = false;
+                    bool has_in_flow_content = false;
+                    float float_extent = root_child_float_only_extent(
+                        child_block, &has_float, &has_in_flow_content);
+                    bool self_collapsing = root_child_margins_are_self_collapsing(child_block);
+                    // CSS 2.1 §10.6.3: a nested float is out of flow for the
+                    // container's used height but still extends the root overflow.
+                    if (self_collapsing && has_float && !has_in_flow_content) {
+                        float root_float_extent = child_block->y + float_extent;
+                        // CSS 2.1 §10.6.3: the root ends at the furthest float
+                        // edge; the body's bottom margin is not appended after
+                        // overflow that already extends beyond its margin box.
+                        child_extent = root_float_extent;
+                        if (root_float_extent > root_content_extent) {
+                            root_content_extent = root_float_extent;
+                        }
+                        all_root_children_self_collapsing = false;
+                    } else if (self_collapsing) {
+                        float collapsed_margin = collapse_root_margins(
+                            child_block->boundary()->margin.top, margin_bottom);
+                        float collapsed_child_extent =
+                            child_block->y - child_block->boundary()->margin.top +
+                            collapsed_margin;
                         if (collapsed_child_extent > collapsed_root_content_extent) {
                             collapsed_root_content_extent = collapsed_child_extent;
                         }
                     } else {
-                        bool has_float = false;
-                        bool has_in_flow_content = false;
-                        float float_extent = root_child_float_only_extent(child_block,
-                            &has_float, &has_in_flow_content);
                         if (child_block->height <= 0.0f && has_float && !has_in_flow_content) {
+                            // CSS 2.1 §10.6.3: an out-of-flow-only child still
+                            // carries positive float overflow to the root edge;
+                            // zero-height floats do not add the body's end margin.
                             float root_float_extent = child_block->y + float_extent;
+                            if (float_extent > 0.0f) root_float_extent += margin_bottom;
+                            child_extent = root_float_extent;
                             if (root_float_extent > collapsed_root_content_extent) {
                                 collapsed_root_content_extent = root_float_extent;
                             }

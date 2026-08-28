@@ -4711,9 +4711,13 @@ int64_t fn_len(Item item) {
         // were hardcoded to 0, which made `len(m)` disagree with the loop that
         // ranges over the same map, and made a populated map compare equal to
         // an empty one through `len`. OBJECT extends MAP and shares the shape.
+        // The raw shape length is NOT that count for spread-built maps: a
+        // spread is one nameless link slot covering many fields, so
+        // `len({*:m, w:5})` reported 2 for a 4-field map. Count the flattened
+        // distinct keys instead — the walk iteration itself uses (S8.3.1).
         Map* map = item.map;
         TypeMap* map_type = map ? (TypeMap*)map->type : NULL;
-        size = map_type ? map_type->length : 0;
+        size = map_type ? map_flat_field_count(map_type, map->data) : 0;
         break;
     }
     case LMD_TYPE_VMAP: {
@@ -7745,10 +7749,43 @@ Item cow_mark_shared(Item value) {
     return value;
 }
 
+// S9.1.2/S9.3.1: a value that reaches a second owner -- another binding, a
+// container slot, or a plain (non-`var`) parameter -- is captured BY VALUE.
+// Under COW that capture is a share-mark, so the next write through EITHER
+// handle detaches at cow_prepare_write and neither observer sees the other's
+// update. Callers must treat this as possibly allocating: the ArrayNum arm
+// still copies eagerly.
 Item cow_bind_var(Item value) {
     // ArrayNum views keep their Stage-2 mutable-view contract; generic COW
     // ownership starts only at the core Item-container subset.
     if (get_type_id(value) == LMD_TYPE_ARRAY_NUM) return fn_mutable_value(value);
+    return cow_mark_shared(value);
+}
+
+// S9.3.1: placing a value into a container captures it BY VALUE. Under COW the
+// capture is a share-mark; the copy is deferred to whichever side writes first,
+// where cow_prepare_write detaches it.
+//
+// Unlike cow_bind_var this does NOT copy ArrayNum eagerly. An insertion capture
+// is the value's own flag, so it costs one bit and cannot allocate -- which is
+// what lets every insertion site call it without rooting. ArrayNum still
+// detaches correctly when a COW-aware setter writes it (clone_mutable_array_num
+// via cow_prepare_write); what stays open is the raw/native-lane store paths
+// that never consult the flag, and those are Stage-2 ArrayNum work either way.
+// Opt-in until the nested-mutation half of C4 lands. Insertion capture on its
+// own is sound, but element/field READS still borrow (the open C4.1 half), so
+// the get-modify idiom `c = owner[i]` ... `c[j] = v` silently writes a detached
+// copy once the insertion that produced `owner[i]` captured a named value.
+// Four corpus scripts depend on that idiom today (Appendix B.2 / §9.5.2 is the
+// design that closes it), so the flip stays behind this flag -- the same
+// staging Phase C/D used for LAMBDA_COW.
+bool cow_capture_enabled(void) {
+    static const bool enabled = getenv("LAMBDA_COW_CAPTURE") != NULL;
+    return enabled;
+}
+
+Item cow_capture_value(Item value) {
+    if (!cow_capture_enabled()) return value;
     return cow_mark_shared(value);
 }
 
@@ -7782,7 +7819,10 @@ static void cow_unmark_shape_children(TypeMap* type, void* data) {
     }
 }
 
-static void cow_mark_shape_children(TypeMap* type, void* data) {
+// Also the S9.3.1 capture for a freshly built shaped literal: every field of a
+// new map/object/element holds a value that just entered a second owner, so one
+// walk over the finished shape captures the whole literal.
+void cow_mark_shape_children(TypeMap* type, void* data) {
     if (!type || !data) return;
     for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
         if (!entry->name) {
@@ -8060,6 +8100,8 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     new_type->length = old_count + 1;
     new_type->byte_size = new_size;
     new_type->type_index = ((ArrayList*)context->type_list)->length;
+    // the copied chain above carries old_type's entries verbatim, spread slots included
+    new_type->has_spread = old_type->has_spread;
     new_type->has_named_shape = old_type->has_named_shape;
     new_type->is_trusted_contract = false;
     new_type->struct_name = old_type->struct_name;

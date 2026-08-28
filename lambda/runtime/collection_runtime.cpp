@@ -399,6 +399,8 @@ void list_push_spread(List* list, Item item) {
             for (int64_t i = 0; i < arr->length; i++) {
                 list = rooted_list.get();
                 arr = rooted_source.get().array;
+                // S9.3.1: each spread element is captured into the destination.
+                cow_capture_value(arr->items[i]);
                 list_push(list, arr->items[i]);
             }
             return;
@@ -418,5 +420,6 @@ void list_push_spread(List* list, Item item) {
             return;
         }
     }
+    cow_capture_value(item);  // S9.3.1: content/list child capture
     list_push(list, item);
 }

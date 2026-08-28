@@ -1,0 +1,59 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM contenteditable commands</title>
+<style>
+  #surface { border: 1px solid #777; min-height: 28px; padding: 6px; }
+  #out { margin-top: 8px; white-space: pre-wrap; }
+</style>
+<div id="surface" contenteditable="true" tabindex="0">seedtext</div>
+<div id="partial" contenteditable="true" tabindex="0"><b>seedtext</b></div>
+<div id="partial-middle" contenteditable="true" tabindex="0"><b>seedtext</b></div>
+<div id="partial-start" contenteditable="true" tabindex="0"><b>seedtext</b></div>
+<button id="bold">bold</button>
+<button id="html">html</button>
+<button id="report">report</button>
+<button id="unsup">unsup</button>
+<button id="partial-bold">partial</button>
+<button id="partial-middle-bold">middle</button>
+<button id="partial-start-bold">start</button>
+<div id="out"></div>
+<script>
+  var surface = document.getElementById('surface');
+  var partial = document.getElementById('partial');
+  var partialMiddle = document.getElementById('partial-middle');
+  var partialStart = document.getElementById('partial-start');
+  var out = document.getElementById('out');
+  function report(tag, ok) {
+    out.textContent = tag + ':' + ok + '|' + surface.innerHTML;
+  }
+  // A toolbar button must not steal the selection the command addresses, which
+  // is what every real editor's mousedown handler does.
+  function keepSelection(event) { event.preventDefault(); }
+  ['bold', 'html', 'report', 'unsup', 'partial-bold',
+   'partial-middle-bold', 'partial-start-bold'].forEach(function(id) {
+    document.getElementById(id).addEventListener('mousedown', keepSelection);
+  });
+  document.getElementById('bold').addEventListener('click', function() {
+    report('bold', document.execCommand('bold', false, ''));
+  });
+  document.getElementById('html').addEventListener('click', function() {
+    report('html', document.execCommand('insertHTML', false, '<i>-x</i>'));
+  });
+  // Reads the tree without changing it, so a keyboard-applied command can be
+  // asserted through the same channel as an execCommand one.
+  document.getElementById('report').addEventListener('click', function() {
+    report('report', true);
+  });
+  document.getElementById('unsup').addEventListener('click', function() {
+    report('unsup', document.execCommand('justifyCenter', false, ''));
+  });
+  document.getElementById('partial-bold').addEventListener('click', function() {
+    out.textContent = 'partial:' + document.execCommand('bold', false, '') + '|' + partial.innerHTML;
+  });
+  document.getElementById('partial-middle-bold').addEventListener('click', function() {
+    out.textContent = 'partial-middle:' + document.execCommand('bold', false, '') + '|' + partialMiddle.innerHTML;
+  });
+  document.getElementById('partial-start-bold').addEventListener('click', function() {
+    out.textContent = 'partial-start:' + document.execCommand('bold', false, '') + '|' + partialStart.innerHTML;
+  });
+</script>

@@ -77,7 +77,7 @@ The Lambda language documentation is organized into focused sub-documents for ea
 | Document | Description |
 |----------|-------------|
 | **[Developer_Guide.md](dev/Developer_Guide.md)** | **Developer Guide** — Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT |
-| **[Lamdba_Runtime.md](dev/Lamdba_Runtime.md)** | **Lambda Runtime** — Runtime internals and architecture |
+| **[lambda/LR_00_Overview.md](dev/lambda/LR_00_Overview.md)** | **Lambda Core Runtime** — Runtime internals and architecture: compilation pipeline, value & type model, MIR-Direct transpiler and JIT, memory & GC, builtins |
 
 ### Quick Reference
 

@@ -558,7 +558,7 @@ Added a batch execution mode to lambda.exe (`main.cpp`, lines ~1948–2018):
   \x01BATCH_END <exit_code>
   ```
 - **Per-script cleanup:** Frees source, syntax tree, memory pool, type list, and JIT context between scripts, then resets `runtime.scripts->length = 0`. Parser is kept alive (expensive to recreate).
-- **Flags:** Supports `--no-log` and `--c2mir` flags.
+- **Flags:** Supports the `--no-log` flag.
 
 #### 10.2 Batch Test Helpers (C++)
 

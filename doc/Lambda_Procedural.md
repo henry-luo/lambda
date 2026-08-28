@@ -246,7 +246,7 @@ Map field assignment automatically rebuilds the map's shape metadata when the va
 
 ```lambda
 pn example() {
-    let elem = <div class: "main"; "Hello">
+    var elem = <div class: "main", "Hello">
     elem.class = "updated"       // attribute assignment
     elem[0] = "Goodbye"          // child assignment by index
 }

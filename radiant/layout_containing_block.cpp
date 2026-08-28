@@ -61,10 +61,10 @@ LayoutContainingBlock layout_initial_containing_block(LayoutContext* lycon) {
 
     if (lycon->ui_context) {
         cb.border_width = lycon->ui_context->viewport_width > 0
-            ? lycon->ui_context->viewport_width * lycon->ui_context->pixel_ratio
+            ? lycon->ui_context->viewport_width
             : 0.0f;
         cb.border_height = lycon->ui_context->viewport_height > 0
-            ? lycon->ui_context->viewport_height * lycon->ui_context->pixel_ratio
+            ? lycon->ui_context->viewport_height
             : 0.0f;
     }
     if (cb.border_width <= 0.0f) cb.border_width = lycon->width;

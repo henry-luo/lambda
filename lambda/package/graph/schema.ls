@@ -316,9 +316,16 @@ fn required_attr_diagnostics(value, path, spec) => [
 ]
 
 fn present_attr_diagnostics(value, path, spec) => [
+  // A null attribute is absent, not present — the same rule
+  // required_attr_missing applies. Canonical builders declare every optional
+  // attribute explicitly (`'node-sep': known["node-sep"]`), so an unset one is
+  // a null-valued field; type-checking it reported every optional attribute as
+  // the wrong type. This was masked while attribute spread was invisible to
+  // key iteration, which made this walk see no attributes at all.
   for (key, attr_value in map(value), let name = string(key),
     let entry = spec_attr(spec, name)
-    where entry != null and (not type_ok(attr_value, entry.kind) or
+    where entry != null and attr_value != null and
+      (not type_ok(attr_value, entry.kind) or
       (entry.values != null and not contains(entry.values, string(attr_value)))))
     diagnostic.for_value(
       if (not type_ok(attr_value, entry.kind)) "graph.schema.attribute-type"

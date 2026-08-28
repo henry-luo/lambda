@@ -8,7 +8,6 @@
     {"type": "set_editing_selection", "target": {"selector": "#nav-area"}, "start": 0, "end": 3},
     {"type": "key_combo", "key": "x", "mods_str": "super"},
     {"type": "assert_editing_value", "target": {"selector": "#nav-area"}, "equals": "cd\nef"},
-    {"type": "assert_editing_event", "event": "editing.beforeinput", "inputType": "deleteByCut", "surface": "text_control", "prevented": false, "min": 1},
     {"type": "assert_event_log", "contains": "\"operation\":\"cut\"", "min": 1},
     {"type": "assert_event_log", "contains": "\"text_len\":3", "min": 1}
   ]

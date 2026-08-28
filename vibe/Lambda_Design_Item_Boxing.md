@@ -5,7 +5,7 @@
 - **Scope:** the 64-bit `Item` representation shared by Lambda core, LambdaJS, the Jube frontends, Radiant, the MIR transpilers, and the garbage collector.
 - **Decision:** retain Lambda's hybrid representation: inline tagged values and tagged leaf pointers for scalar types; unmodified native pointers for header-bearing containers.
 - **Convention:** source references name symbols rather than fixed line numbers because line numbers drift.
-- **Related:** `Lambda_Design_Stack_API.md` Phase 7 (current scalar ownership), `impl/Lambda_Impl_Double_Boxing (done).md` (completed inline-double work), `Lambda_Transpile_Restructure6.md` (measured direct-string-pointer experiment), `Lambda_Semantics_Number_Model.md`, `doc/dev/lambda/LR_03_Value_and_Type_Model.md`, and `doc/dev/js/JS_03_Value_Model.md`.
+- **Related:** `Lambda_Design_Stack_API.md` Phase 7 (current scalar ownership), `impl/Lambda_Impl_Double_Boxing (done).md` (completed inline-double work), `Lambda_Transpiler.md` R1 (measured direct-string-pointer experiment), `Lambda_Semantics_Number_Model.md`, `doc/dev/lambda/LR_03_Value_and_Type_Model.md`, and `doc/dev/js/JS_03_Value_Model.md`.
 
 ---
 
@@ -298,7 +298,7 @@ When dynamic code first reads `Container.type_id` and then accesses fields, the 
 
 ### 4.3 Measured evidence: the direct-string-pointer experiment
 
-`Lambda_Transpile_Restructure6.md` records an implemented release-build experiment that converted String/Symbol/Binary to the raw-header-pointer model.
+`Lambda_Transpiler.md` Appendix B R1 records an implemented release-build experiment that converted String/Symbol/Binary to the raw-header-pointer model.
 
 The hypothesis was that removing an OR during boxing and a 56-bit extraction during unboxing would speed up string-heavy workloads. The result was the opposite:
 
@@ -522,7 +522,7 @@ The current design decision remains:
 - `lambda/transpile-mir.cpp` — native scalar registers, semantic pointer ABI, raw container fields, and direct aggregate lowering.
 - `lambda/js/js_mir_expression_lowering.cpp` — LambdaJS array and typed-array direct access.
 - `lib/gc/gc_heap.c` — GC classification of raw and tagged pointer Items.
-- `vibe/Lambda_Transpile_Restructure6.md` — measured negative result from unifying String/Symbol/Binary with raw containers.
+- `vibe/Lambda_Transpiler.md` Appendix B R1 — measured negative result from unifying String/Symbol/Binary with raw containers.
 - `vibe/Lambda_Type_Double_Boxing.md` — proposed float self-tagging extension and its migration requirements.
 
 ### External primary references

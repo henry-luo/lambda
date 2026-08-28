@@ -316,6 +316,7 @@ on beforeinput(evt) {
   } else {
     status = evt.input_type
   }
+  return 'prevent-default'
 }
 on click(evt) {
   if ((evt.target_tag == null or evt.target_tag != "button") and (evt.source_selection != null or evt.source_pos != null)) {

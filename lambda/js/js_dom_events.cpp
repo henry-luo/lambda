@@ -30,9 +30,17 @@
 
 #include <cstring>
 #include <cmath>
-#include <functional>
 
 extern Item js_make_number(double d);
+
+struct EventContext;
+extern "C" bool radiant_native_click_dispatch_active(void);
+extern "C" bool radiant_dispatch_behavior_submit_activation(EventContext* evcon,
+                                                            View* target);
+extern "C" bool radiant_dispatch_behavior_reset_activation(EventContext* evcon,
+                                                           View* target);
+bool radiant_behavior_claims_event(EventContext* evcon, View* target,
+                                   const char* event_name);
 
 // Forward decls used by Event helpers below (signatures from js_runtime.h /
 // js_dom.h, declared here under extern "C" to avoid header coupling).
@@ -223,7 +231,8 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
     (void)type;
 }
 
-static DomElement* js_dom_find_form_owner(DomElement* control) {
+extern "C" DomElement* js_dom_find_form_owner(void* control_ptr) {
+    DomElement* control = (DomElement*)control_ptr;
     if (!control) return nullptr;
     const char* form_id = control->get_attribute("form");
     if (form_id && *form_id) {
@@ -241,7 +250,8 @@ static DomElement* js_dom_find_form_owner(DomElement* control) {
     return nullptr;
 }
 
-static bool js_dom_is_submit_button(DomElement* elem) {
+extern "C" bool js_dom_is_submit_button(void* elem_ptr) {
+    DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !elem->tag_name) return false;
     if (strcasecmp(elem->tag_name, "input") == 0) {
         const char* type = js_dom_input_type_lower(elem);
@@ -250,6 +260,18 @@ static bool js_dom_is_submit_button(DomElement* elem) {
     if (strcasecmp(elem->tag_name, "button") == 0) {
         const char* type = js_dom_input_type_lower(elem);
         return strcmp(type, "text") == 0 || strcmp(type, "submit") == 0;
+    }
+    return false;
+}
+
+extern "C" bool js_dom_is_reset_button(void* elem_ptr) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    if (!elem || !elem->tag_name) return false;
+    if (strcasecmp(elem->tag_name, "input") == 0) {
+        return strcmp(js_dom_input_type_lower(elem), "reset") == 0;
+    }
+    if (strcasecmp(elem->tag_name, "button") == 0) {
+        return strcmp(js_dom_input_type_lower(elem), "reset") == 0;
     }
     return false;
 }
@@ -389,6 +411,9 @@ struct EventHandlerSlot {
     void* key;
     char* type;
     uint64_t order;
+    uint64_t* callback_root;
+    DomDocument* owner_doc;
+    DomNodeRef node_ref;
     bool active;
 };
 
@@ -680,6 +705,9 @@ static EventHandlerSlot* get_or_create_handler_slot(void* key, const char* type)
     slot->key = key;
     slot->type = type_copy;
     slot->order = 0;
+    slot->callback_root = nullptr;
+    slot->owner_doc = nullptr;
+    slot->node_ref = {nullptr, 0};
     slot->active = false;
     if (!_handler_index) {
         _handler_index = hashmap_new(sizeof(EventHandlerIndexEntry), 16, 0, 0,
@@ -707,6 +735,21 @@ static EventHandlerSlot* get_or_create_handler_slot(void* key, const char* type)
     return slot;
 }
 
+static void event_handler_release_target(EventHandlerSlot* slot) {
+    if (!slot || !slot->owner_doc || !slot->node_ref.address) return;
+    dom_node_unpin(slot->owner_doc, slot->node_ref,
+                   DOM_NODE_PIN_EVENT_QUEUE);
+    slot->owner_doc = nullptr;
+    slot->node_ref = {nullptr, 0};
+}
+
+static void event_handler_release_callback(EventHandlerSlot* slot) {
+    if (!slot || !slot->callback_root) return;
+    heap_unregister_gc_root(slot->callback_root);
+    mem_free(slot->callback_root);
+    slot->callback_root = nullptr;
+}
+
 static bool event_handler_target_supported(Item target) {
     Item global = js_get_global_this();
     if (target.item != 0 && target.item == global.item) return true;
@@ -719,7 +762,9 @@ static bool event_handler_target_supported(Item target) {
 static void event_handler_property_set_for_key(void* key,
                                                 const char* property_name,
                                                 int property_name_len,
-                                                Item value) {
+                                                Item value,
+                                                DomDocument* owner_doc,
+                                                DomNodeRef node_ref) {
     if (!property_name || property_name_len < 3 || property_name[0] != 'o' ||
         property_name[1] != 'n' || !key) {
         return;
@@ -734,11 +779,27 @@ static void event_handler_property_set_for_key(void* key,
     EventHandlerSlot* slot = find_handler_slot(key, stack_type);
     bool callable = js_is_callable(value);
     if (!callable) {
-        if (slot) slot->active = false;
+        if (slot) {
+            slot->active = false;
+            event_handler_release_callback(slot);
+            event_handler_release_target(slot);
+        }
         return;
     }
     if (!slot) slot = get_or_create_handler_slot(key, stack_type);
     if (!slot) return;
+    if (!slot->callback_root) {
+        slot->callback_root = heap_gc_root_slot_new(value.item);
+        if (!slot->callback_root) return;
+    } else {
+        *slot->callback_root = value.item;
+    }
+    if (!slot->owner_doc && owner_doc && node_ref.address &&
+        dom_node_ref_validate(owner_doc, node_ref) &&
+        dom_node_pin(owner_doc, node_ref, DOM_NODE_PIN_EVENT_QUEUE)) {
+        slot->owner_doc = owner_doc;
+        slot->node_ref = node_ref;
+    }
     if (!slot->active) {
         // Clearing an event-handler attribute removes its listener-list slot;
         // a later callable assignment must therefore append after live listeners.
@@ -754,6 +815,10 @@ extern "C" void js_dom_event_handler_property_set(Item target,
     if (!js_dom_event_runtime_state_ensure()) return;
     if (!event_handler_target_supported(target)) return;
     void* key = get_event_target_key(target);
+    DomNode* node = (DomNode*)js_dom_unwrap_element(target);
+    DomDocument* owner_doc = node && node->is_element()
+        ? node->as_element()->doc : nullptr;
+    DomNodeRef node_ref = node ? dom_node_ref(node) : DomNodeRef{nullptr, 0};
     DomNodeRef no_node = {nullptr, 0};
     if (event_target_needs_root(target, key, no_node) &&
         !get_or_create_listeners(key, nullptr, no_node, target)) {
@@ -761,14 +826,20 @@ extern "C" void js_dom_event_handler_property_set(Item target,
         return;
     }
     event_handler_property_set_for_key(key, property_name,
-                                       property_name_len, value);
+                                       property_name_len, value,
+                                       owner_doc, node_ref);
 }
 
 extern "C" void js_dom_event_handler_property_set_for_node(
         void* dom_node, const char* property_name, int property_name_len, Item value) {
     if (!js_dom_event_runtime_state_ensure()) return;
+    DomNode* node = (DomNode*)dom_node;
+    DomDocument* owner_doc = node && node->is_element()
+        ? node->as_element()->doc : nullptr;
+    DomNodeRef node_ref = node ? dom_node_ref(node) : DomNodeRef{nullptr, 0};
     event_handler_property_set_for_key(dom_node, property_name,
-                                       property_name_len, value);
+                                       property_name_len, value,
+                                       owner_doc, node_ref);
 }
 
 static void nl_push(NodeListeners* nl, EventListener listener) {
@@ -1574,18 +1645,18 @@ static Item js_ctor_mouse_event_with_class(Item type_arg, Item init_arg,
         const char* class_name) {
     JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, class_name));
     stamp_modifiers(ev, init_arg);
-    event_set_int(ev, "screenX", init_int(init_arg, "screenX", 0));
-    event_set_int(ev, "screenY", init_int(init_arg, "screenY", 0));
-    event_set_int(ev, "clientX", init_int(init_arg, "clientX", 0));
-    event_set_int(ev, "clientY", init_int(init_arg, "clientY", 0));
-    event_set_int(ev, "pageX",   init_int(init_arg, "pageX", 0));
-    event_set_int(ev, "pageY",   init_int(init_arg, "pageY", 0));
-    event_set_int(ev, "x",       init_int(init_arg, "clientX", 0));
-    event_set_int(ev, "y",       init_int(init_arg, "clientY", 0));
-    event_set_int(ev, "offsetX", 0);
-    event_set_int(ev, "offsetY", 0);
-    event_set_int(ev, "movementX", init_int(init_arg, "movementX", 0));
-    event_set_int(ev, "movementY", init_int(init_arg, "movementY", 0));
+    event_set_double(ev, "screenX", init_double(init_arg, "screenX", 0.0));
+    event_set_double(ev, "screenY", init_double(init_arg, "screenY", 0.0));
+    event_set_double(ev, "clientX", init_double(init_arg, "clientX", 0.0));
+    event_set_double(ev, "clientY", init_double(init_arg, "clientY", 0.0));
+    event_set_double(ev, "pageX",   init_double(init_arg, "pageX", 0.0));
+    event_set_double(ev, "pageY",   init_double(init_arg, "pageY", 0.0));
+    event_set_double(ev, "x",       init_double(init_arg, "clientX", 0.0));
+    event_set_double(ev, "y",       init_double(init_arg, "clientY", 0.0));
+    event_set_double(ev, "offsetX", 0.0);
+    event_set_double(ev, "offsetY", 0.0);
+    event_set_double(ev, "movementX", init_double(init_arg, "movementX", 0.0));
+    event_set_double(ev, "movementY", init_double(init_arg, "movementY", 0.0));
     event_set_int(ev, "button",  init_int(init_arg, "button", 0));
     event_set_int(ev, "buttons", init_int(init_arg, "buttons", 0));
     event_set_item(ev, "relatedTarget", init_item(init_arg, "relatedTarget"));
@@ -1824,7 +1895,7 @@ static void stamp_modifier_init(Item init, bool ctrl, bool shift, bool alt, bool
 }
 
 extern "C" Item js_create_native_mouse_event(const char* type,
-    int client_x, int client_y,
+    double client_x, double client_y,
     int button, int buttons,
     bool ctrl, bool shift, bool alt, bool meta,
     int detail, Item related_target)
@@ -1834,12 +1905,12 @@ extern "C" Item js_create_native_mouse_event(const char* type,
     event_set_bool(init, "cancelable", true);
     event_set_bool(init, "composed", true);
     event_set_int(init, "detail", detail);
-    event_set_int(init, "clientX", client_x);
-    event_set_int(init, "clientY", client_y);
-    event_set_int(init, "screenX", client_x);
-    event_set_int(init, "screenY", client_y);
-    event_set_int(init, "pageX", client_x);
-    event_set_int(init, "pageY", client_y);
+    event_set_double(init, "clientX", client_x);
+    event_set_double(init, "clientY", client_y);
+    event_set_double(init, "screenX", client_x);
+    event_set_double(init, "screenY", client_y);
+    event_set_double(init, "pageX", client_x);
+    event_set_double(init, "pageY", client_y);
     event_set_int(init, "button", button);
     event_set_int(init, "buttons", buttons);
     stamp_modifier_init(init, ctrl, shift, alt, meta);
@@ -1854,7 +1925,7 @@ extern "C" Item js_create_native_mouse_event(const char* type,
 JS_FORWARD_VOID( js_event_set_timestamp, (Item event, double timestamp_ms), event_set_double, (event, "timeStamp", timestamp_ms))
 
 extern "C" Item js_create_native_pointer_event(const char* type,
-    int client_x, int client_y,
+    double client_x, double client_y,
     int button, int buttons,
     bool ctrl, bool shift, bool alt, bool meta,
     const char* pointer_type, int pointer_id, bool is_primary)
@@ -1863,12 +1934,12 @@ extern "C" Item js_create_native_pointer_event(const char* type,
     event_set_bool(init, "bubbles", true);
     event_set_bool(init, "cancelable", true);
     event_set_bool(init, "composed", true);
-    event_set_int(init, "clientX", client_x);
-    event_set_int(init, "clientY", client_y);
-    event_set_int(init, "screenX", client_x);
-    event_set_int(init, "screenY", client_y);
-    event_set_int(init, "pageX", client_x);
-    event_set_int(init, "pageY", client_y);
+    event_set_double(init, "clientX", client_x);
+    event_set_double(init, "clientY", client_y);
+    event_set_double(init, "screenX", client_x);
+    event_set_double(init, "screenY", client_y);
+    event_set_double(init, "pageX", client_x);
+    event_set_double(init, "pageY", client_y);
     event_set_int(init, "button", button);
     event_set_int(init, "buttons", buttons);
     stamp_modifier_init(init, ctrl, shift, alt, meta);
@@ -1903,7 +1974,7 @@ extern "C" Item js_create_native_css_event(const char* type,
 }
 
 extern "C" Item js_create_native_drag_event(const char* type,
-    int client_x, int client_y, Item data_transfer,
+    double client_x, double client_y, Item data_transfer,
     bool ctrl, bool shift, bool alt, bool meta)
 {
     // DragEvent extends MouseEvent; reuse the MouseEvent ctor for geometry and
@@ -2028,7 +2099,7 @@ extern "C" Item js_create_native_input_event(const char* type,
 }
 
 extern "C" Item js_create_native_wheel_event(const char* type,
-    int client_x, int client_y,
+    double client_x, double client_y,
     double delta_x, double delta_y,
     int buttons,
     bool ctrl, bool shift, bool alt, bool meta)
@@ -2037,10 +2108,10 @@ extern "C" Item js_create_native_wheel_event(const char* type,
     event_set_bool(init, "bubbles", true);
     event_set_bool(init, "cancelable", true);
     event_set_bool(init, "composed", true);
-    event_set_int(init, "clientX", client_x);
-    event_set_int(init, "clientY", client_y);
-    event_set_int(init, "screenX", client_x);
-    event_set_int(init, "screenY", client_y);
+    event_set_double(init, "clientX", client_x);
+    event_set_double(init, "clientY", client_y);
+    event_set_double(init, "screenX", client_x);
+    event_set_double(init, "screenY", client_y);
     event_set_int(init, "buttons", buttons);
     event_set_double(init, "deltaX", delta_x);
     event_set_double(init, "deltaY", delta_y);
@@ -2153,6 +2224,12 @@ static Item wrap_path_key(void* key, bool key_is_dom) {
 
 static Item event_target_get_idl_handler(Item target, const char* type) {
     if (target.item == 0 || !type) return ItemNull;
+    void* key = get_event_target_key(target);
+    EventHandlerSlot* slot = find_handler_slot(key, type);
+    if (slot && slot->active && slot->callback_root) {
+        Item rooted_handler = event_listener_root_item(slot->callback_root);
+        if (js_is_callable(rooted_handler)) return rooted_handler;
+    }
     TypeId target_type = get_type_id(target);
     if (target_type != LMD_TYPE_MAP && target_type != LMD_TYPE_OBJECT &&
         target_type != LMD_TYPE_ELEMENT && target_type != LMD_TYPE_VMAP) {
@@ -2590,63 +2667,49 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
             js_dom_dispatch_event(self_item, change_ev);
         }
     } else if (act_kind == 2 && act_target && !prevented && !act_disabled) {
-        // Submit-button activation and requestSubmit(submitter) share one path
-        // so constraint validation, cancelable submit events, and navigation agree.
-        // Re-check disabled in case the click listener disabled us.
+        // Native clicks run the package activation after the JS click returns.
+        // Script-created clicks use the same claim protocol here; the bridge
+        // remains only for documents where the package is not available.
         if (js_dom_is_disabled(act_target)) {
             // listener disabled the control mid-flight — skip submit.
         } else if (!js_dom_is_connected(act_target)) {
             // disconnected forms must not submit (HTML §4.10.21.3).
         } else {
             DomElement* el = (DomElement*)act_target;
-            DomElement* owner = js_dom_find_form_owner(el);
-            if (owner) {
-                js_dom_form_request_submit_bridge(js_dom_wrap_element(owner),
-                    js_dom_wrap_element(el));
+            if (!radiant_native_click_dispatch_active()) {
+                DomElement* owner = js_dom_find_form_owner(el);
+                if (owner) {
+                    View* target_view = (View*)el;
+                    bool claimed = radiant_behavior_claims_event(
+                        nullptr, target_view, "submitactivation");
+                    if (claimed) {
+                        radiant_dispatch_behavior_submit_activation(nullptr,
+                                                                    target_view);
+                    } else {
+                        js_dom_form_request_submit_bridge(
+                            js_dom_wrap_element(owner), js_dom_wrap_element(el));
+                    }
+                }
             }
         }
     } else if (act_kind == 3 && act_target && !prevented && !act_disabled) {
-        // Reset-button activation: walk up to owning <form> and call reset().
+        // Reset follows the same package claim protocol as submit.
         if (!js_dom_is_disabled(act_target) && js_dom_is_connected(act_target)) {
             DomElement* el = (DomElement*)act_target;
-            DomElement* owner = nullptr;
-            // Per HTML spec, a form-associated element's owner is determined
-            // by the `form` attribute first; otherwise the nearest ancestor.
-            const char* fa = el->get_attribute("form");
-            if (fa && *fa) {
-                DomDocument* doc = (DomDocument*)js_dom_get_document();
-                if (doc && doc->root) {
-                    // Walk to find element with matching id.
-                    std::function<DomElement*(DomNode*)> find_id =
-                        [&](DomNode* node) -> DomElement* {
-                        while (node) {
-                            if (node->is_element()) {
-                                DomElement* ce = (DomElement*)node;
-                                const char* eid = ce->get_attribute("id");
-                                if (eid && strcmp(eid, fa) == 0) return ce;
-                                DomElement* r = find_id(ce->first_child);
-                                if (r) return r;
-                            }
-                            node = node->next_sibling;
-                        }
-                        return nullptr;
-                    };
-                    owner = find_id((DomNode*)doc->root);
-                }
-            } else {
-                DomNode* p = el->parent;
-                while (p && p->is_element()) {
-                    DomElement* pe = (DomElement*)p;
-                    if (pe->tag_name && strcasecmp(pe->tag_name, "form") == 0) {
-                        owner = pe; break;
-                    }
-                    p = p->parent;
-                }
-            }
+            DomElement* owner = js_dom_find_form_owner(el);
             if (owner) {
-                Item form_item = js_dom_wrap_element(owner);
-                radiant_dom_element_operation(form_item, JUBE_DOM_RESET,
-                    nullptr, 0);
+                if (!radiant_native_click_dispatch_active()) {
+                    View* target_view = (View*)el;
+                    bool claimed = radiant_behavior_claims_event(
+                        nullptr, target_view, "resetactivation");
+                    if (claimed) {
+                        radiant_dispatch_behavior_reset_activation(nullptr,
+                                                                   target_view);
+                    } else {
+                        radiant_dom_element_operation(js_dom_wrap_element(owner),
+                            JUBE_DOM_RESET, nullptr, 0);
+                    }
+                }
             }
         }
     }
@@ -2699,6 +2762,8 @@ void js_dom_events_reset(void) {
     }
     for (int i = 0; i < _handler_slot_count; i++) {
         if (_handler_slots[i].type) mem_free(_handler_slots[i].type);
+        event_handler_release_callback(&_handler_slots[i]);
+        event_handler_release_target(&_handler_slots[i]);
     }
     if (_handler_slots) {
         mem_free(_handler_slots);

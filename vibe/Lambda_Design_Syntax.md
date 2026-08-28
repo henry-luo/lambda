@@ -1352,7 +1352,8 @@ for scalars".
     exception; rule 1 is safe only because §7.15 dissolved the
     `<svg .rect>`-vs-`<svg, .rect>` case. `;` has exactly one role
     language-wide:
-    statement separation. S2.4.3v2 needs a `;`→`,` amendment (§7.11).
+    statement separation. S2.4.3 took that amendment as **S2.4.3v3**
+    (2026-08-28) — and the outcome was *no* delimiter, not `,`: see §7.11.
 31. Unary `+` is kept (identity + string→number coercion), and `+` stays
     in the S16.2.3 banned set — class consistency over per-token
     minimality: the whole arithmetic family `- + * /` is banned uniformly
@@ -1886,9 +1887,14 @@ role it has language-wide, not a residue of the divider.
 
 **Migration and spec touchpoints.** `<div; content>` → drop the `;` (or
 `,` in the ambiguous cases); `type { fields; methods }` → comma;
-S2.4.3v2's "explicit `;` before a relative-path element child" needs a v2
-amendment to the comma spelling. Trailing commas remain banned (ruling
-15): `<div a:1,>` errors.
+S2.4.3v2's "explicit `;` before a relative-path element child" took its
+amendment as **S2.4.3v3** (spec 18.0.2, 2026-08-28). Note the amendment is
+to *no* delimiter rather than to a comma: by rule 1 above the element has no
+attributes, so the biconditional forbids the boundary comma outright —
+`<svg \.rect>` is the form and `<svg, \.rect>` is an error. Verified against
+the parser on 2026-08-28: `<svg .rect>` yields tag `svg.rect` with 0
+children, `<svg \.rect>` yields tag `svg` with one `path` child. Trailing
+commas remain banned (ruling 15): `<div a:1,>` errors.
 
 ### 7.12 Unary `+` kept; the arithmetic family stays banned uniformly (decided)
 
@@ -2169,7 +2175,13 @@ A further ambiguity dissolved as a side effect: `<svg .rect>` versus
 `<svg, .rect>` (qualified tag versus tag-plus-path-child, S2.4.3v2's
 motivating case) no longer competes at all — with the relative path
 respelled, `.rect` cannot be a path, so `<svg .rect>` is unambiguously the
-qualified tag and the path-child form is `<svg, \\.rect>`.
+qualified tag and the path-child form is `<svg \\.rect>`.
+
+*(Corrected 2026-08-28: this paragraph previously gave the path-child form
+as `<svg, \\.rect>`, contradicting §7.11 rule 1. The comma is not merely
+optional here but **forbidden** — the element has no attributes, so the
+S16.9.3 biconditional rejects `<svg, \\.rect>`. Confirmed against the
+parser; the ruling now reads S2.4.3v3.)*
 
 ### 7.16 Digit-adjacent identifiers (decided and implemented — found by the implementation audit)
 

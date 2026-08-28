@@ -50,6 +50,15 @@ confirmation against the formal rules: LR01-1 (`S2.4.1v2`, `D3.4.1`), LR01-3
 moved to Appendix A with the `-R` suffix. `make test-lambda-baseline` passes
 **3914/3914** after the changes.
 
+### Numeric implementation pass — 2026-08-28
+
+LR04-1 was re-verified against **S4.6.1** and resolved: decimal source
+coefficients are parsed exactly, and exact `+`, `-`, and `*` results use a
+local maximum-precision context and promote storage when needed. The mixed
+float/decimal paths retain the existing shortest-round-trip conversion required
+by **S4.7.1**. Focused decimal and numeric tests pass; the full Lambda baseline
+passes **3978/3978**.
+
 
 Counts:
 
@@ -57,25 +66,30 @@ Counts:
 |---|---|---:|---:|---:|---:|
 | LR_01 | Compilation pipeline, CLI & REPL | 8 | 2 | 5 | 15 |
 | LR_02 | Parsing & AST construction | 3 | 4 | 13 | 20 |
-| LR_03 | Value & type model | 6 | 1 | 2 | 9 |
-| LR_04 | Numbers, decimal & datetime | 8 | 0 | 0 | 8 |
-| LR_05 | Strings, symbols & vectors | 5 | 1 | 4 | 10 |
+| LR_03 | Value & type model | 5 | 1 | 2 | 8 |
+| LR_04 | Numbers, decimal & datetime | 6 | 0 | 1 | 7 |
+| LR_05 | Strings, symbols & vectors | 3 | 1 | 5 | 9 |
 | LR_06 | C transpiler (legacy C2MIR) | 0 | 0 | 9 | 9 |
 | LR_07 | MIR Direct transpiler & JIT | 13 | 1 | 2 | 16 |
 | LR_08 | Memory management & GC | 10 | 0 | 0 | 10 |
-| LR_09 | Runtime builtins | 6 | 0 | 4 | 10 |
-| LR_10 | Error handling | 5 | 1 | 2 | 8 |
+| LR_09 | Runtime builtins | 5 | 0 | 4 | 9 |
+| LR_10 | Error handling | 2 | 1 | 2 | 5 |
 | LR_11 | Mark data API | 8 | 0 | 1 | 9 |
 | LR_12 | Procedural runtime | 7 | 0 | 2 | 9 |
 | LR_13 | Schema validator | 7 | 0 | 1 | 8 |
 | TS / Issues8 / Lint / Issues0 | Sibling vibe ledgers | 6 | 1 | 8 | 15 |
-| **Total** | | **92** | **11** | **53** | **156** |
+| **Total** | | **83** | **11** | **55** | **149** |
 
-The 131 total exceeds the 127 items in the source sections for two reasons.
+The 149 record total exceeds the 127 items in the original source sections for two reasons.
 Two original entries each split into a resolved half and a surviving residue —
 LR_03 #4 (sentinels → LR03-4 + LR03-5) and LR_05 #3 (two string orderings →
 LR05-R2 + LR05-3). And two defects were **found during verification** rather
 than extracted: LR02-8 through LR02-10, each marked as such in place (a fourth, LR02-11, was fixed the same day and is now LR02-R6).
+
+The 2026-08-28 ledger cleanup removes seven non-live records: five
+source-marker observations and two duplicate index entries. The resolved
+`LR05-2` classification remains in place because `LR05-R2` is already owned by
+the separate split half of LR05 #3.
 
 A follow-up syntax pass on 2026-08-24 added LR02-8 and LR02-9 and corrected three
 stale markers outside this ledger: the `S16.1–S16.6` row in
@@ -385,8 +399,11 @@ couplings should shrink as the common representation contract becomes
 authoritative — see [LR07-1](#7-mir-direct-transpiler--jit-lr_07).
 *Note:* the doc framed this partly as C2MIR/MIR-Direct divergence; with C2MIR
 removed it is now purely a MIR Direct ↔ value-model coupling.
+*Implementation note (2026-08-28, D2.4.1–D2.4.3):* the shared carrier vocabulary and
+fail-closed conversion boundary now distinguish the int lane from machine/full-width
+integers. Remaining workaround reduction is gated on expression-producer migration.
 
-<a id="lr03-4"></a>**LR03-4 · `it2l` error sentinel collides with a legitimate value · OPEN**
+<a id="lr03-4"></a><a id="lr10-5"></a>**LR03-4 · `it2l` error sentinel collides with a legitimate value · OPEN**
 `INT64_ERROR == INT64_MAX` (`lambda/lambda.h:1261`); `it2l`
 (`lambda/core/lambda-data.cpp:424`) returns it as the failure sentinel, so a
 real maximum int64 is indistinguishable from a conversion failure. Cross-link:
@@ -410,20 +427,19 @@ wrong number instead of propagating.
 value mis-reads as a function unless callers check `JSPD_IS_ACCESSOR` first
 (`lambda-data.hpp:281`, warned in the header at `:286`).
 
-<a id="lr03-7"></a>**LR03-7 · Latent, not annotated · OPEN (note)**
-The core value-model files still carry no `TODO`/`FIXME`/`HACK`/`XXX` markers;
-the issues above are structural and will not surface in a tag grep.
-
 ---
 
 ## 4. Numbers, decimal & datetime (LR_04)
 
-<a id="lr04-1"></a>**LR04-1 · "Unlimited" decimal is a 200-digit cap · OPEN**
-`g_unlimited_ctx.prec = 200` (`lambda/core/lambda-decimal.cpp:46`) is a
-workaround for `mpd_pow` crashing at `mpd_maxcontext` precision; the in-code
-comment still reads "far more than needed for any practical computation"
-(`:44`). Computations needing more than 200 significant digits silently round,
-while the surface name says "unlimited".
+<a id="lr04-1"></a>**LR04-1 · "Unlimited" decimal is a 200-digit cap · RESOLVED 2026-08-28**
+Literal, string, and arena ingestion now parse coefficients exactly, and
+decimal `+`, `-`, and `*` use a local maximum-precision context so exact
+results can grow beyond 200 digits. `g_unlimited_ctx.prec = 200`
+(`lambda/core/lambda-decimal.cpp:46`) remains only the extended context for
+documented inexact operations such as division and power; it is no longer used
+to cap source literals or exact arithmetic under **S4.6.1**/S4.6.2. Regression:
+`decimal_tiers` covers a 350-digit literal and a 53-digit fixed-tier product;
+the decimal baseline passes.
 
 <a id="lr04-2"></a>**LR04-2 · BigInt still has practical caps · OPEN**
 `bigint_precision_context` caps precision at 100000 digits
@@ -461,9 +477,6 @@ Division-by-zero and invalid decimal results can still collapse to a generic
 are the finest precision. Out-of-range construction yields
 `DATETIME_MAKE_ERROR()`.
 
-<a id="lr04-8"></a>**LR04-8 · No literal `TODO`/`FIXME` markers · OPEN (note)**
-Expressed only as "for now" / "far more than needed" comments.
-
 ---
 
 ## 5. Strings, symbols & vectors (LR_05)
@@ -478,11 +491,12 @@ str[32]` stack buffers with **no bound re-check** (`:696`, `:794`, `:3123`,
 `:3271`, `:3357`, `:3391`, `:3463`, `:3581`, `:3663`, `:3680`). Any path that
 reaches them with an unvalidated shape overruns the stack.
 
-<a id="lr05-2"></a>**LR05-2 · Not full UCA collation · OPEN**
-The utf8proc path is casefold-then-`memcmp`, not the Unicode Collation
-Algorithm: no locale tailoring, no weight tables, no accent ordering. The
-comment at `lambda/core/utf_string.cpp:57` still overstates it as "proper
-Unicode collation".
+<a id="lr05-2"></a>**LR05-2 · Not full UCA collation · RESOLVED (not a defect; ruled by S6.2.2)**
+The former expectation was wrong: Lambda's normative total order is bytewise
+UTF-8, with no locale collation or accent ordering. The utf8proc casefold path
+is used only for markup tag/attribute matching. The stale comment at
+`lambda/core/utf_string.cpp:57` should be corrected, but implementing UCA would
+contradict **S6.2.2** rather than fix Lambda's operators.
 
 <a id="lr05-3"></a>**LR05-3 · Dead `*_comp_unicode` Item wrappers · OPEN**
 `equal_comp_unicode` / `less_comp_unicode` / `greater_comp_unicode` /
@@ -518,8 +532,6 @@ Normalizers return raw utf8proc-allocated buffers that callers must `raw_free`
 (`utf_string.cpp:64`–`65`, `:90`); the `RAWALLOC_OK` annotations acknowledge
 this sits outside the pool/GC discipline.
 
-<a id="lr05-8"></a>**LR05-8 · No `TODO`/`FIXME` markers · OPEN (note)**
-
 ---
 
 ## 6. C transpiler — legacy C2MIR (LR_06)
@@ -543,6 +555,13 @@ AST names a concrete numeric type. All three sites must consume one shared
 result-domain decision or a raw register can be mistaken for an Item.
 Cross-link: this is the same "expression results carry no ValueRep" root cause
 recorded in [Result32 lane-parity + Tune19] and [Compiling lane design].
+*Implementation note (2026-08-28, D2.4.1–D2.4.3):* L0–L4's first slice landed: `MirValue`
+carries the full contract, `ValueRep` separates `INT_LANE`/machine quantities, arithmetic,
+branch, binding, index, call, and return consumers now use explicit carriers, and direct
+identity/axis/fail-closed transition fixtures cover the router. Lambda expression lowering
+has zero semantic `MIR_reg_type()` probes; ten remaining probes are physical-only. Raw
+expression producers still cross the explicit `transpile_expr_reg_legacy` shim, so this issue
+remains open.
 
 <a id="lr07-2"></a>**LR07-2 · "undeclared reg 0" guard · OPEN**
 Value-less statements would return the invalid register 0 and crash MIR;
@@ -765,12 +784,6 @@ Regression: `ErrorCreationTest.CreateFormattedErrorPreservesLongMessage`
 verifies the full 1514-byte formatted message. The focused error suite passes
 121/121 and `make test-lambda-baseline` passes 3978/3978.
 
-<a id="lr09-7"></a>**LR09-7 · No tags in source · OPEN (note)**
-The registry caveats carry no `TODO`/`FIXME`/`HACK`; they are discoverable only
-by reading the commented-out block, the "transpiler special case" notes, and the
-`NULL` pointers.
-
-
 ---
 
 ## 10. Error handling (LR_10)
@@ -794,13 +807,6 @@ function's start; the *last* function has no successor and is given a fixed
 address order mis-attributes return addresses past that boundary, silently
 dropping or mislabeling the deepest frame.
 
-<a id="lr10-3"></a>**LR10-3 · Fixed error buffers truncate silently · OPEN**
-`err_createf` / `set_runtime_error` format into 1024-byte stack buffers,
-`err_format` into `char buffer[4096]` (`lambda-error.cpp:857`),
-`err_format_with_context` into `char buffer[8192]` (`:894`), `err_format_json`
-into `[4096]` (`:1074`), and the caret span is capped at 20 characters (`:954`).
-All truncate without signaling.
-
 <a id="lr10-4"></a>**LR10-4 · Two stack-trace capture depths and a trace-free path · PARTIAL**
 `set_runtime_error` and `fn_error` pass `max_frames = 32` while
 `err_capture_stack_trace` defaults to 64 when passed `<= 0`
@@ -809,13 +815,6 @@ All truncate without signaling.
 default 64, hard max 128, capacity max 1024 (`:755`–`760`).
 *Residue:* the callers still pass 32, so deep recursion — the very case where a
 trace is most wanted — is silently truncated.
-
-<a id="lr10-5"></a>**LR10-5 · `it2l` sentinel collides with a legitimate value · OPEN**
-Owned by [LR03-4](#lr03-4)
-but bears on error handling: any caller using the sentinel to detect conversion
-failure cannot distinguish it from a real maximum int64.
-
-<a id="lr10-6"></a>**LR10-6 · No source-level markers · OPEN (note)**
 
 ---
 
@@ -923,7 +922,113 @@ single non-thread-local flag: concurrent compilation/execution that wants
 per-run dry-run semantics has no per-context override. Cross-link: RG1–RG14 in
 [Runtime globals audit].
 
-<a id="lr12-9"></a>**LR12-9 · Construction/insertion aliases instead of capturing by value (`S9.3.1`) · OPEN**
+<a id="lr12-9"></a>**LR12-9 · Construction/insertion aliases instead of capturing by value (`S9.3.1`) · IMPLEMENTED BEHIND A FLAG**
+
+**Update 2026-08-28.** Insertion capture is implemented on both tiers behind
+`LAMBDA_COW_CAPTURE` (default OFF). With the flag set, all four probes below
+return the ruled value, the two-node cycle is no longer constructible, and
+`awfy/richards3` still passes. Mechanism: capture is `cow_mark_shared` at the
+insertion site — the copy stays deferred to `cow_prepare_write`, so nothing is
+eagerly cloned. It is decided at COMPILE time and applied only to a *named*
+value (`ast_expr_insertion_needs_capture`): a freshly produced container has no
+second observer, and marking one would make `rows[i] = <fresh>` detach on the
+owner's first write. MIR Direct additionally needed the static half — it picks
+the store form from `MirVarEntry::cow_marked` at compile time, so an unflagged
+binding keeps emitting raw field stores that never read the runtime bit
+(`mir_note_value_captured` / `mir_emit_value_capture`).
+
+**Why it is not yet the default.** Insertion capture is sound alone, but element
+and field READS still borrow (the open C4.1 half). Once a slot holds a captured
+value, the get-modify idiom `c = owner[i]` … `c[j] = v` writes to a detached
+copy and the update is lost. Measured cost of flipping it: exactly **four**
+corpus scripts, all that idiom — `proc/proc_fill_gc_nested`,
+`awfy/{cd2_orig,deltablue,deltablue2}`. Three are benchmark sources (`cd2_orig`
+is a perf *control*), so the rewrite is a scoping decision, not a mechanical
+fix. The sanctioned rewrites are the path write (`owner[i][j] = v`, which
+`cow_path_set` already propagates correctly), mutate-then-insert, or the
+explicit read-modify-write handle store (`C4.2e`) that `richards3` uses.
+`S9.1.3` plain-parameter snapshots remain unimplemented and are still expected
+to land with this. The nested-mutation design that lets the flag become the
+default is now written:
+[`Lambda_Design_Nested_Mutation.md`](Lambda_Design_Nested_Mutation.md)
+(CW22–CW28, PROPOSED, owner of `SO14`). Its scheduling result is that the flip
+is gated on **CW24** — a compile error for a mutated place copy — which turns
+silent wrong answers into located, mechanical fixes.
+
+**CW24 implemented 2026-08-28** (worktree, not yet merged), gated on the same
+`LAMBDA_COW_CAPTURE` switch: `error[E232]`, raised in `build_ast` so both tiers
+share it. Two corrections fell out of building it, recorded in the design doc
+§6.1: (a) the check must DEFER to end-of-function, because read-modify-**write-
+back** (`p = w.pkts[i]` … `w.pkts[i] = p`) is the sanctioned C4.2e idiom and is
+indistinguishable from the bug at the mutation site — a mutation-site check
+rejects `awfy/richards3.ls`, the model's own worked example; (b) the migration
+is **nine** scripts, not four. The extra five (`proc_markup_mutation`,
+`proc_param_typed_container_write`, `proc_view_mutable`,
+`typed_map_write_child_ownership`, `r7rs/mbrot2`) still work today only because
+insertion capture marks named values only, so containers filled with fresh
+values still hand back borrowable children. `proc_view_mutable` is the notable
+one: it pins `var row = m[1]` as a write-through view *binding*, which S9.2.2
+already forbids, so CW24 enforces part of Stage-2's CW16.3 confinement early —
+and that family needs CW25 before it has a legal spelling.
+
+**CW25 implemented 2026-08-28** (same worktree, same flag). Path borrows
+(`f(var m.rows[i])`) now detach the whole spine before the call on BOTH tiers,
+via one new runtime helper `cow_path_borrow` plus a hook at each tier's
+argument site. Before this they aliased — a write through `m.rows` reached the
+original binding, a standing violation of the ratified S9.2.2 ("a mutable
+borrow over shared storage un-shares first"). Verified at depth 1 and 2 on both
+tiers; no new test failures (still exactly the 9 E232 from CW24), and the view
+family's migration is proven: `write_row(m[1])` produces the `99 5 88` that
+`proc_view_mutable` expects.
+
+The design's specified third step — install the leaf back on return — turned
+out to be **unnecessary** and was dropped (design doc rev 4). Both tiers run
+the borrow protocol as detach-then-mutate-in-place, and `var` parameters use
+the in-place checked setters, so a detached leaf is already installed where it
+belongs.
+
+**`E207` closed 2026-08-28**: annotated path borrows (`pn f(var r: any[])`
+called as `f(m.rows)`) now compile and borrow on both tiers. The exact-match
+rule for `var` arguments was NOT relaxed — it exists because a callee writes
+through the borrow and must not see a mismatched representation. The real
+defect was that a place's node type is `any` (a member read does not propagate
+its field's declared type, TIG1), so the check compared against a type nobody
+had computed. It now resolves the declared type *through the path* via
+`declared_compound_destination_type` — the walker the assignment side already
+uses for annotated destinations — before reporting. A genuine mismatch
+(`var r: int[]` against a declared `any[]` field) is still rejected. This
+covers annotated roots only; general TIG1 carrier-read propagation stays open.
+
+**Corpus migration 2026-08-28: 8 of 9 done, flag-on failures 9 → 1.** Goldens
+unchanged in every migrated case, each passing with the flag on and off:
+`r7rs/mbrot2` + `proc_fill_gc_nested` → path writes; `proc_view_mutable` → a
+`var`-parameter borrow (the CW25 spelling S9.2.2 requires of a write-through
+view); `proc_param_typed_container_write`, `typed_map_write_child_ownership`,
+`proc_markup_mutation` → read-modify-write-back (C4.2e).
+
+The remaining three were stopped deliberately, as they are structural rather
+than spelling problems (design doc §B.1). `awfy/cd2_orig` needs a cascading
+`var`-signature migration through every caller — attempted and reverted, and it
+is also the *comparable source* perf control for `cd2`. `awfy/deltablue` and
+`deltablue2` are constraint graphs needing the C4.2e handle-store rewrite.
+**`deltablue2.ls` has since been ported** (in place, golden unchanged): one `w`
+world owns `w.vars`/`w.cons`, every Variable-valued field (`out`, `v1`, `v2`,
+`sc`, `off`) holds a variable id, constraint lists and plans hold cids, planner
+state moved onto the world, and `w` is the single `var` parameter. Passes with
+the flag on, both tiers, zero `E232`. **`deltablue.ls` followed**, derived from
+that port with its annotations stripped, so the typed/untyped pair still
+differs only in signatures (138 lines, all annotations). Only `awfy/cd2_orig`
+remains.
+
+Two engine findings fell out, both pre-existing: **NM-O8** — a nested path
+write through a *plain* `pn` parameter is not published to the caller while a
+flat one is (both tiers agree; it is what makes `cd2_orig` cascade) — and a T0
+scratch-planner under-budget for the nested-path assignment branch
+(`interp: scratch overflow depth=5 cap=5`, write silently dropped), reproduced
+on pristine master and **fixed** here.
+
+Original record (behavior with the flag unset) follows.
+
 Probed 2026-08-27 on `ba7ce817c`, interpreter and `LAMBDA_TIER=jit` alike.
 `S9.3.1` rules that placing a value into a container captures it **by value** at
 every constructor and insertion point; none of them do:
@@ -1014,6 +1119,31 @@ and `error_reporting.cpp` 6, writing to stdout with emoji rather than through
 `log_*`. Also `error->actual.item` truthiness treats a `0`/null actual as
 "absent", which can misreport a legitimately-null value.
 
+## 13.1 Ledger hygiene observations (not issues)
+
+These records are retained for provenance but are excluded from the counts
+above. The absence of source markers is not evidence that a structural defect
+is absent; active rows must be found by behavior and ownership analysis.
+
+<a id="lr03-7"></a>**LR03-7 · Latent, not annotated · OBSERVATION**
+The core value-model files carry no `TODO`/`FIXME`/`HACK`/`XXX` markers; the
+issues above are structural and will not surface in a tag grep.
+
+<a id="lr04-8"></a>**LR04-8 · No literal `TODO`/`FIXME` markers · OBSERVATION**
+The number and datetime concerns are expressed only as "for now" /
+"far more than needed" comments.
+
+<a id="lr05-8"></a>**LR05-8 · No `TODO`/`FIXME` markers · OBSERVATION**
+The string and vector concerns have no source-level marker.
+
+<a id="lr09-7"></a>**LR09-7 · No tags in source · OBSERVATION**
+The registry caveats carry no `TODO`/`FIXME`/`HACK`; they are discoverable only
+by reading the commented-out block, the "transpiler special case" notes, and
+the `NULL` pointers.
+
+<a id="lr10-6"></a>**LR10-6 · No source-level markers · OBSERVATION**
+The error-handling concerns have no source-level marker.
+
 ---
 
 ## 14. Sibling vibe ledgers (TS, Issues8)
@@ -1077,7 +1207,7 @@ makes optional parameters the sanctioned alternative to overloading:
 `test/std/negative/wrong_arg_count_optional.ls` +
 `NegativeScriptTest.OptionalParamArityReportsARange`.
 
-<a id="i8-mapkey"></a><a id="i8-mapkey"></a>**Issues8 · Double-quoted map keys rejected · RESOLVED (not a defect — doc was wrong)**
+<a id="i8-mapkey"></a>**Issues8 · Double-quoted map keys rejected · RESOLVED (not a defect — doc was wrong)**
 Every double-quoted map key fails: `{"key": 1}` gives
 `error[E100]: expected an expression` at the `:`, while `{'key': 1}` and
 `{key: 1}` both work. Ruled 2026-08-25: **the parser is correct** — a map key is
@@ -1401,6 +1531,11 @@ evaluates to `<path d: "M0", stroke-dasharray: "4 2">`.
   native, FLOAT→INT widening truncating in loops, indirect/closure calls past
   three arguments returning wrong values, and errors silently coercing to
   `0`/`0.0`/`false` when unboxed.
+  *Implementation note (2026-08-28, D2.4.1–D2.4.3):* the L0–L4 first slice is now
+  present in the shared MIR metadata and Lambda adapter. Arithmetic, branch, binding,
+  index, call, and return consumers use explicit carriers; direct identity/axis/fail-closed
+  transition fixtures are landed; and semantic `MIR_reg_type()` probes are gone from Lambda
+  expression lowering. Remaining raw producers and the final legacy-shim ratchet stay open.
 - **OI-6 · Codegen quality cluster (JS).** Destination-passing lowering
   (66–88% of emitted MIR is MOVs); shape-based polymorphic inline caching;
   de-pointered relocatable MIR (~59 baked realm pointers) blocking artifact
@@ -1438,9 +1573,10 @@ One policy each, not per-site fixes.
 - **Silent fixed caps with inconsistent failure modes** — closure captures 16,
   generator states 63, promise reactions 8, TypeMap hash 32, union types 32,
   module vars 2048/1024, regex groups 256, and more. One grow-or-error doctrine
-  retires the class. Ledger instances: [LR09-6](#lr09-6), [LR13-5](#lr13-5).
+  retires the class. Ledger instances: [LR01-5](#lr01-5), [LR11-4](#lr11-4),
+  [LR13-5](#lr13-5).
 - **Layout-coupled raw offsets** — GC trace/compaction and `init_module_import`
-  ([LR01-9](#lr01-9), [LR08-6](#lr08-6)); static-assert guards or generated
+  ([LR01-8](#lr01-8), [LR08-5](#lr08-5)); static-assert guards or generated
   offset tables.
 - **One masked memory-safety bug** — the event-loop SIGSEGV band-aid remains;
   the `sys://` map-walk segfault workaround was replaced by the shape-aware
@@ -1949,11 +2085,12 @@ textile, wiki) calls `list_push` and merges them. `input-ics.cpp` and
 `input-mark.cpp` use both and so mix the two policies — worth reconciling, along
 with retiring the dead flag.
 
-<a id="lr09-r4"></a>**LR09-R4 · `set_runtime_error` message buffer cap · RESOLVED 2026-08-28**
+<a id="lr09-r4"></a><a id="lr10-3"></a>**LR09-R4 · `set_runtime_error` message buffer cap · RESOLVED 2026-08-28**
 `err_createf` and `set_runtime_error` now share the exact-size variadic
 formatter backed by `mem_alloc`, so long diagnostics are not silently
 truncated at 1023 bytes. The 32-frame trace cap is a separate LR10-4
-residue. Regression: `ErrorCreationTest.CreateFormattedErrorPreservesLongMessage`;
+residue. This also closes the duplicate LR10-3 index entry; its stable anchor
+is retained here. Regression: `ErrorCreationTest.CreateFormattedErrorPreservesLongMessage`;
 the error suite passes 121/121 and the Lambda baseline passes 3978/3978.
 
 ## A.11 Procedural runtime (LR_12)
@@ -2023,11 +2160,11 @@ together, not individually.
 |---|---|---|
 | **Honest static types** | LR07-7, LR08-3, LR11-6, LR12-3 | The collector, the TCO gate, and the stack-check gate all trust transpiler type classification. Until that is provable, all three stay pessimistic. Fix per CLAUDE.md rule 15 with precise `RootFrame`/`Rooted` ownership. |
 | **Representation ↔ semantics coupling** | LR03-3, LR07-1, LR07-5, LR07-14 | Expression results carry no `ValueRep`; each consumer re-derives it. See [Result32 lane-parity + Tune19], [Compiling lane design]. |
-| **Value-semantics residue (OI-1)** | LR03-1, LR04-4, LR09-3 | Second equality walker, `decimal_cmp` failure-as-equality, VMap key eq/hash rank consistency. Tracked as OI-1 in `vibe/Lambda_Issues_Outstanding.md`. |
-| **`INT64_MAX` sentinel collision** | LR03-4, LR07-4, LR10-5 | `INT64_ERROR == INT64_MAX` and `INT_LANE_INF` share one bit pattern; index OOB also lands on `INT64_MAX`. See [v5 int migration in flight]. |
+| **Value-semantics residue (OI-1)** | LR03-1, LR04-4, LR09-3 | Second equality walker, `decimal_cmp` failure-as-equality, VMap key eq/hash rank consistency. Tracked as OI-1 in this ledger's [§15](#15-design-gaps-inherited-from-the-retired-outstanding-rollup-oi). |
+| **`INT64_MAX` sentinel collision** | LR03-4, LR07-4 | `INT64_ERROR == INT64_MAX` and `INT_LANE_INF` share one bit pattern; index OOB also lands on `INT64_MAX`. The former LR10-5 entry is a preserved alias for LR03-4. See [v5 int migration in flight]. |
 | **Hard-coded byte offsets** | LR01-8, LR07-12, LR08-5 | Three subsystems read struct fields at literal offsets that no `static_assert` protects. A single layout change corrupts module binding, GC tracing, or the JIT prologue silently. |
-| **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR09-6, LR10-3, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
-| **Surface syntax (S16) residue** | LR02-9, LR02-10, SO9, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
+| **Silent-truncation caps** | LR01-5, LR01-6, LR03-2, LR05-6, LR07-11, LR08-6, LR08-10, LR10-4, LR11-4, LR13-4 | Every one of these fails by quietly dropping data rather than erroring. The truncate-vs-error inconsistency (LR11-4) is the clearest statement of the pattern. |
+| **Surface syntax (S16) residue** | LR02-16, S16.9.5, i8-genafterlet, SO36, O3, §7.17 | S16.1–S16.6.7 are conformant on the harness (140/140 C, 135/135 Tree-sitter); S16.6.8/S16.6.9 (procedural blocks are not expressions; branch homogeneity) were ratified AND implemented 2026-08-24 in build_ast (E312); harness now 152/152 C, 135/135 Tree-sitter. SO36 (pn calls in expressions) is deliberately open. What remains is not the line-delimiter design but the type sublanguage and the paired `for`: forms that parse and then behave wrongly or inconsistently by position. See [Design_Syntax §6–§7](Lambda_Design_Syntax.md). |
 | **Process globals** | LR01-12, LR12-6 | `g_template_registry` and `g_dry_run` block concurrent runtimes. See RG1–RG14 in [Runtime globals audit], RC1–RC8 in [Radiant concurrency design]. |
 
 ---

@@ -608,7 +608,7 @@ Integration point: called from `transpile_js_to_mir()` after heap/context setup,
 
 ## Appendix: Profiling Data Reference
 
-Full profiling report: [`test/benchmark/Transpile_Result.md`](../test/benchmark/Transpile_Result.md)
+Full profiling report: [`test/benchmark/Transpile_Result.md`](../../test/benchmark/Transpile_Result.md)
 
 **Top 5 standalone scripts by transpile time:**
 

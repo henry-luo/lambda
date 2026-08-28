@@ -802,6 +802,18 @@ static inline void dom_pre_remove(DomNode* child, bool record_mutation = true) {
                                       child ? child->parent : nullptr, 0);
     }
 }
+
+static bool js_dom_detach_dom_node(DomNode* node) {
+    if (!node || !node->parent) return true;
+    dom_pre_remove(node);
+    DomNode* old_parent = node->parent;
+    return old_parent->remove_child(node);
+}
+
+static void js_dom_pre_remove_if_attached(DomNode* node) {
+    if (node && node->parent) dom_pre_remove(node);
+}
+
 static inline void dom_post_insert(DomNode* parent, DomNode* node,
                                    bool record_mutation = true) {
     DocState* st = js_dom_state_for_nodes(node, parent);
@@ -2890,11 +2902,10 @@ static bool js_dom_prepare_cross_document_insertion(DomNode* node,
     bool cross_document = source != destination;
     if (cross_document &&
         !js_dom_transfer_document_storage(source, destination)) return false;
-    // Detach while the source document and lifecycle ids are still current;
-    // rebinding first makes removal pins target two incompatible registries.
-    if (node->parent) {
-        dom_pre_remove(node);
-        node->parent->remove_child(node);
+    // Detach only for adoption; same-document backed paths must retain the
+    // source parent so they can remove the corresponding Mark child too.
+    if (cross_document && node->parent && !js_dom_detach_dom_node(node)) {
+        return false;
     }
     if (cross_document &&
         !js_dom_rebind_subtree_document(node, source, destination)) return false;
@@ -5580,7 +5591,9 @@ static DomElement* js_dom_parse_html_fragment(DomDocument* doc,
     return fragment;
 }
 
-static bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
+// F14.1: the DOM package owns the command decision; this remains only as the
+// parse-and-splice mechanism behind radiant.dom_insert_html.
+extern "C" bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
     if (!doc || !html_str) return false;
     DocState* state = doc->state ? doc->state : js_dom_current_state();
     DomSelection* selection = state ? state->dom_selection : nullptr;
@@ -5615,8 +5628,6 @@ static bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
         return false;
     }
 
-    // Editor.js delegates inline paste to execCommand; the bridge removed by
-    // DOM API consolidation must report the Range mutation that saves editor state.
     if (replaced_selection && replace_root) {
         js_dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
                                replace_root, replace_root);
@@ -5639,6 +5650,14 @@ static bool js_dom_exec_insert_html(DomDocument* doc, const char* html_str) {
     return true;
 }
 
+extern "C" bool radiant_dom_exec_command(void* document, const char* command,
+                                        const char* value);
+
+// F14.1/ES20: `document.execCommand` is now a thin dispatch into the dom
+// package's command set. It used to implement exactly one command here —
+// `insertHTML` — which meant Cmd+B and `execCommand('bold')` could not share an
+// implementation because only one of them had one. The package owns the command
+// set for both entry points; this only converts the arguments.
 extern "C" Item js_dom_document_exec_command_bridge(Item command_item,
                                                       Item value_item) {
     JS_ROOTS(roots,
@@ -5647,18 +5666,21 @@ extern "C" Item js_dom_document_exec_command_bridge(Item command_item,
         string_root, js_to_string(value_root.get()));
     const char* command = fn_to_cstr(command_root.get());
     const char* value = fn_to_cstr(string_root.get());
-    if (!command || !value || strcasecmp(command, "insertHTML") != 0) {
-        return (Item){.item = ITEM_FALSE};
-    }
+    if (!command || !*command) return (Item){.item = ITEM_FALSE};
 
-    // A precise root keeps the JS string live, while this owned copy keeps the
-    // parser input stable if fragment construction triggers a moving collection.
-    char* stable_value = mem_strdup(value, MEM_CAT_JS_RUNTIME);
-    if (!stable_value) return (Item){.item = ITEM_FALSE};
-    bool inserted = js_dom_exec_insert_html(
-        (DomDocument*)js_dom_get_document(), stable_value);
+    // Owned copies: the package may parse a fragment or splice a text node, and
+    // both can move the heap out from under a JS string the roots only pin in
+    // place, not in address.
+    char* stable_command = mem_strdup(command, MEM_CAT_JS_RUNTIME);
+    char* stable_value = mem_strdup(value ? value : "", MEM_CAT_JS_RUNTIME);
+    bool handled = false;
+    if (stable_command && stable_value) {
+        handled = radiant_dom_exec_command(js_dom_get_document(), stable_command,
+                                           stable_value);
+    }
+    mem_free(stable_command);
     mem_free(stable_value);
-    return (Item){.item = b2it(inserted ? 1 : 0)};
+    return (Item){.item = b2it(handled ? 1 : 0)};
 }
 
 // ============================================================================
@@ -8385,6 +8407,37 @@ static Item js_dom_check_or_report_validity(Item elem_item, bool report) {
 JS_FORWARD_ITEM(js_dom_check_validity_bridge, (Item elem_item), js_dom_check_or_report_validity, (elem_item, false))
 JS_FORWARD_ITEM(js_dom_report_validity_bridge, (Item elem_item), js_dom_check_or_report_validity, (elem_item, true))
 
+static DomElement* js_dom_first_invalid_control(DomNode* node) {
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!current->is_element()) continue;
+        DomElement* elem = current->as_element();
+        if (js_dom_is_constraint_control(elem)) {
+            Item state = _build_validity_state(elem);
+            if (!js_dom_validity_item_is_valid(js_get_key_cstr(state, "valid"))) {
+                return elem;
+            }
+        }
+        DomElement* nested = js_dom_first_invalid_control(elem->first_child);
+        if (nested) return nested;
+    }
+    return nullptr;
+}
+
+// Interactive submission focuses the first invalid control after the invalid
+// events have fired. The validity computation remains shared with the public
+// checkValidity/reportValidity bridges; this helper only supplies the focus
+// side effect required by the form submission policy.
+extern "C" bool js_dom_focus_first_invalid_form_control(void* form_ptr) {
+    DomElement* form = (DomElement*)form_ptr;
+    if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
+        return false;
+    }
+    DomElement* invalid = js_dom_first_invalid_control(form->first_child);
+    if (!invalid) return false;
+    js_dom_focus_method_bridge((void*)invalid, true);
+    return true;
+}
+
 // ----------------------------------------------------------------------
 // ----------------------------------------------------------------------
 // F-0: reflected IDL attributes.
@@ -10626,6 +10679,7 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // above, and setAttribute() remains the DOM attribute mutation path.
     {
         expando_set_property((DomNode*)elem, prop_name, value);
+        Item set_map = expando_get_map((DomNode*)elem);
         if (prop[0] == 'o' && prop[1] == 'n' && prop[2] != '\0') {
             // DOM host setters store on* values in the expando side table;
             // register the same write in the listener list so assignment
@@ -13224,11 +13278,12 @@ static bool js_dom_append_backed_element(DomElement* parent, DomNode* child) {
     if (!parent || !child || !child->is_element()) return false;
     parent = js_dom_prepare_children_for_mutation(parent);
     if (!parent) return false;
+    if (child->parent == (DomNode*)parent && parent->last_child == child) return true;
+    if (child->parent) dom_pre_remove(child);
     DomElement* child_elem = child->as_element();
     int64_t backed_index = js_dom_backed_child_index(parent, child_elem);
     if (backed_index >= 0) {
         if (child->parent == parent) {
-            if (parent->last_child == child) return true;
             // Move an existing sibling through both trees so the backing order
             // stays aligned with the DOM appendChild() ordering rule.
             if (!js_dom_remove_backed_child(parent, child)) return false;
@@ -13393,6 +13448,36 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
         if (!((DomNode*)parent)->remove_child((DomNode*)text)) return false;
         return ((DomNode*)parent)->insert_before((DomNode*)text, ref_child);
     }
+    return true;
+}
+
+static bool js_dom_append_fragment_children(DomElement* parent,
+                                             DomElement* fragment) {
+    if (!parent || !fragment) return false;
+    DomNode* child = fragment->first_child;
+    while (child) {
+        DomNode* next = child->next_sibling;
+        if (!js_dom_prepare_cross_document_insertion(child, parent)) {
+            return false;
+        }
+        if (child->is_element()) {
+            // DOM Standard: appending a DocumentFragment splices its children;
+            // keep the backing Element order aligned with the live DOM chain.
+            if (!js_dom_append_backed_element(parent, child)) return false;
+        } else if (child->is_text()) {
+            js_dom_pre_remove_if_attached(child);
+            if (!js_dom_insert_backed_text(parent, child->as_text(), nullptr)) {
+                return false;
+            }
+        } else if (!js_dom_detach_dom_node(child) ||
+                   !((DomNode*)parent)->append_child(child)) {
+            return false;
+        }
+        dom_post_insert((DomNode*)parent, child);
+        child = next;
+    }
+    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                           (DomNode*)parent, (DomNode*)parent);
     return true;
 }
 
@@ -13642,28 +13727,7 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
     if (child_node->is_element()) {
         DomElement* child_elem = child_node->as_element();
         if (child_elem->tag_name && strcmp(child_elem->tag_name, "#document-fragment") == 0) {
-            DomNode* frag_child = child_elem->first_child;
-            while (frag_child) {
-                DomNode* next = frag_child->next_sibling;
-                if (!js_dom_prepare_cross_document_insertion(frag_child, elem)) {
-                    return ItemNull;
-                }
-                if (frag_child->is_element()) {
-                    // Moving a fragment child must update the destination Mark
-                    // tree; the base DOM linker leaves renderer-visible SVG
-                    // children detached from their Element backing.
-                    if (!js_dom_append_backed_element(elem, frag_child)) return ItemNull;
-                } else if (frag_child->is_text()) {
-                    if (!js_dom_insert_backed_text(elem, frag_child->as_text(), nullptr)) {
-                        return ItemNull;
-                    }
-                } else if (!((DomNode*)elem)->append_child(frag_child)) {
-                    return ItemNull;
-                }
-                dom_post_insert((DomNode*)elem, frag_child);
-                frag_child = next;
-            }
-            js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT, (DomNode*)elem, (DomNode*)elem);
+            if (!js_dom_append_fragment_children(elem, child_elem)) return ItemNull;
             return child_arg;
         }
     }
@@ -13673,8 +13737,10 @@ extern "C" Item js_dom_append_child_bridge(void* parent_ptr, Item child_arg) {
         // DomElement to preserve the renderer's tree as well as DOM links.
         if (!js_dom_append_backed_element(elem, child_node)) return ItemNull;
     } else if (child_node->is_text()) {
+        js_dom_pre_remove_if_attached(child_node);
         if (!js_dom_insert_backed_text(elem, child_node->as_text(), nullptr)) return ItemNull;
-    } else if (!((DomNode*)elem)->append_child(child_node)) {
+    } else if (!js_dom_detach_dom_node(child_node) ||
+               !((DomNode*)elem)->append_child(child_node)) {
         return ItemNull;
     }
     dom_post_insert((DomNode*)elem, child_node);
@@ -13958,6 +14024,7 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
         int64_t old_index = js_dom_backed_child_index(elem, old_elem);
         if (new_elem && old_elem && old_index >= 0) {
             if (new_child->parent && new_child->parent != (DomNode*)elem) {
+                dom_pre_remove(new_child);
                 if (!new_child->parent->is_element() ||
                     !js_dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
                     return ItemNull;
@@ -14204,12 +14271,33 @@ extern "C" Item js_dom_append_variadic_bridge(void* elem_ptr, Item* args, int ar
     for (int i = 0; i < argc; i++) {
         DomNode* child_node = (DomNode*)js_dom_unwrap_element(args[i]);
         if (child_node) {
+            if (child_node->is_element()) {
+                DomElement* child_elem = child_node->as_element();
+                if (child_elem->tag_name &&
+                    strcmp(child_elem->tag_name, "#document-fragment") == 0) {
+                    if (!js_dom_append_fragment_children(elem, child_elem)) {
+                        return (Item){.item = ITEM_JS_UNDEFINED};
+                    }
+                    continue;
+                }
+            }
             // ParentNode.append is the path used by DOMParser consumers such
             // as HTMX; it must adopt foreign nodes before relinking them.
             if (!js_dom_prepare_cross_document_insertion(child_node, elem)) {
                 return (Item){.item = ITEM_JS_UNDEFINED};
             }
-            ((DomNode*)elem)->append_child(child_node);
+            bool inserted = false;
+            if (child_node->is_element()) {
+                inserted = js_dom_append_backed_element(elem, child_node);
+            } else if (child_node->is_text()) {
+                js_dom_pre_remove_if_attached(child_node);
+                inserted = js_dom_insert_backed_text(
+                    elem, child_node->as_text(), nullptr);
+            } else {
+                inserted = js_dom_detach_dom_node(child_node) &&
+                    ((DomNode*)elem)->append_child(child_node);
+            }
+            if (!inserted) return (Item){.item = ITEM_JS_UNDEFINED};
             dom_post_insert((DomNode*)elem, child_node);
         } else {
             const char* text = fn_to_cstr(args[i]);
@@ -14233,7 +14321,18 @@ extern "C" Item js_dom_prepend_variadic_bridge(void* elem_ptr, Item* args, int a
             if (!js_dom_prepare_cross_document_insertion(child_node, elem)) {
                 return (Item){.item = ITEM_JS_UNDEFINED};
             }
-            ((DomNode*)elem)->insert_before(child_node, ref);
+            bool inserted = false;
+            if (child_node->is_element()) {
+                inserted = js_dom_insert_before_child(elem, child_node, ref);
+            } else if (child_node->is_text()) {
+                js_dom_pre_remove_if_attached(child_node);
+                inserted = js_dom_insert_backed_text(
+                    elem, child_node->as_text(), ref);
+            } else {
+                inserted = js_dom_detach_dom_node(child_node) &&
+                    ((DomNode*)elem)->insert_before(child_node, ref);
+            }
+            if (!inserted) return (Item){.item = ITEM_JS_UNDEFINED};
             dom_post_insert((DomNode*)elem, child_node);
             if (elem->tag() == MARKUP_NAME_SELECT && child_node->is_element() &&
                 child_node->as_element()->tag() == MARKUP_NAME_OPTION) {

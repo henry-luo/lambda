@@ -302,6 +302,7 @@ static TypeMap* map_clone_typemap_for_mutation(Map* mp, Input* input) {
     clone->length = tm->length;
     clone->byte_size = tm->byte_size;
     clone->type_index = tm->type_index;
+    clone->has_spread = tm->has_spread;  // cloned chain keeps any nameless spread slot
     clone->has_named_shape = tm->has_named_shape;
     clone->is_trusted_contract = false;
     clone->struct_name = tm->struct_name;
@@ -351,6 +352,7 @@ static TypeElmt* elmt_clone_type_for_mutation(Element* elmt, Pool* pool) {
     clone->length = tm->length;
     clone->byte_size = tm->byte_size;
     clone->type_index = tm->type_index;
+    clone->has_spread = tm->has_spread;  // cloned chain keeps any nameless spread slot
     clone->has_named_shape = tm->has_named_shape;
     clone->is_trusted_contract = false;
     clone->struct_name = tm->struct_name;
@@ -437,6 +439,7 @@ static TypeMap* map_transition_target_for_add(TypeMap* parent, String* key,
     child->last = added;
     child->length = parent->length + 1;
     child->byte_size = added->byte_offset + type_info[type_id].byte_size;
+    child->has_spread = parent->has_spread;  // prefix clone keeps any nameless spread slot
     child->has_named_shape = parent->has_named_shape;
     child->is_trusted_contract = false;
     child->struct_name = parent->struct_name;

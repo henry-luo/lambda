@@ -17,6 +17,121 @@ static Type* contract_unwrap_type(Type* type) {
     return type;
 }
 
+static Type* canonical_contract_base(Type* type, int depth) {
+    if (!type || depth > 64) return NULL;
+    type = contract_unwrap_type(type);
+    if (!type) return NULL;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_PARAM) {
+        TypeParam* parameter = (TypeParam*)type;
+        Type* full = parameter->contract_type ? parameter->contract_type :
+            parameter->full_type;
+        return full && full != type ? canonical_contract_base(full, depth + 1) : NULL;
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_CONSTRAINED) {
+        TypeConstrained* constrained = (TypeConstrained*)type;
+        return canonical_contract_base(constrained->base, depth + 1);
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
+        TypeUnary* unary = (TypeUnary*)type;
+        if (unary->op == OPERATOR_OPTIONAL) {
+            return canonical_contract_base(unary->operand, depth + 1);
+        }
+        // repeated values are containers, not the element's carrier.
+        return NULL;
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_BINARY) {
+        // a union's runtime tag records the selected member. no single raw
+        // register carrier is valid until admission has selected that member.
+        return NULL;
+    }
+    return type;
+}
+
+ValueRep lambda_canonical_rep(Type* contract) {
+    if (!contract) return VALUE_REP_ITEM;
+
+    LaneStorageDesc lane = {};
+    if (lambda_type_lane_storage_desc(contract, &lane)) {
+        switch (lane.kind) {
+        case LANE_STORAGE_INT: return VALUE_REP_INT_LANE;
+        case LANE_STORAGE_FLOAT64: return VALUE_REP_F64;
+        case LANE_STORAGE_BOOL: return VALUE_REP_I64;
+        case LANE_STORAGE_SIZED_I64: return VALUE_REP_I64;
+        case LANE_STORAGE_ITEM: return VALUE_REP_ITEM;
+        case LANE_STORAGE_POINTER:
+            return lane.base_contract && lane.base_contract->type_id == LMD_TYPE_TYPE
+                ? VALUE_REP_RAW_NON_GC_POINTER : VALUE_REP_RAW_GC_POINTER;
+        default: break;
+        }
+    }
+
+    Type* base = canonical_contract_base(contract, 0);
+    if (!base || base == &TYPE_ANY || base == &TYPE_INTEGER ||
+            base == &TYPE_NUMBER) {
+        return VALUE_REP_ITEM;
+    }
+    switch (base->type_id) {
+    case LMD_TYPE_INT: return VALUE_REP_INT_LANE;
+    case LMD_TYPE_INT64: return VALUE_REP_I64;
+    case LMD_TYPE_UINT64: return VALUE_REP_U64;
+    case LMD_TYPE_FLOAT: return VALUE_REP_F64;
+    case LMD_TYPE_TYPE: return VALUE_REP_RAW_NON_GC_POINTER;
+    case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_DTIME:
+    case LMD_TYPE_STRING:
+    case LMD_TYPE_SYMBOL:
+    case LMD_TYPE_BINARY:
+    case LMD_TYPE_COMPLEX:
+    case LMD_TYPE_PATH:
+    case LMD_TYPE_RANGE:
+    case LMD_TYPE_ARRAY_NUM:
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_MAP:
+    case LMD_TYPE_VMAP:
+    case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_OBJECT:
+    case LMD_TYPE_FUNC:
+        return VALUE_REP_RAW_GC_POINTER;
+    case LMD_TYPE_BOOL:
+        return VALUE_REP_I64;
+    default:
+        return VALUE_REP_ITEM;
+    }
+}
+
+static Type* canonical_type_for_id(TypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_BOOL: return &TYPE_BOOL;
+    case LMD_TYPE_INT: return &TYPE_INT;
+    case LMD_TYPE_INT64: return &TYPE_INT64;
+    case LMD_TYPE_FLOAT: return &TYPE_FLOAT;
+    case LMD_TYPE_COMPLEX: return &TYPE_COMPLEX;
+    case LMD_TYPE_DECIMAL: return &TYPE_DECIMAL;
+    case LMD_TYPE_STRING: return &TYPE_STRING;
+    case LMD_TYPE_BINARY: return &TYPE_BINARY;
+    case LMD_TYPE_SYMBOL: return &TYPE_SYMBOL;
+    case LMD_TYPE_PATH: return &TYPE_PATH;
+    case LMD_TYPE_NUM_SIZED: return &TYPE_NUM_SIZED;
+    case LMD_TYPE_UINT64: return &TYPE_UINT64;
+    case LMD_TYPE_DTIME: return &TYPE_DTIME;
+    case LMD_TYPE_ARRAY_NUM: return (Type*)&TYPE_ARRAY;
+    case LMD_TYPE_ARRAY: return (Type*)&TYPE_ARRAY;
+    case LMD_TYPE_RANGE: return &TYPE_RANGE;
+    case LMD_TYPE_MAP: return &TYPE_MAP;
+    case LMD_TYPE_VMAP: return &TYPE_MAP;
+    case LMD_TYPE_ELEMENT: return &TYPE_ELMT;
+    case LMD_TYPE_OBJECT: return &TYPE_OBJECT;
+    case LMD_TYPE_TYPE: return &TYPE_TYPE;
+    case LMD_TYPE_FUNC: return &TYPE_FUNC;
+    case LMD_TYPE_ANY: return &TYPE_ANY;
+    default: return NULL;
+    }
+}
+
+ValueRep lambda_canonical_rep_for_type_id(TypeId type_id) {
+    return lambda_canonical_rep(canonical_type_for_id(type_id));
+}
+
 static LambdaWideResultProof wide_result_join(LambdaWideResultProof left,
         LambdaWideResultProof right) {
     if (left == LAMBDA_WIDE_RESULT_CAPABLE ||
@@ -374,6 +489,17 @@ static Type* contract_nullable_lane_base(Type* type, bool* nullable) {
     type = contract_unwrap_type(type);
     if (!type || !nullable) return NULL;
     *nullable = false;
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_PARAM) {
+        TypeParam* parameter = (TypeParam*)type;
+        Type* full = parameter->contract_type ? parameter->contract_type :
+            parameter->full_type;
+        return full && full != type
+            ? contract_nullable_lane_base(full, nullable) : NULL;
+    }
+    if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_CONSTRAINED) {
+        TypeConstrained* constrained = (TypeConstrained*)type;
+        return contract_nullable_lane_base(constrained->base, nullable);
+    }
     if (type->type_id == LMD_TYPE_TYPE && type->kind == TYPE_KIND_UNARY) {
         TypeUnary* unary = (TypeUnary*)type;
         if (unary->op == OPERATOR_OPTIONAL) {

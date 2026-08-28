@@ -804,8 +804,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
             }
             if (item->embedp()->img) {
                 ImageSurface* img = item->embedp()->img;
-                float w = img->width * lycon->ui_context->pixel_ratio;
-                float h = img->height * lycon->ui_context->pixel_ratio;
+                float w = img->width;
+                float h = img->height;
                 // Check for explicit CSS dimensions
                 float explicit_width = layout_axis_has_given_size(item, true) ?
                     item->block()->given_width : -1;
