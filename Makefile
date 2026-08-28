@@ -154,6 +154,17 @@ else
 	RANLIB := ranlib
 endif
 
+# macOS ld64 requires 64-bit archive members to start on 8-byte boundaries;
+# cctools ar only guarantees even-byte member placement, so use libtool for
+# static archives on Darwin and keep ar for the other platforms.
+ifeq ($(OS),Darwin)
+	STATIC_ARCHIVER := libtool -static
+	STATIC_ARCHIVE_FLAGS := -o
+else
+	STATIC_ARCHIVER := $(AR)
+	STATIC_ARCHIVE_FLAGS := rcs
+endif
+
 # Enable ccache for faster builds if available.
 # MUST come after the CC/CXX detection block above; otherwise the platform
 # branches overwrite our `ccache <compiler>` wrap.
@@ -259,7 +270,7 @@ LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
 # output captured and shown only on failure, so a successful parser build is a
 # single status line. $(2) = extra sub-make args (e.g. TS=...).
 define ts_lib_build
-@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-$(1) libtree-sitter-$(1).a CC="$(CC)" CXX="$(CXX)" $(2) 2>&1) || { printf '%s\n' "$$out"; exit 1; }; \
+@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-$(1) libtree-sitter-$(1).a CC="$(CC)" CXX="$(CXX)" AR="$(STATIC_ARCHIVER)" ARFLAGS="$(STATIC_ARCHIVE_FLAGS)" $(2) 2>&1) || { printf '%s\n' "$$out"; exit 1; }; \
 echo "✅ tree-sitter-$(1) library built"
 endef
 
@@ -280,7 +291,7 @@ $(TREE_SITTER_LIB):
 		-O3 -Wall -Wextra -std=c11 -fPIC \
 		-D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
 		-o tree_sitter.o && \
-	$(AR) rcs libtree-sitter.a tree_sitter.o && \
+	$(STATIC_ARCHIVER) $(STATIC_ARCHIVE_FLAGS) libtree-sitter.a tree_sitter.o && \
 	rm -f tree_sitter.o
 	@echo "✅ tree-sitter library built: lambda/tree-sitter/libtree-sitter.a"
 
@@ -311,7 +322,8 @@ $(TREE_SITTER_PYTHON_LIB): generate-tree-sitter-python-parser
 	@echo "Building tree-sitter-python library..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python \
 		libtree-sitter-python.a TS="$(TREE_SITTER_CLI)" \
-		CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+		CC="$(CC)" CXX="$(CXX)" AR="$(STATIC_ARCHIVER)" \
+		ARFLAGS="$(STATIC_ARCHIVE_FLAGS)" V=1 VERBOSE=1
 
 # Generate TypeScript parser from grammar.js when it changes
 $(TS_PARSER_C): $(TS_GRAMMAR_JS)
