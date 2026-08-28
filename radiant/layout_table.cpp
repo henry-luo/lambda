@@ -4322,11 +4322,15 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     }
     if (layout_element_is_replaced(elem) &&
         is_table_internal_display(display.inner)) {
-        // CSS Tables 3 §2.1: a replaced element keeps its principal box even
-        // when its computed display value is a table-internal type.
-        DisplayValue replaced_display = display;
-        replaced_display.inner = RDT_DISPLAY_REPLACED;
-        layout_block(lycon, node, replaced_display);
+        // CSS Tables 3 §2.1: a replaced element keeps its principal box, while
+        // its table-internal display still occupies a table grid slot.
+        ViewTableCell* cell = static_cast<ViewTableCell*>(mark_table_box(
+            lycon, node, RDT_VIEW_TABLE_CELL, display));
+        if (cell) {
+            cell->display.inner = RDT_DISPLAY_REPLACED;
+            parse_cell_attributes(lycon, node, cell);
+            layout_ensure_replaced_image_surface(lycon, cell, elem);
+        }
         return;
     }
     LayoutViewScope view_scope(lycon);

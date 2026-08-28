@@ -1024,10 +1024,9 @@ static void record_block_in_inline_split_chain(ViewSpan* span) {
     while (ancestor && ancestor->is_element()) {
         if (ancestor->view_type != RDT_VIEW_INLINE) break;
         ViewSpan* ancestor_span = lam::view_require<RDT_VIEW_INLINE>(ancestor);
-        // CSS 2.1 §9.2.1.1: an empty anonymous edge fragment must not enlarge
-        // an inline ancestor that has no direct visible content.
-        float ancestor_min_y = span_has_direct_visible_text(ancestor_span)
-            ? min(ancestor_span->y, fragment_min_y) : fragment_min_y;
+        // CSS 2.1 §9.2.1.1: a nested split inline keeps its ancestor's
+        // first-line decoration fragment even when the text is indirect.
+        float ancestor_min_y = min(ancestor_span->y, fragment_min_y);
         span_record_split_inline_fragment(ancestor_span, fragment_min_x, fragment_max_x,
                                           ancestor_min_y, fragment_max_y);
         ancestor = ancestor->parent;
@@ -1414,12 +1413,6 @@ void compute_span_bounding_box(ViewSpan* span, bool is_multi_line, struct FontHa
         if (span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x > max_x) max_x = span->ensure_fragment_union(FRAGMENT_UNION_SPLIT_INLINE)->max_x;
         final_min_y = split->min_y - roundf(edges.top);
         final_max_y = split->max_y + roundf(edges.bottom);
-        if (span_has_vertical_decoration_descendant(span)) {
-            // CSS Inline 3: descendant inline decorations extend the containing
-            // inline's union, while an undecorated atomic child remains line-box content.
-            final_min_y = min(final_min_y, visual_min_y - roundf(edges.top));
-            final_max_y = max(final_max_y, visual_max_y + roundf(edges.bottom));
-        }
         content_width = max_x - min_x;
         // CSS 2.1 §9.2.1.1: split inline boxes expose the union of their own
         span->x = min_x;
@@ -1543,12 +1536,10 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
         bool is_block_or_table_internal = inline_child_is_block_split(child);
 
         if (is_block_or_table_internal) {
-            log_info("[BLOCK_INLINE_TRACE] parent=%s tag=%d child=%s child_tag=%d before adv=%.1f line_start=%d x=%.1f",
-                inline_elem->source_loc(), inline_elem->tag(), child->source_loc(),
-                child->tag(), lycon->block.advance_y, lycon->line.is_line_start,
-                lycon->line.advance_x);
             // CSS 2.1 §9.2.1.1: Leading anonymous block strut.
-            if (!had_block_child && (!in_inline_sequence || lycon->line.is_line_start) && span->bound) {
+            if (!had_block_child && lycon->line.is_line_start && span->bound) {
+                // CSS 2.1 §9.2.1.1: a line already containing preceding inline
+                // content supplies its own strut before the split block.
                 bool is_rtl = lycon->block.direction == CSS_VALUE_RTL;
                 if (inline_has_axis_edge_decoration(span, is_rtl, true)) {
                     float line_height = lycon->block.line_height > 0 ? lycon->block.line_height : 18.0f;
@@ -1578,9 +1569,6 @@ void layout_inline_with_block_children(LayoutContext* lycon, DomElement* inline_
             // IMPORTANT: Save/restore max_width because block layout will set it to container width,
             float saved_max_width = lycon->block.max_width;
             layout_block(lycon, child, child_display);
-            log_info("[BLOCK_INLINE_TRACE] parent=%s child=%s after block y=%.1f h=%.1f adv=%.1f line_start=%d x=%.1f",
-                inline_elem->source_loc(), child->source_loc(), child->y, child->height,
-                lycon->block.advance_y, lycon->line.is_line_start, lycon->line.advance_x);
             visible_inline_after_last_block = false;
             lycon->block.max_width = saved_max_width; // Restore inline content width
             lycon->line.inline_start_edge_pending = 0.0f;

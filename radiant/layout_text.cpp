@@ -2174,10 +2174,6 @@ static bool line_trailing_space_is_vertical_atomic_gap(ViewText* text_view,
 }
 
 void line_break(LayoutContext* lycon) {
-    log_info("[BLOCK_INLINE_TRACE] line-break before view=%s adv=%.1f line_start=%d x=%.1f asc=%.1f desc=%.1f",
-        lycon->view ? lycon->view->source_loc() : "(none)", lycon->block.advance_y,
-        lycon->line.is_line_start, lycon->line.advance_x, lycon->line.max_ascender,
-        lycon->line.max_descender);
     line_consume_trailing_collapsible_space(lycon, true, true);
     // CSS Text 3 §4.1.3: Hanging spaces (U+3000, pre-wrap spaces) at end of line
     if (lycon->line.hanging_space_width > 0) {
@@ -2465,8 +2461,6 @@ void line_break(LayoutContext* lycon) {
         lycon->line.parent_font_size = block_font->font_size;
         lycon->line.parent_font_style = block_font;
     }
-    log_info("[BLOCK_INLINE_TRACE] line-break after adv=%.1f line_start=%d x=%.1f",
-        lycon->block.advance_y, lycon->line.is_line_start, lycon->line.advance_x);
 }
 // CSS Text 3 §5.2: Measure the width of the first word starting from `str`.
 static float measure_first_word_width(LayoutContext* lycon, const unsigned char* str,
@@ -3568,6 +3562,17 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         float line_right = lycon->line.has_float_intrusion ?
                            lycon->line.effective_right : lycon->line.right;
         uint32_t first_codepoint = peek_codepoint(str);
+        // CSS Text 3 §5.2: zero-advance attachment characters cannot create a
+        // break before themselves; soft hyphen and ZWSP remain break controls.
+        bool leading_zero_width_attachment =
+            text_codepoint_has_zero_advance(first_codepoint) &&
+            first_codepoint != 0x00AD && first_codepoint != 0x200B;
+        // UAX #14 LB13: punctuation with no break-before opportunity must stay
+        // with the preceding inline content even when word-break is break-all.
+        bool leading_no_break_punctuation =
+            is_line_break_cl(first_codepoint) ||
+            is_line_break_ns(first_codepoint) ||
+            is_line_break_ex_is_sy(first_codepoint);
         bool cjk_boundary_wrap = wrap_lines && !lycon->line.is_line_start &&
             lycon->line.advance_x >= line_right - kTextLayoutSubpixelEpsilon &&
             has_id_line_break_class(lycon->line.prev_codepoint) &&
@@ -3579,8 +3584,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
              cjk_boundary_wrap) &&
             !lycon->line.is_line_start
             && (lycon->line.last_space || lycon->line.wrap_opportunity_before_nowrap
-                || (had_leading_space && !whitespace_before_forced_break) || break_all ||
-                    cjk_boundary_wrap)) {
+                // CSS Text 3 §4.1.2: a leading segment break transformed into
+                // collapsed space does not itself create a wrap opportunity.
+                || (had_explicit_leading_space && !whitespace_before_forced_break) || break_all ||
+                    cjk_boundary_wrap) && !leading_zero_width_attachment &&
+                !leading_no_break_punctuation) {
             line_break(lycon);
             if (collapse_spaces && is_space(*str)) {
                 if (skip_collapsible_text_edge(lycon, text_node, &str, collapse_newlines,

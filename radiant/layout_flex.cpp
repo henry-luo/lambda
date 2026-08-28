@@ -431,7 +431,8 @@ static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon) 
 }
 
 void apply_anonymous_flex_text_geometry(FlexContainerLayout* flex_layout) {
-    if (!flex_layout || !flex_layout->flex_items) return;
+    if (!flex_layout || !flex_layout->flex_items ||
+        flex_layout->direct_text_geometry_handled) return;
 
     for (int i = 0; i < flex_layout->item_count; i++) {
         ViewElement* item = lam::view_as_element(flex_layout->flex_items[i]);

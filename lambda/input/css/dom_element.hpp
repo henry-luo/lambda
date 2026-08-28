@@ -533,6 +533,10 @@ struct DomElementExt {
     bool has_empty_ruby_base;
     bool popover_open;
     bool dialog_modal;
+    // Deferred text-control events are DOM task state, so their queue links
+    // outlive layout-property teardown while a control is detached.
+    uint8_t selectionchange_event_pending;
+    DomElement* selectionchange_event_next;
 };
 
 /**

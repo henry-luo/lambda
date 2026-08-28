@@ -3709,9 +3709,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         if (elem->tag() == MARKUP_NAME_BR && display.outer != CSS_VALUE_NONE) {
             display.outer = CSS_VALUE_INLINE;
         }
-        log_info("[FLOW_TRACE] node=%s tag=%d outer=%d inner=%d before adv=%.1f line_start=%d x=%.1f",
-            node->source_loc(), node->tag(), display.outer, display.inner,
-            lycon->block.advance_y, lycon->line.is_line_start, lycon->line.advance_x);
         switch (display.outer) {
         case CSS_VALUE_BLOCK:  case CSS_VALUE_INLINE_BLOCK:  case CSS_VALUE_LIST_ITEM:
         case CSS_VALUE_TABLE_CELL:  // CSS display: table-cell on non-table elements
@@ -3799,9 +3796,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         default:
             break;
         }
-        log_info("[FLOW_TRACE] node=%s after adv=%.1f line_start=%d x=%.1f y=%.1f h=%.1f",
-            node->source_loc(), lycon->block.advance_y, lycon->line.is_line_start,
-            lycon->line.advance_x, node->y, node->height);
     }
     else if (node->is_text()) {
         // CSS 2.2: "When white space is contained at the end of a block's content,

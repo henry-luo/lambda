@@ -2111,6 +2111,8 @@ typedef struct FlexContainerLayout : FlexProp {
     float main_axis_size;
     float cross_axis_size;
     bool needs_reflow;
+    // The final direct-text pass owns text geometry for this flex container.
+    bool direct_text_geometry_handled;
     // Sizing mode flags (CSS Flexbox spec §9.2)
     // When true, the axis size is indefinite (fit-content/shrink-to-fit)
     // and flex-grow should NOT distribute additional space

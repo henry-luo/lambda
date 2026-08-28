@@ -728,7 +728,7 @@ static char* load_script_content(const char* resolved_path, bool is_http) {
         // fixture setup exactly as the browser reference extractor does.
         return mem_strdup(
             "window.test=window.test||function(callback){if(typeof callback==='function')callback();};\n"
-            "window.async_test=window.async_test||function(){return{done:function(){}};};\n"
+            "window.async_test=window.async_test||function(){var t={done:function(){},step_func:function(fn){var self=this;return function(){return fn.apply(self,arguments);};},step_func_done:function(fn){var self=this;return function(){var result=fn.apply(self,arguments);t.done();return result;};}};return t;};\n"
             "window.promise_test=window.promise_test||function(){};\n"
             "window.assert_true=window.assert_true||function(){};\n"
             "window.assert_false=window.assert_false||function(){};\n"

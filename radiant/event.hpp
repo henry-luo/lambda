@@ -1549,7 +1549,7 @@ void tc_set_selection_range(DomElement* elem,
                             uint8_t dir);
 
 // Phase 8E: queue a `selectionchange` event on this text control. Coalesced
-// per-element via FormControlProp::tc_sc_pending; dispatched as a microtask
+// per-element via DOM task state; dispatched as a microtask
 // (setTimeout(0)) by the JS-side strong impl.
 void tc_notify_selection_changed(DomElement* elem);
 
@@ -2438,7 +2438,7 @@ typedef struct DocState {
     uint32_t             selection_event_seq;
     bool                 selectionchange_pending;  // task queued and not yet fired
     // Phase 8E: per-text-control selectionchange coalescing. Linked list head
-    // through `FormControlProp::tc_sc_next_pending`. Drained by a single
+    // through the element's DOM task link. Drained by a single
     // setTimeout(0) callback queued via `js_dom_queue_textcontrol_selectionchange`.
     DomElement*          tc_selectionchange_head;
     bool                 tc_selectionchange_drain_scheduled;

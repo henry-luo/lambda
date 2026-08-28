@@ -1177,6 +1177,9 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     }
 
     if (has_text_content && flex) {
+        // Direct text is laid out against the flex container's resolved axes;
+        // the anonymous-item pass must not replace those physical rectangles.
+        flex->direct_text_geometry_handled = true;
         FlexProp* flex_prop = flex_container->embed ? flex_container->embedp()->flex : nullptr;
         int align_items = flex_prop ? flex_prop->align_items : CSS_VALUE_STRETCH;
         int justify_content = flex_prop ? flex_prop->justify : CSS_VALUE_FLEX_START;
@@ -1195,7 +1198,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
         }
 
         bool handled_direct_text_br_run = false;
-        if (flex_container_has_only_direct_text_and_br(flex_container)) {
+        bool only_direct_text_and_br = flex_container_has_only_direct_text_and_br(flex_container);
+        if (only_direct_text_and_br) {
             // CSS Flexbox section 4: direct text runs in a flex container are wrapped in
             setup_line_height(lycon, flex_container);
             if (flex_container->blk) {

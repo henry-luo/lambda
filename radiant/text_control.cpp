@@ -19,6 +19,8 @@ extern void font_prop_release_handle(FontProp* fprop);
 
 void tc_notify_selection_changed(DomElement* elem) {
     if (!elem) return;
+    log_debug("[EVENT_PROP_TRACE] queue notify node=%p id=%s form=%p",
+              (void*)elem, elem->id ? elem->id : "", (void*)elem->form);
     // Selection projection updates anchor and focus through nested StateStore
     // transitions; queue `select` with selectionchange so handlers never
     // re-enter selectionStart/End against the half-committed projection.

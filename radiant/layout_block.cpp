@@ -8228,17 +8228,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
         float line_height = layout_optgroup_anonymous_line_height(lycon);
         lycon->block.advance_y = max(lycon->block.advance_y, line_height);
     }
-    if (block->parent_view() && block->parent_view()->is_inline()) {
-        log_info("[BLOCK_INLINE_TRACE] content-start block=%s tag=%d y=%.1f h=%.1f adv=%.1f line_start=%d",
-            block->source_loc(), block->tag(), block->y, block->height,
-            lycon->block.advance_y, lycon->line.is_line_start);
-    }
     layout_block_inner_content(lycon, block);
-    if (block->parent_view() && block->parent_view()->is_inline()) {
-        log_info("[BLOCK_INLINE_TRACE] content-end block=%s y=%.1f h=%.1f content_h=%.1f adv=%.1f line_start=%d",
-            block->source_loc(), block->y, block->height, block->content_height,
-            lycon->block.advance_y, lycon->line.is_line_start);
-    }
     if (closed_details_contents) {
         // The collapsed details box clips its used height to the control line;
         // descendants remain laid out as visible overflow after that line.

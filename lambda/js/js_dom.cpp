@@ -9979,6 +9979,9 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
         Item exp_map = expando_get_map((DomNode*)elem);
         if (exp_map.item != ITEM_NULL) {
             Item val = js_get_name_key(exp_map, event_prop_name);
+            log_debug("[EVENT_PROP_TRACE] get %s on <%s> node=%p map=%p value_type=%d callable=%d",
+                      event_prop_name, elem->tag_name ? elem->tag_name : "?",
+                      (void*)elem, (void*)exp_map.map, (int)get_type_id(val), js_is_callable(val));
             if (val.item != ITEM_NULL && !is_js_undefined(val)) {
                 return val;
             }
@@ -10668,6 +10671,10 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
     // above, and setAttribute() remains the DOM attribute mutation path.
     {
         expando_set_property((DomNode*)elem, prop_name, value);
+        Item set_map = expando_get_map((DomNode*)elem);
+        log_debug("[EVENT_PROP_TRACE] set %s on <%s> node=%p map=%p value_type=%d callable=%d",
+                  prop, elem->tag_name ? elem->tag_name : "?",
+                  (void*)elem, (void*)set_map.map, (int)get_type_id(value), js_is_callable(value));
         if (prop[0] == 'o' && prop[1] == 'n' && prop[2] != '\0') {
             // DOM host setters store on* values in the expando side table;
             // register the same write in the listener list so assignment

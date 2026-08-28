@@ -1302,8 +1302,8 @@ extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
 // ----------------------------------------------------------------------------
 // Called from radiant/text_control.cpp after every programmatic selection
 // mutation on an <input>/<textarea> (e.g. setSelectionRange, value setter,
-// editing). Coalesces per-element via FormControlProp::tc_sc_pending and
-// drains the whole pending list in a single setTimeout(0) callback.
+// editing). Coalesces per-element in DOM-owned task state and drains the
+// whole pending list in a single setTimeout(0) callback.
 static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
     (void)this_val; (void)args; (void)argc;
     DomDocument* doc = (DomDocument*)js_dom_get_document();
@@ -1318,12 +1318,11 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
     state->tc_selectionchange_head = nullptr;
     state->tc_selectionchange_drain_scheduled = false;
     while (head) {
-        DomElement* next = nullptr;
-        FormControlProp* f = head->form;
-        if (f) {
-            next = f->tc_sc_next_pending;
-            f->tc_sc_next_pending = nullptr;
-            f->tc_sc_pending = 0;
+        DomElementExt* task_state = head->ext;
+        DomElement* next = task_state ? task_state->selectionchange_event_next : nullptr;
+        if (task_state) {
+            task_state->selectionchange_event_next = nullptr;
+            task_state->selectionchange_event_pending = 0;
         }
         // The text-control selection writer can be nested inside the native
         // anchor/focus transition. Dispatch at this checkpoint so `onselect`
@@ -1352,31 +1351,45 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
 
 extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     if (!elem) return;
-    FormControlProp* f = elem->form;
-    if (!f) return;
+    if (!elem->form) return;
     if (!js_active_runtime_state) return;
     if (!js_input || !js_input->pool) return;
     DomDocument* doc = elem->doc;
+    log_debug("[EVENT_PROP_TRACE] queue start node=%p doc=%p state=%p",
+              (void*)elem, (void*)doc, doc ? (void*)doc->state : nullptr);
     JsDocRuntimeScope scope;
-    if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
+    if (!js_doc_runtime_enter_if_needed(doc, &scope)) {
+        log_debug("[EVENT_PROP_TRACE] queue rejected node=%p", (void*)elem);
+        return;
+    }
     DocState* state = get_or_create_state();
     if (!state) {
         js_doc_runtime_exit(&scope);
         return;
     }
-    if (f->tc_sc_pending) {
+    DomElementExt* task_state = elem->ensure_ext();
+    if (!task_state) {
+        js_doc_runtime_exit(&scope);
+        return;
+    }
+    if (task_state->selectionchange_event_pending) {
         js_doc_runtime_exit(&scope);
         return;
     }
     DomNodeRef pending_ref = dom_node_ref((DomNode*)elem);
     if (!doc || !dom_node_ref_validate(doc, pending_ref) ||
         !dom_node_pin(doc, pending_ref, DOM_NODE_PIN_EVENT_QUEUE)) {
+        log_debug("[EVENT_PROP_TRACE] queue pin rejected node=%p", (void*)elem);
         js_doc_runtime_exit(&scope);
         return;
     }
-    f->tc_sc_pending = 1;
-    f->tc_sc_next_pending = state->tc_selectionchange_head;
+    task_state->selectionchange_event_pending = 1;
+    task_state->selectionchange_event_next = state->tc_selectionchange_head;
     state->tc_selectionchange_head = elem;
+    log_debug("[EVENT_PROP_TRACE] queue linked node=%p head=%p scheduled=%d next=%p",
+              (void*)elem, (void*)state->tc_selectionchange_head,
+              state->tc_selectionchange_drain_scheduled,
+              (void*)task_state->selectionchange_event_next);
     if (state->tc_selectionchange_drain_scheduled) {
         js_doc_runtime_exit(&scope);
         return;
@@ -1398,13 +1411,16 @@ extern "C" void js_dom_selection_reset(void) {
     DomDocument* doc = (DomDocument*)js_dom_get_document();
     if (!doc || !doc->state) return;
     DocState* state = doc->state;
+    log_debug("[EVENT_PROP_TRACE] selection reset head=%p scheduled=%d",
+              (void*)state->tc_selectionchange_head,
+              state->tc_selectionchange_drain_scheduled);
     DomElement* pending = state->tc_selectionchange_head;
     while (pending) {
-        FormControlProp* form = pending->form;
-        DomElement* next = form ? form->tc_sc_next_pending : nullptr;
-        if (form) {
-            form->tc_sc_next_pending = nullptr;
-            form->tc_sc_pending = 0;
+        DomElementExt* task_state = pending->ext;
+        DomElement* next = task_state ? task_state->selectionchange_event_next : nullptr;
+        if (task_state) {
+            task_state->selectionchange_event_next = nullptr;
+            task_state->selectionchange_event_pending = 0;
         }
         dom_node_unpin(pending->doc, dom_node_ref((DomNode*)pending),
                        DOM_NODE_PIN_EVENT_QUEUE);
