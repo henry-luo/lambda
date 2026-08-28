@@ -28,6 +28,16 @@ typedef enum ScalarReturnClass {
 typedef enum ValueRep {
     VALUE_REP_NONE = 0,
     VALUE_REP_ITEM,
+    // lambda's compact int carrier is an i64 register, but it is not a
+    // machine integer: the lane reserves the i64 extremes for poison/null.
+    // keeping it distinct prevents an INT64_MAX machine quantity from being
+    // reinterpreted as an int-lane sentinel (D2.4.2–D2.4.3).
+    VALUE_REP_INT_LANE,
+    // compiler-only quantities never cross a Lambda semantic boundary through
+    // em_require_rep(); they are named here so physical i64 values cannot be
+    // mistaken for Lambda values (D2.4.1–D2.4.3).
+    VALUE_REP_MACHINE_I64,
+    VALUE_REP_MACHINE_U64,
     VALUE_REP_I64,
     VALUE_REP_U64,
     VALUE_REP_F64,
