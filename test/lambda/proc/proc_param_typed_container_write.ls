@@ -16,17 +16,23 @@
 type P = {cur: string, n: int}
 type Box = {xs: int[]}
 
-pn set_typed_field(p: P) {
+pn set_typed_field(var p: P) {
     p.cur = "X"
     p.n = 7
 }
 
-pn set_typed_elem(b: Box) {
+pn set_typed_elem(var b: Box) {
+    // Read-modify-write-back (C4.2e): binding a field binds a COPY under
+    // S9.1.2, so the copy is stored back explicitly. The rule pinned here is
+    // unchanged -- the write reaches the caller -- and it now travels the flat
+    // typed member assignment, which is the path `is_proc_param` selects the
+    // in-place setter for.
     var xs: int[] = (b.xs)
     xs[0] = 99
+    b.xs = xs
 }
 
-pn set_untyped_field(p) {
+pn set_untyped_field(var p) {
     p.cur = "U"
 }
 

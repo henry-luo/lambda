@@ -1,11 +1,30 @@
-// AWFY Benchmark: DeltaBlue
-// Constraint solver benchmark
-// Ported from JavaScript AWFY suite
+// AWFY Benchmark: DeltaBlue — VALUE-SEMANTICS port (handle store)
+// Incremental constraint solver
+//
+// The reference-semantics shape this replaces: a Variable record was reached
+// from `c.v1`/`c.v2`/`c.out`/`c.sc`/`c.off` on several constraints AND from the
+// local that created it, and every function mutated whichever handle it held.
+// That depends on aliasing, which S9.1.2/S9.3.1 rule out — those handles would
+// be independent copies drifting apart, so each constraint would mark and
+// recalculate its own private variable and the plan would never converge.
+//
+// This port applies the handle-store idiom (C4.2e; doc/Lambda_Procedural.md
+// "Sharing Mutable State"): every record has exactly one owner, and every field
+// that used to hold a pointer holds an id into that owner instead.
+//
+//   w.vars[vid]  owns every Variable    — `out`, `v1`, `v2`, `sc`, `off` are vids
+//   w.cons[cid]  owns every Constraint  — `determinedBy` and every plan/todo
+//                                         list element is a cid
+//
+// `w` is the single mutation root and travels as one `var` parameter, so
+// S9.1.3's exclusivity check is trivially satisfied at every call site.
+// Constraint ids start at 1, so cid 0 is the "no constraint" sentinel that
+// `determinedBy` already used. Variable id 0 is legal, so NO_VAR is -1.
 
 // --- Constants ---
 let FORWARD = 1
 let BACKWARD = 2
-// Strength (arithmetic values, lower = stronger)
+
 let S_ABSOLUTE_STRONGEST = -10000
 let S_REQUIRED = -800
 let S_STRONG_PREFERRED = -600
@@ -14,20 +33,19 @@ let S_STRONG_DEFAULT = -200
 let S_DEFAULT = 0
 let S_WEAK_DEFAULT = 500
 let S_ABSOLUTE_WEAKEST = 10000
-// Constraint kinds
+
 let K_EDIT = 1
 let K_STAY = 2
 let K_EQUAL = 3
 let K_SCALE = 4
 
-type Vec = any   // a growable array (built-in []/push/len/splice)
-type Variable = any
-type Planner = any
+let NO_CON = 0    // handle-store spelling of a null constraint
+let NO_VAR = -1   // handle-store spelling of a null variable
 
-// --- Vector (chunked 16x16=256) ---
+type Vec = any    // a growable array (built-in []/push/len/splice)
 
-// Growable array via the built-ins `push`/`len`/`splice` — no chunked + `.sz` wrapper.
-// `splice(v, i, 1)` removes one element in place (shift + shrink).
+// --- Vector ---
+
 pn vec_new() any {
     return []
 }
@@ -44,17 +62,13 @@ pn vec_size(v: Vec) any {
     return len(v)
 }
 
-pn vec_set(var v: Vec, idx, item) any {
-    v[idx] = item
-}
-
 pn vec_is_empty(v: Vec) any {
     if (len(v) == 0) { return 1 }
     return 0
 }
 
 pn vec_remove_first(var v: Vec) any {
-    if (len(v) == 0) { return null }
+    if (len(v) == 0) { return NO_CON }
     var first = v[0]
     splice(v, 0, 1)
     return first
@@ -66,7 +80,7 @@ pn vec_with(item) any {
     return v
 }
 
-// Remove constraint by cid from vector
+// Remove a cid from a vector of cids (elements are plain ints now).
 pn vec_remove_cid(var v: Vec, cid) any {
     var sz = len(v)
     var found: int = -1
@@ -74,8 +88,7 @@ pn vec_remove_cid(var v: Vec, cid) any {
     while (i < sz) {
         if (found == -1) {
             var elem = v[i]
-            var ecid = (elem.cid)
-            if (ecid == cid) {
+            if (elem == cid) {
                 found = i
             }
         }
@@ -102,193 +115,188 @@ pn s_weakest(a, b) any {
     return b
 }
 
-// --- Variable ---
-pn var_new() any {
-    var cs = vec_new()
-    var v = { val: 0, constraints: null, determinedBy: 0, walkStrength: 10000, stay: 1, mark: 0 }
-    v.constraints = cs
-    return v
+// --- World ---
+pn world_new() any {
+    // cons[0] is the NO_CON placeholder so a cid indexes its own slot.
+    var w = { vars: [], cons: [null], currentMark: 1, nextCid: 1 }
+    return w
 }
 
-pn var_value(aValue) any {
-    var v = var_new()
-    v.val = aValue
-    return v
+// --- Variable: owned by w.vars, addressed by slot id ---
+
+pn var_new(var w) any {
+    var vid = len(w.vars)
+    push(w.vars, { val: 0, constraints: [], determinedBy: NO_CON,
+                   walkStrength: 10000, stay: 1, mark: 0 })
+    return vid
 }
 
-pn var_add_constraint(var variable: any, c) any {
-    var cs: Vec = (variable.constraints)
-    vec_add(cs, c)
+pn var_value(var w, aValue) any {
+    var vid = var_new(w)
+    w.vars[vid].val = aValue
+    return vid
 }
 
-pn var_remove_constraint(var variable: any, c) any {
-    var cs: Vec = (variable.constraints)
-    var ccid = (c.cid)
+// The constraint list is read, mutated and stored back (C4.2e): binding
+// `w.vars[vid].constraints` binds a copy under S9.1.2.
+pn var_add_constraint(var w, vid, ccid) any {
+    var cs: Vec = w.vars[vid].constraints
+    vec_add(cs, ccid)
+    w.vars[vid].constraints = cs
+}
+
+pn var_remove_constraint(var w, vid, ccid) any {
+    var cs: Vec = w.vars[vid].constraints
     vec_remove_cid(cs, ccid)
-    var det = (variable.determinedBy)
+    w.vars[vid].constraints = cs
+    var det = w.vars[vid].determinedBy
     if (det == ccid) {
-        variable.determinedBy = 0
+        w.vars[vid].determinedBy = NO_CON
     }
 }
 
 // --- Constraint dispatch ---
-// All constraints: { cid:INT, kind:INT, strength:INT, ... }
-// Unary (Edit/Stay): { cid, kind:1|2, strength, out:var, satisfied:0|1 }
-// Binary (Equal): { cid, kind:3, strength, v1:var, v2:var, direction:0|1|2 }
-// Scale: { cid, kind:4, strength, v1:var, v2:var, direction:0|1|2, sc:var, off:var }
-// determinedBy stores cid (INT), 0 = no constraint
+// All constraints share one shape so the store stays a single map shape:
+//   { cid, kind, strength, out, satisfied, v1, v2, direction, sc, off }
+// out/v1/v2/sc/off are variable ids (NO_VAR when unused).
 
-pn c_is_input(c) any {
-    var k = (c.kind)
+pn c_is_input(var w, cid) any {
+    var k = w.cons[cid].kind
     if (k == K_EDIT) { return 1 }
     return 0
 }
 
-pn c_is_satisfied(c) any {
-    var k = (c.kind)
+pn c_is_satisfied(var w, cid) any {
+    var k = w.cons[cid].kind
     if (k == K_EDIT) {
-        var s = (c.satisfied)
-        return s
+        return w.cons[cid].satisfied
     }
     if (k == K_STAY) {
-        var s2 = (c.satisfied)
-        return s2
+        return w.cons[cid].satisfied
     }
     // binary: satisfied = direction != 0
-    var dir = (c.direction)
+    var dir = w.cons[cid].direction
     if (dir != 0) { return 1 }
     return 0
 }
 
-pn c_add_to_graph(var c: any) any {
-    var k = (c.kind)
+pn c_add_to_graph(var w, cid) any {
+    var k = w.cons[cid].kind
     if (k == K_EDIT) {
-        var o: Variable = (c.out)
-        var_add_constraint(o, c)
-        c.satisfied = 0
+        var_add_constraint(w, w.cons[cid].out, cid)
+        w.cons[cid].satisfied = 0
     }
     if (k == K_STAY) {
-        var o2: Variable = (c.out)
-        var_add_constraint(o2, c)
-        c.satisfied = 0
+        var_add_constraint(w, w.cons[cid].out, cid)
+        w.cons[cid].satisfied = 0
     }
     if (k == K_EQUAL) {
-        var v1: Variable = (c.v1)
-        var v2: Variable = (c.v2)
-        var_add_constraint(v1, c)
-        var_add_constraint(v2, c)
-        c.direction = 0
+        var_add_constraint(w, w.cons[cid].v1, cid)
+        var_add_constraint(w, w.cons[cid].v2, cid)
+        w.cons[cid].direction = 0
     }
     if (k == K_SCALE) {
-        var v1s: Variable = (c.v1)
-        var v2s: Variable = (c.v2)
-        var sc: Variable = (c.sc)
-        var off: Variable = (c.off)
-        var_add_constraint(v1s, c)
-        var_add_constraint(v2s, c)
-        var_add_constraint(sc, c)
-        var_add_constraint(off, c)
-        c.direction = 0
+        var_add_constraint(w, w.cons[cid].v1, cid)
+        var_add_constraint(w, w.cons[cid].v2, cid)
+        var_add_constraint(w, w.cons[cid].sc, cid)
+        var_add_constraint(w, w.cons[cid].off, cid)
+        w.cons[cid].direction = 0
     }
 }
 
-pn c_remove_from_graph(var c: any) any {
-    var k = (c.kind)
+pn c_remove_from_graph(var w, cid) any {
+    var k = w.cons[cid].kind
     if (k == K_EDIT) {
-        var o: Variable = (c.out)
-        if (o != null) {
-            var_remove_constraint(o, c)
-        }
-        c.satisfied = 0
+        var o = w.cons[cid].out
+        if (o != NO_VAR) { var_remove_constraint(w, o, cid) }
+        w.cons[cid].satisfied = 0
     }
     if (k == K_STAY) {
-        var o2: Variable = (c.out)
-        if (o2 != null) {
-            var_remove_constraint(o2, c)
-        }
-        c.satisfied = 0
+        var o2 = w.cons[cid].out
+        if (o2 != NO_VAR) { var_remove_constraint(w, o2, cid) }
+        w.cons[cid].satisfied = 0
     }
     if (k == K_EQUAL) {
-        var v1: Variable = (c.v1)
-        if (v1 != null) { var_remove_constraint(v1, c) }
-        var v2: Variable = (c.v2)
-        if (v2 != null) { var_remove_constraint(v2, c) }
-        c.direction = 0
+        var v1 = w.cons[cid].v1
+        if (v1 != NO_VAR) { var_remove_constraint(w, v1, cid) }
+        var v2 = w.cons[cid].v2
+        if (v2 != NO_VAR) { var_remove_constraint(w, v2, cid) }
+        w.cons[cid].direction = 0
     }
     if (k == K_SCALE) {
-        var v1s: Variable = (c.v1)
-        if (v1s != null) { var_remove_constraint(v1s, c) }
-        var v2s: Variable = (c.v2)
-        if (v2s != null) { var_remove_constraint(v2s, c) }
-        var sc: Variable = (c.sc)
-        if (sc != null) { var_remove_constraint(sc, c) }
-        var off: Variable = (c.off)
-        if (off != null) { var_remove_constraint(off, c) }
-        c.direction = 0
+        var v1s = w.cons[cid].v1
+        if (v1s != NO_VAR) { var_remove_constraint(w, v1s, cid) }
+        var v2s = w.cons[cid].v2
+        if (v2s != NO_VAR) { var_remove_constraint(w, v2s, cid) }
+        var sc = w.cons[cid].sc
+        if (sc != NO_VAR) { var_remove_constraint(w, sc, cid) }
+        var off = w.cons[cid].off
+        if (off != NO_VAR) { var_remove_constraint(w, off, cid) }
+        w.cons[cid].direction = 0
     }
 }
 
-pn c_choose_method(var c: any, mark) any {
-    var k = (c.kind)
+pn c_choose_method(var w, cid, mark) any {
+    var k = w.cons[cid].kind
     if (k == K_EDIT) {
-        var o = (c.out)
-        var om = (o.mark)
-        var ows = (o.walkStrength)
-        var cs = (c.strength)
+        var o = w.cons[cid].out
+        var om = w.vars[o].mark
+        var ows = w.vars[o].walkStrength
+        var cs = w.cons[cid].strength
         if (om != mark) {
             var str = s_stronger(cs, ows)
             if (str == 1) {
-                c.satisfied = 1
+                w.cons[cid].satisfied = 1
                 return 0
             }
         }
-        c.satisfied = 0
+        w.cons[cid].satisfied = 0
         return 0
     }
     if (k == K_STAY) {
-        var o2: Variable = (c.out)
-        var om2 = (o2.mark)
-        var ows2 = (o2.walkStrength)
-        var cs2 = (c.strength)
+        var o2 = w.cons[cid].out
+        var om2 = w.vars[o2].mark
+        var ows2 = w.vars[o2].walkStrength
+        var cs2 = w.cons[cid].strength
         if (om2 != mark) {
             var str2 = s_stronger(cs2, ows2)
             if (str2 == 1) {
-                c.satisfied = 1
+                w.cons[cid].satisfied = 1
                 return 0
             }
         }
-        c.satisfied = 0
+        w.cons[cid].satisfied = 0
         return 0
     }
     // Binary/Scale
-    var v1: Variable = (c.v1)
-    var v2: Variable = (c.v2)
-    var v1m = (v1.mark)
-    var v2m = (v2.mark)
-    var v1ws = (v1.walkStrength)
-    var v2ws = (v2.walkStrength)
-    var cs3 = (c.strength)
+    var v1 = w.cons[cid].v1
+    var v2 = w.cons[cid].v2
+    var v1m = w.vars[v1].mark
+    var v2m = w.vars[v2].mark
+    var v1ws = w.vars[v1].walkStrength
+    var v2ws = w.vars[v2].walkStrength
+    var cs3 = w.cons[cid].strength
 
     if (v1m == mark) {
         if (v2m != mark) {
             var sf = s_stronger(cs3, v2ws)
             if (sf == 1) {
-                c.direction = FORWARD
+                w.cons[cid].direction = FORWARD
                 return 0
             }
         }
-        c.direction = 0
+        w.cons[cid].direction = 0
         return 0
     }
     if (v2m == mark) {
         if (v1m != mark) {
             var sb = s_stronger(cs3, v1ws)
             if (sb == 1) {
-                c.direction = BACKWARD
+                w.cons[cid].direction = BACKWARD
                 return 0
             }
         }
-        c.direction = 0
+        w.cons[cid].direction = 0
         return 0
     }
     // Neither marked
@@ -296,427 +304,376 @@ pn c_choose_method(var c: any, mark) any {
     if (w1 == 1) {
         var sb2 = s_stronger(cs3, v1ws)
         if (sb2 == 1) {
-            c.direction = BACKWARD
+            w.cons[cid].direction = BACKWARD
             return 0
         }
-        c.direction = 0
+        w.cons[cid].direction = 0
         return 0
     }
     var sf2 = s_stronger(cs3, v2ws)
     if (sf2 == 1) {
-        c.direction = FORWARD
+        w.cons[cid].direction = FORWARD
         return 0
     }
-    c.direction = 0
+    w.cons[cid].direction = 0
     return 0
 }
 
-pn c_mark_unsatisfied(var c: any) any {
-    var k = (c.kind)
-    if (k == K_EDIT) {
-        c.satisfied = 0
-    }
-    if (k == K_STAY) {
-        c.satisfied = 0
-    }
-    if (k == K_EQUAL) {
-        c.direction = 0
-    }
-    if (k == K_SCALE) {
-        c.direction = 0
-    }
+pn c_mark_unsatisfied(var w, cid) any {
+    var k = w.cons[cid].kind
+    if (k == K_EDIT) { w.cons[cid].satisfied = 0 }
+    if (k == K_STAY) { w.cons[cid].satisfied = 0 }
+    if (k == K_EQUAL) { w.cons[cid].direction = 0 }
+    if (k == K_SCALE) { w.cons[cid].direction = 0 }
 }
 
-pn c_get_output(var c: any) any {
-    var k = (c.kind)
-    if (k == K_EDIT) {
-        var o: Variable = (c.out)
-        return o
-    }
-    if (k == K_STAY) {
-        var o2: Variable = (c.out)
-        return o2
-    }
+pn c_get_output(var w, cid) any {
+    var k = w.cons[cid].kind
+    if (k == K_EDIT) { return w.cons[cid].out }
+    if (k == K_STAY) { return w.cons[cid].out }
     // binary: forward→v2, backward→v1
-    var dir = (c.direction)
-    if (dir == FORWARD) {
-        var v2: Variable = (c.v2)
-        return v2
-    }
-    var v1: Variable = (c.v1)
-    return v1
+    var dir = w.cons[cid].direction
+    if (dir == FORWARD) { return w.cons[cid].v2 }
+    return w.cons[cid].v1
 }
 
-pn c_mark_inputs(var c: any, mark) any {
-    var k = (c.kind)
+pn c_mark_inputs(var w, cid, mark) any {
+    var k = w.cons[cid].kind
     // Unary: no inputs
     if (k == K_EDIT) { return 0 }
     if (k == K_STAY) { return 0 }
     // Binary: input is the non-output variable
-    var dir = (c.direction)
+    var dir = w.cons[cid].direction
     if (k == K_EQUAL) {
         if (dir == FORWARD) {
-            var v1: Variable = (c.v1)
-            v1.mark = mark
+            w.vars[w.cons[cid].v1].mark = mark
         }
         if (dir == BACKWARD) {
-            var v2: Variable = (c.v2)
-            v2.mark = mark
+            w.vars[w.cons[cid].v2].mark = mark
         }
     }
     if (k == K_SCALE) {
         if (dir == FORWARD) {
-            var sv1: Variable = (c.v1)
-            sv1.mark = mark
+            w.vars[w.cons[cid].v1].mark = mark
         }
         if (dir == BACKWARD) {
-            var sv2: Variable = (c.v2)
-            sv2.mark = mark
+            w.vars[w.cons[cid].v2].mark = mark
         }
-        var sc: Variable = (c.sc)
-        sc.mark = mark
-        var off: Variable = (c.off)
-        off.mark = mark
+        w.vars[w.cons[cid].sc].mark = mark
+        w.vars[w.cons[cid].off].mark = mark
     }
     return 0
 }
 
-// inputsKnown: all inputs must satisfy (mark==mark || stay || determinedBy==0)
-pn c_inputs_known(var c: any, mark) any {
-    var k = (c.kind)
+pn c_inputs_known(var w, cid, mark) any {
+    var k = w.cons[cid].kind
     if (k == K_EDIT) { return 1 }
     if (k == K_STAY) { return 1 }
-    var dir = (c.direction)
+    var dir = w.cons[cid].direction
     // Check input variable
     if (k == K_EQUAL) {
-        var inp = null
-        if (dir == FORWARD) { inp = (c.v1) }
-        if (dir == BACKWARD) { inp = (c.v2) }
-        if (inp != null) {
-            var im = (inp.mark)
-            var ist = (inp.stay)
-            var idet = (inp.determinedBy)
+        var inp = NO_VAR
+        if (dir == FORWARD) { inp = w.cons[cid].v1 }
+        if (dir == BACKWARD) { inp = w.cons[cid].v2 }
+        if (inp != NO_VAR) {
+            var im = w.vars[inp].mark
+            var ist = w.vars[inp].stay
+            var idet = w.vars[inp].determinedBy
             if (im != mark) {
                 if (ist == 0) {
-                    if (idet != 0) { return 0 }
+                    if (idet != NO_CON) { return 0 }
                 }
             }
         }
     }
     if (k == K_SCALE) {
-        var sinp = null
-        if (dir == FORWARD) { sinp = (c.v1) }
-        if (dir == BACKWARD) { sinp = (c.v2) }
-        if (sinp != null) {
-            var sim = (sinp.mark)
-            var sist = (sinp.stay)
-            var sidet = (sinp.determinedBy)
+        var sinp = NO_VAR
+        if (dir == FORWARD) { sinp = w.cons[cid].v1 }
+        if (dir == BACKWARD) { sinp = w.cons[cid].v2 }
+        if (sinp != NO_VAR) {
+            var sim = w.vars[sinp].mark
+            var sist = w.vars[sinp].stay
+            var sidet = w.vars[sinp].determinedBy
             if (sim != mark) {
                 if (sist == 0) {
-                    if (sidet != 0) { return 0 }
+                    if (sidet != NO_CON) { return 0 }
                 }
             }
         }
         // Also check scale and offset
-        var sc: Variable = (c.sc)
-        var scm = (sc.mark)
-        var scst = (sc.stay)
-        var scdet = (sc.determinedBy)
+        var sc = w.cons[cid].sc
+        var scm = w.vars[sc].mark
+        var scst = w.vars[sc].stay
+        var scdet = w.vars[sc].determinedBy
         if (scm != mark) {
             if (scst == 0) {
-                if (scdet != 0) { return 0 }
+                if (scdet != NO_CON) { return 0 }
             }
         }
-        var off: Variable = (c.off)
-        var offm = (off.mark)
-        var offst = (off.stay)
-        var offdet = (off.determinedBy)
+        var off = w.cons[cid].off
+        var offm = w.vars[off].mark
+        var offst = w.vars[off].stay
+        var offdet = w.vars[off].determinedBy
         if (offm != mark) {
             if (offst == 0) {
-                if (offdet != 0) { return 0 }
+                if (offdet != NO_CON) { return 0 }
             }
         }
     }
     return 1
 }
 
-pn c_recalculate(var c: any) any {
-    var k = (c.kind)
+pn c_recalculate(var w, cid) any {
+    var k = w.cons[cid].kind
     if (k == K_EDIT) {
-        var o: Variable = (c.out)
-        var cs = (c.strength)
-        o.walkStrength = cs
+        var o = w.cons[cid].out
+        var cs = w.cons[cid].strength
+        w.vars[o].walkStrength = cs
         // isInput=true so stay=false → stay=0
-        o.stay = 0
+        w.vars[o].stay = 0
         return 0
     }
     if (k == K_STAY) {
-        var o2: Variable = (c.out)
-        var cs2 = (c.strength)
-        o2.walkStrength = cs2
+        var o2 = w.cons[cid].out
+        var cs2 = w.cons[cid].strength
+        w.vars[o2].walkStrength = cs2
         // isInput=false so stay=true → stay=1
-        var ost = (o2.stay)
-        o2.stay = 1
+        w.vars[o2].stay = 1
         // Stay execute is no-op, nothing to do
         return 0
     }
     if (k == K_EQUAL) {
-        var dir = (c.direction)
-        var ihn = null
-        var out = null
+        var dir = w.cons[cid].direction
+        var ihn = NO_VAR
+        var out = NO_VAR
         if (dir == FORWARD) {
-            ihn = (c.v1)
-            out = (c.v2)
+            ihn = w.cons[cid].v1
+            out = w.cons[cid].v2
         }
         if (dir == BACKWARD) {
-            ihn = (c.v2)
-            out = (c.v1)
+            ihn = w.cons[cid].v2
+            out = w.cons[cid].v1
         }
-        var cs3 = (c.strength)
-        var iws = (ihn.walkStrength)
+        var cs3 = w.cons[cid].strength
+        var iws = w.vars[ihn].walkStrength
         var ws = s_weakest(cs3, iws)
-        out.walkStrength = ws
-        var ist = (ihn.stay)
-        out.stay = ist
+        w.vars[out].walkStrength = ws
+        var ist = w.vars[ihn].stay
+        w.vars[out].stay = ist
         if (ist == 1) {
-            c_execute(c)
+            c_execute(w, cid)
         }
         return 0
     }
     if (k == K_SCALE) {
-        var dir2 = (c.direction)
-        var ihn2 = null
-        var out2 = null
+        var dir2 = w.cons[cid].direction
+        var ihn2 = NO_VAR
+        var out2 = NO_VAR
         if (dir2 == FORWARD) {
-            ihn2 = (c.v1)
-            out2 = (c.v2)
+            ihn2 = w.cons[cid].v1
+            out2 = w.cons[cid].v2
         }
         if (dir2 == BACKWARD) {
-            ihn2 = (c.v2)
-            out2 = (c.v1)
+            ihn2 = w.cons[cid].v2
+            out2 = w.cons[cid].v1
         }
-        var cs4 = (c.strength)
-        var iws2 = (ihn2.walkStrength)
+        var cs4 = w.cons[cid].strength
+        var iws2 = w.vars[ihn2].walkStrength
         var ws2 = s_weakest(cs4, iws2)
-        out2.walkStrength = ws2
-        var ist2 = (ihn2.stay)
-        var sc: Variable = (c.sc)
-        var scst = (sc.stay)
-        var off: Variable = (c.off)
-        var offst = (off.stay)
+        w.vars[out2].walkStrength = ws2
+        var ist2 = w.vars[ihn2].stay
+        var scst = w.vars[w.cons[cid].sc].stay
+        var offst = w.vars[w.cons[cid].off].stay
         var stay: int = 1
         if (ist2 == 0) { stay = 0 }
         if (scst == 0) { stay = 0 }
         if (offst == 0) { stay = 0 }
-        out2.stay = stay
+        w.vars[out2].stay = stay
         if (stay == 1) {
-            c_execute(c)
+            c_execute(w, cid)
         }
         return 0
     }
     return 0
 }
 
-pn c_execute(var c: any) any {
-    var k = (c.kind)
+pn c_execute(var w, cid) any {
+    var k = w.cons[cid].kind
     // Edit and Stay: no-op
     if (k == K_EDIT) { return 0 }
     if (k == K_STAY) { return 0 }
     if (k == K_EQUAL) {
-        var dir = (c.direction)
+        var dir = w.cons[cid].direction
         if (dir == FORWARD) {
-            var v1: Variable = (c.v1)
-            var v2: Variable = (c.v2)
-            var val = (v1.val)
-            v2.val = val
+            var val = w.vars[w.cons[cid].v1].val
+            w.vars[w.cons[cid].v2].val = val
         }
         if (dir == BACKWARD) {
-            var v1b: Variable = (c.v1)
-            var v2b: Variable = (c.v2)
-            var valb = (v2b.val)
-            v1b.val = valb
+            var valb = w.vars[w.cons[cid].v2].val
+            w.vars[w.cons[cid].v1].val = valb
         }
         return 0
     }
     if (k == K_SCALE) {
-        var dirs = (c.direction)
+        var dirs = w.cons[cid].direction
         if (dirs == FORWARD) {
-            var sv1: Variable = (c.v1)
-            var sv2: Variable = (c.v2)
-            var sc: Variable = (c.sc)
-            var off: Variable = (c.off)
-            var sv1v = (sv1.val)
-            var scv = (sc.val)
-            var offv = (off.val)
+            var sv1v = w.vars[w.cons[cid].v1].val
+            var scv = w.vars[w.cons[cid].sc].val
+            var offv = w.vars[w.cons[cid].off].val
             var result = sv1v * scv + offv
-            sv2.val = result
+            w.vars[w.cons[cid].v2].val = result
         }
         if (dirs == BACKWARD) {
-            var sv1b: Variable = (c.v1)
-            var sv2b: Variable = (c.v2)
-            var scb: Variable = (c.sc)
-            var offb: Variable = (c.off)
-            var sv2v = (sv2b.val)
-            var scvb = (scb.val)
-            var offvb = (offb.val)
+            var sv2v = w.vars[w.cons[cid].v2].val
+            var scvb = w.vars[w.cons[cid].sc].val
+            var offvb = w.vars[w.cons[cid].off].val
             var resultb = (sv2v - offvb) / scvb
-            sv1b.val = resultb
+            w.vars[w.cons[cid].v1].val = resultb
         }
         return 0
     }
     return 0
 }
 
-// --- Planner ---
-pn planner_new() any {
-    var p: Planner = { currentMark: 1, nextCid: 1 }
-    return p
-}
+// --- Planner (planner state lives on the world) ---
 
-pn planner_new_mark(var planner: any) any {
-    var cm = (planner.currentMark) + 1
-    planner.currentMark = cm
+pn planner_new_mark(var w) any {
+    var cm = w.currentMark + 1
+    w.currentMark = cm
     return cm
 }
 
-pn planner_next_cid(var planner: any) any {
-    var nc = (planner.nextCid)
-    var nn = nc + 1
-    planner.nextCid = nn
+pn planner_next_cid(var w) any {
+    var nc = w.nextCid
+    w.nextCid = nc + 1
     return nc
 }
 
-// c_satisfy: returns overridden constraint (or null)
-pn c_satisfy(var c: any, mark, var planner: any) any {
-    c_choose_method(c, mark)
-    var sat = c_is_satisfied(c)
+// c_satisfy: returns the overridden constraint id (or NO_CON)
+pn c_satisfy(var w, cid, mark) any {
+    c_choose_method(w, cid, mark)
+    var sat = c_is_satisfied(w, cid)
     if (sat == 1) {
-        c_mark_inputs(c, mark)
-        var out: Variable = c_get_output(c)
-        var det = (out.determinedBy)
-        var overridden = null
-        if (det != 0) {
-            // find old constraint by cid
-            var cs: Vec = (out.constraints)
+        c_mark_inputs(w, cid, mark)
+        var out = c_get_output(w, cid)
+        var det = w.vars[out].determinedBy
+        var overridden = NO_CON
+        if (det != NO_CON) {
+            // find the old constraint by cid among the variable's constraints
+            var cs: Vec = w.vars[out].constraints
             var csz = vec_size(cs)
             var i: int = 0
             while (i < csz) {
                 var cc = vec_at(cs, i)
-                var ccid = (cc.cid)
-                if (ccid == det) {
-                    // Mutate the graph-owned constraint before retaining the
-                    // return alias, so COW does not detach a local copy.
-                    c_mark_unsatisfied(cc)
+                if (cc == det) {
+                    c_mark_unsatisfied(w, cc)
                     overridden = cc
                 }
                 i = i + 1
             }
         }
-        var ccid2 = (c.cid)
-        out.determinedBy = ccid2
-        var ok = planner_add_propagate(planner, c, mark)
+        w.vars[out].determinedBy = cid
+        var ok = planner_add_propagate(w, cid, mark)
         if (ok == 0) {
             print("ERROR: cycle\n")
         }
-        out.mark = mark
+        w.vars[out].mark = mark
         return overridden
     }
-    var cs2 = (c.strength)
+    var cs2 = w.cons[cid].strength
     if (cs2 == S_REQUIRED) {
         print("ERROR: required constraint not satisfied\n")
     }
-    return null
+    return NO_CON
 }
 
-pn c_add_constraint(var c: any, var planner: any) any {
-    c_add_to_graph(c)
-    planner_incremental_add(planner, c)
+pn c_add_constraint(var w, cid) any {
+    c_add_to_graph(w, cid)
+    planner_incremental_add(w, cid)
 }
 
-pn c_destroy_constraint(var c: any, var planner: any) any {
-    var sat = c_is_satisfied(c)
+pn c_destroy_constraint(var w, cid) any {
+    var sat = c_is_satisfied(w, cid)
     if (sat == 1) {
-        planner_incremental_remove(planner, c)
+        planner_incremental_remove(w, cid)
     }
-    c_remove_from_graph(c)
+    c_remove_from_graph(w, cid)
 }
 
-// --- Constraint constructors ---
-pn edit_constraint_new(var v: any, strength, var planner: any) any {
-    var cid = planner_next_cid(planner)
-    var c: any = { cid: 0, kind: 1, strength: 0, out: null, satisfied: 0 }
-    c.cid = cid
-    c.strength = strength
-    c.out = v
-    c_add_constraint(c, planner)
-    return c
+// --- Constraint constructors: allocate into w.cons, return the cid ---
+
+pn con_alloc(var w, kind, strength) any {
+    var cid = planner_next_cid(w)
+    push(w.cons, { cid: cid, kind: kind, strength: strength,
+                   out: NO_VAR, satisfied: 0,
+                   v1: NO_VAR, v2: NO_VAR, direction: 0,
+                   sc: NO_VAR, off: NO_VAR })
+    return cid
 }
 
-pn stay_constraint_new(var v: any, strength, var planner: any) any {
-    var cid = planner_next_cid(planner)
-    var c: any = { cid: 0, kind: 2, strength: 0, out: null, satisfied: 0 }
-    c.cid = cid
-    c.strength = strength
-    c.out = v
-    c_add_constraint(c, planner)
-    return c
+pn edit_constraint_new(var w, vid, strength) any {
+    var cid = con_alloc(w, K_EDIT, strength)
+    w.cons[cid].out = vid
+    c_add_constraint(w, cid)
+    return cid
 }
 
-pn equality_constraint_new(var v1: any, var v2: any, strength, var planner: any) any {
-    var cid = planner_next_cid(planner)
-    var c: any = { cid: 0, kind: 3, strength: 0, v1: null, v2: null, direction: 0 }
-    c.cid = cid
-    c.strength = strength
-    c.v1 = v1
-    c.v2 = v2
-    c_add_constraint(c, planner)
-    return c
+pn stay_constraint_new(var w, vid, strength) any {
+    var cid = con_alloc(w, K_STAY, strength)
+    w.cons[cid].out = vid
+    c_add_constraint(w, cid)
+    return cid
 }
 
-pn scale_constraint_new(var src: any, var scale: any, var offset: any, var dest: any, strength, var planner: any) any {
-    var cid = planner_next_cid(planner)
-    var c: any = { cid: 0, kind: 4, strength: 0, v1: null, v2: null, direction: 0, sc: null, off: null }
-    c.cid = cid
-    c.strength = strength
-    c.v1 = src
-    c.v2 = dest
-    c.sc = scale
-    c.off = offset
-    c_add_constraint(c, planner)
-    return c
+pn equality_constraint_new(var w, v1, v2, strength) any {
+    var cid = con_alloc(w, K_EQUAL, strength)
+    w.cons[cid].v1 = v1
+    w.cons[cid].v2 = v2
+    c_add_constraint(w, cid)
+    return cid
+}
+
+pn scale_constraint_new(var w, src, scale, offset, dest, strength) any {
+    var cid = con_alloc(w, K_SCALE, strength)
+    w.cons[cid].v1 = src
+    w.cons[cid].v2 = dest
+    w.cons[cid].sc = scale
+    w.cons[cid].off = offset
+    c_add_constraint(w, cid)
+    return cid
 }
 
 // --- Planner methods ---
-pn planner_incremental_add(var planner: any, var c: any) any {
-    var mark = planner_new_mark(planner)
-    var overridden = c_satisfy(c, mark, planner)
-    while (overridden != null) {
-        overridden = c_satisfy(overridden, mark, planner)
+pn planner_incremental_add(var w, cid) any {
+    var mark = planner_new_mark(w)
+    var overridden = c_satisfy(w, cid, mark)
+    while (overridden != NO_CON) {
+        overridden = c_satisfy(w, overridden, mark)
     }
 }
 
-pn planner_incremental_remove(var planner: any, var c: any) any {
-    var out: Variable = c_get_output(c)
-    c_mark_unsatisfied(c)
-    c_remove_from_graph(c)
-    var unsatisfied = planner_remove_propagate_from(planner, out)
+pn planner_incremental_remove(var w, cid) any {
+    var out = c_get_output(w, cid)
+    c_mark_unsatisfied(w, cid)
+    c_remove_from_graph(w, cid)
+    var unsatisfied = planner_remove_propagate_from(w, out)
     var usz = vec_size(unsatisfied)
     var i: int = 0
     while (i < usz) {
         var u = vec_at(unsatisfied, i)
-        planner_incremental_add(planner, u)
+        planner_incremental_add(w, u)
         i = i + 1
     }
 }
 
-pn planner_extract_plan(var planner: any, var constraints: Vec) any {
+pn planner_extract_plan(var w, var constraints: Vec) any {
     var sources: Vec = vec_new()
     var csz = vec_size(constraints)
     var i: int = 0
     while (i < csz) {
         var c = vec_at(constraints, i)
-        var inp = c_is_input(c)
-        var sat = c_is_satisfied(c)
+        var inp = c_is_input(w, c)
+        var sat = c_is_satisfied(w, c)
         if (inp == 1) {
             if (sat == 1) {
                 vec_add(sources, c)
@@ -724,25 +681,25 @@ pn planner_extract_plan(var planner: any, var constraints: Vec) any {
         }
         i = i + 1
     }
-    var plan: Vec = planner_make_plan(planner, sources)
+    var plan: Vec = planner_make_plan(w, sources)
     return plan
 }
 
-pn planner_make_plan(var planner: any, var sources: Vec) any {
-    var mark = planner_new_mark(planner)
+pn planner_make_plan(var w, var sources: Vec) any {
+    var mark = planner_new_mark(w)
     var plan: Vec = vec_new()
     var todo = sources
     var empty = vec_is_empty(todo)
     while (empty == 0) {
         var c = vec_remove_first(todo)
-        var out: Variable = c_get_output(c)
-        var om = (out.mark)
+        var out = c_get_output(w, c)
+        var om = w.vars[out].mark
         if (om != mark) {
-            var ik = c_inputs_known(c, mark)
+            var ik = c_inputs_known(w, c, mark)
             if (ik == 1) {
                 vec_add(plan, c)
-                out.mark = mark
-                planner_add_constraints_consuming_to(planner, out, todo)
+                w.vars[out].mark = mark
+                planner_add_constraints_consuming_to(w, out, todo)
             }
         }
         empty = vec_is_empty(todo)
@@ -750,29 +707,28 @@ pn planner_make_plan(var planner: any, var sources: Vec) any {
     return plan
 }
 
-pn planner_propagate_from(var planner: any, var v: any) any {
+pn planner_propagate_from(var w, vid) any {
     var todo: Vec = vec_new()
-    planner_add_constraints_consuming_to(planner, v, todo)
+    planner_add_constraints_consuming_to(w, vid, todo)
     var empty = vec_is_empty(todo)
     while (empty == 0) {
         var c = vec_remove_first(todo)
-        c_execute(c)
-        var out: Variable = c_get_output(c)
-        planner_add_constraints_consuming_to(planner, out, todo)
+        c_execute(w, c)
+        var out = c_get_output(w, c)
+        planner_add_constraints_consuming_to(w, out, todo)
         empty = vec_is_empty(todo)
     }
 }
 
-pn planner_add_constraints_consuming_to(var planner: any, var v: any, var coll: Vec) any {
-    var det = (v.determinedBy)
-    var cs: Vec = (v.constraints)
+pn planner_add_constraints_consuming_to(var w, vid, var coll: Vec) any {
+    var det = w.vars[vid].determinedBy
+    var cs: Vec = w.vars[vid].constraints
     var csz = vec_size(cs)
     var i: int = 0
     while (i < csz) {
         var c = vec_at(cs, i)
-        var ccid = (c.cid)
-        if (ccid != det) {
-            var sat = c_is_satisfied(c)
+        if (c != det) {
+            var sat = c_is_satisfied(w, c)
             if (sat == 1) {
                 vec_add(coll, c)
             }
@@ -781,75 +737,74 @@ pn planner_add_constraints_consuming_to(var planner: any, var v: any, var coll: 
     }
 }
 
-pn planner_add_propagate(var planner: any, var c: any, mark) any {
-    var todo: Vec = vec_with(c)
+pn planner_add_propagate(var w, cid, mark) any {
+    var todo: Vec = vec_with(cid)
     var empty = vec_is_empty(todo)
     while (empty == 0) {
         var d = vec_remove_first(todo)
-        var out: Variable = c_get_output(d)
-        var om = (out.mark)
+        var out = c_get_output(w, d)
+        var om = w.vars[out].mark
         if (om == mark) {
-            planner_incremental_remove(planner, c)
+            planner_incremental_remove(w, cid)
             return 0
         }
-        c_recalculate(d)
-        planner_add_constraints_consuming_to(planner, out, todo)
+        c_recalculate(w, d)
+        planner_add_constraints_consuming_to(w, out, todo)
         empty = vec_is_empty(todo)
     }
     return 1
 }
 
-pn planner_change(var planner: any, var v: any, newValue) any {
-    var editC = edit_constraint_new(v, S_PREFERRED, planner)
+pn planner_change(var w, vid, newValue) any {
+    var editC = edit_constraint_new(w, vid, S_PREFERRED)
     var editV: Vec = vec_with(editC)
-    var plan: Vec = planner_extract_plan(planner, editV)
+    var plan: Vec = planner_extract_plan(w, editV)
     var i: int = 0
     while (i < 10) {
-        v.val = newValue
+        w.vars[vid].val = newValue
         // execute plan
         var psz = vec_size(plan)
         var j: int = 0
         while (j < psz) {
             var pc = vec_at(plan, j)
-            c_execute(pc)
+            c_execute(w, pc)
             j = j + 1
         }
         i = i + 1
     }
-    c_destroy_constraint(editC, planner)
+    c_destroy_constraint(w, editC)
 }
 
-pn planner_remove_propagate_from(var planner: any, var out: any) any {
+pn planner_remove_propagate_from(var w, out) any {
     var unsatisfied: Vec = vec_new()
-    out.determinedBy = 0
-    out.walkStrength = S_ABSOLUTE_WEAKEST
-    out.stay = 1
+    w.vars[out].determinedBy = NO_CON
+    w.vars[out].walkStrength = S_ABSOLUTE_WEAKEST
+    w.vars[out].stay = 1
     var todo: Vec = vec_with(out)
     var empty = vec_is_empty(todo)
     while (empty == 0) {
-        var v: Variable = vec_remove_first(todo)
-        var cs: Vec = (v.constraints)
+        var v = vec_remove_first(todo)
+        var cs: Vec = w.vars[v].constraints
         var csz = vec_size(cs)
         var i: int = 0
         while (i < csz) {
             var cc = vec_at(cs, i)
-            var sat = c_is_satisfied(cc)
+            var sat = c_is_satisfied(w, cc)
             if (sat == 0) {
                 vec_add(unsatisfied, cc)
             }
             i = i + 1
         }
         // constraintsConsuming(v, fn): for each c != determinedBy && satisfied
-        var det = (v.determinedBy)
+        var det = w.vars[v].determinedBy
         var j: int = 0
         while (j < csz) {
             var cc2 = vec_at(cs, j)
-            var cc2id = (cc2.cid)
-            if (cc2id != det) {
-                var sat2 = c_is_satisfied(cc2)
+            if (cc2 != det) {
+                var sat2 = c_is_satisfied(w, cc2)
                 if (sat2 == 1) {
-                    c_recalculate(cc2)
-                    var o2: Variable = c_get_output(cc2)
+                    c_recalculate(w, cc2)
+                    var o2 = c_get_output(w, cc2)
                     vec_add(todo, o2)
                 }
             }
@@ -864,13 +819,13 @@ pn planner_remove_propagate_from(var planner: any, var out: any) any {
 // --- Benchmark tests ---
 
 pn chain_test(n) any {
-    var planner: Planner = planner_new()
+    var w = world_new()
     // Create n+1 variables
     var vars: Vec = vec_new()
     var i: int = 0
     var np1 = n + 1
     while (i < np1) {
-        var v = var_new()
+        var v = var_new(w)
         vec_add(vars, v)
         i = i + 1
     }
@@ -878,32 +833,32 @@ pn chain_test(n) any {
     var j: int = 0
     while (j < n) {
         var jp1 = j + 1
-        var v1: Variable = vec_at(vars, j)
-        var v2: Variable = vec_at(vars, jp1)
-        var ec = equality_constraint_new(v1, v2, S_REQUIRED, planner)
+        var v1 = vec_at(vars, j)
+        var v2 = vec_at(vars, jp1)
+        var ec = equality_constraint_new(w, v1, v2, S_REQUIRED)
         j = j + 1
     }
     // StayConstraint on last variable
-    var tail_var: Variable = vec_at(vars, n)
-    var sc = stay_constraint_new(tail_var, S_STRONG_DEFAULT, planner)
+    var tail_var = vec_at(vars, n)
+    var sc = stay_constraint_new(w, tail_var, S_STRONG_DEFAULT)
     // EditConstraint on first variable
-    var first: Variable = vec_at(vars, 0)
-    var editC = edit_constraint_new(first, S_PREFERRED, planner)
+    var first = vec_at(vars, 0)
+    var editC = edit_constraint_new(w, first, S_PREFERRED)
     var editV: Vec = vec_with(editC)
-    var plan: Vec = planner_extract_plan(planner, editV)
+    var plan: Vec = planner_extract_plan(w, editV)
     // Run 100 iterations
     var k: int = 0
     while (k < 100) {
-        first.val = k
+        w.vars[first].val = k
         // execute plan
         var psz = vec_size(plan)
         var m: int = 0
         while (m < psz) {
             var pc = vec_at(plan, m)
-            c_execute(pc)
+            c_execute(w, pc)
             m = m + 1
         }
-        var lastval = (tail_var.val)
+        var lastval = w.vars[tail_var].val
         if (lastval != k) {
             print("Chain test FAILED at k=")
             print(k)
@@ -914,48 +869,48 @@ pn chain_test(n) any {
         }
         k = k + 1
     }
-    c_destroy_constraint(editC, planner)
+    c_destroy_constraint(w, editC)
     return 1
 }
 
 pn projection_test(n) any {
-    var planner: Planner = planner_new()
+    var w = world_new()
     var dests: Vec = vec_new()
-    var scale: Variable = var_value(10)
-    var offset: Variable = var_value(1000)
-    var src = null
-    var dst = null
+    var scale = var_value(w, 10)
+    var offset = var_value(w, 1000)
+    var src = NO_VAR
+    var dst = NO_VAR
     var i: int = 1
     while (i <= n) {
-        src = var_value(i)
-        dst = var_value(i)
+        src = var_value(w, i)
+        dst = var_value(w, i)
         vec_add(dests, dst)
-        var stc = stay_constraint_new(src, S_DEFAULT, planner)
-        var scc = scale_constraint_new(src, scale, offset, dst, S_REQUIRED, planner)
+        var stc = stay_constraint_new(w, src, S_DEFAULT)
+        var scc = scale_constraint_new(w, src, scale, offset, dst, S_REQUIRED)
         i = i + 1
     }
-    planner_change(planner, src, 17)
-    var dstval = (dst.val)
+    planner_change(w, src, 17)
+    var dstval = w.vars[dst].val
     if (dstval != 1170) {
         print("Projection test 1 FAILED: dst=")
         print(dstval)
         print("\n")
         return 0
     }
-    planner_change(planner, dst, 1050)
-    var srcval = (src.val)
+    planner_change(w, dst, 1050)
+    var srcval = w.vars[src].val
     if (srcval != 5) {
         print("Projection test 2 FAILED: src=")
         print(srcval)
         print("\n")
         return 0
     }
-    planner_change(planner, scale, 5)
+    planner_change(w, scale, 5)
     var j: int = 0
     var nm1 = n - 1
     while (j < nm1) {
-        var dj: Variable = vec_at(dests, j)
-        var djv = (dj.val)
+        var dj = vec_at(dests, j)
+        var djv = w.vars[dj].val
         var expected = (j + 1) * 5 + 1000
         if (djv != expected) {
             print("Projection test 3 FAILED at j=")
@@ -969,11 +924,11 @@ pn projection_test(n) any {
         }
         j = j + 1
     }
-    planner_change(planner, offset, 2000)
+    planner_change(w, offset, 2000)
     var k: int = 0
     while (k < nm1) {
-        var dk: Variable = vec_at(dests, k)
-        var dkv = (dk.val)
+        var dk = vec_at(dests, k)
+        var dkv = w.vars[dk].val
         var expected2 = (k + 1) * 5 + 2000
         if (dkv != expected2) {
             print("Projection test 4 FAILED at k=")

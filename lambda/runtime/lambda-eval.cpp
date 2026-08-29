@@ -7757,9 +7757,17 @@ Item cow_mark_shared(Item value) {
 // update. Callers must treat this as possibly allocating: the ArrayNum arm
 // still copies eagerly.
 Item cow_bind_var(Item value) {
-    // ArrayNum views keep their Stage-2 mutable-view contract; generic COW
-    // ownership starts only at the core Item-container subset.
-    if (get_type_id(value) == LMD_TYPE_ARRAY_NUM) return fn_mutable_value(value);
+    if (get_type_id(value) == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* an = value.array_num;
+        // CW32v2: mutable views keep their write-through contract (open/todo
+        // by designer ruling 2026-08-29) -- marking one would make its first
+        // write detach and stop reaching the base. The old eager clone also
+        // returned views unclonied, so behavior is unchanged for them.
+        if (an && an->is_view) return value;
+        // plain ArrayNum joins the uniform mark: O(1) bind, one memcpy detach
+        // at the first COW-aware write. This retires the last Stage-1
+        // eager-clone exception.
+    }
     return cow_mark_shared(value);
 }
 
@@ -7773,20 +7781,11 @@ Item cow_bind_var(Item value) {
 // detaches correctly when a COW-aware setter writes it (clone_mutable_array_num
 // via cow_prepare_write); what stays open is the raw/native-lane store paths
 // that never consult the flag, and those are Stage-2 ArrayNum work either way.
-// Opt-in until the nested-mutation half of C4 lands. Insertion capture on its
-// own is sound, but element/field READS still borrow (the open C4.1 half), so
-// the get-modify idiom `c = owner[i]` ... `c[j] = v` silently writes a detached
-// copy once the insertion that produced `owner[i]` captured a named value.
-// Four corpus scripts depend on that idiom today (Appendix B.2 / §9.5.2 is the
-// design that closes it), so the flip stays behind this flag -- the same
-// staging Phase C/D used for LAMBDA_COW.
-bool cow_capture_enabled(void) {
-    static const bool enabled = getenv("LAMBDA_COW_CAPTURE") != NULL;
-    return enabled;
-}
-
+// The escape hatch is RETIRED (2026-08-29, after the flip soaked): insertion
+// capture (S9.3.1), plain-param snapshots (S9.1.3/CW29), and the CW24v2
+// place diagnostics are unconditionally the semantics. LAMBDA_COW_CAPTURE is
+// no longer consulted anywhere.
 Item cow_capture_value(Item value) {
-    if (!cow_capture_enabled()) return value;
     return cow_mark_shared(value);
 }
 
@@ -8220,6 +8219,33 @@ Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expect
     return converted_root;
 }
 
+// NM-O8, typed arm. A `var`/plain-`pn` parameter root writes through to the
+// caller, so it cannot be validated by swapping in a detached candidate -- the
+// caller would never see the swap. Check the pre-state conforms (the same
+// contract lambda_map_set_checked_inplace relies on for the flat store), write
+// in place, then re-check the post-state.
+Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
+        Type* expected, const char* boundary) {
+    Type* contract = runtime_boundary_unwrap_type(expected);
+    if (!contract || contract->type_id != LMD_TYPE_MAP) {
+        return lambda_type_error(value, expected, boundary);
+    }
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_path(roots, path);
+    Rooted<Item> rooted_value(roots, value);
+    if (!lambda_type_matches(rooted_owner.get(), contract)) {
+        return lambda_type_error(rooted_owner.get(), contract, boundary);
+    }
+    Item write_result = cow_path_set_inplace(rooted_owner.get(), rooted_path.get(),
+        rooted_value.get());
+    if (get_type_id(write_result) == LMD_TYPE_ERROR) return write_result;
+    if (!lambda_type_matches(rooted_owner.get(), contract)) {
+        return lambda_type_error(rooted_owner.get(), contract, boundary);
+    }
+    return rooted_owner.get();
+}
+
 static Type* runtime_array_contract_element(Type* expected) {
     expected = runtime_boundary_unwrap_type(expected);
     if (!expected) return NULL;
@@ -8386,6 +8412,40 @@ Item lambda_array_set_checked_inplace_lane(Item owner, int64_t index, Item value
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true, &hint);
 }
 
+// CW32v2: numeric mask stores (`arr[mask] = v`) mutate the packed buffer in
+// place. Under mark-only binds the owner may be shared, so the wrapper
+// prepares first and returns the (possibly replaced) owner for mandatory
+// republication -- the raw fn_index_assign keeps reference semantics (CW21).
+Item index_assign_cow(Item owner, Item key, Item value) {
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_key(roots, key);
+    Rooted<Item> rooted_value(roots, value);
+    Item replacement = cow_prepare_write(rooted_owner.get());
+    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+    rooted_owner.set(replacement);
+    Item result = fn_index_assign(rooted_owner.get(), rooted_key.get(),
+        rooted_value.get());
+    if (item_is_error(result)) return result;
+    return rooted_owner.get();
+}
+
+// CW32v2: the MIR lane-store cold arm's entry -- machine index, no key
+// decode. Prepares (detaching a shared owner with one packed memcpy), then
+// delegates to the raw setter (CW21) and returns the owner for mandatory
+// republication into the binding.
+Item array_num_set_cow_idx(Item owner, int64_t index, Item value) {
+    Item replacement = cow_prepare_write(owner);
+    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+    TypeId type_id = get_type_id(replacement);
+    if (type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_ARRAY_NUM) {
+        log_error("cow lane store rejected non-array owner type %d", type_id);
+        return ItemError;
+    }
+    if (fn_array_set(replacement.array, index, value).item == ItemError.item) return ItemError;
+    return replacement;
+}
+
 Item array_set_cow(Item owner, Item key, Item value) {
     Item replacement = cow_prepare_write(owner);
     if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
@@ -8469,7 +8529,61 @@ Item cow_path_set_raw(Item owner, Item key, Item value) {
     return ItemError;
 }
 
-Item cow_path_set(Item owner, Item path, Item value) {
+// CW25 / S9.2.2: a `var` argument that names a PLACE (`f(var m.rows[i])`) must
+// borrow that place, and "creating a mutable borrow over shared storage
+// un-shares first". Both tiers already detach the borrowed ROOT before the
+// call and then let the callee mutate in place -- no replacement channel is
+// needed because `var` parameters use the in-place setters. A path borrow is
+// the same protocol one level deeper: detach every link from the root down to
+// the leaf, reinstalling each replacement in its parent, and hand the callee
+// the detached leaf. It is already installed where it belongs, so the callee's
+// in-place writes land in the caller's container and no writeback is required.
+//
+// `owner` must already be the caller's detached root.
+Item cow_path_borrow(Item owner, Item path) {
+    if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array || path.array->length <= 0) {
+        log_error("cow path borrow requires a non-empty array path");
+        return ItemError;
+    }
+    RootFrame roots(5);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_path(roots, path);
+    Rooted<Item> rooted_current(roots, owner);
+    Rooted<Item> rooted_child(roots, ItemNull);
+    Rooted<Item> rooted_key(roots, ItemNull);
+
+    for (int64_t i = 0; i < rooted_path.get().array->length; i++) {
+        rooted_key.set(item_at(rooted_path.get(), i));
+        if (get_type_id(rooted_key.get()) == LMD_TYPE_NULL) return ItemError;
+        rooted_child.set(fn_index(rooted_current.get(), rooted_key.get()));
+        if (!cow_item_is_container(rooted_child.get())) {
+            // A borrow of a scalar slot has no storage to write through; the
+            // caller must reject it rather than hand the callee a value copy.
+            log_error("cow path borrow encountered a non-container link");
+            return ItemError;
+        }
+        Item pre_detach = rooted_child.get();
+        rooted_child.set(cow_prepare_write(rooted_child.get()));
+        if (get_type_id(rooted_child.get()) == LMD_TYPE_ERROR) return ItemError;
+        if (rooted_child.get().item != pre_detach.item &&
+                get_type_id(cow_path_set_raw(rooted_current.get(), rooted_key.get(),
+                    rooted_child.get())) == LMD_TYPE_ERROR) return ItemError;
+        rooted_current.set(rooted_child.get());
+    }
+    return rooted_current.get();
+}
+
+// NM-O8: `publish_in_place` skips the ROOT detach. A `var` parameter's root was
+// already detached by the caller before the call, and a plain `pn` parameter
+// writes through to the caller under the current pn ABI -- which is exactly the
+// selection the FLAT member/element store already makes via
+// `is_var_param` (lambda_map_set_checked_inplace). The nested
+// path store never made it, so it detached the callee's own root and published
+// the replacement into the callee's binding: `b.xs[0] = 99` was visible inside
+// the procedure and lost at the caller, while `b.cur = "X"` was not. Children
+// are still detached and reinstalled either way; only the root is left alone.
+static Item cow_path_set_impl(Item owner, Item path, Item value,
+        bool publish_in_place) {
     if (get_type_id(path) != LMD_TYPE_ARRAY || !path.array || path.array->length <= 0) {
         log_error("cow path mutation requires a non-empty array path");
         return ItemError;
@@ -8486,7 +8600,8 @@ Item cow_path_set(Item owner, Item path, Item value) {
     Rooted<Item> rooted_key(roots, ItemNull);
     Rooted<Item> rooted_replacement(roots, ItemNull);
 
-    rooted_current.set(cow_prepare_write(rooted_owner.get()));
+    rooted_current.set(publish_in_place ? rooted_owner.get()
+                                        : cow_prepare_write(rooted_owner.get()));
     if (get_type_id(rooted_current.get()) == LMD_TYPE_ERROR) return ItemError;
     // The top-level replacement survives every child detach; returning an
     // unrooted local here used a pre-compaction address for nested writes.
@@ -8507,13 +8622,27 @@ Item cow_path_set(Item owner, Item path, Item value) {
             log_error("cow path mutation encountered a non-container child");
             return ItemError;
         }
+        Item pre_detach = rooted_child.get();
         rooted_child.set(cow_prepare_write(rooted_child.get()));
         if (get_type_id(rooted_child.get()) == LMD_TYPE_ERROR) return ItemError;
-        if (get_type_id(cow_path_set_raw(rooted_current.get(), rooted_key.get(), rooted_child.get())) ==
-                LMD_TYPE_ERROR) return ItemError;
+        // Reinstall only when the child actually moved. In the steady state
+        // the whole spine is already unique, so cow_prepare_write is the
+        // identity and this store would rewrite the slot with the value it
+        // already holds -- a dynamic shape lookup per link per write, wasted.
+        if (rooted_child.get().item != pre_detach.item &&
+                get_type_id(cow_path_set_raw(rooted_current.get(), rooted_key.get(),
+                    rooted_child.get())) == LMD_TYPE_ERROR) return ItemError;
         rooted_current.set(rooted_child.get());
     }
     return ItemError;
+}
+
+Item cow_path_set(Item owner, Item path, Item value) {
+    return cow_path_set_impl(owner, path, value, false);
+}
+
+Item cow_path_set_inplace(Item owner, Item path, Item value) {
+    return cow_path_set_impl(owner, path, value, true);
 }
 
 // rebuild a map/element shape when a field's type changes

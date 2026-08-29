@@ -20,11 +20,17 @@ pn test_float_view_write_through() {
     print(arr[1]); print("\n")   // 99.9
 }
 
-pn test_leading_axis_row_write() {
-    var m = [[1, 2, 3], [4, 5, 6]]
-    var row = m[1]               // leading-axis view of row 1 -> [4, 5, 6]
+// S9.2.2: a write-through view is a BORROW, never a value -- legal only in
+// `var`-parameter position. Taking the row as a binding (`var row = m[1]`) binds
+// a copy under S9.1.2, so this is the row write spelled as the borrow it is.
+pn write_row(var row) {
     row[0] = 99                  // -> m[1][0]
     row[2] = 88                  // -> m[1][2]
+}
+
+pn test_leading_axis_row_write() {
+    var m = [[1, 2, 3], [4, 5, 6]]
+    write_row(m[1])              // leading-axis row 1 borrowed -> [4, 5, 6]
     print(m[1][0]); print(" "); print(m[1][1]); print(" "); print(m[1][2]); print("\n")  // 99 5 88
 }
 

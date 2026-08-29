@@ -3,7 +3,7 @@
 // 100 balls bouncing in a 500x500 box for 50 frames
 // Uses flat arrays instead of maps for ball data to avoid type mismatch
 
-pn random_next(seed_arr) {
+pn random_next(var seed_arr) {
     var s = seed_arr[0]
     s = s * 1309 + 13849
     s = s % 65536

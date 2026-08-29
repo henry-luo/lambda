@@ -35,8 +35,11 @@ pn main() {
     // T7: XML element - type-changing attr mutation on markup element
     let doc: any | error = input("test/input/test_markup.xml")
     var root = doc[0]
+    // Read-modify-write-back (C4.2e): `root[0]` binds a copy under S9.1.2, so
+    // the mutated element is stored back into the document it came from.
     var item = root[0]
     item.name = 999
+    root[0] = item
     print(item.name)
 
     // T8: XML element - second type change (data already migrated)

@@ -14,14 +14,14 @@ pn join_ints(v) {
 }
 
 // In-place mutation through a function boundary (the property deltablue relies on)
-pn dequeue(v) {
+pn dequeue(var v) {
     if (len(v) == 0) { return null }
     var first = v[0]
     splice(v, 0, 1)
     return first
 }
 
-pn remove_by_id(v, id) {
+pn remove_by_id(var v, id) {
     var i = 0
     var found = -1
     while (i < len(v)) {
@@ -83,6 +83,6 @@ pn main() {
     print("set:" ++ join_ints(g) ++ "\n")
 }
 
-pn set_at(v, idx, item) {
+pn set_at(var v, idx, item) {
     v[idx] = item
 }

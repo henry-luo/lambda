@@ -1,0 +1,6 @@
+11 (borrow: ruled 11)
+2 (re-borrow: ruled 2)
+10 (recursion: ruled 10)
+clean written (path borrow: ruled clean written)
+B old (ordering: ruled B old)
+

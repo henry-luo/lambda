@@ -1664,15 +1664,37 @@ static AstNode* unwrap_primary_node(AstNode* node) {
     return node;
 }
 
+// promoted to ast-core.hpp as ast_compound_root_ident (CW30 shares it)
 static AstIdentNode* compound_root_ident(AstNode* node) {
-    node = unwrap_primary_node(node);
-    if (!node) return NULL;
-    if (node->node_type == AST_NODE_IDENT) return (AstIdentNode*)node;
-    if (node->node_type == AST_NODE_INDEX_EXPR || node->node_type == AST_NODE_MEMBER_EXPR) {
-        AstFieldNode* field = (AstFieldNode*)node;
-        return compound_root_ident(field->object);
+    return ast_compound_root_ident(node);
+}
+
+// CW31/S9.2.4 face 4: `var v = subview(base, ...)` makes `v` a mutable view
+// whose writes reach `base`'s storage. Record the ULTIMATE base binding on the
+// view's own entry so the call-site exclusivity check can conflict two `var`
+// arguments that share a base -- the same whole-base granularity as face 3.
+// Chasing view_base here keeps view-of-view chains one hop at check time.
+static void lambda_ast_note_view_binding(AstDeclaratorNode* named) {
+    if (!named || !named->entry || !named->init) return;
+    AstNode* init = ast_unwrap_primary(named->init);
+    if (!init || init->node_type != AST_NODE_CALL_EXPR) return;
+    AstCallNode* call = (AstCallNode*)init;
+    AstNode* callee = ast_unwrap_primary(call->function);
+    // subview resolves to a sys-func node, not a user ident
+    const char* fname = NULL;
+    size_t fname_len = 0;
+    if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+        if (info && info->name) { fname = info->name; fname_len = strlen(info->name); }
+    } else if (callee && callee->node_type == AST_NODE_IDENT) {
+        String* n = ((AstIdentNode*)callee)->name;
+        if (n) { fname = n->chars; fname_len = n->len; }
     }
-    return NULL;
+    if (!fname || fname_len != 7 || strncmp(fname, "subview", 7) != 0) return;
+    AstIdentNode* base = ast_compound_root_ident(call->argument);
+    if (!base || !base->entry) return;
+    named->entry->view_base = base->entry->view_base
+        ? base->entry->view_base : base->entry;
 }
 
 // Resolve a statically named member/index path from an explicitly annotated
@@ -2626,7 +2648,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     int arg_index = 0;
     int line = (int)lambda_source_span_start_point(tp->source,
         diagnostic_span).row + 1;
-    String* var_arg_roots[64];
+    NameEntry* var_arg_root_entries[64];
     int var_arg_root_count = 0;
     bool parameter_short_circuits_error = false;
 
@@ -2674,19 +2696,44 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
                     return false;
                 }
             } else {
+                // CW31 face 4: a mutable view conflicts through its BASE, so
+                // two subviews of one array (or a view and its base) reject at
+                // the sanctioned whole-base granularity. Distinct bases stay
+                // independent; region-precise checking is the ladder's later rung.
+                NameEntry* effective_root = root->entry->view_base
+                    ? root->entry->view_base : root->entry;
                 for (int i = 0; i < var_arg_root_count; i++) {
-                    if (same_name_string(var_arg_roots[i], root->name)) {
+                    if (var_arg_root_entries[i] == effective_root) {
                         record_semantic_error_span(tp, diagnostic_span, ERR_IMMUTABLE_ASSIGNMENT,
-                            "argument %d overlaps another `var` parameter; pass distinct mutable bindings",
+                            var_arg_root_entries[i] == root->entry
+                                ? "argument %d overlaps another `var` parameter; pass distinct mutable bindings"
+                                : "argument %d overlaps another `var` parameter through their shared view base; pass views of distinct arrays",
                             arg_index + 1);
                         break;
                     }
                 }
                 if (var_arg_root_count < 64) {
-                    var_arg_roots[var_arg_root_count++] = root->name;
+                    var_arg_root_entries[var_arg_root_count++] = effective_root;
                 }
             }
+            // CW25/E207: a PLACE argument (`f(var m.rows[i])`) carries `any` as
+            // its own node type -- a member/index read does not propagate its
+            // field's declared type onto the expression (TIG1). Comparing that
+            // `any` against an annotated `var` parameter rejected every
+            // annotated path borrow. Resolve the declared type THROUGH the path
+            // first, using the same walker the assignment side already uses for
+            // annotated destinations. This is a resolution, not a relaxation:
+            // an unresolvable path, or one whose declared type does not match,
+            // still reports below. The exact-match rule stays intact because a
+            // callee writes through a borrow and must not see a mismatched
+            // representation.
+            bool var_place_type_matches = false;
             if (!type_exact_match(arg->type, expected_param)) {
+                Type* place_type = declared_compound_destination_type(tp, arg, NULL);
+                var_place_type_matches = place_type &&
+                    type_exact_match(place_type, expected_param);
+            }
+            if (!var_place_type_matches && !type_exact_match(arg->type, expected_param)) {
                 Type* full_type = parameter_boundary_type(expected_param);
                 char expected_name[128];
                 char actual_name[128];
@@ -2869,6 +2916,11 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
     else {
         log_debug("found identifier %.*s", (int)entry->name->len, entry->name->chars);
         ast_node->entry = entry;
+        // CW24v2 phase 2: every resolved use of a place-copy binding counts as
+        // a read; mutation notes compensate their own target-root read below.
+        if (entry->is_place_copy && entry->place_copy_reads < UINT16_MAX) {
+            entry->place_copy_reads++;
+        }
         if (entry->import && entry->node->type->type_id != LMD_TYPE_FUNC) {
             // clone and remove is_const flag
             // todo: full type clone
@@ -8534,12 +8586,10 @@ AstNamedNode* build_param_from_parts(Transpiler* tp, SourceSpan span,
     if (tp->current_scope && tp->current_scope->is_proc) {
         NameEntry* entry = lookup_name_in_current_scope(tp, param->name);
         if (entry) {
+            // the CW29 sweep resolves body writes against this exact entry
+            param->entry = entry;
             entry->is_mutable = true;
             entry->is_var_param = is_var;
-            // Record the pn-parameter fact itself rather than leaving consumers
-            // to infer it from is_mutable (which a plain `var` local also sets).
-            // Both tiers decide in-place-vs-detached container writes from it.
-            entry->is_proc_param = true;
         }
     }
     return param;
@@ -8610,6 +8660,125 @@ static void direct_validate_mutable_compound(Transpiler* tp,
         (int)root->name->len, root->name->chars);
 }
 
+// CW24 (S9.3.1 / S9.1.2): `var row = m.rows[i]` binds a COPY of a place, so a
+// later `row[y] = v` updates the copy and `m` never changes. Before insertion
+// capture that write happened to alias through and appeared to work; with
+// capture on it silently computes a wrong answer, which is the whole reason the
+// S9.3.1 flip is unsafe without this diagnostic. Reject it at the mutation --
+// that is where the expectation breaks and where the fix goes.
+//
+// Gated on the same switch as capture itself: with the flag off the aliasing
+// behavior is still in force and the write does reach the container, so the
+// error would be false.
+void lambda_ast_mark_place_copy(AstDeclaratorNode* named) {
+    if (!named || !named->entry || !named->init) return;
+    AstNode* init = unwrap_primary_node(named->init);
+    if (!init || (init->node_type != AST_NODE_MEMBER_EXPR &&
+            init->node_type != AST_NODE_INDEX_EXPR)) return;
+    // Only a place rooted at a MUTABLE binding is a lost update. Rooted at a
+    // `let`, nothing could have been written through it anyway (S9.1.1), and
+    // direct_validate_mutable_compound already owns that diagnostic.
+    AstIdentNode* root = compound_root_ident(init);
+    if (!root || !root->entry || !root->entry->is_mutable) return;
+    named->entry->is_place_copy = true;
+    named->entry->place_copy_root = root->name;
+}
+
+// CW29 rollout sweep (env-gated, LAMBDA_COW_PARAM_NOTE): report every `pn`
+// whose body writes THROUGH a plain (non-`var`) container parameter -- the
+// exact shapes whose caller-visibility flips when S9.1.3 plain-param
+// snapshots land. Rebinds are excluded (local under both semantics); interior
+// writes and passing the param onward to a mutating callee are counted.
+// Diagnostic only: it changes no behavior and exists to measure the
+// migration blast radius before CW29 ships (COW §11.9 rollout).
+static bool cow_param_note_enabled(void) {
+    static const bool enabled = getenv("LAMBDA_COW_PARAM_NOTE") != NULL;
+    return enabled;
+}
+
+static void lambda_ast_note_plain_param_writes(Transpiler* tp, AstFuncNode* fn) {
+    bool note = cow_param_note_enabled();
+    // the walk feeds the shipped CW29 semantics: entry->cow_param_mutated
+    // tells both tiers which plain params to snapshot at activation entry
+    if (((AstNode*)fn)->node_type != AST_NODE_PROC || !fn->body) return;
+    for (AstNamedNode* param = fn->param; param;
+            param = (AstNamedNode*)((AstNode*)param)->next) {
+        TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
+        if (!pt || pt->is_var_param || !param->entry) continue;
+        if (!ast_body_may_write_entry(fn->body, param->entry, false)) continue;
+        param->entry->cow_param_mutated = true;
+        if (!note) continue;
+        String* fname = fn->name;
+        log_warn("cow-param-note: %s:%.*s: write through plain parameter `%.*s` "
+            "is local to the procedure under S9.1.3; add `var` to publish it",
+            tp->reference ? tp->reference : "<script>",
+            fname ? (int)fname->len : 9, fname ? fname->chars : "<anon pn>",
+            (int)param->name->len, param->name->chars);
+    }
+}
+
+// Pending CW24 candidates for the function currently being built. A mutation
+// alone does not decide the diagnostic (see NameEntry::place_copy_written_back),
+// so candidates accumulate here and are judged at FUNCTION_END.
+static NameEntry* g_place_copy_pending = NULL;
+
+static void direct_note_place_copy_mutation(SourceSpan span, AstNode* object) {
+    AstIdentNode* root = compound_root_ident(object);
+    NameEntry* entry = root ? root->entry : NULL;
+    if (!entry || !entry->is_place_copy) return;
+    // the target's own root ident was already counted as a read when the
+    // object expression resolved; it is not an OBSERVATION of the copy
+    if (entry->place_copy_target_reads < UINT16_MAX) entry->place_copy_target_reads++;
+    entry->place_copy_mutated = true;  // durable; gates the bind-time mark
+    if (entry->place_copy_mutation_pending) return;
+    entry->place_copy_mutation_pending = true;
+    entry->place_copy_mutation_span = span;
+    entry->place_copy_next = g_place_copy_pending;
+    g_place_copy_pending = entry;
+}
+
+// `<place> = p` puts the copy back where it came from, which makes every
+// earlier mutation of `p` reach the owner. Conservatively, a write-back
+// ANYWHERE clears the candidate: a false negative here costs a missed
+// diagnostic, a false positive would reject the model's own idiom.
+static void direct_note_place_copy_writeback(AstNode* value) {
+    AstNode* source = unwrap_primary_node(value);
+    if (!source || source->node_type != AST_NODE_IDENT) return;
+    AstIdentNode* ident = (AstIdentNode*)source;
+    if (ident->entry && ident->entry->is_place_copy) {
+        ident->entry->place_copy_written_back = true;
+    }
+}
+
+static void lambda_ast_flush_place_copy_diagnostics(Transpiler* tp) {
+    NameEntry* entry = g_place_copy_pending;
+    g_place_copy_pending = NULL;
+    while (entry) {
+        NameEntry* next = entry->place_copy_next;
+        entry->place_copy_next = NULL;
+        entry->place_copy_mutation_pending = false;
+        // CW24v2 (Swift/R endpoint, ratified 2026-08-29): a mutated place copy
+        // the program OBSERVES -- reads, returns, stores, passes on, or writes
+        // back -- is a legitimate deliberate snapshot, not an error. Only the
+        // dead-store shape (mutated, then never observed at all) survives, as
+        // a warning: it is provably useless work under either semantics.
+        bool observed = entry->place_copy_written_back ||
+            entry->place_copy_reads > entry->place_copy_target_reads;
+        if (!observed) {
+            String* origin = entry->place_copy_root;
+            int olen = origin ? (int)origin->len : 1;
+            const char* ochars = origin ? origin->chars : "?";
+            log_warn("cow-dead-snapshot: %s: '%.*s' is a copy of '%.*s...' "
+                "(S9.1.2) that is mutated but never read, returned, or written "
+                "back -- the writes are dead. write the path directly, or use "
+                "the copy.",
+                tp->reference ? tp->reference : "<script>",
+                (int)entry->name->len, entry->name->chars, olen, ochars);
+        }
+        entry = next;
+    }
+}
+
 AstNode* build_assignment_statement_from_parts(Transpiler* tp,
         SourceSpan span, AstNode* target, AstNode* value) {
     if (!tp->current_scope || !tp->current_scope->is_proc) {
@@ -8635,6 +8804,8 @@ AstNode* build_assignment_statement_from_parts(Transpiler* tp,
         assignment->left = target;
         assignment->right = value;
         direct_validate_mutable_compound(tp, span, field->object);
+        direct_note_place_copy_mutation(span, field->object);   // CW24
+        direct_note_place_copy_writeback(value);                // CW24
         check_compound_assignment_static_boundary(tp, span, target, value,
             target->node_type == AST_NODE_INDEX_EXPR ? "array element" : "map member");
         return (AstNode*)assignment;
@@ -9190,6 +9361,7 @@ AstNode* build_for_from_parts(Transpiler* tp, SourceSpan span,
     }
     node->type = statement_form ? set_type_any(tp, ANY_STATEMENT) :
         set_type_any(tp, ANY_LIST);
+    lambda_ast_mark_loop_snapshots(node);  // CW30/S9.2.3
     return (AstNode*)node;
 }
 
@@ -9484,6 +9656,10 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 analyze_captures(tp, fn, find_global_scope(function_scope->parent));
                 validate_cross_frame_binding_reads(tp, fn);
             }
+            // CW24: the body is complete, so every write-back that could
+            // excuse a place-copy mutation has now been seen.
+            lambda_ast_flush_place_copy_diagnostics(tp);
+            if (fn) lambda_ast_note_plain_param_writes(tp, fn);  // CW29 sweep
             return 0;
         }
     }
@@ -9721,6 +9897,9 @@ static LambdaParseValue direct_ast_reduce(void* context,
         }
         active->type = statement_form ? set_type_any(tp, ANY_STATEMENT) :
             set_type_any(tp, ANY_LIST);
+        // CW30/S9.2.3: body is attached and every ident is resolved, so the
+        // loop-head snapshot decision is computable exactly once, here.
+        lambda_ast_mark_loop_snapshots(active);
         return direct_ast_value((AstNode*)active);
     }
     case LAMBDA_REDUCE_BINARY: {
@@ -9965,6 +10144,8 @@ static LambdaParseValue direct_ast_reduce(void* context,
                 if (entry) {
                     entry->is_mutable = true;
                     named->entry = entry;
+                    lambda_ast_mark_place_copy(named);  // CW24
+                    lambda_ast_note_view_binding(named);  // CW31 face 4
                 }
             }
             return direct_ast_value((AstNode*)var);
