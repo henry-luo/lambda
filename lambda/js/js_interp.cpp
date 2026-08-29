@@ -2469,10 +2469,15 @@ static Item js_interp_direct_eval(JsInterpFrame* frame, Item code) {
     js_set_this(caller_this_root.get());
     result_root.set(js_builtin_eval(code, 3 | (frame && frame->strict ? 4 : 0)));
     js_set_this(prior_this_root.get());
-    Item captured = js_interp_capture_eval_bindings(frame);
+    // The dynamic evaluator leaves caller-owned bridges active through throws;
+    // write back while the temporary globals still expose the eval's writes.
     Item writeback = bridge.writeback();
     private_bridge.close();
     bridge.close();
+    // Capture after bridge removal so an eval-created var observes mutations
+    // made by a later eval instead of copying the pre-eval journal value back
+    // into the interpreter environment.
+    Item captured = js_interp_capture_eval_bindings(frame);
     if (item_is_error(result_root.get())) return result_root.get();
     if (item_is_error(captured)) return captured;
     return item_is_error(writeback) ? writeback : result_root.get();

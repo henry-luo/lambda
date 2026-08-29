@@ -182,7 +182,8 @@ const char radiant_dom_interface_decl[] =
     "    data: string, node_value: string, text_content: string,\n"
     "    replace_data: fn(a0: any, a1: any, a2: any) any,\n"
     "    insert_data: fn(a0: any, a1: any) any, append_data: fn(a0: any) any,\n"
-    "    delete_data: fn(a0: any, a1: any) any, substring_data: fn(a0: any, a1: any) any\n"
+    "    delete_data: fn(a0: any, a1: any) any, substring_data: fn(a0: any, a1: any) any,\n"
+    "    split_text: fn(a0: any) any\n"
     "}\n"
     "type svg_element : html_element {\n"
     "    create_svg_point: fn() any, create_svg_matrix: fn() any,\n"
@@ -897,6 +898,7 @@ extern "C" int radiant_dom_m4d_insert_data(Item r, Item* args, int argc, Item* o
 extern "C" int radiant_dom_m4d_append_data(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_delete_data(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_substring_data(Item r, Item* args, int argc, Item* out);
+extern "C" int radiant_dom_m4d_split_text(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_get_attribute(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_set_attribute(Item r, Item* args, int argc, Item* out);
 extern "C" int radiant_dom_m4d_remove_attribute(Item r, Item* args, int argc, Item* out);
@@ -1277,6 +1279,7 @@ static const JubeMemberBind radiant_dom_character_data_members[] = {
     BIND_CALL_JS("append_data", "appendData", radiant_dom_m4d_append_data),
     BIND_CALL_JS("delete_data", "deleteData", radiant_dom_m4d_delete_data),
     BIND_CALL_JS("substring_data", "substringData", radiant_dom_m4d_substring_data),
+    BIND_CALL_JS("split_text", "splitText", radiant_dom_m4d_split_text),
 };
 
 static const JubeMemberBind radiant_dom_svg_element_members[] = {

@@ -2276,6 +2276,7 @@ static Item js_dom_text_delete_data_method(DomText* text_node, Item offset_arg,
                                            Item count_arg);
 static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_arg,
                                               Item count_arg);
+static Item js_dom_text_split_method(DomText* text_node, Item offset_arg);
 static Item js_text_data_body(Item callee, Item this_value, Item* args,
                               int argc, uint64_t* result_home);
 static void js_dom_expando_flag_set(DomElement* elem, const char* name, Item value);
@@ -6943,6 +6944,34 @@ static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_ar
     return (Item){.item = s2it(s)};
 }
 
+static Item js_dom_text_split_method(DomText* text_node, Item offset_arg) {
+    if (!text_node) return make_js_undefined();
+    int64_t offset = js_dom_to_integer_or_zero(offset_arg);
+    if (offset < 0) {
+        return js_dom_throw_index_size_error("The offset is negative.");
+    }
+
+    uint32_t length = dom_text_utf16_length(text_node);
+    if ((uint64_t)offset > length) {
+        return js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");
+    }
+
+    DomNode* parent = text_node->parent;
+    DocState* state = js_dom_state_for_nodes((DomNode*)text_node, parent);
+    DomText* right = dom_text_split_at(state, text_node, (uint32_t)offset);
+    if (!right) {
+        return js_dom_throw_index_size_error("The text node cannot be split.");
+    }
+
+    // dom_text_split_at updates live ranges and the sibling chain; publish the
+    // corresponding JS mutation after the new sibling is fully linked.
+    js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT,
+                                  (DomNode*)right, parent, 0);
+    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                           (DomNode*)right, parent);
+    return js_dom_wrap_element((void*)right);
+}
+
 extern "C" Item js_dom_set_text_data_property(void* text_ptr, Item value) {
     DomText* text_node = (DomText*)text_ptr;
     if (!text_node) return value;
@@ -6986,6 +7015,7 @@ enum JsTextDataOperation {
     JS_TEXT_DATA_APPEND,
     JS_TEXT_DATA_DELETE,
     JS_TEXT_DATA_SUBSTRING,
+    JS_TEXT_DATA_SPLIT,
 };
 
 static Item js_text_data_body(Item callee, Item this_value, Item* args,
@@ -7008,6 +7038,8 @@ static Item js_text_data_body(Item callee, Item this_value, Item* args,
         return js_dom_text_delete_data_method(node->as_text(), arg0, arg1);
     case JS_TEXT_DATA_SUBSTRING:
         return js_dom_text_substring_data_method(node->as_text(), arg0, arg1);
+    case JS_TEXT_DATA_SPLIT:
+        return js_dom_text_split_method(node->as_text(), arg0);
     default:
         return ItemError;
     }
@@ -8912,6 +8944,8 @@ static bool js_dom_get_textlike_property(DomNode* node, Item elem_item,
             operation = JS_TEXT_DATA_DELETE; arity = 2;
         } else if (strcmp(prop, "substringData") == 0) {
             operation = JS_TEXT_DATA_SUBSTRING; arity = 2;
+        } else if (strcmp(prop, "splitText") == 0) {
+            operation = JS_TEXT_DATA_SPLIT; arity = 1;
         } else {
             operation = JS_TEXT_DATA_APPEND; arity = 0;
         }
@@ -14085,6 +14119,84 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
     }
     if (!js_dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
 
+    // Replacing a backed CharacterData node with a backed Element must update
+    // the Lambda child list too; the generic DOM-only fallback leaves the
+    // source tree stale and the next reconciliation walks a different shape.
+    if (new_child->is_element() && old_child->is_text() && elem->doc &&
+        elem->doc->input) {
+        DomElement* new_elem = new_child->as_element();
+        int64_t old_index = js_dom_backed_node_index(elem, old_child);
+        if (new_elem && !new_elem->is_synthetic() && old_index >= 0) {
+            if (new_child->parent && new_child->parent != (DomNode*)elem) {
+                dom_pre_remove(new_child);
+                if (!new_child->parent->is_element() ||
+                    !js_dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
+                    return ItemNull;
+                }
+            }
+            dom_pre_remove(old_child);
+            if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
+            MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
+            Item result = editor.elmt_replace_child(
+                {.element = dom_element_to_element(elem)}, (int)old_index,
+                {.element = dom_element_to_element(new_elem)});
+            if (get_type_id(result) != LMD_TYPE_ELEMENT ||
+                result.element != dom_element_to_element(elem)) {
+                log_error("js_dom_replace_child: text-element replace changed backing identity");
+                return ItemNull;
+            }
+            dom_post_insert((DomNode*)elem, new_child);
+            js_dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
+            js_dom_mutation_notify();
+            return old_child_arg;
+        }
+    }
+
+    // The highlight renderer also unwraps a backed Element back into its text
+    // child. Move that text out of its old backing parent before replacing the
+    // element, otherwise the old span remains in the Lambda child list and a
+    // later relink traverses a different tree from the live DOM.
+    if (new_child->is_text() && old_child->is_element() && elem->doc &&
+        elem->doc->input) {
+        DomText* new_text = new_child->as_text();
+        DomElement* old_elem = old_child->as_element();
+        String* replacement_string = new_text ? new_text->native_string : nullptr;
+        int64_t old_index = js_dom_backed_child_index(elem, old_elem);
+        if (new_text && replacement_string && old_elem && old_index >= 0) {
+            if (new_child->parent && new_child->parent != (DomNode*)elem) {
+                dom_pre_remove(new_child);
+                if (!new_child->parent->is_element() ||
+                    !js_dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
+                    return ItemNull;
+                }
+            } else if (new_child->parent == (DomNode*)elem) {
+                // DOM replacement removes an existing sibling before inserting
+                // it at the old node's position; recompute the old index after
+                // that removal because the backing array may have shifted.
+                dom_pre_remove(new_child);
+                if (!js_dom_remove_backed_child(elem, new_child)) return ItemNull;
+                old_index = js_dom_backed_child_index(elem, old_elem);
+                if (old_index < 0) return ItemNull;
+            }
+            if (!new_text->native_string) new_text->native_string = replacement_string;
+            dom_pre_remove(old_child);
+            if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
+            MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
+            Item result = editor.elmt_replace_child(
+                {.element = dom_element_to_element(elem)}, (int)old_index,
+                {.item = s2it(replacement_string)});
+            if (get_type_id(result) != LMD_TYPE_ELEMENT ||
+                result.element != dom_element_to_element(elem)) {
+                log_error("js_dom_replace_child: element-text replace changed backing identity");
+                return ItemNull;
+            }
+            dom_post_insert((DomNode*)elem, new_child);
+            js_dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
+            js_dom_mutation_notify();
+            return old_child_arg;
+        }
+    }
+
     if (new_child->is_element() && old_child->is_element() && elem->doc &&
         elem->doc->input) {
         DomElement* new_elem = new_child->as_element();
@@ -14527,6 +14639,10 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
         Item count_arg = argc >= 2 ? args[1] : make_js_undefined();
         return js_dom_text_substring_data_method(node->as_text(), offset_arg, count_arg);
+    }
+    if (node->is_text() && operation == JUBE_DOM_SPLIT_TEXT) {
+        Item offset_arg = argc >= 1 ? args[0] : make_js_undefined();
+        return js_dom_text_split_method(node->as_text(), offset_arg);
     }
 
     // EventTarget is a Node capability, so text/comment nodes must reach the
