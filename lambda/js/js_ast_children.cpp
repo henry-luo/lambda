@@ -132,6 +132,10 @@ static bool js_ast_function_boundary(JsAstNode* node, JsAstNode* root) {
     return node != root && (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION || node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION || node->node_type == JS_AST_NODE_ARROW_FUNCTION || node->node_type == JS_AST_NODE_METHOD_DEFINITION || node->node_type == JS_AST_NODE_CLASS_DECLARATION || node->node_type == JS_AST_NODE_CLASS_EXPRESSION);
 }
 
+static bool js_ast_lexical_function_boundary(JsAstNode* node, JsAstNode* root) {
+    return node != root && (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION || node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION || node->node_type == JS_AST_NODE_METHOD_DEFINITION || node->node_type == JS_AST_NODE_CLASS_DECLARATION || node->node_type == JS_AST_NODE_CLASS_EXPRESSION);
+}
+
 bool js_ast_has_direct_eval_call(JsAstNode* node) {
     if (!node) return false;
     if (js_ast_function_boundary(node, NULL)) return false;
@@ -157,30 +161,75 @@ bool js_ast_function_has_direct_eval(JsFunctionNode* function) {
     return js_ast_has_direct_eval_call((JsAstNode*)function->body);
 }
 
-static bool js_ast_arguments_node(JsAstNode* node, JsAstNode* root);
-static bool js_ast_arguments_child(JsAstNode* child, void* opaque) {
-    return js_ast_arguments_node(child, (JsAstNode*)opaque);
+struct JsAstObservationContext {
+    uint8_t mask;
+};
+
+static uint8_t js_ast_observation_node(JsAstNode* node, JsAstNode* root);
+
+static void js_ast_observation_child(JsAstNode* child, void* opaque) {
+    JsAstObservationContext* context = (JsAstObservationContext*)opaque;
+    context->mask |= js_ast_observation_node(child, NULL);
 }
 
-static bool js_ast_arguments_node(JsAstNode* node, JsAstNode* root) {
-    if (!node) return false;
-    // nested functions/classes own their facts; arrows remain lexical.
-    if (js_ast_function_boundary(node, root)) return false;
-    if (node->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* id = (JsIdentifierNode*)node;
-        return id->name && id->name->len == 9 && strncmp(id->name->chars, "arguments", 9) == 0;
+static bool js_ast_identifier_named(JsAstNode* node, const char* name,
+        size_t length) {
+    if (!node || node->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    String* value = ((JsIdentifierNode*)node)->name;
+    return value && value->len == length && strncmp(value->chars, name, length) == 0;
+}
+
+static uint8_t js_ast_observation_node(JsAstNode* node, JsAstNode* root) {
+    if (!node || js_ast_lexical_function_boundary(node, root)) return 0;
+    uint8_t mask = 0;
+    if (js_ast_identifier_named(node, "arguments", 9)) {
+        mask |= JS_AST_OBSERVES_ARGUMENTS;
+    } else if (js_ast_identifier_named(node, "this", 4)) {
+        mask |= JS_AST_OBSERVES_THIS;
+    } else if (js_ast_identifier_named(node, "new.target", 10)) {
+        mask |= JS_AST_OBSERVES_NEW_TARGET;
     }
-    return js_ast_any_child(node, js_ast_arguments_child, root);
+    if (node->node_type == JS_AST_NODE_CALL_EXPRESSION ||
+            node->node_type == JS_AST_NODE_NEW_EXPRESSION) {
+        JsCallNode* call = (JsCallNode*)node;
+        if (js_ast_identifier_named(call->callee, "super", 5)) {
+            mask |= JS_AST_OBSERVES_THIS;
+        }
+    } else if (node->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* member = (JsMemberNode*)node;
+        if (js_ast_identifier_named(member->object, "super", 5)) {
+            mask |= JS_AST_OBSERVES_THIS;
+        }
+    }
+    JsAstObservationContext context = {mask};
+    js_ast_visit_children(node, js_ast_observation_child, &context);
+    return context.mask;
+}
+
+uint8_t js_ast_function_observation_mask(JsFunctionNode* function) {
+    if (!function) return 0;
+    uint8_t mask = 0;
+    for (JsAstNode* param = (JsAstNode*)function->params; param;
+            param = (JsAstNode*)param->next) {
+        mask |= js_ast_observation_node(param, NULL);
+    }
+    return mask | js_ast_observation_node((JsAstNode*)function->body, NULL);
+}
+
+static bool js_ast_with_child(JsAstNode* child, void*) {
+    return js_ast_function_boundary(child, NULL) ? false :
+        child && (child->node_type == JS_AST_NODE_WITH_STATEMENT ||
+            js_ast_any_child(child, js_ast_with_child, NULL));
+}
+
+bool js_ast_function_has_with(JsFunctionNode* function) {
+    return function && js_ast_any_child((JsAstNode*)function->body,
+        js_ast_with_child, NULL);
 }
 
 bool js_ast_function_uses_arguments(JsFunctionNode* function) {
-    if (!function) return false;
-    for (JsAstNode* param = (JsAstNode*)function->params; param;
-            param = (JsAstNode*)param->next) {
-        if (js_ast_arguments_node(param, (JsAstNode*)function)) return true;
-    }
-    return js_ast_arguments_node((JsAstNode*)function->body,
-        (JsAstNode*)function);
+    return (js_ast_function_observation_mask(function) &
+        JS_AST_OBSERVES_ARGUMENTS) != 0;
 }
 
 static bool js_ast_tail_reuse_node_safe(JsAstNode* node, JsAstNode* root);

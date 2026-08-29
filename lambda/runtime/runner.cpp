@@ -160,12 +160,6 @@ static void free_transpiler_diagnostics(Transpiler* tp) {
     tp->warnings = NULL;
 }
 
-static int lambda_index_compiler_pass(void* opaque) {
-    Transpiler* tp = (Transpiler*)opaque;
-    return tp && (!tp->ast_root || ast_index_build_profile(
-        &tp->ast_index, tp->ast_root, tp->profile));
-}
-
 extern "C" int lambda_compiler_timing_enabled(void) {
     if (g_compiler_timing_enabled >= 0) return g_compiler_timing_enabled;
     const char* value = shell_getenv("LAMBDA_COMPILER_TIMING");
@@ -870,11 +864,13 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     CompilerPassManager pass_manager;
     compiler_pass_manager_init(&pass_manager,
         COMPILER_FACT_AST | COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED);
+    AstIndexPassContext index_context = {
+        &tp->ast_index, tp->ast_root, tp->profile};
     CompilerPassSpec index_pass = {"index",
         COMPILER_FACT_AST | COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED,
-        COMPILER_FACT_INDEXED, lambda_index_compiler_pass};
+        COMPILER_FACT_INDEXED, ast_index_compiler_pass, &index_context};
     if (!compiler_pass_manager_add(&pass_manager, &index_pass) ||
-            !compiler_pass_manager_run(&pass_manager, tp)) {
+            !compiler_pass_manager_run(&pass_manager, NULL)) {
         log_error("failed to run indexed AST pass for '%s'", script_path);
         return;
     }

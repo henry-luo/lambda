@@ -412,6 +412,9 @@ typedef struct AstIndex {
     uint32_t slot_capacity;
 } AstIndex;
 
+typedef struct AstIndexPassContext { AstIndex* index; AstNode* root;
+    const LangProfile* profile; } AstIndexPassContext;
+
 typedef struct AstNodeFacts {
     Type* declared_contract;
     Type* inferred_type;
@@ -433,6 +436,7 @@ extern "C" {
 #endif
 void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx);
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
+int ast_index_compiler_pass(void* opaque);
 // Adds a newly retained AST fragment without invalidating the stable IDs and
 // analysis facts already published for earlier REPL inputs (D8.2.4).
 bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,

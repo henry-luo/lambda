@@ -2087,7 +2087,7 @@ static bool jm_is_plain_script_module_var_decl_without_init(JsMirTranspiler* mt,
     return true;
 }
 
-bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
+static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
     if (!root || root->node_type != JS_AST_NODE_PROGRAM) {
         log_error("js-mir: expected program node");
         return false;
@@ -2099,10 +2099,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // v20: Detect program-level "use strict" directive
     mt->is_global_strict = (mt->tp && mt->tp->strict_mode) || program->has_use_strict_directive;
 
-    // Phase 1: Use the collector itself as the count pass so class-method and
-    // synthetic-field eligibility cannot drift from the fill pass. The shared
-    // AstIndex remains available for later identity lookups; its callable
-    // count is an upper-bound hint, not the collector's semantic contract.
+    // collect exact function/class metadata before lowering.
     mt->collection_count_only = true;
     jm_collect_functions(mt, root);
     if (mt->collection_failed) {
@@ -2156,8 +2153,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     }
     log_debug("js-mir: collected %d functions, %d classes", mt->func_count, mt->class_count);
 
-    // Phase 1.1: Pre-scan top-level const declarations with literal values
-    // These become module-level constants accessible from any function scope
+    // publish module constants and variable slots.
     mt->module_consts = hashmap_new(sizeof(JsModuleConstEntry), 16, 0, 0,
         js_module_const_hash, js_module_const_cmp, NULL, NULL);
 
@@ -2227,11 +2223,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
     }
 
-    // Third pass (b): hoist var declarations from nested positions (for-inits,
-    // labeled statements, etc.) to module scope.  In JS, `var` is function-scoped,
-    // so `for (var i = 0; ...)` at the top level hoists `i` to module scope.
-    // The previous scan only finds top-level VariableDeclaration nodes; this
-    // additional scan uses jm_collect_body_locals to find vars recursively.
+    // hoist nested var declarations to module scope.
     {
         struct hashmap* hoisted_vars = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -2285,8 +2277,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         hashmap_free(hoisted_vars);
     }
 
-    // Third pass (c): assign module var indices for import bindings
-    // so closures can access imported names via js_get_module_var()
+    // publish import bindings for closure/module-slot reads.
     {
         JsAstNode* s = program->body;
         while (s) {
@@ -2344,23 +2335,7 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
         }
     }
 
-    // Third pass (d): detect implicit globals — variables assigned but never declared
-    // in their enclosing function. In JS sloppy mode, assigning to an undeclared
-    // variable creates a global. We do per-function analysis: for each function
-    // (declaration or expression), collect assignments and declarations, and any
-    // assigned name that lacks a var/let/const/param declaration in that function
-    // is a candidate implicit global.
-    //
-    // IMPORTANT: A variable assigned-but-not-declared in one function may be a
-    // legitimate closure capture if it IS declared in an ANCESTOR function.
-    // For example:
-    //   function makeRunningSum() {
-    //       let n = 0;
-    //       return function(x) { n = n + x; return n; };  // n is NOT an implicit global
-    //   }
-    // So for each candidate, we check if it's declared in an ancestor function
-    // (via parent_index chain) or at the top level. Only if it's NOT declared
-    // in any ancestor scope is it a true implicit global.
+    // classify sloppy-mode implicit globals after ancestor declarations are known.
     {
         struct hashmap* implicit_globals = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -5331,6 +5306,25 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     // Load module for linking
     MIR_load_module(mt->ctx, mt->module);
     return true;
+}
+
+static int js_mir_compile_pass(void* opaque) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)opaque;
+    return mt && transpile_js_mir_ast_impl(mt, mt->root_node);
+}
+
+bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
+    if (!mt || !root) return false;
+    mt->root_node = root;
+    CompilerPassManager pass_manager;
+    compiler_pass_manager_init(&pass_manager, COMPILER_FACT_AST |
+        COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED | COMPILER_FACT_INDEXED);
+    CompilerPassSpec compile_pass = {"analysis-lower-finalize", COMPILER_FACT_INDEXED,
+        COMPILER_FACT_ANALYZED | COMPILER_FACT_PLANNED |
+        COMPILER_FACT_MIR_LOWERED | COMPILER_FACT_FINALIZED,
+        js_mir_compile_pass, mt};
+    return compiler_pass_manager_add(&pass_manager, &compile_pass) &&
+        compiler_pass_manager_run(&pass_manager, NULL);
 }
 
 // Pre-link validation: scan all MIR instructions for NULL label operands.

@@ -45,6 +45,7 @@ typedef struct CompilerPassSpec {
     uint32_t required_facts;
     uint32_t produced_facts;
     CompilerPassRun run;
+    void* context; // pass-owned state; NULL uses the manager caller context.
 } CompilerPassSpec;
 
 typedef struct CompilerPassManager {

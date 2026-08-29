@@ -82,7 +82,10 @@ The companion `JsTranspiler` (`js_transpiler.hpp:40`) holds the parse/AST contex
 
 ## 5. Compilation phases
 
-`transpile_js_mir_ast` drives the phases; workers live across the split `js_mir_*` files. The phase numbers are comments in the current driver, not yet typed `CompilerPassManager` ownership under **D8.2.5**.
+`transpile_js_mir_ast` is the manager-owned analysis/lower/finalize entry;
+workers live across the split `js_mir_*` files. The numbered workers remain a
+composite pass until each phase can migrate with its own retirement under
+**D8.2.5**.
 
 <img alt="Compilation phases" src="diagram/compile_phases.svg" width="346">
 
@@ -150,7 +153,7 @@ A **bare `.js` path as `argv[1]` does not** enter the JS pipeline — the defaul
 The fixed function/class arrays and fixed scope/loop/try stacks described by the 2026-07-15 version of this document are retired. The current implementation boundary is:
 
 - `AstIndex` supplies dense node/function/scope/binding/class identity and parent/owner links. P2a–P2b removed the duplicate JS pointer index and synthetic fallback; P2c publishes common and JavaScript extension scopes, resolved `NameEntry` bindings, node-to-binding use edges, and definition lookup, and MIR consumes those facts without compiler-time `js_scope_lookup()` or stale-scope repair. Count/fill collection, duplicate `JsFuncCollected::analysis`, pass ownership, and full expression contracts remain open residue. **D8.2.4** requires one stable ID authority.
-- `CompilerPassManager` and fact bits now cover the JavaScript validate→index slice, but not the full build→bind→validate→index→analysis→lower→link schedule shared with Lambda. **D8.2.5** requires truthful produced facts and one schedule.
+- `CompilerPassManager` and fact bits now cover JavaScript validate→index and the manager-owned analysis→lower→finalize boundary, but not the full build→bind→validate→index→analysis→lower→link schedule shared with Lambda. **D8.2.5** requires truthful produced facts and one schedule.
 - `MirValue`, demands, provenance, representation conversion, and emitter-owned rooting exist, but `jm_transpile_expression` and the Lambda `transpile_expr` boundary still return `MIR_reg_t`. **D2.4.1–D2.4.3** and **D8.2.6** require the full contract at every core expression boundary.
 - Dynamic `ArrayList` control stacks and exact function/class/member allocation remove the old silent limits. Remaining explicit semantic/optimization capacities include 64 generator resume labels, 512 closure read-back/TDZ entries, and 16 constructor-shape evidence slots; callers fail closed, fall back, or clamp according to the owning feature.
 - Ordinary source, pre-built AST, module, eval/new-Function, and batch/preamble paths now share compile-unit opening and declaration-snapshot materialization, but still duplicate parts of build/validate/link/cleanup orchestration. Their JavaScript policy differs, but **D8.2.5** requires one lifecycle driver with mode policy as data.

@@ -148,12 +148,6 @@ static inline int js_validate_compiler_pass(void* opaque) {
     pass->validation_errors = js_check_early_errors(pass->transpiler, pass->root);
     return pass->validation_errors == 0;
 }
-static inline int js_index_compiler_pass(void* opaque) {
-    JsAstIndexPassContext* pass = (JsAstIndexPassContext*)opaque;
-    return pass && pass->transpiler && pass->root &&
-        ast_index_build_profile(&pass->transpiler->ast_index,
-            (AstNode*)pass->root, pass->transpiler->profile);
-}
 static inline JsAstNode* build_js_ast_indexed(JsTranspiler* tp, TSNode root) {
     JsAstNode* ast = build_js_ast(tp, root);
     if (!ast) return NULL;
@@ -162,16 +156,19 @@ static inline JsAstNode* build_js_ast_indexed(JsTranspiler* tp, TSNode root) {
     tp->ast_root = (AstNode*)ast;
     js_report_any_census(tp);
     JsAstIndexPassContext pass_context = {tp, ast, -1};
+    AstIndexPassContext index_context = {
+        &tp->ast_index, (AstNode*)ast, tp->profile};
     CompilerPassManager pass_manager;
     compiler_pass_manager_init(&pass_manager, COMPILER_FACT_AST | COMPILER_FACT_BOUND);
     CompilerPassSpec validate_pass = {"validate", COMPILER_FACT_AST |
-        COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED, js_validate_compiler_pass};
+        COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED, js_validate_compiler_pass,
+        &pass_context};
     CompilerPassSpec index_pass = {"index",
         COMPILER_FACT_AST | COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED,
-        COMPILER_FACT_INDEXED, js_index_compiler_pass};
+        COMPILER_FACT_INDEXED, ast_index_compiler_pass, &index_context};
     if (!compiler_pass_manager_add(&pass_manager, &validate_pass) ||
             !compiler_pass_manager_add(&pass_manager, &index_pass) ||
-            !compiler_pass_manager_run(&pass_manager, &pass_context)) {
+            !compiler_pass_manager_run(&pass_manager, NULL)) {
         if (pass_context.validation_errors > 0) return ast;
         log_error("js-ast: failed to run indexed AST pass");
         return NULL;
