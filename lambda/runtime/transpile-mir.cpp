@@ -117,6 +117,12 @@ typedef struct MirPropertyKeyEntry {
 } MirPropertyKeyEntry;
 
 struct MirTranspiler {
+    // CW33 M1a: the current function's consumed `var`-param homes (from
+    // Context::mir_var_homes), written back through in the shared epilogue.
+    // Only untyped `var` params participate (single boxed convention); the
+    // typed/raw instantiation ships with the full pointer ABI.
+    MIR_reg_t var_param_home_regs[LAMBDA_MAX_FUNCTION_ARGS];
+    MirVarEntry* var_param_entries[LAMBDA_MAX_FUNCTION_ARGS];
     // Input
     AstScript* script;
     // indexed facts stay separate from the immutable AST. CONST uses this
@@ -1629,6 +1635,33 @@ static void finish_function_epilogue(MirTranspiler* mt) {
         abort();
     }
     emit_label(mt, mt->em.frame.return_label);
+    // CW33 M1a: publish each untyped `var` param's FINAL value through the
+    // caller's home address consumed in the prologue. A zero home (the caller
+    // could not transport this argument) skips -- graceful degradation to the
+    // pre-CW33 behavior. This is what propagates REBINDS of a `var` param on
+    // the JIT tier; in the common in-place case it stores back the pointer
+    // already there. Runs before cleanup/root-exit: the store targets the
+    // CALLER's rooted slot, alive throughout.
+    for (int vh = 0; vh < LAMBDA_MAX_FUNCTION_ARGS; vh++) {
+        MIR_reg_t home = mt->var_param_home_regs[vh];
+        MirVarEntry* ventry = mt->var_param_entries[vh];
+        // consume-once: auxiliary lowerings (boxed wrappers, handlers) share
+        // this MirTranspiler and reach this epilogue too -- stale entries
+        // from the primary function's freed var pool must never be read
+        mt->var_param_home_regs[vh] = 0;
+        mt->var_param_entries[vh] = NULL;
+        if (!home || !ventry) continue;
+        MIR_label_t skip = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+            MIR_new_label_op(mt->ctx, skip),
+            MIR_new_reg_op(mt->ctx, home), MIR_new_int_op(mt->ctx, 0)));
+        // untyped convention: the home holds a boxed Item
+        MIR_reg_t boxed_final = emit_box(mt, ventry->reg, ventry->type_id);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+            MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, home, 0, 1),
+            MIR_new_reg_op(mt->ctx, boxed_final)));
+        emit_label(mt, skip);
+    }
     MIR_reg_t error_scratch = 0;
     if (mt->em.frame.return_lane_kind == RETURN_LANE_ERROR) {
         error_scratch = em_materialize_frame_ref(&mt->em,
@@ -18437,6 +18470,12 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             bool typed_array_witness_args[LAMBDA_MAX_FUNCTION_ARGS] = {false};
             uint64_t array_witness_mask = 0;
             for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) arg_root_slots[i] = -1;
+            // CW33 M1a: `var` args whose home address travels via
+            // Context::mir_var_homes; the binding register reloads from its
+            // own root slot after the call (the callee's epilogue may have
+            // published a rebind/detach through the address).
+            MirVarEntry* var_home_roots[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+            int var_home_count = 0;
             int ai = 0;
             AstNamedNode* param_iter = fn_def ? fn_def->param : NULL;
             uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
@@ -18808,6 +18847,46 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                                     mir_root_may_need_cow(borrow_root)
                                 ? mir_prepare_cow_root(mt, borrow_root)
                                 : transpile_box_item(mt, resolved_args[i]);
+                            if (type_param && type_param->is_var_param &&
+                                    !type_param->full_type &&
+                                    i < LAMBDA_MAX_FUNCTION_ARGS) {
+                                // CW33 M1a transport: untyped `var` position.
+                                // An address when the argument is a
+                                // boxed-classed rooted binding; 0 otherwise
+                                // (place borrows, raw ArrayNum roots) so the
+                                // callee's write-back degrades to a no-op
+                                // instead of reading a stale cell.
+                                MIR_disp_t vh_cell = (MIR_disp_t)offsetof(Context, mir_var_homes)
+                                    + (MIR_disp_t)i * (MIR_disp_t)sizeof(uint64_t*);
+                                bool vh_homed = borrow_root &&
+                                    borrow_root->root_slot >= 0 &&
+                                    borrow_root->type_id != LMD_TYPE_ARRAY_NUM;
+                                if (vh_homed) {
+                                    // sync register -> slot, then pass &slot
+                                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                        MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                                            (MIR_disp_t)borrow_root->root_slot *
+                                                (MIR_disp_t)sizeof(uint64_t),
+                                            mt->em.frame.root_base, 0, 1),
+                                        MIR_new_reg_op(mt->ctx, val)));
+                                    MIR_reg_t vh_addr = new_reg(mt, "var_home_addr", MIR_T_I64);
+                                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+                                        MIR_new_reg_op(mt->ctx, vh_addr),
+                                        MIR_new_reg_op(mt->ctx, mt->em.frame.root_base),
+                                        MIR_new_int_op(mt->ctx,
+                                            (int64_t)borrow_root->root_slot * (int64_t)sizeof(uint64_t))));
+                                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                        MIR_new_mem_op(mt->ctx, MIR_T_I64, vh_cell,
+                                            mt->em.frame.runtime, 0, 1),
+                                        MIR_new_reg_op(mt->ctx, vh_addr)));
+                                    var_home_roots[var_home_count++] = borrow_root;
+                                } else {
+                                    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                                        MIR_new_mem_op(mt->ctx, MIR_T_I64, vh_cell,
+                                            mt->em.frame.runtime, 0, 1),
+                                        MIR_new_int_op(mt->ctx, 0)));
+                                }
+                            }
                         }
                         TypeId val_tid = get_effective_type(mt, resolved_args[i]);
                         // T-A1, boxed-ABI mirror of the native-param site above.
@@ -18980,6 +19059,22 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 for (int i = 0; i < ai; i++) ops[3 + i] = call_ops[i];
                 em_emit_borrowed_call(&mt->em, fn_mangled,
                     MIR_new_insn_arr(mt->ctx, MIR_CALL, 3 + ai, ops));
+            }
+            // CW33 M1a: the callee's epilogue may have published a final
+            // `var`-param value (rebind/detach) through the transported home
+            // -- the caller's binding register reloads from its own slot.
+            for (int vh = 0; vh < var_home_count; vh++) {
+                MirVarEntry* vroot = var_home_roots[vh];
+                if (!vroot) continue;
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                    MIR_new_reg_op(mt->ctx, vroot->reg),
+                    MIR_new_mem_op(mt->ctx, MIR_T_I64,
+                        (MIR_disp_t)vroot->root_slot * (MIR_disp_t)sizeof(uint64_t),
+                        mt->em.frame.root_base, 0, 1)));
+                // the home holds a boxed Item by the untyped convention
+                vroot->type_id = LMD_TYPE_ANY;
+                vroot->mir_type = MIR_T_I64;
+                update_gc_root_slot(mt, vroot);
             }
             MIR_reg_t second_result = 0;
             // the slot transport is also materialized in a MIR register by
@@ -25440,6 +25535,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     memset(mt->typed_array_inbounds_roots, 0,
         sizeof(mt->typed_array_inbounds_roots));
     mt->typed_array_inbounds_root_count = 0;
+    memset(mt->var_param_home_regs, 0, sizeof(mt->var_param_home_regs));
+    memset(mt->var_param_entries, 0, sizeof(mt->var_param_entries));
     mt->in_async_proc = is_async_proc;
     mt->emitting_async_call = false;
     mt->async_call_state = 0;
@@ -25491,6 +25588,30 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     for (int i = 0; i < param_count; i++) raw_free(param_name_copies[i]);
 
     MIR_reg_t runtime_fn = MIR_reg(mt->ctx, "runtime", func);
+    // CW33 M1a: consume the caller's `var`-home transport cells FIRST, before
+    // anything else can call out -- the cells are dead outside this window.
+    // Untyped `var` params only (single boxed Item* convention); async procs
+    // skip the channel (their register spilling is its own protocol).
+    if (fn_as_node && fn_as_node->node_type == AST_NODE_PROC && !is_async_proc) {
+        int vh_index = 0;
+        for (AstNamedNode* vp = fn_node->param; vp && vh_index < LAMBDA_MAX_FUNCTION_ARGS;
+                vp = (AstNamedNode*)((AstNode*)vp)->next, vh_index++) {
+            TypeParam* vp_type = (TypeParam*)((AstNode*)vp)->type;
+            if (!vp_type || !vp_type->is_var_param || vp_type->full_type) continue;
+            char vh_name[24];
+            snprintf(vh_name, sizeof(vh_name), "var_home_%d", vh_index);
+            MIR_reg_t home = new_reg(mt, vh_name, MIR_T_I64);
+            MIR_disp_t cell = (MIR_disp_t)offsetof(Context, mir_var_homes)
+                + (MIR_disp_t)vh_index * (MIR_disp_t)sizeof(uint64_t*);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, home),
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, cell, runtime_fn, 0, 1)));
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_mem_op(mt->ctx, MIR_T_I64, cell, runtime_fn, 0, 1),
+                MIR_new_int_op(mt->ctx, 0)));
+            mt->var_param_home_regs[vh_index] = home;
+        }
+    }
     MIR_reg_t array_witness = raw_array_witness_mask
         ? MIR_reg(mt->ctx, "_array_witness", func) : 0;
     emit_load_module_consts(mt);
@@ -25936,6 +26057,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 // leaving shallow children shared, so callee writes recheck paths.
                 param_var->cow_children_may_be_shared = true;
                 param_var->is_var_param = true;
+                // CW33 M1a: remember the binding so the shared epilogue can
+                // publish its FINAL value through the consumed home address
+                if (pi < LAMBDA_MAX_FUNCTION_ARGS && mt->var_param_home_regs[pi]) {
+                    mt->var_param_entries[pi] = param_var;
+                }
             }
             if (var_type == LMD_TYPE_NUM_SIZED) {
                 MirVarEntry* v = find_var(mt, pname);

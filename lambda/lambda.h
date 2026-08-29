@@ -2148,6 +2148,16 @@ struct Context {
     // bits, never a pointer — RV8), single-thread-owned, and dead outside the
     // window between a shape-2 return and its resolution.
     uint64_t mir_companion_slot;
+    // CW33 M1a (COW §11.10): per-call transport for `var`-parameter HOME
+    // addresses -- the address of the caller binding's GC root slot. The
+    // caller writes the cells for the callee's untyped `var` positions
+    // immediately before a direct call (an address, or 0 when the argument
+    // has no boxed-classed home); the callee prologue consumes them into its
+    // own registers and ZEROES the cells, so they are always 0 outside the
+    // call window. Same contract as mir_companion_slot: never GC-scanned
+    // (raw addresses of already-rooted slots), single-thread-owned, dead
+    // outside the transport window. Deleted when the true pointer ABI lands.
+    uint64_t* mir_var_homes[LAMBDA_MAX_FUNCTION_ARGS];
 };
 
 // A property key specification is compiler-neutral data stored in the sealed
