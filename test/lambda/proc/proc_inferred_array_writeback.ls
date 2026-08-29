@@ -1,4 +1,4 @@
-pn bump(values) {
+pn bump(var values) {
     values[0] = values[0] + 1
 }
 

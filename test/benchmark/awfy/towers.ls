@@ -3,26 +3,26 @@
 // 13 disks, using arrays as stacks
 // Each pile is represented as {disks: [...], top: int}
 
-pn push_disk(piles, tops, disk_size, pile) {
+pn push_disk(var piles, var tops, disk_size, pile) {
     let t = tops[pile]
     piles[pile * 14 + t] = disk_size
     tops[pile] = t + 1
 }
 
-pn pop_disk_from(piles, tops, pile) {
+pn pop_disk_from(var piles, var tops, pile) {
     let t = tops[pile] - 1
     tops[pile] = t
     let disk_size = piles[pile * 14 + t]
     return disk_size
 }
 
-pn move_top_disk(piles, tops, st, from_pile, to_pile) {
+pn move_top_disk(var piles, var tops, var st, from_pile, to_pile) {
     let disk = pop_disk_from(piles, tops, from_pile)
     push_disk(piles, tops, disk, to_pile)
     st.moves = st.moves + 1
 }
 
-pn move_disks(piles, tops, st, disks, from_pile, to_pile) {
+pn move_disks(var piles, var tops, var st, disks, from_pile, to_pile) {
     if (disks == 1) {
         move_top_disk(piles, tops, st, from_pile, to_pile)
         return 0
@@ -43,7 +43,7 @@ pn benchmark() {
         push_disk(piles, tops, i, 0)
         i = i - 1
     }
-    let st = {moves: 0}
+    var st = {moves: 0}
     move_disks(piles, tops, st, 13, 0, 1)
     return st.moves
 }

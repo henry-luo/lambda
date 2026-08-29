@@ -686,7 +686,7 @@ pn v3d_new(x, y, z) any {
 // =====================================================
 // Voxel hashing (typed float → native division)
 // =====================================================
-pn voxel_hash_xy(px: float, py: float, out) any {
+pn voxel_hash_xy(px: float, py: float, var out) any {
     var xdiv: int = int(px / GOOD_VOXEL_SIZE)
     var ydiv: int = int(py / GOOD_VOXEL_SIZE)
     var rx: int = GOOD_VOXEL_SIZE * xdiv
@@ -769,7 +769,7 @@ pn is_in_voxel(vx: int, vy: int, p1x: float, p1y: float, p2x: float, p2y: float)
 // Recurse: draw motion into voxel map
 // ctx: DrawCtx — typed map for direct field-offset access
 // =====================================================
-pn recurse_draw(voxelMap, seenTree, vx: int, vy: int, ctx: DrawCtx) any {
+pn recurse_draw(var voxelMap, var seenTree, vx: int, vy: int, ctx: DrawCtx) any {
     var p1x: float = (ctx.p1x)
     var p1y: float = (ctx.p1y)
     var p2x: float = (ctx.p2x)
@@ -953,7 +953,7 @@ pn simulate_frame(numAircraft: int, tval) any {
     return frame
 }
 
-pn handle_new_frame(stateTree, frame: Vec) any {
+pn handle_new_frame(var stateTree, frame: Vec) any {
     var motions: Vec = vec_new()
     // Use flat arr for aircraft seen set (IDs are 0-99, well within arr capacity)
     var seenArr: Arr = arr_new()

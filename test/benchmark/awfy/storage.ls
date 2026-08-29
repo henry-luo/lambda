@@ -2,7 +2,7 @@
 // Expected result: 5461
 // Recursive tree of arrays (allocation stress test)
 
-pn random_next(seed_arr) {
+pn random_next(var seed_arr) {
     var s = seed_arr[0]
     s = s * 1309 + 13849
     s = s % 65536
@@ -10,7 +10,7 @@ pn random_next(seed_arr) {
     return s
 }
 
-pn build_tree_depth(st, depth, seed_arr) {
+pn build_tree_depth(var st, depth, var seed_arr) {
     st.count = st.count + 1
     if (depth == 1) {
         return fill((random_next(seed_arr) % 10) + 1, 0)
@@ -24,7 +24,7 @@ pn build_tree_depth(st, depth, seed_arr) {
 
 pn benchmark() {
     var seed_arr = [74755]
-    let st = {count: 0}
+    var st = {count: 0}
     build_tree_depth(st, 7, seed_arr)
     return st.count
 }

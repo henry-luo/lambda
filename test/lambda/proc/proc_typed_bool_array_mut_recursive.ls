@@ -1,4 +1,4 @@
-pn set_three(rows, maxs, mins, value) {
+pn set_three(var rows, var maxs, var mins, value) {
     rows[0] = value
     maxs[0] = value
     mins[0] = value

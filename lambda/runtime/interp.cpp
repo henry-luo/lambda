@@ -681,6 +681,14 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
         named->name ? named->name->chars : "");
     Item bound = interp_coerce_declared_binding(f, value, named->declared_type,
         boundary);
+    // CW24v2 phase 2: a place-copy binding (`var row = m.rows[i]`) marks the
+    // read value so the first write DETACHES -- a real S9.1.2 snapshot --
+    // instead of aliasing a child a fresh literal never captured. All T0
+    // declaration paths funnel through this bind. Mark-only: cannot allocate.
+    if (cow_capture_enabled() && named->entry && named->entry->is_place_copy &&
+            named->entry->place_copy_mutated) {
+        cow_mark_shared(bound);
+    }
     if (!item_is_error(source) && item_is_error(bound) && named->declared_type &&
             !lambda_type_accepts_error(named->declared_type)) {
         // A failed deferred boundary must not publish ItemError into the slot:

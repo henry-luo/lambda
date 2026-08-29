@@ -347,6 +347,17 @@ struct NameEntry {
     // declaration, consumed at the mutation site, which is where the
     // programmer's expectation actually breaks.
     bool is_place_copy;
+    // CW24v2 phase 2: counts of ident READS of a place-copy binding vs reads
+    // that were merely a mutation target's own root. reads > target_reads
+    // means the mutated copy is OBSERVED somewhere -- a legitimate deliberate
+    // snapshot under the Swift/R endpoint, so the diagnostic downgrades.
+    uint16_t place_copy_reads;
+    uint16_t place_copy_target_reads;
+    // durable "this place copy IS mutated somewhere" fact (pending is cleared
+    // at flush). Gates the bind-time mark: an unmutated place copy stays a
+    // borrow -- read-and-return helpers (rbt_get) must not share-mark the
+    // stored value they hand out.
+    bool place_copy_mutated;
     // The place's root name, kept only to name it in that diagnostic.
     String* place_copy_root;
     // Read-modify-WRITE-BACK (`p = w.pkts[i]` ... `w.pkts[i] = p`) is the

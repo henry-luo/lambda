@@ -12820,6 +12820,19 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     ast_expr_may_return_container(asn->init, expr_tid, var_tid);
                 bool cow_binding = ast_expr_may_return_container(asn->init, expr_tid, var_tid) &&
                     mir_expr_is_owned_binding_alias(mt, asn->init);
+                // CW24v2 phase 2: a place-copy binding (`var row = m.rows[i]`)
+                // must mark the read value so its first write DETACHES -- a
+                // real S9.1.2 snapshot -- instead of aliasing a child a fresh
+                // literal never captured. Same tier rule as T0's bind path.
+                if (!cow_binding && cow_capture_enabled() &&
+                        asn->entry && asn->entry->is_place_copy &&
+                        asn->entry->place_copy_mutated &&
+                        ast_type_needs_mutable_clone(var_tid)) {
+                    // a scalar place copy (`var mi: int = stack[d]`) has
+                    // nothing to snapshot; marking it only boxed the binding
+                    // to ANY and deoptimized loop arithmetic (triangl2)
+                    cow_binding = true;
+                }
                 MirVarEntry* cow_source = cow_binding
                     ? mir_direct_root_binding(mt, asn->init) : NULL;
                 if (cow_binding) {

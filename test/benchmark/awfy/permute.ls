@@ -2,13 +2,13 @@
 // Expected result: 8660
 // Generates all permutations of an array via recursive swap
 
-pn swap(v, i, j) {
+pn swap(var v, i, j) {
     var tmp = v[i]
     v[i] = v[j]
     v[j] = tmp
 }
 
-pn permute(st, v, n) {
+pn permute(var st, var v, n) {
     st.count = st.count + 1
     if (n != 0) {
         var n1 = n - 1
@@ -24,7 +24,7 @@ pn permute(st, v, n) {
 }
 
 pn benchmark() {
-    let st = {count: 0}
+    var st = {count: 0}
     var v = fill(6, 0)
     permute(st, v, 6)
     return st.count

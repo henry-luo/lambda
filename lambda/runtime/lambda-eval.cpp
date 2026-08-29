@@ -7781,20 +7781,18 @@ Item cow_bind_var(Item value) {
 // detaches correctly when a COW-aware setter writes it (clone_mutable_array_num
 // via cow_prepare_write); what stays open is the raw/native-lane store paths
 // that never consult the flag, and those are Stage-2 ArrayNum work either way.
-// Opt-in until the nested-mutation half of C4 lands. Insertion capture on its
-// own is sound, but element/field READS still borrow (the open C4.1 half), so
-// the get-modify idiom `c = owner[i]` ... `c[j] = v` silently writes a detached
-// copy once the insertion that produced `owner[i]` captured a named value.
-// Four corpus scripts depend on that idiom today (Appendix B.2 / §9.5.2 is the
-// design that closes it), so the flip stays behind this flag -- the same
-// staging Phase C/D used for LAMBDA_COW.
+// DEFAULT ON as of the 2026-08-29 flip: insertion capture (S9.3.1) and
+// plain-param snapshots (S9.1.3/CW29) are the shipped semantics, together
+// with the CW24 mutated-place-copy diagnostic that makes the read-side safe.
+// `LAMBDA_COW_CAPTURE=0` (or `off`) is a temporary escape hatch kept for one
+// stabilization cycle so a regression can be bisected against the old
+// write-through/aliasing behavior; the gated arms it selects are scheduled
+// for deletion once the flip has soaked (COW §11.9 rollout step 3).
 bool cow_capture_enabled(void) {
-    // A set-but-empty value reads as "unset" here. getenv() reports "" as
-    // present, so `LAMBDA_COW_CAPTURE=` in a shell prologue would silently
-    // enable the semantic flip -- the opposite of what writing it says.
     static const bool enabled = [] {
         const char* value = getenv("LAMBDA_COW_CAPTURE");
-        return value && value[0] && strcmp(value, "0") != 0;
+        if (!value || !value[0]) return true;  // default ON
+        return strcmp(value, "0") != 0 && strcmp(value, "off") != 0;
     }();
     return enabled;
 }

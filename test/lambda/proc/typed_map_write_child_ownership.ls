@@ -22,7 +22,7 @@ pn mk() H {
     return h
 }
 
-pn write_a(h: H, v: int) {
+pn write_a(var h: H, v: int) {
     // Read-modify-write-back (C4.2e). Binding `h.a` binds a COPY under S9.1.2,
     // so the mutated child is stored back explicitly. What this fixture guards
     // is unchanged: the element write must survive the transactional field

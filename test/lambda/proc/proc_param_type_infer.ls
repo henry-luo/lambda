@@ -50,7 +50,7 @@ pn test_typed_int_string(n: int) {
 }
 
 // Test 7: Chain of float comparisons (simulates splay tree key routing)
-pn insert_key(tree, key, value) {
+pn insert_key(var tree, key, value) {
     if (tree.root == null) {
         tree.root = {key: key, left: null, right: null, value: value}
         return 0

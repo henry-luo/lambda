@@ -2916,6 +2916,11 @@ AstNode* build_identifier_from_span(Transpiler* tp, SourceSpan span) {
     else {
         log_debug("found identifier %.*s", (int)entry->name->len, entry->name->chars);
         ast_node->entry = entry;
+        // CW24v2 phase 2: every resolved use of a place-copy binding counts as
+        // a read; mutation notes compensate their own target-root read below.
+        if (entry->is_place_copy && entry->place_copy_reads < UINT16_MAX) {
+            entry->place_copy_reads++;
+        }
         if (entry->import && entry->node->type->type_id != LMD_TYPE_FUNC) {
             // clone and remove is_const flag
             // todo: full type clone
@@ -8726,7 +8731,12 @@ static void direct_note_place_copy_mutation(SourceSpan span, AstNode* object) {
     if (!cow_capture_enabled()) return;
     AstIdentNode* root = compound_root_ident(object);
     NameEntry* entry = root ? root->entry : NULL;
-    if (!entry || !entry->is_place_copy || entry->place_copy_mutation_pending) return;
+    if (!entry || !entry->is_place_copy) return;
+    // the target's own root ident was already counted as a read when the
+    // object expression resolved; it is not an OBSERVATION of the copy
+    if (entry->place_copy_target_reads < UINT16_MAX) entry->place_copy_target_reads++;
+    entry->place_copy_mutated = true;  // durable; gates the bind-time mark
+    if (entry->place_copy_mutation_pending) return;
     entry->place_copy_mutation_pending = true;
     entry->place_copy_mutation_span = span;
     entry->place_copy_next = g_place_copy_pending;
@@ -8754,19 +8764,23 @@ static void lambda_ast_flush_place_copy_diagnostics(Transpiler* tp) {
         NameEntry* next = entry->place_copy_next;
         entry->place_copy_next = NULL;
         entry->place_copy_mutation_pending = false;
-        if (!entry->place_copy_written_back) {
+        // CW24v2 (Swift/R endpoint, ratified 2026-08-29): a mutated place copy
+        // the program OBSERVES -- reads, returns, stores, passes on, or writes
+        // back -- is a legitimate deliberate snapshot, not an error. Only the
+        // dead-store shape (mutated, then never observed at all) survives, as
+        // a warning: it is provably useless work under either semantics.
+        bool observed = entry->place_copy_written_back ||
+            entry->place_copy_reads > entry->place_copy_target_reads;
+        if (!observed) {
             String* origin = entry->place_copy_root;
             int olen = origin ? (int)origin->len : 1;
             const char* ochars = origin ? origin->chars : "?";
-            record_semantic_error_span(tp, entry->place_copy_mutation_span,
-                ERR_PLACE_COPY_MUTATED,
-                "writes through '%.*s' do not reach '%.*s': it was bound from a "
-                "member/index read, which copies (S9.1.2). write the path directly "
-                "('%.*s...[key] = value'), pass the place as a `var` argument, or "
-                "store it back ('%.*s... = %.*s').",
-                (int)entry->name->len, entry->name->chars, olen, ochars,
-                olen, ochars, olen, ochars,
-                (int)entry->name->len, entry->name->chars);
+            log_warn("cow-dead-snapshot: %s: '%.*s' is a copy of '%.*s...' "
+                "(S9.1.2) that is mutated but never read, returned, or written "
+                "back -- the writes are dead. write the path directly, or use "
+                "the copy.",
+                tp->reference ? tp->reference : "<script>",
+                (int)entry->name->len, entry->name->chars, olen, ochars);
         }
         entry = next;
     }

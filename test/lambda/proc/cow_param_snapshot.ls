@@ -1,7 +1,8 @@
-// Pins the CURRENT plain-param write-through pn ABI (flag off). When CW29
-// plain-param snapshots flip on by default (S9.1.3, COW §11.9), this golden
-// changes to "1 2 a 5" and the scripts the sweep flagged migrate to `var`.
-// The flag-ON behavior is probed by temp/cw29/param_snap.ls (LR12-9 pattern).
+// Pins the SHIPPED plain-param snapshot semantics (S9.1.3/CW29, default ON
+// since the 2026-08-29 flip): writes through plain params stay local to the
+// procedure; `var` is the sole write-through construct. The pre-flip
+// write-through ABI ("9 9 9 5") is reachable only via the temporary
+// LAMBDA_COW_CAPTURE=0 escape hatch.
 
 pn set_flat(m) { m.cur = 9 }
 pn set_nested(t) { t.a[1] = 9 }
