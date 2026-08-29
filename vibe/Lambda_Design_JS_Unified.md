@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29
 
-**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3g compile-unit migrations, and P4a–P4e collection-owned function facts are verified; the remaining P3/P4–P6 driver work remains proposed. HEAD governs 313,938 `lambda/runtime` + `lambda/js` lines; the current P4e/P3g working candidate is 313,931. The older 310,711-line project anchor remains historical and its final 308,711 cap is not yet claimed.
+**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3j compile-unit migrations, and P4a–P4k indexed function facts are verified; the remaining P5 lowering-family work remains proposed. The current HEAD governs 314,814 `lambda/runtime` + `lambda/js` lines and the working candidate is 314,192; the older 310,711-line project anchor remains historical and its final 308,711 cap is not yet claimed.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -816,8 +816,10 @@ Mode-specific policy is data on the unit: parse goal, module/eval/preamble flags
 The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. P3b moves MIR context creation, error-handler installation, transpiler ownership, name-base setup, and module creation into one script-unit opener used by ordinary source and pre-built-AST entry points. P3c extends that opener to ES modules while retaining the module's private zero-based name image and registry/TLA policy. P3d extends it to direct eval and `new Function` with their compact storage and optimize-level policy. P3e routes eval-preamble publication and batch/preamble declaration snapshots through one owned map-to-array helper. P3f routes finalized MIR volume accounting for Lambda and LambdaJS through one shared runtime walk. Manual phase timing and cleanup labels remain for the later driver slices.
 
 P3g makes pass contexts explicit and places the JS analysis/lower/finalize
-boundary under the manager; MIR link, execution, cleanup, and Lambda's later
-phases remain for the later driver slices.
+boundary under the manager. P3i extends that authority through Lambda MIR
+lower/finalize/link and routes JavaScript execution through one recovery-aware
+entry helper; cleanup remains the final runtime-owned handoff after template
+and module publication.
 
 #### P3a implementation record — truthful JavaScript validation pass, 2026-08-28
 
@@ -1031,6 +1033,102 @@ LAMBDA_TEST_MAX_CONCURRENT=1 make test-lambda-baseline
 git diff --check                                     # clean
 ```
 
+#### P3h implementation record — shared JavaScript link/entry publication, 2026-08-29
+
+The source, pre-built-AST, and ES-module JavaScript entry paths now call one
+`js_mir_link_main()` helper for the MIR interface selection, `MIR_link`, and
+`js_main` lookup. The shared `JsMirMainFunc` contract also removes three local
+function-pointer typedefs. This retires link/entry spelling drift while leaving
+the mode-specific execution and retention policy explicit for the remaining
+**D8.2.5** lifecycle slices.
+
+This is a deletion-funded **D8.2.5** slice. The helper and shared typedef are
+paid for by the three duplicate link/find blocks and local typedefs; an
+additional dead class-method scan was removed in the same slice. Against the
+current external HEAD, the working candidate is 314,675 lines (`-139`), and the
+changed first-party C/C++ and source counters are `+98/-238 = -140`. No prior
+slice's deletion credit is reused.
+
+Focused verification:
+
+```text
+make -C build/premake config=debug_native test_js_script_gtest test_js_mir_emission_gtest test_js_opt_gtest -j8 CC=clang CXX=clang++
+                                                       # build passed
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+./utils/check_ast_tune_loc.sh --base HEAD --cap 314814 --phase-base HEAD
+                                                       # candidate 314,675; phase C/C++ -140; source -140
+git diff --check                                     # clean
+```
+
+P3i and P3j subsequently move Lambda link/entry and the conditional indexed
+prerequisite into the authoritative driver; mode-specific cleanup and the
+final **D8.6.4v2** ratchets remain explicit closeout work.
+
+#### P3i implementation record — manager-owned Lambda MIR link and shared execution entry, 2026-08-29
+
+**D8.2.5** requires the compile driver to publish phase facts only after the
+declared work succeeds. The Lambda MIR Direct path now runs const-fold,
+lower/finalize, and link/`main` publication as one ordered pass-manager
+schedule. The link pass owns the large-module interpreter policy, lazy/native
+interface choice, optimization downgrade, and entry lookup; the caller retains
+only post-link BSS/template publication and final ownership transfer. The JS
+source, cached-AST, eval/`new Function`, and ES-module execution paths use the
+same recovery-aware entry helper, including deferred module-body execution.
+
+This is a deletion-funded **D8.2.5** slice. The former Lambda lower/count,
+policy, link, and entry blocks are retired when their pass callbacks are
+installed. The current governed candidate is 314,506 lines against the
+314,814-line HEAD baseline; the cumulative changed C/C++ and source counters
+are `+989/-1,297 = -308`. No prior deletion credit is reused.
+
+Focused verification:
+
+```text
+make build                                             # Errors: 0
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+./utils/check_ast_tune_loc.sh --base HEAD --cap 314814 --phase-base HEAD
+                                                       # candidate 314,506; phase C/C++ -308; source -308
+git diff --check                                       # clean
+```
+
+The final baseline gate is run after the remaining P4 fact/index slices; no
+semantic ruling or AST layout changed.
+
+#### P3j implementation record — conditional indexed prerequisite in the Lambda driver, 2026-08-29
+
+The Lambda MIR Direct compile driver now treats the indexed AST as a required
+prerequisite while remaining safe for retained pre-indexed AST callers. The
+driver seeds the pass manager with the facts already present, schedules the
+shared `ast_index_compiler_pass` only when the unit has no published index, and
+then runs const-fold, MIR lower/finalize, and link/entry through the same
+ordered manager. This makes the compile driver authoritative for the complete
+build-to-entry schedule without rebuilding an index that the shared builder
+already published.
+
+This is a deletion-funded **D8.2.5** slice: the old caller-side prerequisite
+branch is retired when the conditional `CompilerPassSpec` is installed. No
+semantic ruling or AST layout changed, and the phase remains non-positive under
+the governed and changed-source counters.
+
+Focused verification:
+
+```text
+make build                                             # Errors: 0
+./test/test_compiler_pass_gtest.exe --gtest_color=no   # 2/2 passed
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+./utils/check_ast_tune_loc.sh --base HEAD --cap 314814 --phase-base HEAD
+                                                       # candidate 314,192; phase C/C++ -622; source -622
+git diff --check                                       # clean
+```
+
+The full baseline and final LOC ratchets remain the P1–P4 acceptance gate.
+
 ### 4.5 P4 — Replace collection with indexed analysis
 
 P4 makes `AstIndex.functions` and the new class index authoritative. Each analysis changes from recursive discovery to an indexed or worklist pass, and its former walk/cache is deleted immediately.
@@ -1218,6 +1316,266 @@ Focused verification after rebuilding the affected targets:
 
 This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
 target.
+
+#### P4f implementation record — AST-owned function analysis, 2026-08-29
+
+The next P4 slice retires the duplicate `FnAnalysis` record embedded in
+`JsFuncCollected`. Function analysis now lives on the owning AST function node,
+the same identity consumed by Lambda planning/interpreter/runtime code;
+collection metadata reaches it through one small accessor. Parameter facts,
+capture facts, variants, and cleanup therefore use the common AST-owned record,
+while MIR-only artifacts remain on `JsFuncCollected` until their indexed-table
+slice. The old embedded record and its per-function publication assignment are
+deleted in the same change. The capture analyzer also shares one initializer
+for self and lexical pseudo-captures, retiring four duplicate record layouts.
+
+This is a deletion-funded **D8.2.4** slice. Against the current external merge
+HEAD, changed first-party C/C++ is `+79/-103 = -24`; the governed candidate is
+314,790 lines versus the 314,814 baseline. The prior P4a–P4e accounting remains
+against each slice's own merge base and is not reused here.
+
+Focused verification after rebuilding the affected targets:
+
+```text
+make -C build/premake config=debug_native test_js_script_gtest test_js_mir_emission_gtest test_js_opt_gtest test_compiler_pass_gtest -j8 CC=clang CXX=clang++
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+./test/test_compiler_pass_gtest.exe --gtest_color=no   # 2/2 passed
+./utils/check_ast_tune_loc.sh --base HEAD --cap 314814 --phase-base HEAD
+                                                       # candidate 314,790; phase C/C++ -24; source -24
+git diff --check                                     # clean
+```
+
+The full Lambda baseline remains the next gate after the subsequent P3/P4
+driver slices; this record does not claim the final **D8.6.4v2** timing or
+`-2,000`-line project target.
+
+#### P4g implementation record — indexed enclosing lexical facts, 2026-08-29
+
+The capture pass no longer rescans the AST subtree to rediscover enclosing
+lexical declarations for every function. The builder's `NameScope` parent chain
+is the authoritative bound scope graph; P4g projects its lexical entries into
+the existing capture-analysis fact set, preserving source ranges, binding
+identity, TDZ kind, and Annex-B function-declaration markers. The recursive
+collector and its private child-dispatch context are retired immediately, so
+capture analysis now consumes the same scope identity that binding/indexing
+published under **D8.2.4**.
+
+This is a deletion-funded **D8.2.4** slice. Relative to the P4f candidate,
+changed first-party C/C++ is `+24/-133 = -109`; the cumulative candidate is
+314,681 lines against the current 314,814-line HEAD baseline. No prior slice's
+deletion credit is reused.
+
+Focused verification after rebuilding the affected targets:
+
+```text
+make -C build/premake config=debug_native test_js_script_gtest test_js_mir_emission_gtest test_js_opt_gtest -j8 CC=clang CXX=clang++
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+LAMBDA_TEST_MAX_CONCURRENT=1 make test-lambda-baseline  # pending final run
+./utils/check_ast_tune_loc.sh --base HEAD --cap 314814 --phase-base HEAD
+                                                       # candidate 314,681; phase C/C++ -133; source -133
+git diff --check                                     # clean
+```
+
+P4j subsequently consumes indexed call-site evidence and completes the
+capture/inference worklists; the final **D8.6.4v2** timing and project target
+remain acceptance gates.
+
+#### P4h implementation record — common capture-capacity ownership, 2026-08-29
+
+Capture-array capacity and teardown now live with the AST-owned `FnAnalysis`
+record. `JsFuncCollected` no longer carries a second capacity counter; the
+collection entry remains only a temporary backend view of the shared array while
+the indexed capture/environment slices are completed. Reallocation copies the
+shared analysis storage, and cleanup releases it through that owner, preventing
+the previous mirror from becoming an independent lifetime.
+
+This is a deletion-funded **D8.2.4** slice. One JS collection field and its
+separate teardown path were retired while the common analysis record gained the
+single capacity fact. Against the current external HEAD, the candidate is
+314,675 lines; the cumulative changed C/C++ and source counters are
+`+113/-252 = -139` (the same working candidate includes P3h). No prior
+deletion credit is reused.
+
+Focused verification after rebuilding the affected targets:
+
+```text
+make -C build/premake config=debug_native test_js_script_gtest test_js_mir_emission_gtest test_js_opt_gtest -j8 CC=clang CXX=clang++
+                                                       # build passed
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+./utils/check_ast_tune_loc.sh --base HEAD --cap 314814 --phase-base HEAD
+                                                       # candidate 314,675; phase C/C++ -139; source -139
+git diff --check                                     # clean
+```
+
+The JS pointer/count view is still consumed by backend code and is the next
+capture migration target; this slice does not claim sole `FunctionId` capture
+identity or the final **D8.6.4v2** project ratchet.
+
+#### P4i implementation record — AST-owned capture identity, 2026-08-29
+
+The JavaScript MIR capture readers and writers now use the AST function's
+`FnAnalysis` array and count directly. `JsFuncCollected` no longer carries a
+second pointer/count view, so capture propagation, scope-environment layout,
+closure emission, and cleanup all address the same analysis record published by
+the indexed function identity. Class-method collection no longer touches that
+record before the collection pass allocates it; the AST-owned zero state is
+initialized once at publication. This closes the pointer/count mirror left by
+P4h without changing Lambda's linked-list capture contract.
+
+This is a deletion-funded **D8.2.4** slice. The two collection fields and their
+cleanup/assignment paths were retired; two shared access macros are the only
+new structural surface. Against the current external HEAD, the governed
+candidate is 314,684 lines and the changed first-party C/C++ and source
+counters are `+431/-561 = -130`. No prior deletion credit is reused.
+
+Focused verification after rebuilding the affected targets:
+
+```text
+make build                                             # Errors: 0
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+./utils/check_ast_tune_loc.sh --base HEAD --cap 314814 --phase-base HEAD
+                                                       # candidate 314,684; phase C/C++ -130; source -130
+git diff --check                                       # clean
+```
+
+P4j subsequently completes the capture fixed point, call-site evidence, and
+function-local inference caches; the final **D8.6.4v2** ratchets remain open.
+
+#### P4j implementation record — shared JavaScript profile facts and indexed inference, 2026-08-29
+
+**D8.2.4** requires one function-owned analysis record for facts consumed by
+all post-index passes. JavaScript direct-eval, `arguments`, rest/non-simple
+parameter, `this`, `new.target`, `with`, reassignment, formal length, return
+type, boxed-return class, parameter count, parameter types, and capture storage
+now live on the AST function's `FnAnalysis`; `JsFuncCollected` retains only
+collection/backend state. Parameter and return inference consume the indexed
+node table filtered by `AstFunctionId`, so nested function bodies cannot leak
+evidence into an enclosing function. The old recursive parameter/return walks
+and their public declarations are deleted in the same slice.
+
+The indexed capture fixed-point is a queued worklist rather than a bounded
+ten-round loop; call-site evidence is read directly from `AstIndex.nodes`, and
+the function-local declaration caches are owned and freed by `FnAnalysis`.
+This closes the remaining pointer/count/fact-table mirrors without changing
+the JS ABI or Lambda's linked-list capture contract.
+
+This is a deletion-funded **D8.2.4** slice. Against the 314,814-line HEAD
+baseline the governed candidate is 314,506 lines, with changed first-party
+C/C++ and source counters `+989/-1,297 = -308`. No prior deletion credit is
+reused.
+
+Focused verification:
+
+```text
+make build                                             # Errors: 0
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+./utils/check_ast_tune_loc.sh --base HEAD --cap 314814 --phase-base HEAD
+                                                       # candidate 314,506; phase C/C++ -308; source -308
+git diff --check                                       # clean
+```
+
+The full Lambda baseline is the final P1–P4 acceptance gate; P5 lowering
+families and the historical project-wide 308,711-line target remain outside
+this closeout.
+
+#### P4k implementation record — indexed suspension, assignment, return, local, and constructor facts, 2026-08-29
+
+The remaining function-shape scans now consume the shared indexed function
+identity. Suspension counts, assignment-name collection, boxed-return checks,
+function-body locals, constructor-property discovery, and related body-reference
+queries use the indexed owner-filtered dispatch; the former recursive walks and
+their duplicate public declarations are retired in the same slice. Synthetic
+class-field and block-function fragments therefore use the same AST ownership
+and scope projection as ordinary functions. Shared scope writeback also ignores
+unused parent-environment holes, which prevents a sparse indexed environment
+from being treated as a binding.
+
+This closes the P4 fact/index family under **D8.2.4** without changing JS
+semantics or the Lambda linked-list contract. The slice is deletion-funded and
+its governed, changed-C/C++, and changed-source LOC deltas are all
+non-positive; the aggregate current-tree checker reports candidate 314,192
+against the 314,814 HEAD baseline (`+1,492/-2,114 = -622`), and no historical
+anchor credit is reused.
+
+Focused verification:
+
+```text
+make build                                             # Errors: 0
+./lambda.exe js test/js/hljs_highlight.js --no-log     # exit 0
+./lambda.exe js test/js/lib_ajv.js --no-log            # exit 0
+./lambda.exe js test/js/lib_handlebars.js --no-log     # exit 0
+./lambda.exe js test/js/lib_marked.js --no-log         # exit 0
+./lambda.exe js test/js/lib_ramda.js --no-log          # exit 0
+./lambda.exe js test/js/lib_yup.js --no-log            # exit 0
+./lambda.exe js test/js/lib_zod.js --no-log            # exit 0
+./lambda.exe js test/js/tune4_closure_scalar_ownership.js --no-log # exit 0
+./lambda.exe js test/js/underscore_lib.js --no-log     # exit 0
+LAMBDA_TEST_IDLE_TIMEOUT=900 make test-lambda-baseline # 4045/4045 passed
+./utils/check_ast_tune_loc.sh --base HEAD --cap 314814 --phase-base HEAD
+                                                       # candidate 314,192; phase C/C++ -622; source -622
+```
+
+The complete baseline and phase-local LOC checker pass above satisfy the
+P1–P4 implementation gate. The historical project-anchor ratchet and the
+semantic-family lowering work remain P5 scope.
+
+#### P4l implementation record — deletion-funded indexed-walk retirement, 2026-08-29
+
+The next P4 cleanup slice retires the duplicate recursive lexical-key walk and
+its target-containment helpers. Enclosing lexical identity now comes from the
+indexed `JsScope`/`NameEntry` chain, while module-block and `for`-initializer
+collection reuse the shared `js_ast_visit_children()` child contract. The same
+slice removes the dead pattern-kind wrapper, always-true closure/parent-scope
+guards, duplicate capture-key branch, and hand-written frame teardown in favor
+of the existing `em_frame_dispose()` owner. `jm_collect_let_const_names()` is
+also reused for switch lexical collection, so no new AST walk or compatibility
+wrapper is introduced.
+
+This is an implementation-only **D8.2.4**/**D8.2.5** slice: indexed identity,
+one child-enumeration contract, and pass-owned analysis remain authoritative;
+the Lambda/JavaScript semantic boundary and linked-list storage are unchanged.
+The generic rewrite of `jm_count_lexical_binding_name_for_slot()` was rejected
+after it double-counted sibling lists and regressed Highlight.js; that focused
+manual count remains an explicit P4 residual until it can consume identity
+keys without changing Annex B behavior.
+
+The deletion-funded ledger is measured against the immediately preceding live
+candidate, not a historical anchor:
+
+```text
+governed candidate before this slice                        314,192
+governed candidate after this slice                         313,692
+net governed/source C/C++ change                               -500
+current HEAD baseline                                        314,814
+current aggregate delta                                      -1,122
+phase-local C/C++ and source delta                           -1,122
+phase-local additions/deletions                         +1,702/-2,824
+```
+
+No blank lines or formatting-only churn was removed. Validation for this
+slice was:
+
+```text
+make build                                             # errors 0
+focused JS library/closure/property matrix             # all exit 0
+LAMBDA_TEST_IDLE_TIMEOUT=900 make test-lambda-baseline # 4045/4045 passed
+./utils/check_ast_tune_loc.sh --base HEAD --cap 314814 --phase-base HEAD
+                                                       # candidate 313,692; phase -1,122
+git diff --check                                       # clean
+```
+
+No formal-spec ruling or semver changed; P5 lowering-family consolidation and
+the historical project-wide target remain open.
 
 ### 4.6 P5 — Consolidate lowering by semantic family
 
@@ -1443,7 +1801,7 @@ The initial stale-document set was reconciled on 2026-08-28:
 
 | Document | Reconciliation |
 |---|---|
-| `doc/Lambda_Formal_Design.md` | Spec 1.38.4 Appendix A now records the P2c `AstIndex` identity publication and P3a truthful JS validation/index pass alongside the partial traversal, pass-fact, and `MirValue` scaffolding; it names the incompatible core layouts, remaining manual schedule, bare-register residue, current 310,711-line formal LOC result, and still-open combined closeout. The D8.2 rulings were not changed; older IC examples elsewhere were editorially reconciled with **D8.4.1v2**. |
+| `doc/Lambda_Formal_Design.md` | Spec 1.38.4 Appendix A now records the P2c `AstIndex` identity publication, P3a truthful JS validation/index pass, P3j conditional indexed prerequisite in the Lambda driver, and P4k indexed function-shape facts alongside the partial traversal, pass-fact, and `MirValue` scaffolding; it names the incompatible core layouts, remaining P5 manual/lowering residue, bare-register residue, current 310,711-line formal LOC result, and still-open proposal-wide closeout. The D8.2 rulings were not changed; older IC examples elsewhere were editorially reconciled with **D8.4.1v2**. |
 | `vibe/impl/Lambda_Impl_Tune_Ast (retired).md` | Renamed from `(done)` to `(retired)` and marked as a historical partial record whose G1/G2/G3 closeout was not accepted. Open work points here. |
 | `doc/dev/js/JS_01_Compilation_Pipeline.md` | Reverified against the 2026-08-28 tree: function/class/member arrays are exact-sized after count/fill collection, control stacks are dynamic, duplicate pointer identity and orchestration residue are explicit, and **D8.4.1v2** no-inline-cache terminology is restored. |
 | `Lambda_Design_Unified_AST.md` | Current continuation links now point here; the retired plan is historical only; `JsLoadIC`/`JsStoreIC` wording was removed and replaced by the formal **D8.4.1v2** boundary. |

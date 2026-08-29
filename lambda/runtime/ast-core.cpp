@@ -243,10 +243,55 @@ typedef struct AstIndexWalk {
 static void ast_index_visit(AstNode* child, AstNode* parent, void* opaque) {
     AstIndexWalk* walk = (AstIndexWalk*)opaque;
     if (!child || walk->failed) return;
-    // AST list links and shared declaration nodes can be reached through more
-    // than one field; do not descend through an already indexed node.
-    if (ast_index_find(walk->index, child) != AST_NODE_ID_INVALID) return;
+    // `next` is an intrusive sibling link, not a lexical parent edge. The
+    // child-table visitor presents it as a child of the previous sibling; use
+    // that sibling's published parent so indexed scope projection remains
+    // faithful to the AST ownership contract.
     AstFunctionId owner = walk->owner_function;
+    if (parent && parent->next == child) {
+        AstNodeId parent_id = ast_index_find(walk->index, parent);
+        if (parent_id != AST_NODE_ID_INVALID) {
+            parent = walk->index->parents[parent_id];
+        }
+    }
+    // Shared AST fragments can be retained by a synthetic callable (for
+    // example a class-field initializer). Revisit their descendants under the
+    // new owner so identifier facts are projected into that callable as well.
+    AstNodeId existing_id = ast_index_find(walk->index, child);
+    if (existing_id != AST_NODE_ID_INVALID) {
+        bool is_function = child->node_type == AST_NODE_FUNC ||
+            child->node_type == AST_NODE_FUNC_EXPR || child->node_type == AST_NODE_PROC ||
+            child->node_type == AST_NODE_ARROW_FUNC || child->node_type == AST_NODE_METHOD;
+        AstFunctionId child_owner = is_function
+            ? walk->index->owner_functions[existing_id] : walk->owner_function;
+        if ((!is_function && walk->index->owner_functions[existing_id] == child_owner) ||
+                (is_function && child_owner == walk->owner_function)) return;
+        AstFunctionId previous_owner = walk->owner_function;
+        if (!is_function) walk->index->owner_functions[existing_id] = child_owner;
+        walk->owner_function = child_owner;
+        ast_visit_core_children(child, ast_index_visit, walk);
+        if (walk->profile && walk->profile->visit_ext_children) {
+            walk->profile->visit_ext_children(child, ast_index_visit, walk);
+        }
+        walk->owner_function = previous_owner;
+        return;
+    }
+    // Source spans recover the innermost function when a malformed or shared
+    // list edge leaves the traversal owner stale. The structural owner remains
+    // the fallback for synthetic nodes without a meaningful span.
+    uint32_t best_span = UINT32_MAX;
+    if (child->source_span.end_byte > child->source_span.start_byte) {
+        for (AstFunctionId i = 0; i < walk->index->function_count; i++) {
+            AstNode* function = walk->index->functions[i];
+            if (!function || function->source_span.start_byte > child->source_span.start_byte ||
+                    function->source_span.end_byte < child->source_span.end_byte) continue;
+            uint32_t span = function->source_span.end_byte - function->source_span.start_byte;
+            if (span < best_span) {
+                best_span = span;
+                owner = i;
+            }
+        }
+    }
     AstNodeId id = ast_index_add(walk->index, child, parent, owner);
     if (id == AST_NODE_ID_INVALID) {
         walk->failed = true;

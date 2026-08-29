@@ -26,8 +26,6 @@ bool jm_function_decl_is_direct_binding(JsFunctionNode* fn, bool arrow_body_is_d
 }
 
 // Forward declare
-void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs);
-void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_only);
 void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names);
 
 void jm_name_set_add(struct hashmap* set, const char* name) {
@@ -122,22 +120,6 @@ static void jm_name_set_add_binding(struct hashmap* set, const char* name, JsAst
     hashmap_set(set, &e);
 }
 
-static void jm_name_set_add_existing(struct hashmap* set, JsNameSetEntry* entry) {
-    if (!set || !entry) return;
-    JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(set, entry);
-    if (existing) {
-        if ((existing->binding_start == 0 && existing->binding_end == 0) &&
-            (entry->binding_start != 0 || entry->binding_end != 0)) {
-            existing->binding_start = entry->binding_start;
-            existing->binding_end = entry->binding_end;
-            existing->entry = entry->entry;
-        }
-        if (!existing->entry && entry->entry) existing->entry = entry->entry;
-        return;
-    }
-    hashmap_set(set, entry);
-}
-
 bool jm_name_set_has(struct hashmap* set, const char* name) {
     JsNameSetEntry key;
     memset(&key, 0, sizeof(key));
@@ -168,136 +150,57 @@ static bool jm_ref_binding_is_inside_function(JsFunctionNode* fn,
     return ref->binding_start >= body_start && ref->binding_end <= body_end;
 }
 
-static bool jm_for_head_declares_lexical_names(JsForOfNode* fo, struct hashmap* names) {
-    if (!fo || !names) return false;
-    bool lexical_head = false;
-    if (fo->left && fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)fo->left;
-        if (vd->kind == JS_VAR_LET || vd->kind == JS_VAR_CONST) {
-            lexical_head = true;
-            for (JsAstNode* d = vd->declarations; d; d = d->next) {
-                if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
-                jm_collect_pattern_names(((JsVariableDeclaratorNode*)d)->id, names);
-            }
-        }
-    } else if (fo->left && (fo->kind == JS_VAR_LET || fo->kind == JS_VAR_CONST)) {
-        lexical_head = true;
-        jm_collect_pattern_names(fo->left, names);
-    }
-    return lexical_head;
-}
-
-// Suspension counting is shared by generator yield and async await analysis.
+// Suspension facts are indexed once with the function owner, so nested
+// closures cannot leak yield/await points into their enclosing state machine.
 typedef enum JsSuspensionKind {
     JS_SUSPENSION_YIELD,
     JS_SUSPENSION_AWAIT,
 } JsSuspensionKind;
 
-// Yield and await counting share the same AST walk; only suspension-node and lane-specific spill rules differ.
-typedef struct JmSuspensionCountCtx {
-    JsSuspensionKind kind;
-    int count;
-} JmSuspensionCountCtx;
-
-static int jm_count_suspensions(JsAstNode* node, JsSuspensionKind kind);
-
-static void jm_count_suspensions_child(JsAstNode* child, void* ctx) {
-    JmSuspensionCountCtx* state = (JmSuspensionCountCtx*)ctx;
-    state->count += jm_count_suspensions(child, state->kind);
+bool jm_index_node_descends(AstIndex* index, AstNodeId node_id,
+        AstNodeId ancestor_id) {
+    while (index && node_id != AST_NODE_ID_INVALID) {
+        if (node_id == ancestor_id) return true;
+        AstNode* parent = index->parents[node_id];
+        node_id = parent ? ast_index_find(index, parent) : AST_NODE_ID_INVALID;
+    }
+    return false;
 }
 
-static int jm_count_suspensions(JsAstNode* node, JsSuspensionKind kind) {
-#define JM_COUNT(child) jm_count_suspensions((child), kind)
-    if (!node) return 0;
-    switch (node->node_type) {
-    case JS_AST_NODE_YIELD_EXPRESSION: {
-        if (kind != JS_SUSPENSION_YIELD) return 0;
-        JsYieldNode* y = (JsYieldNode*)node;
-        return 1 + JM_COUNT(y->argument);
-    }
-    case JS_AST_NODE_AWAIT_EXPRESSION: {
-        if (kind != JS_SUSPENSION_AWAIT) return 0;
-        JsAwaitNode* a = (JsAwaitNode*)node;
-        return 1 + JM_COUNT(a->argument);
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATOR: {
-        // a declarator's pattern is not part of the enclosing suspension count
-        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)node;
-        return JM_COUNT(d->init);
-    }
-    case JS_AST_NODE_FOR_OF_STATEMENT:
-    case JS_AST_NODE_FOR_IN_STATEMENT: {
-        JsForOfNode* fo = (JsForOfNode*)node;
-        int implicit_await = kind == JS_SUSPENSION_AWAIT &&
-            node->node_type == JS_AST_NODE_FOR_OF_STATEMENT && fo->is_await ? 2 : 0;
-        return implicit_await + JM_COUNT(fo->left) + JM_COUNT(fo->right) +
-            JM_COUNT(fo->body);
-    }
-    case JS_AST_NODE_CATCH_CLAUSE: {
-        JsCatchNode* cc = (JsCatchNode*)node;
-        return JM_COUNT(cc->body);
-    }
-    case JS_AST_NODE_PROPERTY: {
-        JsPropertyNode* prop = (JsPropertyNode*)node;
-        int count = prop->computed ? JM_COUNT(prop->key) : 0;
-        return count + JM_COUNT(prop->value);
-    }
-    case JS_AST_NODE_ARRAY_PATTERN: {
-        JsArrayPatternNode* arrp = (JsArrayPatternNode*)node;
-        int count = 0;
-        JsAstNode* e = arrp->elements;
-        while (e) {
-            int elem_count = JM_COUNT(e);
-            // generator destructuring resumes through both iterator-result
-            // branches; async counting only tracks source await expressions.
-            if (kind == JS_SUSPENSION_YIELD &&
-                    e->node_type != JS_AST_NODE_NULL) {
-                elem_count *= 2;
+static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
+        JsSuspensionKind kind) {
+    if (!mt || !mt->tp || !root) return 0;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId root_id = ast_index_find(index, (AstNode*)root);
+    if (root_id == AST_NODE_ID_INVALID) return 0;
+    AstFunctionId owner = index->owner_functions[root_id];
+    int count = 0;
+    for (uint32_t i = 0; i < index->count; i++) {
+        AstNode* node = index->nodes[i];
+        if (!node || index->owner_functions[i] != owner ||
+                !jm_index_node_descends(index, i, root_id)) continue;
+        if (kind == JS_SUSPENSION_YIELD &&
+                node->node_type == JS_AST_NODE_YIELD_EXPRESSION) {
+            count++;
+            // A yield in an array-pattern element resumes through both
+            // iterator-result branches for every enclosing pattern level.
+            AstNodeId parent_id = i;
+            while (parent_id != root_id && parent_id != AST_NODE_ID_INVALID) {
+                AstNode* parent = index->parents[parent_id];
+                parent_id = parent ? ast_index_find(index, parent) : AST_NODE_ID_INVALID;
+                if (parent && parent->node_type == JS_AST_NODE_ARRAY_PATTERN) count++;
             }
-            count += elem_count;
-            e = e->next;
+        } else if (kind == JS_SUSPENSION_AWAIT &&
+                node->node_type == JS_AST_NODE_AWAIT_EXPRESSION) {
+            count++;
         }
-        return count;
+        if (kind == JS_SUSPENSION_AWAIT &&
+                node->node_type == JS_AST_NODE_FOR_OF_STATEMENT &&
+                ((JsForOfNode*)node)->is_await) {
+            count += 2;
+        }
     }
-    case JS_AST_NODE_CLASS_DECLARATION:
-    case JS_AST_NODE_CLASS_EXPRESSION: {
-        // Count yields in computed property names of class members (they're in outer generator scope)
-        JsClassNode* cls = (JsClassNode*)node;
-        int count = JM_COUNT(cls->superclass);
-        JsAstNode* m = cls->body;
-        while (m) { count += JM_COUNT(m); m = m->next; }
-        return count;
-    }
-    case JS_AST_NODE_METHOD_DEFINITION: {
-        JsMethodDefinitionNode* md = (JsMethodDefinitionNode*)node;
-        // Only count yields in computed key (value is a nested function, excluded by recursion)
-        return md->computed ? JM_COUNT(md->key) : 0;
-    }
-    case JS_AST_NODE_FIELD_DEFINITION: {
-        if (kind != JS_SUSPENSION_YIELD) return 0;
-        JsFieldDefinitionNode* fd = (JsFieldDefinitionNode*)node;
-        return fd->computed ? JM_COUNT(fd->key) : 0;
-    }
-    // A nested function has its own suspension count, and these kinds were
-    // never counted; not descending is deliberate, so it is stated here rather
-    // than left to the shared child table.
-    case JS_AST_NODE_FUNCTION_DECLARATION:
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
-    case JS_AST_NODE_STATIC_BLOCK:
-    case JS_AST_NODE_REST_PROPERTY:
-    case JS_AST_NODE_PROGRAM:
-    case JS_AST_NODE_IMPORT_DECLARATION:
-    case JS_AST_NODE_EXPORT_DECLARATION:
-        return 0;
-    default: {
-        // every remaining kind is a plain sum over its children
-        JmSuspensionCountCtx state = { kind, 0 };
-        js_ast_visit_children(node, jm_count_suspensions_child, &state);
-        return state.count;
-    }
-    }
-#undef JM_COUNT
+    return count;
 }
 
 // Generator yield spill: save a temporary register to an env slot before a yield-containing
@@ -316,7 +219,9 @@ void jm_gen_spill_load(JsMirTranspiler* mt, MIR_reg_t reg, int slot) {
 }
 
 // Check if an expression subtree contains a yield (for generator spill decisions)
-bool jm_has_yield(JsAstNode* node) { return jm_count_yields(node) > 0; }
+bool jm_has_yield(JsMirTranspiler* mt, JsAstNode* node) {
+    return jm_count_yields(mt, node) > 0;
+}
 
 // Check if an expression subtree contains an optional chain (?.),
 // meaning the result may be undefined due to short-circuiting.
@@ -336,414 +241,116 @@ bool jm_has_optional_chain(JsAstNode* node) {
 }
 
 
-int jm_count_yields(JsAstNode* node) { return jm_count_suspensions(node, JS_SUSPENSION_YIELD); }
-int jm_count_awaits(JsAstNode* node) { return jm_count_suspensions(node, JS_SUSPENSION_AWAIT); }
-
-// Collect assignment target identifiers within a single function body.
-// Does NOT recurse into nested function bodies — only collects assignments
-// at the current function level.
-// Adapter so the shared child-table visitor can drive this walk.
-static void jm_collect_func_assignments_child(JsAstNode* child, void* ctx) {
-    jm_collect_func_assignments(child, (struct hashmap*)ctx);
+int jm_count_yields(JsMirTranspiler* mt, JsAstNode* node) {
+    return jm_count_indexed_suspensions(mt, node, JS_SUSPENSION_YIELD);
+}
+int jm_count_awaits(JsMirTranspiler* mt, JsAstNode* node) {
+    return jm_count_indexed_suspensions(mt, node, JS_SUSPENSION_AWAIT);
 }
 
-void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) {
-    if (!node) return;
-    switch (node->node_type) {    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
-        JsAssignmentNode* a = (JsAssignmentNode*)node;
-        if (a->left && a->left->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* id = (JsIdentifierNode*)a->left;
-            if (id->name) {
-                const char* name = jm_var_name(id->name);
-                jm_name_set_add(names, name);
+// Assignment facts use the same indexed owner boundary as captures and
+// suspensions. A `with` body is intentionally omitted because its writes are
+// object-environment effects rather than lexical binding mutations.
+void jm_collect_indexed_func_assignments(JsMirTranspiler* mt, JsAstNode* root,
+        struct hashmap* names) {
+    if (!mt || !mt->tp || !root || !names) return;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId root_id = ast_index_find(index, (AstNode*)root);
+    if (root_id == AST_NODE_ID_INVALID) return;
+    AstFunctionId owner = index->owner_functions[root_id];
+    for (uint32_t i = 0; i < index->count; i++) {
+        AstNode* node = index->nodes[i];
+        if (!node || index->owner_functions[i] != owner ||
+                !jm_index_node_descends(index, i, root_id)) continue;
+        bool in_with = false;
+        AstNodeId parent_id = i;
+        while (parent_id != root_id && parent_id != AST_NODE_ID_INVALID) {
+            AstNode* parent = index->parents[parent_id];
+            parent_id = parent ? ast_index_find(index, parent) : AST_NODE_ID_INVALID;
+            if (parent && parent->node_type == JS_AST_NODE_WITH_STATEMENT) {
+                in_with = true;
+                break;
             }
         }
-        jm_collect_func_assignments(a->left, names);
-        jm_collect_func_assignments(a->right, names);
-        break;
+        if (in_with) continue;
+        JsIdentifierNode* id = NULL;
+        if (node->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
+            JsAssignmentNode* assignment = (JsAssignmentNode*)node;
+            if (assignment->left && assignment->left->node_type == JS_AST_NODE_IDENTIFIER) {
+                id = (JsIdentifierNode*)assignment->left;
+            }
+        } else if (node->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
+            JsUnaryNode* unary = (JsUnaryNode*)node;
+            if ((unary->op == JS_OP_INCREMENT || unary->op == JS_OP_DECREMENT) &&
+                    unary->operand && unary->operand->node_type == JS_AST_NODE_IDENTIFIER) {
+                id = (JsIdentifierNode*)unary->operand;
+            }
+        }
+        if (id && id->name) jm_name_set_add(names, jm_var_name(id->name));
     }
-    case JS_AST_NODE_UNARY_EXPRESSION: {
-        JsUnaryNode* un = (JsUnaryNode*)node;
-        // i++ / i-- are also implicit assignments
-        if (un->operand && un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
-            if (un->op == JS_OP_INCREMENT || un->op == JS_OP_DECREMENT) {
-                JsIdentifierNode* id = (JsIdentifierNode*)un->operand;
-                if (id->name) {
-                    const char* name = jm_var_name(id->name);
-                    jm_name_set_add(names, name);
+}
+
+// Collect local declarations from the indexed owner graph. Function bodies
+// are excluded by owner id; direct function declarations are retained as the
+// hoisted binding in their enclosing owner.
+void jm_collect_indexed_body_locals(JsMirTranspiler* mt, JsAstNode* node,
+        struct hashmap* locals, bool var_only) {
+    if (!mt || !mt->tp || !node || !locals) return;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId root_id = ast_index_find(index, (AstNode*)node);
+    if (root_id == AST_NODE_ID_INVALID) return;
+    AstFunctionId owner = index->owner_functions[root_id];
+    for (uint32_t i = 0; i < index->count; i++) {
+        AstNode* current = index->nodes[i];
+        if (!current || !jm_index_node_descends(index, i, root_id)) continue;
+        bool same_owner = index->owner_functions[i] == owner;
+        AstNodeId parent_id = i;
+        AstNode* parent = index->parents[parent_id];
+        parent_id = parent ? ast_index_find(index, parent) : AST_NODE_ID_INVALID;
+        bool enclosing_owner = parent_id != AST_NODE_ID_INVALID &&
+            index->owner_functions[parent_id] == owner;
+        if (!same_owner && !(current->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
+                enclosing_owner)) continue;
+        if (current->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)current;
+            if (var_only && declaration->kind != JS_VAR_VAR) continue;
+            for (JsAstNode* d = declaration->declarations; d; d = d->next) {
+                if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                    JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)d;
+                    if (declarator->id) jm_collect_pattern_names(declarator->id, locals);
                 }
             }
-        }
-        jm_collect_func_assignments(un->operand, names);
-        break;
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATOR: {
-        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)node;
-        if (d->init) jm_collect_func_assignments(d->init, names);
-        break;
-    }
-    case JS_AST_NODE_PROPERTY: {
-        JsPropertyNode* p = (JsPropertyNode*)node;
-        jm_collect_func_assignments(p->value, names);
-        break;
-    }
-    // Do NOT recurse into nested functions — their locals are separate
-    case JS_AST_NODE_FUNCTION_DECLARATION:
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
-        break;
-    case JS_AST_NODE_CATCH_CLAUSE: {
-        JsCatchNode* cc = (JsCatchNode*)node;
-        jm_collect_func_assignments(cc->body, names);
-        break;
-    }
-    case JS_AST_NODE_FOR_IN_STATEMENT:
-    case JS_AST_NODE_FOR_OF_STATEMENT: {
-        JsForInNode* fi = (JsForInNode*)node;
-        jm_collect_func_assignments(fi->left, names);
-        jm_collect_func_assignments(fi->body, names);
-        break;
-    }
-    case JS_AST_NODE_WITH_STATEMENT: {
-        // Do NOT recurse into 'with' bodies — assignments inside 'with' may resolve
-        // to the scope object at runtime, so they are not implicit globals
-        break;
-    }
-
-    // Plain traversals whose child order matches JS_AST_CHILDREN — one shared
-    // visitor replaces 21 hand-written bodies. Listed explicitly, not folded
-    // into `default:`: this walker has no case for PROGRAM, class kinds,
-    // patterns, yield/await, spread/rest or templates, and delegating the
-    // default would start descending into all of them. The cases kept above
-    // record names or deliberately visit fewer children than the table lists.
-    case JS_AST_NODE_BLOCK_STATEMENT:
-    case JS_AST_NODE_EXPRESSION_STATEMENT:
-    case JS_AST_NODE_IF_STATEMENT:
-    case AST_NODE_LOOP:
-    case JS_AST_NODE_RETURN_STATEMENT:
-    case JS_AST_NODE_VARIABLE_DECLARATION:
-    case JS_AST_NODE_BINARY_EXPRESSION:
-    case JS_AST_NODE_CALL_EXPRESSION:
-    case JS_AST_NODE_NEW_EXPRESSION:
-    case JS_AST_NODE_MEMBER_EXPRESSION:
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION:
-    case JS_AST_NODE_ARRAY_EXPRESSION:
-    case JS_AST_NODE_OBJECT_EXPRESSION:
-    case JS_AST_NODE_SWITCH_STATEMENT:
-    case JS_AST_NODE_SWITCH_CASE:
-    case JS_AST_NODE_TRY_STATEMENT:
-    case JS_AST_NODE_THROW_STATEMENT:
-    case JS_AST_NODE_SEQUENCE_EXPRESSION:
-    case JS_AST_NODE_LABELED_STATEMENT:
-        js_ast_visit_children(node, jm_collect_func_assignments_child, names);
-        break;
-    default:
-        break; // unchanged
-    }
-}
-
-// Collect all identifier references in a function body (excluding nested function bodies)
-typedef struct JmBodyRefsCtx {
-    struct hashmap* refs;
-    uint32_t body_start;
-    uint32_t body_end;
-} JmBodyRefsCtx;
-
-static void jm_collect_body_refs_impl(JsAstNode* node, struct hashmap* refs,
-                                      uint32_t body_start, uint32_t body_end);
-
-static void jm_collect_body_refs_child(JsAstNode* child, void* ctx) {
-    JmBodyRefsCtx* state = (JmBodyRefsCtx*)ctx;
-    jm_collect_body_refs_impl(child, state->refs, state->body_start, state->body_end);
-}
-
-static void jm_collect_body_refs_impl(JsAstNode* node, struct hashmap* refs,
-                                      uint32_t body_start, uint32_t body_end) {
-    if (!node) return;
-
-    switch (node->node_type) {
-    case JS_AST_NODE_IDENTIFIER: {
-        JsIdentifierNode* id = (JsIdentifierNode*)node;
-        if (id->name) {
-            const char* name = jm_var_name(id->name);
-            jm_name_set_add_ref(refs, name, id, body_start, body_end);
-        }
-        break;
-    }
-    // Don't recurse into nested function bodies (they have their own scope)
-    case JS_AST_NODE_FUNCTION_DECLARATION:
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
-        // nested function facts are published by the shared AST observer.
-        break;
-    case JS_AST_NODE_VARIABLE_DECLARATOR: {
-        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)node;
-        // Recurse into init (may reference outer vars)
-        if (d->init) jm_collect_body_refs_impl(d->init, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_CALL_EXPRESSION:
-    case JS_AST_NODE_NEW_EXPRESSION: {
-        JsCallNode* c = (JsCallNode*)node;
-        bool is_super_call = false;
-        if (c->callee && c->callee->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* id = (JsIdentifierNode*)c->callee;
-            is_super_call = id->name && id->name->len == 5 &&
-                strncmp(id->name->chars, "super", 5) == 0;
-        }
-        if (!is_super_call) {
-            jm_collect_body_refs_impl(c->callee, refs, body_start, body_end);
-        }
-        JsAstNode* arg = c->arguments;
-        while (arg) { jm_collect_body_refs_impl(arg, refs, body_start, body_end); arg = arg->next; }
-        break;
-    }
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
-        JsMemberNode* m = (JsMemberNode*)node;
-        bool is_super = false;
-        if (m->object && m->object->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* obj_id = (JsIdentifierNode*)m->object;
-            is_super = obj_id->name && obj_id->name->len == 5 &&
-                strncmp(obj_id->name->chars, "super", 5) == 0;
-        }
-        if (!is_super) {
-            jm_collect_body_refs_impl(m->object, refs, body_start, body_end);
-        }
-        if (m->computed) jm_collect_body_refs_impl(m->property, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_PROPERTY: {
-        JsPropertyNode* p = (JsPropertyNode*)node;
-        if (p->computed) jm_collect_body_refs_impl(p->key, refs, body_start, body_end);
-        jm_collect_body_refs_impl(p->value, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_FOR_OF_STATEMENT:
-    case JS_AST_NODE_FOR_IN_STATEMENT: {
-        JsForOfNode* fo = (JsForOfNode*)node;
-        struct hashmap* loop_head_lexicals = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
-            jm_name_hash, jm_name_cmp, NULL, NULL);
-        bool lexical_head = jm_for_head_declares_lexical_names(fo, loop_head_lexicals);
-        if (!lexical_head) {
-            jm_collect_body_refs_impl(fo->left, refs, body_start, body_end);
-        } else if (fo->left && fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-            // a lexical for-of/in head declares the body binding; only any
-            // initializer references belong in the outer capture scan.
-            jm_collect_body_refs_impl(fo->left, refs, body_start, body_end);
-        }
-        jm_collect_body_refs_impl(fo->right, refs, body_start, body_end);
-        if (lexical_head) {
-            struct hashmap* body_refs = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-                jm_name_hash, jm_name_cmp, NULL, NULL);
-            jm_collect_body_refs_impl(fo->body, body_refs, body_start, body_end);
-            size_t biter = 0; void* bitem = NULL;
-            while (hashmap_iter(body_refs, &biter, &bitem)) {
-                JsNameSetEntry* ref = (JsNameSetEntry*)bitem;
-                if (!jm_name_set_has(loop_head_lexicals, ref->name)) {
-                    jm_name_set_add_existing(refs, ref);
-                }
+        } else if (current->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            JsFunctionNode* fn = (JsFunctionNode*)current;
+            if (var_only && (fn->is_generator || fn->is_async)) continue;
+            if (fn->name) {
+                JsNameSetEntry entry;
+                memset(&entry, 0, sizeof(entry));
+                entry.name = jm_persist_name(jm_var_name(fn->name));
+                entry.from_func_decl = true;
+                if (!hashmap_get(locals, &entry)) hashmap_set(locals, &entry);
             }
-            hashmap_free(body_refs);
-        } else {
-            jm_collect_body_refs_impl(fo->body, refs, body_start, body_end);
-        }
-        hashmap_free(loop_head_lexicals);
-        break;
-    }
-    case JS_AST_NODE_CATCH_CLAUSE: {
-        JsCatchNode* cc = (JsCatchNode*)node;
-        // Note: cc->param is a DECLARATION (catch parameter), not a reference — don't add to refs
-        jm_collect_body_refs_impl(cc->body, refs, body_start, body_end);
-        break;
-    }
-    case JS_AST_NODE_WITH_STATEMENT: {
-        JsWithStatementNode* ws = (JsWithStatementNode*)node;
-        jm_collect_body_refs_impl(ws->body, refs, body_start, body_end);
-        break;
-    }
-    // Patterns and class members are declaration sites, not reference sites,
-    // and program/import/export never reach this walker. Not descending is
-    // deliberate, so it is stated here rather than left to the child table.
-    case JS_AST_NODE_ARRAY_PATTERN:
-    case JS_AST_NODE_OBJECT_PATTERN:
-    case JS_AST_NODE_ASSIGNMENT_PATTERN:
-    case JS_AST_NODE_REST_ELEMENT:
-    case JS_AST_NODE_REST_PROPERTY:
-    case JS_AST_NODE_CLASS_DECLARATION:
-    case JS_AST_NODE_CLASS_EXPRESSION:
-    case JS_AST_NODE_FIELD_DEFINITION:
-    case JS_AST_NODE_METHOD_DEFINITION:
-    case JS_AST_NODE_STATIC_BLOCK:
-    case JS_AST_NODE_PROGRAM:
-    case JS_AST_NODE_IMPORT_DECLARATION:
-    case JS_AST_NODE_EXPORT_DECLARATION:
-        break;
-    default: {
-        // every remaining kind just scans all of its children
-        JmBodyRefsCtx state = { refs, body_start, body_end };
-        js_ast_visit_children(node, jm_collect_body_refs_child, &state);
-        break;
-    }
-    }
-}
-
-void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs) {
-    jm_collect_body_refs_impl(node, refs, 0, 0);
-}
-
-// Collect all locally declared variable names in a function body.
-// When var_only=true, only 'var' declarations are collected (for function prologue hoisting).
-// When var_only=false (default), all var/let/const are collected (for implicit global detection).
-void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_only ) {
-    if (!node) return;
-
-    switch (node->node_type) {
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)node;
-        // v20 TDZ: In var_only mode, skip let/const (block-scoped, handled by jm_init_block_tdz).
-        // In full mode, collect everything (needed for implicit global detection).
-        if (var_only && v->kind != JS_VAR_VAR) break;
-        {
-            JsAstNode* d = v->declarations;
-            while (d) { jm_collect_body_locals(d, locals, var_only); d = d->next; }
-        }
-        break;
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATOR: {
-        JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)node;
-        if (d->id) {
-            jm_collect_pattern_names(d->id, locals);
-        }
-        break;
-    }
-    // Don't recurse into nested functions, but DO collect their names as locals
-    // (function declarations are hoisted and should be available in the parent scope
-    // for capture analysis — closures that reference hoisted functions need to capture them)
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
-        break;
-    case JS_AST_NODE_FUNCTION_DECLARATION: {
-        JsFunctionNode* fn = (JsFunctionNode*)node;
-        if (var_only && (fn->is_generator || fn->is_async)) {
-            // AnnexB var-style block function hoisting applies to ordinary
-            // function declarations, not generator or async-generator declarations.
-            break;
-        }
-        if (fn->name) {
-            const char* name = jm_var_name(fn->name);
-            JsNameSetEntry e;
-            memset(&e, 0, sizeof(e));
-            e.name = jm_persist_name(name);
-            e.from_func_decl = true;
-            JsNameSetEntry* existing = (JsNameSetEntry*)hashmap_get(locals, &e);
-            if (!existing) hashmap_set(locals, &e);
-        }
-        break;
-    }
-    case JS_AST_NODE_CLASS_DECLARATION: {
-        if (var_only) break;
-        JsClassNode* cls = (JsClassNode*)node;
-        if (cls->name) {
-            const char* name = jm_var_name(cls->name);
-            jm_name_set_add(locals, name);
-        }
-        break;
-    }
-
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        JsAstNode* s = blk->statements;
-        while (s) { jm_collect_body_locals(s, locals, var_only); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* ifn = (JsIfNode*)node;
-        jm_collect_body_locals(ifn->consequent, locals, var_only);
-        jm_collect_body_locals(ifn->alternate, locals, var_only);
-        break;
-    }
-    case AST_NODE_LOOP: {
-        AstLoopControlNode* loop = (AstLoopControlNode*)node;
-        if (loop->form == LOOP_FORM_FOR_C) jm_collect_body_locals(loop->init, locals, var_only);
-        jm_collect_body_locals(loop->body, locals, var_only);
-        break;
-    }
-    case JS_AST_NODE_FOR_OF_STATEMENT:
-    case JS_AST_NODE_FOR_IN_STATEMENT: {
-        // for (const/let/var x of/in iterable) — collect the loop variable as a local
-        // Note: Tree-sitter gives the left as a plain identifier (e.g. for const s of arr → left=IDENTIFIER 's')
-        JsForOfNode* fo = (JsForOfNode*)node;
-        if (fo->left) {
-            if (fo->left->node_type == JS_AST_NODE_IDENTIFIER) {
-                // plain identifier: for (s of arr) or for (let/const s of arr)
-                // When var_only, skip let/const loop variables (they're block-scoped)
-                if (!var_only || fo->kind == 0) {
-                    if (fo->kind == JS_VAR_LET || fo->kind == JS_VAR_CONST) {
-                        JsIdentifierNode* id = (JsIdentifierNode*)fo->left;
-                        const char* name = jm_var_name(id->name);
-                        jm_name_set_add_binding(locals, name, fo->left);
+        } else if (!var_only && current->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+            JsClassNode* cls = (JsClassNode*)current;
+            if (cls->name) jm_name_set_add(locals, jm_var_name(cls->name));
+        } else if (current->node_type == JS_AST_NODE_FOR_OF_STATEMENT ||
+                current->node_type == JS_AST_NODE_FOR_IN_STATEMENT) {
+            JsForOfNode* loop = (JsForOfNode*)current;
+            if (!loop->left) continue;
+            if (loop->left->node_type == JS_AST_NODE_IDENTIFIER) {
+                if (!var_only || loop->kind == JS_VAR_VAR) {
+                    if (loop->kind == JS_VAR_LET || loop->kind == JS_VAR_CONST) {
+                        JsIdentifierNode* id = (JsIdentifierNode*)loop->left;
+                        jm_name_set_add_binding(locals, jm_var_name(id->name), loop->left);
                     } else {
-                        jm_collect_pattern_names(fo->left, locals);
+                        jm_collect_pattern_names(loop->left, locals);
                     }
                 }
-            } else if (fo->left->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)fo->left;
-                // Respect var_only: skip let/const loop variables (they're block-scoped)
-                if (!var_only || vd->kind == JS_VAR_VAR) {
-                    JsAstNode* d = vd->declarations;
-                    while (d) { jm_collect_body_locals(d, locals, var_only); d = d->next; }
-                }
-            } else {
-                // Assignment-form heads do not create locals. A var pattern
-                // has kind zero, so the explicit marker distinguishes it from
-                // `for ([a] of arr)` and keeps function-local bindings visible.
-                if (fo->declares_binding && (!var_only || fo->kind == JS_VAR_VAR)) {
-                    jm_collect_pattern_names(fo->left, locals);
-                }
+            } else if (loop->left->node_type != JS_AST_NODE_VARIABLE_DECLARATION &&
+                    loop->declares_binding && (!var_only || loop->kind == JS_VAR_VAR)) {
+                jm_collect_pattern_names(loop->left, locals);
             }
         }
-        jm_collect_body_locals(fo->body, locals, var_only);
-        break;
-    }
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* t = (JsTryNode*)node;
-        jm_collect_body_locals(t->block, locals, var_only);
-        if (t->handler) jm_collect_body_locals(t->handler, locals, var_only);
-        if (t->finalizer) jm_collect_body_locals(t->finalizer, locals, var_only);
-        break;
-    }
-    case JS_AST_NODE_CATCH_CLAUSE: {
-        JsCatchNode* cc = (JsCatchNode*)node;
-        // Catch parameter is block-scoped (like let) — do NOT add to function-level
-        // locals, otherwise it prevents correct capture of same-named outer variables.
-        // The catch param is handled at runtime via jm_push_scope/jm_set_var.
-        jm_collect_body_locals(cc->body, locals, var_only);
-        break;
-    }
-    case JS_AST_NODE_SWITCH_STATEMENT: {
-        JsSwitchNode* sw = (JsSwitchNode*)node;
-        JsAstNode* c = sw->cases;
-        while (c) { jm_collect_body_locals(c, locals, var_only); c = c->next; }
-        break;
-    }
-    case JS_AST_NODE_SWITCH_CASE: {
-        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
-        JsAstNode* s = sc->consequent;
-        while (s) { jm_collect_body_locals(s, locals, var_only); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_LABELED_STATEMENT: {
-        JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
-        jm_collect_body_locals(ls->body, locals, var_only);
-        break;
-    }
-    case JS_AST_NODE_WITH_STATEMENT: {
-        JsWithStatementNode* ws = (JsWithStatementNode*)node;
-        jm_collect_body_locals(ws->body, locals, var_only);
-        break;
-    }
-    default:
-        break;
     }
 }
 
@@ -816,157 +423,65 @@ void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names) {
     }
 }
 
-void jm_collect_pattern_names_kind(JsAstNode* pat, struct hashmap* names, int var_kind) {
-    if (!pat || !names) return;
-    struct hashmap* tmp = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
-    jm_collect_pattern_names(pat, tmp);
-    size_t iter = 0;
-    void* item = NULL;
-    while (hashmap_iter(tmp, &iter, &item)) {
-        JsNameSetEntry* e = (JsNameSetEntry*)item;
-        jm_name_set_add_kind(names, e->name, var_kind);
-    }
-    hashmap_free(tmp);
-}
-
 void jm_collect_switch_lexical_names(JsAstNode* switch_node, struct hashmap* names) {
     if (!switch_node || switch_node->node_type != JS_AST_NODE_SWITCH_STATEMENT || !names) return;
     JsSwitchNode* sw = (JsSwitchNode*)switch_node;
     for (JsAstNode* c = sw->cases; c; c = c->next) {
         if (c->node_type != JS_AST_NODE_SWITCH_CASE) continue;
         JsSwitchCaseNode* sc = (JsSwitchCaseNode*)c;
-        for (JsAstNode* stmt = sc->consequent; stmt; stmt = stmt->next) {
-            if (stmt->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)stmt;
-                if (v->kind != JS_VAR_LET && v->kind != JS_VAR_CONST) continue;
-                for (JsAstNode* d = v->declarations; d; d = d->next) {
-                    if (d->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
-                    JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-                    jm_collect_pattern_names_kind(decl->id, names, (int)v->kind);
-                }
-            } else if (stmt->node_type == JS_AST_NODE_CLASS_DECLARATION) {
-                JsClassNode* cls = (JsClassNode*)stmt;
-                if (cls->name) {
-                    const char* name = jm_var_name(cls->name);
-                    jm_name_set_add_kind(names, name, (int)JS_VAR_LET);
-                }
-            } else if (stmt->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
-                JsFunctionNode* fn = (JsFunctionNode*)stmt;
-                if (fn->name) {
-                    const char* name = jm_var_name(fn->name);
-                    jm_name_set_add_kind(names, name, (int)JS_VAR_LET);
-                }
-            }
-        }
+        // Switch cases use the same direct-lexical contract as a block.
+        JsBlockNode block = {};
+        block.node_type = JS_AST_NODE_BLOCK_STATEMENT;
+        block.statements = sc->consequent;
+        jm_collect_let_const_names((JsAstNode*)&block, names);
     }
 }
 
-// AnnexB B.3.3.3 helper: recursively scan a subtree for any let/const declared
-// names (at any depth, in any nested block or for-init).  Used to suppress
-// AnnexB nested-function-decl propagation when the same name is bound by a
-// lexical declaration in the eval program.
+// AnnexB lexical-name collection uses the shared AST child contract while
+// retaining declaration and function/class boundary exceptions.
+static void jm_collect_all_let_const_child(JsAstNode* child, void* opaque);
+
 void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* names) {
-    if (!node) return;
-    switch (node->node_type) {
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* v = (JsVariableDeclarationNode*)node;
-        if (v->kind == JS_VAR_LET || v->kind == JS_VAR_CONST) {
-            JsAstNode* d = v->declarations;
-            while (d) {
-                if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
-                    JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)d;
-                    if (decl->id && decl->id->node_type == JS_AST_NODE_IDENTIFIER) {
-                        JsIdentifierNode* id = (JsIdentifierNode*)decl->id;
-                        const char* nm = jm_var_name(id->name);
-                        jm_name_set_add(names, nm);
-                    }
+    if (!node || !names) return;
+    if (node->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)node;
+        if (declaration->kind == JS_VAR_LET || declaration->kind == JS_VAR_CONST) {
+            for (JsAstNode* item = declaration->declarations; item; item = item->next) {
+                if (item->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
+                JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)item;
+                if (declarator->id && declarator->id->node_type == JS_AST_NODE_IDENTIFIER) {
+                    jm_name_set_add(names, jm_var_name(((JsIdentifierNode*)declarator->id)->name));
                 }
-                d = d->next;
             }
         }
-        break;
-    }
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        JsAstNode* s = blk->statements;
-        while (s) { jm_collect_all_let_const_names_recursive(s, names); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* ifn = (JsIfNode*)node;
-        jm_collect_all_let_const_names_recursive(ifn->consequent, names);
-        jm_collect_all_let_const_names_recursive(ifn->alternate, names);
-        break;
-    }
-    case AST_NODE_LOOP: {
-        AstLoopControlNode* loop = (AstLoopControlNode*)node;
-        if (loop->form == LOOP_FORM_FOR_C) {
-            jm_collect_all_let_const_names_recursive(loop->init, names);
+    } else if (node->node_type == JS_AST_NODE_FOR_IN_STATEMENT ||
+            node->node_type == JS_AST_NODE_FOR_OF_STATEMENT) {
+        JsForInNode* loop = (JsForInNode*)node;
+        if (loop->left && (loop->kind == JS_VAR_LET || loop->kind == JS_VAR_CONST) &&
+                loop->left->node_type == JS_AST_NODE_IDENTIFIER) {
+            jm_name_set_add(names, jm_var_name(((JsIdentifierNode*)loop->left)->name));
         }
-        jm_collect_all_let_const_names_recursive(loop->body, names);
-        break;
-    }
-    case JS_AST_NODE_FOR_IN_STATEMENT:
-    case JS_AST_NODE_FOR_OF_STATEMENT: {
-        JsForInNode* fi = (JsForInNode*)node;
-        // Tree-sitter sometimes builds `for (let x in ...)` as fi->left = identifier
-        // with fi->kind indicating let/const (instead of nesting a VariableDeclaration).
-        if (fi->left && (fi->kind == JS_VAR_LET || fi->kind == JS_VAR_CONST)) {
-            if (fi->left->node_type == JS_AST_NODE_IDENTIFIER) {
-                JsIdentifierNode* id = (JsIdentifierNode*)fi->left;
-                const char* nm = jm_var_name(id->name);
-                jm_name_set_add(names, nm);
-            }
+    } else if (node->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+        JsClassNode* cls = (JsClassNode*)node;
+        if (cls->name) jm_name_set_add(names, jm_var_name(cls->name));
+        return;
+    } else if (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
+            node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+            node->node_type == JS_AST_NODE_ARROW_FUNCTION ||
+            node->node_type == JS_AST_NODE_METHOD_DEFINITION ||
+            node->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        return;
+    } else if (node->node_type == JS_AST_NODE_CATCH_CLAUSE) {
+        JsCatchNode* catch_node = (JsCatchNode*)node;
+        if (catch_node->param && catch_node->param->node_type != JS_AST_NODE_IDENTIFIER) {
+            jm_collect_pattern_names(catch_node->param, names);
         }
-        jm_collect_all_let_const_names_recursive(fi->left, names);
-        jm_collect_all_let_const_names_recursive(fi->body, names);
-        break;
     }
-    case JS_AST_NODE_SWITCH_STATEMENT: {
-        JsSwitchNode* sw = (JsSwitchNode*)node;
-        JsAstNode* c = sw->cases;
-        while (c) { jm_collect_all_let_const_names_recursive(c, names); c = c->next; }
-        break;
-    }
-    case JS_AST_NODE_SWITCH_CASE: {
-        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)node;
-        JsAstNode* s = sc->consequent;
-        while (s) { jm_collect_all_let_const_names_recursive(s, names); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* t = (JsTryNode*)node;
-        jm_collect_all_let_const_names_recursive(t->block, names);
-        jm_collect_all_let_const_names_recursive(t->handler, names);
-        jm_collect_all_let_const_names_recursive(t->finalizer, names);
-        break;
-    }
-    case JS_AST_NODE_CATCH_CLAUSE: {
-        JsCatchNode* c = (JsCatchNode*)node;
-        if (c->param && c->param->node_type != JS_AST_NODE_IDENTIFIER) {
-            jm_collect_pattern_names(c->param, names);
-        }
-        jm_collect_all_let_const_names_recursive(c->body, names);
-        break;
-    }
-    case JS_AST_NODE_LABELED_STATEMENT: {
-        JsLabeledStatementNode* ls = (JsLabeledStatementNode*)node;
-        jm_collect_all_let_const_names_recursive(ls->body, names);
-        break;
-    }
-    case JS_AST_NODE_CLASS_DECLARATION: {
-        // class X — class name is a lexical binding
-        JsClassNode* c = (JsClassNode*)node;
-        if (c->name) {
-            const char* nm = jm_var_name(c->name);
-            jm_name_set_add(names, nm);
-        }
-        break;
-    }
-    default:
-        break;
-    }
+    js_ast_visit_children(node, jm_collect_all_let_const_child, names);
+}
+
+static void jm_collect_all_let_const_child(JsAstNode* child, void* opaque) {
+    jm_collect_all_let_const_names_recursive(child, (struct hashmap*)opaque);
 }
 
 // v20 TDZ: Initialize let/const variables in a block to TDZ sentinel.
@@ -1231,39 +746,92 @@ void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names) {
     }
 }
 
-// Collect identifier references from default parameter expressions.
-// E.g., function f(x, t) — F is a reference that needs to be captured.
-// Handles nested destructuring defaults like ({a, b) and [a, b=F].
-void jm_collect_param_default_refs(JsAstNode* params, struct hashmap* refs) {
-    JsAstNode* p = params;
-    while (p) {
-        if (p->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
-            JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)p;
-            if (ap->right) jm_collect_body_refs(ap->right, refs);
-            // Also recurse into the left side for nested destructuring defaults
-            if (ap->left) jm_collect_param_default_refs(ap->left, refs);
-        } else if (p->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-            JsObjectPatternNode* op = (JsObjectPatternNode*)p;
-            JsAstNode* prop = op->properties;
-            while (prop) {
-                if (prop->node_type == JS_AST_NODE_PROPERTY) {
-                    JsPropertyNode* pp = (JsPropertyNode*)prop;
-                    if (pp->value) jm_collect_param_default_refs(pp->value, refs);
-                } else if (prop->node_type == JS_AST_NODE_REST_PROPERTY || prop->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
-                    JsSpreadElementNode* sp = (JsSpreadElementNode*)prop;
-                    if (sp->argument) jm_collect_param_default_refs(sp->argument, refs);
-                }
-                prop = prop->next;
-            }
-        } else if (p->node_type == JS_AST_NODE_ARRAY_PATTERN) {
-            JsArrayPatternNode* ap = (JsArrayPatternNode*)p;
-            JsAstNode* elem = ap->elements;
-            while (elem) {
-                jm_collect_param_default_refs(elem, refs);
-                elem = elem->next;
-            }
-        }
-        p = p->next;
+// Indexed bindings make declarations and member/property names distinguishable
+// without a second tree walk. Owner-function IDs also exclude nested closures.
+static bool jm_index_identifier_is_binding(AstIndex* index, uint32_t node_id,
+        JsIdentifierNode* id) {
+    if (!index || !id || !id->entry || !id->entry->node) return false;
+    AstNode* definition = (AstNode*)id->entry->node;
+    if (definition == (AstNode*)id) return true;
+    // Variable entries point at the whole declarator, whose initializer also
+    // lies inside its span; only the pattern span is a binding position.
+    if (definition->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+        JsVariableDeclaratorNode* declarator =
+            (JsVariableDeclaratorNode*)definition;
+        JsAstNode* pattern = declarator->id;
+        return pattern && pattern->source_span.start_byte <= id->source_span.start_byte &&
+            id->source_span.end_byte <= pattern->source_span.end_byte;
+    }
+    // Function/class entries cover their complete body; their declared name is
+    // the sole binding identifier owned by that entry.
+    if (definition->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
+            definition->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
+            definition->node_type == JS_AST_NODE_ARROW_FUNCTION ||
+            definition->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+        JsFunctionNode* function = (JsFunctionNode*)definition;
+        // Function names are stored as interned strings rather than AST name
+        // nodes; the declared name is the only entry use before the body.
+        return function->body && definition->source_span.start_byte <=
+            id->source_span.start_byte && id->source_span.end_byte <=
+            function->body->source_span.start_byte;
+    }
+    if (definition->node_type == JS_AST_NODE_CLASS_DECLARATION ||
+            definition->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        JsClassNode* class_node = (JsClassNode*)definition;
+        return class_node->body && definition->source_span.start_byte <=
+            id->source_span.start_byte && id->source_span.end_byte <=
+            class_node->body->source_span.start_byte;
+    }
+    // Parameter and catch bindings normally point directly at their pattern;
+    // retain exact-span matching for parser placeholders without treating an
+    // enclosing executable node as a declaration.
+    return definition->source_span.start_byte == id->source_span.start_byte &&
+        definition->source_span.end_byte == id->source_span.end_byte;
+}
+
+static bool jm_index_identifier_is_property_key(AstNode* parent, AstNode* node) {
+    if (!parent || !node) return false;
+    if (parent->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+        JsMemberNode* member = (JsMemberNode*)parent;
+        return !member->computed && member->property == node;
+    }
+    if (parent->node_type == JS_AST_NODE_PROPERTY) {
+        JsPropertyNode* property = (JsPropertyNode*)parent;
+        return !property->computed && property->key == node;
+    }
+    if (parent->node_type == JS_AST_NODE_METHOD_DEFINITION) {
+        return ((JsMethodDefinitionNode*)parent)->key == node;
+    }
+    return false;
+}
+
+void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
+        struct hashmap* refs) {
+    if (!mt || !fn || !refs || !mt->tp) return;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId fn_node_id = ast_index_find(index, (AstNode*)fn);
+    AstFunctionId owner = fn_node_id == AST_NODE_ID_INVALID ?
+        AST_FUNCTION_ID_INVALID : index->owner_functions[fn_node_id];
+    if (owner == AST_FUNCTION_ID_INVALID) return;
+    uint32_t body_start = fn->body ? fn->body->source_span.start_byte : 0;
+    uint32_t body_end = fn->body ? fn->body->source_span.end_byte : 0;
+    for (uint32_t i = 0; i < index->count; i++) {
+        AstNode* node = index->nodes[i];
+        if (!node || index->owner_functions[i] != owner ||
+                node->node_type != JS_AST_NODE_IDENTIFIER) continue;
+        JsIdentifierNode* id = (JsIdentifierNode*)node;
+        bool is_binding = jm_index_identifier_is_binding(index, i, id);
+        bool is_property_key = jm_index_identifier_is_property_key(index->parents[i], node);
+        if (!id->name || is_binding || is_property_key) continue;
+        AstNode* parent = index->parents[i];
+        if (parent && parent->node_type == JS_AST_NODE_MEMBER_EXPRESSION &&
+                ((JsMemberNode*)parent)->object == node && id->name->len == 5 &&
+                memcmp(id->name->chars, "super", 5) == 0) continue;
+        if (parent && (parent->node_type == JS_AST_NODE_CALL_EXPRESSION ||
+                parent->node_type == JS_AST_NODE_NEW_EXPRESSION) &&
+                ((JsCallNode*)parent)->callee == node && id->name->len == 5 &&
+                memcmp(id->name->chars, "super", 5) == 0) continue;
+        jm_name_set_add_ref(refs, jm_var_name(id->name), id, body_start, body_end);
     }
 }
 
@@ -1271,14 +839,30 @@ static bool jm_analysis_function_is_method_syntax(JsFunctionNode* fn) {
     return fn && fn->node_type == JS_AST_NODE_METHOD_DEFINITION;
 }
 
-void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
+static void jm_add_capture(JsFuncCollected* fc, const char* name, NameEntry* entry,
+                           bool is_nfe_binding, bool force_env_capture) {
+    jm_ensure_captures_capacity(fc);
+    FnCapture* capture = &JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)++];
+    capture->name = jm_persist_name(name);
+    capture->scope_env_key = jm_persist_name(name);
+    capture->scope_env_slot = capture->private_env_slot = capture->grandparent_slot = -1;
+    capture->parent_env_link_slot_override = -1;
+    capture->entry = entry;
+    capture->is_mutable = capture->is_let_const = capture->is_const = false;
+    capture->is_nfe_binding = is_nfe_binding;
+    capture->force_env_capture = force_env_capture;
+}
+
+void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
+                         struct hashmap* outer_scope_names,
                          struct hashmap* module_consts,
                          struct hashmap* ancestor_func_locals,
                          bool captures_with_scope) {
     JsFunctionNode* fn = fc->node;
-    fc->capture_count = 0;
-    fc->analysis.captures = fc->captures;
-    fc->analysis.capture_count = 0;
+    FnAnalysis* analysis = jm_function_analysis(fc);
+    if (!analysis) return;
+    JM_CAPTURE_COUNT(fc) = 0;
+    analysis->js_has_direct_eval = js_ast_function_has_direct_eval(fn);
 
     // Collect parameter names (handles simple ids, default params, and destructuring)
     struct hashmap* params = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
@@ -1292,28 +876,24 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     // Collect local variable declarations
     struct hashmap* locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
-    if (fn->body) jm_collect_body_locals(fn->body, locals);
+    if (fn->body) jm_collect_indexed_body_locals(mt, fn->body, locals);
 
     // Collect all identifier references in the body
     struct hashmap* refs = hashmap_new(sizeof(JsNameSetEntry), 64, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
-    if (fn->body) {
-        jm_collect_body_refs_impl(fn->body, refs,
-            fn->body->source_span.start_byte, fn->body->source_span.end_byte);
-    }
-    // Also collect refs from default parameter expressions (e.g., function f(x, t=F) — F is a ref)
-    jm_collect_param_default_refs(fn->params, refs);
+    jm_collect_indexed_body_refs(mt, fn, refs);
 
     // Default initializers execute in the function environment and can read
     // this/new.target before the body; classify them before stamping call ABI
     // facts so a binding-oblivious lane cannot hide either value.
     uint8_t observations = js_ast_function_observation_mask(fn);
-    fc->observes_this = (observations & JS_AST_OBSERVES_THIS) || fc->has_direct_eval;
-    fc->observes_new_target = (observations & JS_AST_OBSERVES_NEW_TARGET) ||
-        fc->has_direct_eval;
+    JM_JS_FACT(fc, observes_this) = (observations & JS_AST_OBSERVES_THIS) ||
+        JM_JS_FACT(fc, has_direct_eval);
+    JM_JS_FACT(fc, observes_new_target) = (observations & JS_AST_OBSERVES_NEW_TARGET) ||
+        JM_JS_FACT(fc, has_direct_eval);
     // A function nested below a `with` is created with that Object Environment
     // Record and must keep dynamic name lookup after the enclosing body returns.
-    fc->uses_with = captures_with_scope || fc->has_direct_eval ||
+    JM_JS_FACT(fc, uses_with) = captures_with_scope || JM_JS_FACT(fc, has_direct_eval) ||
         js_ast_function_has_with(fn);
 
     // Find captures: referenced identifiers that are not params/locals but ARE in outer scope
@@ -1394,29 +974,29 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         // This is a capture
         {
             jm_ensure_captures_capacity(fc);
-            fc->captures[fc->capture_count].name = jm_persist_name(ref->name);
+            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].name = jm_persist_name(ref->name);
             if (ref->binding_start != 0 || ref->binding_end != 0) {
-                fc->captures[fc->capture_count].scope_env_key = jm_format_name(
+                JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].scope_env_key = jm_format_name(
                     "%s@%u:%u", ref->name, ref->binding_start, ref->binding_end);
             } else {
-                fc->captures[fc->capture_count].scope_env_key = jm_persist_name(ref->name);
+                JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].scope_env_key = jm_persist_name(ref->name);
             }
-            fc->captures[fc->capture_count].scope_env_slot = -1;
-            fc->captures[fc->capture_count].private_env_slot = -1;
-            fc->captures[fc->capture_count].grandparent_slot = -1;
-            fc->captures[fc->capture_count].parent_env_link_slot_override = -1;
-            fc->captures[fc->capture_count].entry = ref->entry;
+            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].scope_env_slot = -1;
+            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].private_env_slot = -1;
+            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].grandparent_slot = -1;
+            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].parent_env_link_slot_override = -1;
+            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].entry = ref->entry;
             // Binding metadata is authoritative when scope analysis resolved
             // the reference; name-only ancestor scans can confuse an outer
             // const with a nearer same-named var in minified code.
-            fc->captures[fc->capture_count].is_let_const = ref->var_kind != 0 ||
+            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].is_let_const = ref->var_kind != 0 ||
                 is_lexical_for_head;
-            fc->captures[fc->capture_count].is_const = ref->var_kind == JS_VAR_CONST;
-            fc->captures[fc->capture_count].is_nfe_binding = false;
-            fc->captures[fc->capture_count].force_env_capture = force_env_capture ||
+            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].is_const = ref->var_kind == JS_VAR_CONST;
+            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].is_nfe_binding = false;
+            JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].force_env_capture = force_env_capture ||
                 is_lexical_for_head;
-            const char* capture_key = fc->captures[fc->capture_count].scope_env_key;
-            fc->capture_count++;
+            const char* capture_key = JM_CAPTURE_ARRAY(fc)[JM_CAPTURE_COUNT(fc)].scope_env_key;
+            JM_CAPTURE_COUNT(fc)++;
             log_debug("js-mir: capture '%s' [%s] in function '%s'",
                 ref->name, capture_key, fc->name);
         }
@@ -1436,40 +1016,18 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         !jm_function_decl_is_direct_binding(fn, false);
     if (has_self_ref && self_name && self_name[0] &&
             (fc->parent_index >= 0 || is_func_expr || is_block_func_decl)) {
-        jm_ensure_captures_capacity(fc);
-        fc->captures[fc->capture_count].name = jm_persist_name(self_name);
-        fc->captures[fc->capture_count].scope_env_key = jm_persist_name(self_name);
-        fc->captures[fc->capture_count].scope_env_slot = -1;
-        fc->captures[fc->capture_count].private_env_slot = -1;
-        fc->captures[fc->capture_count].grandparent_slot = -1;
-        fc->captures[fc->capture_count].parent_env_link_slot_override = -1;
-        fc->captures[fc->capture_count].is_let_const = false;
-        fc->captures[fc->capture_count].is_const = false;
-        fc->captures[fc->capture_count].is_nfe_binding = is_func_expr;
         // Annex B exposes a separate outer var binding for a block function.
         // Its self-reference must stay in the private block closure cell;
         // resolving it through the same-named module var lets `f = 123` inside
         // the function overwrite the callable outer binding.
-        fc->captures[fc->capture_count].force_env_capture = is_block_func_decl;
-        fc->capture_count++;
+        jm_add_capture(fc, self_name, NULL, is_func_expr, is_block_func_decl);
         log_debug("js-mir: self-capture '%s' in closure '%s'", self_name, fc->name);
     }
 
     // Arrow functions: capture 'this' from enclosing lexical scope.
     // In JS, arrow functions do NOT have their own 'this'; they inherit from the parent.
     if (fn->is_arrow && (observations & JS_AST_OBSERVES_THIS)) {
-        jm_ensure_captures_capacity(fc);
-        fc->captures[fc->capture_count].name = jm_persist_name("_js_this");
-        fc->captures[fc->capture_count].scope_env_key = jm_persist_name("_js_this");
-        fc->captures[fc->capture_count].scope_env_slot = -1;
-        fc->captures[fc->capture_count].private_env_slot = -1;
-        fc->captures[fc->capture_count].grandparent_slot = -1;
-        fc->captures[fc->capture_count].parent_env_link_slot_override = -1;
-        fc->captures[fc->capture_count].is_let_const = false;
-        fc->captures[fc->capture_count].is_const = false;
-        fc->captures[fc->capture_count].is_nfe_binding = false;
-        fc->captures[fc->capture_count].force_env_capture = false;
-        fc->capture_count++;
+        jm_add_capture(fc, "_js_this", NULL, false, false);
         log_debug("js-mir: arrow capture '_js_this' in function '%s'", fc->name);
     }
 
@@ -1477,44 +1035,19 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     // clears the dynamic runtime new.target, so arrows must keep a closure slot
     // for the value visible where the arrow was created.
     if (fn->is_arrow && (observations & JS_AST_OBSERVES_NEW_TARGET)) {
-        jm_ensure_captures_capacity(fc);
-        fc->captures[fc->capture_count].name = jm_persist_name("_js_new.target");
-        fc->captures[fc->capture_count].scope_env_key = jm_persist_name("_js_new.target");
-        fc->captures[fc->capture_count].scope_env_slot = -1;
-        fc->captures[fc->capture_count].private_env_slot = -1;
-        fc->captures[fc->capture_count].grandparent_slot = -1;
-        fc->captures[fc->capture_count].parent_env_link_slot_override = -1;
-        fc->captures[fc->capture_count].is_let_const = false;
-        fc->captures[fc->capture_count].is_const = false;
-        fc->captures[fc->capture_count].is_nfe_binding = false;
-        fc->captures[fc->capture_count].force_env_capture = false;
-        fc->capture_count++;
+        jm_add_capture(fc, "_js_new.target", NULL, false, false);
         log_debug("js-mir: arrow capture '_js_new.target' in function '%s'", fc->name);
     }
 
     if (fn->is_arrow && (observations & JS_AST_OBSERVES_ARGUMENTS)) {
-        jm_ensure_captures_capacity(fc);
-        fc->captures[fc->capture_count].name = jm_persist_name("_js_arguments");
-        fc->captures[fc->capture_count].scope_env_key = jm_persist_name("_js_arguments");
-        fc->captures[fc->capture_count].scope_env_slot = -1;
-        fc->captures[fc->capture_count].private_env_slot = -1;
-        fc->captures[fc->capture_count].grandparent_slot = -1;
-        fc->captures[fc->capture_count].parent_env_link_slot_override = -1;
-        fc->captures[fc->capture_count].is_let_const = false;
-        fc->captures[fc->capture_count].is_const = false;
-        fc->captures[fc->capture_count].is_nfe_binding = false;
-        fc->captures[fc->capture_count].force_env_capture = false;
-        fc->capture_count++;
+        jm_add_capture(fc, "_js_arguments", NULL, false, false);
         log_debug("js-mir: arrow capture '_js_arguments' in function '%s'", fc->name);
     }
 
     // v18q: publish the shared AST fact; refs still carry lexical captures.
-    fc->uses_arguments = !fn->is_arrow && js_ast_function_uses_arguments(fn);
-    fc->analysis.captures = fc->captures;
-    fc->analysis.capture_count = fc->capture_count;
-    if (fn) {
-        fn->analysis = &fc->analysis;
-    }
+    JM_JS_FACT(fc, uses_arguments) = !fn->is_arrow && js_ast_function_uses_arguments(fn);
+    analysis->captures = JM_CAPTURE_ARRAY(fc);
+    analysis->capture_count = JM_CAPTURE_COUNT(fc);
 
     hashmap_free(params);
     hashmap_free(locals);

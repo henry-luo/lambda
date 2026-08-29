@@ -53,7 +53,7 @@ static JsMirPhaseTiming g_last_js_mir_phase_timing;
 static JsMirPhaseTiming g_document_js_mir_phase_timing;
 static bool g_document_js_mir_phase_timing_active = false;
 
-static Item js_mir_execute_compiled_entry(void* entry_func) {
+Item js_mir_execute_compiled_entry(void* entry_func) {
     if (!entry_func || !context) return ItemError;
 
     typedef Item (*JsMainFunc)(Context*);
@@ -89,6 +89,12 @@ static Item js_mir_execute_compiled_entry(void* entry_func) {
     Item result = js_main((Context*)context);
     lambda_recovery_frame_end(recovery_frame);
     return result;
+}
+
+JsMirMainFunc js_mir_link_main(MIR_context_t ctx, bool use_interp,
+        void (*gen_interface)(MIR_context_t, MIR_item_t)) {
+    MIR_link(ctx, use_interp ? MIR_set_interp_interface : gen_interface, import_resolver);
+    return (JsMirMainFunc)find_func(ctx, (char*)"js_main");
 }
 
 static void js_mir_finish_script_turn(Runtime* runtime, Item result) {
@@ -491,10 +497,8 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
             runtime, js_context, reusing_context);
     }
 
-    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
-
-    typedef Item (*js_main_func_t)(Context*);
-    js_main_func_t js_main = (js_main_func_t)find_func(ctx, (char*)"js_main");
+    JsMirMainFunc js_main = js_mir_link_main(ctx, g_mir_interp_mode,
+        MIR_set_gen_interface);
 
     if (!js_main) {
         log_error("js-mir-ast: failed to find js_main");
@@ -527,7 +531,7 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
         return js_mir_compile_unit_fail(ctx, mt, tp, NULL,
             runtime, js_context, reusing_context);
     }
-    Item result = js_main((Context*)context);
+    Item result = js_mir_execute_compiled_entry((void*)js_main);
     log_debug("js-mir-ast: execution returned (type=%d)", get_type_id(result));
 
     // handle result
@@ -1029,7 +1033,8 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         js_lazy_mir_cached ? MIR_set_lazy_gen_interface : MIR_set_gen_interface;
 
     phase_start = js_mir_phase_now_us();
-    MIR_link(ctx, use_mir_interp_for_script ? MIR_set_interp_interface : gen_interface, import_resolver);
+    JsMirMainFunc linked_main = js_mir_link_main(ctx,
+        use_mir_interp_for_script, gen_interface);
     g_last_js_mir_phase_timing.link_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: mir_linked");
     void* js_debug_info = jm_build_js_debug_info(mt, filename);
@@ -1041,9 +1046,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
 
     // Find js_main
-    typedef Item (*js_main_func_t)(Context*);
-    // Use find_func which is declared in transpiler.hpp
-    js_main_func_t js_main = (js_main_func_t)find_func(ctx, (char*)"js_main");
+    JsMirMainFunc js_main = linked_main;
 
     if (!js_main) {
         log_error("js-mir: failed to find js_main");
@@ -1550,11 +1553,10 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     js_event_loop_init();
     if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
 
-    typedef Item (*js_main_func_t)(Context*);
-    js_main_func_t js_main = (js_main_func_t)cached->entry_func;
+    JsMirMainFunc js_main = (JsMirMainFunc)cached->entry_func;
     js_mir_reset_last_phase_timing();
     long execute_start = js_mir_phase_now_us();
-    Item result = js_main((Context*)context);
+    Item result = js_mir_execute_compiled_entry((void*)js_main);
     g_last_js_mir_phase_timing.execute_us = js_mir_phase_now_us() - execute_start;
     g_last_js_mir_phase_timing.total_us = g_last_js_mir_phase_timing.execute_us;
     js_microtask_flush();

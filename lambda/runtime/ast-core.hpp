@@ -12,6 +12,7 @@ typedef struct AstImportNode AstImportNode;
 typedef struct NameEntry NameEntry;
 typedef struct NameScope NameScope;
 typedef struct LangProfile LangProfile;
+struct hashmap;
 typedef struct TsTypeAnnotationNode TsTypeAnnotationNode;
 typedef struct _ArrayList ArrayList;
 
@@ -1222,6 +1223,7 @@ typedef struct FnPromotionCell {
 
 typedef struct FnAnalysis {
     FnCapture* captures;
+    int capture_capacity;
     FnParamEvidence* evidence;
     FnParamTypeInfo* param_types;
     int param_count;
@@ -1230,6 +1232,26 @@ typedef struct FnAnalysis {
     bool may_await;
     bool needs_task_context;
     bool has_indirect_pn_call;
+    // JavaScript profile observations are stored on the same function-owned
+    // record so indexed MIR passes do not maintain a second fact table.
+    bool js_has_direct_eval;
+    bool js_uses_arguments;
+    bool js_has_rest_param;
+    bool js_has_non_simple_params;
+    bool js_observes_this;
+    bool js_observes_new_target;
+    bool js_uses_with;
+    bool js_is_reassigned;
+    TypeId js_return_type;
+    ScalarReturnClass js_boxed_return_scalar_class;
+    int js_formal_length;
+    // immutable JS scope walk caches live with the function-owned analysis;
+    // collection entries only index the function and do not own pass facts.
+    struct hashmap* js_cached_var_locals;
+    struct hashmap* js_cached_all_locals;
+    struct hashmap* js_cached_direct_lexicals;
+    struct hashmap* js_cached_annexb_suppressed;
+    bool js_cached_annexb_suppressed_ready;
     int await_point_count;
     int async_fault_handler_count;
     const char* may_await_cause;
