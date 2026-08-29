@@ -33,6 +33,8 @@ struct gc_heap;
 void js_interp_generator_trace_continuations(JsGeneratorStateRecord* state,
                                              struct gc_heap* gc);
 void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
+struct JsAsyncContextStateRecord;
+void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state);
 
 // Shared formatting buffer for the throw-with-format helpers. JS error
 // messages are bounded by construction; truncation is preferable to a heap
@@ -31444,6 +31446,7 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     ctx->ast_function_env = NULL;
     ctx->ast_body_env = NULL;
     ctx->ast_resume_statement = NULL;
+    ctx->ast_loop_continuations = NULL;
     ctx->ast_await_values = get_type_id(ast_function) == LMD_TYPE_FUNC
         ? js_array_new(0) : ItemNull;
     if (item_is_error(ctx->ast_await_values)) return ctx->ast_await_values;
@@ -37413,6 +37416,9 @@ void js_deep_batch_reset() {
     // heap; GC-owned Promise carriers are reclaimed with that heap.
     for (int i = 0; i < js_generator_count; i++) {
         js_interp_generator_clear_continuations(&js_generators[i]);
+    }
+    for (int i = 0; i < js_async_context_count; i++) {
+        js_interp_async_clear_continuations(&js_async_contexts[i]);
     }
     memset(js_generators, 0, sizeof(js_generators));
     js_generator_count = 0;
