@@ -2070,16 +2070,31 @@ static MIR_reg_t mir_prepare_cow_root(MirTranspiler* mt, MirVarEntry* root) {
 
 static bool mir_root_may_need_cow(MirVarEntry* root) {
     if (!root) return false;
+    // This gate is an ELISION, not the correctness mechanism (CW32v2):
+    // cow_prepare_write is a no-op on an unshared owner, so the only roots
+    // that may skip it are those PROVABLY never containers. The old
+    // container allow-list defaulted to false and silently skipped the
+    // un-share-at-borrow for bindings carrying composite declared types --
+    // `var xs: any[] = [...]` holds the open-any-array TypeUnary id, fell to
+    // default, and a `var` borrow then wrote through the caller's alias.
     switch (root->type_id) {
-    case LMD_TYPE_ARRAY:
-    case LMD_TYPE_MAP:
-    case LMD_TYPE_OBJECT:
-    case LMD_TYPE_ELEMENT:
-    case LMD_TYPE_VMAP:
-    case LMD_TYPE_ANY:
-        return true;
-    default:
+    case LMD_TYPE_NULL:
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_INT:
+    case LMD_TYPE_INT64:
+    case LMD_TYPE_UINT64:
+    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_NUM_SIZED:
+    case LMD_TYPE_DECIMAL:
+    case LMD_TYPE_STRING:
+    case LMD_TYPE_SYMBOL:
+    case LMD_TYPE_BINARY:
+    case LMD_TYPE_DTIME:
+    case LMD_TYPE_RANGE:
+    case LMD_TYPE_FUNC:
         return false;
+    default:
+        return true;
     }
 }
 
@@ -2092,7 +2107,6 @@ static bool mir_root_may_need_cow(MirVarEntry* root) {
 // Emission order is program order, so setting it here reaches exactly the
 // writes that follow the capture -- the same mechanism binding aliases use.
 static void mir_note_value_captured(MirTranspiler* mt, AstNode* value_expr) {
-    if (!cow_capture_enabled()) return;
     MirVarEntry* source = mir_direct_root_binding(mt, value_expr);
     if (source && mir_root_may_need_cow(source)) source->cow_marked = true;
 }
@@ -2104,7 +2118,6 @@ static void mir_note_value_captured(MirTranspiler* mt, AstNode* value_expr) {
 // Literal construction needs no emission: its fill/push helpers are Lambda-only
 // and capture in the runtime.
 static void mir_emit_value_capture(MirTranspiler* mt, AstNode* value_expr) {
-    if (!cow_capture_enabled()) return;
     MirVarEntry* source = mir_direct_root_binding(mt, value_expr);
     if (!source || !mir_root_may_need_cow(source)) return;
     source->cow_marked = true;
@@ -5358,15 +5371,14 @@ static MIR_reg_t mir_emit_cow_path_set(MirTranspiler* mt, MirVarEntry* root,
     // -- a `var` parameter's root was already detached at the call site, and a
     // plain `pn` parameter writes through under the current pn ABI. This is the
     // same selection the flat store makes with
-    // `is_var_param || is_proc_param` (lambda_array_set_checked_inplace).
+    // `is_var_param` (lambda_array_set_checked_inplace).
     // Detaching here published the replacement into the callee's own register,
     // so the caller never saw a nested write. Children are still detached and
     // reinstalled below either way.
     // CW29 (gated): under plain-param snapshots the plain-param arm reverts
     // -- a nested write through a plain param stays local, so the root IS
     // detached into the callee's own binding, which is now correct.
-    bool writes_through_caller = root->is_var_param ||
-        (root->is_proc_param && !cow_capture_enabled());
+    bool writes_through_caller = root->is_var_param;
     if (!writes_through_caller) {
         MIR_reg_t owner = emit_box(mt, root->reg, root->type_id);
         MIR_reg_t replacement = emit_call_1(mt, "cow_prepare_write", MIR_T_I64,
@@ -12824,7 +12836,7 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                 // must mark the read value so its first write DETACHES -- a
                 // real S9.1.2 snapshot -- instead of aliasing a child a fresh
                 // literal never captured. Same tier rule as T0's bind path.
-                if (!cow_binding && cow_capture_enabled() &&
+                if (!cow_binding &&
                         asn->entry && asn->entry->is_place_copy &&
                         asn->entry->place_copy_mutated &&
                         ast_type_needs_mutable_clone(var_tid)) {
@@ -13409,7 +13421,7 @@ static MIR_reg_t transpile_array(MirTranspiler* mt, AstArrayNode* arr_node) {
             // S9.3.1: only a NAMED element needs the capture; a fresh one has
             // no second observer (ast_expr_insertion_needs_capture).
             emit_call_void_2(mt,
-                cow_capture_enabled() && ast_expr_insertion_needs_capture(item)
+                ast_expr_insertion_needs_capture(item)
                     ? "array_push_capture" : "array_push",
                 MIR_T_P, MIR_new_reg_op(mt->ctx, arr),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
@@ -14520,7 +14532,7 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
                     MIR_reg_t boxed = transpile_box_item(mt, value_node);
                     // S9.3.1: capture a named field value here -- this shaped
                     // fast path stores straight into the data buffer.
-                    if (cow_capture_enabled() &&
+                    if (
                             ast_expr_insertion_needs_capture(value_node)) {
                         emit_call_1(mt, "cow_capture_value", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
@@ -14568,7 +14580,7 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
             if (key_expr->as) {
                 mir_note_value_captured(mt, key_expr->as);  // S9.3.1
                 MIR_reg_t val = transpile_box_item(mt, key_expr->as);
-                if (cow_capture_enabled() &&
+                if (
                         ast_expr_insertion_needs_capture(key_expr->as)) {
                     emit_call_1(mt, "cow_capture_value", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -14595,7 +14607,7 @@ static MIR_reg_t transpile_map(MirTranspiler* mt, AstMapNode* map_node) {
         } else {
             mir_note_value_captured(mt, item);  // S9.3.1
             MIR_reg_t val = transpile_box_item(mt, item);
-            if (cow_capture_enabled() && ast_expr_insertion_needs_capture(item)) {
+            if (ast_expr_insertion_needs_capture(item)) {
                 emit_call_1(mt, "cow_capture_value", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
             }
@@ -14667,7 +14679,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
                 if (key_expr->as) {
                     mir_note_value_captured(mt, key_expr->as);  // S9.3.1
                     MIR_reg_t val = transpile_box_item(mt, key_expr->as);
-                    if (cow_capture_enabled() &&
+                    if (
                         ast_expr_insertion_needs_capture(key_expr->as)) {
                         emit_call_1(mt, "cow_capture_value", MIR_T_I64,
                             MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
@@ -14684,7 +14696,7 @@ static MIR_reg_t transpile_element(MirTranspiler* mt, AstElementNode* elmt_node)
             } else {
                 mir_note_value_captured(mt, scan);  // S9.3.1
                 MIR_reg_t val = transpile_box_item(mt, scan);
-                if (cow_capture_enabled() && ast_expr_insertion_needs_capture(scan)) {
+                if (ast_expr_insertion_needs_capture(scan)) {
                     emit_call_1(mt, "cow_capture_value", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
                 }
@@ -18444,7 +18456,7 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
                 // This must precede the arms because several of them (contract
                 // boundaries, native lanes) re-evaluate the argument expression
                 // themselves and would each need the same treatment.
-                if (cow_capture_enabled() && type_param && type_param->is_var_param &&
+                if (type_param && type_param->is_var_param &&
                         resolved_args[i] &&
                         !mir_direct_root_binding(mt, resolved_args[i])) {
                     AstCowPath borrow_path = {};
@@ -21134,8 +21146,7 @@ static void mir_rebind_typed_array_layout(MirTranspiler* mt, MirVarEntry* var);
 static MIR_reg_t emit_typed_array_store_fallback(MirTranspiler* mt,
         MIR_reg_t owner, TypeId owner_tid, MIR_reg_t index, MIR_reg_t value,
         MirVarEntry* root) {
-    const char* checked_set = (root->is_var_param ||
-            (root->is_proc_param && !cow_capture_enabled()))
+    const char* checked_set = root->is_var_param
         ? "lambda_array_set_checked_inplace" : "lambda_array_set_checked";
     Type* element_contract = mir_array_occurrence_element(root->full_type);
     LaneStorageDesc lane_desc = {};
@@ -21383,8 +21394,7 @@ static MIR_reg_t transpile_expr_value_legacy_impl(MirTranspiler* mt,
                 if (typed_path.count == 0) {
                     MIR_reg_t key = transpile_box_item(mt, ca->key);
                     MIR_reg_t owner = emit_box(mt, typed_root->reg, typed_root->type_id);
-                    const char* checked_set = (typed_root->is_var_param ||
-                    (typed_root->is_proc_param && !cow_capture_enabled()))
+                    const char* checked_set = typed_root->is_var_param
                         ? "lambda_map_set_checked_inplace" : "lambda_map_set_checked";
                     MIR_reg_t replacement = emit_call_5(mt, checked_set, MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
@@ -21446,8 +21456,7 @@ static MIR_reg_t transpile_expr_value_legacy_impl(MirTranspiler* mt,
                     (lane_desc.kind == LANE_STORAGE_INT || lane_desc.kind == LANE_STORAGE_BOOL ||
                      lane_desc.kind == LANE_STORAGE_FLOAT64 || lane_desc.kind == LANE_STORAGE_ITEM ||
                      lane_desc.kind == LANE_STORAGE_SIZED_I64 || lane_desc.kind == LANE_STORAGE_POINTER)));
-                bool writes_through_caller = typed_root->is_var_param ||
-                    (typed_root->is_proc_param && !cow_capture_enabled());
+                bool writes_through_caller = typed_root->is_var_param;
                 // A local exact ArrayNum is already a writable witness. Requiring
                 // caller write-back here sent every `var a: float[]` store through
                 // fn_mutable_value, copying the full payload before one checked leaf.
@@ -22353,8 +22362,7 @@ static MIR_reg_t transpile_expr_value_legacy_impl(MirTranspiler* mt,
                 key = transpile_box_item(mt, ca->key);
             }
             MIR_reg_t owner = emit_box(mt, cow_root->reg, cow_root->type_id);
-            const char* checked_set = (cow_root->is_var_param ||
-                    (cow_root->is_proc_param && !cow_capture_enabled()))
+            const char* checked_set = cow_root->is_var_param
                 ? "lambda_map_set_checked_inplace" : "lambda_map_set_checked";
             MIR_reg_t replacement = emit_call_5(mt, checked_set, MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, owner),
@@ -25892,12 +25900,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             MirVarEntry* param_var = find_var(mt, pname);
             if (param_var) {
                 param_var->full_type = param->declared_type;
-                // Plain procedure parameters are locally mutable under the
-                // existing pn ABI. Their typed container writes must remain
-                // visible to the caller after a successful pre-write check.
-                param_var->is_proc_param = fn_as_node->node_type == AST_NODE_PROC;
             }
-            if (param_var && param_var->is_proc_param && cow_capture_enabled() &&
+            if (param_var && fn_as_node->node_type == AST_NODE_PROC &&
                     param->entry && param->entry->cow_param_mutated) {
                 // CW29/S9.1.3 (gated): this plain param's body writes through
                 // it, so the activation snapshots it -- one share-mark at

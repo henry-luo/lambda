@@ -7781,24 +7781,11 @@ Item cow_bind_var(Item value) {
 // detaches correctly when a COW-aware setter writes it (clone_mutable_array_num
 // via cow_prepare_write); what stays open is the raw/native-lane store paths
 // that never consult the flag, and those are Stage-2 ArrayNum work either way.
-// DEFAULT ON as of the 2026-08-29 flip: insertion capture (S9.3.1) and
-// plain-param snapshots (S9.1.3/CW29) are the shipped semantics, together
-// with the CW24 mutated-place-copy diagnostic that makes the read-side safe.
-// `LAMBDA_COW_CAPTURE=0` (or `off`) is a temporary escape hatch kept for one
-// stabilization cycle so a regression can be bisected against the old
-// write-through/aliasing behavior; the gated arms it selects are scheduled
-// for deletion once the flip has soaked (COW §11.9 rollout step 3).
-bool cow_capture_enabled(void) {
-    static const bool enabled = [] {
-        const char* value = getenv("LAMBDA_COW_CAPTURE");
-        if (!value || !value[0]) return true;  // default ON
-        return strcmp(value, "0") != 0 && strcmp(value, "off") != 0;
-    }();
-    return enabled;
-}
-
+// The escape hatch is RETIRED (2026-08-29, after the flip soaked): insertion
+// capture (S9.3.1), plain-param snapshots (S9.1.3/CW29), and the CW24v2
+// place diagnostics are unconditionally the semantics. LAMBDA_COW_CAPTURE is
+// no longer consulted anywhere.
 Item cow_capture_value(Item value) {
-    if (!cow_capture_enabled()) return value;
     return cow_mark_shared(value);
 }
 
@@ -8590,7 +8577,7 @@ Item cow_path_borrow(Item owner, Item path) {
 // already detached by the caller before the call, and a plain `pn` parameter
 // writes through to the caller under the current pn ABI -- which is exactly the
 // selection the FLAT member/element store already makes via
-// `is_var_param || is_proc_param` (lambda_map_set_checked_inplace). The nested
+// `is_var_param` (lambda_map_set_checked_inplace). The nested
 // path store never made it, so it detached the callee's own root and published
 // the replacement into the callee's binding: `b.xs[0] = 99` was visible inside
 // the procedure and lost at the caller, while `b.cur = "X"` was not. Children

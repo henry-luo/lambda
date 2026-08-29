@@ -8590,10 +8590,6 @@ AstNamedNode* build_param_from_parts(Transpiler* tp, SourceSpan span,
             param->entry = entry;
             entry->is_mutable = true;
             entry->is_var_param = is_var;
-            // Record the pn-parameter fact itself rather than leaving consumers
-            // to infer it from is_mutable (which a plain `var` local also sets).
-            // Both tiers decide in-place-vs-detached container writes from it.
-            entry->is_proc_param = true;
         }
     }
     return param;
@@ -8702,9 +8698,8 @@ static bool cow_param_note_enabled(void) {
 
 static void lambda_ast_note_plain_param_writes(Transpiler* tp, AstFuncNode* fn) {
     bool note = cow_param_note_enabled();
-    // the same walk also feeds the gated CW29 semantics: entry->cow_param_mutated
+    // the walk feeds the shipped CW29 semantics: entry->cow_param_mutated
     // tells both tiers which plain params to snapshot at activation entry
-    if (!note && !cow_capture_enabled()) return;
     if (((AstNode*)fn)->node_type != AST_NODE_PROC || !fn->body) return;
     for (AstNamedNode* param = fn->param; param;
             param = (AstNamedNode*)((AstNode*)param)->next) {
@@ -8715,7 +8710,7 @@ static void lambda_ast_note_plain_param_writes(Transpiler* tp, AstFuncNode* fn) 
         if (!note) continue;
         String* fname = fn->name;
         log_warn("cow-param-note: %s:%.*s: write through plain parameter `%.*s` "
-            "becomes local to the procedure when S9.1.3 lands; add `var` to publish it",
+            "is local to the procedure under S9.1.3; add `var` to publish it",
             tp->reference ? tp->reference : "<script>",
             fname ? (int)fname->len : 9, fname ? fname->chars : "<anon pn>",
             (int)param->name->len, param->name->chars);
@@ -8728,7 +8723,6 @@ static void lambda_ast_note_plain_param_writes(Transpiler* tp, AstFuncNode* fn) 
 static NameEntry* g_place_copy_pending = NULL;
 
 static void direct_note_place_copy_mutation(SourceSpan span, AstNode* object) {
-    if (!cow_capture_enabled()) return;
     AstIdentNode* root = compound_root_ident(object);
     NameEntry* entry = root ? root->entry : NULL;
     if (!entry || !entry->is_place_copy) return;
@@ -8748,7 +8742,6 @@ static void direct_note_place_copy_mutation(SourceSpan span, AstNode* object) {
 // ANYWHERE clears the candidate: a false negative here costs a missed
 // diagnostic, a false positive would reject the model's own idiom.
 static void direct_note_place_copy_writeback(AstNode* value) {
-    if (!cow_capture_enabled()) return;
     AstNode* source = unwrap_primary_node(value);
     if (!source || source->node_type != AST_NODE_IDENT) return;
     AstIdentNode* ident = (AstIdentNode*)source;

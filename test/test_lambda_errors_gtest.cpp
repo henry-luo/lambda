@@ -1088,6 +1088,14 @@ TEST_F(NegativeScriptTest, VarViewOverlapSharedBaseIsRejected) {
         "overlaps another `var` parameter through their shared view base");
 }
 
+// Exclusivity face 3: a `var` place argument rooted at another `var`
+// argument's base is a path-prefix overlap, rejected at whole-base
+// granularity.
+TEST_F(NegativeScriptTest, VarPathPrefixOverlapIsRejected) {
+    ExpectErrorMessage("test/lambda/negative/semantic/var_path_prefix_overlap.ls",
+        "overlaps another `var` parameter");
+}
+
 // Type error tests
 TEST_F(NegativeScriptTest, TypeErrorFuncParam) {
     ExpectErrorWithoutCrash("test/lambda/negative/func_param_negative.ls");

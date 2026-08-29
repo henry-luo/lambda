@@ -685,7 +685,7 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
     // read value so the first write DETACHES -- a real S9.1.2 snapshot --
     // instead of aliasing a child a fresh literal never captured. All T0
     // declaration paths funnel through this bind. Mark-only: cannot allocate.
-    if (cow_capture_enabled() && named->entry && named->entry->is_place_copy &&
+    if (named->entry && named->entry->is_place_copy &&
             named->entry->place_copy_mutated) {
         cow_mark_shared(bound);
     }
@@ -1527,7 +1527,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             // in its parent, so the callee's in-place `var` writes reach the
             // caller's container and need no writeback binding. Mirrors the
             // MIR argument-loop hook so the tiers cannot diverge.
-            if (!entry && cow_capture_enabled() && borrow_args[index]) {
+            if (!entry && borrow_args[index]) {
                 AstCowPath place = {};
                 if (!ast_collect_cow_path(&place, borrow_args[index]) ||
                         place.count == 0 || !place.root ||
@@ -4257,7 +4257,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // NM-O8: a `var` parameter's root was detached by the caller, and a
             // plain `pn` parameter writes through to the caller under the
             // current pn ABI -- the same rule the FLAT store above applies via
-            // `is_var_param || is_proc_param`. Without it the nested store
+            // the in-place setter for `var` roots. Without it the nested store
             // detached the callee's own root and published the replacement
             // into the callee's binding, so `b.xs[0] = v` was visible inside
             // the procedure and lost at the caller while `b.cur = v` was not.
@@ -4270,10 +4270,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // proc_type_numeric_structural_admission caught it. Typed nested
             // writes through a parameter therefore still need the explicit
             // read-modify-write-back spelling.
-            // CW29 (gated): under plain-param snapshots only `var` borrows
-            // write through; a plain param's write stays local to the callee.
-            bool writes_through_caller = root->is_var_param ||
-                (root->is_proc_param && !cow_capture_enabled());
+            // CW29: only `var` borrows write through; a plain param's write
+            // stays local to the callee (S9.1.3).
+            bool writes_through_caller = root->is_var_param;
             Item replacement = ast_declared_type_is_map(root->declared_type)
                 ? lambda_map_path_set_checked(owner_slot.get(), path_slot.get(),
                     value_slot.get(), root->declared_type,
@@ -4349,13 +4348,12 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // "element" here (transpile-mir.cpp), so T0 matches it.
             const char* boundary = "typed array element assignment";
             // SI3v2 again, on the write side: MIR Direct selects the in-place
-            // setter for `is_var_param || is_proc_param`
+            // setter for `var` roots
             // (emit_typed_array_store_fallback / writes_through_caller). T0 read
             // only is_var_param, so a plain `pn` parameter's typed write was
             // validated on a DETACHED candidate and republished to the callee's
             // own slot -- visible inside the procedure, lost to the caller.
-            replacement = (root->is_var_param ||
-                    (root->is_proc_param && !cow_capture_enabled()))
+            replacement = root->is_var_param
                 ? lambda_array_set_checked_inplace_item(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary)
                 : lambda_array_set_checked_item(owner.get(), key_slot.get(),
@@ -4371,8 +4369,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // object: the parser threads its state through `p: Parser`, a plain
             // pn parameter, so every `p.cur = ...` was published to a detached
             // copy and the caller kept reading the initial value.
-            replacement = (root->is_var_param ||
-                    (root->is_proc_param && !cow_capture_enabled()))
+            replacement = root->is_var_param
                 ? lambda_map_set_checked_inplace(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary)
                 : lambda_map_set_checked(owner.get(), key_slot.get(),
@@ -4735,7 +4732,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             // -- one share-mark; its first write detaches a private copy and
             // the caller's value is never touched. Non-mutating callees skip
             // this entirely (cow_param_mutated stays false).
-            if (cow_capture_enabled() && p->entry && p->entry->cow_param_mutated) {
+            if (p->entry && p->entry->cow_param_mutated) {
                 cow_mark_shared(value);
             }
             frame->slots[index] = value.item;
