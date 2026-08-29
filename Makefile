@@ -80,6 +80,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_repl_gtest \
 	test_lambda_proc_gtest \
 	test_js_gtest \
+	test_js_c_parser_gtest \
 	test_js_script_gtest \
 	test_js_opt_gtest \
 	test_lambda_opt_gtest \
