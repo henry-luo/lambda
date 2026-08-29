@@ -1454,6 +1454,13 @@ MIR's reference set remains the capture-edge source. This is an
 implementation-only **D8.2.4** slice; no formal semantic ruling or document
 semver changes.
 
+P4d (2026-08-29) moves AST tail-reuse eligibility to the shared AST-support
+owner and centralizes nested function/method/class boundary handling for the
+direct-eval, `arguments`, and tail-reuse scanners. The interpreter-local
+structural scan is retired; `eval`, `with`, `try`, `arguments`, and nested
+function safety conditions remain unchanged. This is an implementation-only
+**D8.2.4** slice; no formal semantic ruling or document semver changes.
+
 | Ruling | Status |
 |---|---|
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |

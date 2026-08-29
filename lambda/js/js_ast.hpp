@@ -343,6 +343,7 @@ bool js_ast_child_catalog_complete(void);
 bool js_ast_has_direct_eval_call(JsAstNode* node);
 bool js_ast_function_has_direct_eval(JsFunctionNode* function);
 bool js_ast_function_uses_arguments(JsFunctionNode* function);
+bool js_ast_function_tail_reuse_safe(JsFunctionNode* function);
 bool js_ast_is_proto_literal_key(JsAstNode* key);
 
 // Adapter for the shared AstIndex walker. Core-shaped JavaScript nodes are

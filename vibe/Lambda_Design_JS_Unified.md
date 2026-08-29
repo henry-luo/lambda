@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29
 
-**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3f compile-unit migrations, and P4a–P4c collection-owned function facts are verified; the remaining P3/P4–P6 driver work remains proposed. The current merge-base tree is 313,883 governed `lambda/runtime` + `lambda/js` lines before P4c; the older 310,711-line project anchor remains historical and its final 308,711 cap is not yet claimed.
+**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3f compile-unit migrations, and P4a–P4d collection-owned function facts are verified; the remaining P3/P4–P6 driver work remains proposed. The current merge-base tree is 313,947 governed `lambda/runtime` + `lambda/js` lines before P4d; the older 310,711-line project anchor remains historical and its final 308,711 cap is not yet claimed.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -1118,6 +1118,32 @@ Focused verification after rebuilding the release-native JS script target:
 ```text
 ./test/test_js_script_gtest.exe --gtest_color=no
 # 104/104 passed
+```
+
+This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+target.
+
+#### P4d implementation record — shared tail-reuse eligibility fact, 2026-08-29
+
+The next P4 slice moves AST tail-reuse eligibility into the shared AST-support
+owner. Direct-eval, `arguments`, and tail-reuse scanners now use one explicit
+nested-function/method/class boundary predicate; tail reuse still rejects
+`eval`, `with`, `try`, and any nested function, while `arguments` remains a
+shared function fact. The interpreter's private 24-line structural scanner is
+retired, and the call path consumes the shared fact without changing the
+activation or completion contract.
+
+This is a deletion-funded **D8.2.4** ownership slice with no semantic ruling or
+AST layout change. The merge-base governed tree falls from 313,947 to 313,938
+lines (`-9`); changed first-party C/C++ and source counters are `+32/-41`
+(`-9` delta). The prior P4 records retain their original merge-base accounting.
+
+Focused verification after rebuilding the affected targets:
+
+```text
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
 ```
 
 This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
