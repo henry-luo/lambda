@@ -459,7 +459,7 @@ Older `Overall_Result3.md` and `Overall_Result4.md` publish MIR Direct overall s
 
 On the shared five-suite family from `Overall_Result6.md` (R7RS, AWFY, BENG, KOSTYA, LARCENY), the latest Result7 snapshot is about **13.34x** slower than Node over 51 timed cases, versus about **2.15x** in the March R7 table over 53 timed cases. That is roughly **6.2x worse** on the comparable suite family, before adding the current JetStream gap of **207.86x** over its six timed cases.
 
-`Overall_Result.md` and `Overall_Result5.md` are not used as LambdaJS-vs-Node comparison baselines here because they are MIR Direct/C2MIR and direct-string-pointer experiment reports. `Overall_Result2.md` is also left out of the aggregate table because LambdaJS coverage was still partial and included one non-positive timing, making its geometric mean unsuitable as a clean benchmark baseline.
+`Overall_Result1.md` and `Overall_Result5.md` are not used as LambdaJS-vs-Node comparison baselines here because they are MIR Direct/C2MIR and direct-string-pointer experiment reports. `Overall_Result2.md` is also left out of the aggregate table because LambdaJS coverage was still partial and included one non-positive timing, making its geometric mean unsuitable as a clean benchmark baseline.
 
 ### Interpretation
 

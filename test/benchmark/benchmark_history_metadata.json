@@ -2,7 +2,7 @@
   "metric": "geometric mean of engine time divided by Node.js time",
   "y_scale": "log10, 0.1x to 100x",
   "session_labels": [
-    "Result",
+    "Result1",
     "Result2",
     "Result3",
     "Result4",
@@ -43,8 +43,8 @@
   "month_groups": [
     {
       "label": "Feb 26",
-      "start": "Result",
-      "end": "Result"
+      "start": "Result1",
+      "end": "Result1"
     },
     {
       "label": "Mar 26",
@@ -334,6 +334,7 @@
     ]
   },
   "sources": {
+    "Result1": "Overall_Result1.md (MIR Direct/C2MIR experiment report)",
     "Result2": "Overall_Result2.md (Overall raw for Lambda typed/QuickJS; LambdaJS geo recomputed from displayed timing tables)",
     "Result3": "Overall_Result3.md (MIR Overall dedup; LambdaJS and Python geo means recomputed from displayed timing tables)",
     "Result4": "Overall_Result4.md (MIR Overall dedup; LambdaJS and Python geo means recomputed from displayed timing tables)",
@@ -341,9 +342,9 @@
   },
   "interpretation": "Single-MIR sessions without a typed/untyped split are plotted as Lambda typed. Results5-8 are partial tests and are omitted from the axis. The C2MIR series begins at Result18 because Results2-4 use Lambda scripts through the C2MIR transpiler, while Result18 onward reports native C benchmark ports. Python is reported in Results3-4; Go is reported in Result18. Node.js is the 1.0x reference line.",
   "title": "Lambda Benchmark History",
-  "description": "Line chart of benchmark-session geometric means relative to Node.js from Result through Result35, omitting partial Results5 through Result8 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.",
+  "description": "Line chart of benchmark-session geometric means relative to Node.js from Result1 through Result35, omitting partial Results5 through Result8 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.",
   "session_dates": {
-    "Result": "2026-02-21",
+    "Result1": "2026-02-21",
     "Result2": "2026-03-07",
     "Result3": "2026-03-09",
     "Result4": "2026-03-19",
