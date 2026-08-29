@@ -5796,6 +5796,10 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
         : js_get_global_this());
     Rooted<Item> new_target_root(roots, js_get_new_target());
     Rooted<Item> home_class_root(roots, ItemNull);
+    if (script->test262_native_harness) {
+        Item installed = js_test262_native_harness_install();
+        if (item_is_error(installed)) return installed;
+    }
     JsInterpFrame frame = {script, NULL, this_root.home(), new_target_root.home(),
         home_class_root.home(),
         script->strict_mode, NULL, 0, NULL, false, NULL};
