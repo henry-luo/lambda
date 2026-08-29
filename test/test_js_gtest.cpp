@@ -52,6 +52,18 @@ static bool g_js_direct_has_timing = false;
 static bool g_js_direct_has_volume = false;
 static int g_js_direct_status = 0;
 
+enum JsExecutionBackend {
+    JS_BACKEND_INHERIT,
+    JS_BACKEND_AST,
+    JS_BACKEND_MIR,
+};
+
+static const char* js_backend_env_value(JsExecutionBackend backend) {
+    if (backend == JS_BACKEND_AST) return "ast";
+    if (backend == JS_BACKEND_MIR) return "mir";
+    return NULL;
+}
+
 static void parse_js_direct_protocol(const char* output) {
     g_js_direct_timing = {};
     g_js_direct_has_timing = false;
@@ -103,20 +115,29 @@ static void parse_js_direct_protocol(const char* output) {
 
 // Helper function to execute a JavaScript file with lambda js and capture output
 static char* execute_js_script_configured(const char* script_path,
-        bool permission, const char* module_path) {
+        bool permission, const char* module_path,
+        JsExecutionBackend backend = JS_BACKEND_INHERIT) {
     const char* args[7] = {LAMBDA_EXE, "js", script_path, NULL, NULL, NULL, NULL};
     int arg_count = 3;
     if (permission) args[arg_count++] = "--permission";
     args[arg_count++] = "--no-log";
     args[arg_count] = NULL;
 
-    ShellEnvEntry env[2] = {};
+    ShellEnvEntry env[3] = {};
     ShellOptions options = {};
-    if (module_path && module_path[0]) {
-        env[0].key = "JUBE_MODULE_PATH";
-        env[0].value = module_path;
-        options.env = env;
+    size_t env_count = 0;
+    const char* backend_value = js_backend_env_value(backend);
+    if (backend_value) {
+        env[env_count].key = "JS_EXECUTION_BACKEND";
+        env[env_count].value = backend_value;
+        env_count++;
     }
+    if (module_path && module_path[0]) {
+        env[env_count].key = "JUBE_MODULE_PATH";
+        env[env_count].value = module_path;
+        env_count++;
+    }
+    if (env_count > 0) options.env = env;
     ShellResult shell_result = shell_exec(LAMBDA_EXE, args,
         options.env ? &options : NULL);
     g_js_direct_status = shell_result.exit_code;
@@ -148,7 +169,8 @@ static char* execute_js_script_configured(const char* script_path,
 }
 
 char* execute_js_script(const char* script_path) {
-    return execute_js_script_configured(script_path, false, NULL);
+    return execute_js_script_configured(script_path, false, NULL,
+        JS_BACKEND_INHERIT);
 }
 
 int execute_js_script_status(const char* script_path, char* output, size_t output_size) {
@@ -340,11 +362,21 @@ char* execute_js_builtin_tests() {
 }
 
 // Helper function to execute a JavaScript file with --document flag and capture output
-char* execute_js_script_with_doc(const char* script_path, const char* html_path) {
+char* execute_js_script_with_doc(const char* script_path, const char* html_path,
+        JsExecutionBackend backend = JS_BACKEND_INHERIT) {
     const char* args[] = {
         LAMBDA_EXE, "js", script_path, "--document", html_path, "--no-log", NULL,
     };
-    ShellResult shell_result = shell_exec(LAMBDA_EXE, args, NULL);
+    ShellEnvEntry env[2] = {};
+    ShellOptions options = {};
+    const char* backend_value = js_backend_env_value(backend);
+    if (backend_value) {
+        env[0].key = "JS_EXECUTION_BACKEND";
+        env[0].value = backend_value;
+        options.env = env;
+    }
+    ShellResult shell_result = shell_exec(LAMBDA_EXE, args,
+        options.env ? &options : NULL);
     g_js_direct_status = shell_result.exit_code;
     char* full_output = shell_result.stdout_buf ? strdup(shell_result.stdout_buf) : strdup("");
     parse_js_direct_protocol(full_output);
@@ -376,14 +408,16 @@ char* execute_js_script_with_doc(const char* script_path, const char* html_path)
 }
 
 // Helper function to test JavaScript DOM script against expected output file
-void test_js_dom_script_against_file(const char* script_path, const char* html_path, const char* expected_file_path) {
+void test_js_dom_script_against_file(const char* script_path, const char* html_path,
+        const char* expected_file_path,
+        JsExecutionBackend backend = JS_BACKEND_INHERIT) {
     const char* script_name = strrchr(script_path, '/');
     script_name = script_name ? script_name + 1 : script_path;
 
     char* expected_output = read_expected_output(expected_file_path);
     ASSERT_NE(expected_output, nullptr) << "Could not read expected output file: " << expected_file_path;
 
-    char* actual_output = execute_js_script_with_doc(script_path, html_path);
+    char* actual_output = execute_js_script_with_doc(script_path, html_path, backend);
     ast_tune_append_timing_row("js", script_path, script_name, g_js_direct_status,
         &g_js_direct_timing, g_js_direct_has_timing, g_js_direct_has_volume);
     ASSERT_NE(actual_output, nullptr) << "Could not execute JavaScript DOM script: " << script_path;
@@ -470,7 +504,8 @@ static void run_js_sub_batch(
     const std::vector<std::string>& scripts,
     size_t start, size_t end,
     int batch_id,
-    std::unordered_map<std::string, JsBatchResult>& results)
+    std::unordered_map<std::string, JsBatchResult>& results,
+    JsExecutionBackend backend)
 {
     // write manifest for this chunk
     char manifest_path[256];
@@ -486,6 +521,13 @@ static void run_js_sub_batch(
     const char* args[] = {LAMBDA_EXE, "js-test-batch", "--timeout=60", NULL};
     ShellOptions options = {0};
     options.stdin_path = manifest_path;
+    ShellEnvEntry env[2] = {};
+    const char* backend_value = js_backend_env_value(backend);
+    if (backend_value) {
+        env[0].key = "JS_EXECUTION_BACKEND";
+        env[0].value = backend_value;
+        options.env = env;
+    }
     ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
     if (shell_result.exit_code < 0) {
         shell_result_free(&shell_result);
@@ -540,7 +582,8 @@ static void run_js_sub_batch(
 
 static std::unordered_map<std::string, JsBatchResult> execute_js_batch(
     const std::vector<std::string>& scripts,
-    size_t chunk_size = JS_BATCH_CHUNK_SIZE)
+    size_t chunk_size = JS_BATCH_CHUNK_SIZE,
+    JsExecutionBackend backend = JS_BACKEND_INHERIT)
 {
     std::unordered_map<std::string, JsBatchResult> results;
     if (scripts.empty()) return results;
@@ -560,7 +603,7 @@ static std::unordered_map<std::string, JsBatchResult> execute_js_batch(
     for (size_t i = 0; i < batches.size(); i++) {
         threads.emplace_back([&, i]() {
             run_js_sub_batch(scripts, batches[i].start, batches[i].end,
-                             batches[i].id, thread_results[i]);
+                             batches[i].id, thread_results[i], backend);
         });
     }
     for (auto& t : threads) t.join();
@@ -587,6 +630,80 @@ struct JsTestParam {
     bool permission;         // true → execute with the permission sandbox enabled
     char module_path[512];   // optional isolated Jube module profile
 };
+
+static const char* JS_MIR_LIST_FILE = "test/js/mir_list.txt";
+static bool js_mixed_mode = false;
+static bool js_mir_list_loaded = false;
+static bool js_mir_list_available = false;
+static char* js_mir_list_contents = NULL;
+static size_t js_mir_list_size = 0;
+
+static bool load_js_mir_list() {
+    if (js_mir_list_loaded) return js_mir_list_available;
+    js_mir_list_loaded = true;
+
+    FILE* file = fopen(JS_MIR_LIST_FILE, "r");
+    if (!file) return false;
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
+        return false;
+    }
+    long file_size = ftell(file);
+    if (file_size < 0 || fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return false;
+    }
+    js_mir_list_contents = (char*)malloc((size_t)file_size + 1);
+    if (!js_mir_list_contents) {
+        fclose(file);
+        return false;
+    }
+    js_mir_list_size = fread(js_mir_list_contents, 1, (size_t)file_size, file);
+    if (js_mir_list_size != (size_t)file_size) {
+        free(js_mir_list_contents);
+        js_mir_list_contents = NULL;
+        js_mir_list_size = 0;
+        fclose(file);
+        return false;
+    }
+    js_mir_list_contents[js_mir_list_size] = '\0';
+    fclose(file);
+    js_mir_list_available = true;
+    return js_mir_list_available;
+}
+
+static bool js_test_is_in_mir_list(const char* test_name) {
+    if (!test_name || !js_mir_list_available || !js_mir_list_contents) return false;
+    size_t test_name_size = strlen(test_name);
+    const char* line = js_mir_list_contents;
+    const char* contents_end = js_mir_list_contents + js_mir_list_size;
+    while (line < contents_end) {
+        const char* line_end = (const char*)memchr(line, '\n',
+            (size_t)(contents_end - line));
+        const char* entry_end = line_end ? line_end : contents_end;
+        const char* entry = line;
+        while (entry < entry_end && isspace((unsigned char)*entry)) entry++;
+        const char* comment = (const char*)memchr(entry, '#',
+            (size_t)(entry_end - entry));
+        if (comment) entry_end = comment;
+        while (entry_end > entry && isspace((unsigned char)entry_end[-1])) {
+            entry_end--;
+        }
+        if ((size_t)(entry_end - entry) == test_name_size &&
+                strncmp(entry, test_name, test_name_size) == 0) {
+            return true;
+        }
+        if (!line_end) break;
+        line = line_end + 1;
+    }
+    return false;
+}
+
+static JsExecutionBackend js_backend_for_test(const JsTestParam& test) {
+    if (!js_mixed_mode) return JS_BACKEND_INHERIT;
+    return js_test_is_in_mir_list(test.test_name.c_str())
+        ? JS_BACKEND_MIR : JS_BACKEND_AST;
+}
 
 static bool js_baseline_excludes_library_test(const JsTestParam& test) {
     static const char* excluded_tests[] = {
@@ -752,6 +869,11 @@ public:
 
     static void SetUpTestSuite() {
         if (batch_executed) return;
+        if (js_mixed_mode && !load_js_mir_list()) {
+            fprintf(stderr, "[js-gtest] Cannot load MIR list: %s\n", JS_MIR_LIST_FILE);
+            batch_executed = true;
+            return;
+        }
         if (!js_gtest_filter_requests_full_batch()) {
             // Focused filters must not batch unrelated crash-recovery scripts before the selected case.
             batch_executed = true;
@@ -761,16 +883,48 @@ public:
         // collect non-DOM scripts for batch execution
         auto all = discover_all_js_tests();
         std::vector<std::string> batch_scripts;
+        std::vector<std::string> ast_batch_scripts;
+        std::vector<std::string> mir_batch_scripts;
         for (const auto& t : all) {
             // Batch workers share one CLI and environment; profile-sensitive
             // scripts must run alone or they silently exercise the wrong host.
             if (t.html_path.empty() && !t.permission && !t.module_path[0]) {
-                batch_scripts.push_back(t.script_path);
+                if (!js_mixed_mode) {
+                    batch_scripts.push_back(t.script_path);
+                } else if (js_backend_for_test(t) == JS_BACKEND_MIR) {
+                    mir_batch_scripts.push_back(t.script_path);
+                } else {
+                    ast_batch_scripts.push_back(t.script_path);
+                }
             }
         }
 
-        if (!batch_scripts.empty()) {
-            batch_results = execute_js_batch(batch_scripts, js_capture_batch_chunk_size());
+        size_t chunk_size = js_capture_batch_chunk_size();
+        if (!js_mixed_mode) {
+            if (!batch_scripts.empty()) {
+                batch_results = execute_js_batch(batch_scripts, chunk_size);
+            }
+        } else {
+            std::unordered_map<std::string, JsBatchResult> ast_results;
+            std::unordered_map<std::string, JsBatchResult> mir_results;
+            std::thread ast_thread;
+            std::thread mir_thread;
+            if (!ast_batch_scripts.empty()) {
+                ast_thread = std::thread([&]() {
+                    ast_results = execute_js_batch(ast_batch_scripts, chunk_size,
+                        JS_BACKEND_AST);
+                });
+            }
+            if (!mir_batch_scripts.empty()) {
+                mir_thread = std::thread([&]() {
+                    mir_results = execute_js_batch(mir_batch_scripts, chunk_size,
+                        JS_BACKEND_MIR);
+                });
+            }
+            if (ast_thread.joinable()) ast_thread.join();
+            if (mir_thread.joinable()) mir_thread.join();
+            for (auto& kv : ast_results) batch_results[kv.first] = std::move(kv.second);
+            for (auto& kv : mir_results) batch_results[kv.first] = std::move(kv.second);
         }
         batch_executed = true;
     }
@@ -781,11 +935,12 @@ bool JsFileTest::batch_executed = false;
 
 TEST_P(JsFileTest, Run) {
     const auto& p = GetParam();
+    JsExecutionBackend backend = js_backend_for_test(p);
 
     if (!p.html_path.empty()) {
         // DOM tests: use subprocess fallback (--document flag)
         test_js_dom_script_against_file(
-            p.script_path.c_str(), p.html_path.c_str(), p.expected_path.c_str());
+            p.script_path.c_str(), p.html_path.c_str(), p.expected_path.c_str(), backend);
         return;
     }
 
@@ -801,7 +956,7 @@ TEST_P(JsFileTest, Run) {
     auto it = batch_results.find(p.script_path);
     if (it == batch_results.end()) {
         char* retry_output = execute_js_script_configured(
-            p.script_path.c_str(), p.permission, p.module_path);
+            p.script_path.c_str(), p.permission, p.module_path, backend);
         ast_tune_append_timing_row("js", p.script_path.c_str(),
             p.test_name.c_str(), g_js_direct_status, &g_js_direct_timing,
             g_js_direct_has_timing, g_js_direct_has_volume);
@@ -847,7 +1002,7 @@ TEST_P(JsFileTest, Run) {
     // process before reporting a failure.
     if (br.status != 0 || strcmp(expected_output, actual.c_str()) != 0) {
         char* retry_output = execute_js_script_configured(
-            p.script_path.c_str(), p.permission, p.module_path);
+            p.script_path.c_str(), p.permission, p.module_path, backend);
         if (retry_output) {
             strip_js_timing_lines(retry_output);
             trim_trailing_whitespace(retry_output);
@@ -1092,7 +1247,34 @@ TEST(JavaScriptRegression, Js54P6ArrayProtoFillSetSlice) {
     ASSERT_EQ(status, 0) << output;
 }
 
+static void parse_js_gtest_options(int* argc, char** argv) {
+    if (!argc || !argv) return;
+    const char* mode = getenv("JS_GTEST_MODE");
+    js_mixed_mode = !mode || strcmp(mode, "mir") != 0;
+
+    int write_index = 1;
+    for (int read_index = 1; read_index < *argc; read_index++) {
+        if (strcmp(argv[read_index], "--mixed-mode") == 0) {
+            js_mixed_mode = true;
+            continue;
+        }
+        if (strcmp(argv[read_index], "--full-mir") == 0) {
+            js_mixed_mode = false;
+            continue;
+        }
+        argv[write_index++] = argv[read_index];
+    }
+    *argc = write_index;
+    argv[write_index] = NULL;
+    if (js_mixed_mode) {
+        // make every unlisted direct or shell-launched JS check AST by default;
+        // listed parameterized cases override this in their child environment.
+        shell_setenv("JS_EXECUTION_BACKEND", "ast");
+    }
+}
+
 int main(int argc, char **argv) {
+    parse_js_gtest_options(&argc, argv);
     js_baseline_mode = test_parse_baseline_mode(&argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
