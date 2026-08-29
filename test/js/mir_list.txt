@@ -1,0 +1,17 @@
+# Tests with a clear MIR wall-time advantage over the AST interpreter.
+# Measurements: release build, focused one-test runs, MIR faster by >=5 ms.
+collection_gc_retention
+dynamic_string_no_name_id_exhaustion
+for_destructure_closure
+generator_shadowed_loop_yield
+lib_fast_diff
+nested_reused_scope_env
+number_methods
+opt_p5_modvar
+sparse_basic
+sparse_density_conversion
+stack_api_scalar_homes
+tco
+tune6_intrinsic_reflect_define
+typed_arrays
+type_infer_ip6

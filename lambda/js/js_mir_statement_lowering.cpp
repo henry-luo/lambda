@@ -1236,12 +1236,13 @@ bool jm_push_typeof_narrow(JsMirTranspiler* mt, JsIdentifierNode* id, TypeId nar
     return true;
 }
 
-static bool jm_branch_assigns_identifier(JsAstNode* branch, JsIdentifierNode* id) {
+static bool jm_branch_assigns_identifier(JsMirTranspiler* mt, JsAstNode* branch,
+        JsIdentifierNode* id) {
     if (!branch || !id || !id->name) return false;
     const char* vname = jm_var_name(id->name);
     struct hashmap* assigned = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
-    jm_collect_func_assignments(branch, assigned);
+    jm_collect_indexed_func_assignments(mt, branch, assigned);
     bool assigns = jm_name_set_has(assigned, vname);
     hashmap_free(assigned);
     return assigns;
@@ -1396,7 +1397,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
         // Phase 3.5: narrow variable type inside the consequent when typeof guard matched
         bool consequent_narrowed = false;
         if (typeof_id && !typeof_negate &&
-            !jm_branch_assigns_identifier(if_node->consequent, typeof_id))
+            !jm_branch_assigns_identifier(mt, if_node->consequent, typeof_id))
             consequent_narrowed = jm_push_typeof_narrow(mt, typeof_id, typeof_narrowed_type);
 
         if (if_node->consequent->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -1435,7 +1436,7 @@ void jm_transpile_if(JsMirTranspiler* mt, JsIfNode* if_node) {
         // Phase 3.5: narrow variable type inside the alternate when typeof !== guard matched
         bool alternate_narrowed = false;
         if (typeof_id && typeof_negate &&
-            !jm_branch_assigns_identifier(if_node->alternate, typeof_id))
+            !jm_branch_assigns_identifier(mt, if_node->alternate, typeof_id))
             alternate_narrowed = jm_push_typeof_narrow(mt, typeof_id, typeof_narrowed_type);
 
         if (if_node->alternate->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -1985,7 +1986,7 @@ void jm_emit_class_static_block(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     {
         struct hashmap* static_vars = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
-        jm_collect_body_locals(block, static_vars, true);
+        jm_collect_indexed_body_locals(mt, block, static_vars, true);
         size_t iter = 0;
         void* item;
         while (hashmap_iter(static_vars, &iter, &item)) {
@@ -3011,7 +3012,7 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
 
     // Phase 4: In native function, return native value directly
     if (mt->in_native_func && mt->current_fc) {
-        TypeId ret_type = mt->current_fc->return_type;
+        TypeId ret_type = JM_JS_FACT(mt->current_fc, return_type);
 
         // TCO: set tail position so recursive calls in the argument can be converted to goto
         bool saved_tail = mt->in_tail_position;
@@ -3253,7 +3254,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     fn_decl->name->chars, (int)fn_decl->name->len)) {
                 break;
             }
-            if (mt->current_fc && mt->current_fc->uses_arguments &&
+            if (mt->current_fc && JM_JS_FACT(mt->current_fc, uses_arguments) &&
                 strcmp(fn_vname, "_js_arguments") == 0 &&
                 !jm_function_decl_is_direct_binding(fn_decl, true) &&
                 !current_body_direct) {
@@ -3911,7 +3912,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             }
             int saved_error_lane_flag_spill = -1;
             int saved_error_lane_val_spill = -1;
-            if (mt->in_generator && jm_has_yield(try_node->finalizer)) {
+            if (mt->in_generator && jm_has_yield(mt, try_node->finalizer)) {
                 saved_error_lane_flag_spill = jm_gen_spill_save(mt, saved_error_lane_flag);
                 saved_error_lane_val_spill = jm_gen_spill_save(mt, saved_error_lane_val);
             }

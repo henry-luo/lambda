@@ -67,7 +67,7 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
 
     // Check if all argument types at this call site match the inferred param types
     JsAstNode* arg = call->arguments;
-    for (int i = 0; i < fc->param_count; i++) {
+    for (int i = 0; i < JM_PARAM_COUNT(fc); i++) {
         TypeId expected = jm_param_type(fc, i);
         TypeId actual = arg ? jm_get_effective_type(mt, arg) : LMD_TYPE_ANY;
         if (expected == LMD_TYPE_INT) {
@@ -113,34 +113,23 @@ bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, 
         jm_resolve_native_call(mt, call) == fc;
 }
 
-// Walk JS AST to find if there's at least one tail-recursive call.
-// A tail call is: return f(...) where f is the function itself.
-bool jm_has_tail_call(JsAstNode* node, JsFuncCollected* fc) {
-    if (!node || !fc) return false;
-    switch (node->node_type) {
-    case JS_AST_NODE_RETURN_STATEMENT: {
-        JsReturnNode* ret = (JsReturnNode*)node;
-        if (ret->argument && ret->argument->node_type == JS_AST_NODE_CALL_EXPRESSION) {
-            if (jm_is_recursive_call((JsCallNode*)ret->argument, fc)) return true;
-        }
-        return false;
+// Indexed return ownership excludes nested functions from tail-call evidence.
+// A tail call is `return f(...)` where f is the function itself.
+bool jm_has_tail_call(JsMirTranspiler* mt, JsFuncCollected* fc) {
+    if (!mt || !fc || !fc->node || !mt->tp) return false;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId fn_node_id = ast_index_find(index, (AstNode*)fc->node);
+    AstFunctionId owner = fn_node_id == AST_NODE_ID_INVALID ?
+        AST_FUNCTION_ID_INVALID : index->owner_functions[fn_node_id];
+    if (owner == AST_FUNCTION_ID_INVALID) return false;
+    for (uint32_t i = 0; i < index->count; i++) {
+        if (index->owner_functions[i] != owner ||
+                index->nodes[i]->node_type != JS_AST_NODE_RETURN_STATEMENT) continue;
+        JsReturnNode* ret = (JsReturnNode*)index->nodes[i];
+        if (ret->argument && ret->argument->node_type == JS_AST_NODE_CALL_EXPRESSION &&
+                jm_is_recursive_call((JsCallNode*)ret->argument, fc)) return true;
     }
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        JsAstNode* s = blk->statements;
-        while (s) {
-            if (jm_has_tail_call(s, fc)) return true;
-            s = s->next;
-        }
-        return false;
-    }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* n = (JsIfNode*)node;
-        return jm_has_tail_call(n->consequent, fc) || jm_has_tail_call(n->alternate, fc);
-    }
-    default:
-        return false;
-    }
+    return false;
 }
 
 // ============================================================================
@@ -347,7 +336,6 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
     collected->parent_index = -1;
     collected->is_strict = true;
     collected->is_class_field_initializer = true;
-    collected->has_direct_eval = js_ast_has_direct_eval_call(field->value);
     mt->func_count++;
     for (int child_index = children_start; child_index < children_end;
             child_index++) {
@@ -404,7 +392,6 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             e->is_strict = mt->is_global_strict || mt->is_module ||
                 jm_function_inside_class_syntax(fn) ||
                 jm_has_use_strict_directive(fn);
-            e->has_direct_eval = js_ast_function_has_direct_eval(fn);
             mt->func_count++;
             // Set parent_index for direct children; strictness covers every
             // descendant collected from this function's body range.
@@ -415,7 +402,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                 if (e->is_strict) mt->func_entries[ci].is_strict = true;
             }
             // A5: Scan for this.prop = expr patterns (constructor shape pre-alloc)
-            if (fn->body) jm_scan_ctor_props(e, fn->body);
+            jm_scan_ctor_props(mt, e);
         } else {
             // The count/fill walker must agree before pointers into exact storage are published.
             log_error("js-mir: function count/fill mismatch at %d of %d",
@@ -736,10 +723,8 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                     mt->class_count, mt->func_count);
                             }
                             fc->func_item = NULL;
-                            fc->capture_count = 0;
                             fc->is_class_method = true;
                             fc->is_strict = true;
-                            fc->has_direct_eval = js_ast_function_has_direct_eval(fn);
                             mt->func_count++;
 
                             // Set parent_index for inner functions collected during method body
@@ -782,7 +767,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                     fc->is_constructor = true;  // P3: mark fc for direct slot stores
                                     fc->is_derived_constructor = (cls->superclass != NULL);
                                     // A5: Scan constructor for this.prop = expr
-                                    if (fn->body) jm_scan_ctor_props(fc, fn->body);
+                                    jm_scan_ctor_props(mt, fc);
                                 }
                                 fc->is_class_static_method = me->is_static;
                                 ce->method_count++;
@@ -1030,46 +1015,56 @@ static void jm_scan_ctor_prop_assignment(JsFuncCollected* fc, JsAssignmentNode* 
     if (is_new_prop) fc->ctor_prop_count++;
 }
 
-static void jm_scan_ctor_expression(JsFuncCollected* fc, JsAstNode* expression) {
-    if (!expression) return;
-    if (expression->node_type == JS_AST_NODE_CALL_EXPRESSION) {
-        return;
-    }
-    if (expression->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
-        jm_scan_ctor_prop_assignment(fc, (JsAssignmentNode*)expression);
-        return;
-    }
-    if (expression->node_type == JS_AST_NODE_SEQUENCE_EXPRESSION) {
-        // Minifiers commonly collapse constructor initialization into a comma
-        // sequence; every member still belongs to the fixed instance shape.
-        JsSequenceNode* sequence = (JsSequenceNode*)expression;
-        for (JsAstNode* child = sequence->expressions; child; child = child->next) {
-            jm_scan_ctor_expression(fc, child);
+static bool jm_ctor_indexed_expression_path(AstIndex* index, AstNodeId node_id,
+        AstNodeId body_id) {
+    while (index && node_id != AST_NODE_ID_INVALID) {
+        AstNode* parent = index->parents[node_id];
+        if (!parent) return false;
+        AstNodeId parent_id = ast_index_find(index, parent);
+        if (parent_id == AST_NODE_ID_INVALID) return false;
+        switch (parent->node_type) {
+        case JS_AST_NODE_SEQUENCE_EXPRESSION:
+        case JS_AST_NODE_BINARY_EXPRESSION:
+            node_id = parent_id;
+            continue;
+        case JS_AST_NODE_EXPRESSION_STATEMENT:
+            parent = index->parents[parent_id];
+            return parent && ast_index_find(index, parent) == body_id;
+        default:
+            return false;
         }
-        return;
     }
-    if (expression->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
-        // Short-circuit tails such as `(this.next = next) && ...` are still
-        // unconditional shape declarations even when their RHS is not run.
-        JsBinaryNode* binary = (JsBinaryNode*)expression;
-        jm_scan_ctor_expression(fc, binary->left);
-        jm_scan_ctor_expression(fc, binary->right);
-    }
+    return false;
 }
 
-// A5: Scan constructor body for this.property = expr assignment patterns.
-// Records property names in order so we can pre-build the object shape.
-void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body) {
-    if (!body || body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
+// A5: scan constructor assignments from the indexed owner graph. The old
+// expression recursion only admitted direct body expression statements and
+// sequence/binary wrappers; the path filter preserves that shape exactly.
+void jm_scan_ctor_props(JsMirTranspiler* mt, JsFuncCollected* fc) {
+    if (!mt || !fc || !fc->node || !fc->node->body ||
+            fc->node->body->node_type != JS_AST_NODE_BLOCK_STATEMENT || !mt->tp) return;
     memset(fc->ctor_prop_param_idx, -1, sizeof(fc->ctor_prop_param_idx));
-    JsBlockNode* blk = (JsBlockNode*)body;
-    for (JsAstNode* stmt = blk->statements; stmt; stmt = stmt->next) {
-        if (stmt->node_type == JS_AST_NODE_RETURN_STATEMENT ||
-            stmt->node_type == JS_AST_NODE_THROW_STATEMENT) break;
-        if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
-            jm_scan_ctor_expression(fc,
-                ((JsExpressionStatementNode*)stmt)->expression);
-        }
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId fn_id = ast_index_find(index, (AstNode*)fc->node);
+    AstNodeId body_id = ast_index_find(index, (AstNode*)fc->node->body);
+    if (fn_id == AST_NODE_ID_INVALID || body_id == AST_NODE_ID_INVALID) return;
+    AstFunctionId owner = index->owner_functions[fn_id];
+    uint32_t terminal_start = UINT32_MAX;
+    JsBlockNode* body = (JsBlockNode*)fc->node->body;
+    for (JsAstNode* stmt = body->statements; stmt; stmt = stmt->next) {
+        if (stmt->node_type != JS_AST_NODE_RETURN_STATEMENT &&
+                stmt->node_type != JS_AST_NODE_THROW_STATEMENT) continue;
+        if (stmt->source_span.start_byte < terminal_start)
+            terminal_start = stmt->source_span.start_byte;
+    }
+    for (uint32_t i = 0; i < index->count; i++) {
+        AstNode* node = index->nodes[i];
+        if (!node || index->owner_functions[i] != owner ||
+                node->node_type != JS_AST_NODE_ASSIGNMENT_EXPRESSION ||
+                !jm_index_node_descends(index, i, body_id) ||
+                node->source_span.start_byte >= terminal_start ||
+                !jm_ctor_indexed_expression_path(index, i, body_id)) continue;
+        jm_scan_ctor_prop_assignment(fc, (JsAssignmentNode*)node);
     }
     if (fc->ctor_prop_count > 0) {
         log_debug("A5: constructor '%s' has %d this.prop assignments", fc->name,
@@ -1175,281 +1170,190 @@ static bool jm_expr_has_bigint_literal(JsAstNode* node) {
     }
 }
 
-void jm_infer_walk(JsAstNode* node, const String* const binding_names[],
-                          FnParamEvidence* evidence, int param_count,
-                          const char* self_name) {
+static int jm_infer_find_param(JsAstNode* node,
+        const String* const binding_names[], int param_count) {
+    if (!node || node->node_type != JS_AST_NODE_IDENTIFIER) return -1;
+    JsIdentifierNode* id = (JsIdentifierNode*)node;
+    for (int i = 0; i < param_count; i++) {
+        if (jm_js_name_equal(id->name, binding_names[i])) return i;
+    }
+    return -1;
+}
+
+static bool jm_infer_is_int_literal(JsAstNode* node) {
+    if (!node || node->node_type != JS_AST_NODE_LITERAL) return false;
+    JsLiteralNode* lit = (JsLiteralNode*)node;
+    if (lit->literal_type != JS_LITERAL_NUMBER || lit->is_bigint || lit->has_decimal) return false;
+    double value = lit->value.number_value;
+    return value == (double)(int64_t)value;
+}
+
+static bool jm_infer_is_float_literal(JsAstNode* node) {
+    if (!node || node->node_type != JS_AST_NODE_LITERAL) return false;
+    JsLiteralNode* lit = (JsLiteralNode*)node;
+    if (lit->literal_type != JS_LITERAL_NUMBER || lit->is_bigint) return false;
+    return lit->has_decimal ||
+        lit->value.number_value != (double)(int64_t)lit->value.number_value;
+}
+
+static bool jm_infer_is_non_numeric_literal(JsAstNode* node) {
+    if (!node || node->node_type != JS_AST_NODE_LITERAL) return false;
+    JsLiteralNode* lit = (JsLiteralNode*)node;
+    return lit->literal_type == JS_LITERAL_UNDEFINED ||
+        lit->literal_type == JS_LITERAL_NULL || lit->literal_type == JS_LITERAL_BOOLEAN;
+}
+
+// Consume one indexed node. Child expressions are visited independently by
+// AstIndex, so inference no longer needs a second recursive tree walk.
+static void jm_infer_indexed_node(JsAstNode* node,
+        const String* const binding_names[], FnParamEvidence* evidence,
+        int param_count, const char* self_name) {
     if (!node) return;
-
-    // Helper: check if an identifier is a tracked parameter and return its index
-    auto find_param = [&](JsAstNode* n) -> int {
-        if (!n || n->node_type != JS_AST_NODE_IDENTIFIER) return -1;
-        JsIdentifierNode* id = (JsIdentifierNode*)n;
-        for (int i = 0; i < param_count; i++) {
-            if (jm_js_name_equal(id->name, binding_names[i])) return i;
-        }
-        return -1;
-    };
-
-    // Helper: check if an expression is a numeric literal
-    auto is_int_literal = [](JsAstNode* n) -> bool {
-        if (!n || n->node_type != JS_AST_NODE_LITERAL) return false;
-        JsLiteralNode* lit = (JsLiteralNode*)n;
-        if (lit->literal_type != JS_LITERAL_NUMBER) return false;
-        if (lit->is_bigint) return false;
-        if (lit->has_decimal) return false;  // 999999.0 is NOT an int literal
-        double val = lit->value.number_value;
-        return val == (double)(int64_t)val;
-    };
-    auto is_float_literal = [](JsAstNode* n) -> bool {
-        if (!n || n->node_type != JS_AST_NODE_LITERAL) return false;
-        JsLiteralNode* lit = (JsLiteralNode*)n;
-        if (lit->literal_type != JS_LITERAL_NUMBER) return false;
-        if (lit->is_bigint) return false;
-        if (lit->has_decimal) return true;  // 999999.0 IS a float literal
-        return lit->value.number_value != (double)(int64_t)lit->value.number_value;
-    };
-
     switch (node->node_type) {
     case JS_AST_NODE_BINARY_EXPRESSION: {
         JsBinaryNode* bin = (JsBinaryNode*)node;
-        int li = find_param(bin->left);
-        int ri = find_param(bin->right);
-        bool is_arith = (bin->op == JS_OP_SUB ||
-                         bin->op == JS_OP_MUL || bin->op == JS_OP_DIV ||
-                         bin->op == JS_OP_MOD || bin->op == JS_OP_EXP);
-        bool is_cmp = (bin->op == JS_OP_LT || bin->op == JS_OP_LE ||
-                        bin->op == JS_OP_GT || bin->op == JS_OP_GE ||
-                        bin->op == JS_OP_EQ || bin->op == JS_OP_NE ||
-                        bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_STRICT_NE);
-        bool is_bitwise = (bin->op == JS_OP_BIT_AND || bin->op == JS_OP_BIT_OR ||
-                           bin->op == JS_OP_BIT_XOR || bin->op == JS_OP_BIT_LSHIFT ||
-                           bin->op == JS_OP_BIT_RSHIFT || bin->op == JS_OP_BIT_URSHIFT);
-
-        if (is_arith || (bin->op == JS_OP_ADD && self_name && li >= 0 && ri >= 0)) {
-            // recursive numeric accumulators have no literal on the add node;
-            // without this evidence their second parameter stays boxed and
-            // the tail-call loop cannot be formed.
+        int li = jm_infer_find_param(bin->left, binding_names, param_count);
+        int ri = jm_infer_find_param(bin->right, binding_names, param_count);
+        bool arithmetic = bin->op == JS_OP_SUB || bin->op == JS_OP_MUL ||
+            bin->op == JS_OP_DIV || bin->op == JS_OP_MOD || bin->op == JS_OP_EXP;
+        bool comparison = bin->op == JS_OP_LT || bin->op == JS_OP_LE ||
+            bin->op == JS_OP_GT || bin->op == JS_OP_GE || bin->op == JS_OP_EQ ||
+            bin->op == JS_OP_NE || bin->op == JS_OP_STRICT_EQ || bin->op == JS_OP_STRICT_NE;
+        bool bitwise = bin->op == JS_OP_BIT_AND || bin->op == JS_OP_BIT_OR ||
+            bin->op == JS_OP_BIT_XOR || bin->op == JS_OP_BIT_LSHIFT ||
+            bin->op == JS_OP_BIT_RSHIFT || bin->op == JS_OP_BIT_URSHIFT;
+        if (arithmetic || (bin->op == JS_OP_ADD && self_name && li >= 0 && ri >= 0)) {
             if (li >= 0 && jm_expr_has_bigint_literal(bin->right)) evidence[li].compared_with_non_numeric = true;
-            if (ri >= 0 && jm_expr_has_bigint_literal(bin->left))  evidence[ri].compared_with_non_numeric = true;
-            // Parameter used in arithmetic with int literal → int evidence
-            // NOTE: comparisons (< > == etc.) do NOT contribute type evidence,
-            // because JS is dynamically typed — e.g. (x < 0) works for both int and float x.
-            if (li >= 0 && is_int_literal(bin->right)) evidence[li].int_evidence++;
-            if (ri >= 0 && is_int_literal(bin->left))  evidence[ri].int_evidence++;
-            // Parameter used in arithmetic with float literal → float evidence
-            if (li >= 0 && is_float_literal(bin->right)) evidence[li].float_evidence++;
-            if (ri >= 0 && is_float_literal(bin->left))  evidence[ri].float_evidence++;
-            // Two params in arithmetic together → both are numeric, but could be
-            // int or float.
-            if (li >= 0 && ri >= 0) {
-                evidence[li].int_evidence++;
-                evidence[ri].int_evidence++;
-            }
+            if (ri >= 0 && jm_expr_has_bigint_literal(bin->left)) evidence[ri].compared_with_non_numeric = true;
+            if (li >= 0 && jm_infer_is_int_literal(bin->right)) evidence[li].int_evidence++;
+            if (ri >= 0 && jm_infer_is_int_literal(bin->left)) evidence[ri].int_evidence++;
+            if (li >= 0 && jm_infer_is_float_literal(bin->right)) evidence[li].float_evidence++;
+            if (ri >= 0 && jm_infer_is_float_literal(bin->left)) evidence[ri].float_evidence++;
+            if (li >= 0 && ri >= 0) { evidence[li].int_evidence++; evidence[ri].int_evidence++; }
         }
-        if (is_bitwise) {
-            // Bitwise ops always produce/expect int
+        if (bitwise) {
             if (li >= 0) evidence[li].int_evidence++;
             if (ri >= 0) evidence[ri].int_evidence++;
         }
-        // Detect param compared with undefined/null/boolean — these values cannot
-        // survive native INT unboxing, so the param must stay boxed (ANY).
-        if (is_cmp) {
-            auto is_non_numeric_literal = [](JsAstNode* n) -> bool {
-                if (!n || n->node_type != JS_AST_NODE_LITERAL) return false;
-                JsLiteralNode* l = (JsLiteralNode*)n;
-                return l->literal_type == JS_LITERAL_UNDEFINED ||
-                       l->literal_type == JS_LITERAL_NULL ||
-                       l->literal_type == JS_LITERAL_BOOLEAN;
-            };
-            if (li >= 0 && is_non_numeric_literal(bin->right))
-                evidence[li].compared_with_non_numeric = true;
-            if (ri >= 0 && is_non_numeric_literal(bin->left))
-                evidence[ri].compared_with_non_numeric = true;
-            // P6: Comparison with numeric literal → numeric evidence.
-            // e.g., n >= 0, n < limit, n !== 1 → param is numeric.
-            if (li >= 0 && !is_non_numeric_literal(bin->right)) {
-                if (is_int_literal(bin->right)) evidence[li].int_evidence++;
-                else if (is_float_literal(bin->right)) evidence[li].float_evidence++;
+        if (comparison) {
+            if (li >= 0 && jm_infer_is_non_numeric_literal(bin->right)) evidence[li].compared_with_non_numeric = true;
+            if (ri >= 0 && jm_infer_is_non_numeric_literal(bin->left)) evidence[ri].compared_with_non_numeric = true;
+            if (li >= 0 && !jm_infer_is_non_numeric_literal(bin->right)) {
+                if (jm_infer_is_int_literal(bin->right)) evidence[li].int_evidence++;
+                else if (jm_infer_is_float_literal(bin->right)) evidence[li].float_evidence++;
             }
-            if (ri >= 0 && !is_non_numeric_literal(bin->left)) {
-                if (is_int_literal(bin->left)) evidence[ri].int_evidence++;
-                else if (is_float_literal(bin->left)) evidence[ri].float_evidence++;
+            if (ri >= 0 && !jm_infer_is_non_numeric_literal(bin->left)) {
+                if (jm_infer_is_int_literal(bin->left)) evidence[ri].int_evidence++;
+                else if (jm_infer_is_float_literal(bin->left)) evidence[ri].float_evidence++;
             }
         }
-        // Detect param in nullish coalescing (param ?? default) — the ?? operator
-        // checks for null/undefined which cannot survive native INT unboxing.
-        if (bin->op == JS_OP_NULLISH_COALESCE) {
-            if (li >= 0) evidence[li].compared_with_non_numeric = true;
-        }
-        jm_infer_walk(bin->left, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(bin->right, binding_names, evidence, param_count, self_name);
+        if (bin->op == JS_OP_NULLISH_COALESCE && li >= 0)
+            evidence[li].compared_with_non_numeric = true;
         break;
     }
     case JS_AST_NODE_UNARY_EXPRESSION: {
-        JsUnaryNode* un = (JsUnaryNode*)node;
-        int oi = find_param(un->operand);
-        if (oi >= 0) {
-            switch (un->op) {
-            case JS_OP_PLUS: case JS_OP_ADD:
-            case JS_OP_MINUS: case JS_OP_SUB:
-            case JS_OP_INCREMENT: case JS_OP_DECREMENT:
-            case JS_OP_BIT_NOT:
-                evidence[oi].int_evidence++;
-                break;
-            case JS_OP_TYPEOF:
-                // typeof param — code may check if param is undefined/string/etc.
-                // Native INT unboxing loses type info, so param must stay boxed.
-                evidence[oi].compared_with_non_numeric = true;
-                break;
-            default: break;
-            }
+        JsUnaryNode* unary = (JsUnaryNode*)node;
+        int index = jm_infer_find_param(unary->operand, binding_names, param_count);
+        if (index < 0) break;
+        switch (unary->op) {
+        case JS_OP_PLUS: case JS_OP_ADD: case JS_OP_MINUS: case JS_OP_SUB:
+        case JS_OP_INCREMENT: case JS_OP_DECREMENT: case JS_OP_BIT_NOT:
+            evidence[index].int_evidence++; break;
+        case JS_OP_TYPEOF:
+            evidence[index].compared_with_non_numeric = true; break;
+        default: break;
         }
-        jm_infer_walk(un->operand, binding_names, evidence, param_count, self_name);
         break;
     }
     case JS_AST_NODE_CALL_EXPRESSION: {
         JsCallNode* call = (JsCallNode*)node;
-        // Check if this is a recursive call — args passed to self propagate evidence
         if (self_name && call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* cid = (JsIdentifierNode*)call->callee;
-            const char* cname = jm_var_name(cid->name);
-            if (strncmp(cname, self_name, strlen(self_name)) == 0) {
-                // Recursive call: pass-through params are type-consistent
-                // but only reinforce if there's already arithmetic evidence
+            const char* callee_name = jm_var_name(((JsIdentifierNode*)call->callee)->name);
+            if (strncmp(callee_name, self_name, strlen(self_name)) == 0) {
                 JsAstNode* arg = call->arguments;
                 for (int pi = 0; pi < param_count && arg; pi++, arg = arg->next) {
-                    int ai = find_param(arg);
-                    if (ai >= 0) {
-                        if (evidence[ai].int_evidence > 0) evidence[ai].int_evidence++;
-                        if (evidence[ai].float_evidence > 0) evidence[ai].float_evidence++;
+                    int index = jm_infer_find_param(arg, binding_names, param_count);
+                    if (index >= 0) {
+                        if (evidence[index].int_evidence > 0) evidence[index].int_evidence++;
+                        if (evidence[index].float_evidence > 0) evidence[index].float_evidence++;
                     }
                 }
             }
         }
-        jm_infer_walk(call->callee, binding_names, evidence, param_count, self_name);
-        JsAstNode* a = call->arguments;
-        while (a) { jm_infer_walk(a, binding_names, evidence, param_count, self_name); a = a->next; }
         break;
     }
     case JS_AST_NODE_MEMBER_EXPRESSION: {
-        JsMemberNode* mem = (JsMemberNode*)node;
-        // A computed key is a full JavaScript PropertyKey, not evidence of an
-        // array index. Treating target[key] as numeric miscompiled generic
-        // setters used by libraries when key held a CSS property string.
-        if (mem->computed) {
-            int oi = find_param(mem->object);
-            if (oi >= 0) evidence[oi].used_as_container = true;
+        JsMemberNode* member = (JsMemberNode*)node;
+        if (member->computed) {
+            int index = jm_infer_find_param(member->object, binding_names, param_count);
+            if (index >= 0) evidence[index].used_as_container = true;
         }
-        jm_infer_walk(mem->object, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(mem->property, binding_names, evidence, param_count, self_name);
-        break;
-    }
-    // Recurse into sub-expressions
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        JsAstNode* s = blk->statements;
-        while (s) { jm_infer_walk(s, binding_names, evidence, param_count, self_name); s = s->next; }
-        break;
-    }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* n = (JsIfNode*)node;
-        jm_infer_walk(n->test, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(n->consequent, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(n->alternate, binding_names, evidence, param_count, self_name);
-        break;
-    }
-    case AST_NODE_LOOP: {
-        AstLoopControlNode* loop = (AstLoopControlNode*)node;
-        jm_infer_walk(loop->init, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(loop->test, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(loop->update, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(loop->body, binding_names, evidence, param_count, self_name);
-        break;
-    }
-    case JS_AST_NODE_RETURN_STATEMENT: {
-        JsReturnNode* n = (JsReturnNode*)node;
-        jm_infer_walk(n->argument, binding_names, evidence, param_count, self_name);
-        break;
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* n = (JsVariableDeclarationNode*)node;
-        JsAstNode* d = n->declarations;
-        while (d) { jm_infer_walk(d, binding_names, evidence, param_count, self_name); d = d->next; }
-        break;
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATOR: {
-        JsVariableDeclaratorNode* n = (JsVariableDeclaratorNode*)node;
-        jm_infer_walk(n->init, binding_names, evidence, param_count, self_name);
-        break;
-    }
-    case JS_AST_NODE_EXPRESSION_STATEMENT: {
-        JsExpressionStatementNode* n = (JsExpressionStatementNode*)node;
-        jm_infer_walk(n->expression, binding_names, evidence, param_count, self_name);
         break;
     }
     case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
-        JsAssignmentNode* n = (JsAssignmentNode*)node;
-        // P6: Plain assignment to a parameter (e = expr) means the initial call-site
-        // type may differ from the post-assignment type. The native version assumes
-        // the parameter starts as the inferred type, so reassignment is unsafe.
-        if (n->op == JS_OP_ASSIGN) {
-            int li = find_param(n->left);
-            if (li >= 0) evidence[li].param_reassigned = true;
+        JsAssignmentNode* assignment = (JsAssignmentNode*)node;
+        int left = jm_infer_find_param(assignment->left, binding_names, param_count);
+        if (assignment->op == JS_OP_ASSIGN) {
+            if (left >= 0) evidence[left].param_reassigned = true;
+            break;
         }
-        // P6: Compound assignments (r -= y, x += 1) → operands are numeric
-        if (n->op != JS_OP_ASSIGN) {
-            bool is_compound_arith = (n->op == JS_OP_ADD_ASSIGN || n->op == JS_OP_SUB_ASSIGN ||
-                                      n->op == JS_OP_MUL_ASSIGN || n->op == JS_OP_DIV_ASSIGN ||
-                                      n->op == JS_OP_MOD_ASSIGN || n->op == JS_OP_EXP_ASSIGN);
-            bool is_compound_bit = (n->op == JS_OP_BIT_AND_ASSIGN || n->op == JS_OP_BIT_OR_ASSIGN ||
-                                    n->op == JS_OP_BIT_XOR_ASSIGN || n->op == JS_OP_LSHIFT_ASSIGN ||
-                                    n->op == JS_OP_RSHIFT_ASSIGN || n->op == JS_OP_URSHIFT_ASSIGN);
-            if (is_compound_arith || is_compound_bit) {
-                int ri = find_param(n->right);
-                int li = find_param(n->left);
-                if (ri >= 0) {
-                    if (is_compound_bit) evidence[ri].int_evidence++;
-                    else if (is_float_literal(n->left)) evidence[ri].float_evidence++;
-                    else evidence[ri].int_evidence++;
-                }
-                if (li >= 0) {
-                    if (is_compound_bit) evidence[li].int_evidence++;
-                    else if (is_float_literal(n->right)) evidence[li].float_evidence++;
-                    else if (is_int_literal(n->right)) evidence[li].int_evidence++;
-                }
-            }
+        bool compound_arith = assignment->op == JS_OP_ADD_ASSIGN || assignment->op == JS_OP_SUB_ASSIGN ||
+            assignment->op == JS_OP_MUL_ASSIGN || assignment->op == JS_OP_DIV_ASSIGN ||
+            assignment->op == JS_OP_MOD_ASSIGN || assignment->op == JS_OP_EXP_ASSIGN;
+        bool compound_bit = assignment->op == JS_OP_BIT_AND_ASSIGN || assignment->op == JS_OP_BIT_OR_ASSIGN ||
+            assignment->op == JS_OP_BIT_XOR_ASSIGN || assignment->op == JS_OP_LSHIFT_ASSIGN ||
+            assignment->op == JS_OP_RSHIFT_ASSIGN || assignment->op == JS_OP_URSHIFT_ASSIGN;
+        if (!compound_arith && !compound_bit) break;
+        int right = jm_infer_find_param(assignment->right, binding_names, param_count);
+        if (right >= 0) {
+            if (compound_bit) evidence[right].int_evidence++;
+            else if (jm_infer_is_float_literal(assignment->left)) evidence[right].float_evidence++;
+            else evidence[right].int_evidence++;
         }
-        jm_infer_walk(n->left, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(n->right, binding_names, evidence, param_count, self_name);
-        break;
-    }
-    case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
-        JsConditionalNode* n = (JsConditionalNode*)node;
-        jm_infer_walk(n->test, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(n->consequent, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(n->alternate, binding_names, evidence, param_count, self_name);
+        if (left >= 0) {
+            if (compound_bit) evidence[left].int_evidence++;
+            else if (jm_infer_is_float_literal(assignment->right)) evidence[left].float_evidence++;
+            else if (jm_infer_is_int_literal(assignment->right)) evidence[left].int_evidence++;
+        }
         break;
     }
     default: break;
     }
 }
 
+static void jm_infer_indexed(JsMirTranspiler* mt, JsFunctionNode* fn,
+        const String* const binding_names[], FnParamEvidence* evidence,
+        int param_count, const char* self_name) {
+    if (!mt || !mt->tp || !fn) return;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId fn_id = ast_index_find(index, (AstNode*)fn);
+    AstFunctionId owner = fn_id == AST_NODE_ID_INVALID
+        ? AST_FUNCTION_ID_INVALID : index->owner_functions[fn_id];
+    if (owner == AST_FUNCTION_ID_INVALID) return;
+    for (uint32_t i = 0; i < index->count; i++) {
+        if (index->owner_functions[i] == owner)
+            jm_infer_indexed_node((JsAstNode*)index->nodes[i], binding_names,
+                evidence, param_count, self_name);
+    }
+}
+
 // Infer parameter types for a collected function from body usage patterns.
-void jm_infer_param_types(JsFuncCollected* fc) {
+void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
     int pc = jm_count_params(fn);
-    fc->param_count = pc;
-    fc->formal_length = jm_formal_length(fn);
-    if (fc->analysis.param_types) {
-        mem_free(fc->analysis.param_types);
-        fc->analysis.param_types = NULL;
+    JM_PARAM_COUNT(fc) = pc;
+    JM_JS_FACT(fc, formal_length) = jm_formal_length(fn);
+    FnAnalysis* analysis = jm_function_analysis(fc);
+    if (analysis->param_types) {
+        mem_free(analysis->param_types);
+        analysis->param_types = NULL; analysis->param_count = 0;
     }
-    fc->analysis.param_count = pc;
+    analysis->param_count = pc;
     if (pc > 0) {
-        fc->analysis.param_types = (FnParamTypeInfo*)mem_calloc((size_t)pc,
+        analysis->param_types = (FnParamTypeInfo*)mem_calloc((size_t)pc,
             sizeof(FnParamTypeInfo), MEM_CAT_JS_RUNTIME);
-        if (!fc->analysis.param_types) {
-            fc->analysis.param_count = 0;
+        if (!analysis->param_types) {
+            analysis->param_count = 0;
             log_error("js-mir: parameter metadata allocation failed for %d formals", pc);
             return;
         }
@@ -1459,15 +1363,15 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     }
 
     // detect rest params (...rest as last parameter)
-    fc->has_rest_param = false;
-    fc->has_non_simple_params = false;
+    JM_JS_FACT(fc, has_rest_param) = false;
+    JM_JS_FACT(fc, has_non_simple_params) = false;
     if (pc > 0) {
         JsAstNode* last_p = fn->params;
         while (last_p && last_p->next) last_p = last_p->next;
         if (last_p && (last_p->node_type == JS_AST_NODE_REST_ELEMENT ||
                        last_p->node_type == JS_AST_NODE_SPREAD_ELEMENT)) {
-            fc->has_rest_param = true;
-            fc->has_non_simple_params = true;
+            JM_JS_FACT(fc, has_rest_param) = true;
+            JM_JS_FACT(fc, has_non_simple_params) = true;
         }
         // v20: detect non-simple params (default, destructuring, rest, or non-identifier)
         JsAstNode* check_p = fn->params;
@@ -1477,14 +1381,14 @@ void jm_infer_param_types(JsFuncCollected* fc) {
                 check_p->node_type == JS_AST_NODE_OBJECT_PATTERN ||
                 check_p->node_type == JS_AST_NODE_REST_ELEMENT ||
                 check_p->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
-                fc->has_non_simple_params = true;
+                JM_JS_FACT(fc, has_non_simple_params) = true;
                 break;
             }
             // Also detect params that are not identifiers (e.g. corrupted rest params
             // where the AST builder produces a LITERAL node instead of REST_ELEMENT)
             if (check_p->node_type != JS_AST_NODE_IDENTIFIER &&
                 check_p->node_type != (int)TS_AST_NODE_PARAMETER) {
-                fc->has_non_simple_params = true;
+                JM_JS_FACT(fc, has_non_simple_params) = true;
                 break;
             }
             check_p = check_p->next;
@@ -1579,8 +1483,8 @@ void jm_infer_param_types(JsFuncCollected* fc) {
     }
 
     // Accumulate evidence
-    jm_infer_walk(fn->body, param_bindings, evidence, pc,
-                  self_name && self_name[0] ? self_name : NULL);
+    jm_infer_indexed(mt, fn, param_bindings, evidence, pc,
+                     self_name && self_name[0] ? self_name : NULL);
 
     // P6: Alias tracking — if `let x = param` appears in the function body,
     // re-walk with `x` added as an alias for that param so evidence on `x`
@@ -1628,8 +1532,8 @@ void jm_infer_param_types(JsFuncCollected* fc) {
             FnParamEvidence* alias_evidence = (FnParamEvidence*)mem_calloc(
                 (size_t)alias_count, sizeof(*alias_evidence), MEM_CAT_JS_RUNTIME);
             if (alias_evidence) {
-                jm_infer_walk(fn->body, alias_bindings, alias_evidence, alias_count,
-                              self_name && self_name[0] ? self_name : NULL);
+                jm_infer_indexed(mt, fn, alias_bindings, alias_evidence, alias_count,
+                                 self_name && self_name[0] ? self_name : NULL);
                 // merge alias evidence back to original params
                 for (int ai = 0; ai < alias_count; ai++) {
                     int pi = alias_map[ai];
@@ -1702,156 +1606,84 @@ bool jm_add_chain_has_string(JsAstNode* expr) {
     return false;
 }
 
-// Infer return type by collecting types from all return statements.
-// For recursive calls to self, assume result type matches the base-case return type.
-void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
-                                       JsFuncCollected* fc, TypeId* collected,
-                                       int* count, int max_count) {
-    if (!node || *count >= max_count) return;
-
-    switch (node->node_type) {
-    case JS_AST_NODE_RETURN_STATEMENT: {
-        JsReturnNode* ret = (JsReturnNode*)node;
-        if (!ret->argument) {
-            collected[(*count)++] = LMD_TYPE_NULL;
-            return;
-        }
-        // Determine expression type statically
-        JsAstNode* expr = ret->argument;
-        TypeId t = LMD_TYPE_ANY;
-
-        if (expr->node_type == JS_AST_NODE_LITERAL) {
-            JsLiteralNode* lit = (JsLiteralNode*)expr;
-            switch (lit->literal_type) {
-            case JS_LITERAL_NUMBER: {
-                if (lit->is_bigint) {
-                    t = LMD_TYPE_DECIMAL;
-                    break;
-                }
-                t = LMD_TYPE_FLOAT;
-                break;
-            }
-            case JS_LITERAL_BOOLEAN: t = LMD_TYPE_BOOL; break;
-            case JS_LITERAL_STRING:  t = LMD_TYPE_STRING; break;
-            default: break;
-            }
-        } else if (expr->node_type == JS_AST_NODE_IDENTIFIER) {
-            // parameter return values inherit the already-proven native lane.
-            JsIdentifierNode* id = (JsIdentifierNode*)expr;
-            JsAstNode* param = fc && fc->node ? fc->node->params : NULL;
-            for (int pi = 0; param && fc && pi < fc->param_count;
-                    pi++, param = param->next) {
-                if (jm_js_name_equal(id->name, jm_param_binding_name(param))) {
-                    TypeId param_type = jm_param_type(fc, pi);
-                    if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT)
-                        t = param_type;
-                    break;
-                }
-            }
-        } else if (expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
-            JsBinaryNode* bin = (JsBinaryNode*)expr;
-            switch (bin->op) {
-            case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
-            case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
-                t = LMD_TYPE_BOOL; break;
-            case JS_OP_ADD:
-                // plus is string concat when any operand is a string; otherwise
-                // unknown operands must stay boxed because param + param can
-                // still concatenate at runtime.
-                if (jm_expr_has_bigint_literal(expr))
-                    t = LMD_TYPE_ANY;
-                else if (jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right))
-                    t = LMD_TYPE_STRING;
-                else
-                    t = LMD_TYPE_ANY;
-                break;
-            case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD:
-                t = jm_expr_has_bigint_literal(expr) ? LMD_TYPE_ANY : LMD_TYPE_FLOAT;
-                break;
-            case JS_OP_DIV: case JS_OP_EXP:
-                t = jm_expr_has_bigint_literal(expr) ? LMD_TYPE_ANY : LMD_TYPE_FLOAT;
-                break;
-            default: break;
-            }
-        } else if (expr->node_type == JS_AST_NODE_CALL_EXPRESSION) {
-            // Recursive call: assume same return type (will be validated)
-            JsCallNode* call = (JsCallNode*)expr;
-            if (self_name && call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
-                JsIdentifierNode* cid = (JsIdentifierNode*)call->callee;
-                const char* cn = jm_var_name(cid->name);
-                if (strncmp(cn, self_name, strlen(self_name)) == 0) {
-                    t = LMD_TYPE_FLOAT; // recursive JS Number calls return binary64
-                }
-            }
-        }
-        collected[(*count)++] = t;
+// Classify one return node. The indexed owner filter below excludes nested
+// functions, so this helper has no recursive AST traversal of its own.
+static void jm_collect_return_type(JsAstNode* node, const char* self_name,
+        JsFuncCollected* fc, TypeId* collected, int* count, int max_count) {
+    if (!node || node->node_type != JS_AST_NODE_RETURN_STATEMENT ||
+            !count || *count >= max_count) return;
+    JsReturnNode* ret = (JsReturnNode*)node;
+    if (!ret->argument) {
+        collected[(*count)++] = LMD_TYPE_NULL;
         return;
     }
-    // Recurse into sub-statements (but NOT into nested function bodies)
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        JsAstNode* s = blk->statements;
-        while (s) { jm_infer_return_type_walk(s, self_name, fc, collected, count, max_count); s = s->next; }
-        break;
+    JsAstNode* expr = ret->argument;
+    TypeId t = LMD_TYPE_ANY;
+    if (expr->node_type == JS_AST_NODE_LITERAL) {
+        JsLiteralNode* lit = (JsLiteralNode*)expr;
+        if (lit->literal_type == JS_LITERAL_NUMBER) {
+            t = lit->is_bigint ? LMD_TYPE_DECIMAL : LMD_TYPE_FLOAT;
+        } else if (lit->literal_type == JS_LITERAL_BOOLEAN) {
+            t = LMD_TYPE_BOOL;
+        } else if (lit->literal_type == JS_LITERAL_STRING) {
+            t = LMD_TYPE_STRING;
+        }
+    } else if (expr->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)expr;
+        JsAstNode* param = fc && fc->node ? fc->node->params : NULL;
+        for (int pi = 0; param && fc && pi < JM_PARAM_COUNT(fc);
+                pi++, param = param->next) {
+            if (jm_js_name_equal(id->name, jm_param_binding_name(param))) {
+                TypeId param_type = jm_param_type(fc, pi);
+                if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT) t = param_type;
+                break;
+            }
+        }
+    } else if (expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
+        JsBinaryNode* bin = (JsBinaryNode*)expr;
+        switch (bin->op) {
+        case JS_OP_LT: case JS_OP_LE: case JS_OP_GT: case JS_OP_GE:
+        case JS_OP_EQ: case JS_OP_NE: case JS_OP_STRICT_EQ: case JS_OP_STRICT_NE:
+            t = LMD_TYPE_BOOL; break;
+        case JS_OP_ADD:
+            if (!jm_expr_has_bigint_literal(expr) &&
+                    (jm_add_chain_has_string(bin->left) || jm_add_chain_has_string(bin->right)))
+                t = LMD_TYPE_STRING;
+            break;
+        case JS_OP_SUB: case JS_OP_MUL: case JS_OP_MOD: case JS_OP_DIV: case JS_OP_EXP:
+            t = jm_expr_has_bigint_literal(expr) ? LMD_TYPE_ANY : LMD_TYPE_FLOAT;
+            break;
+        default: break;
+        }
+    } else if (expr->node_type == JS_AST_NODE_CALL_EXPRESSION) {
+        JsCallNode* call = (JsCallNode*)expr;
+        if (self_name && call->callee && call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
+            const char* cn = jm_var_name(((JsIdentifierNode*)call->callee)->name);
+            if (strncmp(cn, self_name, strlen(self_name)) == 0) t = LMD_TYPE_FLOAT;
+        }
     }
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* n = (JsIfNode*)node;
-        jm_infer_return_type_walk(n->consequent, self_name, fc, collected, count, max_count);
-        jm_infer_return_type_walk(n->alternate, self_name, fc, collected, count, max_count);
-        break;
-    }
-    case AST_NODE_LOOP: {
-        AstLoopControlNode* loop = (AstLoopControlNode*)node;
-        jm_infer_return_type_walk(loop->body, self_name, fc, collected, count, max_count);
-        break;
-    }
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* n = (JsTryNode*)node;
-        jm_infer_return_type_walk(n->block, self_name, fc, collected, count, max_count);
-        jm_infer_return_type_walk(n->handler, self_name, fc, collected, count, max_count);
-        jm_infer_return_type_walk(n->finalizer, self_name, fc, collected, count, max_count);
-        break;
-    }
-    case JS_AST_NODE_CATCH_CLAUSE: {
-        JsCatchNode* n = (JsCatchNode*)node;
-        jm_infer_return_type_walk(n->body, self_name, fc, collected, count, max_count);
-        break;
-    }
-    case JS_AST_NODE_SWITCH_STATEMENT: {
-        JsSwitchNode* n = (JsSwitchNode*)node;
-        JsAstNode* c = n->cases;
-        while (c) { jm_infer_return_type_walk(c, self_name, fc, collected, count, max_count); c = c->next; }
-        break;
-    }
-    case JS_AST_NODE_SWITCH_CASE: {
-        JsSwitchCaseNode* n = (JsSwitchCaseNode*)node;
-        JsAstNode* s = n->consequent;
-        while (s) { jm_infer_return_type_walk(s, self_name, fc, collected, count, max_count); s = s->next; }
-        break;
-    }
-    default: break;
-    }
+    collected[(*count)++] = t;
 }
 
-void jm_infer_return_type(JsFuncCollected* fc) {
+void jm_infer_return_type(JsMirTranspiler* mt, JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
-    fc->return_type = LMD_TYPE_ANY;
+    JM_JS_FACT(fc, return_type) = LMD_TYPE_ANY;
 
     // Phase 3.4: check for explicit TS return type annotation
     if (fn->ts_return_type) {
         TsTypeAnnotationNode* ann = fn->ts_return_type;
         if (ann->type_expr && ann->type_expr->node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
             TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)ann->type_expr;
-            fc->return_type = pt->predefined_id;
+            JM_JS_FACT(fc, return_type) = pt->predefined_id;
             log_debug("js-mir P3.4: annotation-based return type for %s: %s",
                 fn->name ? fn->name->chars : "(anon)",
-                fc->return_type == LMD_TYPE_INT ? "INT" : fc->return_type == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");
+                JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" : JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");
             return;
         }
     }
 
     if (jm_expr_has_bigint_literal(fn->body)) {
-        fc->return_type = LMD_TYPE_ANY;
+        JM_JS_FACT(fc, return_type) = LMD_TYPE_ANY;
         log_debug("js-mir P4: boxed return for %s because body uses BigInt literals", fc->name);
         return;
     }
@@ -1868,10 +1700,10 @@ void jm_infer_return_type(JsFuncCollected* fc) {
             JsLiteralNode* lit = (JsLiteralNode*)fn->body;
             if (lit->literal_type == JS_LITERAL_NUMBER) {
                 if (lit->is_bigint) {
-                    fc->return_type = LMD_TYPE_DECIMAL;
+                    JM_JS_FACT(fc, return_type) = LMD_TYPE_DECIMAL;
                     return;
                 }
-                fc->return_type = LMD_TYPE_FLOAT;
+                JM_JS_FACT(fc, return_type) = LMD_TYPE_FLOAT;
             }
         }
         return;
@@ -1879,11 +1711,21 @@ void jm_infer_return_type(JsFuncCollected* fc) {
 
     TypeId collected[32];
     int count = 0;
-    jm_infer_return_type_walk(fn->body, self_name && self_name[0] ? self_name : NULL,
-                               fc, collected, &count, 32);
+    const char* return_self_name = self_name && self_name[0] ? self_name : NULL;
+    if (mt && mt->tp) {
+        AstIndex* index = &mt->tp->ast_index;
+        AstNodeId fn_node_id = ast_index_find(index, (AstNode*)fn);
+        AstFunctionId function_id = fn_node_id == AST_NODE_ID_INVALID
+            ? AST_FUNCTION_ID_INVALID : index->owner_functions[fn_node_id];
+        for (uint32_t i = 0; i < index->count && count < 32; i++) {
+            if (index->owner_functions[i] != function_id) continue;
+            jm_collect_return_type(index->nodes[i], return_self_name, fc,
+                collected, &count, 32);
+        }
+    }
 
     if (count == 0) {
-        fc->return_type = LMD_TYPE_NULL; // no return statements → returns undefined
+        JM_JS_FACT(fc, return_type) = LMD_TYPE_NULL; // no return statements → returns undefined
         return;
     }
 
@@ -1905,19 +1747,19 @@ void jm_infer_return_type(JsFuncCollected* fc) {
                 (unified == LMD_TYPE_FLOAT && collected[i] == LMD_TYPE_INT)) {
                 unified = LMD_TYPE_FLOAT; // int + float → float
             } else {
-                fc->return_type = LMD_TYPE_ANY;
+                JM_JS_FACT(fc, return_type) = LMD_TYPE_ANY;
                 return;
             }
         }
     }
 
     if (has_concrete && !has_any) {
-        fc->return_type = unified;
+        JM_JS_FACT(fc, return_type) = unified;
     }
 
     log_debug("js-mir P4: inferred return type for %s: %s", fc->name,
-        fc->return_type == LMD_TYPE_INT ? "INT" :
-        fc->return_type == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");
+        JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" :
+        JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");
 }
 
 // Return expressions whose values always fit directly in Item bits or are
@@ -1975,58 +1817,26 @@ static bool jm_return_expr_needs_scalar_home(JsAstNode* expr) {
     }
 }
 
-static bool jm_return_walk_needs_scalar_home(JsAstNode* node) {
-    if (!node) return false;
-    switch (node->node_type) {
-    case JS_AST_NODE_RETURN_STATEMENT:
-        return jm_return_expr_needs_scalar_home(((JsReturnNode*)node)->argument);
-    case JS_AST_NODE_BLOCK_STATEMENT:
-        for (JsAstNode* stmt = ((JsBlockNode*)node)->statements; stmt;
-                stmt = stmt->next) {
-            if (jm_return_walk_needs_scalar_home(stmt)) return true;
+ScalarReturnClass jm_infer_boxed_return_scalar_class(JsMirTranspiler* mt,
+        JsFuncCollected* fc) {
+    if (!mt || !fc || !fc->node || !mt->tp) return SCALAR_RETURN_DYNAMIC;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId fn_id = ast_index_find(index, (AstNode*)fc->node);
+    if (fn_id == AST_NODE_ID_INVALID) return SCALAR_RETURN_DYNAMIC;
+    AstFunctionId owner = index->owner_functions[fn_id];
+    bool needs_home = false;
+    for (uint32_t i = 0; i < index->count; i++) {
+        AstNode* node = index->nodes[i];
+        if (!node || index->owner_functions[i] != owner ||
+                node->node_type != JS_AST_NODE_RETURN_STATEMENT ||
+                !jm_index_node_descends(index, i, fn_id)) continue;
+        if (jm_return_expr_needs_scalar_home(((JsReturnNode*)node)->argument)) {
+            needs_home = true;
+            break;
         }
-        return false;
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* branch = (JsIfNode*)node;
-        return jm_return_walk_needs_scalar_home(branch->consequent) ||
-            jm_return_walk_needs_scalar_home(branch->alternate);
     }
-    case AST_NODE_LOOP:
-        return jm_return_walk_needs_scalar_home(((AstLoopControlNode*)node)->body);
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* attempt = (JsTryNode*)node;
-        return jm_return_walk_needs_scalar_home(attempt->block) ||
-            jm_return_walk_needs_scalar_home(attempt->handler) ||
-            jm_return_walk_needs_scalar_home(attempt->finalizer);
-    }
-    case JS_AST_NODE_CATCH_CLAUSE:
-        return jm_return_walk_needs_scalar_home(((JsCatchNode*)node)->body);
-    case JS_AST_NODE_SWITCH_STATEMENT:
-        for (JsAstNode* item = ((JsSwitchNode*)node)->cases; item;
-                item = item->next) {
-            if (jm_return_walk_needs_scalar_home(item)) return true;
-        }
-        return false;
-    case JS_AST_NODE_SWITCH_CASE:
-        for (JsAstNode* stmt = ((JsSwitchCaseNode*)node)->consequent; stmt;
-                stmt = stmt->next) {
-            if (jm_return_walk_needs_scalar_home(stmt)) return true;
-        }
-        return false;
-    default:
-        // Nested function bodies are intentionally not traversed.
-        return false;
-    }
-}
-
-ScalarReturnClass jm_infer_boxed_return_scalar_class(JsFuncCollected* fc) {
-    if (!fc || !fc->node) return SCALAR_RETURN_DYNAMIC;
-    JsAstNode* body = fc->node->body;
-    bool needs_home = body && body->node_type == JS_AST_NODE_BLOCK_STATEMENT
-        ? jm_return_walk_needs_scalar_home(body)
-        : jm_return_expr_needs_scalar_home(body);
     if (!needs_home) return SCALAR_RETURN_NONE;
-    return em_scalar_return_class_for_type(fc->return_type);
+    return em_scalar_return_class_for_type(JM_JS_FACT(fc, return_type));
 }
 
 // ============================================================================
@@ -2144,10 +1954,6 @@ void jm_prescan_widen_walk(JsAstNode* node, struct hashmap* float_arrays,
                 jm_expression_has_float_hint(asgn->right)) {
                 should_widen = true;
             }
-            log_debug("P9-DBG: prescan assignment '%.*s' op=%d rhs_type=%d float_hint=%d should_widen=%d",
-                (int)dbg_id->name->len, dbg_id->name->chars, asgn->op,
-                asgn->right ? asgn->right->node_type : -1,
-                asgn->right ? jm_expression_has_float_hint(asgn->right) : 0, should_widen);
             if (should_widen) {
                 const char* name = jm_format_name("%.*s",
                     (int)dbg_id->name->len, dbg_id->name->chars);
@@ -2318,7 +2124,7 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
     if (mt->in_generator) {
         JsAstNode* chk = first_arg;
         while (chk) {
-            if (jm_has_yield(chk) || (mt->in_async && jm_count_awaits(chk) > 0)) {
+            if (jm_has_yield(mt, chk) || (mt->in_async && jm_count_awaits(mt, chk) > 0)) {
                 has_yield_in_args = true;
                 break;
             }
@@ -2403,7 +2209,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
     int arr_spill_slot = -1;
     if (mt->in_generator) {
         JsAstNode* cy = first_arg;
-        while (cy) { if (jm_has_yield(cy)) { arr_spill_slot = jm_gen_spill_save(mt, array); break; } cy = cy->next; }
+        while (cy) { if (jm_has_yield(mt, cy)) { arr_spill_slot = jm_gen_spill_save(mt, array); break; } cy = cy->next; }
     }
 
     JsAstNode* arg = first_arg;
@@ -2413,7 +2219,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             MIR_reg_t src_raw = jm_transpile_box_item(mt, spread->argument);
             jm_emit_error_lane_propagate_check(mt);
             // Generator spill: restore array after yield in spread argument
-            if (arr_spill_slot >= 0 && jm_has_yield(spread->argument)) {
+            if (arr_spill_slot >= 0 && jm_has_yield(mt, spread->argument)) {
                 jm_gen_spill_load(mt, array, arr_spill_slot);
             }
             // Convert any iterable to array first
@@ -2445,7 +2251,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
             MIR_reg_t val = jm_transpile_box_item(mt, arg);
             jm_emit_error_lane_propagate_check(mt);
             // Generator spill: restore array after yield in argument
-            if (arr_spill_slot >= 0 && jm_has_yield(arg)) {
+            if (arr_spill_slot >= 0 && jm_has_yield(mt, arg)) {
                 jm_gen_spill_load(mt, array, arr_spill_slot);
             }
             jm_callr_2(mt, "js_array_push", MIR_T_I64, array, val);

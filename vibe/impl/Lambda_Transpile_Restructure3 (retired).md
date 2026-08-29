@@ -533,7 +533,7 @@ All five benchmarks now have concrete implementations with verified speedups. D1
 
 ## Appendix A: C2MIR vs MIR Direct Comparison
 
-The earlier benchmark data (from [Overall_Result.md](../../test/benchmark/Overall_Result.md)) shows C2MIR is **1.24x faster** than MIR Direct in release builds. The key differences:
+The earlier benchmark data (from [Overall_Result1.md](../../test/benchmark/Overall_Result1.md)) shows C2MIR is **1.24x faster** than MIR Direct in release builds. The key differences:
 
 | Aspect | C2MIR | MIR Direct |
 |--------|-------|------------|

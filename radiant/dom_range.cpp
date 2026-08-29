@@ -18,6 +18,7 @@
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
+#include "../lambda/io/mark_editor.hpp"
 #include "view.hpp"  // For MARKUP_NAME_* constants
 #include "render.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
@@ -1243,6 +1244,10 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
     size_t left_bytes  = u8_split;
     size_t right_bytes = original->length - u8_split;
 
+    DomElement* parent = original->parent->as_element();
+    if (!parent) return nullptr;
+    DomNode* after = original->next_sibling;
+
     // Allocate both replacements before mutating the original. The new node's
     // inline payload recycles with its primary allocation.
     DomText* right = DomText::create_detached_copy(
@@ -1255,14 +1260,57 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
         return nullptr;
     }
 
-    // Insert right after original.
-    DomNode* parent = original->parent;
-    DomNode* after  = original->next_sibling;
-    if (after) parent->insert_before(static_cast<DomNode*>(right), after);
-    else       parent->append_child(static_cast<DomNode*>(right));
+    // Keep the Lambda backing in lockstep with the DOM chain. The old helper
+    // only changed sibling links, so a later layout reconciliation could
+    // resurrect the unsplit text or dereference its retired wrapper.
+    Element* parent_backing = dom_element_backing(parent);
+    int64_t original_index = parent_backing && original->native_string
+        ? dom_text_get_child_index(original) : -1;
+    bool sync_backing = original_index >= 0 && doc->input && parent_backing;
+    if (sync_backing) {
+        MarkEditor editor(doc->input, EDIT_MODE_INLINE);
+        Item inserted = editor.elmt_insert_child(
+            {.element = parent_backing}, (int)(original_index + 1),
+            {.item = s2it(right->native_string)});
+        if (get_type_id(inserted) != LMD_TYPE_ELEMENT ||
+            inserted.element != parent_backing) {
+            dom_node_schedule_detached(doc, static_cast<DomNode*>(right));
+            pool_free(doc->document_pool, left_str);
+            return nullptr;
+        }
+        String* inserted_string = parent_backing->items[original_index + 1].get_string();
+        if (inserted_string) {
+            right->native_string = inserted_string;
+            right->text = inserted_string->chars;
+            right->length = inserted_string->len;
+        }
+        if (!dom_text_replace_backed_string(original, left_str)) {
+            MarkEditor rollback(doc->input, EDIT_MODE_INLINE);
+            rollback.elmt_delete_child({.element = parent_backing},
+                                        (int)(original_index + 1));
+            dom_node_schedule_detached(doc, static_cast<DomNode*>(right));
+            pool_free(doc->document_pool, left_str);
+            return nullptr;
+        }
+        left_str = nullptr;
+    } else {
+        dom_text_adopt_document_string(original, doc, left_str);
+        left_str = nullptr;
+    }
 
-    // Truncate original.
-    dom_text_adopt_document_string(original, doc, left_str);
+    // In ui_mode, MarkEditor may have already relinked the new fat text
+    // wrapper while inserting its backing String. Re-linking an already-last
+    // node through append_child() would make its next_sibling point to itself.
+    bool already_linked = right->parent == static_cast<DomNode*>(parent) &&
+        (after ? right->next_sibling == after : parent->last_child == (DomNode*)right);
+    bool linked = already_linked || (after
+        ? parent->insert_before(static_cast<DomNode*>(right), after)
+        : parent->append_child(static_cast<DomNode*>(right)));
+    if (!linked) {
+        // The captured sibling relationship is valid here, so this is an
+        // allocation/structural failure rather than a normal DOM branch.
+        return nullptr;
+    }
 
     if (state) dom_mutation_text_split(state, original, right, offset);
     return right;

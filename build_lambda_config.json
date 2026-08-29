@@ -3026,6 +3026,7 @@
               "radiant/css_animation.cpp",
               "radiant/css_display.cpp",
               "radiant/css_cascade.cpp",
+              "radiant/css_display.cpp",
               "radiant/css_prop_table.cpp",
               "lambda/input/css/css_engine.cpp",
               "lambda/input/css/selector_matcher.cpp",

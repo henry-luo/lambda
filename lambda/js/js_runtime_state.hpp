@@ -730,6 +730,7 @@ struct JsAsyncContextStateRecord {
     JsInterpEnv* ast_body_env = NULL;
     AstNode* ast_resume_statement = NULL;
     Item ast_await_values = {};
+    JsInterpGeneratorLoopContinuation* ast_loop_continuations = NULL;
     int64_t ast_await_skip = 0;
     bool ast_initialized = false;
 };

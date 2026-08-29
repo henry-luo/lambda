@@ -175,11 +175,6 @@ struct JsFuncCollected {
     const char* body_name;  // NamePool-owned backend body symbol
     MIR_item_t func_item;        // public checked wrapper
     MIR_item_t body_func_item;   // internal boxed implementation body
-    // Capture info
-    FnCapture* captures;          // dynamically allocated capture array
-    int captures_capacity;        // allocated size
-    int capture_count;
-    FnAnalysis analysis;
     int parent_index;       // index of parent function in func_entries (-1 = top level)
     // Scope env: shared closure environment for all child closures
     bool has_scope_env;              // true if this func allocates a scope env
@@ -196,10 +191,6 @@ struct JsFuncCollected {
     int closure_env_parent_link_slot; // slot in copied closure env holding direct parent scope_env
     // phase 4: type inference results. Per-formal type records live in the
     // shared FnAnalysis metadata and are sized from the JS AST parameter list.
-    TypeId return_type;             // inferred return type
-    ScalarReturnClass boxed_return_scalar_class; // caller-home need for boxed body
-    int param_count;                // cached param count
-    int formal_length;              // ES spec .length: params before first default/rest (-1 = same as param_count)
     MIR_item_t native_func_item;    // native version (NULL if not generated)
     bool has_native_version;        // whether native version was generated
     NativeReturnKind native_return_kind; // ABI result for the native entry
@@ -214,17 +205,7 @@ struct JsFuncCollected {
     bool is_class_static_method;    // true for static class methods/accessors
     bool is_class_field_initializer; // synthetic per-instance field capability
     JsClassEntry* owner_class;       // innermost class whose lexical body contains this function
-    bool has_rest_param;            // true if last param is ...rest
-    bool uses_arguments;            // v18q: true if function body references 'arguments'
-    bool has_non_simple_params;      // v20: true if function has default/rest/destructuring params (no arguments aliasing)
-    bool is_reassigned;              // function name is an assignment target somewhere in the module
     bool is_strict;                  // v30: true if function is strict mode (own directive, inherits, or class method)
-    bool has_direct_eval;            // true if own function body contains syntactic eval(...)
-    bool observes_this;              // own body or lexical arrows read this
-    bool observes_new_target;        // own body or lexical arrows read new.target
-    // The function either contains a `with` body or is created inside one.
-    // Both forms need dynamic Object Environment Record lookup when invoked.
-    bool uses_with;
     // A5: Constructor shape pre-allocation
     int ctor_prop_count;            // number of this.xxx = yyy properties found
     bool ctor_shape_overflow;       // optimization disabled after exceeding shape metadata capacity
@@ -232,26 +213,31 @@ struct JsFuncCollected {
     int ctor_prop_lens[16];         // lengths of each property name
     TypeId ctor_prop_types[16];     // P1: detected field type from constructor init (LMD_TYPE_NULL = unknown)
     int ctor_prop_param_idx[16];    // P4b: maps property → constructor param index (-1 = not a param)
-    // immutable post-collection scope facts; cache AST walks shared by capture,
-    // propagation, and scope-environment planning.
-    struct hashmap* cached_var_locals;
-    struct hashmap* cached_all_locals;
-    struct hashmap* cached_direct_lexicals;
-    struct hashmap* cached_annexb_suppressed;
-    bool cached_annexb_suppressed_ready;
 };
 
+static inline FnAnalysis* jm_function_analysis(JsFuncCollected* fc) {
+    // module_fc is a synthetic scope carrier without an AST node; expose a
+    // read-only zero record so shared fact access remains valid while js_main
+    // uses it as current_fc for the module scope environment.
+    static FnAnalysis empty_analysis = {};
+    return fc && fc->node ? fc->node->analysis : &empty_analysis;
+}
+
+#define JM_CAPTURE_ARRAY(fc) (jm_function_analysis(fc)->captures)
+#define JM_CAPTURE_COUNT(fc) (jm_function_analysis(fc)->capture_count)
+#define JM_JS_FACT(fc, field) (jm_function_analysis(fc)->js_##field)
+#define JM_PARAM_COUNT(fc) (jm_function_analysis(fc)->param_count)
+#define JM_JS_CACHE(fc, field) (jm_function_analysis(fc)->js_cached_##field)
+
 static inline FnParamTypeInfo* jm_param_info(JsFuncCollected* fc, int index) {
-    if (!fc || index < 0 || index >= fc->analysis.param_count ||
-            !fc->analysis.param_types) return NULL;
-    return &fc->analysis.param_types[index];
+    FnAnalysis* analysis = jm_function_analysis(fc);
+    if (!analysis || index < 0 || index >= analysis->param_count || !analysis->param_types) return NULL;
+    return &analysis->param_types[index];
 }
 
 static inline const FnParamTypeInfo* jm_param_info_const(const JsFuncCollected* fc,
         int index) {
-    if (!fc || index < 0 || index >= fc->analysis.param_count ||
-            !fc->analysis.param_types) return NULL;
-    return &fc->analysis.param_types[index];
+    return jm_param_info((JsFuncCollected*)fc, index);
 }
 
 static inline TypeId jm_param_type(const JsFuncCollected* fc, int index) {
@@ -267,34 +253,36 @@ static inline void jm_set_param_type(JsFuncCollected* fc, int index, TypeId type
 // Free dynamically allocated scope_env_names for all func_entries
 static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_count) {
     for (int i = 0; i < func_count; i++) {
-        if (func_entries[i].cached_var_locals) {
-            hashmap_free(func_entries[i].cached_var_locals);
-            func_entries[i].cached_var_locals = NULL;
+        FnAnalysis* analysis = jm_function_analysis(&func_entries[i]);
+        if (analysis && analysis->js_cached_var_locals) {
+            hashmap_free(analysis->js_cached_var_locals);
+            analysis->js_cached_var_locals = NULL;
         }
-        if (func_entries[i].cached_all_locals) {
-            hashmap_free(func_entries[i].cached_all_locals);
-            func_entries[i].cached_all_locals = NULL;
+        if (analysis && analysis->js_cached_all_locals) {
+            hashmap_free(analysis->js_cached_all_locals);
+            analysis->js_cached_all_locals = NULL;
         }
-        if (func_entries[i].cached_direct_lexicals) {
-            hashmap_free(func_entries[i].cached_direct_lexicals);
-            func_entries[i].cached_direct_lexicals = NULL;
+        if (analysis && analysis->js_cached_direct_lexicals) {
+            hashmap_free(analysis->js_cached_direct_lexicals);
+            analysis->js_cached_direct_lexicals = NULL;
         }
-        if (func_entries[i].cached_annexb_suppressed) {
-            hashmap_free(func_entries[i].cached_annexb_suppressed);
-            func_entries[i].cached_annexb_suppressed = NULL;
+        if (analysis && analysis->js_cached_annexb_suppressed) {
+            hashmap_free(analysis->js_cached_annexb_suppressed);
+            analysis->js_cached_annexb_suppressed = NULL;
         }
+        if (analysis) analysis->js_cached_annexb_suppressed_ready = false;
         if (func_entries[i].scope_env_names) {
             mem_free(func_entries[i].scope_env_names);
             func_entries[i].scope_env_names = NULL;
         }
-        if (func_entries[i].captures) {
-            mem_free(func_entries[i].captures);
-            func_entries[i].captures = NULL;
+        if (analysis && analysis->captures) {
+            mem_free(analysis->captures);
+            analysis->captures = NULL;
+            analysis->capture_capacity = 0;
         }
-        if (func_entries[i].analysis.param_types) {
-            mem_free(func_entries[i].analysis.param_types);
-            func_entries[i].analysis.param_types = NULL;
-            func_entries[i].analysis.param_count = 0;
+        if (analysis && analysis->param_types) {
+            mem_free(analysis->param_types);
+            analysis->param_types = NULL; analysis->param_count = 0;
         }
         // shape cache slots are pool-owned because generated MIR embeds their addresses.
     }
@@ -302,16 +290,17 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
 
 // Ensure captures array has room for at least one more entry
 static void __attribute__((unused)) jm_ensure_captures_capacity(JsFuncCollected* fc) {
-    if (fc->capture_count >= fc->captures_capacity) {
-        int new_cap = fc->captures_capacity == 0 ? 16 : fc->captures_capacity * 2;
+    FnAnalysis* analysis = jm_function_analysis(fc);
+    if (!analysis) return;
+    if (analysis->capture_count >= analysis->capture_capacity) {
+        int new_cap = analysis->capture_capacity == 0 ? 16 : analysis->capture_capacity * 2;
         FnCapture* new_arr = (FnCapture*)mem_calloc(new_cap, sizeof(FnCapture), MEM_CAT_JS_RUNTIME);
-        if (fc->captures && fc->capture_count > 0) {
-            memcpy(new_arr, fc->captures, fc->capture_count * sizeof(FnCapture));
+        if (analysis->captures && analysis->capture_count > 0) {
+            memcpy(new_arr, analysis->captures, analysis->capture_count * sizeof(FnCapture));
         }
-        mem_free(fc->captures);
-        fc->captures = new_arr;
-        fc->analysis.captures = fc->captures;
-        fc->captures_capacity = new_cap;
+        mem_free(analysis->captures);
+        analysis->captures = new_arr;
+        analysis->capture_capacity = new_cap;
     }
 }
 
@@ -673,36 +662,5 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         mem_free(mt->module_fc.scope_env_names);
         mt->module_fc.scope_env_names = NULL;
     }
-    if (mt->module_fc.captures) {
-        mem_free(mt->module_fc.captures);
-        mt->module_fc.captures = NULL;
-    }
-    if (mt->em.frame.root_bindings) {
-        mem_free(mt->em.frame.root_bindings);
-        mt->em.frame.root_bindings = NULL;
-    }
-    if (mt->em.frame.root_binding_by_reg) {
-        mem_free(mt->em.frame.root_binding_by_reg);
-        mt->em.frame.root_binding_by_reg = NULL;
-    }
-    if (mt->em.frame.root_binding_by_home) {
-        mem_free(mt->em.frame.root_binding_by_home);
-        mt->em.frame.root_binding_by_home = NULL;
-    }
-    if (mt->em.frame.gc_candidates) {
-        mem_free(mt->em.frame.gc_candidates);
-        mt->em.frame.gc_candidates = NULL;
-    }
-    if (mt->em.frame.gc_candidate_by_reg) {
-        mem_free(mt->em.frame.gc_candidate_by_reg);
-        mt->em.frame.gc_candidate_by_reg = NULL;
-    }
-    if (mt->em.frame.gc_call_sites) {
-        mem_free(mt->em.frame.gc_call_sites);
-        mt->em.frame.gc_call_sites = NULL;
-    }
-    if (mt->em.frame.env_bindings) {
-        mem_free(mt->em.frame.env_bindings);
-        mt->em.frame.env_bindings = NULL;
-    }
+    em_frame_dispose(&mt->em);
 }

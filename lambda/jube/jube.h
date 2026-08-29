@@ -372,6 +372,7 @@ typedef enum JubeDomElementOperation {
     JUBE_DOM_GET_SCREEN_CTM,
     JUBE_DOM_AFTER,
     JUBE_DOM_BEFORE,
+    JUBE_DOM_SPLIT_TEXT,
 } JubeDomElementOperation;
 
 struct JubeTypeDef {

@@ -154,7 +154,9 @@ uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1) 
 bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture) {
     if (!mt || !capture || !mt->module_consts || capture->force_env_capture) return false;
     JsModuleConstEntry* entry = jm_find_module_const(mt, capture->name);
-    return entry && entry->const_type == MCONST_MODVAR;
+    return entry && entry->const_type == MCONST_MODVAR &&
+        (entry->var_kind != JS_VAR_CONST || entry->is_iife_var ||
+            entry->is_iife_func_decl);
 }
 
 bool jm_capture_is_lexical_meta_binding(const char* name) {
