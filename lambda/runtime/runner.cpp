@@ -1890,6 +1890,7 @@ void runtime_release_script_generation(Runtime* runtime, int first_script_index,
     // The batch realm has already dropped callbacks, globals, and module
     // registry entries. Retire the exact tail before the next test reuses its
     // module IDs; otherwise an old AST can retain a mismatched sealed slab.
+    js_release_global_var_module_bindings_from(first_module_state_id);
     lambda_module_state_release_from(first_module_state_id);
     if (runtime->scripts) {
         int first = first_script_index;
