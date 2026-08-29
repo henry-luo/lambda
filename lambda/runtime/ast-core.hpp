@@ -295,6 +295,17 @@ struct NameEntry {
     bool is_mutable;
     bool is_var_param;
     bool is_parameter;
+    // CW29/S9.1.3 (gated on LAMBDA_COW_CAPTURE): this plain `pn` parameter's
+    // body writes through it, so both tiers snapshot it at entry -- one
+    // share-mark in the callee prologue; the first write detaches a private
+    // copy. Computed once at FUNCTION_END from the shared body walk.
+    bool cow_param_mutated;
+    // CW31/S9.2.4 face 4: when this binding holds a mutable VIEW, the ultimate
+    // base binding it aliases (chased through view-of-view). The call-site
+    // exclusivity check conflicts two `var` args sharing an effective root, so
+    // overlapping subviews of one base are rejected at the same whole-base
+    // granularity face 3 already uses -- no region math in v1.
+    struct NameEntry* view_base;
     // A plain (non-`var`) parameter of a `pn`. Under the current pn ABI such a
     // parameter is locally mutable AND its typed-container writes stay visible
     // to the caller, so a checked write must use the in-place setter rather
@@ -743,6 +754,22 @@ static inline AstNode* ast_unwrap_primary(AstNode* node) {
         node = ((AstPrimaryNode*)node)->expr;
     }
     return node;
+}
+
+// The root identifier of a member/index chain (`t.nodes[i].value` -> `t`), or
+// the bare identifier itself; NULL when the base is not a name (a call, a
+// literal). Promoted from build_ast.cpp's compound_root_ident (rule 13) so the
+// CW30 loop-body walk, the CW24 place diagnostics, and the call-site
+// exclusivity check all resolve roots identically.
+static inline AstIdentNode* ast_compound_root_ident(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node) return NULL;
+    if (node->node_type == AST_NODE_IDENT) return (AstIdentNode*)node;
+    if (node->node_type == AST_NODE_INDEX_EXPR ||
+            node->node_type == AST_NODE_MEMBER_EXPR) {
+        return ast_compound_root_ident(((AstFieldNode*)node)->object);
+    }
+    return NULL;
 }
 
 static inline bool ast_type_needs_mutable_clone(TypeId type_id) {

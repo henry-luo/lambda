@@ -1664,15 +1664,37 @@ static AstNode* unwrap_primary_node(AstNode* node) {
     return node;
 }
 
+// promoted to ast-core.hpp as ast_compound_root_ident (CW30 shares it)
 static AstIdentNode* compound_root_ident(AstNode* node) {
-    node = unwrap_primary_node(node);
-    if (!node) return NULL;
-    if (node->node_type == AST_NODE_IDENT) return (AstIdentNode*)node;
-    if (node->node_type == AST_NODE_INDEX_EXPR || node->node_type == AST_NODE_MEMBER_EXPR) {
-        AstFieldNode* field = (AstFieldNode*)node;
-        return compound_root_ident(field->object);
+    return ast_compound_root_ident(node);
+}
+
+// CW31/S9.2.4 face 4: `var v = subview(base, ...)` makes `v` a mutable view
+// whose writes reach `base`'s storage. Record the ULTIMATE base binding on the
+// view's own entry so the call-site exclusivity check can conflict two `var`
+// arguments that share a base -- the same whole-base granularity as face 3.
+// Chasing view_base here keeps view-of-view chains one hop at check time.
+static void lambda_ast_note_view_binding(AstNamedNode* named) {
+    if (!named || !named->entry || !named->as) return;
+    AstNode* init = ast_unwrap_primary(named->as);
+    if (!init || init->node_type != AST_NODE_CALL_EXPR) return;
+    AstCallNode* call = (AstCallNode*)init;
+    AstNode* callee = ast_unwrap_primary(call->function);
+    // subview resolves to a sys-func node, not a user ident
+    const char* fname = NULL;
+    size_t fname_len = 0;
+    if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+        if (info && info->name) { fname = info->name; fname_len = strlen(info->name); }
+    } else if (callee && callee->node_type == AST_NODE_IDENT) {
+        String* n = ((AstIdentNode*)callee)->name;
+        if (n) { fname = n->chars; fname_len = n->len; }
     }
-    return NULL;
+    if (!fname || fname_len != 7 || strncmp(fname, "subview", 7) != 0) return;
+    AstIdentNode* base = ast_compound_root_ident(call->argument);
+    if (!base || !base->entry) return;
+    named->entry->view_base = base->entry->view_base
+        ? base->entry->view_base : base->entry;
 }
 
 // Resolve a statically named member/index path from an explicitly annotated
@@ -2626,7 +2648,7 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     int arg_index = 0;
     int line = (int)lambda_source_span_start_point(tp->source,
         diagnostic_span).row + 1;
-    String* var_arg_roots[64];
+    NameEntry* var_arg_root_entries[64];
     int var_arg_root_count = 0;
     bool parameter_short_circuits_error = false;
 
@@ -2674,16 +2696,24 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
                     return false;
                 }
             } else {
+                // CW31 face 4: a mutable view conflicts through its BASE, so
+                // two subviews of one array (or a view and its base) reject at
+                // the sanctioned whole-base granularity. Distinct bases stay
+                // independent; region-precise checking is the ladder's later rung.
+                NameEntry* effective_root = root->entry->view_base
+                    ? root->entry->view_base : root->entry;
                 for (int i = 0; i < var_arg_root_count; i++) {
-                    if (same_name_string(var_arg_roots[i], root->name)) {
+                    if (var_arg_root_entries[i] == effective_root) {
                         record_semantic_error_span(tp, diagnostic_span, ERR_IMMUTABLE_ASSIGNMENT,
-                            "argument %d overlaps another `var` parameter; pass distinct mutable bindings",
+                            var_arg_root_entries[i] == root->entry
+                                ? "argument %d overlaps another `var` parameter; pass distinct mutable bindings"
+                                : "argument %d overlaps another `var` parameter through their shared view base; pass views of distinct arrays",
                             arg_index + 1);
                         break;
                     }
                 }
                 if (var_arg_root_count < 64) {
-                    var_arg_roots[var_arg_root_count++] = root->name;
+                    var_arg_root_entries[var_arg_root_count++] = effective_root;
                 }
             }
             // CW25/E207: a PLACE argument (`f(var m.rows[i])`) carries `any` as
@@ -8551,6 +8581,8 @@ AstNamedNode* build_param_from_parts(Transpiler* tp, SourceSpan span,
     if (tp->current_scope && tp->current_scope->is_proc) {
         NameEntry* entry = lookup_name_in_current_scope(tp, param->name);
         if (entry) {
+            // the CW29 sweep resolves body writes against this exact entry
+            param->entry = entry;
             entry->is_mutable = true;
             entry->is_var_param = is_var;
             // Record the pn-parameter fact itself rather than leaving consumers
@@ -8649,6 +8681,40 @@ void lambda_ast_mark_place_copy(AstNamedNode* named) {
     if (!root || !root->entry || !root->entry->is_mutable) return;
     named->entry->is_place_copy = true;
     named->entry->place_copy_root = root->name;
+}
+
+// CW29 rollout sweep (env-gated, LAMBDA_COW_PARAM_NOTE): report every `pn`
+// whose body writes THROUGH a plain (non-`var`) container parameter -- the
+// exact shapes whose caller-visibility flips when S9.1.3 plain-param
+// snapshots land. Rebinds are excluded (local under both semantics); interior
+// writes and passing the param onward to a mutating callee are counted.
+// Diagnostic only: it changes no behavior and exists to measure the
+// migration blast radius before CW29 ships (COW §11.9 rollout).
+static bool cow_param_note_enabled(void) {
+    static const bool enabled = getenv("LAMBDA_COW_PARAM_NOTE") != NULL;
+    return enabled;
+}
+
+static void lambda_ast_note_plain_param_writes(Transpiler* tp, AstFuncNode* fn) {
+    bool note = cow_param_note_enabled();
+    // the same walk also feeds the gated CW29 semantics: entry->cow_param_mutated
+    // tells both tiers which plain params to snapshot at activation entry
+    if (!note && !cow_capture_enabled()) return;
+    if (((AstNode*)fn)->node_type != AST_NODE_PROC || !fn->body) return;
+    for (AstNamedNode* param = fn->param; param;
+            param = (AstNamedNode*)((AstNode*)param)->next) {
+        TypeParam* pt = (TypeParam*)((AstNode*)param)->type;
+        if (!pt || pt->is_var_param || !param->entry) continue;
+        if (!ast_body_may_write_entry(fn->body, param->entry, false)) continue;
+        param->entry->cow_param_mutated = true;
+        if (!note) continue;
+        String* fname = fn->name;
+        log_warn("cow-param-note: %s:%.*s: write through plain parameter `%.*s` "
+            "becomes local to the procedure when S9.1.3 lands; add `var` to publish it",
+            tp->reference ? tp->reference : "<script>",
+            fname ? (int)fname->len : 9, fname ? fname->chars : "<anon pn>",
+            (int)param->name->len, param->name->chars);
+    }
 }
 
 // Pending CW24 candidates for the function currently being built. A mutation
@@ -9288,6 +9354,7 @@ AstNode* build_for_from_parts(Transpiler* tp, SourceSpan span,
     }
     node->type = statement_form ? set_type_any(tp, ANY_STATEMENT) :
         set_type_any(tp, ANY_LIST);
+    lambda_ast_mark_loop_snapshots(node);  // CW30/S9.2.3
     return (AstNode*)node;
 }
 
@@ -9585,6 +9652,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
             // CW24: the body is complete, so every write-back that could
             // excuse a place-copy mutation has now been seen.
             lambda_ast_flush_place_copy_diagnostics(tp);
+            if (fn) lambda_ast_note_plain_param_writes(tp, fn);  // CW29 sweep
             return 0;
         }
     }
@@ -9822,6 +9890,9 @@ static LambdaParseValue direct_ast_reduce(void* context,
         }
         active->type = statement_form ? set_type_any(tp, ANY_STATEMENT) :
             set_type_any(tp, ANY_LIST);
+        // CW30/S9.2.3: body is attached and every ident is resolved, so the
+        // loop-head snapshot decision is computable exactly once, here.
+        lambda_ast_mark_loop_snapshots(active);
         return direct_ast_value((AstNode*)active);
     }
     case LAMBDA_REDUCE_BINARY: {
@@ -10067,6 +10138,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
                     entry->is_mutable = true;
                     named->entry = entry;
                     lambda_ast_mark_place_copy(named);  // CW24
+                    lambda_ast_note_view_binding(named);  // CW31 face 4
                 }
             }
             return direct_ast_value((AstNode*)var);

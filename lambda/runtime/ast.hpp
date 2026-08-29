@@ -315,6 +315,11 @@ typedef struct AstLoopNode : AstNode {
     LoopKeyFilter key_filter;   // key type filter (ALL, INT, SYMBOL)
     bool key_only;              // for k at expr: bind primary variable to keys, not values
     bool optional;              // true for null-padded left join (`name? in ... on ...`)
+    // CW30/S9.2.3: the body may write this level's collection root, so both
+    // tiers snapshot at the loop head (share-mark + independent handle).
+    // Computed once at for-node completion; the general (non-mutating) loop
+    // stays untouched on both tiers.
+    bool snapshot_collection;
     int join_key_count;
 } AstLoopNode;
 
@@ -350,6 +355,145 @@ typedef struct AstForNode : AstNode {
     NameScope *vars;     // scope for the variables in the loop
     bool discard_result; // statement form executes its stream for effects only
 } AstForNode;
+
+// --- CW30/S9.2.3: loop-head snapshot gate (shared by both tiers) -----------
+// Lambda is functional, so by default a loop emits NO snapshot work: only a
+// loop whose body may WRITE its collection's root becomes the special case.
+// The walk is conservative -- a spurious hit costs one share-mark and a
+// possible copy, never a lost write; a miss would leave that shape iterating
+// live, so unknown callees and `var`-argument passes count as writes.
+// `include_rebind`: CW30 counts a whole-binding rebind (`arr = ...`) as a
+// write -- the loop must keep the entry-time value -- while the CW29 sweep
+// excludes it (a rebind is local to the callee under BOTH param semantics).
+static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
+        bool include_rebind) {
+    for (; node; node = node->next) {
+        AstNode* stmt = ast_unwrap_primary(node);
+        if (!stmt) continue;
+        switch (stmt->node_type) {
+        case AST_NODE_ASSIGN_STAM: {
+            AstAssignStamNode* as = (AstAssignStamNode*)stmt;
+            // a rebind publishes a new value into the binding; the loop must
+            // keep walking the entry-time one, so it needs the snapshot too
+            if (include_rebind && as->target_entry == root) return true;
+            if (ast_body_may_write_entry(as->value, root, include_rebind)) return true;
+            break;
+        }
+        case AST_NODE_INDEX_ASSIGN_STAM:
+        case AST_NODE_MEMBER_ASSIGN_STAM: {
+            AstCompoundAssignNode* ca = (AstCompoundAssignNode*)stmt;
+            AstIdentNode* ident = ast_compound_root_ident(ca->object);
+            if (ident && ident->entry == root) return true;
+            if (ca->key && ast_body_may_write_entry(ca->key, root, include_rebind)) return true;
+            if (ca->value && ast_body_may_write_entry(ca->value, root, include_rebind)) return true;
+            break;
+        }
+        case AST_NODE_CALL_EXPR: {
+            AstCallNode* call = (AstCallNode*)stmt;
+            AstNode* callee_node = ast_unwrap_primary(call->function);
+            AstFuncNode* callee = NULL;
+            if (callee_node && callee_node->node_type == AST_NODE_IDENT) {
+                AstIdentNode* fn_ident = (AstIdentNode*)callee_node;
+                AstNode* target = fn_ident->entry ? fn_ident->entry->node : NULL;
+                if (target && (target->node_type == AST_NODE_FUNC ||
+                        target->node_type == AST_NODE_PROC ||
+                        target->node_type == AST_NODE_FUNC_EXPR)) {
+                    callee = (AstFuncNode*)target;
+                }
+            }
+            AstNamedNode* param = callee ? callee->param : NULL;
+            bool callee_is_proc = callee &&
+                ((AstNode*)callee)->node_type == AST_NODE_PROC;
+            for (AstNode* arg = call->argument; arg; arg = arg->next) {
+                AstIdentNode* arg_root = ast_compound_root_ident(arg);
+                if (arg_root && arg_root->entry == root) {
+                    TypeParam* pt = param ? (TypeParam*)((AstNode*)param)->type : NULL;
+                    // unknown callee (builtins: push/splice/pop), a `var`
+                    // borrow, or -- until CW29 lands -- any plain `pn`
+                    // parameter (write-through ABI) may all mutate the root
+                    if (!callee || (pt && pt->is_var_param) || callee_is_proc) {
+                        return true;
+                    }
+                }
+                // nested calls inside the argument expression
+                if (ast_body_may_write_entry(arg, root, include_rebind)) return true;
+                if (param) param = (AstNamedNode*)((AstNode*)param)->next;
+            }
+            if (ast_body_may_write_entry(call->function, root, include_rebind)) return true;
+            break;
+        }
+        // composite statements and expressions that can hide any of the above
+        case AST_NODE_CONTENT:
+        case AST_NODE_LIST:
+        case AST_NODE_ARRAY:
+            if (ast_body_may_write_entry(((AstArrayNode*)stmt)->item, root, include_rebind)) return true;
+            break;
+        case AST_NODE_IF_EXPR: {
+            AstIfNode* if_node = (AstIfNode*)stmt;
+            if (ast_body_may_write_entry(if_node->cond, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(if_node->then, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(if_node->otherwise, root, include_rebind)) return true;
+            break;
+        }
+        case AST_NODE_WHILE_STAM: {
+            AstWhileNode* wh = (AstWhileNode*)stmt;
+            if (ast_body_may_write_entry(wh->cond, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(wh->body, root, include_rebind)) return true;
+            break;
+        }
+        case AST_NODE_FOR_EXPR:
+        case AST_NODE_FOR_STAM: {
+            AstForNode* nested = (AstForNode*)stmt;
+            for (AstNode* lv = nested->loop; lv; lv = lv->next) {
+                if (ast_body_may_write_entry(((AstLoopNode*)lv)->as, root, include_rebind)) return true;
+            }
+            if (ast_body_may_write_entry(nested->then, root, include_rebind)) return true;
+            break;
+        }
+        case AST_NODE_MATCH_EXPR: {
+            AstMatchNode* match = (AstMatchNode*)stmt;
+            if (ast_body_may_write_entry(match->scrutinee, root, include_rebind)) return true;
+            for (AstMatchArm* arm = match->first_arm; arm;
+                    arm = (AstMatchArm*)((AstNode*)arm)->next) {
+                if (ast_body_may_write_entry(arm->body, root, include_rebind)) return true;
+            }
+            break;
+        }
+        case AST_NODE_BINARY:
+            if (ast_body_may_write_entry(((AstBinaryNode*)stmt)->left, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(((AstBinaryNode*)stmt)->right, root, include_rebind)) return true;
+            break;
+        case AST_NODE_UNARY:
+            if (ast_body_may_write_entry(((AstUnaryNode*)stmt)->operand, root, include_rebind)) return true;
+            break;
+        case AST_NODE_INDEX_EXPR:
+        case AST_NODE_MEMBER_EXPR: {
+            AstFieldNode* field = (AstFieldNode*)stmt;
+            if (ast_body_may_write_entry(field->object, root, include_rebind)) return true;
+            if (field->computed && ast_body_may_write_entry(field->field, root, include_rebind)) return true;
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return false;
+}
+
+// Decide, at for-node completion, which loop levels need the head snapshot.
+// Only a source rooted at a MUTABLE binding can be written at all; a fresh
+// source (`for x in f()`) has no second observer and a `let` source rejects
+// writes elsewhere (S9.1.1).
+static inline void lambda_ast_mark_loop_snapshots(AstForNode* for_node) {
+    if (!for_node || !for_node->then) return;
+    for (AstNode* lv = for_node->loop; lv; lv = lv->next) {
+        AstLoopNode* level = (AstLoopNode*)lv;
+        AstIdentNode* src_root = ast_compound_root_ident(level->as);
+        if (!src_root || !src_root->entry || !src_root->entry->is_mutable) continue;
+        level->snapshot_collection =
+            ast_body_may_write_entry(for_node->then, src_root->entry, true);
+    }
+}
 
 typedef struct AstListNode : AstArrayNode {
     AstNode *declare;  // declarations in the list

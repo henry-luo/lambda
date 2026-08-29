@@ -2425,6 +2425,10 @@ static bool interp_for_level(ForCtx* fc, AstLoopNode* loop) {
     if (interp_frame_pending(f)) return false;
     Scratch coll_slot(f);
     coll_slot.set(collection);
+    // CW30/S9.2.3: the body may write this collection's root, so the loop
+    // walks the entry-time value. The mark makes the body's first write
+    // detach into the BINDING; coll_slot keeps the original independently.
+    if (loop->snapshot_collection) cow_mark_shared(coll_slot.get());
 
     // item_keys allocates; the collection must already be published.
     SymbolKeyList* keys = item_keys(coll_slot.get());
@@ -4258,7 +4262,10 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // proc_type_numeric_structural_admission caught it. Typed nested
             // writes through a parameter therefore still need the explicit
             // read-modify-write-back spelling.
-            bool writes_through_caller = root->is_var_param || root->is_proc_param;
+            // CW29 (gated): under plain-param snapshots only `var` borrows
+            // write through; a plain param's write stays local to the callee.
+            bool writes_through_caller = root->is_var_param ||
+                (root->is_proc_param && !cow_capture_enabled());
             Item replacement = ast_declared_type_is_map(root->declared_type)
                 ? lambda_map_path_set_checked(owner_slot.get(), path_slot.get(),
                     value_slot.get(), root->declared_type,
@@ -4335,7 +4342,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // only is_var_param, so a plain `pn` parameter's typed write was
             // validated on a DETACHED candidate and republished to the callee's
             // own slot -- visible inside the procedure, lost to the caller.
-            replacement = (root->is_var_param || root->is_proc_param)
+            replacement = (root->is_var_param ||
+                    (root->is_proc_param && !cow_capture_enabled()))
                 ? lambda_array_set_checked_inplace_item(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary)
                 : lambda_array_set_checked_item(owner.get(), key_slot.get(),
@@ -4351,7 +4359,8 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // object: the parser threads its state through `p: Parser`, a plain
             // pn parameter, so every `p.cur = ...` was published to a detached
             // copy and the caller kept reading the initial value.
-            replacement = (root->is_var_param || root->is_proc_param)
+            replacement = (root->is_var_param ||
+                    (root->is_proc_param && !cow_capture_enabled()))
                 ? lambda_map_set_checked_inplace(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary)
                 : lambda_map_set_checked(owner.get(), key_slot.get(),
@@ -4710,6 +4719,13 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             interp_format_parameter_boundary(boundary, sizeof(boundary), fn_node,
                 fn->name, index);
             value = interp_coerce_parameter_binding(frame, value, p, boundary);
+            // CW29/S9.1.3 (gated): a plain param the body writes is a snapshot
+            // -- one share-mark; its first write detaches a private copy and
+            // the caller's value is never touched. Non-mutating callees skip
+            // this entirely (cow_param_mutated stays false).
+            if (cow_capture_enabled() && p->entry && p->entry->cow_param_mutated) {
+                cow_mark_shared(value);
+            }
             frame->slots[index] = value.item;
             if (interp_parameter_rejects_error(p, value)) {
                 // Direct MIR enters neither body for a rejected parameter.

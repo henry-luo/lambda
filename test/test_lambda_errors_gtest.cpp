@@ -1081,6 +1081,13 @@ TEST_F(NegativeScriptTest, PatternClassBindingCollisionReportsReservedName) {
         "pattern class 'd' is reserved inside pattern islands");
 }
 
+// CW31/S9.2.4 exclusivity face 4: overlapping mutable views of one base
+// conflict through their shared view base at whole-base granularity.
+TEST_F(NegativeScriptTest, VarViewOverlapSharedBaseIsRejected) {
+    ExpectErrorMessage("test/lambda/negative/semantic/var_view_overlap.ls",
+        "overlaps another `var` parameter through their shared view base");
+}
+
 // Type error tests
 TEST_F(NegativeScriptTest, TypeErrorFuncParam) {
     ExpectErrorWithoutCrash("test/lambda/negative/func_param_negative.ls");
