@@ -342,6 +342,15 @@ bool js_ast_child_catalog_complete(void);
 // shared EvalContext bridge.
 bool js_ast_has_direct_eval_call(JsAstNode* node);
 bool js_ast_function_has_direct_eval(JsFunctionNode* function);
+enum JsAstObservation {
+    JS_AST_OBSERVES_ARGUMENTS = 1u << 0,
+    JS_AST_OBSERVES_THIS = 1u << 1,
+    JS_AST_OBSERVES_NEW_TARGET = 1u << 2,
+};
+uint8_t js_ast_function_observation_mask(JsFunctionNode* function);
+bool js_ast_function_has_with(JsFunctionNode* function);
+bool js_ast_function_uses_arguments(JsFunctionNode* function);
+bool js_ast_function_tail_reuse_safe(JsFunctionNode* function);
 bool js_ast_is_proto_literal_key(JsAstNode* key);
 
 // Adapter for the shared AstIndex walker. Core-shaped JavaScript nodes are

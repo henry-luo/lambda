@@ -681,6 +681,14 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
         named->name ? named->name->chars : "");
     Item bound = interp_coerce_declared_binding(f, value, named->declared_type,
         boundary);
+    // CW24v2 phase 2: a place-copy binding (`var row = m.rows[i]`) marks the
+    // read value so the first write DETACHES -- a real S9.1.2 snapshot --
+    // instead of aliasing a child a fresh literal never captured. All T0
+    // declaration paths funnel through this bind. Mark-only: cannot allocate.
+    if (named->entry && named->entry->is_place_copy &&
+            named->entry->place_copy_mutated) {
+        cow_mark_shared(bound);
+    }
     if (!item_is_error(source) && item_is_error(bound) && named->declared_type &&
             !lambda_type_accepts_error(named->declared_type)) {
         // A failed deferred boundary must not publish ItemError into the slot:
@@ -1506,12 +1514,54 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     }
     if (!injected && ast_type_func_has_var_parameter(direct_signature)) {
         NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-        if (!ast_direct_call_var_parameter_entries(node, direct_signature, borrowed)) {
+        AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+        if (!ast_direct_call_var_parameter_entries(node, direct_signature, borrowed,
+                borrow_args)) {
             log_error("interp: unsupported direct `var` argument layout");
             return ItemError;
         }
         for (int index = 0; index < dispatch_argc; index++) {
             NameEntry* entry = borrowed[index];
+            // CW25 / S9.2.2: `f(var m.rows[i])` borrows a PLACE. Detach the
+            // whole spine and pass the detached leaf; it is already installed
+            // in its parent, so the callee's in-place `var` writes reach the
+            // caller's container and need no writeback binding. Mirrors the
+            // MIR argument-loop hook so the tiers cannot diverge.
+            if (!entry && borrow_args[index]) {
+                AstCowPath place = {};
+                if (!ast_collect_cow_path(&place, borrow_args[index]) ||
+                        place.count == 0 || !place.root ||
+                        place.root->node_type != AST_NODE_IDENT) {
+                    continue;
+                }
+                NameEntry* root_entry = ((AstIdentNode*)place.root)->entry;
+                if (!root_entry) continue;
+                Scratch root_slot(f);
+                root_slot.set(interp_read_binding(f, root_entry));
+                if (!is_container_type_id(get_type_id(root_slot.get()))) continue;
+                Item private_root = cow_prepare_write(root_slot.get());
+                if (item_is_error(private_root)) return private_root;
+                root_slot.set(private_root);
+                interp_write_binding(f, root_entry, root_slot.get());
+
+                Scratch path_slot(f);
+                path_slot.set(interp_ptr_item(array_plain()));
+                bool path_ok = true;
+                for (int seg = 0; seg < place.count && path_ok; seg++) {
+                    Scratch key_slot(f);
+                    key_slot.set(interp_eval_cow_path_key(f, place.segment[seg],
+                        place.is_member[seg]));
+                    if (interp_frame_pending(f)) return ItemNull;
+                    Array* keys = (Array*)(uintptr_t)path_slot.get().item;
+                    if (!keys) { path_ok = false; break; }
+                    array_push(keys, key_slot.get());
+                }
+                if (!path_ok) continue;
+                Item leaf = cow_path_borrow(root_slot.get(), path_slot.get());
+                if (item_is_error(leaf)) return leaf;
+                words[index] = leaf.item;
+                continue;
+            }
             Item owner = (Item){.item = words[index]};
             if (!entry || !entry->cow_owned ||
                     !is_container_type_id(get_type_id(owner))) {
@@ -2383,6 +2433,10 @@ static bool interp_for_level(ForCtx* fc, AstLoopNode* loop) {
     if (interp_frame_pending(f)) return false;
     Scratch coll_slot(f);
     coll_slot.set(collection);
+    // CW30/S9.2.3: the body may write this collection's root, so the loop
+    // walks the entry-time value. The mark makes the body's first write
+    // detach into the BINDING; coll_slot keeps the original independently.
+    if (loop->snapshot_collection) cow_mark_shared(coll_slot.get());
 
     // item_keys allocates; the collection must already be published.
     SymbolKeyList* keys = item_keys(coll_slot.get());
@@ -4199,11 +4253,34 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             owner_slot.set(interp_read_binding(f, root));
             // An untyped COW path validates no enclosing contract; a nested
             // typed-map write must validate its rebuilt root before publish.
+            //
+            // NM-O8: a `var` parameter's root was detached by the caller, and a
+            // plain `pn` parameter writes through to the caller under the
+            // current pn ABI -- the same rule the FLAT store above applies via
+            // the in-place setter for `var` roots. Without it the nested store
+            // detached the callee's own root and published the replacement
+            // into the callee's binding, so `b.xs[0] = v` was visible inside
+            // the procedure and lost at the caller while `b.cur = v` was not.
+            //
+            // The TYPED arm stays transactional even for those roots: its
+            // publish runs `lambda_type_check` over the whole candidate, which
+            // CONVERTS (a 3.5 admitted into an int field becomes 2). An
+            // in-place write has no candidate to convert, so applying this
+            // there silently skipped the coercion —
+            // proc_type_numeric_structural_admission caught it. Typed nested
+            // writes through a parameter therefore still need the explicit
+            // read-modify-write-back spelling.
+            // CW29: only `var` borrows write through; a plain param's write
+            // stays local to the callee (S9.1.3).
+            bool writes_through_caller = root->is_var_param;
             Item replacement = ast_declared_type_is_map(root->declared_type)
                 ? lambda_map_path_set_checked(owner_slot.get(), path_slot.get(),
                     value_slot.get(), root->declared_type,
                     "typed nested map assignment")
-                : cow_path_set(owner_slot.get(), path_slot.get(), value_slot.get());
+                : (writes_through_caller
+                    ? cow_path_set_inplace(owner_slot.get(), path_slot.get(),
+                        value_slot.get())
+                    : cow_path_set(owner_slot.get(), path_slot.get(), value_slot.get()));
             if (item_is_error(replacement)) return replacement;
             interp_write_binding(f, root, replacement);
             return ItemNull;
@@ -4248,11 +4325,15 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         owner.set(interp_read_binding(f, root));
 
         if (ast_is_direct_numeric_mask_assignment(node)) {
-            // A mask store mutates the numeric buffer in place. Alias and var
-            // boundaries have already detached this binding, so this must use
-            // MIR's shared helper rather than fabricate a scalar COW index.
-            Item write_result = fn_index_assign(owner.get(), key_slot.get(), value_slot.get());
-            return item_is_error(write_result) ? write_result : ItemNull;
+            // CW32v2: alias boundaries no longer eagerly detach ArrayNum, so
+            // a mask store's owner may be shared. The _cow wrapper prepares
+            // (one packed memcpy when shared) and returns the owner, which
+            // MUST be republished into the binding.
+            Item owner_result = index_assign_cow(owner.get(), key_slot.get(),
+                value_slot.get());
+            if (item_is_error(owner_result)) return owner_result;
+            interp_write_binding(f, root, owner_result);
+            return ItemNull;
         }
 
         // Dispatch on the owner's runtime type, not the syntax: `m["k"] = v`
@@ -4267,12 +4348,12 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // "element" here (transpile-mir.cpp), so T0 matches it.
             const char* boundary = "typed array element assignment";
             // SI3v2 again, on the write side: MIR Direct selects the in-place
-            // setter for `is_var_param || is_proc_param`
+            // setter for `var` roots
             // (emit_typed_array_store_fallback / writes_through_caller). T0 read
             // only is_var_param, so a plain `pn` parameter's typed write was
             // validated on a DETACHED candidate and republished to the callee's
             // own slot -- visible inside the procedure, lost to the caller.
-            replacement = (root->is_var_param || root->is_proc_param)
+            replacement = root->is_var_param
                 ? lambda_array_set_checked_inplace_item(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary)
                 : lambda_array_set_checked_item(owner.get(), key_slot.get(),
@@ -4288,7 +4369,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             // object: the parser threads its state through `p: Parser`, a plain
             // pn parameter, so every `p.cur = ...` was published to a detached
             // copy and the caller kept reading the initial value.
-            replacement = (root->is_var_param || root->is_proc_param)
+            replacement = root->is_var_param
                 ? lambda_map_set_checked_inplace(owner.get(), key_slot.get(),
                     value_slot.get(), root->declared_type, boundary)
                 : lambda_map_set_checked(owner.get(), key_slot.get(),
@@ -4647,6 +4728,13 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             interp_format_parameter_boundary(boundary, sizeof(boundary), fn_node,
                 fn->name, index);
             value = interp_coerce_parameter_binding(frame, value, p, boundary);
+            // CW29/S9.1.3 (gated): a plain param the body writes is a snapshot
+            // -- one share-mark; its first write detaches a private copy and
+            // the caller's value is never touched. Non-mutating callees skip
+            // this entirely (cow_param_mutated stays false).
+            if (p->entry && p->entry->cow_param_mutated) {
+                cow_mark_shared(value);
+            }
             frame->slots[index] = value.item;
             if (interp_parameter_rejects_error(p, value)) {
                 // Direct MIR enters neither body for a rejected parameter.

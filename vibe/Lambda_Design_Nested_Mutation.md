@@ -1,6 +1,11 @@
 # Lambda Design: Nested Mutation — Places, Path Borrows, and the Lost-Update Rule
 
-- **Status:** PROPOSED — rev 5, 2026-08-28. CW24 and CW25 are implemented
+- **Status:** PROPOSED — rev 6, 2026-08-29. **CW24v2 ratified by designer:
+  the Swift/R endpoint — CW24's error is a MIGRATION guard, retired for the
+  general case once the flip migration completes; the surviving diagnostic is
+  the dead-store shape only (§4.3). NM-O2 is CLOSED by the same ruling; no
+  `copy()` builtin is minted.** Precedent survey in Appendix C.
+- **Status history:** rev 5, 2026-08-28. CW24 and CW25 are implemented
   (worktree, flag-gated) and CW25's `E207` prerequisite is closed.
 - **Status history:** rev 4, 2026-08-28. CW24 and CW25 are implemented
   (worktree, flag-gated); rev 4 records that CW25's post-call writeback step
@@ -324,7 +329,53 @@ sites. No new analysis framework is required — see Appendix A.3.
 **Error, not warning.** A warning preserves the silent-wrong-answer failure
 mode for anyone not reading warnings, which is the entire problem. The cost of
 strictness is a program that genuinely wants a mutable local snapshot, which
-needs an opt-out — see NM-O2.
+needs an opt-out — during the migration window, the CW29 plain-`pn` idiom or
+an explicit write-back (see §4.3 and the closed NM-O2).
+
+### 4.3 CW24v2 — the error is a migration guard, not the endpoint (RATIFIED, designer, 2026-08-29)
+
+The Appendix C survey exposed that CW24's error has **no precedent in the
+COW-value-semantics family**: Swift, R, MATLAB, and PHP arrays all accept
+`var row = m.rows[i]; row.x = 9` as a deliberate private snapshot, because
+binding-copies-then-mutate *is* their semantics. Lambda needs the error only
+because it is migrating **from aliasing** — the same spelling historically
+wrote through, so at the S9.3.1 flip its meaning silently changes. The guard
+protects the transition, not the steady state.
+
+**The ruling — two phases:**
+
+1. **Migration phase (now, through the flip and the 88-script migration):**
+   CW24 as specified in §4.2 — a mutated place copy is a compile **error**,
+   full stop. Escapes: write the path directly (N1), borrow the place (N2),
+   route through a plain-`pn` snapshot (CW29), or write the copy back.
+2. **Steady state (after the migration completes):** the general error
+   **retires**. A mutated place copy that the program subsequently
+   *observes* — reads, returns, stores, or writes back — is a legitimate
+   deliberate snapshot, exactly as in Swift/R. What survives is the
+   **dead-store shape**: a place copy that is mutated and then never
+   observed at all, which is provably useless work whatever the semantics —
+   warning-class, aligned with how family-1 languages lint it.
+
+Consequences: **NM-O2 is closed** — no `copy(x)` builtin, no `as copy` form
+is minted; at steady state the binding itself is the deliberate-copy
+spelling (the Hylo-style explicit marker remains a possible future sugar,
+recorded in Appendix C, but nothing depends on it). The existing CW24
+implementation (write-back excusal at FUNCTION_END) is phase 1 as built;
+phase 2 widens the excusal from "written back" to "observed" and downgrades
+the residue to a warning. **Phase 2 IMPLEMENTED with the flip, 2026-08-29**:
+read/target-read counters on the place-copy entry decide "observed"; the
+surviving dead-store shape logs `cow-dead-snapshot`. Two refinements
+surfaced during implementation and landed with it: (a) for observed copies to
+be legitimate snapshots the READ must actually copy, so **place-copy binds
+mark their value** (both tiers) and the first write detaches — without this,
+a fresh-literal child was never capture-marked and the "snapshot" aliased;
+(b) the mark is gated on the durable **is-this-copy-ever-mutated** fact from
+the CW24 walk (plus a container-capable binding type) — an unmutated place
+copy stays a borrow, observationally identical to a copy (P6) and free.
+Marking unconditionally broke two corpus scripts: scalar place copies
+(`var mi: int = stack[d]`) deoptimized to boxed ANY (triangl2), and
+read-and-return helpers (`rbt_get`'s `var v = n[NV]`) share-marked every
+value they handed out, detaching the callers' borrows (cd2_orig).
 
 ---
 
@@ -396,11 +447,13 @@ Piece 1 does not depend on 2 or 3. That is the point of §4.2.
   O(width) regardless of how the update is spelled. Unchanged from COW §9.5.1
   residue / Appendix B.2 row 2; the chunked-children question is still gated on
   the editor benchmark, and this design neither helps nor worsens it.
-- **NM-O2 — The intentional-snapshot opt-out.** CW24 rejects a mutated place
-  copy, but a program may genuinely want a private mutable snapshot. There is
-  no `copy(x)` builtin today (only `io.copy`). Options: mint one; accept `let`
-  (immutable, so it does not answer the mutable-snapshot case); or an explicit
-  `var row = m.rows[i] as copy` form. Needs a decision before CW24 ships.
+- **NM-O2 — CLOSED 2026-08-29 by CW24v2 (§4.3).** The intentional-snapshot
+  opt-out question is dissolved rather than answered: at steady state the
+  binding itself is the deliberate copy (Swift/R model), so no `copy(x)`
+  builtin or `as copy` form is minted. During the migration window the
+  escapes are the CW29 plain-`pn` idiom
+  (`pn tweak(row: Row) Row { row.x = 1; row }`) or an explicit write-back.
+  Precedent survey: Appendix C.
 - **NM-O3 — Should N2 ship before Stage-2 exclusivity?** A path borrow with no
   overlap check has the same unchecked writer-vs-writer residue as every
   Stage-1 borrow, but it is easier to trip (`f(var t, var t.nodes[i])` looks
@@ -409,7 +462,9 @@ Piece 1 does not depend on 2 or 3. That is the point of §4.2.
   share-marks at the loop head. Inside a borrow over the same place (an N2
   callee body, or a `with var` block if NM-O7 adopts one), the head mark and
   the borrow's detach must not fight. Believed benign (detach precedes the
-  loop), but it needs a fixture.
+  loop), but it needs a fixture. Note CW30 (COW §11.6, 2026-08-29): the head
+  mark is now compile-gated — emitted only when the loop body may write the
+  collection's root — so the non-mutating case never raises this interaction.
 - **NM-O5 — Where these ratify.** The formal spec's S9 currently ends at S9.3;
   the legacy "§9.5.2" references in the COW doc point at a section that
   distillation removed. On ratification these become **S9.4** (nested
@@ -428,7 +483,16 @@ Piece 1 does not depend on 2 or 3. That is the point of §4.2.
   Pick-up trigger: migrated corpus code where threading enclosing locals
   through an extracted `pn`'s parameters (the C4.2a friction) is a repeated,
   demonstrated pain — not a hypothetical one. Adoption is additive.
-- **NM-O8 — PARTLY FIXED 2026-08-28; the typed arm stays open.** Nested path
+- **NM-O8 — PARTLY FIXED 2026-08-28; the typed arm stays open.
+  DISSOLVES under CW29 (COW §11.9, 2026-08-29):** when plain-param snapshots
+  land, *staying local to the callee is the correct behavior for both arms* —
+  retiring `is_proc_param` makes flat writes join the nested behavior, the
+  inconsistency below disappears by construction, and the untyped-arm
+  root-skip fix gets reverted (it patched toward the write-through semantics
+  S9.1.3 replaces). As of 2026-08-29 the root-skip is GATED on
+  `!cow_capture_enabled()` rather than deleted -- flag ON already takes the
+  CW29-correct detach arm; outright retirement happens at the default flip.
+  The record below is kept for the pre-CW29 state. Nested path
   writes through a plain `pn` parameter were not published to the caller, while flat member writes through the same
   parameter are (`is_proc_param` selects the in-place checked setter only on
   the flat path; the nested path takes `cow_path_set` /
@@ -643,3 +707,45 @@ C4.2e handle store, C4.4 #6); status and evidence
 [LR12-9](Lambda_Issue_Ledger.md#lr12-9); spec
 [`doc/Lambda_Formal_Semantics.md`](../doc/Lambda_Formal_Semantics.md)
 (S9.1.2, S9.1.3, S9.2.2, S9.2.3, S9.3.1, S10.4.3, SO14).
+
+---
+
+## Appendix C — Deliberate-copy precedent survey (2026-08-29; basis of CW24v2)
+
+How other value-semantics and COW languages spell "give me a private mutable
+copy." Two families:
+
+### C.1 Family 1 — binding *is* the deliberate copy (COW value semantics)
+
+| Language | Deliberate snapshot | Notes |
+|---|---|---|
+| **Swift** | `var row = m.rows[i]` | Structs/Array/Dictionary are COW values; assignment is semantically a copy, so mutating the copy is the *expected* meaning, never an error. No `copy()` for value types. |
+| **R** | `y <- x` | Copy-on-modify; same story. |
+| **MATLAB** | `y = x` | Lazy copy, COW on write. Handle classes (reference semantics) need explicit `copy()` via `matlab.mixin.Copyable`. |
+| **PHP arrays** | `$b = $a` | Arrays are COW values. Objects are references and need the explicit `clone` keyword. |
+
+Post-flip Lambda is in this family — and every member is *more permissive*
+than CW24 phase 1: none errors on a mutated copy.
+
+### C.2 Family 2 — explicit copy operator (reference or borrow semantics)
+
+| Language | Spelling | Notes |
+|---|---|---|
+| **Hylo (Val)** | `x.copy()` | Closest theoretical relative to C4 — mutable value semantics where projections are *borrows*, like S9.2.2 places. Its "no implicit copies" principle makes `.copy()` the sanctioned snapshot spelling; the strongest precedent FOR minting `copy()`. |
+| **Swift 5.9 ownership** | `copy x` | A literal `copy` operator forcing a copy where the compiler would borrow/move — nearest syntax precedent for an `as copy` form. |
+| **Rust** | `.clone()` | Universal, explicit, idiomatic; `Rc::make_mut` is `cow_prepare_write` verbatim. |
+| **Clojure** | `(transient v)` | Explicit "private mutable snapshot to batch-edit, then freeze" — the NM-O2 use case as a first-class construct; the CW29 extracted-`pn` idiom is this shape spelled as a procedure. |
+| **D / Go / Python** | `.dup` / `slices.Clone` / `copy.copy()` | Explicit helpers, all mainstream. |
+
+### C.3 The implication that became CW24v2
+
+CW24's error has no precedent in family 1 because those languages never
+migrated from aliasing — there was no historical write-through expectation
+for the guard to protect. Lambda's error is therefore justified exactly as a
+**transition guard** and retires with the transition (§4.3). What family-1
+languages *do* accept as a permanent diagnostic is the dead-store shape — a
+copy mutated and never observed — which is CW24v2's surviving form. The
+Hylo-style explicit `copy()` remains available as future sugar if steady-state
+experience shows the intent marker earns its keep; nothing in the ruling
+forecloses it.
+

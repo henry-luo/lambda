@@ -1250,6 +1250,25 @@ static uint32_t plan_need(AstNode* node) {
         uint32_t at_call = 3;
         uint32_t best = o > k ? o : k;
         if (v > best) best = v;
+        // A NESTED target (`b.xs[0] = v`) takes the cow_path_set branch, which
+        // is a deeper shape than the flat one this estimate was written for: it
+        // holds value, path, terminal AND owner slots live simultaneously
+        // across the call, and evaluates each path segment's key one level
+        // below the first three. Budgeting the flat three overflowed the frame
+        // and the write was dropped -- `b.xs[0] = 99` reported "scratch
+        // overflow depth=5 cap=5" and left the array untouched.
+        AstNode* target_object = ast_unwrap_primary(ca->object);
+        if (target_object && (target_object->node_type == AST_NODE_MEMBER_EXPR ||
+                target_object->node_type == AST_NODE_INDEX_EXPR)) {
+            uint32_t nested = 4;                        // owner_slot is deepest
+            uint32_t nested_value = 1 + plan_need(ca->value);
+            uint32_t nested_key = 3 + plan_need(ca->key);
+            uint32_t nested_seg = 3 + plan_need(ca->object);
+            if (nested_value > nested) nested = nested_value;
+            if (nested_key > nested) nested = nested_key;
+            if (nested_seg > nested) nested = nested_seg;
+            if (nested > best) best = nested;
+        }
         return best > at_call ? best : at_call;
     }
     case AST_NODE_MEMBER_EXPR:

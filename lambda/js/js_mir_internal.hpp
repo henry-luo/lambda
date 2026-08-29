@@ -344,7 +344,6 @@ bool jm_has_yield(JsAstNode* node);
 bool jm_has_optional_chain(JsAstNode* node);
 int jm_count_awaits(JsAstNode* node);
 void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names);
-void jm_collect_arrow_lexical_refs(JsAstNode* node, struct hashmap* refs);
 void jm_collect_body_refs(JsAstNode* node, struct hashmap* refs);
 void jm_collect_body_locals(JsAstNode* node, struct hashmap* locals, bool var_only = false);
 void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names);

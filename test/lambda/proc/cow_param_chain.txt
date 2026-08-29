@@ -1,0 +1,7 @@
+1 (plain->plain: ruled 1)
+1 (plain->var: ruled 1)
+222 (var->var: ruled 222)
+7 (var->plain: ruled 7)
+12 (out-param: ruled 12)
+42 (fn read: ruled 42)
+

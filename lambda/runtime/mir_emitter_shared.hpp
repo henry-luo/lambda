@@ -82,10 +82,6 @@ struct VarEntry {
     // Checked stores must publish through that shared root, not retain a
     // transactional replacement only in the callee's local register.
     bool is_var_param;
-    // Legacy `pn` parameters retain the procedure ABI's caller-visible
-    // container mutation. Checked direct stores validate before writing through
-    // this borrowed container; a detached replacement would be callee-local.
-    bool is_proc_param;
     // A String buffer may be appended in place only by this local binding.
     // Any ordinary read clears this state before the value can become an alias.
     bool string_buffer_owned;

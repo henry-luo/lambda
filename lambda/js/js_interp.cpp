@@ -5177,68 +5177,16 @@ bool js_interp_script_is_supported(JsScript* script) {
     return state.supported;
 }
 
-static bool js_interp_tail_reuse_node_safe(JsAstNode* node, JsAstNode* root);
-
-static bool js_interp_tail_reuse_child_unsafe(JsAstNode* child, void* opaque) {
-    return !js_interp_tail_reuse_node_safe(child, (JsAstNode*)opaque);
-}
-
-static bool js_interp_tail_reuse_node_safe(JsAstNode* node, JsAstNode* root) {
-    if (!node) return true;
-    if (node != root && (node->node_type == AST_NODE_FUNC ||
-            node->node_type == AST_NODE_FUNC_EXPR ||
-            node->node_type == AST_NODE_ARROW_FUNC ||
-            node->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-            node->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
-        return false;
-    }
-    if (node->node_type == JS_AST_NODE_WITH_STATEMENT ||
-            node->node_type == AST_NODE_TRY_STAM) return false;
-    if (node->node_type == AST_NODE_IDENT) {
-        String* name = ((JsIdentifierNode*)node)->name;
-        if (js_interp_name_equals(name, "arguments") ||
-                js_interp_name_equals(name, "eval")) return false;
-    }
-    return !js_ast_any_child(node, js_interp_tail_reuse_child_unsafe, root);
-}
-
-static bool js_interp_arguments_usage_node(JsAstNode* node, JsAstNode* root);
-
-static bool js_interp_arguments_usage_child(JsAstNode* child, void* opaque) {
-    return js_interp_arguments_usage_node(child, (JsAstNode*)opaque);
-}
-
-static bool js_interp_arguments_usage_node(JsAstNode* node, JsAstNode* root) {
-    if (!node) return false;
-    // Ordinary nested functions own their own `arguments`, while arrows retain
-    // the enclosing function's binding and must remain part of this scan.
-    if (node != root && (node->node_type == AST_NODE_FUNC ||
-            node->node_type == AST_NODE_FUNC_EXPR)) return false;
-    if (node->node_type == AST_NODE_IDENT && js_interp_name_equals(
-            ((JsIdentifierNode*)node)->name, "arguments")) return true;
-    return js_ast_any_child(node, js_interp_arguments_usage_child, root);
-}
-
-static bool js_interp_function_uses_arguments(JsFunctionNode* function) {
-    if (!function) return false;
-    for (JsAstNode* param = (JsAstNode*)function->params; param;
-            param = (JsAstNode*)param->next) {
-        if (js_interp_arguments_usage_node(param, (JsAstNode*)function)) return true;
-    }
-    return js_interp_arguments_usage_node((JsAstNode*)function->body,
-        (JsAstNode*)function);
-}
-
 static Item js_interp_configure_function_metadata(Item function_item) {
     if (get_type_id(function_item) != LMD_TYPE_FUNC) return function_item;
     JsFunction* function = (JsFunction*)function_item.function;
     if (!function || !function->ast_function) return ItemError;
     function->ast_has_direct_eval = js_ast_function_has_direct_eval(
         function->ast_function);
-    function->ast_uses_arguments = js_interp_function_uses_arguments(
+    function->ast_uses_arguments = js_ast_function_uses_arguments(
         function->ast_function);
-    function->ast_tail_reuse_safe = js_interp_tail_reuse_node_safe(
-        (JsAstNode*)function->ast_function, (JsAstNode*)function->ast_function);
+    function->ast_tail_reuse_safe = js_ast_function_tail_reuse_safe(
+        function->ast_function);
     return function_item;
 }
 

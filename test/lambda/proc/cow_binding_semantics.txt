@@ -1,0 +1,7 @@
+1 99 (map: ruled 1 99)
+77 5 (map reverse: ruled 77 5)
+1 2 3 (chain: ruled 1 2 3)
+1 draft 9 final (element: ruled 1 draft 9 final)
+1 42 5 (spine: ruled 1 42 5)
+10 0 (let canary: ruled 10 0)
+

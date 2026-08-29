@@ -36,7 +36,7 @@ pn test_int_array_sum(arr: int[], n: int) {
 // ============================================================
 // Test 3: int[] param — write then read back
 // ============================================================
-pn test_int_array_write(arr: int[], n: int) {
+pn test_int_array_write(var arr: int[], n: int) {
     var i = 0
     while (i < n) {
         arr[i] = arr[i] * 10
@@ -81,7 +81,7 @@ pn test_float_array_sum(arr: float[], n: int) {
 // ============================================================
 // Test 6: int[] from fill() — fill creates ArrayInt natively
 // ============================================================
-pn test_fill_to_int_param(arr: int[], n: int) {
+pn test_fill_to_int_param(var arr: int[], n: int) {
     // fill(n, 0) creates ArrayInt, so ensure_typed_array is a no-op
     print(arr[0])
     print(" ")
@@ -151,7 +151,7 @@ pn main() {
     test_int_array_sum(a, 5)
 
     // Test 3: write+read (modifies array in-place)
-    var c = fill(3, 0)
+    var c: int[] = fill(3, 0)
     c[0] = 1; c[1] = 2; c[2] = 3
     test_int_array_write(c, 3)
     // A typed procedure parameter preserves the legacy caller-visible write ABI.
@@ -165,7 +165,7 @@ pn main() {
     test_float_array_sum(b, 4)
 
     // Test 6: fill creates ArrayInt; pass directly
-    var d = fill(5, 0)
+    var d: int[] = fill(5, 0)
     d[0] = 99; d[4] = 77
     test_fill_to_int_param(d, 5)
 

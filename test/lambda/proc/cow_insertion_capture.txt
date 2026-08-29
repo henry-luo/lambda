@@ -1,0 +1,6 @@
+p1 1 (ruled 1)
+p2 1 (ruled 1)
+p3 1 (ruled 1)
+p4 1 (ruled 1)
+p5 1 (ruled 1)
+

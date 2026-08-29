@@ -23,12 +23,11 @@ pn arr_set(var a, idx, val) {
     var mid = shr(idx, 5)
     var i1 = mid % 16
     var i0 = shr(mid, 4)
-    var l0 = a.l0
-    var c1 = l0[i0]
-    if (c1 == null) { c1 = null16()  l0[i0] = c1 }
-    var c2 = c1[i1]
-    if (c2 == null) { c2 = null32()  c1[i1] = c2 }
-    c2[i2] = val
+    // S9.3.1: binding a level and mutating the local writes a copy. Write the
+    // whole path instead -- each store lands in `a`, O(depth) and no subtree copy.
+    if (a.l0[i0] == null) { a.l0[i0] = null16() }
+    if (a.l0[i0][i1] == null) { a.l0[i0][i1] = null32() }
+    a.l0[i0][i1][i2] = val
     return 0
 }
 

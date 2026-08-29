@@ -24,7 +24,7 @@ extern "C" int compiler_pass_manager_run(CompilerPassManager* manager, void* con
     for (uint32_t i = 0; i < manager->pass_count; i++) {
         CompilerPassSpec* pass = &manager->passes[i];
         if ((manager->facts & pass->required_facts) != pass->required_facts) return 0;
-        if (!pass->run(context)) return 0;
+        if (!pass->run(pass->context ? pass->context : context)) return 0;
         manager->facts |= pass->produced_facts;
     }
     return 1;

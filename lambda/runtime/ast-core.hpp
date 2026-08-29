@@ -295,14 +295,17 @@ struct NameEntry {
     bool is_mutable;
     bool is_var_param;
     bool is_parameter;
-    // A plain (non-`var`) parameter of a `pn`. Under the current pn ABI such a
-    // parameter is locally mutable AND its typed-container writes stay visible
-    // to the caller, so a checked write must use the in-place setter rather
-    // than validating a detached candidate. MIR Direct carries the same fact on
-    // MirVarEntry::is_proc_param; T0 read only is_var_param and therefore
-    // detached, which silently dropped the write and made typed json2 parse to
-    // the wrong value on the interpreter tier while the JIT was correct.
-    bool is_proc_param;
+    // CW29/S9.1.3 (gated on LAMBDA_COW_CAPTURE): this plain `pn` parameter's
+    // body writes through it, so both tiers snapshot it at entry -- one
+    // share-mark in the callee prologue; the first write detaches a private
+    // copy. Computed once at FUNCTION_END from the shared body walk.
+    bool cow_param_mutated;
+    // CW31/S9.2.4 face 4: when this binding holds a mutable VIEW, the ultimate
+    // base binding it aliases (chased through view-of-view). The call-site
+    // exclusivity check conflicts two `var` args sharing an effective root, so
+    // overlapping subviews of one base are rejected at the same whole-base
+    // granularity face 3 already uses -- no region math in v1.
+    struct NameEntry* view_base;
     bool has_type_annotation;
     // The explicit source annotation, when present.  `node->type` is the
     // effective compiler type and historically lost this distinction during
@@ -330,6 +333,34 @@ struct NameEntry {
     // (cow_bind_var). Both tiers decide it with the same rule; the JIT keeps the
     // equivalent on MirVarEntry::cow_owned.
     bool cow_owned;
+    // CW24: this binding was initialized from a *place* -- a member/index read
+    // rooted at a mutable binding -- so under S9.1.2 it holds a COPY. Writes
+    // through it cannot reach the container it was read from. Set at the
+    // declaration, consumed at the mutation site, which is where the
+    // programmer's expectation actually breaks.
+    bool is_place_copy;
+    // CW24v2 phase 2: counts of ident READS of a place-copy binding vs reads
+    // that were merely a mutation target's own root. reads > target_reads
+    // means the mutated copy is OBSERVED somewhere -- a legitimate deliberate
+    // snapshot under the Swift/R endpoint, so the diagnostic downgrades.
+    uint16_t place_copy_reads;
+    uint16_t place_copy_target_reads;
+    // durable "this place copy IS mutated somewhere" fact (pending is cleared
+    // at flush). Gates the bind-time mark: an unmutated place copy stays a
+    // borrow -- read-and-return helpers (rbt_get) must not share-mark the
+    // stored value they hand out.
+    bool place_copy_mutated;
+    // The place's root name, kept only to name it in that diagnostic.
+    String* place_copy_root;
+    // Read-modify-WRITE-BACK (`p = w.pkts[i]` ... `w.pkts[i] = p`) is the
+    // sanctioned idiom (C4.2e) and is indistinguishable from the lost-update
+    // bug at the mutation itself -- only the later store tells them apart. So
+    // the mutation is recorded and the diagnostic is deferred to the end of
+    // the enclosing function, by which point a write-back has been seen.
+    bool place_copy_written_back;
+    bool place_copy_mutation_pending;
+    SourceSpan place_copy_mutation_span;
+    NameEntry* place_copy_next;   // intrusive link over pending candidates
     // When this name was hung into the scope by an import, the module that
     // actually declares it. `slot` is then an index into *that* module's slab,
     // not this one's — the two modules' plan passes number their globals
@@ -412,6 +443,9 @@ typedef struct AstIndex {
     uint32_t slot_capacity;
 } AstIndex;
 
+typedef struct AstIndexPassContext { AstIndex* index; AstNode* root;
+    const LangProfile* profile; } AstIndexPassContext;
+
 typedef struct AstNodeFacts {
     Type* declared_contract;
     Type* inferred_type;
@@ -433,6 +467,7 @@ extern "C" {
 #endif
 void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx);
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
+int ast_index_compiler_pass(void* opaque);
 // Adds a newly retained AST fragment without invalidating the stable IDs and
 // analysis facts already published for earlier REPL inputs (D8.2.4).
 bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
@@ -726,6 +761,22 @@ static inline AstNode* ast_unwrap_primary(AstNode* node) {
         node = ((AstPrimaryNode*)node)->expr;
     }
     return node;
+}
+
+// The root identifier of a member/index chain (`t.nodes[i].value` -> `t`), or
+// the bare identifier itself; NULL when the base is not a name (a call, a
+// literal). Promoted from build_ast.cpp's compound_root_ident (rule 13) so the
+// CW30 loop-body walk, the CW24 place diagnostics, and the call-site
+// exclusivity check all resolve roots identically.
+static inline AstIdentNode* ast_compound_root_ident(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node) return NULL;
+    if (node->node_type == AST_NODE_IDENT) return (AstIdentNode*)node;
+    if (node->node_type == AST_NODE_INDEX_EXPR ||
+            node->node_type == AST_NODE_MEMBER_EXPR) {
+        return ast_compound_root_ident(((AstFieldNode*)node)->object);
+    }
+    return NULL;
 }
 
 static inline bool ast_type_needs_mutable_clone(TypeId type_id) {

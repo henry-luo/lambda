@@ -2423,6 +2423,9 @@ extern "C" {
         const char* boundary);
     Item lambda_map_path_set_checked(Item owner, Item path, Item value, Type* expected,
         const char* boundary);
+    // NM-O8 typed arm: validates in place instead of swapping a candidate in.
+    Item lambda_map_path_set_checked_inplace(Item owner, Item path, Item value,
+        Type* expected, const char* boundary);
     Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary);
     Item lambda_array_set_checked_item(Item owner, Item key, Item value, Type* expected,
@@ -2810,10 +2813,11 @@ extern "C" {
     Item fn_map_set(Item map, Item key, Item value);
     bool cow_item_is_container(Item value);
     Item cow_mark_shared(Item value);
+    Item array_num_set_cow_idx(Item owner, int64_t index, Item value);
+    Item index_assign_cow(Item owner, Item key, Item value);
     Item cow_capture_value(Item value);
     // Whether S9.3.1 insertion capture is active (LAMBDA_COW_CAPTURE). The
     // transpiler reads it too, so flag-off emits the pre-capture code exactly.
-    bool cow_capture_enabled(void);
     // Capture every field of a freshly built shaped literal (S9.3.1).
     void cow_mark_shape_children(struct TypeMap* type, void* data);
     Item cow_bind_var(Item value);
@@ -2828,6 +2832,10 @@ extern "C" {
     Item map_set_cow(Item owner, Item key, Item value);
     Item cow_path_set_raw(Item owner, Item key, Item value);
     Item cow_path_set(Item owner, Item path, Item value);
+    // NM-O8: nested store that leaves the ROOT alone (var / plain-pn params).
+    Item cow_path_set_inplace(Item owner, Item path, Item value);
+    // CW25: detach root..leaf and return the leaf, for a `var` path borrow.
+    Item cow_path_borrow(Item owner, Item path);
 
     // runtime type coercion for typed array annotations (int[], float[], etc.)
     // converts generic Array/List to typed array, or validates existing typed array

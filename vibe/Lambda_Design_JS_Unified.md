@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29
 
-**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3f compile-unit migrations, and P4a–P4b collection-owned function facts are verified; the remaining P3/P4–P6 driver work remains proposed. The current `master` tree is 312,272 governed `lambda/runtime` + `lambda/js` lines before the P1e slice; the older 310,711-line project anchor remains historical and its final 308,711 cap is not yet claimed.
+**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3g compile-unit migrations, and P4a–P4e collection-owned function facts are verified; the remaining P3/P4–P6 driver work remains proposed. HEAD governs 313,938 `lambda/runtime` + `lambda/js` lines; the current P4e/P3g working candidate is 313,931. The older 310,711-line project anchor remains historical and its final 308,711 cap is not yet claimed.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -815,6 +815,10 @@ Mode-specific policy is data on the unit: parse goal, module/eval/preamble flags
 
 The JS validation pass now produces `VALIDATED` before index publication; repeated caller-side early-error checks are retired. P3b moves MIR context creation, error-handler installation, transpiler ownership, name-base setup, and module creation into one script-unit opener used by ordinary source and pre-built-AST entry points. P3c extends that opener to ES modules while retaining the module's private zero-based name image and registry/TLA policy. P3d extends it to direct eval and `new Function` with their compact storage and optimize-level policy. P3e routes eval-preamble publication and batch/preamble declaration snapshots through one owned map-to-array helper. P3f routes finalized MIR volume accounting for Lambda and LambdaJS through one shared runtime walk. Manual phase timing and cleanup labels remain for the later driver slices.
 
+P3g makes pass contexts explicit and places the JS analysis/lower/finalize
+boundary under the manager; MIR link, execution, cleanup, and Lambda's later
+phases remain for the later driver slices.
+
 #### P3a implementation record — truthful JavaScript validation pass, 2026-08-28
 
 **D8.2.5** requires a pass to declare the facts it produces and to run only
@@ -988,6 +992,45 @@ LAMBDA_TEST_MAX_CONCURRENT=1 make test-lambda-baseline
 git diff --check                                     # clean
 ```
 
+#### P3g implementation record — pass-owned contexts and authoritative MIR driver, 2026-08-29
+
+**D8.2.5** requires pass declarations to carry the context they consume and
+requires the compile driver, rather than each caller, to publish phase facts.
+`AstIndexPassContext` and `ast_index_compiler_pass()` now own the indexed-AST
+operation for both Lambda and JavaScript; their private callbacks are deleted.
+`CompilerPassSpec` carries an optional pass context, so validation and index
+passes cannot accidentally receive the other pass's state. The public
+`transpile_js_mir_ast()` entry is now the only JS analysis/lower/finalize
+driver: it seeds the indexed prerequisites, runs one manager-owned composite
+pass, and publishes `ANALYZED`, `PLANNED`, `MIR_LOWERED`, and `FINALIZED` only
+after the complete existing sequence succeeds. All JS source, module, eval,
+batch, and pre-built-AST callers already enter through this boundary.
+
+This is a deletion-funded **D8.2.5** slice. Path-isolated against commit
+`7a7ca002c`, the P3g hand source is `+47/-49 = -2`; the combined working tree
+also contains P4e and is `313,938 → 313,931` governed lines with
+`+131/-138 = -7` across changed first-party C/C++ and source. MIR link,
+execution/cleanup policy, and Lambda's later analysis/lowering remain explicit
+residue for the next driver slices; P3g does not claim the complete cross-
+language schedule or the final **D8.6.4v2** ratchets.
+
+Focused verification after rebuilding the affected targets:
+
+```text
+make -C build/premake config=debug_native test_compiler_pass_gtest test_js_script_gtest test_js_mir_emission_gtest test_js_opt_gtest -j8 CC=clang CXX=clang++
+                                                       # build passed
+./test/test_compiler_pass_gtest.exe --gtest_color=no   # 2/2 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+./test/test_js_script_gtest.exe --gtest_color=no --gtest_filter='JsScriptOwnership.*:JsInterpreter.*'
+                                                       # 103/103 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+LAMBDA_TEST_MAX_CONCURRENT=1 make test-lambda-baseline
+                                                       # 4035/4035 passed
+./utils/check_ast_tune_loc.sh --base HEAD --cap 313947 --phase-base HEAD
+                                                       # candidate 313,931; phase C/C++ -7; source -7
+git diff --check                                     # clean
+```
+
 ### 4.5 P4 — Replace collection with indexed analysis
 
 P4 makes `AstIndex.functions` and the new class index authoritative. Each analysis changes from recursive discovery to an indexed or worklist pass, and its former walk/cache is deleted immediately.
@@ -1096,6 +1139,85 @@ LAMBDA_TEST_MAX_CONCURRENT=1 node test/test_run.js --target=lambda --category=ba
 ```
 
 The final **D8.6.4v2** timing and `-2,000`-line project target remain open.
+
+#### P4c implementation record — shared `arguments` observation fact, 2026-08-29
+
+The next P4 slice gives `arguments` observation one AST-support owner. The
+shared function fact scans parameters and the body through the common
+core/extension child contract, keeps lexical arrows in the enclosing scan, and
+stops at nested ordinary functions, methods, and classes that own their own
+binding facts. MIR collection and the AST interpreter now consume the same
+classification; the interpreter's private 29-line scan is retired while MIR's
+reference set remains responsible for capture edges.
+
+This is a deletion-funded **D8.2.4** ownership slice with no semantic ruling or
+AST layout change. The merge-base governed tree and candidate are both 313,883
+lines (`0` phase delta); changed first-party C/C++ and source counters are each
+`+30/-30` (`0` delta). The earlier P4a/P4b reductions remain recorded against
+their pre-merge bases and are not double-counted here.
+
+Focused verification after rebuilding the release-native JS script target:
+
+```text
+./test/test_js_script_gtest.exe --gtest_color=no
+# 104/104 passed
+```
+
+This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+target.
+
+#### P4d implementation record — shared tail-reuse eligibility fact, 2026-08-29
+
+The next P4 slice moves AST tail-reuse eligibility into the shared AST-support
+owner. Direct-eval, `arguments`, and tail-reuse scanners now use one explicit
+nested-function/method/class boundary predicate; tail reuse still rejects
+`eval`, `with`, `try`, and any nested function, while `arguments` remains a
+shared function fact. The interpreter's private 24-line structural scanner is
+retired, and the call path consumes the shared fact without changing the
+activation or completion contract.
+
+This is a deletion-funded **D8.2.4** ownership slice with no semantic ruling or
+AST layout change. The merge-base governed tree falls from 313,947 to 313,938
+lines (`-9`); changed first-party C/C++ and source counters are `+32/-41`
+(`-9` delta). The prior P4 records retain their original merge-base accounting.
+
+Focused verification after rebuilding the affected targets:
+
+```text
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+```
+
+This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+target.
+
+#### P4e implementation record — shared lexical-observation fact, 2026-08-29
+
+The next P4 slice gives `arguments`, `this`, and `new.target` observation one
+AST-support owner. One observation mask now handles default-parameter and body
+references, lexical arrows, `super`-based `this`, and ordinary
+function/method/class boundaries. MIR capture analysis consumes the mask for
+function facts and arrow environment slots; the temporary arrow pseudo-reference
+walk and MIR-local `with` scan are retired. `with` ownership remains a separate
+AST fact because lexical arrows do not transfer that dynamic environment fact to
+their parent.
+
+This is a deletion-funded **D8.2.4** ownership slice with no semantic ruling or
+AST layout change. The merge-base governed tree falls from 313,938 to 313,933
+lines (`-5`); changed first-party C/C++ and source counters are `+84/-89`
+(`-5` delta). The P4d accounting remains against its own merge base.
+
+Focused verification after rebuilding the affected targets:
+
+```text
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+```
+
+This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+target.
 
 ### 4.6 P5 — Consolidate lowering by semantic family
 

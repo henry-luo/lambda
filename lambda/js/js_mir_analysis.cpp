@@ -442,31 +442,6 @@ void jm_collect_func_assignments(JsAstNode* node, struct hashmap* names) {
     }
 }
 
-// Walk a node tree collecting only arrow lexical pseudo-references.
-// Used to propagate lexical this/arguments/new.target requirements from nested arrow
-// functions up to enclosing arrows. Stops at non-arrow function boundaries
-// (those introduce fresh non-lexical bindings) and only adds the
-// pseudo-refs (no other identifiers) so it does not pollute the
-// closure-capture analysis with the nested arrow's own free variables.
-void jm_collect_arrow_lexical_refs(JsAstNode* node, struct hashmap* refs) {
-    if (!node) return;
-    // Use jm_collect_body_refs to walk the immediate body (it already
-    // covers all statement/expression node types, but stops at any nested
-    // function boundary). Capture into a temp set so we can extract only
-    // the two pseudo-refs we care about.
-    struct hashmap* tmp = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
-    jm_collect_body_refs(node, tmp);
-    if (jm_name_set_has(tmp, "_js_this")) jm_name_set_add(refs, "_js_this");
-    if (jm_name_set_has(tmp, "_js_arguments")) jm_name_set_add(refs, "_js_arguments");
-    if (jm_name_set_has(tmp, "_js_new.target")) jm_name_set_add(refs, "_js_new.target");
-    hashmap_free(tmp);
-    // jm_collect_body_refs already invokes us recursively for nested
-    // ARROW bodies (via the FUNCTION_*/ARROW case), so transitive arrows
-    // are covered. Non-arrow nested functions introduce their own
-    // this/arguments and are correctly skipped.
-}
-
 // Collect all identifier references in a function body (excluding nested function bodies)
 typedef struct JmBodyRefsCtx {
     struct hashmap* refs;
@@ -496,23 +471,11 @@ static void jm_collect_body_refs_impl(JsAstNode* node, struct hashmap* refs,
         break;
     }
     // Don't recurse into nested function bodies (they have their own scope)
+    case JS_AST_NODE_FUNCTION_DECLARATION:
     case JS_AST_NODE_FUNCTION_EXPRESSION:
     case JS_AST_NODE_ARROW_FUNCTION:
-    case JS_AST_NODE_FUNCTION_DECLARATION: {
-        // Exception: arrow functions inherit `this`/`arguments`/`new.target` lexically.
-        // If a nested arrow (or chain of nested arrows) references `this`
-        // or those lexical meta-bindings, the enclosing function (which may itself be an
-        // arrow) needs to propagate the capture upward. So when we see a
-        // nested ARROW, recurse into its body collecting only those
-        // pseudo-refs; transparently pass
-        // through further nested arrows; STOP at non-arrow function nodes
-        // (those introduce a fresh `this`/`arguments` binding).
-        JsFunctionNode* nested = (JsFunctionNode*)node;
-        if (nested->is_arrow && nested->body) {
-            jm_collect_arrow_lexical_refs(nested->body, refs);
-        }
+        // nested function facts are published by the shared AST observer.
         break;
-    }
     case JS_AST_NODE_VARIABLE_DECLARATOR: {
         JsVariableDeclaratorNode* d = (JsVariableDeclaratorNode*)node;
         // Recurse into init (may reference outer vars)
@@ -528,9 +491,7 @@ static void jm_collect_body_refs_impl(JsAstNode* node, struct hashmap* refs,
             is_super_call = id->name && id->name->len == 5 &&
                 strncmp(id->name->chars, "super", 5) == 0;
         }
-        if (is_super_call) {
-            jm_name_set_add(refs, "_js_this");
-        } else {
+        if (!is_super_call) {
             jm_collect_body_refs_impl(c->callee, refs, body_start, body_end);
         }
         JsAstNode* arg = c->arguments;
@@ -545,9 +506,7 @@ static void jm_collect_body_refs_impl(JsAstNode* node, struct hashmap* refs,
             is_super = obj_id->name && obj_id->name->len == 5 &&
                 strncmp(obj_id->name->chars, "super", 5) == 0;
         }
-        if (is_super) {
-            jm_name_set_add(refs, "_js_this");
-        } else {
+        if (!is_super) {
             jm_collect_body_refs_impl(m->object, refs, body_start, body_end);
         }
         if (m->computed) jm_collect_body_refs_impl(m->property, refs, body_start, body_end);
@@ -1312,26 +1271,6 @@ static bool jm_analysis_function_is_method_syntax(JsFunctionNode* fn) {
     return fn && fn->node_type == JS_AST_NODE_METHOD_DEFINITION;
 }
 
-static bool jm_analysis_ast_has_with(JsAstNode* node, bool root);
-
-static bool jm_analysis_ast_has_with_child(JsAstNode* child, void*) {
-    return jm_analysis_ast_has_with(child, false);
-}
-
-static bool jm_analysis_ast_has_with(JsAstNode* node, bool root) {
-    if (!node) return false;
-    if (node->node_type == JS_AST_NODE_WITH_STATEMENT) return true;
-    if (!root && (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-            node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-            node->node_type == JS_AST_NODE_ARROW_FUNCTION ||
-            node->node_type == JS_AST_NODE_METHOD_DEFINITION ||
-            node->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-            node->node_type == JS_AST_NODE_CLASS_EXPRESSION)) {
-        return false;
-    }
-    return js_ast_any_child(node, jm_analysis_ast_has_with_child, NULL);
-}
-
 void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
                          struct hashmap* module_consts,
                          struct hashmap* ancestor_func_locals,
@@ -1368,13 +1307,14 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     // Default initializers execute in the function environment and can read
     // this/new.target before the body; classify them before stamping call ABI
     // facts so a binding-oblivious lane cannot hide either value.
-    fc->observes_this = jm_name_set_has(refs, "_js_this") || fc->has_direct_eval;
-    fc->observes_new_target = jm_name_set_has(refs, "_js_new.target") ||
+    uint8_t observations = js_ast_function_observation_mask(fn);
+    fc->observes_this = (observations & JS_AST_OBSERVES_THIS) || fc->has_direct_eval;
+    fc->observes_new_target = (observations & JS_AST_OBSERVES_NEW_TARGET) ||
         fc->has_direct_eval;
     // A function nested below a `with` is created with that Object Environment
     // Record and must keep dynamic name lookup after the enclosing body returns.
-    fc->uses_with = captures_with_scope || fc->has_direct_eval || (fn->body &&
-        jm_analysis_ast_has_with(fn->body, true));
+    fc->uses_with = captures_with_scope || fc->has_direct_eval ||
+        js_ast_function_has_with(fn);
 
     // Find captures: referenced identifiers that are not params/locals but ARE in outer scope
     // Track self-references separately — if the function has other captures (and thus
@@ -1517,7 +1457,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
 
     // Arrow functions: capture 'this' from enclosing lexical scope.
     // In JS, arrow functions do NOT have their own 'this'; they inherit from the parent.
-    if (fn->is_arrow && jm_name_set_has(refs, "_js_this")) {
+    if (fn->is_arrow && (observations & JS_AST_OBSERVES_THIS)) {
         jm_ensure_captures_capacity(fc);
         fc->captures[fc->capture_count].name = jm_persist_name("_js_this");
         fc->captures[fc->capture_count].scope_env_key = jm_persist_name("_js_this");
@@ -1536,7 +1476,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
     // Arrow functions also capture new.target lexically.  A normal direct call
     // clears the dynamic runtime new.target, so arrows must keep a closure slot
     // for the value visible where the arrow was created.
-    if (fn->is_arrow && jm_name_set_has(refs, "_js_new.target")) {
+    if (fn->is_arrow && (observations & JS_AST_OBSERVES_NEW_TARGET)) {
         jm_ensure_captures_capacity(fc);
         fc->captures[fc->capture_count].name = jm_persist_name("_js_new.target");
         fc->captures[fc->capture_count].scope_env_key = jm_persist_name("_js_new.target");
@@ -1552,7 +1492,7 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         log_debug("js-mir: arrow capture '_js_new.target' in function '%s'", fc->name);
     }
 
-    if (fn->is_arrow && jm_name_set_has(refs, "_js_arguments")) {
+    if (fn->is_arrow && (observations & JS_AST_OBSERVES_ARGUMENTS)) {
         jm_ensure_captures_capacity(fc);
         fc->captures[fc->capture_count].name = jm_persist_name("_js_arguments");
         fc->captures[fc->capture_count].scope_env_key = jm_persist_name("_js_arguments");
@@ -1568,8 +1508,8 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         log_debug("js-mir: arrow capture '_js_arguments' in function '%s'", fc->name);
     }
 
-    // v18q: Check if function uses 'arguments' keyword
-    fc->uses_arguments = !fn->is_arrow && jm_name_set_has(refs, "_js_arguments");
+    // v18q: publish the shared AST fact; refs still carry lexical captures.
+    fc->uses_arguments = !fn->is_arrow && js_ast_function_uses_arguments(fn);
     fc->analysis.captures = fc->captures;
     fc->analysis.capture_count = fc->capture_count;
     if (fn) {

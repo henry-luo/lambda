@@ -423,6 +423,12 @@ bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* 
     return ast_index_walk_root(index, root, NULL, profile);
 }
 
+extern "C" int ast_index_compiler_pass(void* opaque) {
+    AstIndexPassContext* pass = (AstIndexPassContext*)opaque;
+    return pass && pass->index && pass->root && ast_index_build_profile(
+        pass->index, pass->root, pass->profile);
+}
+
 bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
         const LangProfile* profile) {
     if (!index || !root) return false;

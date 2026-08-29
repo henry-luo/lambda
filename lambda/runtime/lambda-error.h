@@ -101,6 +101,8 @@ typedef enum LambdaErrorCode {
     ERR_UNSUPPORTED_DYNAMIC_ABI = 229,// valid dynamic call exceeds physical dispatch ABI
     ERR_FUNCTION_ARGUMENT_LIMIT = 230,// Core Lambda function/call exceeds LAMBDA_MAX_FUNCTION_ARGS
     ERR_INVALIDATED_BINDING = 231,     // read after a hidden cross-frame mutation
+    ERR_PLACE_COPY_MUTATED = 232,     // S9.3.1/CW24: writes through a copy of a
+                                      // member/index read never reach its container
     
     // -------------------------------------------------------------------------
     // 3xx - Runtime Errors
