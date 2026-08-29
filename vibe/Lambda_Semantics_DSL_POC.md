@@ -66,7 +66,7 @@ covers meta-circular modeling, so these are working-doc decisions):
 | P4 | Stuckness = raised error on the `T^` channel; rule dispatch = `match` on `name(t)`; where fall-through choice is needed, errors-are-falsy `or` chaining (verified §3). |
 | P5 | Model scalar arithmetic **uses Lambda's own numerics** — the parent's §11 open question 5 resolved pragmatically for the POC, with the A1 caveat recorded in §10. |
 | P6 | Verification is **self-differential in-script**: each check compares `ev(term)` against the runtime evaluating the same expression natively, in the same fixture; goldens are arrays of `true` (§6.1). |
-| P7 | POC fixtures live under `test/lambda/` as ordinary `.ls`+`.txt` pairs so `make test-lambda-baseline` runs them with no new harness. |
+| P7 | POC fixtures are ordinary `.ls`+`.txt` pairs under `test/lambda/sem/`, needing no new harness — but that directory is **deliberately not yet in the baseline's discovery list** (§5), so a model still being shaped cannot dictate what the runtime must do. |
 | P8 | Scope ceiling: functional core (literals, arithmetic/comparison/logical, `let`, `if`, closures/application, recursion, arrays/maps/for basics). Errors-as-modeled-values, `pn`, modules, system functions beyond a tiny builtin list: out (§8, §9). |
 | P9 | The POC model is the migration seed for the parent's Stage 4; arm ↔ rule correspondence is maintained deliberately (§9.2). |
 | P10 | Meta-fragment findings made while building the POC are recorded in §7 and fed to the `Lambda_Semantics_Formal.md` worklist — this is the parent's §13.3 hardening loop, started early. |
@@ -311,18 +311,24 @@ section). No declaration form needed at this scale.
 ## 5. Files and layout
 
 ```
-test/lambda/sem_poc_core.ls      // kernel + arithmetic/let/if checks      (+ .txt golden)
-test/lambda/sem_poc_closure.ls   // closures, capture, shadowing, recursion (+ .txt)
-test/lambda/sem_poc_collect.ls   // arrays/maps/for arms                    (+ .txt)
-test/lambda/sem_poc_stuck.ls     // negative checks: every stuck form       (+ .txt)
+test/lambda/sem/sem_poc_core.ls      // kernel + arith/let/if/closure/recursion/stuck  [LANDED]
+test/lambda/sem/sem_poc_collect.ls   // arrays/maps/for arms                    (+ .txt)
+test/lambda/sem/sem_poc_stuck.ls     // negative checks: every stuck form       (+ .txt)
 ```
 
-Per P7 these are ordinary fixtures: `make test-lambda-baseline` executes them,
-CLAUDE.md rule 8 supplies the golden discipline, and no harness, Makefile
+Per P7 these are ordinary `.ls`+`.txt` fixtures under `test/lambda/sem/`, so
+CLAUDE.md rule 8 supplies the golden discipline and no harness, Makefile
 target, or manifest is added for Phases 1–2. The kernel is duplicated per
 fixture file at first (fixtures are self-contained); if that grates, module
 import of a shared `sem_poc_kernel.ls` is an ordinary Lambda `import` —
 a later cleanup, not a requirement.
+
+**Not in the baseline yet** (designer call, 2026-08-29): `test/lambda/sem` is
+deliberately absent from `FUNCTIONAL_TEST_DIRECTORIES` in
+`test/test_lambda_gtest.cpp`, so `make test-lambda-baseline` does not run these
+while the model is still being shaped. Adding that one line is what turns the
+POC into a CI gate — do it when the M3 negative suite lands, not before, so a
+half-written model cannot start dictating what the runtime must do.
 
 Goldens for these fixtures are arrays of `true` — which sidesteps the
 "golden captured from the implementation" objection for the *checks
@@ -434,10 +440,10 @@ that building the model is itself the hardening instrument:
   outcome is the one the bucket table predicts as most valuable: goldens in the
   ✓✗ cell that had silently enshrined *two* stacked defects, one of which had
   disabled a whole validator.
-- **F2 — doc drift on the element attribute/content separator.**
-  `doc/Lambda_Data.md` shows `<div class: "main"; "content">`; the parser
+- **F2 — doc drift on the element attribute/content separator. FIXED.**
+  `doc/Lambda_Data.md` showed `<div class: "main"; "content">`; the parser
   rejects `;` with *"expected ',' between element attributes and content"*.
-  The docs predate the separator change. (Same class as the parent's §13.2
+  The docs predated the separator change; they now show `,`. (Same class as the parent's §13.2
   `'a' == "a"` finding: user-guide-grade docs diverging from the
   implementation.)
 - **F3 — element content expressions are restricted.** `<clo p: x, t[0]>` and
@@ -464,9 +470,14 @@ POC itself is approved, which is the strongest argument that the loop works.
 Each milestone is a committed fixture set, green under
 `make test-lambda-baseline`:
 
-- **M0 — kernel fixture.** §4.3's kernel + checks as `sem_poc_core.ls`.
-  Status: code already runs; committing it is the milestone. Includes the
-  `fun`/`rclo` recursion arms (§4.4) and factorial check.
+- **M0 — kernel fixture. LANDED** (2026-08-29) as
+  `test/lambda/sem/sem_poc_core.ls` + golden: §4.3's kernel with the
+  `fun`/`rclo` recursion arms (§4.4), and 11 differential checks — arithmetic,
+  `let`, abstraction/application, closure capture, shadowing, both conditional
+  arms, factorial vs. the native recursive `fn`, and three stuckness checks
+  (unbound variable, no-rule tag, propagation out of a nested position). All 11
+  return `true`. `lam`/`fun` share one `app` arm: a plain `clo` has no `f`
+  attribute, so `f.f` reads null and the self-rebind is skipped.
 - **M1 — functional-core breadth.** Remaining scalar ops (sub/div/mod, full
   comparison set, logical with short-circuit, string concat), n-ary `lam`/`app`
   (parameter list as child or attribute-array), multi-binding `lett`,
