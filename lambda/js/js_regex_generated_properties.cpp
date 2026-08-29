@@ -111,9 +111,35 @@ extern "C" int js_regex_wrapper_lookup_property_ranges(const char* name, int nam
 
 // ECMAScript IdentifierStart/IdentifierPart follows Unicode categories;
 // the generated RegExp tables are pinned to older property data.
+// The linked utf8proc data also predates Unicode 17, so keep the generated
+// Unicode 17 identifier delta here until the system Unicode data is upgraded.
+static const JsRegexRange js_unicode_id_start_unicode17_additions[] = {
+    {0x00088F, 0x00088F}, {0x000C5C, 0x000C5C}, {0x000CDC, 0x000CDC},
+    {0x00A7CE, 0x00A7CF}, {0x00A7D2, 0x00A7D2}, {0x00A7D4, 0x00A7D4},
+    {0x00A7F1, 0x00A7F1}, {0x010940, 0x010959}, {0x010EC5, 0x010EC7},
+    {0x011DB0, 0x011DDB}, {0x016EA0, 0x016EB8}, {0x016EBB, 0x016ED3},
+    {0x016FF2, 0x016FF6}, {0x0187F8, 0x0187FF}, {0x018D09, 0x018D1E},
+    {0x018D80, 0x018DF2}, {0x01E6C0, 0x01E6DE}, {0x01E6E0, 0x01E6E2},
+    {0x01E6E4, 0x01E6E5}, {0x01E6E7, 0x01E6ED}, {0x01E6F0, 0x01E6F4},
+    {0x01E6FE, 0x01E6FF}, {0x02B73A, 0x02B73F}, {0x02CEA2, 0x02CEAD},
+    {0x0323B0, 0x033479}
+};
+
+static const JsRegexRange js_unicode_id_continue_unicode17_additions[] = {
+    {0x001ACF, 0x001ACF}, {0x001ADD, 0x001ADD}, {0x001AE0, 0x001AEB},
+    {0x010EFA, 0x010EFB}, {0x011B60, 0x011B67}, {0x011DE0, 0x011DE9},
+    {0x01E6E3, 0x01E6E3}, {0x01E6E6, 0x01E6E6}, {0x01E6EE, 0x01E6EF},
+    {0x01E6F5, 0x01E6F5}
+};
+
 static bool js_unicode_id_is_start_base(uint32_t cp) {
     if (cp == 0x2118 || cp == 0x212E || (cp >= 0x309B && cp <= 0x309C) ||
             (cp >= 0x1885 && cp <= 0x1886)) return true;
+    if (js_regex_sorted_range_contains(
+            js_unicode_id_start_unicode17_additions,
+            (int)(sizeof(js_unicode_id_start_unicode17_additions) /
+                  sizeof(js_unicode_id_start_unicode17_additions[0])),
+            (int)cp)) return true;
     utf8proc_category_t category = utf8proc_category((utf8proc_int32_t)cp);
     return category == UTF8PROC_CATEGORY_LU || category == UTF8PROC_CATEGORY_LL ||
            category == UTF8PROC_CATEGORY_LT || category == UTF8PROC_CATEGORY_LM ||
@@ -131,6 +157,11 @@ extern "C" bool js_unicode_id_is_continue(uint32_t cp) {
     if (cp < 0x80) return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
                           (cp >= '0' && cp <= '9');
     if (js_unicode_id_is_start_base(cp)) return true;
+    if (js_regex_sorted_range_contains(
+            js_unicode_id_continue_unicode17_additions,
+            (int)(sizeof(js_unicode_id_continue_unicode17_additions) /
+                  sizeof(js_unicode_id_continue_unicode17_additions[0])),
+            (int)cp)) return true;
     if (cp == 0x00B7 || cp == 0x0387 || cp == 0x30FB || cp == 0xFF65 ||
             (cp >= 0x1369 && cp <= 0x1371) || cp == 0x19DA) return true;
     utf8proc_category_t category = utf8proc_category((utf8proc_int32_t)cp);

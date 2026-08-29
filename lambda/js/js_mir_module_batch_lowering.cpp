@@ -1670,7 +1670,9 @@ void jm_cleanup_deferred_mir() {
     if (!js_active_runtime_state) return;
     js_dynfunc_cache_reset();
     for (int i = 0; i < module_mir_context_count; i++) {
-        MIR_finish(module_mir_contexts[i]);
+        // Deferred eval units use the same JIT generator as ordinary units;
+        // finishing only MIR leaves the generator arena and native code live.
+        jit_cleanup_mode(module_mir_contexts[i], !g_mir_interp_mode);
         if (module_mir_source_buffers[i]) mem_free(module_mir_source_buffers[i]);
     }
     module_mir_context_count = 0;

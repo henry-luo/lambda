@@ -454,6 +454,11 @@
         "ThorVG",
         "pthread"
       ],
+      "linux": {
+        "additional_libraries": [
+          "gomp"
+        ]
+      },
       "windows": {
         "additional_libraries": [
           "dwrite",
@@ -3019,6 +3024,7 @@
             "additional_sources": [
               "radiant/animation.cpp",
               "radiant/css_animation.cpp",
+              "radiant/css_display.cpp",
               "radiant/css_cascade.cpp",
               "radiant/css_prop_table.cpp",
               "lambda/input/css/css_engine.cpp",

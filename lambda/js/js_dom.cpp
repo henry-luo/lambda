@@ -2276,6 +2276,9 @@ static Item js_dom_text_delete_data_method(DomText* text_node, Item offset_arg,
                                            Item count_arg);
 static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_arg,
                                               Item count_arg);
+static Item js_dom_text_split_method(DomText* text_node, Item offset_arg);
+static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
+                                      DomNode* ref_child);
 static Item js_text_data_body(Item callee, Item this_value, Item* args,
                               int argc, uint64_t* result_home);
 static void js_dom_expando_flag_set(DomElement* elem, const char* name, Item value);
@@ -6943,6 +6946,59 @@ static Item js_dom_text_substring_data_method(DomText* text_node, Item offset_ar
     return (Item){.item = s2it(s)};
 }
 
+static Item js_dom_text_split_method(DomText* text_node, Item offset_arg) {
+    if (!text_node) return make_js_undefined();
+    int64_t offset = js_dom_to_integer_or_zero(offset_arg);
+    if (offset < 0) {
+        return js_dom_throw_index_size_error("The offset is negative.");
+    }
+    uint32_t total = dom_text_utf16_length(text_node);
+    if ((uint64_t)offset > total) {
+        return js_dom_throw_index_size_error(
+            "The offset is larger than the CharacterData length.");
+    }
+
+    DomElement* parent = text_node->parent && text_node->parent->is_element()
+        ? text_node->parent->as_element() : nullptr;
+    DomDocument* doc = parent ? parent->doc : nullptr;
+    if (!parent || !doc) return make_js_undefined();
+
+    uint32_t u8_split = dom_text_utf16_to_utf8(text_node, (uint32_t)offset);
+    DomText* right = DomText::create_detached_copy(
+        doc, text_node->text + u8_split, text_node->length - u8_split);
+    String* left = dom_document_create_string(doc, text_node->text, u8_split);
+    if (!right || !left) {
+        if (left) pool_free(doc->document_pool, left);
+        return make_js_undefined();
+    }
+
+    // Keep the Mark child array synchronized while preserving the split
+    // primitive's required range-adjustment order: insert, adjust, truncate.
+    DomNode* after = text_node->next_sibling;
+    bool inserted = parent->is_synthetic()
+        ? ((DomNode*)parent)->insert_before((DomNode*)right, after)
+        : js_dom_insert_backed_text(parent, right, after);
+    if (!inserted) {
+        pool_free(doc->document_pool, left);
+        return make_js_undefined();
+    }
+
+    DocState* state = js_dom_state_for_nodes(
+        (DomNode*)text_node, text_node->parent);
+    if (state) dom_mutation_text_split(state, text_node, right, (uint32_t)offset);
+    if (!dom_text_replace_backed_string(text_node, left)) {
+        dom_text_adopt_document_string(text_node, doc, left);
+    }
+
+    // The range primitive performs boundary adjustment; publish the sibling
+    // insertion through the JS mutation ledger for observers and reflow.
+    js_dom_record_mutation_detail(DOM_JS_MUTATION_CHILD_INSERT,
+                                  (DomNode*)right, right->parent, 0);
+    js_dom_mutation_notify(DOM_JS_MUTATION_CHILD_INSERT,
+                           (DomNode*)right, right->parent);
+    return js_dom_wrap_element(right);
+}
+
 extern "C" Item js_dom_set_text_data_property(void* text_ptr, Item value) {
     DomText* text_node = (DomText*)text_ptr;
     if (!text_node) return value;
@@ -6986,6 +7042,7 @@ enum JsTextDataOperation {
     JS_TEXT_DATA_APPEND,
     JS_TEXT_DATA_DELETE,
     JS_TEXT_DATA_SUBSTRING,
+    JS_TEXT_DATA_SPLIT,
 };
 
 static Item js_text_data_body(Item callee, Item this_value, Item* args,
@@ -7008,6 +7065,8 @@ static Item js_text_data_body(Item callee, Item this_value, Item* args,
         return js_dom_text_delete_data_method(node->as_text(), arg0, arg1);
     case JS_TEXT_DATA_SUBSTRING:
         return js_dom_text_substring_data_method(node->as_text(), arg0, arg1);
+    case JS_TEXT_DATA_SPLIT:
+        return js_dom_text_split_method(node->as_text(), arg0);
     default:
         return ItemError;
     }
@@ -8912,6 +8971,8 @@ static bool js_dom_get_textlike_property(DomNode* node, Item elem_item,
             operation = JS_TEXT_DATA_DELETE; arity = 2;
         } else if (strcmp(prop, "substringData") == 0) {
             operation = JS_TEXT_DATA_SUBSTRING; arity = 2;
+        } else if (strcmp(prop, "splitText") == 0) {
+            operation = JS_TEXT_DATA_SPLIT; arity = 1;
         } else {
             operation = JS_TEXT_DATA_APPEND; arity = 0;
         }
@@ -14084,6 +14145,50 @@ extern "C" Item js_dom_replace_child_bridge(void* parent_ptr, Item new_child_arg
         return old_child_arg;
     }
     if (!js_dom_prepare_cross_document_insertion(new_child, elem)) return ItemNull;
+
+    if ((new_child->is_element() || new_child->is_text()) &&
+        (old_child->is_element() || old_child->is_text()) &&
+        elem->doc && elem->doc->input) {
+        int64_t old_index = old_child->is_element()
+            ? js_dom_backed_child_index(elem, old_child->as_element())
+            : js_dom_backed_node_index(elem, old_child);
+        Item replacement = ItemNull;
+        if (new_child->is_element()) {
+            DomElement* new_elem = new_child->as_element();
+            if (new_elem && !new_elem->is_synthetic()) {
+                replacement = (Item){.element = dom_element_to_element(new_elem)};
+            }
+        } else {
+            DomText* new_text = new_child->as_text();
+            if (new_text && new_text->native_string) {
+                replacement = (Item){.item = s2it(new_text->native_string)};
+            }
+        }
+        if (old_index >= 0 && replacement.item != ITEM_NULL) {
+            if (new_child->parent && new_child->parent != (DomNode*)elem) {
+                dom_pre_remove(new_child);
+                if (!new_child->parent->is_element() ||
+                    !js_dom_remove_backed_child(new_child->parent->as_element(), new_child)) {
+                    return ItemNull;
+                }
+            }
+            dom_pre_remove(old_child);
+            if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
+            MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
+            Item result = editor.elmt_replace_child(
+                {.element = dom_element_to_element(elem)},
+                (int)old_index, replacement);
+            if (get_type_id(result) != LMD_TYPE_ELEMENT ||
+                result.element != dom_element_to_element(elem)) {
+                log_error("js_dom_replace_child: mixed text/element backing changed identity");
+                return ItemNull;
+            }
+            dom_post_insert((DomNode*)elem, new_child);
+            js_dom_observers_child_replace_notify((DomNode*)elem, new_child, old_child);
+            js_dom_mutation_notify();
+            return old_child_arg;
+        }
+    }
 
     if (new_child->is_element() && old_child->is_element() && elem->doc &&
         elem->doc->input) {

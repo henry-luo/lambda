@@ -3211,7 +3211,12 @@ bool view_state_get_focused(DocState* state, View* view) {
 }
 
 static FormControlProp* form_prop_for_view(View* view) {
-    if (!view || !view->is_block()) return NULL;
+    if (!view) return NULL;
+    if (view->is_element()) {
+        DomElement* elem = lam::dom_require_element(view);
+        return elem ? elem->form : NULL;
+    }
+    if (!view->is_block()) return NULL;
     ViewBlock* block = lam::view_require_block(view);
     return block->form;
 }
