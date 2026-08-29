@@ -7,6 +7,10 @@
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_interp.hpp"
 
+TEST(JsAstStructure, ExtensionChildCatalogIsComplete) {
+    EXPECT_TRUE(js_ast_child_catalog_complete());
+}
+
 static bool js_test262_append_file(StrBuf* source, const char* path) {
     char* contents = read_text_file(path);
     if (!contents) return false;

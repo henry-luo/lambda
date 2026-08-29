@@ -5,96 +5,6 @@ static bool jm_function_inside_class_syntax(JsFunctionNode* fn) {
     return fn && fn->node_type == JS_AST_NODE_METHOD_DEFINITION;
 }
 
-bool js_ast_has_direct_eval_call(JsAstNode* node) {
-    if (!node) return false;
-    switch (node->node_type) {
-    case JS_AST_NODE_CALL_EXPRESSION: {
-        JsCallNode* call = (JsCallNode*)node;
-        if (!call->optional && call->callee &&
-                call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-            // `eval?.()` is always indirect eval. Classifying it as direct made
-            // the function publish caller locals into the eval bridge, so the
-            // otherwise-indirect intrinsic still observed the local environment.
-            if (id->name && id->name->len == 4 &&
-                    strncmp(id->name->chars, "eval", 4) == 0) return true;
-        }
-        for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
-            if (js_ast_has_direct_eval_call(arg)) return true;
-        }
-        return false;
-    }
-    case JS_AST_NODE_FUNCTION_DECLARATION:
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
-    case JS_AST_NODE_CLASS_DECLARATION:
-    case JS_AST_NODE_CLASS_EXPRESSION:
-        return false;
-    case JS_AST_NODE_BLOCK_STATEMENT: {
-        JsBlockNode* blk = (JsBlockNode*)node;
-        for (JsAstNode* stmt = blk->statements; stmt; stmt = stmt->next) {
-            if (js_ast_has_direct_eval_call(stmt)) return true;
-        }
-        return false;
-    }
-    case JS_AST_NODE_EXPRESSION_STATEMENT:
-        return js_ast_has_direct_eval_call(((JsExpressionStatementNode*)node)->expression);
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* decl = (JsVariableDeclarationNode*)node;
-        for (JsAstNode* d = decl->declarations; d; d = d->next) {
-            if (js_ast_has_direct_eval_call(d)) return true;
-        }
-        return false;
-    }
-    case JS_AST_NODE_VARIABLE_DECLARATOR:
-        return js_ast_has_direct_eval_call(((JsVariableDeclaratorNode*)node)->init);
-    case JS_AST_NODE_RETURN_STATEMENT:
-        return js_ast_has_direct_eval_call(((JsReturnNode*)node)->argument);
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* n = (JsIfNode*)node;
-        return js_ast_has_direct_eval_call(n->test) || js_ast_has_direct_eval_call(n->consequent) ||
-            js_ast_has_direct_eval_call(n->alternate);
-    }
-    case JS_AST_NODE_BINARY_EXPRESSION: {
-        JsBinaryNode* n = (JsBinaryNode*)node;
-        return js_ast_has_direct_eval_call(n->left) || js_ast_has_direct_eval_call(n->right);
-    }
-    case JS_AST_NODE_UNARY_EXPRESSION:
-        return js_ast_has_direct_eval_call(((JsUnaryNode*)node)->operand);
-    case JS_AST_NODE_ASSIGNMENT_EXPRESSION: {
-        JsAssignmentNode* n = (JsAssignmentNode*)node;
-        return js_ast_has_direct_eval_call(n->left) || js_ast_has_direct_eval_call(n->right);
-    }
-    case JS_AST_NODE_MEMBER_EXPRESSION: {
-        JsMemberNode* n = (JsMemberNode*)node;
-        return js_ast_has_direct_eval_call(n->object) || (n->computed && js_ast_has_direct_eval_call(n->property));
-    }
-    case JS_AST_NODE_NEW_EXPRESSION: {
-        JsCallNode* call = (JsCallNode*)node;
-        for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
-            if (js_ast_has_direct_eval_call(arg)) return true;
-        }
-        return false;
-    }
-    case JS_AST_NODE_SEQUENCE_EXPRESSION: {
-        JsSequenceNode* seq = (JsSequenceNode*)node;
-        for (JsAstNode* expr = seq->expressions; expr; expr = expr->next) {
-            if (js_ast_has_direct_eval_call(expr)) return true;
-        }
-        return false;
-    }
-    case JS_AST_NODE_SPREAD_ELEMENT:
-    case JS_AST_NODE_REST_ELEMENT:
-        return js_ast_has_direct_eval_call(((JsSpreadElementNode*)node)->argument);
-    case JS_AST_NODE_YIELD_EXPRESSION:
-        return js_ast_has_direct_eval_call(((JsYieldNode*)node)->argument);
-    case JS_AST_NODE_AWAIT_EXPRESSION:
-        return js_ast_has_direct_eval_call(((JsAwaitNode*)node)->argument);
-    default:
-        return false;
-    }
-}
-
 // ============================================================================
 // Phase 4: Native call resolution
 // ============================================================================
@@ -444,6 +354,7 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
         if (mt->func_entries[child_index].parent_index == -1) {
             mt->func_entries[child_index].parent_index = function_index;
         }
+        mt->func_entries[child_index].is_strict = true;
     }
     return collected;
 }
@@ -490,16 +401,18 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
             e->name = jm_make_fn_name(fn, mt);
             e->func_item = NULL; // set during creation
             e->parent_index = -1; // top-level until set by parent
-            e->is_strict = jm_function_inside_class_syntax(fn);
-            e->has_direct_eval = js_ast_has_direct_eval_call(fn->body);
+            e->is_strict = mt->is_global_strict || mt->is_module ||
+                jm_function_inside_class_syntax(fn) ||
+                jm_has_use_strict_directive(fn);
+            e->has_direct_eval = js_ast_function_has_direct_eval(fn);
             mt->func_count++;
-            // Set parent_index for DIRECT children: functions collected during our body
-            // recursion that don't already have a parent assigned by a deeper enclosing
-            // function. Direct children still have parent_index == -1.
+            // Set parent_index for direct children; strictness covers every
+            // descendant collected from this function's body range.
             for (int ci = children_start; ci < children_end; ci++) {
                 if (mt->func_entries[ci].parent_index == -1) {
                     mt->func_entries[ci].parent_index = my_index;
                 }
+                if (e->is_strict) mt->func_entries[ci].is_strict = true;
             }
             // A5: Scan for this.prop = expr patterns (constructor shape pre-alloc)
             if (fn->body) jm_scan_ctor_props(e, fn->body);
@@ -612,6 +525,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     case JS_AST_NODE_CLASS_DECLARATION:
     case JS_AST_NODE_CLASS_EXPRESSION: {
         JsClassNode* cls = (JsClassNode*)node;
+        int superclass_functions_start = mt->func_count;
         if (cls->superclass) jm_collect_functions(mt, cls->superclass);
         if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT &&
             mt->collection_count_only) {
@@ -655,6 +569,11 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
         }
         if (cls->body && cls->body->node_type == JS_AST_NODE_BLOCK_STATEMENT &&
             mt->class_count < mt->class_capacity) {
+            // Class heritage expressions execute in the class's strict realm;
+            // carry that fact into every function collected from the expression.
+            for (int fi = superclass_functions_start; fi < mt->func_count; fi++) {
+                mt->func_entries[fi].is_strict = true;
+            }
             JsClassEntry* ce = &mt->class_entries[mt->class_count];
             mt->class_count++; // reserve slot before recursion into methods/fields
             memset(ce, 0, sizeof(JsClassEntry));
@@ -818,8 +737,9 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                             }
                             fc->func_item = NULL;
                             fc->capture_count = 0;
+                            fc->is_class_method = true;
                             fc->is_strict = true;
-                            fc->has_direct_eval = js_ast_has_direct_eval_call(fn->body);
+                            fc->has_direct_eval = js_ast_function_has_direct_eval(fn);
                             mt->func_count++;
 
                             // Set parent_index for inner functions collected during method body
@@ -829,6 +749,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
                                 if (mt->func_entries[ci].parent_index == -1) {
                                     mt->func_entries[ci].parent_index = method_index;
                                 }
+                                mt->func_entries[ci].is_strict = true;
                             }
 
                             // Add to class entry
