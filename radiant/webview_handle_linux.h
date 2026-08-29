@@ -53,7 +53,8 @@ struct WebViewHandle {
 
     // shared
     float width, height;        // logical CSS pixel size
-    float pixel_ratio;          // DPI scale factor
+    float device_scale;         // child host-coordinate scale key
+    float raster_scale;         // layer snapshot scale key
 };
 
 #endif // __linux__

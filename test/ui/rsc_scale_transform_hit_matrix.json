@@ -1,0 +1,16 @@
+{
+  "name": "RSC12 transformed hit-test scale matrix",
+  "html": "test/ui/test_phase5g_transform.html",
+  "description": "DOM hit-testing stays in logical coordinates for the translated-transform path currently supported by hit-testing.",
+  "device_scale": 1.0,
+  "viewport": {"width": 800, "height": 600},
+  "events": [
+    {"type": "assert_hit_test", "x": 350.25, "y": 30.25, "expected_selector": "#translated"},
+    {"type": "set_device_scale", "scale": 1.25},
+    {"type": "assert_hit_test", "x": 350.25, "y": 30.25, "expected_selector": "#translated"},
+    {"type": "set_device_scale", "scale": 1.5},
+    {"type": "assert_hit_test", "x": 350.25, "y": 30.25, "expected_selector": "#translated"},
+    {"type": "set_device_scale", "scale": 2.0},
+    {"type": "assert_hit_test", "x": 350.25, "y": 30.25, "expected_selector": "#translated"}
+  ]
+}

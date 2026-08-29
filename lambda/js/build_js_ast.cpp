@@ -2104,7 +2104,8 @@ JsAstNode* build_js_if_statement(JsTranspiler* tp, TSNode if_node) {
 
 // Build JavaScript while statement node
 JsAstNode* build_js_while_statement(JsTranspiler* tp, TSNode while_node) {
-    JsWhileNode* while_stmt = (JsWhileNode*)alloc_js_ast_node(tp, JS_AST_NODE_WHILE_STATEMENT, while_node, sizeof(JsWhileNode));
+    JsWhileNode* while_stmt = (JsWhileNode*)alloc_js_ast_node(tp, AST_NODE_LOOP, while_node, sizeof(JsWhileNode));
+    while_stmt->form = LOOP_FORM_WHILE;
 
     // Get condition
     TSNode test_node = ts_node_child_by_field_name(while_node, "condition", strlen("condition"));
@@ -2125,7 +2126,8 @@ JsAstNode* build_js_while_statement(JsTranspiler* tp, TSNode while_node) {
 
 // Build JavaScript for statement node
 JsAstNode* build_js_for_statement(JsTranspiler* tp, TSNode for_node) {
-    JsForNode* for_stmt = (JsForNode*)alloc_js_ast_node(tp, JS_AST_NODE_FOR_STATEMENT, for_node, sizeof(JsForNode));
+    JsForNode* for_stmt = (JsForNode*)alloc_js_ast_node(tp, AST_NODE_LOOP, for_node, sizeof(JsForNode));
+    for_stmt->form = LOOP_FORM_FOR_C;
 
     // Push a block scope for the for-loop header (let/const in init are scoped to this loop)
     JsScope* for_scope = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
@@ -3812,7 +3814,8 @@ JsAstNode* build_js_switch_statement(JsTranspiler* tp, TSNode switch_node) {
 // v5: Build JavaScript do...while statement node
 JsAstNode* build_js_do_while_statement(JsTranspiler* tp, TSNode do_node) {
     JsDoWhileNode* do_while = (JsDoWhileNode*)alloc_js_ast_node(
-        tp, JS_AST_NODE_DO_WHILE_STATEMENT, do_node, sizeof(JsDoWhileNode));
+        tp, AST_NODE_LOOP, do_node, sizeof(JsDoWhileNode));
+    do_while->form = LOOP_FORM_DO_WHILE;
 
     // Get body
     TSNode body_node = ts_node_child_by_field_name(do_node, "body", strlen("body"));

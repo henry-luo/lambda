@@ -13,7 +13,8 @@ extern "C" {
 
 WebViewHandle* webview_platform_create(GLFWwindow* window,
                                        float x, float y, float w, float h,
-                                       float pixel_ratio) {
+                                       float device_scale) {
+    (void)window; (void)x; (void)y; (void)w; (void)h; (void)device_scale;
     log_info("webview_platform_create: stub (no native web view on this platform)");
     return nullptr;
 }
@@ -36,8 +37,8 @@ void webview_platform_eval_js(WebViewHandle* handle, const char* js) {
 
 void webview_platform_set_bounds(WebViewHandle* handle,
                                  float x, float y, float w, float h,
-                                 float pixel_ratio) {
-    (void)handle; (void)x; (void)y; (void)w; (void)h; (void)pixel_ratio;
+                                 float device_scale) {
+    (void)handle; (void)x; (void)y; (void)w; (void)h; (void)device_scale;
 }
 
 void webview_platform_set_visible(WebViewHandle* handle, bool visible) {

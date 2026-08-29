@@ -50,7 +50,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;
     if (block->bound) { render_bound(rdcon, block); }
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     rdcon->block.x = pa_block.x + block->x * s;  rdcon->block.y = pa_block.y + block->y * s;
 
     // Constrain clip region to iframe content box (before scroller setup)

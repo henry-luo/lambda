@@ -6786,8 +6786,31 @@ static Item js_text_control_set_range_text(Item replacement_arg, Item start_arg,
 }
 JS_FORWARD_ITEM(js_dom_text_control_set_range_text_bridge, (void* dom_elem,                                                           Item replacement_arg,                                                           Item start_arg,                                                           Item end_arg,                                                           Item mode_arg), js_text_control_set_range_text_for_elem, ((DomElement*)dom_elem, replacement_arg, start_arg, end_arg, mode_arg))
 
-extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus) {
-    DomElement* elem = (DomElement*)dom_elem;
+static void js_dom_queue_scroll_into_view(DomElement* elem, bool center) {
+    DomDocument* doc = elem ? (elem->doc ? elem->doc : _js_current_document) : nullptr;
+    if (!doc) return;
+    if (doc->pending_scroll_into_view_target) {
+        dom_node_unpin(doc,
+            {(DomNode*)doc->pending_scroll_into_view_target,
+             doc->pending_scroll_into_view_target_id},
+            DOM_NODE_PIN_RECONCILE);
+    }
+    doc->pending_scroll_into_view_target = nullptr;
+    doc->pending_scroll_into_view_target_id = 0;
+    doc->pending_scroll_into_view_center = false;
+    DomNodeRef ref = dom_node_ref((DomNode*)elem);
+    if (!dom_node_ref_validate(doc, ref) ||
+        !dom_node_pin(doc, ref, DOM_NODE_PIN_RECONCILE)) {
+        return;
+    }
+    doc->pending_scroll_into_view_target = elem;
+    doc->pending_scroll_into_view_target_id = ref.expected_id;
+    doc->pending_scroll_into_view_center = center;
+    if (doc->state) doc_state_request_reflow(doc->state);
+}
+
+static Item js_dom_focus_method(DomElement* elem, bool focus,
+                                bool prevent_scroll) {
     if (!elem) return make_js_undefined();
     DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
     if (focus) {
@@ -6802,12 +6825,17 @@ extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus) {
                 js_dom_focus_set_selection_for_element(state, elem);
             }
             if (old_focus != (View*)elem) js_dom_dispatch_focus_events(elem);
+            if (!prevent_scroll) js_dom_queue_scroll_into_view(elem, true);
         }
     } else {
         if (js_document_active_element == elem) js_document_active_element = nullptr;
         if (focus_get(state) == (View*)elem) focus_clear(state);
     }
     return make_js_undefined();
+}
+
+extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus) {
+    return js_dom_focus_method((DomElement*)dom_elem, focus, false);
 }
 
 extern "C" bool js_dom_focus_editing_host_for_automation(void* dom_elem) {
@@ -10380,7 +10408,8 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
 
     // innerText: replace children while preserving line breaks as <br> nodes.
     if (prop_id == JS_DOM_PROP_INNER_TEXT) {
-        const char* text_str = fn_to_cstr(value);
+        // HTMLElement.innerText is a DOMString setter, so convert primitive values too.
+        const char* text_str = js_dom_to_dom_string_cstr(value);
         if (text_str) {
             js_dom_detach_all_children(elem);
 
@@ -13225,24 +13254,9 @@ extern "C" Item js_dom_get_client_rects_bridge(void* dom_elem) {
 extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem) {
     DomElement* elem = (DomElement*)dom_elem;
     if (!elem) return make_js_undefined();
-    DomDocument* doc = elem->doc ? elem->doc : _js_current_document;
-    if (doc) {
-        if (doc->pending_scroll_into_view_target) {
-            dom_node_unpin(doc,
-                {(DomNode*)doc->pending_scroll_into_view_target,
-                 doc->pending_scroll_into_view_target_id},
-                DOM_NODE_PIN_RECONCILE);
-        }
-        DomNodeRef ref = dom_node_ref((DomNode*)elem);
-        if (!dom_node_ref_validate(doc, ref) ||
-            !dom_node_pin(doc, ref, DOM_NODE_PIN_RECONCILE)) {
-            return make_js_undefined();
-        }
-        doc->pending_scroll_into_view_target = elem;
-        doc->pending_scroll_into_view_target_id = ref.expected_id;
-        log_debug("js_dom_scrollIntoView: queued target <%s>",
-                  elem->tag_name ? elem->tag_name : "?");
-    }
+    js_dom_queue_scroll_into_view(elem, false);
+    log_debug("js_dom_scrollIntoView: queued target <%s>",
+              elem->tag_name ? elem->tag_name : "?");
     return make_js_undefined();
 }
 
@@ -15021,9 +15035,15 @@ extern "C" Item js_dom_element_operation_impl(Item elem_item,
         return js_dom_boundary_from_point(elem, x_arg, y_arg, behavior_arg);
     }
 
-    // focus() / blur() — stubs for headless mode
+    // focus() / blur()
     if (operation == JUBE_DOM_FOCUS || operation == JUBE_DOM_BLUR) {
-        return js_dom_focus_method_bridge((void*)elem, operation == JUBE_DOM_FOCUS);
+        bool prevent_scroll = false;
+        if (operation == JUBE_DOM_FOCUS && argc > 0 &&
+            get_type_id(args[0]) == LMD_TYPE_MAP) {
+            prevent_scroll = js_is_truthy(js_get_key_cstr(args[0], "preventScroll"));
+        }
+        return js_dom_focus_method(elem, operation == JUBE_DOM_FOCUS,
+                                   prevent_scroll);
     }
 
     // HTMLElement.click() — synthesise and dispatch a `click` MouseEvent

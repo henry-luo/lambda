@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 18.0.2 (2026-08-28)
+**Spec version:** 18.1.0 (2026-08-28)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -61,7 +61,10 @@ answered from them first.
   `int` is exact over its whole domain (§S4.1); `float` is the explicitly
   inexact type. [C3, C13, C16, v5]
 - **S1.4 — Mutation is visible or it does not exist.** Values never alias;
-  mutability is a property of bindings, marked by `var`. [C4]
+  mutability is a property of bindings, marked by `var`. **Lambda script has
+  no global mutable state** — `var` is a procedural binding, so every mutable
+  root is owned by a `pn` activation, a view/template instance, or an object
+  reachable from one (S9.1.7). [C4, RG14]
 - **S1.5 — Set-oriented: absence flows, failure is deliberate.** *Total reads,
   checked writes, deliberate failures.* Absence lets set processing continue;
   every error value is deliberate. [C5, C14]
@@ -946,7 +949,7 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
 ### S9.1 The model
 
 *Values never alias; `var` is the only mutability marker and the only sharing
-construct; `let` is final.* [C4]
+construct; `let` is final; there is no global mutable state.* [C4, RG14]
 
 - **S9.1.1** `let` is final: nothing reachable through a `let` binding ever
   changes. `let` is the variable of algebra (referential transparency);
@@ -964,8 +967,11 @@ construct; `let` is final.* [C4]
   a `var` receiver; `var` parameters are **invariant** (S9.2.1).
 - **S9.1.4*** Closures are immutable values: captures snapshot at creation;
   assignment to a captured name — including interior mutation through it —
-  is a compile error. State lives in module-level `var`s, view state, and
-  objects with `pn` methods; never inside a function value. (A non-escaping
+  is a compile error. State lives in a `pn` activation, a view/template
+  instance, or an object instance reachable from one of those; never inside a
+  function value, and **never at module scope** (S9.1.7). This clause
+  previously named "module-level `var`s" first — stale wording inherited from
+  the C4 record, corrected 2026-08-28. (A non-escaping
   nested `pn` used only in call position may later be allowed direct access
   — designed, deferred.)
 - **S9.1.5** No reference cells; structural `==` is the only equality.
@@ -979,6 +985,15 @@ construct; `let` is final.* [C4]
   `var a = [1]; a = {value: 1}`. Such reassignment remains subject to the
   binding's declared type; an unannotated `var` may change runtime type under
   S12.2.1. [S8.2.1v2, S9.1.2, C5.3b]
+
+- **S9.1.7** **No global mutable state.** A mutable binding cannot be declared
+  at module scope: there is no script-level global variable. Every mutable root
+  is owned by one `pn` activation, one view/template instance, or one object
+  instance reachable from such a root. The transitive path is closed too — a
+  module-level `let` holding a container or object cannot be written through
+  (S9.1.1). This is not a convention; it follows from the scope model, since
+  only `fn`/`pn` bodies, `while` bodies and event handlers open a procedural
+  scope. [RG14]
 
 ### S9.2 Covariance, borrows, and views
 
@@ -995,9 +1010,13 @@ construct; `let` is final.* [C4]
   loop share-marks at the head, and the first in-body mutation copies — no
   iterator invalidation. The same rule covers pipes over `var` containers.
   [CW §11.6]
-- **S9.2.4*** A module-level or view-state `var` may not be passed as a
-  `var` argument (no call-site check can see the callee's independent path
-  to the same storage). [CW §11.4]
+- **S9.2.4v2*** A **view-state** `var` may not be passed as a `var` argument
+  (no call-site check can see the callee's independent path to the same
+  storage). The original ruling also named module-level `var`; that half is
+  **vacuous by construction under S9.1.7 / RG14** — Lambda has no global
+  mutable state, so no module-level `var` exists to pass. Ruled out by design,
+  not left unimplemented. View state remains a real mutable binding outside any
+  `pn`, so the rule stands for it alone. [CW §11.4, RG14]
 
 ### S9.3 Construction captures values
 
@@ -1891,7 +1910,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S8.2.1v2, S8.2.2v2, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains, including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. Specialized editor/host access sites still need the same audit. Empty-string map keys are now semantically valid, but their known JSON round-trip corruption remains to be fixed. `at` membership now conforms: `1 at [10,20,30]` is false, matching S8.2.2v2 (this row previously recorded it as still true). |
 | S8.1.3 | **Conformant as of 2026-08-24.** The paired `at` form bound both names to the key (a silent wrong answer); fixed in `build_ast`, one fix covering both tiers. Full record: [LR02-R9](../vibe/Lambda_Issue_Ledger.md). |
 | S8.3.2 | Streams (and hence stream `len`) not implemented. |
-| S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap). Stage 2 pending: `var`-param grammar + exclusivity checks (all four faces), capture-assignment compile errors, view-borrow confinement, module-`var` rule, snapshot iteration. `var` params parse and mutate the caller's value today, but a *plain* param does so too — the snapshot half of S9.1.3 is unenforced, so the annotation is currently documentation rather than a gate. |
+| S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap). Stage 2 pending: exclusivity checks (one of four faces landed — var-vs-var arguments, `E211`), capture-assignment compile errors, view-borrow confinement, snapshot iteration. The **module-`var` half of S9.2.4 needs no work** — it is vacuous by construction (S9.2.4v2); only the view-state half is outstanding. `var` params parse and mutate the caller's value today, but a *plain* param does so too — the snapshot half of S9.1.3 is unenforced, so the annotation is currently documentation rather than a gate. |
 | S9.3.1 | **Implemented behind `LAMBDA_COW_CAPTURE`, default OFF** (2026-08-28). With the flag set, insertion captures by value at every point the ruling names — array element store, array literal, map field store, map/object/element literal — on both tiers: all four probes return the ruled `1`, and the two-node cycle is no longer constructible, restoring the totality S9.1.5 assumes. Capture is a *compile-time* decision, and only a NAMED value (identifier, or member/index read) is marked: a freshly produced container has no second observer at the insertion point, and marking one would make the universal builder shape `rows[i] = <fresh>` detach on first write. **Why it is opt-in:** element/field reads still borrow (the open C4.1 half), so once a slot holds a captured value the get-modify idiom `c = owner[i]` … `c[j] = v` writes a detached copy. Exactly four corpus scripts depend on that idiom (`proc_fill_gc_nested`, `awfy/{cd2_orig,deltablue,deltablue2}`); `awfy/richards3` — the sanctioned rewrite — passes with capture on. The nested-mutation design (§9.5.2, COW Appendix B.2) is what lets the flag become the default. With the flag unset, behavior is exactly the aliasing recorded below. Full record: [LR12-9](../vibe/Lambda_Issue_Ledger.md#lr12-9). |
 | S10.2.2, S10.2.3 | `eq ne lt le gt ge` operators and the `vec_cmp` revert not landed; mask-consumption functions deferred. |
 | S11.1.1 | Array-pattern composition unbuilt; `is [T]` inline parse crash open. |
@@ -1941,7 +1960,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 **Values, COW, resources**
 - **SO13** COW granularity on large documents: node representation for spine-copying, refcount discipline for unique-path in-place update, and the gating benchmark. [C4.3]
 - **SO14** Nested-mutation ergonomics (`t.nodes[i].value`): path-shaped `var` borrows, `_modify`-style accessors, or guaranteed get-modify-put. **Owner document as of 2026-08-28: [`vibe/Lambda_Design_Nested_Mutation.md`](../vibe/Lambda_Design_Nested_Mutation.md)** (CW22–CW28, PROPOSED). It rules that a place is a borrow and never a value (S9.2.2 generalized from slices to paths), that `var b = <place>` keeps copying, and that a mutated place copy becomes a compile error — the last being what gates the S9.3.1 default flip. On ratification these become S9.4 and this entry is struck. [C4.4]
-- **SO15** Exclusivity granularity endpoint (whole-base vs blessed splitters vs dynamic bookkeeping); module-`var`-as-borrow final rule (forbid vs dynamic bit).
+- **SO15** Exclusivity granularity endpoint (whole-base vs blessed splitters vs dynamic bookkeeping). The companion "module-`var`-as-borrow final rule" is **closed**: module-level `var` does not exist (S9.1.7 / RG14), so only the view-state case remains and S9.2.4v2 already rules it forbidden.
 - **SO16** Close-error routing (double fault): proposed — normal-exit close failure becomes the `pn`'s error; on error exit the original wins, close error attached suppressed. To confirm. [Features §3.5.2]
 - **SO17** Resource-carrying-type containment rules (when a wrapping value is itself resource-typed). [R3]
 - **SO18** Snapshot iteration to be formally recorded (C4.2d) when implemented.
@@ -1998,7 +2017,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S6 ordering | C11, C11.4, C11.5 | `Lambda_Semantics_Formal2.md` |
 | S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | S8 membership | C5.3a, C5.3b; §8.0–8.3 records | `Lambda_Semantics_Formal2.md` |
-| S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW20 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md` |
+| S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
 | S10 operators | C6, C6.2–C6.4, C10; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Path.md` |
 | S11 types | C7, C8.5c; TE-1–TE-18 | ibid.; `Lambda_Design_Type_Enforcement.md` |
 | S12 effects/resources | Features §3.5–3.7; Procedural; Function_Arg; C19 | `Lambda_Semantics_Features.md`, `Lambda_Procedural.md`, `Lambda_Proc_Assignment.md`, `Lambda_Design_Function_Arg.md` |

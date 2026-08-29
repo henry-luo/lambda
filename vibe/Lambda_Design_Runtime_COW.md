@@ -642,9 +642,19 @@ precedent); likely sufficient for the image toolkit with no new analysis;
 bookkeeping — record `(base, byte-range)` per active borrow, check overlap
 at borrow creation (cost per borrow, not per write) — for dynamic ranges.
 
-### 11.4 The one non-local case: module-level and view-state `var`s
+### 11.4 The one non-local case: ~~module-level and~~ view-state `var`s
+
+> **Narrowed 2026-08-28 (designer): the module-level half is ruled out by
+> design, not deferred.** `var` is a procedural binding, and a module-level one
+> is rejected outright with `error[E224]` ("`var` is only allowed inside a
+> procedure"), so the sketch below cannot be written and there is no
+> module-level `var` to forbid passing. **View state is the live case** — a
+> real mutable binding living outside any `pn`, which a callee can still reach
+> independently of the borrow. Ratified as **S9.2.4v2**, naming view state
+> alone. The sketch is kept because its reasoning still applies there.
 
 ```lambda
+// Illustrative only — this shape does not parse (E224).
 var g_list = [...]
 pn push_sorted(var list: int[]) { ... g_list ... }  // callee also names the global
 push_sorted(g_list)                                  // two write paths, one storage
@@ -843,7 +853,7 @@ bounds-check elimination as a new item not yet in any ledger.
 | **ArrayNum COW and view policy** — native packed-copy strategy, representation-invariant equality, read-view snapshots, mutable-view borrows | §9.1–§9.2; §11.8 | Stage 2; preserve the current specialized ArrayNum path throughout Stage 1 |
 | **JS↔Lambda ownership boundaries** — mutable-buffer ingress/egress, `SharedArrayBuffer`, explicit read-only sharing | §9.3; §11.8 | Stage 2; Stage-1 JS suites are regression-only |
 | Exclusivity checks — all four call-site faces (`var`-vs-`var` args, receiver-vs-args overlap, path-prefix, view-region) + the `var`-args-only check | C4.4 #1; §11.3 | Stage-2 start; fixtures `f(x,x)`, `x.merge(x)` stay pinned at *current* (aliasing) behavior with a stage-2 marker until then |
-| Module-level / view-state `var` passed as `var` arg (the non-local overlap) | §11.4 | Stage-2 start; recommended opening rule = forbid, with teaching error |
+| ~~Module-level~~ / view-state `var` passed as `var` arg (the non-local overlap) | §11.4 | **Module-level half CLOSED 2026-08-28 — vacuous by design** (`var` outside a `pn` is `E224`), nothing to implement. View-state half remains: Stage-2 start, opening rule = forbid with a teaching error. See **S9.2.4v2**. |
 | View-borrow **confinement** (mutable views become non-escaping, `var`-position-only) | CW16.3; §11.7 | Stage 2; until then mutable views retain current behavior |
 | Snapshot iteration over a mutated `var` container | §11.6 | Stage-2; record as C4.2d when implemented |
 | Exclusivity granularity endpoint (splitters vs static ranges vs dynamic checks) | §11.3 ladder; §12.1 | decide on real image-toolkit code during Stage 2 |

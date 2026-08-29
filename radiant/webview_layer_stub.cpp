@@ -11,7 +11,8 @@ extern "C" {
 #include "../lib/log.h"
 }
 
-WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio) {
+WebViewHandle* webview_layer_platform_create(float w, float h, float raster_scale) {
+    (void)w; (void)h; (void)raster_scale;
     log_info("webview_layer_platform_create: stub (no offscreen web view on this platform)");
     return nullptr;
 }
@@ -28,8 +29,8 @@ void webview_layer_platform_set_html(WebViewHandle* handle, const char* html) {
     (void)handle; (void)html;
 }
 
-void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float pixel_ratio) {
-    (void)handle; (void)w; (void)h; (void)pixel_ratio;
+void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float raster_scale) {
+    (void)handle; (void)w; (void)h; (void)raster_scale;
 }
 
 bool webview_layer_platform_snapshot(WebViewHandle* handle, struct ImageSurface* surface) {

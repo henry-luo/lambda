@@ -46,6 +46,13 @@ static unsigned long ast_ptr_hash(const AstNode* node) {
     return (unsigned long)value;
 }
 
+static void ast_index_free_buffers(AstNode** nodes, AstNode** parents,
+        AstFunctionId* owners, AstBindingId* node_bindings, NameScope** scopes,
+        NameEntry** bindings, AstNode** classes, AstNodeFacts* facts) {
+    free(nodes); free(parents); free(owners); free(node_bindings); free(scopes);
+    free(bindings); free(classes); free(facts);
+}
+
 static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
     if (needed <= index->capacity) return true;
     uint32_t capacity = index->capacity ? index->capacity : 256;
@@ -56,27 +63,38 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
     AstNode** nodes = (AstNode**)malloc(sizeof(AstNode*) * capacity);
     AstNode** parents = (AstNode**)malloc(sizeof(AstNode*) * capacity);
     AstFunctionId* owners = (AstFunctionId*)malloc(sizeof(AstFunctionId) * capacity);
+    AstBindingId* node_bindings = (AstBindingId*)malloc(sizeof(AstBindingId) * capacity);
+    NameScope** scopes = (NameScope**)malloc(sizeof(NameScope*) * capacity);
+    NameEntry** bindings = (NameEntry**)malloc(sizeof(NameEntry*) * capacity);
+    AstNode** classes = (AstNode**)malloc(sizeof(AstNode*) * capacity);
     AstNodeFacts* facts = (AstNodeFacts*)malloc(sizeof(AstNodeFacts) * capacity);
-    if (!nodes || !parents || !owners || !facts) {
-        free(nodes);
-        free(parents);
-        free(owners);
-        free(facts);
+    if (!nodes || !parents || !owners || !node_bindings || !scopes ||
+            !bindings || !classes || !facts) {
+        ast_index_free_buffers(nodes, parents, owners, node_bindings, scopes,
+            bindings, classes, facts);
         return false;
     }
     if (index->count) {
         memcpy(nodes, index->nodes, sizeof(AstNode*) * index->count);
         memcpy(parents, index->parents, sizeof(AstNode*) * index->count);
         memcpy(owners, index->owner_functions, sizeof(AstFunctionId) * index->count);
+        memcpy(node_bindings, index->node_bindings,
+            sizeof(AstBindingId) * index->count);
+        memcpy(scopes, index->scopes, sizeof(NameScope*) * index->scope_count);
+        memcpy(bindings, index->bindings, sizeof(NameEntry*) * index->binding_count);
+        memcpy(classes, index->classes, sizeof(AstNode*) * index->class_count);
         memcpy(facts, index->facts, sizeof(AstNodeFacts) * index->count);
     }
-    free(index->nodes);
-    free(index->parents);
-    free(index->owner_functions);
-    free(index->facts);
+    ast_index_free_buffers(index->nodes, index->parents, index->owner_functions,
+        index->node_bindings, index->scopes, index->bindings, index->classes,
+        index->facts);
     index->nodes = nodes;
     index->parents = parents;
     index->owner_functions = owners;
+    index->node_bindings = node_bindings;
+    index->scopes = scopes;
+    index->bindings = bindings;
+    index->classes = classes;
     index->facts = facts;
     index->capacity = capacity;
     return true;
@@ -122,6 +140,69 @@ static bool ast_index_rehash(AstIndex* index, uint32_t capacity) {
     return true;
 }
 
+bool ast_index_publish_scope(AstIndex* index, NameScope* scope) {
+    if (!scope) return true;
+    for (uint32_t i = 0; i < index->scope_count; i++) {
+        if (index->scopes[i] == scope) { scope->scope_id = i; return true; }
+    }
+    if (index->scope_count >= index->capacity) return false;
+    scope->scope_id = index->scope_count; index->scopes[index->scope_count++] = scope;
+    return true;
+}
+
+static AstBindingId ast_index_publish_binding(AstIndex* index, NameEntry* entry) {
+    if (!entry || !ast_index_publish_scope(index, entry->scope)) return AST_BINDING_ID_INVALID;
+    for (uint32_t i = 0; i < index->binding_count; i++) {
+        if (index->bindings[i] == entry) return i;
+    }
+    if (index->binding_count >= index->capacity) return AST_BINDING_ID_INVALID;
+    AstBindingId id = index->binding_count++;
+    index->bindings[id] = entry;
+    return id;
+}
+
+static NameEntry* ast_index_node_entry(AstNode* node) {
+    switch (node->node_type) {
+    case AST_NODE_IDENT: return ((AstIdentNode*)node)->entry;
+    case AST_NODE_PARAM: case AST_NODE_KEY_EXPR: case AST_NODE_NAMED_ARG: return ((AstNamedNode*)node)->entry;
+    case AST_NODE_VARIABLE_DECLARATOR: return ((AstDeclaratorNode*)node)->entry;
+    default:
+        return NULL;
+    }
+}
+
+static bool ast_index_publish_node(AstIndex* index, AstNode* node, AstNodeId id) {
+    NameEntry* entry = ast_index_node_entry(node);
+    if (entry) {
+        AstBindingId binding_id = ast_index_publish_binding(index, entry);
+        if (binding_id == AST_BINDING_ID_INVALID) return false;
+        index->node_bindings[id] = binding_id;
+    }
+    switch (node->node_type) {
+    case AST_SCRIPT:
+        return ast_index_publish_scope(index, ((AstScript*)node)->global_vars);
+    case AST_NODE_BLOCK:
+        return ast_index_publish_scope(index, ((AstBlockNode*)node)->vars);
+    case AST_NODE_LOOP:
+        return ast_index_publish_scope(index, ((AstLoopControlNode*)node)->vars);
+    case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
+    case AST_NODE_ARROW_FUNC: case AST_NODE_METHOD:
+        return ast_index_publish_scope(index, ((AstFuncNode*)node)->vars);
+    case AST_NODE_CLASS: case AST_NODE_CLASS_EXPR: {
+        AstClassNode* cls = (AstClassNode*)node;
+        for (uint32_t i = 0; i < index->class_count; i++) {
+            if (index->classes[i] == node) { cls->class_id = i; return true; }
+        }
+        if (index->class_count >= index->capacity) return false;
+        cls->class_id = index->class_count;
+        index->classes[index->class_count++] = node;
+        return true;
+    }
+    default:
+        return true;
+    }
+}
+
 static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
         AstFunctionId owner) {
     if (!node) return AST_NODE_ID_INVALID;
@@ -140,11 +221,13 @@ static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
     index->nodes[id] = node;
     index->parents[id] = parent;
     index->owner_functions[id] = owner;
+    index->node_bindings[id] = AST_BINDING_ID_INVALID;
     index->facts[id].declared_contract = node->type;
     index->facts[id].inferred_type = NULL;
     index->facts[id].representation = VALUE_REP_NONE;
     index->facts[id].flags = 0;
     index->facts[id].folded_item = ITEM_NULL;
+    if (!ast_index_publish_node(index, node, id)) return AST_NODE_ID_INVALID;
     index->slots[slot] = node;
     index->slot_ids[slot] = id;
     return id;
@@ -166,6 +249,11 @@ static void ast_index_visit(AstNode* child, AstNode* parent, void* opaque) {
     AstFunctionId owner = walk->owner_function;
     AstNodeId id = ast_index_add(walk->index, child, parent, owner);
     if (id == AST_NODE_ID_INVALID) {
+        walk->failed = true;
+        return;
+    }
+    if (walk->profile && walk->profile->publish_ext_facts &&
+            !walk->profile->publish_ext_facts(child, walk->index)) {
         walk->failed = true;
         return;
     }
@@ -191,6 +279,30 @@ static void ast_index_visit(AstNode* child, AstNode* parent, void* opaque) {
     walk->owner_function = previous;
 }
 
+static bool ast_index_walk_root(AstIndex* index, AstNode* root, AstNode* parent,
+        const LangProfile* profile) {
+    if (!root) return true;
+    AstIndexWalk walk = {index, AST_FUNCTION_ID_INVALID, profile, false};
+    AstNodeId id = ast_index_add(index, root, parent, walk.owner_function);
+    if (id == AST_NODE_ID_INVALID) return false;
+    if (profile && profile->publish_ext_facts &&
+            !profile->publish_ext_facts(root, index)) return false;
+    bool is_function = root->node_type == AST_NODE_FUNC ||
+        root->node_type == AST_NODE_FUNC_EXPR || root->node_type == AST_NODE_PROC ||
+        root->node_type == AST_NODE_ARROW_FUNC || root->node_type == AST_NODE_METHOD;
+    if (is_function) {
+        AstFunctionId function_id = ast_index_add_function(index, root);
+        if (function_id == AST_FUNCTION_ID_INVALID) return false;
+        index->owner_functions[id] = function_id;
+        walk.owner_function = function_id;
+    }
+    ast_visit_core_children(root, ast_index_visit, &walk);
+    if (profile && profile->visit_ext_children) {
+        profile->visit_ext_children(root, ast_index_visit, &walk);
+    }
+    return !walk.failed;
+}
+
 void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) {
     if (!node || !visitor) return;
 #define AST_VISIT(field) do { if ((field)) visitor((AstNode*)(field), node, ctx); } while (0)
@@ -199,10 +311,20 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
         case AST_NODE_PRIMARY: AST_VISIT(((AstPrimaryNode*)node)->expr); break;
         case AST_NODE_UNARY: AST_VISIT(((AstUnaryNode*)node)->operand); break;
         case AST_NODE_SPREAD: AST_VISIT(((AstSpreadNode*)node)->argument); break;
+        case AST_NODE_YIELD: case AST_NODE_AWAIT:
+            AST_VISIT(((AstYieldNode*)node)->argument); break;
         case AST_NODE_BINARY: case AST_NODE_PIPE:
             AST_VISIT(((AstBinaryNode*)node)->left);
             AST_VISIT(((AstBinaryNode*)node)->right); break;
+        case AST_NODE_BINARY_TYPE:
+            AST_VISIT(((AstBinaryNode*)node)->left);
+            AST_VISIT(((AstBinaryNode*)node)->right); break;
+        case AST_NODE_UNARY_TYPE: AST_VISIT(((AstUnaryNode*)node)->operand); break;
         case AST_NODE_ASSIGN:
+        case AST_NODE_ASSIGN_STAM:
+        case AST_NODE_INDEX_ASSIGN_STAM:
+        case AST_NODE_MEMBER_ASSIGN_STAM:
+        case AST_NODE_ASSIGN_PATTERN:
             AST_VISIT(((AstAssignNode*)node)->left);
             AST_VISIT(((AstAssignNode*)node)->right); break;
         case AST_NODE_CALL_EXPR: case AST_NODE_NEW_EXPR:
@@ -215,15 +337,25 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             AST_VISIT(((AstIfNode*)node)->cond);
             AST_VISIT(((AstIfNode*)node)->then);
             AST_VISIT(((AstIfNode*)node)->otherwise); break;
-        case AST_NODE_ARRAY: case AST_NODE_LIST: case AST_NODE_SEQ:
+        case AST_NODE_ARRAY: case AST_NODE_SEQ: case AST_NODE_CONTENT: case AST_NODE_CONTENT_TYPE:
+        case AST_NODE_ARRAY_PATTERN:
             AST_VISIT(((AstArrayNode*)node)->item); break;
         case AST_NODE_MAP: case AST_NODE_OBJECT_LITERAL:
+        case AST_NODE_MAP_PATTERN:
+            AST_VISIT(((AstMapNode*)node)->item); break;
+        case AST_NODE_REST_ELEMENT: case AST_NODE_REST_PROPERTY:
+            AST_VISIT(((AstSpreadNode*)node)->argument); break;
+        case AST_NODE_LIST_TYPE: case AST_NODE_ARRAY_TYPE:
+            AST_VISIT(((AstArrayNode*)node)->item); break;
+        case AST_NODE_MAP_TYPE: case AST_NODE_ELMT_TYPE:
             AST_VISIT(((AstMapNode*)node)->item); break;
         case AST_NODE_PROPERTY:
             AST_VISIT(((AstPropertyNode*)node)->key);
             AST_VISIT(((AstPropertyNode*)node)->value); break;
-        case AST_NODE_KEY_EXPR: case AST_NODE_PARAM:
+        case AST_NODE_KEY_EXPR: case AST_NODE_PARAM: case AST_NODE_NAMED_ARG:
+        case AST_NODE_STRING_PATTERN: case AST_NODE_SYMBOL_PATTERN:
             AST_VISIT(((AstNamedNode*)node)->as); break;
+        case AST_NODE_DECOMPOSE: AST_VISIT(((AstDecomposeNode*)node)->as); break;
         case AST_NODE_MATCH_EXPR:
             AST_VISIT(((AstMatchNode*)node)->scrutinee);
             AST_VISIT(((AstMatchNode*)node)->first_arm); break;
@@ -234,14 +366,21 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             if (node->node_type == AST_NODE_BLOCK) AST_VISIT(((AstBlockNode*)node)->statements);
             else AST_VISIT(((AstExprStmtNode*)node)->expression);
             break;
-        case AST_NODE_FOR_STAM:
-            AST_VISIT(((AstForStmtNode*)node)->init); AST_VISIT(((AstForStmtNode*)node)->test);
-            AST_VISIT(((AstForStmtNode*)node)->update); AST_VISIT(((AstForStmtNode*)node)->body); break;
-        case AST_NODE_WHILE_STAM: case AST_NODE_DO_WHILE_STAM:
-            AST_VISIT(((AstWhileNode*)node)->cond); AST_VISIT(((AstWhileNode*)node)->body); break;
+        case AST_NODE_LOOP: {
+            AstLoopControlNode* loop = (AstLoopControlNode*)node;
+            if (loop->form == LOOP_FORM_DO_WHILE) {
+                AST_VISIT(loop->body); AST_VISIT(loop->cond);
+            } else {
+                AST_VISIT(loop->init); AST_VISIT(loop->test);
+                AST_VISIT(loop->update); AST_VISIT(loop->body);
+            }
+            break;
+        }
         case AST_NODE_RETURN_STAM: case AST_NODE_RAISE_STAM: case AST_NODE_RAISE_EXPR:
             AST_VISIT(((AstReturnNode*)node)->value); break;
-        case AST_NODE_VAR_STAM: AST_VISIT(((AstVarDeclNode*)node)->declarations); break;
+        case AST_NODE_VAR_STAM: case AST_NODE_LET_STAM:
+        case AST_NODE_PUB_STAM: case AST_NODE_TYPE_STAM:
+            AST_VISIT(((AstVarDeclNode*)node)->declarations); break;
         case AST_NODE_VARIABLE_DECLARATOR:
             AST_VISIT(((AstDeclaratorNode*)node)->id); AST_VISIT(((AstDeclaratorNode*)node)->init); break;
         case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM:
@@ -254,6 +393,10 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
             AST_VISIT(((AstCatchNode*)node)->param); AST_VISIT(((AstCatchNode*)node)->body); break;
         case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC: case AST_NODE_ARROW_FUNC:
             AST_VISIT(((AstFuncNode*)node)->param); AST_VISIT(((AstFuncNode*)node)->body); break;
+        case AST_NODE_HANDLER_EXPR: case AST_NODE_HANDLER_STAM:
+            AST_VISIT(((AstHandlerNode*)node)->operand); AST_VISIT(((AstHandlerNode*)node)->body);
+            AST_VISIT(((AstHandlerNode*)node)->value_body); break;
+        case AST_NODE_START: AST_VISIT(((AstStartNode*)node)->call); break;
         case AST_NODE_METHOD:
             AST_VISIT(((AstMethodNode*)node)->key); AST_VISIT(((AstMethodNode*)node)->param);
             AST_VISIT(((AstMethodNode*)node)->body); break;
@@ -277,27 +420,7 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile) {
     if (!index) return false;
     ast_index_destroy(index);
-    if (!root) return true;
-    AstIndexWalk walk = {index, AST_FUNCTION_ID_INVALID, profile, false};
-    AstNodeId id = ast_index_add(index, root, NULL, walk.owner_function);
-    if (id == AST_NODE_ID_INVALID) return false;
-    if (root->node_type == AST_NODE_FUNC || root->node_type == AST_NODE_FUNC_EXPR ||
-        root->node_type == AST_NODE_PROC || root->node_type == AST_NODE_ARROW_FUNC ||
-        root->node_type == AST_NODE_METHOD) {
-        AstFunctionId function_id = ast_index_add_function(index, root);
-        if (function_id == AST_FUNCTION_ID_INVALID) return false;
-        index->owner_functions[id] = function_id;
-        walk.owner_function = index->owner_functions[id];
-    }
-    ast_visit_core_children(root, ast_index_visit, &walk);
-    if (profile && profile->visit_ext_children) {
-        profile->visit_ext_children(root, ast_index_visit, &walk);
-    }
-    return !walk.failed;
-}
-
-bool ast_index_build(AstIndex* index, AstNode* root) {
-    return ast_index_build_profile(index, root, NULL);
+    return ast_index_walk_root(index, root, NULL, profile);
 }
 
 bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
@@ -307,29 +430,15 @@ bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
     // not rebuild the table: its IDs/facts are the identity held by promoted
     // definitions and by the P3 const pass.
     if (ast_index_find(index, root) != AST_NODE_ID_INVALID) return true;
-    AstIndexWalk walk = {index, AST_FUNCTION_ID_INVALID, profile, false};
-    AstNodeId id = ast_index_add(index, root, parent, walk.owner_function);
-    if (id == AST_NODE_ID_INVALID) return false;
-    bool is_function = root->node_type == AST_NODE_FUNC ||
-        root->node_type == AST_NODE_FUNC_EXPR || root->node_type == AST_NODE_PROC ||
-        root->node_type == AST_NODE_ARROW_FUNC || root->node_type == AST_NODE_METHOD;
-    if (is_function) {
-        AstFunctionId function_id = ast_index_add_function(index, root);
-        if (function_id == AST_FUNCTION_ID_INVALID) return false;
-        index->owner_functions[id] = function_id;
-        walk.owner_function = function_id;
-    }
-    ast_visit_core_children(root, ast_index_visit, &walk);
-    if (profile && profile->visit_ext_children) {
-        profile->visit_ext_children(root, ast_index_visit, &walk);
-    }
-    return !walk.failed;
+    return ast_index_walk_root(index, root, parent, profile);
 }
 
 void ast_index_destroy(AstIndex* index) {
     if (!index) return;
-    free(index->nodes); free(index->parents); free(index->owner_functions);
-    free(index->functions); free(index->facts);
+    ast_index_free_buffers(index->nodes, index->parents, index->owner_functions,
+        index->node_bindings, index->scopes, index->bindings, index->classes,
+        index->facts);
+    free(index->functions);
     free(index->slots); free(index->slot_ids);
     memset(index, 0, sizeof(*index));
 }
@@ -344,4 +453,16 @@ AstNodeId ast_index_find(const AstIndex* index, const AstNode* node) {
         slot = (slot + 1) & (index->slot_capacity - 1);
     }
     return AST_NODE_ID_INVALID;
+}
+
+AstBindingId ast_index_binding_id(const AstIndex* index, const AstNode* node) {
+    AstNodeId node_id = ast_index_find(index, node);
+    return index && node_id < index->count ? index->node_bindings[node_id] : AST_BINDING_ID_INVALID;
+}
+
+NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id) { return index && id < index->binding_count ? index->bindings[id] : NULL; }
+
+AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id) {
+    if (!index || id >= index->binding_count) return NULL;
+    return ast_index_find(index, index->bindings[id]->node) == AST_NODE_ID_INVALID ? NULL : index->bindings[id]->node;
 }

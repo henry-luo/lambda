@@ -1283,6 +1283,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     // ========== Form elements ==========
     case MARKUP_NAME_FIELDSET: {
         // fieldset: border and padding (CSS logical pixels)
+        BlockProp* fieldset = block->ensure_block(lycon);
         block->ensure_boundary(lycon);
         // Chrome uses groove style with gray color for fieldset borders
         Color fieldset_border_color = (Color){ .r=192, .g=192, .b=192, .a=255 };
@@ -1298,12 +1299,23 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         *radiant_spacing_specificity(&block->boundary_mut()->padding, CSS_BOX_SIDE_BOTTOM) = -1;
         // HTML Rendering §15.3.12 defines the UA margin as margin-inline;
         // physical left/right is the wrong axis for vertical fieldsets.
-        if (layout_element_inline_axis_is_vertical(block->as_element())) {
+        bool vertical_inline_axis =
+            layout_element_inline_axis_is_vertical(block->as_element());
+        if (vertical_inline_axis) {
             radiant_spacing_set_pair(&block->boundary_mut()->margin,
                 CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, 2);
         } else {
             radiant_spacing_set_pair(&block->boundary_mut()->margin,
                 CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, 2);
+        }
+        if (!layout_specified_physical_minmax_size_declaration(
+                block->as_element(), !vertical_inline_axis, true)) {
+            // HTML Rendering §15.3.12 gives fieldsets a min-content inline minimum.
+            if (vertical_inline_axis) {
+                fieldset->given_min_height_type = CSS_VALUE_MIN_CONTENT;
+            } else {
+                fieldset->given_min_width_type = CSS_VALUE_MIN_CONTENT;
+            }
         }
         break;
     }

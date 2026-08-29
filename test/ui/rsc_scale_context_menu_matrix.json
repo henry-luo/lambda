@@ -1,0 +1,51 @@
+{
+  "name": "RSC12 context-menu logical geometry scale matrix",
+  "html": "test/ui/test_form_input.html",
+  "description": "The same logical right-click opens identical context-menu state at four device scales.",
+  "device_scale": 1.0,
+  "viewport": {"width": 600, "height": 600},
+  "events": [
+    {"type": "click", "target": {"selector": "#name"}},
+    {"type": "render_pending"},
+    {"type": "paste_text", "target": {"selector": "#name"}, "text": "ctx"},
+    {"type": "render_pending"},
+
+    {"type": "click", "target": {"selector": "#name"}, "button": 1},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": "#name"},
+     "context_menu_open": true, "context_menu_enabled": 20,
+     "context_menu_x": 246.4, "context_menu_y": 61.0,
+     "context_menu_width": 140.0, "context_menu_height": 120.0, "tolerance": 0.6},
+    {"type": "key_press", "key": "escape"},
+    {"type": "render_pending"},
+
+    {"type": "set_device_scale", "scale": 1.25},
+    {"type": "click", "target": {"selector": "#name"}, "button": 1},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": "#name"},
+     "context_menu_open": true, "context_menu_enabled": 20,
+     "context_menu_x": 246.4, "context_menu_y": 61.0,
+     "context_menu_width": 140.0, "context_menu_height": 120.0, "tolerance": 0.6},
+    {"type": "key_press", "key": "escape"},
+    {"type": "render_pending"},
+
+    {"type": "set_device_scale", "scale": 1.5},
+    {"type": "click", "target": {"selector": "#name"}, "button": 1},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": "#name"},
+     "context_menu_open": true, "context_menu_enabled": 20,
+     "context_menu_x": 246.4, "context_menu_y": 61.0,
+     "context_menu_width": 140.0, "context_menu_height": 120.0, "tolerance": 0.6},
+    {"type": "key_press", "key": "escape"},
+    {"type": "render_pending"},
+
+    {"type": "set_device_scale", "scale": 2.0},
+    {"type": "click", "target": {"selector": "#name"}, "button": 1},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": "#name"},
+     "context_menu_open": true, "context_menu_enabled": 20,
+     "context_menu_x": 246.4, "context_menu_y": 61.0,
+     "context_menu_width": 140.0, "context_menu_height": 120.0, "tolerance": 0.6},
+    {"type": "key_press", "key": "escape"}
+  ]
+}

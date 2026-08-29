@@ -196,6 +196,8 @@ typedef struct WebViewProp {
 
     float last_x, last_y;
     float last_w, last_h;
+    float last_device_scale;  // child host-coordinate cache key
+    float last_raster_scale;  // layer snapshot cache key
 
     struct ImageSurface* surface;
     bool dirty;
@@ -210,13 +212,13 @@ typedef struct WebViewManager WebViewManager;
 
 WebViewManager* webview_manager_create(struct GLFWwindow* window);
 void webview_manager_destroy(WebViewManager* mgr);
-WebViewHandle* webview_handle_create(WebViewManager* mgr, float w, float h, float pixel_ratio);
+WebViewHandle* webview_handle_create(WebViewManager* mgr, float w, float h, float device_scale);
 void webview_handle_destroy(WebViewManager* mgr, WebViewHandle* handle);
 void webview_navigate(WebViewHandle* handle, const char* url);
 void webview_set_html(WebViewHandle* handle, const char* html);
 void webview_eval_js(WebViewHandle* handle, const char* js);
 void webview_set_bounds(WebViewHandle* handle, float x, float y,
-                        float w, float h, float pixel_ratio);
+                        float w, float h, float device_scale);
 void webview_set_visible(WebViewHandle* handle, bool visible);
 void webview_manager_sync_layout(struct UiContext* uicon, struct ViewTree* tree);
 bool webview_manager_poll_dirty(struct UiContext* uicon, struct ViewTree* tree);
@@ -224,21 +226,21 @@ void webview_manager_clear(WebViewManager* mgr);
 
 WebViewHandle* webview_platform_create(struct GLFWwindow* window,
                                        float x, float y, float w, float h,
-                                       float pixel_ratio);
+                                       float device_scale);
 void webview_platform_destroy(WebViewHandle* handle);
 void webview_platform_navigate(WebViewHandle* handle, const char* url);
 void webview_platform_set_html(WebViewHandle* handle, const char* html);
 void webview_platform_eval_js(WebViewHandle* handle, const char* js);
 void webview_platform_set_bounds(WebViewHandle* handle,
                                  float x, float y, float w, float h,
-                                 float pixel_ratio);
+                                 float device_scale);
 void webview_platform_set_visible(WebViewHandle* handle, bool visible);
 
-WebViewHandle* webview_layer_platform_create(float w, float h, float pixel_ratio);
+WebViewHandle* webview_layer_platform_create(float w, float h, float raster_scale);
 void webview_layer_platform_destroy(WebViewHandle* handle);
 void webview_layer_platform_navigate(WebViewHandle* handle, const char* url);
 void webview_layer_platform_set_html(WebViewHandle* handle, const char* html);
-void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float pixel_ratio);
+void webview_layer_platform_resize(WebViewHandle* handle, float w, float h, float raster_scale);
 bool webview_layer_platform_snapshot(WebViewHandle* handle, struct ImageSurface* surface);
 bool webview_layer_platform_is_dirty(WebViewHandle* handle);
 void webview_layer_platform_mark_dirty(WebViewHandle* handle, bool dirty);
@@ -278,7 +280,7 @@ int view_lambda_script_source_in_window_with_events(const char* script_name,
                                                     const char* event_file,
                                                     bool headless);
 int view_doc_in_window(const char* doc_file);
-int ui_context_init(UiContext* uicon, bool headless, float requested_pixel_ratio);
+int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void ui_context_cleanup(UiContext* uicon);
 void free_document(DomDocument* doc);

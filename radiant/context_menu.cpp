@@ -25,7 +25,7 @@ static const char* CTX_MENU_LABELS[CTX_MENU_ITEM_COUNT] = {
     "Cut", "Copy", "Paste", "Delete", "Select All",
 };
 
-// Logical CSS-pixel sizing — multiplied by RenderContext::scale at draw.
+// Logical CSS-pixel sizing — multiplied by RenderContext::raster_scale at draw.
 static const float CTX_MENU_WIDTH       = 140.0f;
 static const float CTX_MENU_ITEM_HEIGHT = 24.0f;
 static const float CTX_MENU_PADDING_X   = 12.0f;
@@ -208,12 +208,16 @@ void context_menu_render(RenderContext* rdcon, DocState* state) {
     if (!state || !state->context_menu_target) return;
     if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->surface) return;
 
-    float s = rdcon->scale;
-    float x = state->context_menu_x * s;
-    float y = state->context_menu_y * s;
-    float w = state->context_menu_width  * s;
+    RdtDeviceRect popup = ui_context_logical_to_device_rect(rdcon->ui_context, {
+        state->context_menu_x, state->context_menu_y,
+        state->context_menu_width, state->context_menu_height,
+    });
+    float x = popup.x;
+    float y = popup.y;
+    float w = popup.width;
+    float s = rdcon->raster_scale;
     float ih = CTX_MENU_ITEM_HEIGHT * s;
-    float h = state->context_menu_height * s;
+    float h = popup.height;
 
     // Override clip to viewport so the popup isn't bound by parent clip rects.
     Bound saved_clip = rdcon->block.clip;

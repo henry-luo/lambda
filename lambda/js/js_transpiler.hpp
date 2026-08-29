@@ -60,7 +60,6 @@ typedef enum JsScopeType {
 struct JsScript : Script {
     size_t source_length;           // source byte count; adopted Script owns source bytes
     JsScope* global_scope;          // JS global/module lexical scope root
-    struct hashmap* scope_lookup_cache; // post-build (scope,name) binding facts
     bool strict_mode;               // JS script/function strictness default
     // Eval code uses configurable global var bindings and inherits any
     // pre-existing global property during declaration instantiation.
@@ -134,11 +133,18 @@ NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* scope,
 // AST building functions (build_js_ast.cpp)
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root);
 void js_report_any_census(JsTranspiler* tp);
-void js_scope_lookup_cache_enable(JsTranspiler* tp);
 typedef struct JsAstIndexPassContext {
     JsTranspiler* transpiler;
     JsAstNode* root;
+    int validation_errors;
 } JsAstIndexPassContext;
+int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast);
+static inline int js_validate_compiler_pass(void* opaque) {
+    JsAstIndexPassContext* pass = (JsAstIndexPassContext*)opaque;
+    if (!pass || !pass->transpiler || !pass->root) return 0;
+    pass->validation_errors = js_check_early_errors(pass->transpiler, pass->root);
+    return pass->validation_errors == 0;
+}
 static inline int js_index_compiler_pass(void* opaque) {
     JsAstIndexPassContext* pass = (JsAstIndexPassContext*)opaque;
     return pass && pass->transpiler && pass->root &&
@@ -152,16 +158,18 @@ static inline JsAstNode* build_js_ast_indexed(JsTranspiler* tp, TSNode root) {
     // Publish the root before post-build passes attach indexed facts to it.
     tp->ast_root = (AstNode*)ast;
     js_report_any_census(tp);
-    js_scope_lookup_cache_enable(tp);
-    JsAstIndexPassContext pass_context = {tp, ast};
+    JsAstIndexPassContext pass_context = {tp, ast, -1};
     CompilerPassManager pass_manager;
-    compiler_pass_manager_init(&pass_manager, COMPILER_FACT_AST |
-        COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED);
+    compiler_pass_manager_init(&pass_manager, COMPILER_FACT_AST | COMPILER_FACT_BOUND);
+    CompilerPassSpec validate_pass = {"validate", COMPILER_FACT_AST |
+        COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED, js_validate_compiler_pass};
     CompilerPassSpec index_pass = {"index",
         COMPILER_FACT_AST | COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED,
         COMPILER_FACT_INDEXED, js_index_compiler_pass};
-    if (!compiler_pass_manager_add(&pass_manager, &index_pass) ||
+    if (!compiler_pass_manager_add(&pass_manager, &validate_pass) ||
+            !compiler_pass_manager_add(&pass_manager, &index_pass) ||
             !compiler_pass_manager_run(&pass_manager, &pass_context)) {
+        if (pass_context.validation_errors > 0) return ast;
         log_error("js-ast: failed to run indexed AST pass");
         return NULL;
     }
@@ -193,9 +201,6 @@ JsOperator js_operator_from_string(const char* op_str, size_t len);
 
 // Error handling functions
 void js_error(JsTranspiler* tp, SourceSpan span, const char* format, ...);
-
-// Early error detection (js_early_errors.cpp)
-int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast);
 
 // Transpiler lifecycle functions
 JsTranspiler* js_transpiler_create(Runtime* runtime);

@@ -149,7 +149,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         return;
     }
 
-    float s = rdcon->scale;  // scale factor for CSS -> physical pixels
+    float s = rdcon->raster_scale;
     unsigned char* str = text_view->text_data();
     TextRect* text_rect = text_view->rect;
 
@@ -352,7 +352,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         // draw a square box for missing glyph (scaled_space_width is in physical pixels)
                         float phys_size = font_handle_get_physical_size_px(font_box_handle(&rdcon->font));
                         const FontMetrics* _m = font_get_metrics(font_box_handle(&rdcon->font));
-                        float box_height = (phys_size > 0) ? phys_size : (_m ? (_m->hhea_line_height * rdcon->scale / 1.2f) : 16.0f);
+                        float box_height = (phys_size > 0) ? phys_size : (_m ? (_m->hhea_line_height * rdcon->raster_scale / 1.2f) : 16.0f);
                         Rect rect = {x + 1, y, (float)(scaled_space_width - 2), box_height};
                         rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
                         x += scaled_space_width;
@@ -368,7 +368,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                         float ascend;
                         {
                             auto tfm1 = std::chrono::high_resolution_clock::now();
-                            ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->scale;
+                            ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
                             auto tfm2 = std::chrono::high_resolution_clock::now();
                             render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_FONT_METRICS,
                                 std::chrono::duration<double, std::milli>(tfm2 - tfm1).count());
@@ -444,7 +444,7 @@ static void render_text_inline_background(RenderContext* rdcon, ViewText* text_v
         return;
     }
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     BackgroundProp* bg = parent_elem->boundary()->background;
     Color* bg_color = bg ? &bg->color : nullptr;
     const float* padding = parent_elem->boundary()->padding.values;
@@ -507,7 +507,7 @@ static void render_text_inline_border(RenderContext* rdcon, ViewText* text_view,
         return;
     }
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     BorderProp* border = parent_elem->boundary()->border;
     Rect border_rect = *bg_rect;
     border_rect.x -= border->width.left * s;
@@ -542,7 +542,7 @@ static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned cha
         return false;
     }
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     float max_shadow_blur = 0;
     TextShadow* ts = text_shadow;
     while (ts) {
@@ -607,7 +607,7 @@ static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned cha
             float s_ascend;
             {
                 auto tfm1 = std::chrono::high_resolution_clock::now();
-                s_ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->scale;
+                s_ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
                 auto tfm2 = std::chrono::high_resolution_clock::now();
                 render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_FONT_METRICS,
                     std::chrono::duration<double, std::milli>(tfm2 - tfm1).count());
@@ -691,8 +691,8 @@ static void render_text_paint_glyph_shadows(RenderContext* rdcon, LoadedGlyph* g
     TextShadow* ts = text_shadow;
     while (ts) {
         rdcon->color = ts->color;
-        float sx = x + glyph->bitmap.bearing_x + ts->offset_x * rdcon->scale;
-        float sy = y + ascend - glyph->bitmap.bearing_y + ts->offset_y * rdcon->scale;
+        float sx = x + glyph->bitmap.bearing_x + ts->offset_x * rdcon->raster_scale;
+        float sy = y + ascend - glyph->bitmap.bearing_y + ts->offset_y * rdcon->raster_scale;
         draw_glyph(rdcon, &glyph->bitmap, lroundf(sx), lroundf(sy));
         ts = ts->next;
     }
@@ -721,7 +721,7 @@ static bool render_text_background_clip_linear_text(RenderContext* rdcon,
         return false;
     }
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     float width = parent_elem->content_width * s;
     float height = parent_elem->content_height * s;
     if (width <= 0.0f) {
@@ -817,7 +817,7 @@ static float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rec
         FontStyleDesc sd_h = font_style_desc_from_prop(rdcon->font.style);
         LoadedGlyph* h_glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd_h, '-', true);
         if (h_glyph) {
-            float ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->scale;
+            float ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
             draw_glyph(rdcon, &h_glyph->bitmap,
                        lroundf(x + h_glyph->bitmap.bearing_x),
                        lroundf(y + ascend - h_glyph->bitmap.bearing_y));
@@ -829,7 +829,7 @@ static float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rec
         FontStyleDesc sd_e = font_style_desc_from_prop(rdcon->font.style);
         LoadedGlyph* e_glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd_e, 0x2026, true);
         if (e_glyph) {
-            float ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->scale;
+            float ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
             draw_glyph(rdcon, &e_glyph->bitmap,
                        lroundf(x + e_glyph->bitmap.bearing_x),
                        lroundf(y + ascend - e_glyph->bitmap.bearing_y));
@@ -842,7 +842,7 @@ static float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rec
 static int collect_skip_ink_gaps(RenderContext* rdcon, unsigned char* str,
                                  TextRect* text_rect, float deco_y_top, float deco_y_bot,
                                  SkipInkGap* gaps, int max_gaps) {
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     float x = rdcon->block.x + text_rect->x * s;
     float y_base = rdcon->block.y + text_rect->y * s;
     float ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * s;
@@ -949,7 +949,7 @@ static void render_text_decorations(RenderContext* rdcon, unsigned char* str, Te
         return;
     }
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     const FontMetrics* deco_m = font_get_metrics(font_box_handle(&rdcon->font));
     float thickness = rdcon->font.style->text_deco_thickness > 0
         ? rdcon->font.style->text_deco_thickness

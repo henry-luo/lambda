@@ -103,8 +103,14 @@ static void ui_document_set_raster_scale(DomDocument* doc,
                                          float device_scale,
                                          uint8_t depth) {
     if (!doc || depth > MAX_IFRAME_DEPTH) return;
-    doc->viewport.scale = doc->viewport.given_scale * device_scale;
-    if (doc->state) {
+    float output_scale = doc->viewport.output_scale > 0.0f
+        ? doc->viewport.output_scale : 1.0f;
+    // RSC7 keeps semantic page zoom out of raster density. Zoom may reflow or
+    // transform logical content once its viewport behavior is defined.
+    float raster_scale = device_scale * output_scale;
+    bool changed = fabsf(doc->viewport.raster_scale - raster_scale) > 0.0001f;
+    doc->viewport.raster_scale = raster_scale;
+    if (changed && doc->state) {
         // Retained paint/display data is physical and must be rebuilt, while
         // the logical viewport and view tree remain valid.
         doc_state_mark_dirty(doc->state);
@@ -112,6 +118,20 @@ static void ui_document_set_raster_scale(DomDocument* doc,
     if (doc->view_tree && doc->view_tree->root) {
         ui_view_set_embedded_raster_scale(doc->view_tree->root,
                                           device_scale, depth);
+    }
+}
+
+void ui_context_sync_document_raster_scale(UiContext* uicon,
+                                           DomDocument* doc) {
+    if (!uicon || !doc) return;
+    float device_scale = uicon->device_scale > 0.0f
+        ? uicon->device_scale : 1.0f;
+    ui_document_set_raster_scale(doc, device_scale, 0);
+    if (doc == uicon->document && uicon->font_ctx) {
+        font_context_set_pixel_ratio(uicon->font_ctx,
+                                     doc->viewport.raster_scale);
+        font_prop_release_handle(&uicon->default_font);
+        font_prop_release_handle(&uicon->legacy_default_font);
     }
 }
 
@@ -125,7 +145,7 @@ bool ui_context_set_device_scale(UiContext* uicon,
         fabsf(uicon->device_scale_y - scale_y) > 0.0001f;
     if (!changed) return false;
 
-    float old_scale = uicon->pixel_ratio > 0.0f ? uicon->pixel_ratio : 1.0f;
+    float old_scale = uicon->device_scale > 0.0f ? uicon->device_scale : 1.0f;
     uicon->device_scale_x = scale_x;
     uicon->device_scale_y = scale_y;
     if (fabsf(scale_x - scale_y) > 0.01f) {
@@ -134,31 +154,30 @@ bool ui_context_set_device_scale(UiContext* uicon,
         log_warn("ui_context_set_device_scale: anisotropic scale %.3f x %.3f; raster uses X",
                  scale_x, scale_y);
     }
-    uicon->pixel_ratio = scale_x;
+    uicon->device_scale = scale_x;
 
-    if (uicon->font_ctx) {
-        font_context_set_pixel_ratio(uicon->font_ctx, uicon->pixel_ratio);
+    if (uicon->document) {
+        ui_context_sync_document_raster_scale(uicon, uicon->document);
+    } else if (uicon->font_ctx) {
+        font_context_set_pixel_ratio(uicon->font_ctx, uicon->device_scale);
         font_prop_release_handle(&uicon->default_font);
         font_prop_release_handle(&uicon->legacy_default_font);
     }
-    if (uicon->document) {
-        ui_document_set_raster_scale(uicon->document, uicon->pixel_ratio, 0);
-    }
     log_info("ui_context_set_device_scale: %.3f -> %.3f (y=%.3f)",
-             old_scale, uicon->pixel_ratio, scale_y);
+             old_scale, uicon->device_scale, scale_y);
     return true;
 }
 
-int ui_context_init(UiContext* uicon, bool headless, float requested_pixel_ratio) {
+int ui_context_init(UiContext* uicon, bool headless, float requested_device_scale) {
     radiant_register_css_counter_hooks();
     radiant_register_css_symbol_hook();
     radiant_register_resource_processor();
     radiant_register_event_hooks();
     if (!uicon) return EXIT_FAILURE;
-    return uicon->init(headless, requested_pixel_ratio);
+    return uicon->init(headless, requested_device_scale);
 }
 
-int UiContext::init(bool next_headless, float requested_pixel_ratio) {
+int UiContext::init(bool next_headless, float requested_device_scale) {
     memset(this, 0, sizeof(UiContext));
     last_click_time = -1.0;
     last_click_button = -1;
@@ -203,12 +222,12 @@ int UiContext::init(bool next_headless, float requested_pixel_ratio) {
             window = NULL;
             log_info("Running in headless mode (windowless)");
         }
-        // pass the export ratio into font initialization before handles are resolved.
-        pixel_ratio = requested_pixel_ratio > 0.0f ? requested_pixel_ratio : 1.0f;
-        device_scale_x = pixel_ratio;
-        device_scale_y = pixel_ratio;
-        this->window_width = window_width * pixel_ratio;
-        this->window_height = window_height * pixel_ratio;
+        // Publish device scale before resolving any scale-dependent font handle.
+        device_scale = requested_device_scale > 0.0f ? requested_device_scale : 1.0f;
+        device_scale_x = device_scale;
+        device_scale_y = device_scale;
+        this->window_width = window_width * device_scale;
+        this->window_height = window_height * device_scale;
         viewport_width = window_width;   // CSS pixels
         viewport_height = window_height; // CSS pixels
     } else {
@@ -243,7 +262,7 @@ int UiContext::init(bool next_headless, float requested_pixel_ratio) {
         log_info("ui_context_init: scale factor: %.2f x %.2f, framebuffer size: %d x %d", scale_x, scale_y, pixel_w, pixel_h);
         device_scale_x = scale_x;
         device_scale_y = scale_y;
-        pixel_ratio = scale_x;
+        device_scale = scale_x;
         this->window_width = pixel_w;  this->window_height = pixel_h;
         // viewport_width/height store the intended CSS viewport (for vh/vw units)
         // These are the logical (CSS) pixels we requested, not the actual framebuffer size
@@ -259,7 +278,7 @@ int UiContext::init(bool next_headless, float requested_pixel_ratio) {
     radiant_ime_win_attach(this);
 
     // Create unified font context — owns font database internally
-    // Created after window so pixel_ratio is known
+    // Created after the window so device scale is known.
     FontContextConfig font_cfg = {};
     font_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "ui.font.pool");
     font_arena = font_pool
@@ -282,7 +301,7 @@ int UiContext::init(bool next_headless, float requested_pixel_ratio) {
     font_cfg.pool = font_pool;
     font_cfg.arena = font_arena;
     font_cfg.glyph_arena = font_glyph_arena;
-    font_cfg.pixel_ratio = pixel_ratio;
+    font_cfg.pixel_ratio = device_scale;
     font_cfg.max_cached_faces = 64;
     font_cfg.enable_lcd_rendering = true;
     font_ctx = font_context_create(&font_cfg);

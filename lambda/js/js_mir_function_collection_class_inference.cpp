@@ -106,27 +106,35 @@ bool js_ast_has_direct_eval_call(JsAstNode* node) {
 // Phase 4: Native call resolution
 // ============================================================================
 
-static JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
-        JsCallNode* call) {
+JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
+        JsCallNode* call, bool stable) {
     if (!call->callee || call->callee->node_type != JS_AST_NODE_IDENTIFIER) return NULL;
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-    // resolve the post-Annex-B scope entry before the AST fallback so both
-    // native eligibility and return-type propagation use the same callee.
-    NameEntry* entry = js_scope_lookup(mt->tp, id->name);
-    if (!entry) entry = id->entry;
-    if (!entry || !entry->node) return NULL;
+    // consume the binding resolved by the AST builder; MIR must not rebuild
+    // compiler scope state after the indexed unit is sealed.
+    AstIndex* index = mt && mt->tp ? &mt->tp->ast_index : NULL;
+    AstBindingId binding_id = ast_index_binding_id(index, (AstNode*)id);
+    NameEntry* entry = ast_index_binding(index, binding_id);
+    AstNode* definition = ast_index_binding_definition(index, binding_id);
+    if (!entry || !definition) return NULL;
 
     JsFunctionNode* fn = NULL;
-    JsAstNodeType ntype = ((JsAstNode*)entry->node)->node_type;
+    JsAstNodeType ntype = ((JsAstNode*)definition)->node_type;
     if (ntype == JS_AST_NODE_FUNCTION_DECLARATION) {
-        fn = (JsFunctionNode*)entry->node;
+        fn = (JsFunctionNode*)definition;
     } else if (ntype == JS_AST_NODE_VARIABLE_DECLARATOR) {
-        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)entry->node;
+        JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)definition;
         if (decl->init && (decl->init->node_type == JS_AST_NODE_FUNCTION_EXPRESSION
             || decl->init->node_type == JS_AST_NODE_ARROW_FUNCTION)) {
             fn = (JsFunctionNode*)decl->init;
         }
     }
+    if (stable && ntype == JS_AST_NODE_FUNCTION_DECLARATION &&
+            !jm_function_decl_is_direct_binding((JsFunctionNode*)definition, false)) return NULL;
+    if (stable && ntype == JS_AST_NODE_VARIABLE_DECLARATOR &&
+            (!entry->is_const || !fn ||
+             ((JsVariableDeclaratorNode*)definition)->init->source_span.end_byte >
+                call->source_span.start_byte)) return NULL;
     return fn;
 }
 
@@ -418,6 +426,14 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
     result->node_type = JS_AST_NODE_RETURN_STATEMENT;
     result->source_span = field->source_span;
     result->argument = field->value;
+
+    // index synthetic capability alongside source functions.
+    if (mt->tp && !ast_index_append_profile(&mt->tp->ast_index,
+            (AstNode*)function, (AstNode*)field, mt->tp->profile)) {
+        log_error("js-mir: failed to index class field initializer");
+        mt->collection_failed = true;
+        return NULL;
+    }
 
     int function_index = mt->func_count;
     JsFuncCollected* collected = &mt->func_entries[function_index];
@@ -905,8 +921,7 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     case JS_AST_NODE_PROGRAM:
     case JS_AST_NODE_BLOCK_STATEMENT:
     case JS_AST_NODE_IF_STATEMENT:
-    case JS_AST_NODE_WHILE_STATEMENT:
-    case JS_AST_NODE_FOR_STATEMENT:
+    case AST_NODE_LOOP:
     case JS_AST_NODE_EXPRESSION_STATEMENT:
     case JS_AST_NODE_VARIABLE_DECLARATION:
     case JS_AST_NODE_RETURN_STATEMENT:
@@ -924,7 +939,6 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
     case JS_AST_NODE_NEW_EXPRESSION:
     case JS_AST_NODE_SWITCH_STATEMENT:
     case JS_AST_NODE_SWITCH_CASE:
-    case JS_AST_NODE_DO_WHILE_STATEMENT:
     case JS_AST_NODE_FOR_OF_STATEMENT:
     case JS_AST_NODE_FOR_IN_STATEMENT:
     case JS_AST_NODE_YIELD_EXPRESSION:
@@ -945,26 +959,18 @@ void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node) {
 }
 
 // ============================================================================
-// Find collected function entry by node pointer
+// Find collected function entry through the shared AST identity index.
 // ============================================================================
 
 JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn) {
-    if (mt && fn &&
-            mt->func_index_capacity && mt->func_index_nodes && mt->func_index_ids) {
-        uintptr_t key = (uintptr_t)fn >> 3;
-        key ^= key >> 17;
-        int slot = (int)(key & (uintptr_t)(mt->func_index_capacity - 1));
-        while (mt->func_index_nodes[slot]) {
-            if (mt->func_index_nodes[slot] == fn) {
-                int id = mt->func_index_ids[slot];
-                return id >= 0 && id < mt->func_count ? &mt->func_entries[id] : NULL;
+    if (mt && fn && mt->tp && mt->tp->ast_index.count && mt->func_by_id) {
+        AstNodeId node_id = ast_index_find(&mt->tp->ast_index, (AstNode*)fn);
+        if (node_id != AST_NODE_ID_INVALID) {
+            AstFunctionId function_id = mt->tp->ast_index.owner_functions[node_id];
+            if (function_id < mt->tp->ast_index.function_count && mt->func_by_id[function_id]) {
+                return mt->func_by_id[function_id];
             }
-            slot = (slot + 1) & (mt->func_index_capacity - 1);
         }
-        return NULL;
-    }
-    for (int i = 0; i < mt->func_count; i++) {
-        if (mt->func_entries[i].node == fn) return &mt->func_entries[i];
     }
     return NULL;
 }
@@ -1438,18 +1444,12 @@ void jm_infer_walk(JsAstNode* node, const String* const binding_names[],
         jm_infer_walk(n->alternate, binding_names, evidence, param_count, self_name);
         break;
     }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* n = (JsWhileNode*)node;
-        jm_infer_walk(n->test, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(n->body, binding_names, evidence, param_count, self_name);
-        break;
-    }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* n = (JsForNode*)node;
-        jm_infer_walk(n->init, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(n->test, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(n->update, binding_names, evidence, param_count, self_name);
-        jm_infer_walk(n->body, binding_names, evidence, param_count, self_name);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        jm_infer_walk(loop->init, binding_names, evidence, param_count, self_name);
+        jm_infer_walk(loop->test, binding_names, evidence, param_count, self_name);
+        jm_infer_walk(loop->update, binding_names, evidence, param_count, self_name);
+        jm_infer_walk(loop->body, binding_names, evidence, param_count, self_name);
         break;
     }
     case JS_AST_NODE_RETURN_STATEMENT: {
@@ -1886,14 +1886,9 @@ void jm_infer_return_type_walk(JsAstNode* node, const char* self_name,
         jm_infer_return_type_walk(n->alternate, self_name, fc, collected, count, max_count);
         break;
     }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* n = (JsWhileNode*)node;
-        jm_infer_return_type_walk(n->body, self_name, fc, collected, count, max_count);
-        break;
-    }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* n = (JsForNode*)node;
-        jm_infer_return_type_walk(n->body, self_name, fc, collected, count, max_count);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        jm_infer_return_type_walk(loop->body, self_name, fc, collected, count, max_count);
         break;
     }
     case JS_AST_NODE_TRY_STATEMENT: {
@@ -2082,10 +2077,8 @@ static bool jm_return_walk_needs_scalar_home(JsAstNode* node) {
         return jm_return_walk_needs_scalar_home(branch->consequent) ||
             jm_return_walk_needs_scalar_home(branch->alternate);
     }
-    case JS_AST_NODE_WHILE_STATEMENT:
-        return jm_return_walk_needs_scalar_home(((JsWhileNode*)node)->body);
-    case JS_AST_NODE_FOR_STATEMENT:
-        return jm_return_walk_needs_scalar_home(((JsForNode*)node)->body);
+    case AST_NODE_LOOP:
+        return jm_return_walk_needs_scalar_home(((AstLoopControlNode*)node)->body);
     case JS_AST_NODE_TRY_STATEMENT: {
         JsTryNode* attempt = (JsTryNode*)node;
         return jm_return_walk_needs_scalar_home(attempt->block) ||
@@ -2260,14 +2253,9 @@ void jm_prescan_widen_walk(JsAstNode* node, struct hashmap* float_arrays,
         while (s) { jm_prescan_widen_walk(s, float_arrays, widen_vars); s = s->next; }
         break;
     }
-    case JS_AST_NODE_FOR_STATEMENT: {
-        JsForNode* n = (JsForNode*)node;
-        jm_prescan_widen_walk(n->body, float_arrays, widen_vars);
-        break;
-    }
-    case JS_AST_NODE_WHILE_STATEMENT: {
-        JsWhileNode* n = (JsWhileNode*)node;
-        jm_prescan_widen_walk(n->body, float_arrays, widen_vars);
+    case AST_NODE_LOOP: {
+        AstLoopControlNode* loop = (AstLoopControlNode*)node;
+        jm_prescan_widen_walk(loop->body, float_arrays, widen_vars);
         break;
     }
     case JS_AST_NODE_IF_STATEMENT: {

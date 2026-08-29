@@ -440,9 +440,7 @@ struct JsMirTranspiler {
     JsFuncCollected* func_entries;      // exact-sized after the shared count pass
     int func_capacity;
     int func_count;
-    JsFunctionNode** func_index_nodes;  // pointer-keyed identity index, built once after collection
-    int* func_index_ids;
-    int func_index_capacity;
+    JsFuncCollected** func_by_id;       // shared AstIndex function identity -> collected entry
 
     // Collected classes
     JsClassEntry* class_entries;        // exact-sized after the shared count pass

@@ -21,10 +21,10 @@ char* load_font_path(FontContext *font_ctx, const char* font_name) {
 }
 
 static float resolved_space_width(UiContext* uicon, FontHandle* handle, const FontStyleDesc* style) {
-    float pixel_ratio = (uicon && uicon->pixel_ratio > 0.0f) ? uicon->pixel_ratio : 1.0f;
+    float raster_scale = ui_context_raster_scale(uicon);
     LoadedGlyph* glyph = font_load_glyph(handle, style, (uint32_t)' ', false);
     if (glyph && glyph->advance_x > 0.0f) {
-        return glyph->advance_x / pixel_ratio;
+        return glyph->advance_x / raster_scale;
     }
 
     const FontMetrics* m = font_get_metrics(handle);
@@ -49,7 +49,7 @@ void font_prop_release_handle(FontProp* fprop) {
 static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
                                      const char* family,
                                      FontWeight weight, FontSlant slant,
-                                     float pixel_ratio) {
+                                     float raster_scale) {
     if (!handle || !fprop || !family) return false;
     const char* handle_family = NULL;
     float handle_size = 0.0f;
@@ -73,7 +73,7 @@ static bool font_handle_matches_prop(FontHandle* handle, FontProp* fprop,
     return family_matches &&
         handle_size == font_prop_used_size(fprop) &&
         fabsf(font_handle_get_physical_size_px(handle) -
-              font_prop_used_size(fprop) * pixel_ratio) <= 0.0001f &&
+              font_prop_used_size(fprop) * raster_scale) <= 0.0001f &&
         handle_weight == weight &&
         handle_slant == slant;
 }
@@ -136,9 +136,9 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     style.weight  = fw;
     style.slant   = fs;
 
-    float pixel_ratio = uicon->pixel_ratio > 0.0f ? uicon->pixel_ratio : 1.0f;
+    float raster_scale = ui_context_raster_scale(uicon);
     if (font_handle_matches_prop(fprop->font_handle, fprop, family, fw, fs,
-                                 pixel_ratio)) {
+                                 raster_scale)) {
         populate_font_prop_metrics(uicon, fprop, fprop->font_handle, &style);
         return;
     }

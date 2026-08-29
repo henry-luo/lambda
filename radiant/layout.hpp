@@ -92,13 +92,11 @@ bool layout_get_initial_letter_info(const DomElement* element,
 bool layout_get_text_initial_letter_info(const DomNode* text_node,
                                          InitialLetterInfo* out_info);
 InitialLetterBoxInsets layout_initial_letter_box_insets(ViewText* text);
+bool layout_overflow_establishes_scroll_container(CssEnum overflow);
+bool layout_block_establishes_scroll_container(ViewBlock* block);
 // maximum DOM nesting depth. guards call-stack overflow in layout_flow_node()
 // and layout_abs_block() — both use the same lycon->depth counter.
-#ifdef NDEBUG
 constexpr int MAX_LAYOUT_DEPTH = 300;
-#else
-constexpr int MAX_LAYOUT_DEPTH = 100;
-#endif
 
 constexpr int MAX_LAYOUT_NODES = 50000;
 constexpr int MAX_FLEX_DEPTH = 16;

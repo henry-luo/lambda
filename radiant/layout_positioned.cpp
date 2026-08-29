@@ -258,11 +258,7 @@ void layout_sticky_positioned(LayoutContext* lycon, ViewBlock* block) {
             }
             break;
         }
-        if (pb->scroller &&
-            ((pb->scroll()->overflow_x != CSS_VALUE_VISIBLE &&
-              pb->scroll()->overflow_x != CSS_VALUE_CLIP) ||
-             (pb->scroll()->overflow_y != CSS_VALUE_VISIBLE &&
-              pb->scroll()->overflow_y != CSS_VALUE_CLIP))) {
+        if (layout_block_establishes_scroll_container(pb)) {
             // overflow:clip clips without creating a scroll container; skipping it
             // lets sticky positioning use the nearest ancestor with a scrollport.
             scroll_ancestor = p;

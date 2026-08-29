@@ -169,10 +169,10 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
 }
 
 // Main function to layout HTML and render to PNG
-// scale: User-specified zoom factor (default 1.0)
-// pixel_ratio: Device pixel ratio for HiDPI (default 1.0, use 2.0 for Retina displays)
-// Final output size is (viewport_width * scale * pixel_ratio) x (viewport_height * scale * pixel_ratio)
-static bool render_png_resolve_auto_size(DomDocument* doc, float total_scale,
+// output_scale: Explicit export density (default 1.0).
+// device_scale: Device pixel density (default 1.0, use 2.0 for Retina displays).
+// Final output size is viewport * output_scale * device_scale.
+static bool render_png_resolve_auto_size(DomDocument* doc, float raster_scale,
                                          bool auto_width, bool auto_height,
                                          int* output_width, int* output_height,
                                          int* content_max_x, int* content_max_y) {
@@ -183,8 +183,8 @@ static bool render_png_resolve_auto_size(DomDocument* doc, float total_scale,
     calculate_content_bounds(doc->view_tree->root, content_max_x, content_max_y);
     *content_max_x += 50;
     *content_max_y += 50;
-    if (auto_width) *output_width = (int)(*content_max_x * total_scale);
-    if (auto_height) *output_height = (int)(*content_max_y * total_scale);
+    if (auto_width) *output_width = (int)(*content_max_x * raster_scale);
+    if (auto_height) *output_height = (int)(*content_max_y * raster_scale);
 
     View* root_view = doc->view_tree->root;
     if (root_view->view_type == RDT_VIEW_BLOCK) {
@@ -197,17 +197,15 @@ static bool render_png_resolve_auto_size(DomDocument* doc, float total_scale,
     return true;
 }
 
-int render_html_to_png(const char* html_file, const char* png_file, int viewport_width, int viewport_height, float scale, float pixel_ratio) {
+int render_html_to_png(const char* html_file, const char* png_file, int viewport_width, int viewport_height, float output_scale, float device_scale) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
 
 
-    // Validate scale and pixel_ratio
-    if (scale <= 0) scale = 1.0f;
-    if (pixel_ratio <= 0) pixel_ratio = 1.0f;
+    if (output_scale <= 0) output_scale = 1.0f;
+    if (device_scale <= 0) device_scale = 1.0f;
 
-    // Combined scale factor for physical output
-    float total_scale = scale * pixel_ratio;
+    float raster_scale = output_scale * device_scale;
 
     // Remember if we need to auto-size (viewport was 0)
     bool auto_width = (viewport_width == 0);
@@ -219,13 +217,13 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 
     // Initialize UI context in headless mode
     UiContext ui_context;
-    if (ui_context_init(&ui_context, true, pixel_ratio) != 0) {
+    if (ui_context_init(&ui_context, true, device_scale) != 0) {
         return 1;
     }
 
-    // Create a surface for rendering with total_scale dimensions (physical pixels)
-    int surface_width = (int)(layout_width * total_scale);
-    int surface_height = (int)(layout_height * total_scale);
+    // Create a surface at the derived raster density.
+    int surface_width = (int)(layout_width * raster_scale);
+    int surface_height = (int)(layout_height * raster_scale);
     ui_context_create_surface(&ui_context, surface_width, surface_height);
 
     // Update UI context dimensions
@@ -256,10 +254,10 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 
     ui_context.document = doc;
 
-    // Set document scale for rendering
-    // given_scale is the user zoom, scale is the combined total_scale for physical rendering
-    doc->viewport.given_scale = scale;
-    doc->viewport.scale = total_scale;  // Combined scale * pixel_ratio for physical output
+    // This API's output scale is raster density; semantic page zoom remains
+    // document-owned and independent.
+    doc->viewport.output_scale = output_scale;
+    ui_context_sync_document_raster_scale(&ui_context, doc);
 
     // Process @font-face rules before layout
     process_document_font_faces(&ui_context, doc);
@@ -276,9 +274,9 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     log_info("[TIMING] Layout: %.1fms", duration<double, std::milli>(t_layout - t_fonts).count());
 
     // Calculate content bounds if auto-sizing
-    // Layout is in CSS logical pixels, so apply total_scale for physical output dimensions
-    int output_width = (int)(layout_width * total_scale);
-    int output_height = (int)(layout_height * total_scale);
+    // Layout remains logical; only destination dimensions use raster density.
+    int output_width = (int)(layout_width * raster_scale);
+    int output_height = (int)(layout_height * raster_scale);
 
     // pixel threshold above which tiled rendering is used to avoid OOM on huge pages
     // (32 M pixels × 4 bytes = 128 MB; e.g. 1200-px wide → ~26 000 px tall)
@@ -293,10 +291,10 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
     bool rendered = false;  // set to true when tiled path handles rendering
 
     int content_max_x = 0, content_max_y = 0;
-    if (render_png_resolve_auto_size(doc, total_scale, auto_width, auto_height,
+    if (render_png_resolve_auto_size(doc, raster_scale, auto_width, auto_height,
             &output_width, &output_height, &content_max_x, &content_max_y)) {
-        log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding, scale=%.2f, pixel_ratio=%.2f)",
-                 output_width, output_height, scale, pixel_ratio);
+        log_info("Auto-sized output dimensions: %dx%d (content bounds with 50px padding, output_scale=%.2f, device_scale=%.2f)",
+                 output_width, output_height, output_scale, device_scale);
 
         if ((int64_t)output_width * output_height > PNG_TILE_THRESHOLD) {
             // Large page: render in tiles to avoid allocating a single huge surface
@@ -308,8 +306,8 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
             target.height = output_height;
             target.viewport_width = viewport_width;
             target.viewport_height = viewport_height;
-            target.scale = scale;
-            target.pixel_ratio = pixel_ratio;
+            target.output_scale = output_scale;
+            target.device_scale = device_scale;
             render_output_render_view_tree_to_target(&ui_context, doc->view_tree, &target);
             rendered = true;
         } else {
@@ -326,8 +324,8 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
             target.surface = ui_context.surface;
             target.viewport_width = viewport_width;
             target.viewport_height = viewport_height;
-            target.scale = scale;
-            target.pixel_ratio = pixel_ratio;
+            target.output_scale = output_scale;
+            target.device_scale = device_scale;
             render_output_render_view_tree_to_target(&ui_context, doc->view_tree, &target);
         } else {
             ui_context_cleanup(&ui_context);
@@ -347,26 +345,23 @@ int render_html_to_png(const char* html_file, const char* png_file, int viewport
 }
 
 // Main function to layout HTML and render to JPEG
-// scale: User-specified zoom factor (default 1.0)
-// pixel_ratio: Device pixel ratio for HiDPI (default 1.0, use 2.0 for Retina displays)
-int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width, int viewport_height, float scale, float pixel_ratio) {
+// output_scale is export density; device_scale is platform pixel density.
+int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality, int viewport_width, int viewport_height, float output_scale, float device_scale) {
 
-    // Validate scale and pixel_ratio
-    if (scale <= 0) scale = 1.0f;
-    if (pixel_ratio <= 0) pixel_ratio = 1.0f;
+    if (output_scale <= 0) output_scale = 1.0f;
+    if (device_scale <= 0) device_scale = 1.0f;
 
-    // Combined scale factor for physical output
-    float total_scale = scale * pixel_ratio;
+    float raster_scale = output_scale * device_scale;
 
     // Initialize UI context in headless mode
     UiContext ui_context;
-    if (ui_context_init(&ui_context, true, pixel_ratio) != 0) {
+    if (ui_context_init(&ui_context, true, device_scale) != 0) {
         return 1;
     }
 
-    // Calculate physical output dimensions (CSS pixels * total_scale)
-    int output_width = (int)(viewport_width * total_scale);
-    int output_height = (int)(viewport_height * total_scale);
+    // Calculate destination dimensions from logical viewport and raster density.
+    int output_width = (int)(viewport_width * raster_scale);
+    int output_height = (int)(viewport_height * raster_scale);
 
     // Create a surface for rendering with scaled dimensions
     ui_context_create_surface(&ui_context, output_width, output_height);
@@ -393,9 +388,8 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
 
     ui_context.document = doc;
 
-    // Set document scale for rendering
-    doc->viewport.given_scale = scale;
-    doc->viewport.scale = total_scale;  // Combined scale * pixel_ratio
+    doc->viewport.output_scale = output_scale;
+    ui_context_sync_document_raster_scale(&ui_context, doc);
 
     // Process @font-face rules before layout
     process_document_font_faces(&ui_context, doc);
@@ -413,8 +407,8 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
         target.jpeg_quality = quality;
         target.viewport_width = viewport_width;
         target.viewport_height = viewport_height;
-        target.scale = scale;
-        target.pixel_ratio = pixel_ratio;
+        target.output_scale = output_scale;
+        target.device_scale = device_scale;
         render_output_render_view_tree_to_target(&ui_context, doc->view_tree, &target);
     } else {
         ui_context_cleanup(&ui_context);
@@ -501,7 +495,7 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
 // ─── Batch render command ────────────────────────────────────────────────────
 //
 // Reads render jobs from stdin (one per line, tab-separated):
-//   <html_file>\t<output_png>\t<viewport_width>\t<viewport_height>\t<pixel_ratio>
+//   <html_file>\t<output_png>\t<viewport_width>\t<viewport_height>\t<device_scale>
 //
 // Initializes UiContext ONCE and reuses it across all renders, saving ~70MB of
 // per-process overhead (GLFW/Metal driver, font database scan, ThorVG, native font backend).
@@ -541,19 +535,19 @@ static bool render_batch_single(
     const char* png_file,
     int viewport_width,
     int viewport_height,
-    float pixel_ratio,
+    float device_scale,
     Url* cwd
 ) {
-    float scale = 1.0f;
-    float total_scale = scale * pixel_ratio;
+    float output_scale = 1.0f;
+    float raster_scale = output_scale * device_scale;
 
     int layout_width = viewport_width > 0 ? viewport_width : 100;
     int layout_height = viewport_height > 0 ? viewport_height : 100;
 
     // update ui_context dimensions for this render
-    ui_context_set_device_scale(ui_context, pixel_ratio, pixel_ratio);
-    int surface_width = (int)(layout_width * total_scale);
-    int surface_height = (int)(layout_height * total_scale);
+    ui_context_set_device_scale(ui_context, device_scale, device_scale);
+    int surface_width = (int)(layout_width * raster_scale);
+    int surface_height = (int)(layout_height * raster_scale);
     ui_context_create_surface(ui_context, surface_width, surface_height);
     ui_context->window_width = surface_width;
     ui_context->window_height = surface_height;
@@ -568,8 +562,8 @@ static bool render_batch_single(
     }
 
     ui_context->document = doc;
-    doc->viewport.given_scale = scale;
-    doc->viewport.scale = total_scale;
+    doc->viewport.output_scale = output_scale;
+    ui_context_sync_document_raster_scale(ui_context, doc);
 
     process_document_font_faces(ui_context, doc);
 
@@ -586,7 +580,7 @@ static bool render_batch_single(
     bool auto_width = (viewport_width == 0);
     bool auto_height = (viewport_height == 0);
     int content_max_x = 0, content_max_y = 0;
-    if (render_png_resolve_auto_size(doc, total_scale, auto_width, auto_height,
+    if (render_png_resolve_auto_size(doc, raster_scale, auto_width, auto_height,
             &output_width, &output_height, &content_max_x, &content_max_y)) {
         if ((int64_t)output_width * output_height > PNG_TILE_THRESHOLD) {
             render_html_doc_tiled(ui_context, doc->view_tree, png_file,
@@ -612,19 +606,19 @@ static bool render_batch_single(
 }
 
 int cmd_render_batch(int argc, char** argv) {
-    // parse optional args: --pixel-ratio <value>
-    float default_pixel_ratio = 1.0f;
+    // --pixel-ratio is the legacy CLI spelling for device scale.
+    float default_device_scale = 1.0f;
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--pixel-ratio") == 0 && i + 1 < argc) {
-            default_pixel_ratio = (float)atof(argv[i + 1]);
-            if (default_pixel_ratio <= 0) default_pixel_ratio = 1.0f;
+            default_device_scale = (float)atof(argv[i + 1]);
+            if (default_device_scale <= 0) default_device_scale = 1.0f;
         }
     }
 
     // initialize UI context once
     UiContext ui_context;
     memset(&ui_context, 0, sizeof(UiContext));
-    if (ui_context_init(&ui_context, true, default_pixel_ratio) != 0) {
+    if (ui_context_init(&ui_context, true, default_device_scale) != 0) {
         fprintf(stderr, "FAIL\t(init)\tFailed to initialize UI context\n");
         return 1;
     }
@@ -681,7 +675,7 @@ int cmd_render_batch(int argc, char** argv) {
         }
         if (len == 0) continue;
 
-        // parse tab-separated fields: html_file\toutput_png\tvw\tvh[\tpixel_ratio]
+        // parse tab-separated fields: html_file\toutput_png\tvw\tvh[\tdevice_scale]
         char* html_file = line;
         char* tab1 = strchr(html_file, '\t');
         if (!tab1) {
@@ -705,7 +699,7 @@ int cmd_render_batch(int argc, char** argv) {
 
         char* tab3 = strchr(tab2 + 1, '\t');
         int vh = 0;
-        float pixel_ratio = default_pixel_ratio;
+        float device_scale = default_device_scale;
         if (tab3) {
             *tab3 = '\0';
             vw = atoi(tab2 + 1);
@@ -715,12 +709,12 @@ int cmd_render_batch(int argc, char** argv) {
             if (tab4) {
                 *tab4 = '\0';
                 vh = atoi(tab3 + 1);
-                pixel_ratio = (float)atof(tab4 + 1);
-                if (pixel_ratio <= 0) pixel_ratio = default_pixel_ratio;
+                device_scale = (float)atof(tab4 + 1);
+                if (device_scale <= 0) device_scale = default_device_scale;
             }
         }
 
-        bool ok = render_batch_single(&ui_context, html_file, output_png, vw, vh, pixel_ratio, cwd);
+        bool ok = render_batch_single(&ui_context, html_file, output_png, vw, vh, device_scale, cwd);
         if (ok) {
             fprintf(stdout, "OK\t%s\n", html_file);
             success_count++;

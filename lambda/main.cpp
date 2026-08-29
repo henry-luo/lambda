@@ -3259,8 +3259,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  -o <output>              Output file path (required, format detected by extension)\n");
             printf("  -vw, --viewport-width    Viewport width in CSS pixels (default: auto-size to content)\n");
             printf("  -vh, --viewport-height   Viewport height in CSS pixels (default: auto-size to content)\n");
-            printf("  -s, --scale              User zoom scale factor (default: 1.0)\n");
-            printf("  --pixel-ratio            Device pixel ratio for HiDPI/Retina (default: 1.0, use 2.0 for crisp text)\n");
+            printf("  -s, --scale              Raster export density (default: 1.0; does not change layout)\n");
+            printf("  --pixel-ratio            Device scale for HiDPI/Retina (default: 1.0; legacy option spelling)\n");
             printf("  --theme <name>           Color theme for graph diagrams (default: zinc-dark)\n");
             printf("                           Dark: tokyo-night, nord, dracula, catppuccin-mocha, one-dark, github-dark\n");
             printf("                           Light: github-light, solarized-light, catppuccin-latte, zinc-light\n");
@@ -3275,8 +3275,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  %s render index.html -o output.jpg        # Auto-size to content\n", argv[0]);
             printf("  %s render index.html -o out.svg -vw 800 -vh 600  # Custom viewport size\n", argv[0]);
             printf("  %s render diagram.mmd -o out.svg --theme tokyo-night  # Graph with theme\n", argv[0]);
-            printf("  %s render index.html -o out.png -s 2.0           # Render at 2x zoom\n", argv[0]);
-            printf("  %s render index.html -o out.png --pixel-ratio 2  # Crisp text on Retina\n", argv[0]);
+            printf("  %s render index.html -o out.png -s 2.0           # Export at 2x density\n", argv[0]);
+            printf("  %s render index.html -o out.png --pixel-ratio 2  # Render for a 2x device scale\n", argv[0]);
             printf("  %s render test/page.html -o result.svg           # Render with relative paths\n", argv[0]);
             return lambda_main_finish(0);
         }
@@ -3286,8 +3286,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         const char* output_file = NULL;
         int viewport_width = 0;   // 0 means use format-specific default
         int viewport_height = 0;  // 0 means use format-specific default
-        float render_scale = 1.0f;  // Default user zoom scale
-        float pixel_ratio = 1.0f;  // Default device pixel ratio (use 2.0 for Retina)
+        float output_scale = 1.0f;  // explicit export density, independent of page zoom
+        float device_scale = 1.0f;  // device pixels per logical pixel
         const char* theme_name = NULL;  // Graph theme name
         const char* graph_view_key = NULL;
 
@@ -3326,8 +3326,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             } else if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--scale") == 0) {
                 if (i + 1 < argc) {
                     i++;
-                    render_scale = (float)str_to_double_default(argv[i], strlen(argv[i]), 0.0);
-                    if (render_scale <= 0.0f) {
+                    output_scale = (float)str_to_double_default(argv[i], strlen(argv[i]), 0.0);
+                    if (output_scale <= 0.0f) {
                         printf("Error: Invalid scale '%s'. Must be a positive number.\n", argv[i]);
                         return lambda_main_finish(1);
                     }
@@ -3338,8 +3338,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             } else if (strcmp(argv[i], "--pixel-ratio") == 0) {
                 if (i + 1 < argc) {
                     i++;
-                    pixel_ratio = (float)str_to_double_default(argv[i], strlen(argv[i]), 0.0);
-                    if (pixel_ratio <= 0.0f) {
+                    device_scale = (float)str_to_double_default(argv[i], strlen(argv[i]), 0.0);
+                    if (device_scale <= 0.0f) {
                         printf("Error: Invalid pixel-ratio '%s'. Must be a positive number.\n", argv[i]);
                         return lambda_main_finish(1);
                     }
@@ -3403,8 +3403,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         const char* input_ext = file_path_ext(html_file);
         bool is_graph_input = graph_bridge_path_is_graph(html_file);
 
-        log_debug("Rendering input '%s' to output '%s' with viewport %dx%d, scale=%.2f, pixel_ratio=%.2f",
-                  html_file, output_file, viewport_width, viewport_height, render_scale, pixel_ratio);
+        log_debug("Rendering input '%s' to output '%s' with viewport %dx%d, output_scale=%.2f, device_scale=%.2f",
+                  html_file, output_file, viewport_width, viewport_height, output_scale, device_scale);
 
         char* render_package_temp_input = nullptr;
         if (is_graph_input) {
@@ -3468,7 +3468,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                            strcmp(ext, ".jpeg") == 0)) {
             log_debug("Detected render output format: %s", ext);
             exit_code = render_html_to_output_target(html_file, output_file,
-                viewport_width, viewport_height, render_scale, pixel_ratio, 85);
+                viewport_width, viewport_height, output_scale, device_scale, 85);
         }
         else {
             printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");

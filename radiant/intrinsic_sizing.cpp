@@ -1395,9 +1395,8 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
     *loaded = glyph != nullptr;
     if (!glyph) return 0.0f;
 
-    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0)
-        ? lycon->ui_context->pixel_ratio : 1.0f;
-    float advance = glyph->advance_x / pixel_ratio + kerning;
+    float raster_scale = ui_context_raster_scale(lycon->ui_context);
+    float advance = glyph->advance_x / raster_scale + kerning;
     if (small_caps_lower) {
         advance *= font_get_small_caps_scale(font_box_handle(&lycon->font));
     }
@@ -2766,6 +2765,17 @@ LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
     LayoutIntrinsicMarginPair result = {0.0f, 0.0f, false};
     if (!element) return result;
 
+    StyleTree* style = element->specified_style;
+    bool has_specified_margin = style &&
+        (style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_LEFT) ||
+         style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_RIGHT) ||
+         (options.include_logical &&
+          (style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_INLINE_START) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_INLINE_END) ||
+           style_tree_get_declaration(style, CSS_PROPERTY_MARGIN_INLINE))) ||
+         (options.include_shorthand &&
+          style_tree_get_declaration(style, CSS_PROPERTY_MARGIN)));
+
     ViewBlock* view = lam::unsafe_view_block_element_storage(element);
     if (options.include_bound && view && view->bound) {
         result.used_bound = true;
@@ -2778,14 +2788,16 @@ LayoutIntrinsicMarginPair layout_intrinsic_horizontal_margin_pair(
             (!options.nonnegative_bound || margin.right >= 0.0f)) {
             result.right = margin.right;
         }
-        if (!options.fallback_zero_bound ||
-            result.left != 0.0f || result.right != 0.0f || !element->specified_style) {
+        if (!has_specified_margin &&
+            (!options.fallback_zero_bound ||
+             result.left != 0.0f || result.right != 0.0f || !style)) {
             return result;
         }
+        // Intrinsic percentage terms use a zero basis, not a previously resolved used margin.
         result.used_bound = false;
     }
 
-    if (element->specified_style) {
+    if (style) {
         layout_resolve_intrinsic_horizontal_margins(
             lycon, element, options.include_logical,
             &result.left, &result.right, options.include_shorthand);
@@ -2896,6 +2908,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     // before an anonymous table cell records the element's contribution.
     bool intrinsic_needs_resolved_style =
         intrinsic_tag == MARKUP_NAME_BUTTON || intrinsic_tag == MARKUP_NAME_INPUT ||
+        intrinsic_tag == MARKUP_NAME_FIELDSET || intrinsic_tag == MARKUP_NAME_LEGEND ||
         intrinsic_tag == MARKUP_NAME_UL || intrinsic_tag == MARKUP_NAME_OL ||
         intrinsic_tag == MARKUP_NAME_MENU || intrinsic_tag == MARKUP_NAME_RUBY ||
         intrinsic_tag == MARKUP_NAME_RT || intrinsic_tag == MARKUP_NAME_FIGURE;
@@ -3460,9 +3473,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         // canvas keeps its attribute aspect ratio; the generic intrinsic-auto rule
         // loses that ratio when its definite percentage height is transferred.
 
-        // Check for explicit height from CSS
+        // HTML dimension hints are specified sizes too; their opposite-axis
+        // contribution transfers through a replaced element's natural ratio.
         if (!percentage_height_is_intrinsic_auto &&
-            !layout_css_size_is_automatic(view_block_for_aspect, false) &&
+            !layout_block_has_automatic_size(view_block_for_aspect, false) &&
             view_block_for_aspect->blk &&
             view_block_for_aspect->block_mut()->given_height > 0) {
             // Ignore a provisional ratio height during intrinsic measurement;
@@ -6358,9 +6372,10 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         contain_intrinsic_height_auto && element->has_last_remembered_height() &&
         !intrinsic_has_definite_css_height(lycon, element, view)) {
         float remembered_height = element->last_remembered_height();
-        // The remembered flow height includes every fragment, while the
-        // hidden box otherwise measures only the empty fallback.
-        return remembered_height;
+        float padding_border = layout_intrinsic_padding_border_axis(
+            lycon, element, false, width);
+        // Intrinsic queries expose the remembered inner size as a border-box contribution.
+        return remembered_height + padding_border;
     }
     bool has_empty_size_containment =
         layout_block_has_size_containment_in_axis(view, false) &&
@@ -6553,6 +6568,10 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     if (is_flex_container) {
         LayoutFlexStyleInfo flex_style = layout_flex_style_info(lycon, view);
         is_flex_row = flex_style.row;
+        if (layout_block_inline_axis_is_vertical(view)) {
+            // Physical height is the inline axis, so logical flex rows and columns swap roles.
+            is_flex_row = !is_flex_row;
+        }
         is_flex_wrap = flex_style.wrapping;
         flex_row_gap = flex_style.row_gap;
         flex_column_gap = flex_style.column_gap;
@@ -6561,6 +6580,14 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     // deciding emptiness before materializing ::before made auto height fall back
     // even though the remembered layout contained a generated box.
     intrinsic_materialize_pseudo_content(lycon, element);
+    DomElement* vertical_fieldset_legend =
+        view->tag() == MARKUP_NAME_FIELDSET &&
+        layout_block_inline_axis_is_vertical(view)
+            ? find_fieldset_rendered_legend(view) : nullptr;
+    auto is_vertical_fieldset_legend = [&](DomNode* child) {
+        return vertical_fieldset_legend &&
+            child == static_cast<DomNode*>(vertical_fieldset_legend);
+    };
     bool is_empty_auto_container = !is_form_control_replaced &&
         view->display.inner != RDT_DISPLAY_REPLACED &&
         (!view->blk || view->block()->given_height < 0.0f) &&
@@ -6592,6 +6619,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         // Flow and contents boxes expose their inline descendants to this formatting context.
         has_only_inline_content = true;
         for (DomNode* c = element->first_child; c; c = c->next_sibling) {
+            if (is_vertical_fieldset_legend(c)) continue;
             if (c->is_text()) {
                 continue;  // Text nodes are inline
             }
@@ -6639,6 +6667,23 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         intrinsic_is_table_row_group_box(element) ||
         intrinsic_is_table_row_box(element);
 
+    float vertical_fieldset_legend_height = 0.0f;
+    if (vertical_fieldset_legend) {
+        vertical_fieldset_legend_height = calculate_max_content_height(
+            lycon, static_cast<DomNode*>(vertical_fieldset_legend), width);
+        float margin_top = 0.0f;
+        float margin_bottom = 0.0f;
+        bool resolved_margins = width > 0.0f && intrinsic_resolve_vertical_margins(
+            lycon, vertical_fieldset_legend, width, &margin_top, &margin_bottom);
+        ViewElement* legend_view = lam::view_require_element(
+            static_cast<View*>(vertical_fieldset_legend));
+        if (!resolved_margins && legend_view->bound) {
+            margin_top = legend_view->boundary()->margin.top;
+            margin_bottom = legend_view->boundary()->margin.bottom;
+        }
+        vertical_fieldset_legend_height += margin_top + margin_bottom;
+    }
+
     // For multi-column grids, calculate height based on rows
     if (has_contain_intrinsic_height) {
         // Size containment removes descendant contributions; its fallback replaces
@@ -6664,6 +6709,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
     } else if (is_balanced_multicol) {
         float flow_height = 0.0f;
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            if (is_vertical_fieldset_legend(child)) continue;
             flow_height += calculate_max_content_height(lycon, child, width);
         }
         int column_count = view->multicol_prop()->column_count;
@@ -6674,6 +6720,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         // Collect child heights
         int child_count = 0;
         for (DomNode* c = element->first_child; c; c = c->next_sibling) {
+            if (is_vertical_fieldset_legend(c)) continue;
             if (c->is_element()) child_count++;
         }
 
@@ -6690,6 +6737,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             float col_share = width / grid_column_count;
             int idx = 0;
             for (DomNode* c = element->first_child; c; c = c->next_sibling) {
+                if (is_vertical_fieldset_legend(c)) continue;
                 if (c->is_element()) {
                     // Auto columns can't shrink below their min-content width,
                     // so use max(share, min_content) to get the actual column width.
@@ -6729,6 +6777,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         bool first_on_line = true;
 
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            if (is_vertical_fieldset_legend(child)) continue;
             if (!child->is_element()) continue;
 
             // Get child's intrinsic width
@@ -6794,6 +6843,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         }
 
         for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+            if (is_vertical_fieldset_legend(child)) continue;
             // Skip display:none elements — they generate no boxes (CSS 2.1 §9.2.4)
             if (child->is_element()) {
                 DomElement* child_elem = child->as_element();
@@ -6900,6 +6950,12 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             }
         }
         }
+    }
+
+    if (vertical_fieldset_legend) {
+        // HTML Rendering §15.3.12: the legend is separate from fieldset contents
+        // and floors, rather than stacks into, the fieldset's intrinsic inline size.
+        height = max(height, vertical_fieldset_legend_height);
     }
 
     // Add padding and border

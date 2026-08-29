@@ -152,7 +152,7 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
     group.has_filter = block->filter && block->filterp()->functions;
     group.has_backdrop_filter = block->backdrop_filter_prop() && block->backdrop_filter_prop()->functions;
 
-    float scale = rdcon->scale;
+    float scale = rdcon->raster_scale;
     float x0 = parent_block->x + block->x * scale;
     float y0 = parent_block->y + block->y * scale;
     float x1 = x0 + block->width * scale;

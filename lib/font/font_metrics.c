@@ -471,13 +471,14 @@ void font_get_normal_lh_split(FontHandle* handle, float* out_ascender, float* ou
 
     float font_size = handle->size_px;
 
-    // 1. OS/2 USE_TYPO_METRICS fonts: Chrome uses sTypo metrics regardless of platform
+    // authored USE_TYPO_METRICS fonts use sTypo metrics; platform-resolved
+    // fallback faces must retain the platform split used for their line height.
     const FontMetrics* m = font_get_metrics(handle);
     bool use_typo = false;
     Os2Table* os2t = font_tables_get_os2(ft);
     use_typo = os2t && (os2t->fs_selection & 0x0080);
 
-    if (use_typo && m) {
+    if (use_typo && !handle->metrics_from_platform_ref && m) {
         float ra = roundf(m->typo_ascender);
         float rd = roundf(m->typo_descender);  // positive
         float rl = roundf(m->typo_line_gap);

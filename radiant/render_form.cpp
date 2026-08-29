@@ -225,7 +225,7 @@ struct FormControlBox {
 
 static FormControlBox form_control_box(RenderContext* rdcon, ViewBlock* block) {
     FormControlBox box;
-    box.s = rdcon->scale;
+    box.s = rdcon->raster_scale;
     box.x = rdcon->block.x + block->x * box.s;
     box.y = rdcon->block.y + block->y * box.s;
     box.w = block->width * box.s;
@@ -291,8 +291,7 @@ struct FormGlyphStep {
 };
 
 static float form_render_pixel_ratio(RenderContext* rdcon) {
-    return (rdcon && rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
-        ? rdcon->ui_context->pixel_ratio : 1.0f;
+    return rdcon ? ui_context_raster_scale(rdcon->ui_context) : 1.0f;
 }
 
 static void form_glyph_run_init(FormGlyphRun* run, FontHandle* font_handle,
@@ -325,7 +324,7 @@ static bool form_glyph_run_next(FormGlyphRun* run, FormGlyphStep* step) {
 }
 
 static float form_measure_glyph_width(FontHandle* font_handle, FontProp* font,
-                                      float pixel_ratio, const char* text,
+                                      float raster_scale, const char* text,
                                       size_t byte_len) {
     if (!text || byte_len == 0 || !font_handle || !font) return 0.0f;
     FormGlyphRun run;
@@ -333,7 +332,7 @@ static float form_measure_glyph_width(FontHandle* font_handle, FontProp* font,
     FormGlyphStep step;
     float text_width = 0.0f;
     while (form_glyph_run_next(&run, &step)) {
-        if (step.glyph) text_width += step.glyph->advance_x / pixel_ratio;
+        if (step.glyph) text_width += step.glyph->advance_x / raster_scale;
     }
     return text_width;
 }
@@ -355,7 +354,7 @@ void render_simple_string(RenderContext* rdcon, const char* text, float x, float
 
     // Get font metrics (all in physical pixels after setup_font)
     const FontMetrics* _fm = font_get_metrics(font_box_handle(&fbox));
-    float ascender = _fm ? (_fm->hhea_ascender * rdcon->ui_context->pixel_ratio) : 12.0f;
+    float ascender = _fm ? (_fm->hhea_ascender * ui_context_raster_scale(rdcon->ui_context)) : 12.0f;
 
     FormGlyphRun run;
     form_glyph_run_init(&run, font_box_handle(&fbox), font, text, strlen(text), true);
@@ -383,8 +382,8 @@ void render_simple_string(RenderContext* rdcon, const char* text, float x, float
 /**
  * F4 helper: measure rendered width of a UTF-8 string up to `byte_count`
  * bytes using the same per-glyph advance loop the caret math uses.
- * Returns logical pixels (already divided by pixel_ratio); caller should
- * multiply by `s` for physical pixels.
+ * Returns logical pixels after removing the font raster scale; callers lower
+ * through `s` only at the paint boundary.
  */
 static float measure_input_text_width(RenderContext* rdcon, FontProp* font,
                                       const char* text, int byte_count) {
@@ -1132,16 +1131,20 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
     if (!state) return;
     if (!select || !select->form || !form_control_is_dropdown_open(state, static_cast<View*>(select))) return;
 
-    float s = rdcon->scale;
     FormControlProp* form = select->form;
     int selected_index = form_control_get_selected_index(state, static_cast<View*>(select));
     int hover_index = form_control_get_hover_index(state, static_cast<View*>(select));
 
     // Popup geometry is canonical interaction state in top-level logical
     // viewport coordinates. This paint boundary performs the only conversion.
-    float x = state->dropdown_x * s;
-    float y = state->dropdown_y * s;
-    float w = state->dropdown_width * s;
+    RdtDeviceRect popup = ui_context_logical_to_device_rect(rdcon->ui_context, {
+        state->dropdown_x, state->dropdown_y,
+        state->dropdown_width, state->dropdown_height,
+    });
+    float x = popup.x;
+    float y = popup.y;
+    float w = popup.width;
+    float s = rdcon->raster_scale;
 
     // native option rows keep their intrinsic metric when the closed control
     // has an author-specified height
@@ -1149,7 +1152,7 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
     int max_visible = 10;
     int visible_count = (form->option_count < max_visible) ? form->option_count : max_visible;
     if (visible_count <= 0) visible_count = 1;
-    float h = state->dropdown_height * s;
+    float h = popup.height;
 
     // Override clip to full viewport for overlay rendering (dropdown should not be clipped by parent containers)
     Bound saved_clip = rdcon->block.clip;
@@ -1214,12 +1217,12 @@ void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* s
 
 /**
  * Measure the advance width of a UTF-8 string segment using the given font handle.
- * Returns width in physical pixels (pre-scaled by pixel_ratio inside font system).
+ * Returns logical width after removing the font raster scale.
  */
-static float measure_text_width(FontHandle* font_handle, FontProp* font, float pixel_ratio,
+static float measure_text_width(FontHandle* font_handle, FontProp* font, float raster_scale,
                                 const char* text, int byte_len) {
     if (!text || byte_len <= 0 || !font_handle) return 0;
-    return form_measure_glyph_width(font_handle, font, pixel_ratio,
+    return form_measure_glyph_width(font_handle, font, raster_scale,
                                     text, (size_t)byte_len);
 }
 
@@ -1347,8 +1350,9 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
         setup_font(rdcon->ui_context, &fbox, render_font);
         if (font_box_handle(&fbox)) {
             const FontMetrics* fm = font_get_metrics(font_box_handle(&fbox));
-            float ascender = fm ? (fm->hhea_ascender * rdcon->ui_context->pixel_ratio) : 12.0f;
-            float descender = fm ? (-(fm->hhea_descender) * rdcon->ui_context->pixel_ratio) : 4.0f;
+            float font_raster_scale = ui_context_raster_scale(rdcon->ui_context);
+            float ascender = fm ? (fm->hhea_ascender * font_raster_scale) : 12.0f;
+            float descender = fm ? (-(fm->hhea_descender) * font_raster_scale) : 4.0f;
             float text_lead_y = line_height - (ascender + descender);
             if (text_lead_y < 0.0f) text_lead_y = 0.0f;
             text_lead_y *= 0.5f;
@@ -1422,13 +1426,12 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
             FontBox fbox = {0};
             setup_font(rdcon->ui_context, &fbox, block->font);
             if (font_box_handle(&fbox)) {
-                float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
-                    ? rdcon->ui_context->pixel_ratio : 1.0f;
+                float raster_scale = ui_context_raster_scale(rdcon->ui_context);
                 float ux0 = content_x + measure_text_width(font_box_handle(&fbox), block->font,
-                                                           pixel_ratio, preedit_display + line_start,
+                                                           raster_scale, preedit_display + line_start,
                                                            start_col) * s;
                 float ux1 = content_x + measure_text_width(font_box_handle(&fbox), block->font,
-                                                           pixel_ratio, preedit_display + line_start,
+                                                           raster_scale, preedit_display + line_start,
                                                            end_col) * s;
                 if (ux1 > ux0) {
                     Color underline = make_color(0x33, 0x33, 0x33, 0xCC);
@@ -1491,11 +1494,10 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
                 FontBox fbox = {0};
                 setup_font(rdcon->ui_context, &fbox, block->font);
                 if (font_box_handle(&fbox)) {
-                    float pixel_ratio = (rdcon->ui_context && rdcon->ui_context->pixel_ratio > 0)
-                        ? rdcon->ui_context->pixel_ratio : 1.0f;
+                    float raster_scale = ui_context_raster_scale(rdcon->ui_context);
                     int line_off = textarea_line_start(value, caret_line);
                     caret_x = content_x + measure_text_width(font_box_handle(&fbox), block->font,
-                                                              pixel_ratio, value + line_off, caret_col) * s
+                                                              raster_scale, value + line_off, caret_col) * s
                         - (form ? form->scroll_x * s : 0.0f);
                 }
                 }

@@ -8,7 +8,7 @@
  * JSON Format:
  * {
  *   "name": "Test name",
- *   "pixel_ratio": 1.5,
+ *   "device_scale": 1.5,
  *   "events": [
  *     {"type": "wait", "ms": 500},
  *     {"type": "click", "target": {"selector": "#btn"}},
@@ -292,6 +292,10 @@ struct SimEvent {
     bool expected_drag_drop_target;
     bool has_expected_open_dropdown;
     bool expected_open_dropdown;
+    bool has_expected_context_menu_open;
+    bool expected_context_menu_open;
+    bool has_expected_context_menu_enabled;
+    uint32_t expected_context_menu_enabled;
     bool has_expected_scrollbar_h_hovered;
     bool expected_scrollbar_h_hovered;
     bool has_expected_scrollbar_v_hovered;
@@ -308,6 +312,10 @@ struct SimEvent {
     bool has_expected_dropdown_y;
     bool has_expected_dropdown_width;
     bool has_expected_dropdown_height;
+    bool has_expected_context_menu_x;
+    bool has_expected_context_menu_y;
+    bool has_expected_context_menu_width;
+    bool has_expected_context_menu_height;
     float expected_doc_scroll_x;
     float expected_doc_scroll_y;
     float expected_view_scroll_x;
@@ -316,6 +324,10 @@ struct SimEvent {
     float expected_dropdown_y;
     float expected_dropdown_width;
     float expected_dropdown_height;
+    float expected_context_menu_x;
+    float expected_context_menu_y;
+    float expected_context_menu_width;
+    float expected_context_menu_height;
     // Phase 7: assert_snapshot fields
     char* snapshot_reference;    // path to reference PNG
     float snapshot_threshold;    // max mismatch %, default 1.0
@@ -380,7 +392,7 @@ struct EventSimContext {
     char* test_name;             // optional test name from JSON
     int viewport_width;          // 0 = use default (1200)
     int viewport_height;         // 0 = use default (800)
-    float pixel_ratio;           // device pixels per logical pixel; default 1
+    float device_scale;          // device pixels per logical pixel; default 1
     int default_timeout;         // default assertion timeout in ms (0 = no retry)
     double current_time;         // deterministic host clock in seconds
     // Assertion retries must yield to the host loop so queued JS and layout work

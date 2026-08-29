@@ -30,6 +30,7 @@
 #define RADIANT_EVENT_CORE_ONLY
 #include "event.hpp"
 #undef RADIANT_EVENT_CORE_ONLY
+#include "scale.hpp"
 
 // Opaque types provided elsewhere. We never deref any of them in this
 // file; everything is passed by pointer.
@@ -214,13 +215,16 @@ const char* ns_to_utf8(id obj) {
             &x, &y, &w_rect, &h_rect)) {
         return NSMakeRect(frame.origin.x, frame.origin.y, 0, 0);
     }
-    CGFloat scale = w ? [w backingScaleFactor] : 1.0;
-    CGFloat screen_x = frame.origin.x + ((CGFloat)x / scale);
-    CGFloat screen_y = frame.origin.y + frame.size.height -
-        (((CGFloat)y + (CGFloat)h_rect) / scale);
-    return NSMakeRect(screen_x, screen_y,
-                      (CGFloat)w_rect / scale,
-                      (CGFloat)h_rect / scale);
+    // The caret is top-level logical geometry. AppKit view/window conversions
+    // own origin inversion, content insets, and screen placement; backing scale
+    // must not be applied to point coordinates.
+    RdtHostRect host = rdt_logical_to_host_rect(
+        {x, y, w_rect, h_rect},
+        {1.0f, 1.0f, (float)self.bounds.size.height, RDT_HOST_Y_UP});
+    NSRect local = NSMakeRect(host.x, host.y, host.width, host.height);
+    if (!w) return local;
+    NSRect window_rect = [self convertRect:local toView:nil];
+    return [w convertRectToScreen:window_rect];
 }
 
 @end

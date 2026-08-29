@@ -3233,10 +3233,10 @@ static bool render_svg_text_with_radiant_glyphs(SvgInlineRenderContext* ctx, con
     bool rotated_text = fabsf(matrix->e21) > 0.001f;
     float shear_x = matrix->e12 / sy;
 
-    float device_scale = rdcon->scale > 0.0f ? rdcon->scale : 1.0f;
+    float raster_scale = rdcon->raster_scale > 0.0f ? rdcon->raster_scale : 1.0f;
     FontStyleDesc style = {};
     style.family = font_family ? font_family : "Arial";
-    style.size_px = font_size * sy / device_scale;
+    style.size_px = font_size * sy / raster_scale;
     style.weight = (FontWeight)font_weight;
     style.slant = font_slant;
     FontHandle* handle = font_resolve(ctx->font_ctx, &style);
@@ -4849,7 +4849,7 @@ static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem) {
 // ============================================================================
 
 static void render_svg_to_display_list_primitives(Element* svg_element, float viewport_width, float viewport_height,
-                       Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform,
+                       Pool* pool, float raster_scale, FontContext* font_ctx, const RdtMatrix* base_transform,
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
                        const char* source_path, float initial_opacity, bool initial_fill_none,
                        const Color* initial_stroke_color, bool initial_stroke_none,
@@ -4881,7 +4881,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     ctx.resource_scratch = resource_scratch;
     ctx.source_path = source_path;
     svg_get_registered_image_resolver(svg_element, &ctx.image_resolver, &ctx.image_resolver_context);
-    ctx.pixel_ratio = (pixel_ratio > 0) ? pixel_ratio : 1.0f;
+    ctx.raster_scale = raster_scale > 0.0f ? raster_scale : 1.0f;
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
     ctx.stroke_color.r = 0; ctx.stroke_color.g = 0; ctx.stroke_color.b = 0; ctx.stroke_color.a = 0;  // default none
     ctx.current_color.r = 0; ctx.current_color.g = 0; ctx.current_color.b = 0; ctx.current_color.a = 255;  // default black
@@ -4995,7 +4995,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
 void render_svg_build_subscene(PaintSvgSubscene* subscene,
                       Element* svg_element,
                       float viewport_width, float viewport_height,
-                      Pool* pool, float pixel_ratio,
+                      Pool* pool, float raster_scale,
                       FontContext* font_ctx,
                       const RdtMatrix* base_transform,
                       const Bound* content_clip,
@@ -5014,7 +5014,7 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
     subscene->font_context = font_ctx;
     subscene->viewport_width = viewport_width;
     subscene->viewport_height = viewport_height;
-    subscene->pixel_ratio = pixel_ratio > 0.0f ? pixel_ratio : 1.0f;
+    subscene->raster_scale = raster_scale > 0.0f ? raster_scale : 1.0f;
     subscene->transform = base_transform ? *base_transform : rdt_matrix_identity();
     if (content_clip) {
         subscene->content_clip = *content_clip;
@@ -5275,7 +5275,7 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
                       subscene->viewport_width,
                       subscene->viewport_height,
                       render_pool,
-                      subscene->pixel_ratio,
+                      subscene->raster_scale,
                       (FontContext*)subscene->font_context,
                       &subscene->transform,
                       dl,
@@ -5302,7 +5302,7 @@ void render_svg_inline_register_paint_ir_lowerers(void) {
 }
 
 static void render_svg_to_display_list(Element* svg_element, float viewport_width, float viewport_height,
-                       Pool* pool, float pixel_ratio, FontContext* font_ctx, const RdtMatrix* base_transform,
+                       Pool* pool, float raster_scale, FontContext* font_ctx, const RdtMatrix* base_transform,
                        DisplayList* dl, const Color* initial_current_color, const Color* initial_fill_color,
                        const char* source_path, float initial_opacity, bool initial_fill_none,
                        const Color* initial_stroke_color, bool initial_stroke_none,
@@ -5313,7 +5313,7 @@ static void render_svg_to_display_list(Element* svg_element, float viewport_widt
                                           viewport_width,
                                           viewport_height,
                                           pool,
-                                          pixel_ratio,
+                                          raster_scale,
                                           font_ctx,
                                           base_transform,
                                           dl,
@@ -5331,7 +5331,7 @@ static void render_svg_to_display_list(Element* svg_element, float viewport_widt
 
 void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
                        float viewport_width, float viewport_height,
-                       Pool* pool, float pixel_ratio, FontContext* font_ctx,
+                       Pool* pool, float raster_scale, FontContext* font_ctx,
                        const RdtMatrix* base_transform,
                        const Color* initial_current_color,
                        const Color* initial_fill_color,
@@ -5364,7 +5364,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
     mem_scratch_init(NULL, &scratch, temp_arena, MEM_ROLE_RENDER, "render.svg_inline.scratch");
 
     render_svg_to_display_list(svg_element, viewport_width, viewport_height,
-                               pool, pixel_ratio, font_ctx, base_transform, &dl,
+                               pool, raster_scale, font_ctx, base_transform, &dl,
                                initial_current_color, initial_fill_color, source_path,
                                initial_opacity, initial_fill_none,
                                initial_stroke_color, initial_stroke_none,
@@ -5383,11 +5383,11 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
             dl_replay_tile(&dl, vec, &surface, &scratch,
                            target.tile_offset_x, target.tile_offset_y,
                            (float)target.width, (float)target.height,
-                           pixel_ratio > 0.0f ? pixel_ratio : 1.0f);
+                           raster_scale > 0.0f ? raster_scale : 1.0f);
         } else {
             Bound clip = {0.0f, 0.0f, (float)target.width, (float)target.height};
             dl_replay(&dl, vec, &surface, &clip, &scratch,
-                      pixel_ratio > 0.0f ? pixel_ratio : 1.0f, nullptr);
+                      raster_scale > 0.0f ? raster_scale : 1.0f, nullptr);
         }
     }
 
@@ -5411,7 +5411,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     }
 
     Element* svg_elem = dom_element_to_element(dom_elem);
-    float scale = rdcon->scale;
+    float scale = rdcon->raster_scale;
 
 
     Rect content_rect = render_geometry_block_content_rect(&rdcon->block, view, scale);
@@ -5486,7 +5486,7 @@ void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
         !rdcon->dl || !rdcon->paint_list) {
         return;
     }
-    float scale = rdcon->scale > 0.0f ? rdcon->scale : 1.0f;
+    float scale = rdcon->raster_scale > 0.0f ? rdcon->raster_scale : 1.0f;
     RdtMatrix base_transform = {
         scale, 0.0f, rdcon->block.x,
         0.0f, scale, rdcon->block.y,

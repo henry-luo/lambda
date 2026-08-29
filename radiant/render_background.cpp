@@ -96,7 +96,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
         return;
     }
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     BorderProp* border  = view->boundary()->border;
     Spacing*    padding = &view->boundary_mut()->padding;
 
@@ -1178,8 +1178,8 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     }
 
     // Scale factor: rect is in physical pixels but shadow props and border radii
-    // are in CSS pixels.  Multiply by rdcon->scale to convert to physical pixels.
-    float sc = rdcon->scale;
+    // are in CSS pixels. Multiply by raster_scale at the lowering boundary.
+    float sc = rdcon->raster_scale;
 
     // Get border radius if present (scaled to physical pixels)
     float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
@@ -1350,8 +1350,8 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     }
 
     // Scale factor: rect is in physical pixels but shadow props and border radii
-    // are in CSS pixels.  Multiply by rdcon->scale to convert to physical pixels.
-    float sc = rdcon->scale;
+    // are in CSS pixels. Multiply by raster_scale at the lowering boundary.
+    float sc = rdcon->raster_scale;
 
     // Get border radius if present (scaled to physical pixels)
     float r_tl = 0, r_tr = 0, r_br = 0, r_bl = 0;
@@ -1944,7 +1944,7 @@ static void render_background_image(RenderContext* rdcon, ViewBlock* view, Backg
         return;
     }
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
 
     BackgroundTilePlan plan = {};
     if (!compute_background_tile_plan(bg, rect, rect, img_w * s, img_h * s, &plan)) {

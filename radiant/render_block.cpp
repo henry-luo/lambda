@@ -35,7 +35,7 @@ static bool render_block_fully_transparent(ViewBlock* block) {
 bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block) {
     if (!rdcon || !block || !rdcon->has_dirty_union) return false;
 
-    float s = rdcon->scale > 0 ? rdcon->scale : 1.0f;
+    float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block) * s;
     Rect marker_rect = render_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
@@ -67,7 +67,7 @@ bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block) {
         return false;
     }
 
-    float s = rdcon->scale > 0 ? rdcon->scale : 1.0f;
+    float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block) * s;
     Rect marker_rect = render_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
@@ -123,7 +123,7 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
         return false;
     }
 
-    float s = rdcon->scale > 0 ? rdcon->scale : 1.0f;
+    float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block) * s;
     Rect marker_rect = render_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
@@ -135,7 +135,7 @@ bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block) 
         marker_rect.y + marker_rect.height
     };
     if (!retained_dl_append_fragment_for_dirty(
-            rdcon->dl, fragment, marker_bound, rdcon->dirty_tracker, rdcon->scale,
+            rdcon->dl, fragment, marker_bound, rdcon->dirty_tracker, rdcon->raster_scale,
             render_retained_dirty_source_inside, static_cast<View*>(block))) {
         retained_dl_cache_note_reuse_rejected_dirty(rdcon->retained_dl_cache);
         return false;
@@ -150,7 +150,7 @@ RenderElementMarkerScope render_element_marker_begin(RenderContext* rdcon, ViewB
         return scope;
     }
 
-    float s = rdcon->scale > 0 ? rdcon->scale : 1.0f;
+    float s = rdcon->raster_scale > 0 ? rdcon->raster_scale : 1.0f;
     float visual_overflow = render_geometry_block_visual_overflow(block) * s;
     Rect marker_rect = render_geometry_expand_rect(
         render_geometry_block_border_rect(&rdcon->block, block, s),
@@ -170,7 +170,7 @@ void render_element_marker_end(RenderContext* rdcon, RenderElementMarkerScope* s
 }
 
 void render_bound(RenderContext* rdcon, ViewBlock* view) {
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     Rect rect;
     rect.x = rdcon->block.x + view->x * s;  rect.y = rdcon->block.y + view->y * s;
     rect.width = view->width * s;  rect.height = view->height * s;
@@ -287,7 +287,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
 
 void render_outline_deferred(RenderContext* rdcon, ViewBlock* view) {
     if (!view->bound || !view->boundary()->outline) return;
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     BlockBlot saved = rdcon->block;
     RenderTransformScope transform_scope = render_state_push_transform(rdcon, view, &saved);
     rdcon->block.x = saved.x + view->x * s;
@@ -417,7 +417,7 @@ static RenderBlockPhase render_block_begin_phase(RenderContext* rdcon, ViewBlock
     render_block_setup_font(rdcon, block);
 
     phase.css_clip_scope = render_clip_push_css_scope(rdcon, block,
-        phase.parent_block.x, phase.parent_block.y, rdcon->scale);
+        phase.parent_block.x, phase.parent_block.y, rdcon->raster_scale);
     phase.effect_group = render_effect_group_begin(rdcon, block, &phase.parent_block);
     return phase;
 }
@@ -444,7 +444,7 @@ static void render_block_paint_self(RenderContext* rdcon, ViewBlock* block,
         render_form_control(rdcon, block);
     }
 
-    float s = rdcon->scale;
+    float s = rdcon->raster_scale;
     rdcon->block.x = phase->parent_block.x + block->x * s;
     rdcon->block.y = phase->parent_block.y + block->y * s;
 

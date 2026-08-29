@@ -3508,9 +3508,8 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                 FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
                 LoadedGlyph* zero_glyph = font_load_glyph(font_box_handle(&lycon->font), &style, (uint32_t)'0', false);
                 if (zero_glyph && zero_glyph->advance_x > 0.0f) {
-                    float pixel_ratio = (lycon->ui_context && lycon->ui_context->pixel_ratio > 0.0f)
-                        ? lycon->ui_context->pixel_ratio : 1.0f;
-                    float advance = zero_glyph->advance_x / pixel_ratio;
+                    float raster_scale = ui_context_raster_scale(lycon->ui_context);
+                    float advance = zero_glyph->advance_x / raster_scale;
                     float zoom = layout_effective_zoom(lycon->view);
                     if (zoom > 0.0f) advance /= zoom;
                     if (lycon->font.style && lycon->font.style->font_size > 0.0f &&
@@ -3583,7 +3582,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssVa
                 result = percentage * lycon->block.parent->given_height / 100.0;
             } else if (!lycon->block.parent && lycon && lycon->height > 0) {
                 // No parent context (root html element) - use viewport height
-                // Layout now uses CSS pixels, so use lycon->height directly (no pixel_ratio scaling)
+                // Layout uses logical pixels, so use lycon->height without raster scaling.
                 result = percentage * lycon->height / 100.0;
             } else {
                 // Per CSS 2.1 §10.7: max-height percentage → 'none', min-height percentage → '0'

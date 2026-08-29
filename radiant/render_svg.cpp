@@ -1629,8 +1629,8 @@ int render_html_to_svg(const char* html_file, const char* svg_file, int viewport
     // Render to SVG (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
         // SVG output dimensions are scaled; coordinates inside are in CSS pixels with viewBox transform
-        int svg_width = (int)(session.content_width * session.scale); // INT_CAST_OK: SVG dimensions are integer pixels.
-        int svg_height = (int)(session.content_height * session.scale); // INT_CAST_OK: SVG dimensions are integer pixels.
+        int svg_width = (int)(session.content_width * session.output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
+        int svg_height = (int)(session.content_height * session.output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
         char* svg_content = render_view_tree_to_svg(ui_context, doc->view_tree->root,
                                                    svg_width, svg_height, doc->state);
         if (svg_content) {

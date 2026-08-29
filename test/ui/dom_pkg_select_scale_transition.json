@@ -1,7 +1,7 @@
 {
   "html": "test/lambda/ui/dom_pkg_select.ls",
   "description": "RSC10/RSC12: a live 1x-to-2x device-scale transition repaints without changing logical layout or select targeting",
-  "pixel_ratio": 1.0,
+  "device_scale": 1.0,
   "events": [
     {"type": "assert_rect", "target": {"selector": ".sel"}, "x": 200, "y": 25.8, "width": 68, "height": 19, "tolerance": 1},
     {"type": "set_device_scale", "scale": 2.0},

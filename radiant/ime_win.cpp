@@ -27,6 +27,7 @@
 #define RADIANT_EVENT_CORE_ONLY
 #include "event.hpp"
 #undef RADIANT_EVENT_CORE_ONLY
+#include "scale.hpp"
 
 // Opaque types — see ime_mac.mm comment.
 struct UiContext;
@@ -73,8 +74,8 @@ bool ime_dispatch_editing(EventType event_type, const char* text, uint32_t caret
                                                    text, caret);
 }
 
-void ime_update_candidate_window(HIMC himc) {
-    if (!himc || !g_ime_uicon) return;
+void ime_update_candidate_window(HWND hwnd, HIMC himc) {
+    if (!hwnd || !himc || !g_ime_uicon) return;
     float x = 0.0f;
     float y = 0.0f;
     float w = 0.0f;
@@ -86,8 +87,13 @@ void ime_update_candidate_window(HIMC himc) {
     memset(&form, 0, sizeof(form));
     form.dwIndex = 0;
     form.dwStyle = CFS_CANDIDATEPOS;
-    form.ptCurrentPos.x = (LONG)x;
-    form.ptCurrentPos.y = (LONG)(y + h);
+    UINT dpi = GetDpiForWindow(hwnd);
+    if (dpi == 0) dpi = USER_DEFAULT_SCREEN_DPI;
+    float host_scale = (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
+    RdtHostRect host = rdt_logical_to_host_rect(
+        {x, y, w, h}, {host_scale, host_scale, 0.0f, RDT_HOST_Y_DOWN});
+    form.ptCurrentPos.x = (LONG)lroundf(host.x);  // discrete Win32 client coordinate
+    form.ptCurrentPos.y = (LONG)lroundf(host.y + host.height);  // candidate baseline
     ImmSetCandidateWindow(himc, &form);
 }
 
@@ -134,7 +140,7 @@ LRESULT CALLBACK ime_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_IME_COMPOSITION: {
             HIMC himc = ImmGetContext(hwnd);
             if (!himc) break;
-            ime_update_candidate_window(himc);
+            ime_update_candidate_window(hwnd, himc);
             if (lp & GCS_RESULTSTR) {
                 uint32_t len = 0;
                 char* u8 = ime_read_string(himc, GCS_RESULTSTR, &len);

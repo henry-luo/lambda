@@ -26,6 +26,20 @@ using namespace std::chrono;
 
 double g_style_resolve_time = 0;
 
+bool layout_overflow_establishes_scroll_container(CssEnum overflow) {
+    // CSS Overflow: clip suppresses scrolling; hidden remains programmatically scrollable.
+    return overflow == CSS_VALUE_AUTO || overflow == CSS_VALUE_SCROLL ||
+        overflow == CSS_VALUE_HIDDEN;
+}
+
+bool layout_block_establishes_scroll_container(ViewBlock* block) {
+    if (!block || !block->scroller) return false;
+    const ScrollProp* scroll = block->scroll();
+    return scroll &&
+        (layout_overflow_establishes_scroll_container(scroll->overflow_x) ||
+         layout_overflow_establishes_scroll_container(scroll->overflow_y));
+}
+
 float layout_effective_zoom(View* view) {
     float effective_zoom = 1.0f;
     for (View* current = view; current; current = current->parent_view()) {
@@ -334,22 +348,27 @@ static DomElement* layout_nearest_scroll_container(DomElement* target,
             // scrolling element; the body pane is only its layout proxy.
             continue;
         }
-        if (ancestor->scroller && ancestor->scroll_mut()->pane) {
+        if (layout_block_establishes_scroll_container(
+                lam::view_require_block(static_cast<View*>(ancestor))) &&
+            ancestor->scroll_mut()->pane) {
             return ancestor;
         }
     }
     return nullptr;
 }
 
-static void layout_resolve_pending_scroll_into_view(DomDocument* doc,
+static void layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
+                                                    DomDocument* doc,
                                                     ViewBlock* root_block) {
-    if (!doc || !root_block || !doc->pending_scroll_into_view_target) return;
+    if (!lycon || !doc || !root_block || !doc->pending_scroll_into_view_target) return;
 
     DomElement* target = doc->pending_scroll_into_view_target;
+    bool center = doc->pending_scroll_into_view_center;
     DomNodeRef target_ref = {(DomNode*)target,
                              doc->pending_scroll_into_view_target_id};
     doc->pending_scroll_into_view_target = nullptr;
     doc->pending_scroll_into_view_target_id = 0;
+    doc->pending_scroll_into_view_center = false;
 
     float target_x = layout_scroll_document_coord(target, true);
     float target_y = layout_scroll_document_coord(target, false);
@@ -357,8 +376,20 @@ static void layout_resolve_pending_scroll_into_view(DomDocument* doc,
     DomElement* scroll_container = layout_nearest_scroll_container(target, root_elem);
 
     if (scroll_container) {
-        float scroll_x = target_x - layout_scrollport_start(scroll_container, true);
-        float scroll_y = target_y - layout_scrollport_start(scroll_container, false);
+        float local_x = target_x - layout_scrollport_start(scroll_container, true);
+        float local_y = target_y - layout_scrollport_start(scroll_container, false);
+        float scroll_x = local_x;
+        float scroll_y = local_y;
+        if (center) {
+            ViewBlock* scroll_block = lam::view_require_block(
+                static_cast<View*>(scroll_container));
+            float scrollport_width = layout_content_size_from_border_box(
+                scroll_block, scroll_container->width, true);
+            float scrollport_height = layout_content_size_from_border_box(
+                scroll_block, scroll_container->height, false);
+            scroll_x += (target->width - scrollport_width) * 0.5f;
+            scroll_y += (target->height - scrollport_height) * 0.5f;
+        }
         if (scroll_x < 0.0f) scroll_x = 0.0f;
         if (scroll_y < 0.0f) scroll_y = 0.0f;
         DocState* state = doc->state;
@@ -375,12 +406,18 @@ static void layout_resolve_pending_scroll_into_view(DomDocument* doc,
                 state, static_cast<View*>(root_block), root_block->scroll()->pane,
                 &current_scroll_x, nullptr, nullptr, nullptr);
         }
-        float viewport_width = layout_content_size_from_border_box(
-            root_block, root_block->width, true);
-        float scrollport_origin_x = layout_scrollport_start(root_elem, true);
-        target_x = layout_scroll_nearest_position(
-            target_x - scrollport_origin_x, target->width,
-            current_scroll_x, viewport_width);
+        float viewport_width = lycon->width;
+        float viewport_height = lycon->height;
+        target_x -= layout_scrollport_start(root_elem, true);
+        target_y -= layout_scrollport_start(root_elem, false);
+        if (center) {
+            // HTML focus() uses center alignment on both viewport axes.
+            target_x += (target->width - viewport_width) * 0.5f;
+            target_y += (target->height - viewport_height) * 0.5f;
+        } else {
+            target_x = layout_scroll_nearest_position(
+                target_x, target->width, current_scroll_x, viewport_width);
+        }
         if (target_x < 0.0f) target_x = 0.0f;
         if (target_y < 0.0f) target_y = 0.0f;
         doc->pending_viewport_scroll_x = target_x;
@@ -1246,9 +1283,8 @@ float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
             ? font_load_glyph(resolved, &desc, (uint32_t)' ', false) : NULL;
         float advance = 0.0f;
         if (glyph && glyph->advance_x > 0.0f) {
-            float pixel_ratio = lycon->ui_context && lycon->ui_context->pixel_ratio > 0.0f
-                ? lycon->ui_context->pixel_ratio : 1.0f;
-            advance = glyph->advance_x / pixel_ratio;
+            float raster_scale = ui_context_raster_scale(lycon->ui_context);
+            advance = glyph->advance_x / raster_scale;
         }
         if (release_resolved) font_handle_release(resolved);
         if (advance > 0.0f) return advance;
@@ -4531,14 +4567,13 @@ static void layout_store_last_remembered_sizes(DomNode* node) {
                 remembered_height += fragment->height;
             }
         }
-        // Intrinsic inline-size substitution consumes a content-box contribution;
-        // retaining the border-box width made every hidden layout add horizontal
-        // padding and borders a second time. The remembered block size stays the
-        // fragmented border-box extent consumed by the hidden-flow path.
+        // CSS Sizing 4 remembers the principal box's inner dimensions; fragment
+        // aggregation reconstructs its border box, so remove each boundary once.
         ViewBlock* remembered_block = lam::unsafe_view_block_element_storage(element);
         remembered_width = layout_content_size_from_border_box(
             remembered_block, remembered_width, true);
-        // first fragment's clipped border box; hidden sizing otherwise loses
+        remembered_height = layout_content_size_from_border_box(
+            remembered_block, remembered_height, false);
         if (element->block()->contain_intrinsic_width_auto) {
             element->set_last_remembered_width(remembered_width);
         }
@@ -4633,7 +4668,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         if (has_scroll_into_view_target) {
             layout_apply_sticky_positions(&lycon, static_cast<View*>(root_block));
         }
-        layout_resolve_pending_scroll_into_view(doc, root_block);
+        layout_resolve_pending_scroll_into_view(&lycon, doc, root_block);
         if (root_block->scroller && root_block->scroll_mut()->pane) {
             ScrollPane* pane = root_block->scroll()->pane;
             float target_x = doc->pending_viewport_scroll_x;

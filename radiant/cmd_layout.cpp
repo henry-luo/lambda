@@ -258,8 +258,8 @@ DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int vie
 DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_source,
                                            int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
-DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
-DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio = 1.0f);
+DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float device_scale = 1.0f);
+DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float device_scale = 1.0f);
 DomDocument* load_text_doc(Url* text_url, int viewport_width, int viewport_height, Pool* pool);
 const char* extract_element_attribute(Element* elem, const char* attr_name, Arena* arena);
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
@@ -571,8 +571,8 @@ void parse_viewport_content(const char* content, DomDocument* doc) {
 
 
             if (str_ieq_const(key, strlen(key), "initial-scale")) {
-                doc->viewport.initial_scale = (float)str_to_double_default(value, strlen(value), 0.0);
-                log_info("[viewport] initial-scale=%.2f", doc->viewport.initial_scale);
+                doc->viewport.page_zoom = (float)str_to_double_default(value, strlen(value), 0.0);
+                log_info("[viewport] initial-scale page_zoom=%.2f", doc->viewport.page_zoom);
             }
             else if (str_ieq_const(key, strlen(key), "minimum-scale")) {
                 doc->viewport.min_scale = (float)str_to_double_default(value, strlen(value), 0.0);
@@ -2044,12 +2044,6 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Extract viewport meta tag values before building DOM tree
     extract_viewport_meta(html_root, dom_doc);
-    // If viewport initial-scale is set and given_scale is default (1.0), apply it
-    if (dom_doc->viewport.initial_scale != 1.0f && dom_doc->viewport.given_scale == 1.0f) {
-        dom_doc->viewport.given_scale = dom_doc->viewport.initial_scale;
-        log_info("[viewport] Applied initial-scale=%.2f to given_scale", dom_doc->viewport.given_scale);
-    }
-
     // Extract <base href="..."> and update document URL if found
     // This ensures relative URLs resolve correctly when loading remote HTML
     const char* base_href = extract_base_href(html_root);
@@ -2259,8 +2253,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
 
     // Set scale fields for HTML documents
     // HTML layout is in CSS logical pixels, scale is set later based on display context
-    dom_doc->viewport.given_scale = 1.0f;
-    dom_doc->viewport.scale = 1.0f;  // Will be updated by caller (window or render) with pixel_ratio
+    dom_doc->viewport.output_scale = 1.0f;
+    dom_doc->viewport.raster_scale = 1.0f;  // derived after the caller publishes device/output scale
 
     // Step 9: Extract body transform scale from CSS (after cascade is complete)
     extract_body_transform_scale(dom_root, dom_doc);
@@ -2675,14 +2669,14 @@ static DomDocument* load_dom_backed_image_document(Url* image_url, int viewport_
 }
 
 // load SVG through the DOM-backed image path.
-DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
-    (void)pixel_ratio;
+DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float device_scale) {
+    (void)device_scale;
     return load_dom_backed_image_document(svg_url, viewport_width, viewport_height, pool, "load_svg_doc");
 }
 
 // load a raster image through the DOM-backed image path.
-DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float pixel_ratio) {
-    (void)pixel_ratio;
+DomDocument* load_image_doc(Url* img_url, int viewport_width, int viewport_height, Pool* pool, float device_scale) {
+    (void)device_scale;
     return load_dom_backed_image_document(img_url, viewport_width, viewport_height, pool, "load_image_doc");
 }
 

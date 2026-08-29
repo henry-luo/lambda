@@ -32,13 +32,13 @@ static inline int get_cpu_count() { return (int)sysconf(_SC_NPROCESSORS_ONLN); }
 // TileGrid
 // ============================================================================
 
-void TileGrid::init(int surface_w, int surface_h, float scale) {
+void TileGrid::init(int surface_w, int surface_h, float raster_scale) {
     memset(this, 0, sizeof(TileGrid));
-    this->scale = scale;
+    this->raster_scale = raster_scale;
     this->surface_w = surface_w;
     this->surface_h = surface_h;
 
-    int tile_px = (int)(TILE_SIZE_CSS * scale);
+    int tile_px = (int)(TILE_SIZE_CSS * raster_scale); // INT_CAST_OK: physical tile dimension
     if (tile_px <= 0) tile_px = TILE_SIZE_CSS;
 
     cols = (surface_w + tile_px - 1) / tile_px;
@@ -84,7 +84,7 @@ void TileGrid::init(int surface_w, int surface_h, float scale) {
     }
 
     log_debug("[TILE_GRID] %dx%d tiles (%d total), tile_px=%d, surface=%dx%d scale=%.1f",
-              cols, rows, total, tile_px, surface_w, surface_h, scale);
+              cols, rows, total, tile_px, surface_w, surface_h, raster_scale);
 }
 
 void TileGrid::destroy() {
@@ -135,8 +135,8 @@ void TileGrid::composite(ImageSurface* surface) {
     }
 }
 
-void tile_grid_init(TileGrid* grid, int surface_w, int surface_h, float scale) {
-    if (grid) grid->init(surface_w, surface_h, scale);
+void tile_grid_init(TileGrid* grid, int surface_w, int surface_h, float raster_scale) {
+    if (grid) grid->init(surface_w, surface_h, raster_scale);
 }
 
 void tile_grid_destroy(TileGrid* grid) {
@@ -217,7 +217,7 @@ static void* worker_thread_fn(void* arg) {
         dl_replay_tile(job->display_list, &tl_worker.vec, &tile_surface,
                        &tl_worker.scratch,
                        tile->x, tile->y, tile->w, tile->h,
-                       job->scale);
+                       job->raster_scale);
 
         // signal completion
         pthread_mutex_lock(&pool->mutex);

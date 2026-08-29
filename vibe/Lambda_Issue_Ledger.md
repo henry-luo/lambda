@@ -948,7 +948,17 @@ fix. The sanctioned rewrites are the path write (`owner[i][j] = v`, which
 `cow_path_set` already propagates correctly), mutate-then-insert, or the
 explicit read-modify-write handle store (`C4.2e`) that `richards3` uses.
 `S9.1.3` plain-parameter snapshots remain unimplemented and are still expected
-to land with this. The nested-mutation design that lets the flag become the
+to land with this.
+
+**Two Stage-2 rows closed by ruling, 2026-08-28 (designer), not by
+implementation.** (a) The **JS↔Lambda ownership boundary is DEFERRED to
+future** — explicitly out of the current COW programme; JS keeps reference
+semantics and its raw setters, and the Lambda-side work does not wait on it.
+(b) The **module-level half of `S9.2.4` is vacuous by design**: `var` is a
+procedural binding and a module-level one is rejected with `error[E224]`, so
+there is no module-level `var` to forbid passing as a `var` argument. Only the
+**view-state** half survives, which is what `S9.2.4v2` now says (spec
+18.1.0). Neither is outstanding work. The nested-mutation design that lets the flag become the
 default is now written:
 [`Lambda_Design_Nested_Mutation.md`](Lambda_Design_Nested_Mutation.md)
 (CW22–CW28, PROPOSED, owner of `SO14`). Its scheduling result is that the flip
@@ -999,7 +1009,7 @@ uses for annotated destinations — before reporting. A genuine mismatch
 (`var r: int[]` against a declared `any[]` field) is still rejected. This
 covers annotated roots only; general TIG1 carrier-read propagation stays open.
 
-**Corpus migration 2026-08-28: 8 of 9 done, flag-on failures 9 → 1.** Goldens
+**Corpus migration 2026-08-28: all 9 done; the flag-on suite is 784/784.** Goldens
 unchanged in every migrated case, each passing with the flag on and off:
 `r7rs/mbrot2` + `proc_fill_gc_nested` → path writes; `proc_view_mutable` → a
 `var`-parameter borrow (the CW25 spelling S9.2.2 requires of a write-through
@@ -1017,12 +1027,23 @@ world owns `w.vars`/`w.cons`, every Variable-valued field (`out`, `v1`, `v2`,
 state moved onto the world, and `w` is the single `var` parameter. Passes with
 the flag on, both tiers, zero `E232`. **`deltablue.ls` followed**, derived from
 that port with its annotations stripped, so the typed/untyped pair still
-differs only in signatures (138 lines, all annotations). Only `awfy/cd2_orig`
-remains.
+differs only in signatures (138 lines, all annotations).
+
+**`awfy/cd2_orig` completed once NM-O8's untyped arm was fixed** — trie path
+writes plus `var` on the eight genuinely-mutating parameters; no cascade into
+callers was needed after all. Correct on both tiers in both flag states, and it
+runs within noise of the original (~40.3s vs ~39.7s debug), so its role as the
+`cd2` perf control is intact. It is a heavy test that intermittently times out
+under the suite's parallel load in a debug build (known flakiness — it passes
+standalone in 38s); that is unrelated to this work.
 
 Two engine findings fell out, both pre-existing: **NM-O8** — a nested path
-write through a *plain* `pn` parameter is not published to the caller while a
-flat one is (both tiers agree; it is what makes `cd2_orig` cascade) — and a T0
+write through a *plain* `pn` parameter was not published to the caller while a
+flat one was (both tiers agreed) — now **fixed for the untyped arm** via
+`cow_path_set_inplace`, selected on `is_var_param || is_proc_param`. The typed
+arm was tried and reverted: its transactional publish *converts* (3.5 into an
+`int` field becomes 2) and an in-place write has no candidate to convert, which
+`proc_type_numeric_structural_admission` caught. Also a T0
 scratch-planner under-budget for the nested-path assignment branch
 (`interp: scratch overflow depth=5 cap=5`, write silently dropped), reproduced
 on pristine master and **fixed** here.
