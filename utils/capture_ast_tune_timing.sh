@@ -22,6 +22,8 @@ case "$suite" in
 esac
 [ -n "$label" ] || { echo "--label is required" >&2; exit 2; }
 [ -x "$test_exe" ] || { echo "missing $test_exe; run make build-test" >&2; exit 1; }
+# JS timing matches the production baseline lane; Lambda keeps its full corpus.
+test_options=""; [ "$suite" = js ] && test_options="--baseline"
 
 root="./temp/ast_tune/$label/$suite"
 run_dir="$root/runs"
@@ -55,7 +57,7 @@ while [ "$i" -lt "$total" ]; do
     AST_TUNE_BATCH_CHUNK=50 \
     AST_TUNE_RUN_ID="$run_id" \
     AST_TUNE_TIMING_TSV="$tsv" \
-    "$test_exe" --gtest_filter="$test_filter" > "$log" 2>&1
+    "$test_exe" $test_options --gtest_filter="$test_filter" > "$log" 2>&1
     status=$?
     set -e
     if [ "$status" -ne 0 ] && [ "${AST_TUNE_ALLOW_TEST_FAILURES:-0}" != "1" ]; then
@@ -65,10 +67,8 @@ while [ "$i" -lt "$total" ]; do
     [ -s "$tsv" ] || { echo "missing timing TSV: $tsv" >&2; exit 1; }
     rows=$(awk 'NR > 1 { n++ } END { print n + 0 }' "$tsv")
     [ "$rows" -gt 0 ] || { echo "empty timing TSV: $tsv" >&2; exit 1; }
-    case "$suite" in
-        lambda) [ "$rows" -eq 698 ] || { echo "incomplete Lambda timing TSV: $rows/698 rows" >&2; exit 1; } ;;
-        js) [ "$rows" -eq 324 ] || { echo "incomplete JS timing TSV: $rows/324 rows" >&2; exit 1; } ;;
-    esac
+    expected=$($test_exe $test_options --gtest_list_tests --gtest_filter="$test_filter" | awk '/# GetParam\(\)/ { n++ } END { print n + 0 }')
+    [ "$rows" -eq "$expected" ] || { echo "incomplete $suite timing TSV: $rows/$expected rows" >&2; exit 1; }
     # A timing capture must contain one complete compiler+volume record for
     # every selected test.  Missing records are never treated as cache hits:
     # that would silently turn a crashed/retried sample into a speedup.

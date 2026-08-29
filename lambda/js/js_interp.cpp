@@ -2488,15 +2488,6 @@ struct JsInterpEvalLocalFrame {
     JsInterpEvalLocalFrame& operator=(const JsInterpEvalLocalFrame&) = delete;
 };
 
-static bool js_interp_function_has_direct_eval(JsFunctionNode* function) {
-    if (!function) return false;
-    for (JsAstNode* param = (JsAstNode*)function->params; param;
-            param = (JsAstNode*)param->next) {
-        if (js_ast_has_direct_eval_call(param)) return true;
-    }
-    return js_ast_has_direct_eval_call((JsAstNode*)function->body);
-}
-
 static bool js_interp_identifier_is(JsAstNode* node, const char* name);
 
 static JsInterpMemberResult js_interp_eval_call_chain(JsInterpFrame* frame,
@@ -5238,7 +5229,7 @@ static Item js_interp_configure_function_metadata(Item function_item) {
     if (get_type_id(function_item) != LMD_TYPE_FUNC) return function_item;
     JsFunction* function = (JsFunction*)function_item.function;
     if (!function || !function->ast_function) return ItemError;
-    function->ast_has_direct_eval = js_interp_function_has_direct_eval(
+    function->ast_has_direct_eval = js_ast_function_has_direct_eval(
         function->ast_function);
     function->ast_uses_arguments = js_interp_function_uses_arguments(
         function->ast_function);
