@@ -10045,6 +10045,13 @@ static void mir_join_collect_source(MirTranspiler* mt, AstLoopNode* loop, MIR_re
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
         boxed_coll = root_gc_result_if_needed(mt, boxed_coll, MIR_T_I64,
             LMD_TYPE_ANY, "loop_snap");
+        // the emitter must also know: the body's stores on this root need
+        // the flag consult. Without the compile-time mark the ArrayNum int
+        // fast arm emits raw lane stores that never see the runtime bit,
+        // and the loop iterates live (fixture regression after master
+        // widened that arm's admission).
+        MirVarEntry* snap_root = mir_direct_root_binding(mt, loop->as);
+        if (snap_root) snap_root->cow_marked = true;
     }
     MIR_reg_t keys_al = emit_call_1(mt, "item_keys", MIR_T_P,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
@@ -10636,6 +10643,10 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
             boxed_coll = root_gc_result_if_needed(mt, boxed_coll, MIR_T_I64,
                 LMD_TYPE_ANY, "loop_snap");
+            // compile-time mark: the body's stores on this root must consult
+            // the runtime bit (see the sibling hook's comment)
+            MirVarEntry* snap_root2 = mir_direct_root_binding(mt, loop->as);
+            if (snap_root2) snap_root2->cow_marked = true;
         }
         MIR_reg_t keys_al = emit_call_1(mt, "item_keys", MIR_T_P,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
@@ -10972,6 +10983,10 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_coll));
             boxed_coll = root_gc_result_if_needed(mt, boxed_coll, MIR_T_I64,
                 LMD_TYPE_ANY, "loop_snap");
+            // compile-time mark: the body's stores on this root must consult
+            // the runtime bit (see the sibling hook's comment)
+            MirVarEntry* snap_root2 = mir_direct_root_binding(mt, loop->as);
+            if (snap_root2) snap_root2->cow_marked = true;
         }
 
         // Get keys (for maps/elements/objects - returns ArrayList* or NULL for arrays)
@@ -11117,6 +11132,9 @@ static MIR_reg_t transpile_for(MirTranspiler* mt, AstForNode* for_node,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, nl_boxed));
             nl_boxed = root_gc_result_if_needed(mt, nl_boxed, MIR_T_I64,
                 LMD_TYPE_ANY, "loop_snap_n");
+            // same compile-time mark as the outer levels (see above)
+            MirVarEntry* nl_snap_root = mir_direct_root_binding(mt, nl->as);
+            if (nl_snap_root) nl_snap_root->cow_marked = true;
         }
 
         // Get length

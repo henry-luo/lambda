@@ -921,7 +921,24 @@ static Item interp_rejected_parameter_error(const TypeFunc* signature,
 static bool interp_parameter_rejects_error(const AstNamedNode* parameter,
         Item value);
 static Item interp_call_with_borrowed(Function* fn, const Item* args, int argc,
-        InterpFrame* caller, NameEntry* const* borrowed_entries);
+        InterpFrame* caller, NameEntry* const* borrowed_entries,
+        uint64_t* const* borrow_homes);
+
+// CW33 (COW §11.10): the address of a binding's Item home, when plain stores
+// through it fully update the binding. View-state overlays are excluded
+// (their writes must also run tmpl_state_set) and object-field entries have
+// no slot of their own; both keep the legacy entry write-back channel.
+static uint64_t* interp_borrow_home(InterpFrame* f, NameEntry* entry) {
+    if (!f || !entry || !entry->storage_assigned) return NULL;
+    if (entry->binding_storage != BINDING_STORAGE_REGISTER) return NULL;
+    if ((uint32_t)entry->slot >= f->scratch_base) return NULL;
+    if (interp_is_object_field_entry(entry)) return NULL;
+    for (InterpViewBinding* binding = f->st ? f->st->view_bindings : NULL;
+            binding; binding = binding->prev) {
+        if (binding->entry == entry) return NULL;
+    }
+    return &f->slots[entry->slot];
+}
 static Function* interp_make_method_closure(Script* module,
         const TypeMethod* method, Item self);
 static void interp_upgrade_function_entry(Function* fn, const AstFuncNode* def,
@@ -1514,6 +1531,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
     }
     if (!injected && ast_type_func_has_var_parameter(direct_signature)) {
         NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+        uint64_t* borrow_homes[LAMBDA_MAX_FUNCTION_ARGS] = {0};
         AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
         if (!ast_direct_call_var_parameter_entries(node, direct_signature, borrowed,
                 borrow_args)) {
@@ -1562,21 +1580,35 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
                 words[index] = leaf.item;
                 continue;
             }
+            if (!entry) continue;
+            uint64_t* home = interp_borrow_home(f, entry);
+            if (home) {
+                // CW33: pass the ADDRESS of the caller's binding home. The
+                // callee prologue prepares through it unconditionally (a
+                // byte-test no-op when unique), which deletes the caller-side
+                // cow_owned gate -- the T0 twin of the MIR allow-list gate
+                // that silently skipped un-share-at-borrow for composite
+                // declared types.
+                borrow_homes[index] = home;
+                // the entry is retained beside the home: the callee prologue
+                // reads is_var_param off it to distinguish a chain-root
+                // borrow (prepare) from a re-borrow (inherit uniqueness)
+                continue;
+            }
             Item owner = (Item){.item = words[index]};
-            if (!entry || !entry->cow_owned ||
+            if (!entry->cow_owned ||
                     !is_container_type_id(get_type_id(owner))) {
                 continue;
             }
-            // MIR detaches a borrowed COW root before entering a `var` callee:
-            // the callee has no replacement channel until return, so delaying
-            // this copy would let its first store mutate the caller's alias.
+            // Legacy channel (view-state / object-field homes): detach before
+            // the call because the callee publishes only at return.
             Item private_owner = cow_prepare_write(owner);
             if (item_is_error(private_owner)) return private_owner;
             words[index] = private_owner.item;
             interp_write_binding(f, entry, private_owner);
         }
         return interp_call_with_borrowed(fn, (const Item*)(void*)words,
-            dispatch_argc, f, borrowed);
+            dispatch_argc, f, borrowed, borrow_homes);
     }
     // Every callee — interpreted or native — reaches its body through the
     // single dynamic dispatch point (AI7). Routing interpreted calls through it
@@ -4597,7 +4629,17 @@ static void interp_format_parameter_boundary(char* boundary, size_t capacity,
 
 typedef struct InterpBorrowedCall {
     InterpFrame* caller;
+    // Legacy write-back channel: resolve the caller binding by entry at
+    // return. Kept only for homes plain stores cannot fully update --
+    // view-state overlays (their writes must run tmpl_state_set) and
+    // object-field entries (no slot of their own).
     NameEntry* entries[LAMBDA_MAX_FUNCTION_ARGS];
+    // CW33 (COW §11.10): the address of the caller binding's Item home. The
+    // callee prologue prepares THROUGH the home (un-share-at-borrow moves to
+    // the one site that always runs), and the final param value is stored
+    // straight back through it -- no entry resolution, no caller-side
+    // pre-detach gate.
+    uint64_t* homes[LAMBDA_MAX_FUNCTION_ARGS];
 } InterpBorrowedCall;
 
 // Borrowed `var` arguments are uncommon, but keeping their publication
@@ -4724,6 +4766,37 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 value = fallback ? eval_expr(frame, fallback) : ItemNull;
             }
             Item source = value;
+            if (borrowed && borrowed->homes[index] &&
+                    borrowed->entries[index] &&
+                    borrowed->entries[index]->cow_owned) {
+                // CW33 prologue prepare -- at the borrow chain's ROOT only,
+                // which on T0 is exactly `cow_owned` (an owner-rooted
+                // binding). Preparing mid-chain -- a `var`-param re-borrow OR
+                // a CW29-marked plain param passed onward -- honors a
+                // conservative capture-mark by DETACHING, which orphans the
+                // interior borrows outer frames still hold (cd2_orig:
+                // `zn = rbt_nd(tree)` then a nested `rbt_*(var tree)` call
+                // detached the tree out from under `zn`, losing every later
+                // `zn[..] = v`). Chain hops inherit uniqueness from the root
+                // prepare (§11.5 single-writer chain). The MIR allow-list bug
+                // that motivated an unconditional prepare was MIR-only; T0's
+                // gate was never the defect.
+                // CW33 callee-prologue prepare: un-share-at-borrow (S9.2.2)
+                // happens HERE, once, through the caller's own home -- the
+                // replacement is the caller's binding the moment it exists.
+                // Unconditional; cow_prepare_write is a byte-test no-op on an
+                // already-unique owner.
+                Item prepared = cow_prepare_write((Item){.item = *borrowed->homes[index]});
+                if (item_is_error(prepared)) {
+                    interp_signal(frame, EvalSignal::RETURNED, prepared);
+                    if (frame->caller) interp_signal(frame->caller,
+                        EvalSignal::RETURNED, prepared);
+                    break;
+                }
+                *borrowed->homes[index] = prepared.item;
+                value = prepared;
+                source = prepared;
+            }
             char boundary[192];
             interp_format_parameter_boundary(boundary, sizeof(boundary), fn_node,
                 fn->name, index);
@@ -4803,7 +4876,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
         }
         if (borrowed && borrowed->caller) {
             for (int index = 0; index < (int)params; index++) {
-                if (!borrowed->entries[index]) continue;
+                if (!borrowed->entries[index] && !borrowed->homes[index]) continue;
                 Item value = (Item){.item = frame->slots[index]};
                 TypeId type = get_type_id(value);
                 borrowed_scratch.scalar_types[index] = type;
@@ -4843,7 +4916,8 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
     if (borrowed && borrowed->caller) {
         for (int index = 0; index < LAMBDA_MAX_FUNCTION_ARGS; index++) {
             NameEntry* entry = borrowed->entries[index];
-            if (!entry) continue;
+            uint64_t* home = borrowed->homes[index];
+            if (!entry && !home) continue;
             Item value = borrowed_scratch.scalar_types[index] == LMD_TYPE_INT64
                 ? box_int64_value((int64_t)borrowed_scratch.scalar_payloads[index])
                 : borrowed_scratch.scalar_types[index] == LMD_TYPE_UINT64
@@ -4852,7 +4926,15 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             // The callee frame owns its param slot, but a `var` argument is
             // the caller's mutable root. Publish after the callee extent
             // closes so a wide scalar cannot retain a dead number-stack home.
-            interp_write_binding(borrowed->caller, entry, value);
+            if (home) {
+                // CW33: the final param value goes straight through the
+                // caller's home -- in the common in-place case this stores
+                // back the pointer already there; it also covers rebinds and
+                // mid-body detaches with no entry resolution at all.
+                *home = value.item;
+            } else {
+                interp_write_binding(borrowed->caller, entry, value);
+            }
         }
     }
     st->depth++;
@@ -4860,11 +4942,13 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
 }
 
 static Item interp_call_with_borrowed(Function* fn, const Item* args, int argc,
-        InterpFrame* caller, NameEntry* const* borrowed_entries) {
+        InterpFrame* caller, NameEntry* const* borrowed_entries,
+        uint64_t* const* borrow_homes) {
     InterpBorrowedCall borrowed = {};
     borrowed.caller = caller;
     for (int index = 0; index < LAMBDA_MAX_FUNCTION_ARGS; index++) {
         borrowed.entries[index] = borrowed_entries ? borrowed_entries[index] : NULL;
+        borrowed.homes[index] = borrow_homes ? borrow_homes[index] : NULL;
     }
     return interp_call_internal(fn, args, argc, &borrowed);
 }
