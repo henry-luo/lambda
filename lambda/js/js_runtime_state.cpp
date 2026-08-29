@@ -135,7 +135,6 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         runtime_context->js_state->batch_test_module_state_id = UINT32_MAX;
         runtime_context->js_state->batch_preamble_module_state_id = UINT32_MAX;
         runtime_context->js_state->batch_preamble_var_count = 0;
-        runtime_context->js_state->test262_realm_template.module_state_id = UINT32_MAX;
         // This capsule is raw-allocated for C-compatible runtime ownership,
         // so restore non-zero queue identities that C++ default initializers
         // would otherwise provide only for a constructed object.
@@ -331,7 +330,6 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     M(&state->constructors.roots, state->constructors.global_builtin_functions, JS_BUILTIN_GLOBAL_MAX + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT, "global builtin and constructor caches") \
     M(&state->namespaces.roots, &state->namespaces.math, 8, "core JS namespace objects") \
     M(&state->test262_agent.roots, &state->test262_agent.object, 1 + JS_TEST262_AGENT_MAX + JS_TEST262_AGENT_REPORT_MAX, "Test262 agent state") \
-    M(&state->test262_realm_template.roots, &state->test262_realm_template.global, 1 + 8, "Test262 realm template roots") \
     M(&state->process.roots, &state->process.argv, 3 + 2 * JS_PROCESS_LISTENER_MAX + 2, "process realm state") \
     M(&state->iterators.roots, &state->iterators.generator_return_marker, 13, "generator and iterator prototype caches") \
     M(&state->async_hooks.roots, &state->async_hooks.root_resource, 2 + JS_ASYNC_HOOK_STATE_MAX + JS_ASYNC_PENDING_DESTROY_STATE_MAX, "async hooks state") \
@@ -390,13 +388,12 @@ void js_root_range_reset_all(void) {
     for (int i = 0; i < js_runtime_state.root_range_registry_count; i++) {
         JsRootRange* range = js_runtime_state.root_range_registry[i];
         if (!range) continue;
-        // Catalog callables and the template's captured realm objects are
-        // identity anchors. Full teardown invalidates them explicitly; a
-        // template reset must keep their exact roots until snapshot restore.
-        if (range == &js_runtime_state.builtin_cache.roots ||
-                range == &js_runtime_state.test262_realm_template.roots ||
-                (js_runtime_state.test262_realm_template.active &&
-                 range == &js_runtime_state.iterators.roots)) continue;
+        // Catalog-backed intrinsic callables are realm identity anchors.  Their
+        // cache is reset explicitly for a full teardown and must survive a
+        // partial preamble reset; clearing the registered root range here made
+        // the next strict arguments object allocate a second %ThrowTypeError%
+        // despite the restored Function.prototype snapshot (D6.2.2v2).
+        if (range == &js_runtime_state.builtin_cache.roots) continue;
         js_root_range_clear(range);
         if (range->reset) range->reset(range->reset_owner);
     }
@@ -1125,31 +1122,13 @@ static void js_batch_reset_runtime_caches(const char* reason, bool full_reset) {
     js_dynfunc_cache_reset();
     if (full_reset) js_array_runtime_items_cleanup_all();
     js_root_range_reset_all();
-    // Partial template resets deliberately retain their template Input; full
-    // heap teardown remains responsible for rejecting any stale Input owner.
-    js_assert_batch_runtime_state_clear(reason, full_reset);
-}
-
-static void js_test262_realm_template_invalidate(void) {
-    JsTest262RealmTemplateState* template_state =
-        &js_runtime_state.test262_realm_template;
-    if (template_state->input && template_state->input != js_input) {
-        input_release_auxiliary_resources(template_state->input);
-    }
-    template_state->global = ItemNull;
-    memset(template_state->namespaces, 0, sizeof(template_state->namespaces));
-    template_state->input = NULL;
-    template_state->module_state_id = UINT32_MAX;
-    template_state->active = false;
+    js_assert_batch_runtime_state_clear(reason, true);
 }
 
 extern "C" void js_batch_reset() {
     // A host can finish a document after its context-owned JS state was
     // released.  Do not manufacture a replacement capsule just to reset it.
     if (!js_active_runtime_state) return;
-    // Full reset retires the heap that owns the template Input and its
-    // intrinsic snapshot. A later AST-native batch must capture a new one.
-    js_test262_realm_template_invalidate();
     // increment epoch to invalidate cached heap objects
     js_heap_epoch++;
     // A full heap reset invalidates every retained harness/test relationship.
@@ -1179,36 +1158,36 @@ extern "C" void js_prepare_compiled_preamble_vars(int declaration_count) {
 
 // Partial batch reset: restore module vars to a checkpoint and clear test state,
 // but leave heap and cached builtins intact.  Used by js-test-batch preamble mode
-// and the AST-native realm template to avoid replacing a healthy heap.
-static bool js_batch_reset_to_checkpoint(int checkpoint_var_count) {
+// to avoid re-initializing the harness between tests.
+extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // The active slab is the retained harness.  Test code must not execute in
     // it: harness closures intentionally keep that owner, while the old batch
     // path copied this prefix into a separate static test slab before each
     // script. Keep the same isolation using a reusable context-owned slab.
     LambdaModuleState* preamble_state = context ? context->active_module_state : NULL;
     uint32_t preamble_state_id = js_get_active_module_state_id();
-    if (!preamble_state || preamble_state_id == UINT32_MAX) return false;
+    if (!preamble_state || preamble_state_id == UINT32_MAX) return;
     if (checkpoint_var_count < 0) checkpoint_var_count = 0;
     if (checkpoint_var_count > (int)preamble_state->var_count) {
         log_error("js-batch-state: preamble checkpoint exceeds its module slab");
-        return false;
+        return;
     }
     js_runtime_state.batch_preamble_var_count = (uint32_t)checkpoint_var_count;
 
     uint32_t test_state_id = js_runtime_state.batch_test_module_state_id;
     if (js_runtime_state.batch_preamble_module_state_id != preamble_state_id ||
             !js_module_state_is_available(test_state_id)) {
-        if (!js_activate_module_state((uint32_t)checkpoint_var_count)) return false;
+        if (!js_activate_module_state((uint32_t)checkpoint_var_count)) return;
         test_state_id = js_get_active_module_state_id();
         js_runtime_state.batch_test_module_state_id = test_state_id;
         js_runtime_state.batch_preamble_module_state_id = preamble_state_id;
     } else if (!js_set_active_module_state_id(test_state_id)) {
-        return false;
+        return;
     }
-    if (!js_ensure_active_module_var_capacity((uint32_t)checkpoint_var_count)) return false;
+    if (!js_ensure_active_module_var_capacity((uint32_t)checkpoint_var_count)) return;
 
     Item* vars = js_ensure_active_module_vars();
-    if (!vars) return false;
+    if (!vars) return;
     if (checkpoint_var_count > 0) {
         memcpy(vars, preamble_state->vars, (size_t)checkpoint_var_count * sizeof(Item));
     }
@@ -1226,79 +1205,6 @@ static bool js_batch_reset_to_checkpoint(int checkpoint_var_count) {
     js_module_cache_reset();
     js_cjs_metadata_reset();
     js_batch_reset_runtime_caches("js_batch_reset_to pre-cleanup", false);
-    return true;
-}
-
-extern "C" void js_batch_reset_to(int checkpoint_var_count) {
-    (void)js_batch_reset_to_checkpoint(checkpoint_var_count);
-}
-
-extern "C" bool js_test262_realm_template_is_active(void) {
-    if (!js_active_runtime_state) return false;
-    const JsTest262RealmTemplateState* template_state =
-        &js_runtime_state.test262_realm_template;
-    return template_state->active && template_state->input &&
-        js_module_state_is_available(template_state->module_state_id);
-}
-
-extern "C" bool js_test262_realm_template_create(void) {
-    if (!js_active_runtime_state || !context || !context->pool) return false;
-    if (js_test262_realm_template_is_active()) return true;
-
-    JsTest262RealmTemplateState* template_state =
-        &js_runtime_state.test262_realm_template;
-    if (template_state->active) {
-        // A recovered batch may discard module slabs underneath the template.
-        // Drop its stale roots before constructing a replacement realm.
-        js_test262_realm_template_invalidate();
-    }
-    if (!js_root_range_ensure_registered(&template_state->roots)) return false;
-    Input* template_input = Input::create(context->pool);
-    if (!template_input) return false;
-    template_state->input = template_input;
-    js_runtime_set_input(template_input);
-    if (!js_activate_module_state(1)) {
-        js_test262_realm_template_invalidate();
-        return false;
-    }
-    template_state->module_state_id = js_get_active_module_state_id();
-    if (template_state->module_state_id == UINT32_MAX ||
-            item_is_error(js_get_global_this()) ||
-            item_is_error(js_test262_native_harness_install())) {
-        js_test262_realm_template_invalidate();
-        return false;
-    }
-    template_state->active = true;
-    if (!js_test262_realm_template_capture_global()) {
-        js_test262_realm_template_invalidate();
-        return false;
-    }
-    // Capturing through the ordinary partial reset reuses the production
-    // intrinsic snapshot path instead of maintaining a second clone format.
-    if (!js_batch_reset_to_checkpoint(0) ||
-            !js_test262_realm_template_restore_global()) {
-        js_test262_realm_template_invalidate();
-        return false;
-    }
-    js_runtime_set_input(template_input);
-    return true;
-}
-
-extern "C" bool js_test262_realm_template_reset(void) {
-    if (!js_test262_realm_template_is_active()) return false;
-    JsTest262RealmTemplateState* template_state =
-        &js_runtime_state.test262_realm_template;
-    Input* retiring_input = js_input;
-    if (!js_set_active_module_state_id(template_state->module_state_id) ||
-            !js_batch_reset_to_checkpoint(0) ||
-            !js_test262_realm_template_restore_global()) {
-        return false;
-    }
-    if (retiring_input && retiring_input != template_state->input) {
-        input_release_auxiliary_resources(retiring_input);
-    }
-    js_runtime_set_input(template_state->input);
-    return true;
 }
 JS_FORWARD_ITEM(js_new_error, (Item message), js_new_error_with_stack, (message, (Item){.item = ITEM_JS_UNDEFINED}))
 

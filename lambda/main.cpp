@@ -4706,19 +4706,6 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 result = 1;
             }
 
-            if (ast_test_generation_active && test262_native_harness &&
-                    js_test262_realm_template_is_active() && runtime.scripts &&
-                    ast_test_script_checkpoint < runtime.scripts->length) {
-                Script* test_script = (Script*)runtime.scripts->data[
-                    ast_test_script_checkpoint];
-                if (test_script && test_script->module_state_id != UINT32_MAX) {
-                    // The template owns the preceding module slabs. Release
-                    // only this script's slab tail after its realm reset.
-                    ast_test_module_state_checkpoint =
-                        test_script->module_state_id;
-                }
-            }
-
             // Print uncaught exception to stdout for batch capture
             if (result == 1 && item_is_error(batch_error)) {
                 char exc_msg[1024];
@@ -4905,25 +4892,12 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     }
                 } else if (ast_test_generation_active) {
                     jm_cleanup_deferred_mir();
-                    if (test262_native_harness &&
-                            js_test262_realm_template_is_active()) {
-                        // The template retains only an empty module slab and
-                        // intrinsic snapshot. It rebuilds globalThis before
-                        // the next test, then drops this test's AST/module tail.
-                        if (!js_test262_realm_template_reset()) {
-                            log_error("test262-realm-template: reset failed; recycling heap");
-                            if (!js_test262_hot_context_recycle(&runtime, batch_context)) break;
-                        }
-                        runtime_release_script_generation(&runtime,
-                            ast_test_script_checkpoint, ast_test_module_state_checkpoint);
-                    } else {
-                        // AST JS-harness batches retain parsed source and scope
-                        // facts only. Replacing their realm prevents a test
-                        // from mutating harness functions seen by its successor.
-                        if (!js_test262_hot_context_recycle(&runtime, batch_context)) break;
-                        runtime_release_script_generation(&runtime,
-                            ast_test_script_checkpoint, ast_test_module_state_checkpoint);
-                    }
+                    // AST JS-harness batches retain parsed source and scope
+                    // facts only. Replacing their realm prevents a test
+                    // from mutating harness functions seen by its successor.
+                    if (!js_test262_hot_context_recycle(&runtime, batch_context)) break;
+                    runtime_release_script_generation(&runtime,
+                        ast_test_script_checkpoint, ast_test_module_state_checkpoint);
                 } else if (has_preamble) {
                     if (js_test262_restore_preamble_module_state(&preamble)) {
                         js_batch_reset_to(preamble_var_checkpoint);

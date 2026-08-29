@@ -840,20 +840,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         // parse, early-error pass, Runtime catalog, and EvalContext setup as
         // the MIR tier. Unsupported syntax is a deterministic admission
         // error; this explicit selector never silently falls back to MIR.
-        if (test262_native_harness && js_batch_execution_mode) {
-            EvalContext* template_context = NULL;
-            bool template_reusing_context = false;
-            if (!js_prepare_eval_context(runtime, true, &template_context,
-                    &template_reusing_context) ||
-                    !js_test262_realm_template_create()) {
-                log_error("test262-realm-template: failed to create AST pristine realm");
-                jm_clear_active_js_transpile(tp, NULL, NULL);
-                js_transpiler_destroy(tp);
-                jm_clear_active_js_transpile(NULL, NULL, owned_source);
-                mem_free(owned_source);
-                return ItemError;
-            }
-        }
         jm_clear_active_js_transpile(tp, NULL, NULL);
         JsScript* script = js_script_adopt_transpiler(tp, runtime, filename);
         if (!script) {

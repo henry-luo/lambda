@@ -851,19 +851,6 @@ struct JsIntrinsicState {
     int array_sym_iter_ever_set = 0;
 };
 
-// Test262 AST-native batches retain one heap per manifest. This template owns
-// rooted pristine global/namespace values, an empty module slab, and the Input
-// used to restore a fresh realm after a test.
-struct JsTest262RealmTemplateState {
-    // Keep the snapshot roots contiguous for the context's exact GC range.
-    Item global = {};
-    Item namespaces[8] = {};
-    JsRootRange roots = {};
-    Input* input = NULL;
-    uint32_t module_state_id = UINT32_MAX;
-    bool active = false;
-};
-
 struct JsRuntimeState {
     JsDnsState dns = {};
     JsBuiltinCacheState builtin_cache = {};
@@ -916,7 +903,6 @@ struct JsRuntimeState {
     JsAsyncHooksState async_hooks = {};
     JsPromiseRuntimeState promises = {};
     JsModuleRuntimeState modules = {};
-    JsTest262RealmTemplateState test262_realm_template = {};
     JsClusterState cluster = {};
     JsAsyncLocalStorageState async_local_storage = {};
     JsPerformanceState performance = {};

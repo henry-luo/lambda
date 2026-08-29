@@ -15821,13 +15821,6 @@ struct JsPrototypeSnapshotState {
     Item typed_array_base_proto_item_snap = {};
     Item typed_array_per_type_proto_snap[JS_TYPED_ARRAY_TYPE_COUNT] = {};
     MapSnapshot typed_array_per_type_proto_map_snap[JS_TYPED_ARRAY_TYPE_COUNT] = {};
-    // AST-native Test262 batches retain these realm objects and restore their
-    // descriptor maps instead of allocating a full host global per test.
-    MapSnapshot test262_global_map = {};
-    MapSnapshot test262_namespace_maps[8] = {};
-    // Iterator prototypes are lazy but realm-visible. Keep each established
-    // identity and its pristine descriptor map across template resets.
-    MapSnapshot test262_iterator_proto_maps[6] = {};
     bool valid = false;
     uint64_t roots_epoch = 0;
     uint64_t intrinsic_function_roots_epoch = 0;
@@ -15879,13 +15872,6 @@ static void js_proto_snapshot_visit_root_slots(JsPrototypeSnapshotState* state,
     op(&state->typed_array_base_proto_snap.pristine.item);
     for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
         op(&state->typed_array_per_type_proto_map_snap[i].pristine.item);
-    }
-    op(&state->test262_global_map.pristine.item);
-    for (int i = 0; i < 8; i++) {
-        op(&state->test262_namespace_maps[i].pristine.item);
-    }
-    for (int i = 0; i < 6; i++) {
-        op(&state->test262_iterator_proto_maps[i].pristine.item);
     }
 }
 
@@ -16069,13 +16055,6 @@ static void js_proto_snapshot_visit_intrinsic_source_maps(
     for (int i = 0; i < JS_TYPED_ARRAY_TYPE_COUNT; i++) {
         visit(&state->typed_array_per_type_proto_map_snap[i], data);
     }
-    visit(&state->test262_global_map, data);
-    for (int i = 0; i < 8; i++) {
-        visit(&state->test262_namespace_maps[i], data);
-    }
-    for (int i = 0; i < 6; i++) {
-        visit(&state->test262_iterator_proto_maps[i], data);
-    }
 }
 
 static void js_proto_snapshot_count_function_slots(MapSnapshot* snap,
@@ -16213,43 +16192,6 @@ static void js_proto_snapshot_take_intrinsic_function_maps(
         js_proto_snapshot_collect_intrinsic_functions, state);
 }
 
-static void js_proto_snapshot_clear_test262_realm_maps(
-        JsPrototypeSnapshotState* state) {
-    if (!state) return;
-    js_proto_snapshot_clear_map(&state->test262_global_map);
-    for (int i = 0; i < 8; i++) {
-        js_proto_snapshot_clear_map(&state->test262_namespace_maps[i]);
-    }
-    for (int i = 0; i < 6; i++) {
-        js_proto_snapshot_clear_map(&state->test262_iterator_proto_maps[i]);
-    }
-}
-
-static void js_proto_snapshot_take_test262_realm_maps(
-        JsPrototypeSnapshotState* state) {
-    if (!state || !js_runtime_state.test262_realm_template.active) return;
-    JsTest262RealmTemplateState* template_state =
-        &js_runtime_state.test262_realm_template;
-    Item global = js_global_this_obj;
-    if (!js_is_object_value(global)) return;
-
-    template_state->global = global;
-    template_state->namespaces[0] = js_runtime_state.namespaces.math;
-    template_state->namespaces[1] = js_runtime_state.namespaces.json;
-    template_state->namespaces[2] = js_runtime_state.namespaces.css;
-    template_state->namespaces[3] = js_runtime_state.namespaces.intl;
-    template_state->namespaces[4] = js_runtime_state.namespaces.console;
-    template_state->namespaces[5] = js_runtime_state.namespaces.test262;
-    template_state->namespaces[6] = js_runtime_state.namespaces.reflect;
-    template_state->namespaces[7] = js_runtime_state.namespaces.atomics;
-    js_proto_snapshot_map(&state->test262_global_map,
-        js_obj_underlying_map(global));
-    for (int i = 0; i < 8; i++) {
-        js_proto_snapshot_map(&state->test262_namespace_maps[i],
-            js_obj_underlying_map(template_state->namespaces[i]));
-    }
-}
-
 JS_FORWARD_STATIC_EXPRESSION(bool, js_proto_snapshot_map_requires_typemap_detach,
     (const MapSnapshot* snap, Map* map), snap && map && snap->m == map && snap->type == map->type)
 
@@ -16295,33 +16237,14 @@ extern "C" bool js_proto_snapshot_requires_typemap_detach(Item object) {
             return true;
         }
     }
-    // The retained Test262 global and namespace maps are restored in place.
-    // Detach their descriptor shapes before a test adds/removes a property, or
-    // the pristine Map data would point back to a test-mutated TypeMap.
-    if (js_proto_snapshot_map_requires_typemap_detach(
-            &state->test262_global_map, map)) {
-        return true;
-    }
-    for (int i = 0; i < 8; i++) {
-        if (js_proto_snapshot_map_requires_typemap_detach(
-                &state->test262_namespace_maps[i], map)) {
-            return true;
-        }
-    }
-    for (int i = 0; i < 6; i++) {
-        if (js_proto_snapshot_map_requires_typemap_detach(
-                &state->test262_iterator_proto_maps[i], map)) {
-            return true;
-        }
-    }
     return false;
 }
 
 static void js_proto_snapshot_take_locked() {
     js_proto_snapshot_ensure_roots();
     js_proto_snapshot_valid = true;
-    JsPrototypeSnapshotState* state = js_proto_snapshot_state();
-    js_proto_snapshot_clear_intrinsic_function_snapshots(state);
+    js_proto_snapshot_clear_intrinsic_function_snapshots(
+        js_proto_snapshot_state());
     for (int i = 0; i < JS_CTOR_MAX; i++) {
         CtorSnapshot* s = &js_ctor_snapshots[i];
         s->valid = false;
@@ -16386,10 +16309,7 @@ static void js_proto_snapshot_take_locked() {
             js_proto_snapshot_map(&js_typed_array_per_type_proto_map_snap[i], p.map);
         }
     }
-    if (!state->test262_global_map.m) {
-        js_proto_snapshot_take_test262_realm_maps(state);
-    }
-    js_proto_snapshot_take_intrinsic_function_maps(state);
+    js_proto_snapshot_take_intrinsic_function_maps(js_proto_snapshot_state());
 }
 
 static void js_proto_snapshot_restore_locked() {
@@ -16430,35 +16350,6 @@ static void js_proto_snapshot_restore_locked() {
     }
 }
 
-static bool js_proto_snapshot_restore_test262_realm_locked() {
-    JsPrototypeSnapshotState* state = js_proto_snapshot_state();
-    JsTest262RealmTemplateState* template_state =
-        &js_runtime_state.test262_realm_template;
-    if (!state || !template_state->active ||
-            !js_is_object_value(template_state->global) ||
-            !state->test262_global_map.m) {
-        log_error("test262-realm-template: global snapshot unavailable active=%d type=%d map=%p",
-            template_state->active ? 1 : 0, get_type_id(template_state->global),
-            state ? (void*)state->test262_global_map.m : NULL);
-        return false;
-    }
-    js_proto_restore_map(&state->test262_global_map);
-    for (int i = 0; i < 8; i++) {
-        js_proto_restore_map(&state->test262_namespace_maps[i]);
-    }
-    js_global_this_obj = template_state->global;
-    js_runtime_state.namespaces.math = template_state->namespaces[0];
-    js_runtime_state.namespaces.json = template_state->namespaces[1];
-    js_runtime_state.namespaces.css = template_state->namespaces[2];
-    js_runtime_state.namespaces.intl = template_state->namespaces[3];
-    js_runtime_state.namespaces.console = template_state->namespaces[4];
-    js_runtime_state.namespaces.test262 = template_state->namespaces[5];
-    js_runtime_state.namespaces.reflect = template_state->namespaces[6];
-    js_runtime_state.namespaces.atomics = template_state->namespaces[7];
-    js_global_var_define_cache_reset();
-    return true;
-}
-
 extern "C" void js_reset_constructor_prototypes() {
     if (!js_proto_snapshot_valid) {
         if (!js_input || !js_input->pool) return;
@@ -16478,65 +16369,6 @@ extern "C" void js_reset_constructor_prototypes() {
 }
 
 JS_FORWARD_EXPRESSION(bool, js_proto_snapshot_is_valid, (void), js_proto_snapshot_valid)
-
-extern "C" bool js_test262_realm_template_capture_global(void) {
-    if (!js_active_runtime_state ||
-            !js_runtime_state.test262_realm_template.active) {
-        return false;
-    }
-    JsPrototypeSnapshotState* state = js_proto_snapshot_state();
-    if (!state) return false;
-    js_proto_snapshot_ensure_roots();
-    js_proto_snapshot_clear_test262_realm_maps(state);
-    js_proto_snapshot_take_test262_realm_maps(state);
-    return state->test262_global_map.m != NULL;
-}
-
-extern "C" bool js_test262_realm_template_restore_global(void) {
-    if (!js_active_runtime_state || !js_proto_snapshot_valid) return false;
-    return js_proto_snapshot_restore_test262_realm_locked();
-}
-
-extern "C" bool js_test262_realm_template_capture_iterator_prototype(
-        Item prototype) {
-    if (!js_active_runtime_state || !js_proto_snapshot_valid ||
-            !js_runtime_state.test262_realm_template.active) {
-        return false;
-    }
-    JsPrototypeSnapshotState* state = js_proto_snapshot_state();
-    Map* map = js_obj_underlying_map(prototype);
-    if (!state || !map) return false;
-    for (int i = 0; i < 6; i++) {
-        MapSnapshot* snap = &state->test262_iterator_proto_maps[i];
-        if (snap->m == map) return true;
-        if (!snap->m) {
-            // Capture immediately after lazy construction, before user code can
-            // mutate the realm-visible iterator prototype (D6.2.2v2).
-            js_proto_snapshot_ensure_roots();
-            js_proto_snapshot_map(snap, map);
-            if (!snap->m) return false;
-            js_proto_snapshot_take_intrinsic_function_maps(state);
-            return true;
-        }
-    }
-    log_error("test262-realm-template: iterator prototype snapshot capacity exhausted");
-    return false;
-}
-
-extern "C" bool js_test262_realm_template_restore_iterator_prototypes(void) {
-    if (!js_active_runtime_state || !js_proto_snapshot_valid ||
-            !js_runtime_state.test262_realm_template.active) {
-        return false;
-    }
-    JsPrototypeSnapshotState* state = js_proto_snapshot_state();
-    if (!state) return false;
-    for (int i = 0; i < 6; i++) {
-        if (state->test262_iterator_proto_maps[i].m) {
-            js_proto_restore_map(&state->test262_iterator_proto_maps[i]);
-        }
-    }
-    return true;
-}
 
 // Invalidate snapshot — must be called before pool/heap teardown that frees
 // the underlying ctor / Map allocations (e.g. crash recovery in batch mode).
@@ -16560,7 +16392,6 @@ extern "C" void js_proto_snapshot_invalidate() {
     }
     js_proto_snapshot_clear_intrinsic_function_snapshots(
         js_proto_snapshot_state());
-    js_proto_snapshot_clear_test262_realm_maps(js_proto_snapshot_state());
     js_typed_array_base_snap = (Item){0};
     js_typed_array_base_proto_item_snap = (Item){0};
     js_proto_snapshot_clear_map(&js_typed_array_base_proto_snap);
