@@ -35,9 +35,10 @@
 //   4. Regressions        == 0   (no test may regress)
 //
 // Execution model:
-//   - Phase 1:  Parse metadata, partition tests into two groups:
-//       (a) CLEAN    — safe to batch (default 100 tests/process, CPU count - 1 parallel workers)
-//       (b) PREVIOUS PARTIAL — tests listed in t262_partial.txt from the
+//   - Phase 1:  Parse metadata, partition tests into backend groups:
+//       (a) AST      — synchronous tests not listed in mir_list.txt (600/process)
+//       (b) MIR      — mir_list.txt entries plus async/module/raw tests
+//       (c) PREVIOUS PARTIAL — tests listed in t262_partial.txt from the
 //                       previous run. They are included in CLEAN every run so
 //                       the partial list can be rebuilt from fresh results.
 //   - Phase 2:  Execute CLEAN tests in batched workers.
@@ -122,6 +123,7 @@ static std::string g_harness_dir = "ref/test262/harness";
 static const char* BASELINE_FILE = "test/js262/test262_baseline.txt";
 static const char* SKIP_LIST_FILE = "test/js262/skip_list.txt";
 static const char* DIAGNOSE_LIST_FILE = "test/js262/diagnose_list.txt";
+static const char* MIR_LIST_FILE = "test/js262/mir_list.txt";
 static const char* SPECIAL_PREAMBLE_FILE = "test/js262/special_premble.txt";
 static const char* SLOW_TEST_FILE = "test/js262/t262_slow.txt";
 static const char* TEST262_RUN_LOCK_FILE = "temp/test_js_test262_gtest.lock";
@@ -974,6 +976,7 @@ struct Test262Prepared {
     bool is_module = false;      // execute through the ES module transpiler path
     bool is_raw = false;         // raw parser-mode test; do not prepend harness or host flags
     bool is_slow_test = false;   // intentionally exhaustive test; isolate batch and use 5s slow gate
+    bool ast_backend = false;    // synchronous non-MIR-list test uses the AST interpreter
     Test262Result skip_result;   // T262_SKIP if test should be skipped
     std::string skip_message;
     bool is_negative;
@@ -988,6 +991,7 @@ struct JsBatchGroup {
     bool is_async = false;
     bool is_module = false;
     bool is_slow_test = false;
+    bool ast_backend = false;
 };
 
 // Assemble combined source on-the-fly from metadata.
@@ -1203,12 +1207,14 @@ static void partition_batch_indices(
 
     for (size_t idx : indices) {
         if (prepared[idx].native_harness && !prepared[idx].is_async &&
-                !prepared[idx].is_module && !prepared[idx].is_slow_test) {
+                !prepared[idx].is_module && !prepared[idx].is_slow_test &&
+                !prepared[idx].ast_backend) {
             native_indices.push_back(idx);
             continue;
         }
 
         std::string key = prepared[idx].is_slow_test ? "slow:" :
+            prepared[idx].ast_backend ? "ast:" :
             prepared[idx].is_module ? "module:" :
             (prepared[idx].is_async ? "async:" : "sync:");
         key += special_preamble_key(prepared[idx].special_preamble_includes);
@@ -1223,6 +1229,7 @@ static void partition_batch_indices(
             group.is_async = prepared[idx].is_async;
             group.is_module = prepared[idx].is_module;
             group.is_slow_test = prepared[idx].is_slow_test;
+            group.ast_backend = prepared[idx].ast_backend;
             js_groups.push_back(std::move(group));
         } else {
             group_index = it->second;
@@ -1284,12 +1291,21 @@ static const size_t T262_DEFAULT_BATCH_CHUNK_SIZE = 100;
 // AST batch cleanup replaces the test realm after every source, so a larger
 // worker manifest does not retain prior test heaps between result records.
 static const size_t T262_MAX_BATCH_CHUNK_SIZE = 600;
+static const size_t T262_AST_BATCH_CHUNK_SIZE = 600;
 static size_t g_t262_jobs = 0;  // 0 means auto: CPU count - 1
 static size_t g_t262_batch_chunk_size = T262_DEFAULT_BATCH_CHUNK_SIZE;
 static size_t g_t262_async_chunk_size = T262_DEFAULT_BATCH_CHUNK_SIZE;
 static bool g_t262_async_chunk_size_explicit = false;
 
-struct SubBatch { size_t start; size_t end; bool native; bool module; bool slow_test; size_t group; };
+struct SubBatch {
+    size_t start;
+    size_t end;
+    bool native;
+    bool module;
+    bool slow_test;
+    bool ast_backend;
+    size_t group;
+};
 
 struct BatchTiming {
     size_t batch_idx;
@@ -1477,6 +1493,8 @@ static std::string g_diagnose_list_file = DIAGNOSE_LIST_FILE;
 static bool g_run_async = false;     // --run-async: permit allowlisted async-flagged tests
 static std::string g_async_list_file; // --async-list=<path>: newline-separated async test allowlist
 static std::unordered_set<std::string> g_async_allowlist;
+static std::unordered_set<std::string> g_mir_allowlist;
+static bool g_hybrid_backend_routing = false;
 static std::unordered_map<std::string, std::vector<std::string>> g_diagnose_expected_paths;
 
 static void configure_test262_source_paths() {
@@ -1498,6 +1516,18 @@ static void configure_test262_source_paths() {
 static long slow_threshold_for_test(const std::string& test_name) {
     return g_slow_tests.count(test_name) ? SLOW_TEST_THRESHOLD_US : SLOW_THRESHOLD_US;
 }
+
+static bool test262_should_use_ast_backend(const Test262Prepared& prepared) {
+    // Raw, async, and module jobs retain the established MIR path; exact test
+    // names and metadata feature tags can also force a synchronous test to MIR.
+    if (prepared.is_async || prepared.is_module || prepared.is_raw) return false;
+    if (g_mir_allowlist.find(prepared.test_name) != g_mir_allowlist.end()) return false;
+    for (const auto& feature : prepared.features) {
+        if (g_mir_allowlist.find(feature) != g_mir_allowlist.end()) return false;
+    }
+    return true;
+}
+
 static std::unordered_map<std::string, std::vector<std::string>> g_special_preamble_exact;
 static std::vector<std::pair<std::string, std::vector<std::string>>> g_special_preamble_prefix;
 static std::string g_write_failures_path; // --write-failures=<path>: write failed test manifest TSV
@@ -2319,6 +2349,7 @@ static void prepare_all_tests(
             p.is_async = false;
             p.is_module = false;
             p.is_raw = false;
+            p.ast_backend = false;
             p.native_harness = false;
 
             // check test-specific skip list (by relative path)
@@ -2433,6 +2464,8 @@ static void prepare_all_tests(
             p.features = std::move(meta.features);
             p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
 
+            p.ast_backend = test262_should_use_ast_backend(p);
+
 #ifndef NDEBUG
             // Native harness eligibility: pre-computed in metadata cache (V2+),
             // or computed inline when no cache is available.
@@ -2442,6 +2475,7 @@ static void prepare_all_tests(
             p.native_harness = p.is_raw;
 #endif
             if (p.is_module) p.native_harness = false;
+            if (p.ast_backend) p.native_harness = false;
 
             prep_count.fetch_add(1, std::memory_order_relaxed);
         }
@@ -2507,6 +2541,10 @@ static long long t262_steady_now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
 }
 
+// Backend selection is process-wide in lambda.exe. Serialize only the brief
+// spawn/restore window so parallel workers can still execute concurrently.
+static std::mutex g_backend_spawn_mutex;
+
 // Run a sub-batch of tests from a pre-written manifest file + stdout pipe
 // Run a sub-batch from a manifest file using posix_spawn (avoids fork's page table copy)
 #ifdef _WIN32
@@ -2514,7 +2552,8 @@ static int run_t262_sub_batch(
     const char* manifest_path,
     std::unordered_map<std::string, BatchResult>& results,
     size_t num_tests = T262_DEFAULT_BATCH_CHUNK_SIZE,
-    bool slow_test = false)
+    bool slow_test = false,
+    bool ast_backend = false)
 {
     // Windows implementation using CreateProcess + anonymous pipes
     HANDLE pipe_rd = NULL, pipe_wr = NULL;
@@ -2554,7 +2593,23 @@ static int run_t262_sub_batch(
 
     PROCESS_INFORMATION pi = {};
     std::string cmd_copy = cmd;
-    if (!CreateProcessA(NULL, &cmd_copy[0], NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+    bool process_created = false;
+    {
+        std::lock_guard<std::mutex> lock(g_backend_spawn_mutex);
+        const char* previous_backend = getenv("JS_EXECUTION_BACKEND");
+        bool had_previous_backend = previous_backend != NULL;
+        char* saved_backend = previous_backend ? _strdup(previous_backend) : NULL;
+        _putenv_s("JS_EXECUTION_BACKEND", ast_backend ? "ast" : "mir");
+        process_created = CreateProcessA(NULL, &cmd_copy[0], NULL, NULL, TRUE, 0,
+                                         NULL, NULL, &si, &pi) != 0;
+        if (had_previous_backend) {
+            _putenv_s("JS_EXECUTION_BACKEND", saved_backend ? saved_backend : "");
+        } else {
+            _putenv_s("JS_EXECUTION_BACKEND", "");
+        }
+        free(saved_backend);
+    }
+    if (!process_created) {
         CloseHandle(manifest_h); CloseHandle(pipe_rd); CloseHandle(pipe_wr);
         return -1;
     }
@@ -2648,7 +2703,8 @@ static int run_t262_sub_batch(
     const char* manifest_path,
     std::unordered_map<std::string, BatchResult>& results,
     size_t num_tests = T262_DEFAULT_BATCH_CHUNK_SIZE,
-    bool slow_test = false)
+    bool slow_test = false,
+    bool ast_backend = false)
 {
     int stdout_pipe[2];
     if (pipe(stdout_pipe) != 0) return -1;
@@ -2703,7 +2759,21 @@ static int run_t262_sub_batch(
     }
     extern char** environ;
     pid_t pid;
-    int ret = posix_spawn(&pid, "./lambda.exe", &file_actions, NULL, argv, environ);
+    int ret;
+    {
+        std::lock_guard<std::mutex> lock(g_backend_spawn_mutex);
+        const char* previous_backend = getenv("JS_EXECUTION_BACKEND");
+        bool had_previous_backend = previous_backend != NULL;
+        char* saved_backend = previous_backend ? strdup(previous_backend) : NULL;
+        setenv("JS_EXECUTION_BACKEND", ast_backend ? "ast" : "mir", 1);
+        ret = posix_spawn(&pid, "./lambda.exe", &file_actions, NULL, argv, environ);
+        if (had_previous_backend) {
+            setenv("JS_EXECUTION_BACKEND", saved_backend ? saved_backend : "", 1);
+        } else {
+            unsetenv("JS_EXECUTION_BACKEND");
+        }
+        free(saved_backend);
+    }
     posix_spawn_file_actions_destroy(&file_actions);
 
     close(manifest_fd);
@@ -3074,6 +3144,13 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     reset_batch_execute_timing_summary(g_last_batch_execute_timing);
     if (indices.empty()) return results;
 
+    if (g_hybrid_backend_routing && g_persistent_workers) {
+        // A persistent lambda.exe cannot switch JS_EXECUTION_BACKEND between
+        // AST and MIR manifests, so hybrid runs use isolated child processes.
+        fprintf(stderr, "[test262] Hybrid AST/MIR routing disables persistent workers\n");
+        g_persistent_workers = false;
+    }
+
     // Split indices into native-harness and JS-harness groups.  JS groups are
     // keyed by special preamble needs so heavy helpers are compiled once only
     // for the batches that require them.
@@ -3081,6 +3158,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     std::vector<JsBatchGroup> js_groups;
     partition_batch_indices(prepared, indices, native_indices, js_groups);
     size_t js_count = 0;
+    size_t ast_count = 0;
     size_t module_count = 0;
     size_t special_group_count = 0;
     size_t slow_count = 0;
@@ -3088,26 +3166,30 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
         js_count += group.indices.size();
         if (group.is_module) module_count += group.indices.size();
         if (group.is_slow_test) slow_count += group.indices.size();
+        if (group.ast_backend) ast_count += group.indices.size();
         if (!group.special_includes.empty()) special_group_count++;
     }
-    fprintf(stderr, "[test262] Batch split: %zu native-harness + %zu js-harness (%zu module, %zu slow) = %zu total (%zu special-preamble groups)\n",
-            native_indices.size(), js_count, module_count, slow_count, indices.size(), special_group_count);
+    fprintf(stderr, "[test262] Batch split: %zu native-harness + %zu js-harness (%zu AST, %zu MIR, %zu module, %zu slow) = %zu total (%zu special-preamble groups)\n",
+            native_indices.size(), js_count, ast_count, js_count - ast_count,
+            module_count, slow_count, indices.size(), special_group_count);
 
     // Create sub-batches from both groups
     std::vector<SubBatch> batches;
     for (size_t s = 0; s < native_indices.size(); s += chunk_size) {
         size_t e = std::min(s + chunk_size, native_indices.size());
-        batches.push_back({s, e, true, false, false, 0});
+        batches.push_back({s, e, true, false, false, false, 0});
     }
     size_t native_batch_count = batches.size();
     for (size_t group_index = 0; group_index < js_groups.size(); group_index++) {
         const auto& group_indices = js_groups[group_index].indices;
         size_t group_chunk_size = js_groups[group_index].is_slow_test ? 1 :
+            js_groups[group_index].ast_backend ? T262_AST_BATCH_CHUNK_SIZE :
             (js_groups[group_index].is_async ? g_t262_async_chunk_size : chunk_size);
         for (size_t s = 0; s < group_indices.size(); s += group_chunk_size) {
             size_t e = std::min(s + group_chunk_size, group_indices.size());
             batches.push_back({s, e, false, js_groups[group_index].is_module,
-                               js_groups[group_index].is_slow_test, group_index});
+                               js_groups[group_index].is_slow_test,
+                               js_groups[group_index].ast_backend, group_index});
         }
     }
 
@@ -3178,9 +3260,9 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
         g_persistent_workers = false;
     }
 #endif
-    fprintf(stderr, "[test262] Batch workers: %zu (target=%zu, batches=%zu, chunk=%zu, async_chunk=%zu, %s, %s)\n",
+    fprintf(stderr, "[test262] Batch workers: %zu (target=%zu, batches=%zu, MIR_chunk=%zu, AST_chunk=%zu, async_chunk=%zu, %s, %s)\n",
             num_workers, target_workers, batches.size(),
-            g_t262_batch_chunk_size, g_t262_async_chunk_size,
+            g_t262_batch_chunk_size, T262_AST_BATCH_CHUNK_SIZE, g_t262_async_chunk_size,
             g_t262_jobs == 0 ? "auto: cpu-1" : "explicit --jobs",
             g_persistent_workers ? "persistent" : "spawn-per-batch");
     std::vector<std::thread> threads;
@@ -3246,7 +3328,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
                 // per-batch "start" line intentionally omitted to keep progress output
                 // to one line per batch; the "finished" line below carries the outcome.
                 int worker_status = run_t262_sub_batch(manifest_path, thread_results[i], batch_num_tests,
-                                                        batches[i].slow_test);
+                                                        batches[i].slow_test, batches[i].ast_backend);
                 auto t1 = std::chrono::steady_clock::now();
                 bool is_async_batch = !batches[i].native && js_groups[batches[i].group].is_async;
                 batch_timings[i] = {i, std::chrono::duration<double>(t1 - t0).count(),
@@ -3448,6 +3530,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         size_t js_batches = 0;
         for (const auto& group : js_clean_groups) {
             size_t group_chunk_size = group.is_slow_test ? 1 :
+                group.ast_backend ? T262_AST_BATCH_CHUNK_SIZE :
                 (group.is_async ? g_t262_async_chunk_size : g_t262_batch_chunk_size);
             js_batches += (group.indices.size() + group_chunk_size - 1) / group_chunk_size;
         }
@@ -3462,6 +3545,7 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         size_t js_batch_base = native_batches;
         for (const auto& group : js_clean_groups) {
             size_t group_chunk_size = group.is_slow_test ? 1 :
+                group.ast_backend ? T262_AST_BATCH_CHUNK_SIZE :
                 (group.is_async ? g_t262_async_chunk_size : g_t262_batch_chunk_size);
             for (size_t i = 0; i < group.indices.size(); i++) {
                 size_t bi = js_batch_base + (i / group_chunk_size);
@@ -3535,9 +3619,12 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
         analyze_group(native_clean, "native", g_t262_batch_chunk_size);
         for (const auto& group : js_clean_groups) {
             size_t group_chunk_size = group.is_slow_test ? 1 :
+                group.ast_backend ? T262_AST_BATCH_CHUNK_SIZE :
                 (group.is_async ? g_t262_async_chunk_size : g_t262_batch_chunk_size);
             std::string label = group.is_slow_test
                 ? "js-slow"
+                : group.ast_backend
+                ? "js-ast"
                 : group.special_includes.empty()
                 ? "js"
                 : std::string("js-special(") + group.key + ")";
@@ -3574,7 +3661,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
             for (size_t s = 0; s < lost_indices.size(); s++) {
                 size_t pi = lost_indices[s];
                 retry_batches.push_back({s, s + 1, false, prepared[pi].is_module,
-                                         prepared[pi].is_slow_test, 0});
+                                         prepared[pi].is_slow_test,
+                                         prepared[pi].ast_backend, 0});
             }
             std::vector<std::unordered_map<std::string, BatchResult>> thread_results(retry_batches.size());
             std::atomic<size_t> next_batch{0};
@@ -3604,7 +3692,8 @@ static void batch_run_all_tests(const std::vector<Test262Param>& tests) {
                         fclose(mf);
                         size_t retry_num_tests = retry_batches[i].end - retry_batches[i].start;
                         run_t262_sub_batch(manifest_path, thread_results[i], retry_num_tests,
-                                           prepared[lost_indices[i]].is_slow_test);
+                                           prepared[lost_indices[i]].is_slow_test,
+                                           prepared[lost_indices[i]].ast_backend);
                     }
                     unlink(manifest_path);
                 });
@@ -4433,6 +4522,8 @@ static void print_test262_help(const char* program) {
     printf("  --batch-chunk-size=<n>    Tests per js-test-batch process, clamped to\n");
     printf("                            1..%zu (default: %zu).\n",
            T262_MAX_BATCH_CHUNK_SIZE, T262_DEFAULT_BATCH_CHUNK_SIZE);
+    printf("                            Hybrid runs use %zu tests/process for AST tests\n",
+           T262_AST_BATCH_CHUNK_SIZE);
     printf("  --async-chunk-size=<n>    Async tests per js-test-batch process, clamped to\n");
     printf("                            1..%zu (default: %zu, same as sync batches).\n",
            T262_MAX_BATCH_CHUNK_SIZE, T262_DEFAULT_BATCH_CHUNK_SIZE);
@@ -4671,6 +4762,14 @@ int main(int argc, char** argv) {
                 g_metadata_cache.size(), METADATA_CACHE_FILE);
     }
 
+    if (!load_test_name_allowlist(MIR_LIST_FILE, g_mir_allowlist)) {
+        fprintf(stderr, "[test262] Error: cannot open MIR allowlist: %s\n", MIR_LIST_FILE);
+        return 1;
+    }
+    g_hybrid_backend_routing = true;
+    fprintf(stderr, "[test262] Loaded MIR allowlist: %zu tests from %s; sync remainder uses AST batches of %zu\n",
+            g_mir_allowlist.size(), MIR_LIST_FILE, T262_AST_BATCH_CHUNK_SIZE);
+
     if (load_special_preamble_list(SPECIAL_PREAMBLE_FILE)) {
         fprintf(stderr, "[test262] Loaded special preamble map: %zu exact + %zu prefix entries from %s\n",
                 g_special_preamble_exact.size(), g_special_preamble_prefix.size(), SPECIAL_PREAMBLE_FILE);
@@ -4807,6 +4906,7 @@ int main(int argc, char** argv) {
             p.is_async = false;
             p.is_module = false;
             p.is_raw = false;
+            p.ast_backend = false;
             p.native_harness = false;
             Test262Metadata meta;
             bool metadata_loaded = false;
@@ -4884,8 +4984,10 @@ int main(int argc, char** argv) {
                 }
             }
             p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
+            p.ast_backend = test262_should_use_ast_backend(p);
             if (p.is_raw) p.native_harness = true;
             if (p.is_module) p.native_harness = false;
+            if (p.ast_backend) p.native_harness = false;
             if (p.skip_result != T262_SKIP) indices.push_back(prepared.size());
             prepared.push_back(std::move(p));
         }
@@ -5032,6 +5134,7 @@ int main(int argc, char** argv) {
                 p.is_async = false;
                 p.is_module = false;
                 p.is_raw = false;
+                p.ast_backend = false;
                 p.native_harness = false;
                 // Load metadata from cache
                 auto cm_it = g_metadata_cache.find(param.test_path);
@@ -5065,8 +5168,10 @@ int main(int argc, char** argv) {
                 // regressions retry without their special preamble and thousands
                 // of retry results become infrastructure noise instead of signal.
                 p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
+                p.ast_backend = test262_should_use_ast_backend(p);
                 if (p.is_raw) p.native_harness = true;
                 if (p.is_module) p.native_harness = false;
+                if (p.ast_backend) p.native_harness = false;
                 retry_indices.push_back(retry_prepared.size());
                 retry_prepared.push_back(std::move(p));
             }

@@ -4738,9 +4738,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         labeled_frame.active_label = labeled->label;
         labeled_frame.active_label_len = labeled->label_len;
         bool directly_labels_iteration = labeled->body &&
-            (labeled->body->node_type == AST_NODE_WHILE_STAM ||
-             labeled->body->node_type == AST_NODE_DO_WHILE_STAM ||
-             labeled->body->node_type == AST_NODE_FOR_STAM ||
+            (labeled->body->node_type == AST_NODE_LOOP ||
              labeled->body->node_type == JS_AST_NODE_FOR_OF_STATEMENT ||
              labeled->body->node_type == JS_AST_NODE_FOR_IN_STATEMENT);
         JsInterpFrame body_frame = labeled_frame;
