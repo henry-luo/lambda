@@ -10181,6 +10181,42 @@ extern "C" Item js_is_constructor(Item fn) {
     return (Item){.item = jfn && jfn->construct ? ITEM_TRUE : ITEM_FALSE};
 }
 
+static Item js_test262_is_primitive(Item value) {
+    bool primitive = !js_is_truthy(value) ||
+        (!js_is_object_value(value) && !js_is_callable(value));
+    return (Item){.item = b2it(primitive)};
+}
+
+extern "C" Item js_test262_native_harness_install(void) {
+    // Native-harness jobs run in a fresh realm. Publishing real callable
+    // helpers preserves ordinary lookup, aliasing, and method dispatch while
+    // avoiding a JavaScript evaluation of sta.js/assert.js for safe tests.
+    RootFrame roots(2);
+    Rooted<Item> global_root(roots, js_get_global_this());
+    Rooted<Item> assert_root(roots, js_new_native_function(js_assert_base));
+    if (item_is_error(global_root.get()) || item_is_error(assert_root.get())) {
+        return item_is_error(global_root.get()) ? global_root.get() : assert_root.get();
+    }
+
+    js_set_native_method(assert_root.get(), "sameValue", js_assert_same_value);
+    js_set_native_method(assert_root.get(), "notSameValue", js_assert_not_same_value);
+    js_set_native_method(assert_root.get(), "compareArray", js_assert_compare_array);
+    js_set_native_method(assert_root.get(), "deepEqual", js_assert_deep_equal);
+    js_set_native_method(assert_root.get(), "throws", js_assert_throws);
+    Item stored = js_set_key_cstr(global_root.get(), "assert", assert_root.get());
+    if (item_is_error(stored)) return stored;
+
+    js_set_native_method(global_root.get(), "compareArray", js_compare_array);
+    js_set_native_method(global_root.get(), "verifyProperty", js_verify_property);
+    js_set_native_method(global_root.get(), "$DONOTEVALUATE", js_donotevaluate);
+    js_set_native_method(global_root.get(), "isConstructor", js_is_constructor);
+    js_set_native_method(global_root.get(), "isPrimitive", js_test262_is_primitive);
+    js_set_native_method(global_root.get(), "buildString", js_test262_build_string);
+    js_set_native_method(global_root.get(), "decimalToPercentHexString",
+        js_test262_decimal_to_percent_hex_string);
+    return js_status_ok();
+}
+
 
 #endif
 

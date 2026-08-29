@@ -101,6 +101,7 @@
     #include <dirent.h>
     #include <fcntl.h>
     #include <spawn.h>
+    #include <poll.h>
     #include <sys/stat.h>
     #include <sys/utsname.h>
     #ifdef __APPLE__
@@ -129,10 +130,15 @@ static const char* SLOW_TEST_FILE = "test/js262/t262_slow.txt";
 static const char* TEST262_RUN_LOCK_FILE = "temp/test_js_test262_gtest.lock";
 static bool g_use_stripped = false;  // use comment-stripped test files from TEST262_SOURCE_DIR
 
-static bool test262_native_harness_is_available(void) {
-    // Native assertion interception belongs to MIR lowering. The AST backend
-    // executes source directly, so ordinary tests require the JS preamble.
-    return !js_ast_interpreter_requested();
+static bool test262_native_harness_is_available(bool ast_backend) {
+    // AST installs an equivalent native helper object in each fresh realm.
+    // Keep MIR's release policy unchanged until it is separately validated.
+#ifndef NDEBUG
+    (void)ast_backend;
+    return true;
+#else
+    return ast_backend;
+#endif
 }
 
 // Features above ES2023 — skip tests requiring these.
@@ -945,10 +951,9 @@ static std::string g_harness_assert;
 static std::mutex  g_harness_mutex;
 static std::unordered_map<std::string, std::string> g_harness_cache;
 
-// Minimal harness files included in every JS preamble.  Expensive family helpers
-// are added per batch from special_premble.txt instead of taxing ordinary tests.
+// Minimal harness files included in every JS preamble. Expensive helpers are
+// promoted to a matching batch-local preamble from each test's includes list.
 static const char* PREAMBLE_INCLUDE_FILES[] = {
-    "nativeFunctionMatcher.js",
     NULL
 };
 
@@ -984,6 +989,23 @@ struct Test262Prepared {
     bool native_harness;         // true = run without JS harness preamble (native interception only)
 };
 
+static void add_batch_local_include_preambles(Test262Prepared* prepared) {
+    if (!prepared) return;
+    for (const std::string& include : prepared->includes) {
+        if (include != "nativeFunctionMatcher.js") continue;
+        bool already_promoted = false;
+        for (const std::string& existing : prepared->special_preamble_includes) {
+            if (existing == include) {
+                already_promoted = true;
+                break;
+            }
+        }
+        if (!already_promoted) {
+            prepared->special_preamble_includes.push_back(include);
+        }
+    }
+}
+
 struct JsBatchGroup {
     std::vector<size_t> indices;
     std::vector<std::string> special_includes;
@@ -992,6 +1014,7 @@ struct JsBatchGroup {
     bool is_module = false;
     bool is_slow_test = false;
     bool ast_backend = false;
+    bool native_harness = false;
 };
 
 // Assemble combined source on-the-fly from metadata.
@@ -1206,9 +1229,10 @@ static void partition_batch_indices(
     std::unordered_map<std::string, size_t> group_by_key;
 
     for (size_t idx : indices) {
-        if (prepared[idx].native_harness && !prepared[idx].is_async &&
-                !prepared[idx].is_module && !prepared[idx].is_slow_test &&
-                !prepared[idx].ast_backend) {
+        bool use_native_harness = prepared[idx].native_harness &&
+            !prepared[idx].is_async && !prepared[idx].is_module &&
+            !prepared[idx].is_slow_test;
+        if (use_native_harness && !prepared[idx].ast_backend) {
             native_indices.push_back(idx);
             continue;
         }
@@ -1217,6 +1241,7 @@ static void partition_batch_indices(
             prepared[idx].ast_backend ? "ast:" :
             prepared[idx].is_module ? "module:" :
             (prepared[idx].is_async ? "async:" : "sync:");
+        if (use_native_harness) key = "native-" + key;
         key += special_preamble_key(prepared[idx].special_preamble_includes);
         auto it = group_by_key.find(key);
         size_t group_index;
@@ -1230,6 +1255,7 @@ static void partition_batch_indices(
             group.is_module = prepared[idx].is_module;
             group.is_slow_test = prepared[idx].is_slow_test;
             group.ast_backend = prepared[idx].ast_backend;
+            group.native_harness = use_native_harness;
             js_groups.push_back(std::move(group));
         } else {
             group_index = it->second;
@@ -2463,19 +2489,16 @@ static void prepare_all_tests(
             p.includes = std::move(meta.includes);
             p.features = std::move(meta.features);
             p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
+            add_batch_local_include_preambles(&p);
 
             p.ast_backend = test262_should_use_ast_backend(p);
-
-#ifndef NDEBUG
             // Native harness eligibility: pre-computed in metadata cache (V2+),
-            // or computed inline when no cache is available.
-            p.native_harness = p.is_raw || (test262_native_harness_is_available() &&
+            // or computed inline when no cache is available. Release builds
+            // admit this only for AST, whose realm-local helper installation is
+            // independent of MIR lowering.
+            p.native_harness = p.is_raw || (test262_native_harness_is_available(p.ast_backend) &&
                 !p.is_async && cached_native_harness);
-#else
-            p.native_harness = p.is_raw;
-#endif
             if (p.is_module) p.native_harness = false;
-            if (p.ast_backend) p.native_harness = false;
 
             prep_count.fetch_add(1, std::memory_order_relaxed);
         }
@@ -2544,6 +2567,68 @@ static long long t262_steady_now_ms() {
 // Backend selection is process-wide in lambda.exe. Serialize only the brief
 // spawn/restore window so parallel workers can still execute concurrently.
 static std::mutex g_backend_spawn_mutex;
+
+#ifndef _WIN32
+struct T262WatchdogSignal {
+    int read_fd;
+    int write_fd;
+};
+
+static bool t262_watchdog_signal_create(T262WatchdogSignal* signal) {
+    if (!signal) return false;
+    signal->read_fd = -1;
+    signal->write_fd = -1;
+    int fds[2];
+    if (pipe(fds) != 0) return false;
+    signal->read_fd = fds[0];
+    signal->write_fd = fds[1];
+    return true;
+}
+
+static void t262_watchdog_signal_complete(T262WatchdogSignal* signal) {
+    if (!signal || signal->write_fd < 0) return;
+    unsigned char complete = 1;
+    while (write(signal->write_fd, &complete, sizeof(complete)) < 0 && errno == EINTR) {}
+    close(signal->write_fd);
+    signal->write_fd = -1;
+}
+
+static void t262_watchdog_signal_destroy(T262WatchdogSignal* signal) {
+    if (!signal) return;
+    if (signal->read_fd >= 0) close(signal->read_fd);
+    if (signal->write_fd >= 0) close(signal->write_fd);
+    signal->read_fd = -1;
+    signal->write_fd = -1;
+}
+
+static void t262_watchdog_wait_for_completion(pid_t pid,
+        int no_progress_timeout_secs, std::atomic<bool>* worker_done,
+        std::atomic<long long>* last_progress_ms, T262WatchdogSignal* completion,
+        const char* worker_label) {
+    while (!worker_done->load(std::memory_order_relaxed)) {
+        int wait_result = -1;
+        if (completion && completion->read_fd >= 0) {
+            struct pollfd completion_fd;
+            completion_fd.fd = completion->read_fd;
+            completion_fd.events = POLLIN;
+            completion_fd.revents = 0;
+            wait_result = poll(&completion_fd, 1, 1000);
+        }
+        if (wait_result > 0) return;
+        long long idle_ms = t262_steady_now_ms() -
+            last_progress_ms->load(std::memory_order_relaxed);
+        if (idle_ms >= (long long)no_progress_timeout_secs * 1000LL) {
+            fprintf(stderr, "\n[test262] WARNING: %sworker PID %d made no progress for %ds — sending SIGKILL\n",
+                    worker_label, pid, no_progress_timeout_secs);
+            kill(pid, SIGKILL);
+            return;
+        }
+        if (wait_result < 0 && (!completion || completion->read_fd < 0)) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+}
+#endif
 
 // Run a sub-batch of tests from a pre-written manifest file + stdout pipe
 // Run a sub-batch from a manifest file using posix_spawn (avoids fork's page table copy)
@@ -2622,17 +2707,27 @@ static int run_t262_sub_batch(
                     : T262_BATCH_NO_PROGRESS_TIMEOUT;
     std::atomic<bool> worker_done{false};
     std::atomic<long long> last_progress_ms{t262_steady_now_ms()};
-    std::thread watchdog([&pi, no_progress_timeout_secs, &worker_done, &last_progress_ms]() {
+    HANDLE watchdog_done_event = CreateEventA(NULL, TRUE, FALSE, NULL);
+    HANDLE watchdog_process = pi.hProcess;
+    DWORD watchdog_pid = pi.dwProcessId;
+    std::thread watchdog([watchdog_process, watchdog_pid, watchdog_done_event,
+            no_progress_timeout_secs, &worker_done, &last_progress_ms]() {
         while (!worker_done.load(std::memory_order_relaxed)) {
+            if (watchdog_done_event) {
+                if (WaitForSingleObject(watchdog_done_event, 1000) == WAIT_OBJECT_0) {
+                    return;
+                }
+            } else {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
             long long idle_ms = t262_steady_now_ms() -
                 last_progress_ms.load(std::memory_order_relaxed);
             if (idle_ms >= (long long)no_progress_timeout_secs * 1000LL) {
                 fprintf(stderr, "\n[test262] WARNING: Worker PID %lu made no progress for %ds — terminating\n",
-                        pi.dwProcessId, no_progress_timeout_secs);
-                TerminateProcess(pi.hProcess, 1);
+                        watchdog_pid, no_progress_timeout_secs);
+                TerminateProcess(watchdog_process, 1);
                 return;
             }
-            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     });
 
@@ -2692,10 +2787,12 @@ static int run_t262_sub_batch(
         fprintf(stderr, "[test262] Batch worker PID %lu exited with status %lu, collected %zu results\n",
                 pi.dwProcessId, exit_code, results.size());
     }
+    worker_done.store(true, std::memory_order_relaxed);
+    if (watchdog_done_event) SetEvent(watchdog_done_event);
+    watchdog.join();
+    if (watchdog_done_event) CloseHandle(watchdog_done_event);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    worker_done.store(true, std::memory_order_relaxed);
-    watchdog.join();
     return (int)exit_code;
 }
 #else
@@ -2794,18 +2891,12 @@ static int run_t262_sub_batch(
                     : T262_BATCH_NO_PROGRESS_TIMEOUT;
     std::atomic<bool> worker_done{false};
     std::atomic<long long> last_progress_ms{t262_steady_now_ms()};
-    std::thread watchdog([pid, no_progress_timeout_secs, &worker_done, &last_progress_ms]() {
-        while (!worker_done.load(std::memory_order_relaxed)) {
-            long long idle_ms = t262_steady_now_ms() -
-                last_progress_ms.load(std::memory_order_relaxed);
-            if (idle_ms >= (long long)no_progress_timeout_secs * 1000LL) {
-                fprintf(stderr, "\n[test262] WARNING: Worker PID %d made no progress for %ds — sending SIGKILL\n",
-                        pid, no_progress_timeout_secs);
-                kill(pid, SIGKILL);
-                return;
-            }
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
+    T262WatchdogSignal watchdog_signal;
+    t262_watchdog_signal_create(&watchdog_signal);
+    std::thread watchdog([pid, no_progress_timeout_secs, &worker_done,
+            &last_progress_ms, &watchdog_signal]() {
+        t262_watchdog_wait_for_completion(pid, no_progress_timeout_secs,
+            &worker_done, &last_progress_ms, &watchdog_signal, "");
     });
 
     FILE* fp = fdopen(stdout_pipe[0], "r");
@@ -2869,7 +2960,9 @@ static int run_t262_sub_batch(
                 pid, WEXITSTATUS(wstatus), results.size());
     }
     worker_done.store(true, std::memory_order_relaxed);
+    t262_watchdog_signal_complete(&watchdog_signal);
     watchdog.join();
+    t262_watchdog_signal_destroy(&watchdog_signal);
     return worker_status;
 }
 #endif // _WIN32
@@ -2887,8 +2980,15 @@ static bool write_t262_sub_batch_manifest(
     const SubBatch& batch = batches[batch_index];
     const auto& idx_vec = batch.native ? native_indices : js_groups[batch.group].indices;
     std::unordered_set<std::string> preamble_include_set;
+    bool native_harness = batch.native ||
+        (!batch.native && js_groups[batch.group].native_harness);
 
-    if (!batch.native && !batch.module) {
+    if (native_harness && batch.ast_backend) {
+        // AST native helpers are installed in the test realm before source
+        // evaluation; no mutable JS harness objects cross test boundaries.
+        fprintf(mf, "native-harness:ast\n");
+    }
+    if (!native_harness && !batch.module) {
         // JS-harness batch: send harness preamble via harness: protocol
         const auto& special_includes = js_groups[batch.group].special_includes;
         preamble_include_set = make_preamble_include_set(special_includes);
@@ -2905,7 +3005,7 @@ static bool write_t262_sub_batch_manifest(
         const auto& p = prepared[pi];
         std::string test_src = batch.module
             ? assemble_module_test_source(p)
-            : batch.native
+            : native_harness
             ? assemble_native_test_source(p)
             : assemble_test_source(p, &preamble_include_set);
         fprintf(mf, "%s:%s:%s:%zu\n",
@@ -2984,17 +3084,12 @@ static int run_t262_persistent_sub_batches(
     std::atomic<bool> worker_done{false};
     std::atomic<long long> last_progress_ms{t262_steady_now_ms()};
     int no_progress_timeout_secs = std::max(T262_HARD_TIMEOUT_MIN, hard_timeout_per_test_secs());
-    std::thread watchdog([pid, no_progress_timeout_secs, &worker_done, &last_progress_ms]() {
-        while (!worker_done.load(std::memory_order_relaxed)) {
-            long long idle_ms = t262_steady_now_ms() - last_progress_ms.load(std::memory_order_relaxed);
-            if (idle_ms >= (long long)no_progress_timeout_secs * 1000LL) {
-                fprintf(stderr, "\n[test262] WARNING: Persistent worker PID %d made no progress for %ds — sending SIGKILL\n",
-                        pid, no_progress_timeout_secs);
-                kill(pid, SIGKILL);
-                return;
-            }
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
+    T262WatchdogSignal watchdog_signal;
+    t262_watchdog_signal_create(&watchdog_signal);
+    std::thread watchdog([pid, no_progress_timeout_secs, &worker_done,
+            &last_progress_ms, &watchdog_signal]() {
+        t262_watchdog_wait_for_completion(pid, no_progress_timeout_secs,
+            &worker_done, &last_progress_ms, &watchdog_signal, "Persistent ");
     });
 
     FILE* fp = fdopen(stdout_pipe[0], "r");
@@ -3096,7 +3191,9 @@ static int run_t262_persistent_sub_batches(
                 pid, WEXITSTATUS(wstatus), batch_pos, batch_order.size());
     }
     worker_done.store(true, std::memory_order_relaxed);
+    t262_watchdog_signal_complete(&watchdog_signal);
     watchdog.join();
+    t262_watchdog_signal_destroy(&watchdog_signal);
 
     int unfinished_status = worker_status == 0 ? 1 : worker_status;
     auto batch_end = std::chrono::steady_clock::now();
@@ -3159,6 +3256,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     partition_batch_indices(prepared, indices, native_indices, js_groups);
     size_t js_count = 0;
     size_t ast_count = 0;
+    size_t ast_native_count = 0;
     size_t module_count = 0;
     size_t special_group_count = 0;
     size_t slow_count = 0;
@@ -3167,10 +3265,14 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
         if (group.is_module) module_count += group.indices.size();
         if (group.is_slow_test) slow_count += group.indices.size();
         if (group.ast_backend) ast_count += group.indices.size();
+        if (group.ast_backend && group.native_harness) {
+            ast_native_count += group.indices.size();
+        }
         if (!group.special_includes.empty()) special_group_count++;
     }
-    fprintf(stderr, "[test262] Batch split: %zu native-harness + %zu js-harness (%zu AST, %zu MIR, %zu module, %zu slow) = %zu total (%zu special-preamble groups)\n",
-            native_indices.size(), js_count, ast_count, js_count - ast_count,
+    fprintf(stderr, "[test262] Batch split: %zu MIR-native + %zu AST-native + %zu JS-harness (%zu AST, %zu MIR, %zu module, %zu slow) = %zu total (%zu special-preamble groups)\n",
+            native_indices.size(), ast_native_count, js_count - ast_native_count,
+            ast_count, js_count - ast_count,
             module_count, slow_count, indices.size(), special_group_count);
 
     // Create sub-batches from both groups
@@ -4910,6 +5012,7 @@ int main(int argc, char** argv) {
             p.native_harness = false;
             Test262Metadata meta;
             bool metadata_loaded = false;
+            bool cached_native_harness = false;
             bool is_module = false;
             bool is_raw = false;
             static const std::string prefix = std::string(TEST262_ROOT) + "/test/";
@@ -4936,8 +5039,7 @@ int main(int argc, char** argv) {
                 p.is_raw = is_raw;
                 p.includes = cm.includes;
                 p.features = cm.features;
-                p.native_harness = test262_native_harness_is_available() &&
-                    !p.is_async && cm.native_harness;
+                cached_native_harness = cm.native_harness;
                 meta.is_async = p.is_async;
                 meta.is_module = is_module;
                 meta.is_raw = is_raw;
@@ -4960,6 +5062,10 @@ int main(int argc, char** argv) {
                     p.is_raw = is_raw;
                     p.includes = meta.includes;
                     p.features = meta.features;
+                    cached_native_harness = meta.includes.empty() && !meta.is_negative &&
+                        source.find("Test262Error") == std::string::npos &&
+                        source.find("eval") == std::string::npos &&
+                        source.find("Function") == std::string::npos;
                     metadata_loaded = true;
                 }
             }
@@ -4984,10 +5090,11 @@ int main(int argc, char** argv) {
                 }
             }
             p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
+            add_batch_local_include_preambles(&p);
             p.ast_backend = test262_should_use_ast_backend(p);
-            if (p.is_raw) p.native_harness = true;
+            p.native_harness = p.is_raw || (test262_native_harness_is_available(p.ast_backend) &&
+                !p.is_async && cached_native_harness);
             if (p.is_module) p.native_harness = false;
-            if (p.ast_backend) p.native_harness = false;
             if (p.skip_result != T262_SKIP) indices.push_back(prepared.size());
             prepared.push_back(std::move(p));
         }
@@ -5153,25 +5260,17 @@ int main(int argc, char** argv) {
                 // here removes the per-test $DONE bridge and misclassifies a valid
                 // batch result as a runtime regression.
                 p.is_slow_test = g_slow_tests.count(p.test_name) > 0;
-                // match prepare_all_tests: release retries must not promote the
-                // cache's debug-only native-harness optimization into native mode.
-#ifndef NDEBUG
-                p.native_harness = p.is_raw || (test262_native_harness_is_available() &&
-                                                !p.is_async &&
-                                                cm_it != g_metadata_cache.end() &&
-                                                cm_it->second.native_harness);
-#else
-                p.native_harness = p.is_raw;
-#endif
                 // Phase 4 rebuilds prepared records from all_tests, so carry the
                 // batch-local helper policy too.  Without this, helper-dependent
                 // regressions retry without their special preamble and thousands
                 // of retry results become infrastructure noise instead of signal.
                 p.special_preamble_includes = special_preamble_for_test(p.test_name, p.test_path);
+                add_batch_local_include_preambles(&p);
                 p.ast_backend = test262_should_use_ast_backend(p);
-                if (p.is_raw) p.native_harness = true;
+                p.native_harness = p.is_raw || (test262_native_harness_is_available(p.ast_backend) &&
+                    !p.is_async && cm_it != g_metadata_cache.end() &&
+                    cm_it->second.native_harness);
                 if (p.is_module) p.native_harness = false;
-                if (p.ast_backend) p.native_harness = false;
                 retry_indices.push_back(retry_prepared.size());
                 retry_prepared.push_back(std::move(p));
             }

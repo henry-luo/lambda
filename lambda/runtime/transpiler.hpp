@@ -250,6 +250,9 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
                           uint64_t* result_home);
 Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                              const char* filename, uint64_t* result_home);
+Item transpile_js_to_mir_test262_native_len(Runtime* runtime, const char* js_source,
+                                            size_t js_source_len, const char* filename,
+                                            uint64_t* result_home);
 
 // Batch mode preamble support (two-module MIR split)
 struct JsPreambleState;
