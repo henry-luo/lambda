@@ -1155,6 +1155,10 @@ extern "C" void js_set_function_name(Item fn_item, Item name_item) {
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
+    if (fn && (fn->flags & JS_FUNC_FLAG_CLASS_CONSTRUCTOR)) {
+        js_set_class_name(fn_item, name_item);
+        return;
+    }
     if (fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC) {
         fn->name = it2s(name_item);
         js_function_refresh_name_property(fn);
@@ -1169,6 +1173,11 @@ extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) 
     if (get_type_id(fn_item) != LMD_TYPE_FUNC) return;
     if (get_type_id(name_item) != LMD_TYPE_STRING) return;
     JsFunction* fn = (JsFunction*)fn_item.function;
+    if (fn && (fn->flags & JS_FUNC_FLAG_CLASS_CONSTRUCTOR)) {
+        // Preserve a class element's own `name` member after class evaluation.
+        js_set_class_name(fn_item, name_item);
+        return;
+    }
     if (fn->layout_magic == JS_FUNCTION_LAYOUT_MAGIC &&
             (!fn->name || fn->name->len == 0)) {
         fn->name = it2s(name_item);
@@ -1179,6 +1188,30 @@ extern "C" void js_set_function_name_if_anonymous(Item fn_item, Item name_item) 
 // Private NameRecords retain their source spelling; rewriting it could
 // conflate a valid #123_name with a former compiler-private encoding.
 JS_FORWARD_STATIC_EXPRESSION(Item, js_private_display_name_item, (Item name_item), name_item)
+
+static bool js_class_name_is_default_metadata(Item class_item) {
+    RootFrame roots(5);
+    Rooted<Item> class_root(roots, class_item);
+    Rooted<Item> name_key_root(roots, js_name_item("name", 4));
+    Rooted<Item> descriptor_root(roots,
+        js_object_get_own_property_descriptor(class_root.get(), name_key_root.get()));
+    if (item_is_error(descriptor_root.get()) ||
+            get_type_id(descriptor_root.get()) == LMD_TYPE_UNDEFINED) {
+        return false;
+    }
+    Rooted<Item> value_key_root(roots, js_name_item("value", 5));
+    Rooted<Item> value_root(roots,
+        js_get_key_default(descriptor_root.get(), value_key_root.get()));
+    if (get_type_id(value_root.get()) != LMD_TYPE_STRING ||
+            it2s(value_root.get())->len != 0) {
+        return false;
+    }
+    Rooted<Item> writable_key_root(roots, js_name_item("writable", 8));
+    // A class element can intentionally define its own empty `name` field.
+    // Only the non-writable factory metadata remains eligible for inference.
+    return !js_is_truthy(js_get_key_default(descriptor_root.get(),
+        writable_key_root.get()));
+}
 
 static int js_function_name_from_symbol_key(NameRef key, char* out, int out_size) {
     if (!key || !property_key_requires_identity(key) ||
@@ -1195,7 +1228,9 @@ static int js_function_name_from_symbol_key(NameRef key, char* out, int out_size
     return len;
 }
 
-extern "C" void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind) {
+static void js_set_function_name_from_property_key_impl(Item fn_item, Item key_item,
+                                                        int64_t prefix_kind,
+                                                        bool only_if_anonymous) {
     Item prop_key = js_to_property_key(key_item);
     if (get_type_id(prop_key) != LMD_TYPE_STRING) return;
     String* key = it2s(prop_key);
@@ -1218,27 +1253,36 @@ extern "C" void js_set_function_name_from_property_key_if_anonymous(Item fn_item
         snprintf(display, sizeof(display), "%.*s", base_len, base);
     }
     Item display_item = js_name_item(display, strlen(display));
-    if (prefix_kind == 1 || prefix_kind == 2) {
+    if (!only_if_anonymous || prefix_kind == 1 || prefix_kind == 2) {
         js_set_function_name(fn_item, display_item);
     } else {
         js_set_function_name_if_anonymous(fn_item, display_item);
     }
 }
 
+extern "C" void js_set_function_name_from_property_key_if_anonymous(Item fn_item,
+    Item key_item, int64_t prefix_kind) {
+    js_set_function_name_from_property_key_impl(fn_item, key_item, prefix_kind, true);
+}
+
+extern "C" void js_set_function_name_from_property_key(Item fn_item, Item key_item,
+    int64_t prefix_kind) {
+    js_set_function_name_from_property_key_impl(fn_item, key_item, prefix_kind, false);
+}
+
 extern "C" void js_set_class_name(Item cls_item, Item name_item) {
     if (get_type_id(cls_item) == LMD_TYPE_FUNC) {
-        JsFunction* fn = (JsFunction*)cls_item.function;
+        RootFrame roots(2);
+        Rooted<Item> class_root(roots, cls_item);
+        Rooted<Item> name_root(roots, name_item);
+        JsFunction* fn = (JsFunction*)class_root.get().function;
         if (!fn || !(fn->flags & JS_FUNC_FLAG_CLASS_CONSTRUCTOR) ||
-                get_type_id(name_item) != LMD_TYPE_STRING) return;
-        Item current = js_get_name_key(cls_item, "name", 4);
-        // A static `name` method is an own callable property; inferred class
-        // naming must not replace it with the constructor's display string.
-        if (get_type_id(current) != LMD_TYPE_STRING) return;
-        String* current_name = it2s(current);
-        if (current_name && current_name->len != 0) return;
+                get_type_id(name_root.get()) != LMD_TYPE_STRING) return;
+        if (!js_class_name_is_default_metadata(class_root.get())) return;
         // Class constructors are JsFunction values after Tune6; keeping this
         // setter Map-only silently erased every inferred class name.
-        fn->name = it2s(name_item);
+        fn = (JsFunction*)class_root.get().function;
+        fn->name = it2s(name_root.get());
         js_function_refresh_name_property(fn);
         return;
     }

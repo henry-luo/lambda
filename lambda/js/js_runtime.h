@@ -111,6 +111,8 @@ LAMBDA_STATIC_ASSERT(ITEM_TAG_IS_NON_DOUBLE((uint8_t)(JS_ITER_DONE_SENTINEL >> 5
  * Follows ECMAScript ToPrimitive algorithm.
  */
 Item js_to_number(Item value);
+// ToNumeric preserves BigInt while otherwise applying ToNumber.
+Item js_to_numeric(Item value);
 Item js_to_string(Item value);
 Item js_to_boolean(Item value);
 Item js_to_object(Item value);
@@ -457,8 +459,12 @@ void js_set_pending_call_source(const char* source, int64_t len);
 Item js_super_bind_this(Item this_val, Item construct_result);
 Item js_get_super_this_value(void);
 Item js_get_super_constructor_from_receiver(Item receiver, Item fallback_ctor);
+Item js_super_get_base(Item receiver);
 Item js_super_property_get(Item receiver, Item key);
+Item js_super_property_get_from_base(Item receiver, Item base, Item key);
 Item js_super_property_set(Item receiver, Item key, Item value, int64_t strict);
+Item js_super_property_set_from_base(Item receiver, Item base, Item key, Item value,
+                                     int64_t strict);
 Item js_build_arguments_object(void);
 // Materialize an arguments exotic object for a deferred AST activation without
 // borrowing the ambient callback's transient call span.
@@ -553,6 +559,7 @@ Item js_nullish_coalesce(Item left, Item right);
 Item js_object_keys(Item object);
 Item js_typed_array_enumerable_custom_keys(Item object);
 Item js_for_in_keys(Item object);
+bool js_for_in_key_is_live(Item object, Item key);
 Item js_object_get_own_property_names(Item object);
 Item js_object_get_own_property_symbols(Item object);
 Item js_to_string_val(Item value);
@@ -882,8 +889,14 @@ Item js_get_global_object(void);
 int js_is_global_this_object_value(Item object);
 Item js_get_global_property(Item key);
 Item js_get_global_property_strict(Item key);
+// Resolve the global environment after an Object Environment Record already
+// performed HasBinding for this identifier.
+Item js_get_global_property_after_with_lookup(Item key);
 Item js_get_global_property_reference(Item key, int64_t strict_reference);
+// Set a global binding after an Object Environment Record already ran HasBinding.
+Item js_set_global_property_after_with_lookup(Item key, Item value, int64_t strict);
 int64_t js_global_binding_exists(Item key);
+int64_t js_global_binding_exists_after_with_lookup(Item key);
 // Tune8 §2.2: js_set_global_property now takes a strict flag
 // (0 = sloppy implicit global, 1 = strict throw-on-undeclared).
 // js_set_global_property_strict has been removed.
@@ -919,6 +932,7 @@ void js_private_home_class_leave(Item previous_class);
 Item js_private_home_class_leave_result(Item previous_class, Item result);
 Item js_private_brand_add(Item object, Item private_key, Item callee);
 void js_set_function_name_from_property_key_if_anonymous(Item fn_item, Item key_item, int64_t prefix_kind);
+void js_set_function_name_from_property_key(Item fn_item, Item key_item, int64_t prefix_kind);
 void js_set_function_name_if_anonymous(Item fn_item, Item name_item);
 Item js_get_global_builtin_fn_by_id(Item global_id);
 void js_eval_env_push_frame(void);
@@ -928,6 +942,9 @@ void js_eval_local_pop_frame(void);
 Item js_eval_local_get_binding_or_fallback(Item key, Item fallback);
 int64_t js_eval_local_has_var_binding(Item key);
 void js_eval_local_export_var(Item key, Item value);
+int64_t js_eval_local_current_var_count(void);
+Item js_eval_local_current_var_key(int64_t index);
+Item js_eval_local_current_var_value(int64_t index);
 void js_eval_local_note_lexical_binding(Item key);
 int64_t js_eval_local_has_lexical_binding(Item key);
 void js_eval_local_note_immutable_binding(Item key);
@@ -938,6 +955,8 @@ Item js_get_with_binding_or_fallback_strict(Item key, Item fallback);
 Item js_get_last_with_binding_base_or_undefined(Item key);
 Item js_probe_with_binding(Item key);
 Item js_capture_with_binding(Item key);
+Item js_probe_with_binding_from(Item key, int64_t minimum_depth);
+Item js_capture_with_binding_from(Item key, int64_t minimum_depth);
 Item js_set_last_with_binding_if_valid(Item key, Item value, int64_t strict);
 Item js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict);
 void js_eval_env_bind(Item key, Item value);
@@ -977,6 +996,8 @@ Item js_symbol_well_known(Item name);
 // v14: Generator Runtime
 // =============================================================================
 
+struct JsGeneratorStateRecord;
+
 /**
  * Create a generator object from a state machine function pointer.
  * The func_ptr is the MIR-compiled generator body (state machine form).
@@ -986,6 +1007,7 @@ Item js_generator_create(void* func_ptr, Item* env, int env_size, int is_async);
 Item js_generator_create_mir(void* func_ptr, Item* env, int env_size, int is_async);
 Item js_generator_create_ast(Item function, Item arguments, Item this_value,
                              int is_async);
+struct JsGeneratorStateRecord* js_generator_get_ast_state(Item generator);
 
 /**
  * Advance the generator: execute next state, return {value, done} result.

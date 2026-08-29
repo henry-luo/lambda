@@ -18,9 +18,16 @@ typedef struct JsInterpEnv {
     uint64_t private_home_class;
     // Flat [source name, identity key] pairs exported to a direct-eval bridge.
     uint64_t private_bindings;
+    // Flat [name, value] pairs declared by direct eval in this variable
+    // environment. Closures retain this GC-owned record after the caller exits.
+    uint64_t eval_bindings;
+    // The nearest non-arrow function's live lexical `this` binding. Derived
+    // constructors initialize this cell only after their `super()` call.
+    uint64_t lexical_this;
     struct AstNode* function_node;
     uint32_t slot_count;
     uint8_t arguments_are_mapped;
-    uint8_t reserved[3];
+    uint8_t has_lexical_this;
+    uint8_t reserved[2];
     uint64_t slots[1];
 } JsInterpEnv;

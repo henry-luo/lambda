@@ -860,8 +860,12 @@ static Item js_private_environment_for_class(Item class_item, bool create) {
     if (get_type_id(class_item) != LMD_TYPE_MAP &&
             get_type_id(class_item) != LMD_TYPE_FUNC) return ItemNull;
     Item environment_key = js_name_item("__pk_env__", 10);
-    Item environment = js_get_key_default(class_item, environment_key);
-    if (get_type_id(environment) == LMD_TYPE_MAP) return environment;
+    bool environment_found = false;
+    Item environment = js_class_internal_property(class_item, "__pk_env__", 10,
+        &environment_found);
+    // A derived constructor inherits its parent's function prototype. Private
+    // identities remain per evaluated class, so this cache must be own-only.
+    if (environment_found && get_type_id(environment) == LMD_TYPE_MAP) return environment;
     if (!create) return ItemNull;
 
     RootFrame roots(3);
@@ -2616,7 +2620,8 @@ static Item js_init_class_instance_fields_inner(Item callee, Item object) {
             if (!brand_only) continue;
             Item field_key = field_keys.array->items[field_index];
             if (get_type_id(field_key) != LMD_TYPE_STRING &&
-                get_type_id(field_key) != LMD_TYPE_SYMBOL) continue;
+                get_type_id(field_key) != LMD_TYPE_SYMBOL &&
+                !js_key_is_symbol(field_key)) continue;
             JS_RETURN_IF_ERROR(js_init_class_instance_field(
                 callee_root.get(), object_root.get(), field_key, false,
                 make_js_undefined(), true));
@@ -2624,7 +2629,8 @@ static Item js_init_class_instance_fields_inner(Item callee, Item object) {
         for (int64_t field_index = 0; field_index < field_count; field_index++) {
             Item field_key = field_keys.array->items[field_index];
             if (get_type_id(field_key) != LMD_TYPE_STRING &&
-                get_type_id(field_key) != LMD_TYPE_SYMBOL) break;
+                get_type_id(field_key) != LMD_TYPE_SYMBOL &&
+                !js_key_is_symbol(field_key)) break;
             bool value_found = values_found && get_type_id(field_values) == LMD_TYPE_ARRAY &&
                 field_index < field_values.array->length;
             Item field_value = value_found ?
@@ -4515,6 +4521,11 @@ static Item js_private_method_lookup_from_brand(Item receiver, Item key, String*
 }
 
 extern "C" Item js_private_in(Item object, Item private_key) {
+    // Private-brand membership never boxes primitives: the RHS must already
+    // be an Object before the private name's brand can be queried.
+    if (!js_is_object_value(object)) {
+        return js_throw_type_error("Right-hand side of private 'in' is not an object");
+    }
     if (get_type_id(private_key) != LMD_TYPE_STRING ||
         !property_key_requires_identity(it2s(private_key)) ||
         property_key_kind(it2s(private_key)) != NAME_KEY_PRIVATE) {
@@ -7909,10 +7920,9 @@ extern "C" Item js_jube_member_call_by_ordinal(Item receiver, int64_t slot,
         argc > 0 ? (int)argc : 0);
 }
 
-// super.x property read: look up property on [[GetPrototypeOf]](receiver),
-// but call getters with receiver as 'this'. Implements ES spec super reference [[Get]].
-extern "C" Item js_super_property_get(Item receiver, Item key) {
-    Item proto = js_super_lookup_base(receiver);
+// A super reference snapshots its base before ToPropertyKey can run user code.
+// Keep that base explicit for callers that already performed the snapshot.
+static Item js_super_property_get_from_base_impl(Item receiver, Item proto, Item key) {
     if (proto.item == ItemNull.item || proto.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot read super property of null or undefined");
     }
@@ -7962,6 +7972,20 @@ extern "C" Item js_super_property_get(Item receiver, Item key) {
     return js_get_key_default(proto, key);
 }
 
+extern "C" Item js_super_get_base(Item receiver) {
+    return js_super_lookup_base(receiver);
+}
+
+// super.x property read: look up property on [[GetPrototypeOf]](receiver),
+// but call getters with receiver as 'this'. Implements ES spec super reference [[Get]].
+extern "C" Item js_super_property_get(Item receiver, Item key) {
+    return js_super_property_get_from_base_impl(receiver, js_super_lookup_base(receiver), key);
+}
+
+extern "C" Item js_super_property_get_from_base(Item receiver, Item base, Item key) {
+    return js_super_property_get_from_base_impl(receiver, base, key);
+}
+
 // Like js_super_property_get but for instance method context:
 // receiver.__proto__.__proto__ = ParentClass.prototype (skip current class override).
 extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
@@ -7999,8 +8023,8 @@ extern "C" Item js_super_instance_method_get(Item receiver, Item key) {
 
 // super.x = val: look up setter on [[GetPrototypeOf]](receiver),
 // call setter with receiver as 'this'. If no setter, set on receiver.
-static Item js_super_property_set_impl(Item receiver, Item key, Item value, bool strict_reference) {
-    Item proto = js_super_lookup_base(receiver);
+static Item js_super_property_set_from_base_impl(Item receiver, Item proto, Item key,
+        Item value, bool strict_reference) {
     // Object.setPrototypeOf(C, null) stores an undefined sentinel; super writes
     // must reject that null base just as super reads do.
     if (proto.item == ItemNull.item || proto.item == ITEM_JS_UNDEFINED) {
@@ -8060,6 +8084,17 @@ static Item js_super_property_set_impl(Item receiver, Item key, Item value, bool
         }
     }
     return js_set_key_default(receiver, key, value);
+}
+
+static Item js_super_property_set_impl(Item receiver, Item key, Item value,
+        bool strict_reference) {
+    return js_super_property_set_from_base_impl(receiver, js_super_lookup_base(receiver),
+        key, value, strict_reference);
+}
+
+extern "C" Item js_super_property_set_from_base(Item receiver, Item base, Item key,
+        Item value, int64_t strict) {
+    return js_super_property_set_from_base_impl(receiver, base, key, value, strict != 0);
 }
 
 // Tune8 §2.2: super_property_set + super_property_set_non_strict folded into
@@ -13711,6 +13746,18 @@ static Item js_super_call_class_impl(Item callee, Item this_val, Item* args,
         // Proxy construction owns the complete [[Construct]] capability.
         return js_construct_value(callee, args, argc, js_get_new_target(), result_home,
             false);
+    }
+    int typed_array_type = js_resolve_ta_type_from_ctor(callee);
+    if (typed_array_type < 0 && get_type_id(callee) == LMD_TYPE_FUNC) {
+        typed_array_type = js_resolve_ta_type_from_class(callee);
+    }
+    if (typed_array_type >= 0) {
+        // An implicit class extending another TypedArray subclass still
+        // reaches this class-super lane.  TypedArray construction is
+        // [[Construct]]-only; falling through to the callable body reports
+        // "Constructor requires 'new'" for that otherwise valid super().
+        return js_construct_value(callee, args, argc, js_get_new_target(),
+            result_home, false);
     }
     if (callee_type == LMD_TYPE_FUNC) {
         if (js_is_class_constructor(callee)) {
@@ -27651,6 +27698,7 @@ extern "C" void js_generator_map_gc_trace(Map* map, gc_heap_t* gc) {
     gc_mark_item(gc, js_generators[idx].ast_function.item);
     gc_mark_item(gc, js_generators[idx].ast_arguments.item);
     gc_mark_item(gc, js_generators[idx].ast_this.item);
+    gc_mark_item(gc, js_generators[idx].ast_yield_values.item);
     gc_mark_item(gc, js_generators[idx].ast_pending_resume_input.item);
     if (js_generators[idx].ast_function_env) {
         gc_mark_object_ptr(gc, js_generators[idx].ast_function_env);
@@ -27852,8 +27900,12 @@ static Item js_generator_create_current(void* func_ptr, Item* env, int env_size,
     gen->ast_function_env = NULL;
     gen->ast_body_env = NULL;
     gen->ast_yield_skip = 0;
+    gen->ast_yield_values = get_type_id(ast_function) == LMD_TYPE_FUNC
+        ? js_array_new(0) : ItemNull;
+    if (item_is_error(gen->ast_yield_values)) return gen->ast_yield_values;
     gen->ast_loop_continuations = NULL;
     gen->ast_list_continuation = NULL;
+    gen->ast_array_binding_continuations = NULL;
     gen->ast_resumable_loop_active = false;
     gen->ast_pending_resume_yield = 0;
     gen->ast_pending_resume_input = ItemNull;
@@ -27947,6 +27999,10 @@ static JsGenerator* js_get_generator(Item gen_obj) {
     int64_t idx = ((JsGeneratorMapCarrier*)gen_obj.map)->generator_index;
     if (idx < 0 || idx >= js_generator_count) return NULL;
     return &js_generators[idx];
+}
+
+extern "C" JsGeneratorStateRecord* js_generator_get_ast_state(Item generator) {
+    return js_get_generator(generator);
 }
 
 #define js_gen_return_signal_marker (js_runtime_state.iterators.generator_return_marker)
@@ -28093,6 +28149,11 @@ static Item js_yield_delegate_next_result(Item iterator, Item input) {
 static Item js_generator_resume_after_delegate_error(Item generator, JsGenerator* gen,
         Item error_lane) {
     Item caught_value = js_error_lane_payload(error_lane);
+    if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
+        // A delegate protocol failure completes yield* abruptly before the
+        // AST replays its suspension point through the enclosing try/finally.
+        gen->ast_yield_skip++;
+    }
     gen->delegate = ItemNull;
     gen->state = gen->delegate_resume;
     gen->delegate_resume = -1;
@@ -28139,12 +28200,11 @@ extern "C" Item js_generator_next(Item generator, Item input) {
     if (get_type_id(gen->delegate) != LMD_TYPE_NULL) {
         Item del_result = js_yield_delegate_next_result(gen->delegate, input);
         if (item_is_error(del_result)) {
-            gen->delegate = ItemNull;
-            gen->state = gen->delegate_resume;
-            gen->delegate_resume = -1;
-            gen->delegate_idx = 0;
             gen->executing = false;
-            return js_generator_throw(generator_root.get(), js_error_lane_payload(del_result));
+            // A failed delegated next completes the yield* expression before
+            // the AST replay receives the injected throw.
+            return js_generator_resume_after_delegate_error(
+                generator_root.get(), gen, del_result);
         }
         Item del_done_item = js_iter_result_is_done(del_result);
         if (item_is_error(del_done_item)) {
@@ -28380,6 +28440,14 @@ static Item js_generator_delegate_abrupt_call(Item generator, JsGenerator* gen,
     gen->delegate = ItemNull;
     gen->delegate_resume = -1;
     gen->delegate_idx = 0;
+    if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
+        // The AST generator has not counted the delegated yield yet. Replay
+        // it as the completed yield* expression before delivering its result.
+        gen->ast_yield_skip++;
+        return is_return ? js_generator_next(generator,
+                js_gen_return_signal(inner_value))
+            : js_generator_next(generator, inner_value);
+    }
     if (is_return) return js_generator_resume_return_signal(gen, is_async, inner_value);
     return js_generator_next(generator, inner_value);
 }
@@ -28395,11 +28463,6 @@ extern "C" Item js_generator_return(Item generator, Item value) {
             gen->state = -1;
             Item result = js_make_iter_result(value, true);
             return is_async ? js_promise_resolve(result) : result;
-        }
-        if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC && !gen->done) {
-            // The AST interpreter represents return as the same resumable
-            // completion as throw, including a finally block that yields.
-            return js_generator_next(generator, js_gen_return_signal(value));
         }
         if (gen->env && gen->env_size > 0) {
             int active_slot = gen->env_size - 1;
@@ -28440,8 +28503,19 @@ extern "C" Item js_generator_return(Item generator, Item value) {
             gen->delegate = ItemNull;
             gen->delegate_resume = -1;
             gen->delegate_idx = 0;
+            if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
+                // The delegate's initial yield belongs to yield*. Mark it
+                // complete before injecting the return completion into the AST.
+                gen->ast_yield_skip++;
+                return js_generator_next(generator, js_gen_return_signal(value));
+            }
         }
         if (!gen->done) {
+            if (get_type_id(gen->ast_function) == LMD_TYPE_FUNC) {
+                // Without an active delegate, return resumes the suspended
+                // AST yield so enclosing finally/catch nodes observe it.
+                return js_generator_next(generator, js_gen_return_signal(value));
+            }
             return js_generator_resume_return_signal(gen, is_async, value);
         }
     }
@@ -28494,10 +28568,11 @@ extern "C" Item js_generator_throw(Item generator, Item error) {
             }
             gen->delegate_resume = -1;
             gen->delegate_idx = 0;
-                    Item error = js_new_error_with_name(
+            Item error = js_new_error_with_name(
                         js_name_item("TypeError", 9),
                         js_name_item("The iterator does not provide a 'throw' method", 46));
-            return js_generator_next(generator, js_gen_throw_signal(error));
+            return js_generator_resume_after_delegate_error(generator, gen,
+                js_throw_value(error));
         }
         if (!gen->done) {
             if (gen->executing) {

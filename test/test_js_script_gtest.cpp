@@ -656,6 +656,103 @@ TEST(JsInterpreter, DelegatesAstGeneratorYieldsThroughTheSharedAsyncProtocol) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, ForwardsAstGeneratorReturnThroughDelegatedIterator) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var returnGets = 0; var iterable = { next: function() { return { value: 1, done: false }; }, "
+        "get return() { returnGets += 1; return null; } }; "
+        "iterable[Symbol.iterator] = function() { return iterable; }; "
+        "function* outer() { yield* iterable; } "
+        "var iterator = outer(); iterator.next(); var result = iterator.return(2); "
+        "[result.value, result.done, returnGets];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "generator-delegation-return.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(2.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 1).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 2), flt2it(1.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ClosesAstGeneratorsFromForOfWithoutReplayingPriorStatements) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var started = 0; var finalized = 0; "
+        "function* values() { started += 1; try { yield; } finally { finalized += 1; } } "
+        "var iterator = values(); for (var value of iterator) { break; } [started, finalized];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "generator-for-of-close.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(1.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ReplaysNestedGeneratorYieldsBeforeAdvancingTheStatementList) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function* nested() { yield yield 1; } "
+        "var iter = nested(); var first = iter.next(); var second = iter.next(3); "
+        "var third = iter.next(); "
+        "[first.value, first.done, second.value, second.done, third.value, third.done];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "nested-generator-yield.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 1).item, b2it(false));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 2), flt2it(3.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 3).item, b2it(false));
+    EXPECT_EQ(get_type_id(js_elements_get_int(result, 4)), LMD_TYPE_UNDEFINED);
+    EXPECT_EQ(js_elements_get_int(result, 5).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ReplaysPriorNestedGeneratorInputsThroughSpreadExpressions) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var calls = 0; var nested = function*() { calls += 1; yield [...yield yield]; }; "
+        "var iter = nested(); var first = iter.next(); "
+        "var second = iter.next(['a', 'b', 'c']); var third = iter.next(second.value); "
+        "[first.value, first.done, second.value, second.done, third.value, third.done, calls];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "nested-generator-yield-spread.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(get_type_id(js_elements_get_int(result, 0)), LMD_TYPE_UNDEFINED);
+    EXPECT_EQ(js_elements_get_int(result, 1).item, b2it(false));
+    EXPECT_EQ(js_array_length(js_elements_get_int(result, 2)), 3);
+    EXPECT_EQ(js_elements_get_int(result, 3).item, b2it(false));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(js_elements_get_int(result, 4), 0),
+        js_make_string("a")).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(js_elements_get_int(result, 4), 2),
+        js_make_string("c")).item, b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 5).item, b2it(false));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 6), flt2it(1.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, AppliesArrayHoleSemanticsThroughNativeCallbacks) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1071,6 +1168,415 @@ TEST(JsInterpreter, BindsDestructuringDefaultsAndRestInSharedCells) {
     runtime_cleanup(&runtime);
 }
 
+TEST(JsInterpreter, InfersNamesForAnonymousDestructuringDefaults) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let [arrow = () => {}, ordinary = function() {}, generator = function*() {}, "
+        "classValue = class {}, namedClass = class Explicit {}, "
+        "staticName = class { static name() {} }] = []; "
+        "let { property: objectArrow = () => {} } = {}; "
+        "let staticMethodClass = [class { static name() {} }][0]; "
+        "let parameterNames = (([parameterClass = class {}, "
+        "parameterNamed = class ExplicitParameter {}, "
+        "parameterStatic = class { static name() {} }]) => "
+        "[parameterClass.name, parameterNamed.name, "
+        "parameterStatic.name !== 'parameterStatic'])([]); "
+        "var assignedParameterFunction; "
+        "assignedParameterFunction = ([assignedClass = class {}, "
+        "assignedNamed = class ExplicitAssigned {}, "
+        "assignedStatic = class { static name() {} }]) => "
+        "[assignedClass.name, assignedNamed.name, "
+        "assignedStatic.name !== 'assignedStatic']; "
+        "let assignedParameterNames = assignedParameterFunction([]); "
+        "[arrow.name, ordinary.name, generator.name, classValue.name, objectArrow.name, "
+        "namedClass.name, staticName.name !== 'staticName', "
+        "typeof staticMethodClass.name === 'function', parameterNames[0], "
+        "parameterNames[1], parameterNames[2], assignedParameterNames[0], "
+        "assignedParameterNames[1], assignedParameterNames[2]];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "destructuring-default-names.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), js_make_string("arrow")).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), js_make_string("ordinary")).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 2), js_make_string("generator")).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 3), js_make_string("classValue")).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 4), js_make_string("objectArrow")).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 5), js_make_string("Explicit")).item,
+        b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 6).item, b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 7).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 8),
+        js_make_string("parameterClass")).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 9),
+        js_make_string("ExplicitParameter")).item, b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 10).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 11),
+        js_make_string("assignedClass")).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 12),
+        js_make_string("ExplicitAssigned")).item, b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 13).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, InfersCallableNamesAtEvaluationBoundaries) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let declared = function() {}; let assigned; assigned = function*() {}; "
+        "let object = { value: () => {}, method() {}, get reader() { return 1; }, "
+        "set writer(value) {} }; class Named { method() {} get reader() { return 1; } "
+        "set writer(value) {} static method() {} static value = function() {} } "
+        "let objectReader = Object.getOwnPropertyDescriptor(object, 'reader').get; "
+        "let objectWriter = Object.getOwnPropertyDescriptor(object, 'writer').set; "
+        "let classReader = Object.getOwnPropertyDescriptor(Named.prototype, 'reader').get; "
+        "let classWriter = Object.getOwnPropertyDescriptor(Named.prototype, 'writer').set; "
+        "[declared.name, assigned.name, object.value.name, object.method.name, "
+        "objectReader.name, objectWriter.name, Named.prototype.method.name, "
+        "classReader.name, classWriter.name, Named.method.name, Named.value.name];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "callable-names.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    const char* expected[] = {"declared", "assigned", "value", "method", "get reader",
+        "set writer", "method", "get reader", "set writer", "method", "value"};
+    for (int index = 0; index < (int)(sizeof(expected) / sizeof(expected[0])); index++) {
+        EXPECT_EQ(js_strict_equal(js_elements_get_int(result, index),
+            js_make_string(expected[index])).item, b2it(true));
+    }
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AssignsClassMethodNamesFromEvaluatedKeys) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let named = Symbol('method'); let anonymous = Symbol(); class C { "
+        "[named]() {} [anonymous]() {} static [named]() {} static [anonymous]() {} } "
+        "[C.prototype[named].name, C.prototype[anonymous].name, C[named].name, "
+        "C[anonymous].name];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "class-computed-method-names.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    const char* expected[] = {"[method]", "", "[method]", ""};
+    for (int index = 0; index < (int)(sizeof(expected) / sizeof(expected[0])); index++) {
+        EXPECT_EQ(js_strict_equal(js_elements_get_int(result, index),
+            js_make_string(expected[index])).item, b2it(true));
+    }
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesWithVarInitializerReference) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var object = { value: 'initial' }; "
+        "var erase = function() { delete object.value; return 'replacement'; }; "
+        "with (object) { var value = erase(); } "
+        "[typeof value, object.value];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "with-var-initializer-reference.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0),
+        js_make_string("undefined")).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1),
+        js_make_string("replacement")).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ResolvesClosureLocalsBeforeCapturedWithBindings) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var object = { value: 'outer' }; with (object) { "
+        "var closure = function() { var value = 'inner'; return [value, object.value]; }; } "
+        "closure();";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "with-closure-local-binding.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0),
+        js_make_string("inner")).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1),
+        js_make_string("outer")).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesNamedFunctionExpressionSelfBindings) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let sloppy = function Self() { Self = 1; return Self; }; "
+        "let evaluated = function EvalName() { eval('EvalName = 1'); return EvalName; }; "
+        "let generated = function* GeneratorName() { GeneratorName = 1; return GeneratorName; }; "
+        "let strictThrown = false; let strict = function StrictName() { 'use strict'; "
+        "StrictName = 1; }; try { strict(); } catch (error) { strictThrown = error instanceof TypeError; } "
+        "let strictGeneratorThrown = false; let strictGenerated = function* StrictGeneratorName() { "
+        "'use strict'; StrictGeneratorName = 1; }; try { strictGenerated().next(); } "
+        "catch (error) { strictGeneratorThrown = error instanceof TypeError; } "
+        "[sloppy() === sloppy, evaluated() === evaluated, generated().next().value === generated, "
+        "strictThrown, strictGeneratorThrown];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "named-function-expression-bindings.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    for (int index = 0; index < 5; index++) {
+        EXPECT_EQ(js_elements_get_int(result, index).item, b2it(true));
+    }
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RequiresObjectCoercibleForEmptyObjectPatterns) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let nullThrown = false; let undefinedThrown = false; "
+        "try { (({}) => {})(null); } catch (error) { nullThrown = error instanceof TypeError; } "
+        "try { (({}) => {})(undefined); } catch (error) { "
+        "undefinedThrown = error instanceof TypeError; } [nullThrown, undefinedThrown];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "object-pattern-coercible.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 1).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, InitializesGeneratorParametersBeforeFirstResume) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let nullThrown = false; let undefinedThrown = false; "
+        "function* values({}) {} "
+        "try { values(null); } catch (error) { nullThrown = error instanceof TypeError; } "
+        "try { values(undefined); } catch (error) { "
+        "undefinedThrown = error instanceof TypeError; } [nullThrown, undefinedThrown];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "generator-parameter-instantiation.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 1).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, BindsClassMethodRestParameters) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "class Container { array([...values]) { return values; } "
+        "object({...properties}) { return properties; } } "
+        "let instance = new Container(); let array = instance.array([1, 2, 3]); "
+        "let object = instance.object({value: 4}); "
+        "[Array.isArray(array), array.length, array[0], array[2], object.value];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "class-method-rest-parameter.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(3.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 2), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 3), flt2it(3.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 4), flt2it(4.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AssignsDestructuringPatternsToPropertyReferences) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var target = {}; var array = [4]; var object = {value: 5}; "
+        "var arrayResult = [target.element] = array; "
+        "var objectResult = ({...target.rest} = object); "
+        "for ([target.loopElement] of [[6]]) {} "
+        "[target.element, target.rest.value, arrayResult === array, "
+        "objectResult === object, target.loopElement];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "destructuring-property-assignment.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(4.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(5.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 2).item, b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 3).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 4), flt2it(6.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, TreatsSloppyYieldAsIdentifierOutsideGenerators) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var yield = 9; var value; [value = yield] = []; value;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "sloppy-yield-identifier.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(9.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, KeepsSelfReferentialDefaultParametersInTdz) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var outer = 0; var calls = 0; var caught = false; "
+        "var f = function(value = value) { calls += 1; }; "
+        "try { f(); } catch (error) { caught = error instanceof ReferenceError; } "
+        "[caught, calls];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "self-referential-default-parameter.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(0.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ResumesGeneratorDestructuringWithoutAdvancingIteratorsTwice) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var nextCount = 0; var returnCount = 0; var reached = 0; "
+        "var iterator = { next: function() { nextCount += 1; return {done:false, "
+        "value:undefined}; }, return: function() { returnCount += 1; return {}; } }; "
+        "var iterable = {}; iterable[Symbol.iterator] = function() { return iterator; }; "
+        "function* valueTarget() { [{} = yield] = iterable; reached += 1; } "
+        "var first = valueTarget(); first.next(); var firstResult = first.return(7); "
+        "var keyReturnCount = 0; var keyIterator = { return: function() { "
+        "keyReturnCount += 1; return {}; } }; var keyIterable = {}; "
+        "keyIterable[Symbol.iterator] = function() { return keyIterator; }; "
+        "function* keyTarget() { [...{}[yield]] = keyIterable; reached += 1; } "
+        "var second = keyTarget(); second.next(); var secondResult = second.return(8); "
+        "[nextCount, returnCount, reached, firstResult.value, firstResult.done, "
+        "keyReturnCount, secondResult.value, secondResult.done];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "generator-destructure-resume.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 2), flt2it(0.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 3), flt2it(7.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 4).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 5), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 6), flt2it(8.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 7).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, InjectsGeneratorThrowsThroughEnclosingTryCompletions) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function* values() { yield 1; try { yield 2; } catch (error) { yield error; } "
+        "yield 3; } var iterator = values(); var first = iterator.next(); "
+        "var second = iterator.next(); var marker = {}; var third = iterator.throw(marker); "
+        "var fourth = iterator.next(); [first.value, second.value, third.value === marker, "
+        "fourth.value, fourth.done];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "generator-throw-try-catch.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(2.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 2).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 3), flt2it(3.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 4).item, b2it(false));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PropagatesComputedObjectPatternKeyErrors) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var key, target; var caught = false; "
+        "try { 0, ({ [key.value]: target } = {}); } "
+        "catch (error) { caught = error instanceof TypeError; } caught;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "object-pattern-computed-key-error.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(result.item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, RejectsEvalVarRedeclarationInDefaultParameters) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var calls = 0; var caught = false; "
+        "var f = function(value = eval('var value = 42')) { calls += 1; }; "
+        "try { f(); } catch (error) { caught = error instanceof SyntaxError; } "
+        "[caught, calls];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "eval-default-parameter-var.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(0.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
 TEST(JsInterpreter, DestructuringConsumesAndClosesIteratorsLazily) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -1085,6 +1591,139 @@ TEST(JsInterpreter, DestructuringConsumesAndClosesIteratorsLazily) {
     EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(1.0)).item,
         b2it(true));
     EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(0.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesAbruptCompletionWhenClosingCustomIterators) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var nextCount = 0; var returnCount = 0; var caughtStep = false; "
+        "var stepIterator = { next: function() { nextCount += 1; throw new Error(); }, "
+        "return: function() { returnCount += 1; return {}; } }; var stepIterable = {}; "
+        "stepIterable[Symbol.iterator] = function() { return stepIterator; }; "
+        "try { 0, [value] = stepIterable; } catch (error) { caughtStep = true; } "
+        "var bodyCount = 0; var caughtBody = false; var bodyError = new Error(); "
+        "var bodyIterable = {}; "
+        "bodyIterable[Symbol.iterator] = function() { return { next: function() { "
+        "return { done: false, value: 0 }; }, return: 'not callable' }; }; "
+        "try { for (var entry of bodyIterable) { bodyCount += 1; throw bodyError; } } "
+        "catch (error) { caughtBody = error === bodyError; } "
+        "[caughtStep, nextCount, returnCount, caughtBody, bodyCount];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "iterator-close-abrupt.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 2), flt2it(0.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 3).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 4), flt2it(1.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PropagatesIteratorStepErrorsFromForOfDestructuring) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var nextCount = 0; var returnCount = 0; var caught = false; var iterable = {}; "
+        "var iterator = { next: function() { nextCount += 1; throw new Error(); }, "
+        "return: function() { returnCount += 1; return {}; } }; "
+        "iterable[Symbol.iterator] = function() { return iterator; }; "
+        "try { for ([value] of [iterable]) {} } catch (error) { caught = true; } "
+        "[caught, nextCount, returnCount];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "for-of-destructuring-step-error.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_elements_get_int(result, 0).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(1.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 2), flt2it(0.0)).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, EvaluatesDestructuringReferenceBeforeIteratorStep) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var log = []; function source() { log.push('source'); var iterator = { "
+        "next: function() { log.push('iterator-step'); return { get done() { "
+        "log.push('iterator-done'); return true; }, get value() { log.push('iterator-value'); } }; } }; "
+        "var value = {}; value[Symbol.iterator] = function() { log.push('iterator'); "
+        "return iterator; }; return value; } function target() { log.push('target'); "
+        "return target = { set q(value) { log.push('set'); } }; } function targetKey() { "
+        "log.push('target-key'); return { toString: function() { log.push('target-key-tostring'); "
+        "return 'q'; } }; } ([target()[targetKey()]] = source()); log;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "destructuring-reference-order.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    const char* expected[] = {"source", "iterator", "target", "target-key",
+        "iterator-step", "iterator-done", "target-key-tostring", "set"};
+    ASSERT_EQ(js_array_length(result), (int64_t)(sizeof(expected) / sizeof(expected[0])));
+    for (int64_t index = 0; index < js_array_length(result); index++) {
+        SCOPED_TRACE(index);
+        EXPECT_EQ(js_strict_equal(js_elements_get_int(result, index),
+            js_make_string(expected[index])).item, b2it(true));
+    }
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, AppliesLogicalAssignmentNamingAndReferenceOrder) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var andValue = 1; andValue &&= function() {}; var orValue = 0; "
+        "orValue ||= (() => {}); var nullishValue; nullishValue ?" "?= class {}; "
+        "var coerced = false; var caught = false; var key = { toString: function() { "
+        "coerced = true; return 'key'; } }; try { null[key] &&= 1; } "
+        "catch (error) { caught = error instanceof TypeError; } "
+        "[andValue.name, orValue.name, nullishValue.name, caught, coerced];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "logical-assignment.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0),
+        js_make_string("andValue")).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1),
+        js_make_string("orValue")).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 2),
+        js_make_string("nullishValue")).item, b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 3).item, b2it(true));
+    EXPECT_EQ(js_elements_get_int(result, 4).item, b2it(false));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesCompoundAssignmentReferenceAcrossDirectEval) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "function test() { var x = 3; var inner = (function() { "
+        "x *= (eval('var x = 2;'), 4); return x; })(); "
+        "return [inner, x]; } test();";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "compound-assignment-direct-eval.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(2.0)).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(12.0)).item,
         b2it(true));
 
     runtime_cleanup(&runtime);
@@ -1236,6 +1875,31 @@ TEST(JsInterpreter, InitializesInstanceFieldsAtSharedConstructionTime) {
 
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, InitializesComputedSymbolClassFields) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "let x = Symbol(); let y = Symbol(); class C { [x]; [y] = 42; } "
+        "let instance = new C(); "
+        "let xDescriptor = Object.getOwnPropertyDescriptor(instance, x); "
+        "let yDescriptor = Object.getOwnPropertyDescriptor(instance, y); "
+        "[Object.prototype.hasOwnProperty.call(instance, x), "
+        "Object.prototype.hasOwnProperty.call(instance, y), instance[x] === undefined, "
+        "instance[y] === 42, xDescriptor.enumerable, xDescriptor.writable, "
+        "xDescriptor.configurable, yDescriptor.enumerable, yDescriptor.writable, "
+        "yDescriptor.configurable];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "computed-symbol-class-fields.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    for (int index = 0; index < 10; index++) {
+        EXPECT_EQ(js_elements_get_int(result, index).item, b2it(true));
+    }
 
     runtime_cleanup(&runtime);
 }
@@ -1514,6 +2178,76 @@ TEST(JsInterpreter, SharesPrivateClassElementsWithTheRuntimeKernel) {
 
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(30.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, ResolvesPrivateNamesThroughNestedClassEnvironments) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "class Outer { #value = 7; #twice() { return this.#value * 2; } "
+        "Inner = class { read(outer) { return outer.#value + outer.#twice(); } } } "
+        "let outer = new Outer(); new outer.Inner().read(outer);";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "nested-private-class.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, flt2it(21.0)).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, DistinguishesInheritedPrivateFieldNames) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "class A { #x = 'A'; read() { return this.#x; } } "
+        "class B extends A { #x = 'B'; read() { return this.#x; } } "
+        "new B().read();";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "inherited-private-fields.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, js_make_string("B")).item, b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, NamesAnonymousClassesBeforeStaticInitializers) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var observed; var C = class { static field = (observed = this.name); }; "
+        "[observed, C.name];";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "anonymous-class-static-name.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), js_make_string("C")).item,
+        b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), js_make_string("C")).item,
+        b2it(true));
+
+    runtime_cleanup(&runtime);
+}
+
+TEST(JsInterpreter, PreservesThisForStaticFieldDirectEval) {
+    Runtime runtime = {};
+    runtime_init(&runtime);
+
+    const char source[] =
+        "var C = class { static f = 'test'; static g = this.f + '262'; "
+        "static h = eval('this.g') + 'test'; }; C.h;";
+    Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
+        "static-field-direct-eval-this.js", NULL);
+
+    ASSERT_FALSE(item_is_error(result));
+    EXPECT_EQ(js_strict_equal(result, js_make_string("test262test")).item,
+        b2it(true));
 
     runtime_cleanup(&runtime);
 }
