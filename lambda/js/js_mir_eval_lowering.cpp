@@ -584,7 +584,7 @@ static void js_dynfunc_apply_function_metadata(Item fn_item, Item* args, int arg
 static Item js_dynfunc_cache_execute(JsDynFuncCacheEntry* entry, Item* args, int argc, const char* source_prefix) {
     if (!entry || !entry->js_main_fn) return ItemNull;
     js_func_cache_suppress_push();
-    Item fn_item = entry->js_main_fn((Context*)context);
+    Item fn_item = js_mir_execute_compiled_entry((void*)entry->js_main_fn);
     js_func_cache_suppress_pop();
     entry->hits++;
     js_dynfunc_apply_function_metadata(fn_item, args, argc, source_prefix);
@@ -851,10 +851,8 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         return ItemNull;
     }
 
-    MIR_link(ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
-
-    typedef Item (*js_main_func_t)(Context*);
-    js_main_func_t js_main_fn = (js_main_func_t)find_func(ctx, (char*)"js_main");
+    JsMirMainFunc js_main_fn = js_mir_link_main(ctx, g_mir_interp_mode != 0,
+        MIR_set_gen_interface);
 
     if (!js_main_fn) {
         log_error("js-new-function: failed to find js_main");
@@ -885,7 +883,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
 
     // Execute js_main to get the compiled function Item.  The returned
     // JsFunction captures the caller's expanded module state for later calls.
-    Item fn_item = js_main_fn((Context*)context);
+    Item fn_item = js_mir_execute_compiled_entry((void*)js_main_fn);
 
     // Keep the MIR context alive for returned closures; names are already linked
     // to the active module table and no compiler pool crosses this boundary.
@@ -1892,10 +1890,8 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             return ItemNull;
         }
 
-        MIR_link(eval_ctx, g_mir_interp_mode ? MIR_set_interp_interface : MIR_set_gen_interface, import_resolver);
-
-        typedef Item (*js_main_func_t)(Context*);
-        js_main_func_t js_main_fn = (js_main_func_t)find_func(eval_ctx, (char*)"js_main");
+        JsMirMainFunc js_main_fn = js_mir_link_main(eval_ctx, g_mir_interp_mode != 0,
+            MIR_set_gen_interface);
 
         if (!js_main_fn) {
             log_error("js-eval: failed to find js_main in direct script");
@@ -1967,7 +1963,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             // behave like strict function code instead of the realm global.
             js_set_this(global_this.get());
         }
-        Item result = js_main_fn((Context*)context);
+        Item result = js_mir_execute_compiled_entry((void*)js_main_fn);
         if (!is_direct_eval) js_set_this(previous_this.get());
 
         if (js_eval_fresh_module_scope) {

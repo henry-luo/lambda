@@ -133,7 +133,7 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
     // suppressing the normal result also suppresses throws from direct calls.
     (void)discard_result;
     MirCallOptions options = {true, false, 0};
-    FnVariantAnalysis* body = fn_analysis_variant(&callee->analysis,
+    FnVariantAnalysis* body = fn_analysis_variant(jm_function_analysis(callee),
         FN_ENTRY_BOXED_BODY);
     MirCallResult direct = em_call_direct(&mt->em, callee->body_name,
         callee->body_func_item, body, arg_count, types, ops,
@@ -235,7 +235,7 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
             ? MIR_T_D : MIR_T_I64;
         ops[i] = MIR_new_reg_op(mt->ctx, arg_regs[i]);
     }
-    FnVariantAnalysis* native = fn_analysis_variant(&callee->analysis,
+    FnVariantAnalysis* native = fn_analysis_variant(jm_function_analysis(callee),
         FN_ENTRY_NATIVE_BODY);
     MirCallOptions options = {true, false, 0};
     MirCallResult direct = em_call_direct(&mt->em, callee->name,
@@ -771,10 +771,10 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     }
     if (fn_node->is_arrow) flags |= JS_FUNC_INIT_ARROW;
     if (fc->is_strict) flags |= JS_FUNC_INIT_STRICT;
-    if (fc->uses_with) flags |= JS_FUNC_INIT_USES_WITH;
+    if (JM_JS_FACT(fc, uses_with)) flags |= JS_FUNC_INIT_USES_WITH;
     flags |= JS_FUNC_INIT_ANALYSIS_KNOWN;
-    if (fc->observes_this) flags |= JS_FUNC_INIT_READS_THIS;
-    if (fc->observes_new_target) flags |= JS_FUNC_INIT_READS_NEW_TARGET;
+    if (JM_JS_FACT(fc, observes_this)) flags |= JS_FUNC_INIT_READS_THIS;
+    if (JM_JS_FACT(fc, observes_new_target)) flags |= JS_FUNC_INIT_READS_NEW_TARGET;
     if (fc->is_class_field_initializer) {
         flags |= JS_FUNC_INIT_CLASS_FIELD_INITIALIZER;
     }
@@ -793,7 +793,7 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
         MIR_T_P, source_chars ? MIR_new_reg_op(mt->ctx, source_chars)
                               : MIR_new_int_op(mt->ctx, 0),
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)span_lengths),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, fc->formal_length),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, JM_JS_FACT(fc, formal_length)),
         MIR_T_I64, MIR_new_int_op(mt->ctx, flags));
 }
 
@@ -993,7 +993,7 @@ MIR_reg_t jm_ensure_boxed(JsMirTranspiler* mt, MIR_reg_t reg) {
 JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
 JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn);
 // A5 forward declaration
-void jm_scan_ctor_props(JsFuncCollected* fc, JsAstNode* body);
+void jm_scan_ctor_props(JsMirTranspiler* mt, JsFuncCollected* fc);
 
 // Returns the inferred TypeId for a JS AST expression node.
 // LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING → known type
@@ -1170,15 +1170,15 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
         // Phase 4: If callee resolves to a function with a native version
         // and all arg types match, the call returns the function's return type
         JsFuncCollected* fc = jm_resolve_native_call(mt, call);
-        if (fc && jm_call_result_uses_native_register(mt, call, fc)) return fc->return_type;
+        if (fc && jm_call_result_uses_native_register(mt, call, fc)) return JM_JS_FACT(fc, return_type);
         // Phase 3.5: return type from any collected function (not just native-eligible)
         // Skip generators — they return iterator objects, not the inferred return type
         {
             JsFuncCollected* any_fc = jm_find_collected_func_for_call(mt, call);
-            if (any_fc && any_fc->return_type != LMD_TYPE_ANY
+            if (any_fc && JM_JS_FACT(any_fc, return_type) != LMD_TYPE_ANY
                 && jm_call_result_uses_native_register(mt, call, any_fc)
                 && any_fc->node && !any_fc->node->is_generator && !any_fc->node->is_async)
-                return any_fc->return_type;
+                return JM_JS_FACT(any_fc, return_type);
         }
         return LMD_TYPE_ANY;
     }
@@ -1300,6 +1300,9 @@ void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_
     if (!fc) return;
     if (!fc->has_scope_env) return;
     for (int s = 0; s < fc->scope_env_count; s++) {
+        // Parent-env reuse leaves holes in the slot image; only named cells
+        // participate in semantic writeback.
+        if (!fc->scope_env_names[s]) continue;
         if (strcmp(name, fc->scope_env_names[s]) == 0) {
             JsMirVarEntry* var = jm_find_var(mt, name);
             int bind_depth = jm_find_var_scope_depth_for_name(mt, name);
@@ -1319,9 +1322,9 @@ void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_
                     slot = var->env_slot;
                 } else {
                     // Fallback: look up the correct slot from captures
-                    for (int c = 0; c < fc->capture_count; c++) {
-                        if (strcmp(name, fc->captures[c].name) == 0) {
-                            int cap_slot = fc->captures[c].scope_env_slot;
+                    for (int c = 0; c < JM_CAPTURE_COUNT(fc); c++) {
+                        if (strcmp(name, JM_CAPTURE_ARRAY(fc)[c].name) == 0) {
+                            int cap_slot = JM_CAPTURE_ARRAY(fc)[c].scope_env_slot;
                             if (cap_slot >= 0) slot = cap_slot;
                             break;
                         }
@@ -1588,9 +1591,9 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
             // jm_transpile_expression → jm_transpile_call → native call → native result
             MIR_reg_t result = jm_transpile_expression(mt, expr);
             if (target_type == LMD_TYPE_FLOAT)
-                return jm_ensure_native_float(mt, result, fc->return_type);
+                return jm_ensure_native_float(mt, result, JM_JS_FACT(fc, return_type));
             else
-                return jm_ensure_native_int(mt, result, fc->return_type);
+                return jm_ensure_native_int(mt, result, JM_JS_FACT(fc, return_type));
         }
         // Non-native call: result is boxed → unbox
         MIR_reg_t boxed = jm_transpile_expression(mt, expr);

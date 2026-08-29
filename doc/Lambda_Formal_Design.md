@@ -1413,14 +1413,25 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 Status of `*`-marked rulings as of 2026-08-29.
 
-The D8.2.4–D8.2.6 implementation record now includes P3g (2026-08-29):
+The D8.2.4–D8.2.6 implementation record now includes P3j and P4l
+(2026-08-29):
 `CompilerPassSpec` carries an optional pass-owned context, and the shared
 `AstIndexPassContext`/`ast_index_compiler_pass` callback is used by Lambda and
 LambdaJS. The JS `transpile_js_mir_ast` entry is a manager-owned
 analysis/lower/finalize composite that publishes its four facts only after the
-existing sequence succeeds. MIR link, execution/cleanup, and Lambda's later
-analysis/lowering remain outside this slice; the full cross-language schedule
-is still open under **D8.2.5**.
+existing sequence succeeds. Lambda MIR Direct now uses the same ordered
+manager for const-fold, lower/finalize, and link/entry publication; JS source,
+eval, module, and cached-AST execution use one recovery-aware entry helper.
+The Lambda driver conditionally schedules the indexed prerequisite when a
+retained AST has not already published it, so build-to-entry is one
+authoritative schedule. Indexed suspension/assignment/return/local/constructor
+facts and sparse scope-environment writeback now use the AST-owned function
+identity; the recursive mirrors are retired. The follow-on P4l slice retires
+duplicate lexical-key, module-block, and `for`-initializer walks in favor of
+the indexed scope chain and shared child contract, and reuses
+`em_frame_dispose()` for frame teardown. Post-link BSS/template
+publication and final owner transfer remain explicit runtime handoff work under
+**D8.2.5**.
 
 P3e (2026-08-28) remains the declaration-snapshot slice:
 eval-preamble publication and batch/preamble declaration snapshots share
@@ -1482,6 +1493,58 @@ shared AST-support mask, including lexical-arrow propagation and `super`-based
 This is an implementation-only **D8.2.4** slice; no formal semantic ruling or
 document semver changes.
 
+P4f (2026-08-29) retires the duplicate `FnAnalysis` embedded in
+`JsFuncCollected`. The AST function node is now the sole owner of shared
+function analysis consumed by JavaScript and the common runtime; MIR collection
+metadata reaches it through one accessor. The capture analyzer's four repeated
+self/lexical-pseudo-capture initializers are replaced by one shared initializer
+in the same deletion-funded slice. MIR-only collection artifacts remain
+temporarily on `JsFuncCollected` pending their indexed-table migration. This is
+an implementation-only **D8.2.4** slice; no formal semantic ruling or document
+semver changes.
+
+P4g (2026-08-29) replaces the per-function recursive subtree walk used to
+rediscover enclosing lexical declarations with the bound `NameScope` parent
+chain. The projected facts retain lexical kind, source range, binding pointer,
+and Annex-B declaration markers, so capture analysis consumes the scope graph
+already published by the indexed compilation unit. The old collector and its
+private child-dispatch context are deleted in the same **D8.2.4** slice. This is
+an implementation-only change; no formal semantic ruling or document semver
+changes.
+
+P4h (2026-08-29) moves capture-array capacity and teardown to the AST-owned
+`FnAnalysis` record. JavaScript collection entries retain only their temporary
+backend view while indexed capture/environment work is in progress; the common
+analysis record owns the allocation and capacity. P4i (2026-08-29) removes the
+remaining JavaScript pointer/count mirror and routes all MIR capture access
+through that AST-owned array/count. Class-method collection relies on the
+publication pass to initialize `FnAnalysis` before capture facts are touched.
+These are implementation-only **D8.2.4** slices; no formal semantic ruling or
+document semver changes.
+
+P4j (2026-08-29) moves JavaScript profile facts, parameter/return metadata,
+capture storage, and scope-walk caches to AST-owned `FnAnalysis`. The former
+recursive parameter and return inference walks are replaced by `AstIndex`
+owner-filtered dispatch; capture propagation is a queued fixed point and
+call-site evidence reads indexed call nodes. `JsFuncCollected` now retains
+collection/backend artifacts only. This is an implementation-only
+**D8.2.4** slice; no formal semantic ruling or document semver changes.
+
+P3j (2026-08-29) makes the Lambda MIR Direct driver conditionally run the
+shared indexed-AST prerequisite for retained pre-built AST callers, then keeps
+const-fold, MIR lower/finalize, and link/entry in one ordered manager schedule.
+P4k (2026-08-29) replaces the remaining recursive suspension, assignment,
+boxed-return, body-local, constructor-shape, and body-reference scans with
+indexed owner-filtered facts and hardens sparse scope-environment writeback by
+skipping unused parent-env slots. These are implementation-only
+**D8.2.4–D8.2.5** slices; no formal semantic ruling or document semver changes.
+P4l (2026-08-29) then retires the duplicate lexical-key and declaration-shape
+walks, reusing indexed scopes, the shared child-enumeration contract, and the
+existing frame disposer. It also records the deliberate rejection of a generic
+lexical-binding counter rewrite after sibling double-counting changed
+Highlight.js behavior. This is an implementation-only **D8.2.4–D8.2.5**
+slice; no formal semantic ruling or document semver changes.
+
 | Ruling | Status |
 |---|---|
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
@@ -1524,7 +1587,7 @@ document semver changes.
 | D8.1.2v2 | Decided 2026-08-24 with D8.1.1v4. `grammar-lambda.js` remains the complete Tree-sitter syntax oracle/editor/bindings grammar; `grammar.js` and generated `parser.c` are reference artifacts regenerated by the normal grammar target and are never hand-edited. The production Lambda parser is maintained in `lambda/runtime/parser/` and is built through the generated build configuration. |
 | D8.1.3v10 | Revised 2026-08-29: normal JavaScript and TypeScript source admission uses the first-party C lexer and hybrid recursive-descent/Pratt parser, reducing directly to the retained `JsAstNode` graph. The vendored JS/TS Tree-sitter grammar archives remain unchanged but link only into `lambda-cst` for differential acceptance checks; normal Lambda, runtime, test, and release targets do not link either archive. The LambdaJS AST tier includes the synchronous ES-module slice under the same Runtime/EvalContext/heap/event loop/module registry as Lambda. Registry-owned namespace placeholders, hoisted function declaration instantiation before dependency traversal, strict private slabs, live import reads, and registry propagation preserve the admitted default/named/namespace imports, default/named/namespace/non-ambiguous-star exports, named/star re-exports, `import.meta.url`, dynamic `import()`, and circular function imports without a JS-private module cache. Lambda `.ls` imports use that descriptor and their public boxed function values cross the common JS call kernel through the existing Lambda boxed dynamic-call ABI with retained `TypeFunc` metadata. The two languages retain their own semantic walkers and activation records; no second runtime, EvalContext, stack owner, heap, or module registry is created. Top-level await/async module evaluation, generators/async functions, ambiguous star exports, shared T0/T1 environments, continuations, and AUTO policy remain pending. `JS_EXECUTION_BACKEND=ast` remains explicit and fail-closed, and the default remains MIR. Status and focused gates: `vibe/jube/JS_Grammar_Parser.md`, `vibe/Lambda_Design_JS_Interpreter.md`, and `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
 | D8.2.1–D8.2.3 | The physical Lambda/JS foundation is substantially shared (`AstNodeType`, many layouts/aliases, `FnAnalysis`, and `MirEmitter`), but structural convergence is incomplete. P1a (2026-08-28) moved Lambda iterator `for` to `AST_NODE_FOR_EXPR`/`AstForNode`; P1b moved Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`/`AstDeclaratorNode`; P1c folded assignment/declaration-wrapper storage; P1d (2026-08-28) promotes condition loops to one `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` and retires the old while/do/C-style tags, while iterator clauses use `AST_NODE_FOR_CLAUSE`. P1e (2026-08-29) retires the duplicated JavaScript core-child rows and leaves only extension layouts in `js_ast_children.cpp`; Python remains the later guest acceptance test. |
-| D8.2.4–D8.2.6 | Partial scaffolding is landed, not the unified process: `AstIndex` publishes dense node/function/scope/binding/class identity plus parent/owner links, and Lambda MIR/interpreter consumers use node facts. P2a–P2b replace the JS source-function pointer index and synthetic fallback with `AstFunctionId`/`func_by_id`; P2c now publishes common and JavaScript extension scopes, records node-to-binding use edges, resolves binding definitions through indexed identity, and JS MIR consumes those facts without compiler-time scope re-resolution or stale-scope repair. P3a (2026-08-28) makes JavaScript early-error validation a required pass before index publication across source, module, eval/new-Function, and AST-interpreter entry paths. P3b (2026-08-28) moves MIR context, error-handler, transpiler-owner, name-base, and script-module setup into one opener shared by ordinary source and pre-built-AST entry paths. P3c (2026-08-28) extends that opener to ES modules while retaining the module-specific private name image and registry/TLA policy. P3d (2026-08-28) extends the opener to direct eval and `new Function`, carrying optimize level, compact storage, dynamic module naming, and caller-selected name-base policy. P4a (2026-08-29) publishes strictness and class-method ownership during function collection and retires the post-collection propagation/containment walk. P4b (2026-08-29) moves direct-`eval` node/function facts to the shared AST-support owner and retires the duplicate MIR/interpreter scans; the remaining full schedule, cross-language driver, and expression contracts remain open. P1a made the common C-style `for` row truthful; P1b moved migrated Lambda core-child traversal through `ast_visit_core_children()`; P1c extended that owner to assignments/declarations; P1d extends it to the shared condition-loop row and moves iterator-clause ownership to the Lambda extension edge. P3g now adds pass-owned contexts and a manager-owned JS analysis/lower/finalize boundary; MIR link/execution, Lambda's later analysis/lowering, and the remaining lifecycle schedule are still manual. `MirValue`/demand support exists around bare-register expression APIs. P1–P5 of `vibe/Lambda_Design_JS_Unified.md` own the residue. |
+| D8.2.4–D8.2.6 | Partial scaffolding is landed, not the unified lowering process: `AstIndex` publishes dense node/function/scope/binding/class identity plus parent/owner links, and Lambda MIR/interpreter consumers use node facts. P2a–P2b replace the JS source-function pointer index and synthetic fallback with `AstFunctionId`/`func_by_id`; P2c now publishes common and JavaScript extension scopes, records node-to-binding use edges, resolves binding definitions through indexed identity, and JS MIR consumes those facts without compiler-time scope re-resolution or stale-scope repair. P3a–P3d make validation and compile-unit opening explicit across source, module, eval/new-Function, and AST-interpreter entry paths. P3g adds pass-owned contexts and a manager-owned JS analysis/lower/finalize boundary; P3i extends the manager through Lambda MIR lower/finalize/link and routes JS execution through one recovery-aware entry helper; P3j conditionally runs the indexed prerequisite for retained AST callers. P4a–P4e centralize strictness, direct-eval, `arguments`, tail-reuse, and lexical-observation facts. P4f–P4i retire duplicate collection analysis and capture pointer/count storage; P4j moves JS profile facts, parameter/return inference, capture worklist, call-site evidence, and scope caches to AST-owned `FnAnalysis`/indexed dispatch; P4k completes the remaining suspension, assignment, boxed-return, body-local, constructor-shape, and body-reference scans and hardens sparse scope writeback. Post-link BSS/template publication and the semantic-family lowering contracts remain the active P5 residue. P1a made the common C-style `for` row truthful; P1b moved migrated Lambda core-child traversal through `ast_visit_core_children()`; P1c extended that owner to assignments/declarations; P1d extends it to the shared condition-loop row and moves iterator-clause ownership to the Lambda extension edge. `MirValue`/demand support exists around bare-register expression APIs. P1–P5 of `vibe/Lambda_Design_JS_Unified.md` own the residue. |
 | D8.3.4 | DF16 guard hoisting decided, flag-gated, unimplemented (P7); DF12 speculative lifting deferred (P5); §10 multi-version specialization future; the size-gate threshold unset. Dual-func Stage 1 core (P0–P4, P6) complete. |
 | D8.4.2v3 | Lambda and LambdaJS direct calls pass `Context*` and source operands only; internal shape-2 results use two MIR results and C-reachable entries use the context companion slot. The trailing scalar-home operand is deleted from generated call ABI. |
 | D8.4.3v2 | Landed 2026-08-17 for Lambda, LambdaJS, Jube, and hosted execution boundaries: ordinary failures use explicit returned completions through each frame, while `LambdaRecoveryFrame` is restricted by the recovery-boundary gate to native-fault/test containment sites. The catalog and adapter audits retain the explicit Item/companion-lane contracts; see `vibe/Lambda_Design_Runtime_Error_Handling.md` §10–§12. |

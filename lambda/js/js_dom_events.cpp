@@ -2444,7 +2444,6 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         log_error("js_dom_dispatch_event: event has no type");
         return (Item){.item = ITEM_FALSE};
     }
-
     // get bubbles flag
     Item bubbles_val = js_get_name_key(event_item, "bubbles");
     bool bubbles = js_is_truthy(bubbles_val);
@@ -2527,12 +2526,9 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         return js_throw_value(js_new_error_with_name(n, m));
     }
 
-    // set target / srcElement (per DOM spec, dispatch sets target to the
-    // current dispatch target — re-dispatch updates it).
-    Item target_key = js_name_item("target");
-    Item src_key = js_name_item("srcElement");
-    js_set_key_default(event_item, target_key, elem_item);
-    js_set_key_default(event_item, src_key, elem_item);
+    // dispatch retargets constructor null placeholders on every dispatch.
+    js_set_name_key(event_item, "target", elem_item);
+    js_set_name_key(event_item, "srcElement", elem_item);
 
     // Mark event as dispatching.
     event_set_bool(event_item, "__dispatch_flag", true);

@@ -28684,6 +28684,34 @@ static int lambda_const_fold_compiler_pass(void* opaque) {
     return interp_const_fold_script((Transpiler*)opaque) ? 1 : 0;
 }
 
+typedef struct LambdaMirLowerPassContext {
+    MIR_context_t ctx;
+    Transpiler* tp;
+    Script* script;
+    ArrayList** property_keys;
+    uint64_t* link_instruction_count;
+    uint64_t mir_module_count;
+    uint64_t mir_function_count;
+    uint64_t mir_instruction_count;
+} LambdaMirLowerPassContext;
+
+static int lambda_mir_lower_compiler_pass(void* opaque) {
+    LambdaMirLowerPassContext* pass = (LambdaMirLowerPassContext*)opaque;
+    if (!pass || !pass->ctx || !pass->tp || !pass->tp->ast_root) return 0;
+    transpile_mir_ast_named(pass->ctx, (AstScript*)pass->tp->ast_root,
+        pass->tp->source, pass->tp->type_list, pass->tp->const_list,
+        pass->tp->pool, pass->tp->name_pool, &MIR_DEFAULT_MODULE_NAMES,
+        pass->property_keys, NULL,
+        pass->tp->compile_against_interp_slab ? pass->script : NULL,
+        NULL, pass->tp->whole_script_poc, &pass->tp->ast_index);
+    mir_count_module_volume(pass->ctx, &pass->mir_module_count,
+        &pass->mir_function_count, &pass->mir_instruction_count);
+    if (pass->link_instruction_count) {
+        *pass->link_instruction_count = pass->mir_instruction_count;
+    }
+    return 1;
+}
+
 void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
                        ArrayList* type_list, ArrayList* const_list,
                        Pool* script_pool, NamePool* name_pool,
@@ -29095,6 +29123,51 @@ static bool lambda_mir_interp_env_enabled(void) {
     return env && (strcmp(env, "1") == 0 || strcmp(env, "true") == 0);
 }
 
+typedef struct LambdaMirLinkPassContext {
+    MIR_context_t ctx;
+    Transpiler* tp;
+    uint64_t mir_instruction_count;
+    bool use_mir_interp_for_script;
+    main_func_t main_func;
+} LambdaMirLinkPassContext;
+
+static int lambda_mir_link_compiler_pass(void* opaque) {
+    LambdaMirLinkPassContext* pass = (LambdaMirLinkPassContext*)opaque;
+    if (!pass || !pass->ctx || !pass->tp) return 0;
+    unsigned int opt_level = pass->tp->runtime ? pass->tp->runtime->optimize_level : 2;
+    bool explicit_interp = g_mir_interp_mode != 0 || lambda_mir_interp_env_enabled();
+    bool auto_interp = !explicit_interp && opt_level == 0 &&
+        mir_large_interp_enabled() && pass->tp->source &&
+        strlen(pass->tp->source) >= mir_large_source_interp_threshold();
+    bool use_interp = explicit_interp || auto_interp;
+    bool large_interp_enabled = mir_large_interp_enabled();
+    bool document_context = pass->tp->runtime && pass->tp->runtime->dom_doc != nullptr;
+    if (!use_interp && large_interp_enabled &&
+            (pass->mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD ||
+             (document_context && (g_js_force_document_interp ||
+                 pass->mir_instruction_count > MIR_RADIANT_INTERP_INSN_THRESHOLD)))) {
+        use_interp = true;
+        log_info("lambda-mir: %s module (%llu insns)%s -> MIR interpreter (skip JIT codegen)",
+            pass->mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD
+                ? "large" : "cold-document",
+            (unsigned long long)pass->mir_instruction_count,
+            document_context ? " [document]" : "");
+    }
+    if (!use_interp && !large_interp_enabled && opt_level >= 2 &&
+            pass->mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD) {
+        log_info("lambda-mir: large module (%llu insns) -> opt=0 (was %u)",
+            (unsigned long long)pass->mir_instruction_count, opt_level);
+        MIR_gen_set_optimize_level(pass->ctx, 0);
+    }
+    MIR_link(pass->ctx, use_interp ? MIR_set_interp_interface :
+        (lambda_mir_lazy_enabled() ? MIR_set_lazy_gen_interface :
+            MIR_set_gen_interface), import_resolver);
+    pass->use_mir_interp_for_script = use_interp;
+    pass->main_func = (main_func_t)(use_interp ? find_func(pass->ctx, "main")
+        : jit_gen_func(pass->ctx, "main"));
+    return pass->main_func != NULL;
+}
+
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms,
                                    double* out_transpile_ms,
@@ -29113,21 +29186,6 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     // Compilation may initialize an otherwise idle eval thread, but it cannot
     // borrow a different live context and restore the caller afterward.
     if (!eval_context_init(template_context)) return;
-
-    // const runs after index construction and under the thread-bound evaluator
-    // context its shared walker needs. A failed/no-op attempt leaves no fact,
-    // so it cannot change source semantics or force a JIT fallback (D8.1.1v2).
-    CompilerPassManager pass_manager;
-    compiler_pass_manager_init(&pass_manager, COMPILER_FACT_AST |
-        COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED | COMPILER_FACT_INDEXED);
-    CompilerPassSpec const_fold_pass = {"const-fold", COMPILER_FACT_INDEXED,
-        COMPILER_FACT_ANALYZED, lambda_const_fold_compiler_pass};
-    if (!compiler_pass_manager_add(&pass_manager, &const_fold_pass) ||
-            !compiler_pass_manager_run(&pass_manager, tp)) {
-        log_error("const-fold: pass manager rejected module '%s'",
-            script_path ? script_path : "<unknown>");
-        return;
-    }
 
     // Ensure template registry exists for post-JIT template registration
     if (!g_template_registry) {
@@ -29201,48 +29259,41 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 #endif
 
     ArrayList* property_keys = NULL;
-    transpile_mir_ast_named(ctx, ast_root, tp->source, tp->type_list, tp->const_list,
-        tp->pool, tp->name_pool, &MIR_DEFAULT_MODULE_NAMES, &property_keys,
-        NULL, tp->compile_against_interp_slab ? script : NULL,
-        NULL,
-        tp->whole_script_poc, &tp->ast_index);
-    uint64_t mir_module_count = 0;
-    uint64_t mir_function_count = 0;
-    uint64_t mir_instruction_count = 0;
-    mir_count_module_volume(ctx, &mir_module_count, &mir_function_count,
-        &mir_instruction_count);
-
-    bool use_mir_interp_for_script = explicit_interp || auto_interp_for_large_source;
-    bool large_interp_enabled = mir_large_interp_enabled();
-    bool document_context = tp->runtime && tp->runtime->dom_doc != nullptr;
-    if (!use_mir_interp_for_script && large_interp_enabled &&
-            (mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD ||
-             (document_context && (g_js_force_document_interp ||
-                                   mir_instruction_count > MIR_RADIANT_INTERP_INSN_THRESHOLD)))) {
-        use_mir_interp_for_script = true;
-        log_info("lambda-mir: %s module (%llu insns)%s -> MIR interpreter (skip JIT codegen)",
-            mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD
-                ? "large" : "cold-document",
-            (unsigned long long)mir_instruction_count,
-            document_context ? " [document]" : "");
+    LambdaMirLinkPassContext link_context = {ctx, tp, 0, false, NULL};
+    LambdaMirLowerPassContext lower_context = {ctx, tp, script, &property_keys,
+        &link_context.mir_instruction_count, 0, 0, 0};
+    // Every MIR Direct module now advances through one authoritative schedule:
+    // const-fold, lower, and finalize all run under the pass manager.
+    CompilerPassManager pass_manager;
+    uint32_t initial_facts = COMPILER_FACT_AST |
+        COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED;
+    AstIndexPassContext index_context = {&tp->ast_index, tp->ast_root, tp->profile};
+    compiler_pass_manager_init(&pass_manager, initial_facts |
+        (tp->ast_index.count ? COMPILER_FACT_INDEXED : 0));
+    CompilerPassSpec index_pass = {"index", initial_facts,
+        COMPILER_FACT_INDEXED, ast_index_compiler_pass, &index_context};
+    CompilerPassSpec const_fold_pass = {"const-fold", COMPILER_FACT_INDEXED,
+        COMPILER_FACT_ANALYZED, lambda_const_fold_compiler_pass, tp};
+    CompilerPassSpec lower_pass = {"mir-lower-finalize", COMPILER_FACT_ANALYZED,
+        COMPILER_FACT_PLANNED | COMPILER_FACT_MIR_LOWERED |
+        COMPILER_FACT_FINALIZED, lambda_mir_lower_compiler_pass, &lower_context};
+    CompilerPassSpec link_pass = {"mir-link-entry", COMPILER_FACT_FINALIZED,
+        COMPILER_FACT_FINALIZED, lambda_mir_link_compiler_pass, &link_context};
+    if ((!tp->ast_index.count && !compiler_pass_manager_add(&pass_manager, &index_pass)) ||
+            !compiler_pass_manager_add(&pass_manager, &const_fold_pass) ||
+            !compiler_pass_manager_add(&pass_manager, &lower_pass) ||
+            !compiler_pass_manager_add(&pass_manager, &link_pass) ||
+            !compiler_pass_manager_run(&pass_manager, NULL)) {
+        log_error("mir-driver: pass manager rejected module '%s'",
+            script_path ? script_path : "<unknown>");
+        jit_cleanup_mode(ctx, mir_gen_initialized ? 1 : 0);
+        return;
     }
+    uint64_t mir_module_count = lower_context.mir_module_count;
+    uint64_t mir_function_count = lower_context.mir_function_count;
+    uint64_t mir_instruction_count = lower_context.mir_instruction_count;
 
-    // If the interpreter escape hatch is disabled, match LambdaJS's fallback:
-    // retain native execution but lower large-module optimization to O0 because
-    // the expensive optimizer passes do not pay back on cold generated code.
-    unsigned int effective_opt = opt_level;
-    if (!use_mir_interp_for_script && !large_interp_enabled &&
-            effective_opt >= 2 &&
-            mir_instruction_count > MIR_LARGE_MODULE_INSN_THRESHOLD) {
-        log_info("lambda-mir: large module (%llu insns) -> opt=0 (was %u)",
-            (unsigned long long)mir_instruction_count, effective_opt);
-        MIR_gen_set_optimize_level(ctx, 0);
-        effective_opt = 0;
-    }
-
-    MIR_link(ctx, use_mir_interp_for_script ? MIR_set_interp_interface :
-        (lambda_mir_lazy_enabled() ? MIR_set_lazy_gen_interface :
-            MIR_set_gen_interface), import_resolver);
+    bool use_mir_interp_for_script = link_context.use_mir_interp_for_script;
 
 #ifdef _WIN32
     if (timing) QueryPerformanceCounter(&pt2);
@@ -29253,7 +29304,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     // Store results in the transpiler and propagate back to script
     tp->jit_context = ctx;
     tp->mir_gen_initialized = mir_gen_initialized;
-    tp->main_func = (main_func_t)(use_mir_interp_for_script ? find_func(ctx, "main") : jit_gen_func(ctx, "main"));
+    tp->main_func = link_context.main_func;
 
 #ifdef _WIN32
     if (timing) QueryPerformanceCounter(&pt3);
