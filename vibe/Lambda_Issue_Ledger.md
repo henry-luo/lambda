@@ -948,7 +948,17 @@ fix. The sanctioned rewrites are the path write (`owner[i][j] = v`, which
 `cow_path_set` already propagates correctly), mutate-then-insert, or the
 explicit read-modify-write handle store (`C4.2e`) that `richards3` uses.
 `S9.1.3` plain-parameter snapshots remain unimplemented and are still expected
-to land with this. The nested-mutation design that lets the flag become the
+to land with this.
+
+**Two Stage-2 rows closed by ruling, 2026-08-28 (designer), not by
+implementation.** (a) The **JS↔Lambda ownership boundary is DEFERRED to
+future** — explicitly out of the current COW programme; JS keeps reference
+semantics and its raw setters, and the Lambda-side work does not wait on it.
+(b) The **module-level half of `S9.2.4` is vacuous by design**: `var` is a
+procedural binding and a module-level one is rejected with `error[E224]`, so
+there is no module-level `var` to forbid passing as a `var` argument. Only the
+**view-state** half survives, which is what `S9.2.4v2` now says (spec
+18.1.0). Neither is outstanding work. The nested-mutation design that lets the flag become the
 default is now written:
 [`Lambda_Design_Nested_Mutation.md`](Lambda_Design_Nested_Mutation.md)
 (CW22–CW28, PROPOSED, owner of `SO14`). Its scheduling result is that the flip

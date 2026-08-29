@@ -775,6 +775,11 @@ for functions that use it; all repeated mutation stays within the context-owned 
 
 ### RG14 — Lambda script has no global mutable state
 
+> **Ratified into the formal spec 2026-08-28 as `S9.1.7`** (spec 18.1.0). It
+> also corrected `S9.1.4`, which had carried the pre-RG14 wording "State lives
+> in module-level `var`s, view state, and objects with `pn` methods", and it
+> makes the module-level half of `S9.2.4` vacuous — see `S9.2.4v2`.
+
 Everything above governs *runtime* state written in C/C++. This decision states the matching
 property of the *language*, which is what makes the runtime rules cheap to hold:
 

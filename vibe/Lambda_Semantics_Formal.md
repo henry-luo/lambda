@@ -836,8 +836,13 @@ fork the count? — both answers are bad). The per-call-copy option is value-sem
 legal but a confusion trap (the intuitive counter returns 1, 1, 1 silently).
 Immutable captures match Java (effectively-final) and C++ (const by-value captures),
 and the probes showed no working behavior was being given up. Idioms for state:
-object with `pn` methods in a `var`, module-level `var`, view `state`, `var` local
-inside the closure body, `var` params.
+object with `pn` methods in a `var`, ~~module-level `var`~~, view `state`, `var`
+local inside the closure body, `var` params.
+*(Superseded 2026-08-28: "module-level `var`" is struck — **RG14**
+(`Lambda_Design_Runtime_Globals.md`) rules that Lambda has no global mutable
+state, and no module-scope mutable binding can be declared. Ratified into the
+formal spec as **S9.1.7**; `doc/Lambda_Formal_Semantics.md` S9.1.4 carried the
+same stale wording and was corrected with it.)*
 
 **Round 4 — the JS question (designer): "JS closures are mutable and used as
 objects — how to model that if Lambda closures are immutable?"** Resolution: the
