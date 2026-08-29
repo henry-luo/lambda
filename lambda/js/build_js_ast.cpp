@@ -454,7 +454,7 @@ JsOperator js_operator_from_string(const char* op_str, size_t len) {
 // Binary and unary `+`/`-` occupy distinct core operator slots. Keep the
 // shared spelling table for all other tokens, but preserve unary coercion
 // semantics for the AST executor.
-static JsOperator js_unary_operator_from_string(const char* op_str, size_t len) {
+JsOperator js_unary_operator_from_string(const char* op_str, size_t len) {
     if (len == 1 && op_str[0] == '+') return JS_OP_PLUS;
     if (len == 1 && op_str[0] == '-') return JS_OP_MINUS;
     return js_operator_from_string(op_str, len);
@@ -3122,7 +3122,7 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
 
 // Build JavaScript import statement
 // import X from 'module'  |  import { a, b } from 'module'  |  import * as X from 'module'
-static void js_record_interp_import(JsTranspiler* tp, String* local,
+void js_record_interp_import(JsTranspiler* tp, String* local,
         String* source, String* export_name, bool namespace_import) {
     if (!tp || !local || !source || (!namespace_import && !export_name)) return;
     JsInterpImportBinding* binding = (JsInterpImportBinding*)pool_calloc(tp->pool,
@@ -3136,7 +3136,7 @@ static void js_record_interp_import(JsTranspiler* tp, String* local,
     tp->interp_imports = binding;
 }
 
-static void js_record_interp_export(JsTranspiler* tp, String* local,
+void js_record_interp_export(JsTranspiler* tp, String* local,
         String* export_name, String* source, bool namespace_export,
         bool star_export) {
     if (!tp || !local || !export_name) return;

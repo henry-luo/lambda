@@ -795,8 +795,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         return js_dynamic_function_throw_syntax_error("Invalid function source");
     }
 
-    TSNode root = ts_tree_root_node(tp->tree);
-    JsAstNode* js_ast = build_js_ast_indexed(tp, root);
+    JsAstNode* js_ast = js_transpiler_build_ast(tp);
     if (!js_ast) {
         log_error("js-new-function: AST build failed");
         (void)js_mir_compile_unit_fail(NULL, NULL, tp, source,
@@ -1823,8 +1822,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             return js_throw_syntax_error(syntax_message);
         }
 
-        TSNode root = ts_tree_root_node(tp->tree);
-        JsAstNode* js_ast = build_js_ast_indexed(tp, root);
+        JsAstNode* js_ast = js_transpiler_build_ast(tp);
         if (!js_ast) {
             log_error("js-eval: AST build failed for direct script");
             (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,

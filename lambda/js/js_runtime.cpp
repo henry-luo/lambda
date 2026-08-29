@@ -28612,6 +28612,10 @@ extern "C" bool js_is_async_generator(Item obj) {
 #define js_regexp_string_iterator_proto_cache (js_runtime_state.iterators.regexp_string_iterator_prototype)
 
 extern "C" void js_iterator_proto_cache_reset(void) {
+    if (js_test262_realm_template_is_active() &&
+            js_test262_realm_template_restore_iterator_prototypes()) {
+        return;
+    }
     js_iterator_proto_cache = (Item){0};
     js_array_iterator_proto_cache = (Item){0};
     js_string_iterator_proto_cache = (Item){0};
@@ -28667,6 +28671,8 @@ static Item js_get_iterator_proto() {
     js_set_key_default(proto_root.get(), si_key, si_fn_root.get());
     js_mark_non_enumerable(proto_root.get(), si_key);
     js_iterator_proto_cache = proto_root.get();
+    js_test262_realm_template_capture_iterator_prototype(
+        js_iterator_proto_cache);
     return proto_root.get();
 }
 
@@ -28674,6 +28680,7 @@ static Item js_get_array_iterator_proto() {
     Item proto = js_make_iterator_proto(&js_array_iterator_proto_cache,
         JS_BUILTIN_OWNER_ARRAY_ITERATOR_INTERNAL, "Array Iterator", 14);
     js_set_prototype(proto, js_get_iterator_proto());
+    js_test262_realm_template_capture_iterator_prototype(proto);
     return proto;
 }
 
@@ -28701,6 +28708,7 @@ static Item js_get_string_iterator_proto() {
     Item proto = js_make_iterator_proto(&js_string_iterator_proto_cache,
         JS_BUILTIN_OWNER_STRING_ITERATOR_INTERNAL, "String Iterator", 15);
     js_set_prototype(proto, js_get_iterator_proto());
+    js_test262_realm_template_capture_iterator_prototype(proto);
     return proto;
 }
 
@@ -28719,6 +28727,7 @@ static Item js_get_map_iterator_proto() {
     Item proto = js_make_iterator_proto(&js_map_iterator_proto_cache,
         JS_BUILTIN_OWNER_COLLECTION_ITERATOR_INTERNAL, "Map Iterator", 12);
     js_set_prototype(proto, js_get_iterator_proto());
+    js_test262_realm_template_capture_iterator_prototype(proto);
     return proto;
 }
 
@@ -28726,6 +28735,7 @@ static Item js_get_set_iterator_proto() {
     Item proto = js_make_iterator_proto(&js_set_iterator_proto_cache,
         JS_BUILTIN_OWNER_COLLECTION_ITERATOR_INTERNAL, "Set Iterator", 12);
     js_set_prototype(proto, js_get_iterator_proto());
+    js_test262_realm_template_capture_iterator_prototype(proto);
     return proto;
 }
 
@@ -28733,6 +28743,7 @@ static Item js_get_regexp_string_iterator_proto() {
     Item proto = js_make_iterator_proto(&js_regexp_string_iterator_proto_cache,
         JS_BUILTIN_OWNER_REGEXP_ITERATOR_INTERNAL, "RegExp String Iterator", 22);
     js_set_prototype(proto, js_get_iterator_proto());
+    js_test262_realm_template_capture_iterator_prototype(proto);
     return proto;
 }
 

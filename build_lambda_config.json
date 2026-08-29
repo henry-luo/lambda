@@ -45,6 +45,11 @@
     "lambda/module/node_core/node_events.cpp",
     "lambda/module/node_core/node_trace_events.cpp",
     "lambda/module/node_core/node_url.cpp",
+    "lambda/runtime/parser/source_parser.c",
+    "lambda/js/parser/js_lexer.c",
+    "lambda/js/parser/js_parser.c",
+    "lambda/js/js_direct_scope.cpp",
+    "lambda/js/js_parser_compare.cpp",
     "lambda/jube/jube_node_zlib_codec.cpp",
     "lambda/serve/serve_utils.cpp",
     "lambda/serve/tls_handler.cpp"
@@ -69,13 +74,18 @@
   "configurable_defines": {
     "JS_TEST262_FAST_PATHS": "1"
   },
+  "release_exclude_libraries": [
+    "tree-sitter-javascript",
+    "tree-sitter-typescript"
+  ],
+  "release_defines": [
+    "JS_C_PRODUCTION"
+  ],
   "includes": [
     ".",
     "lambda/mir",
     "build_temp/re2-noabsl",
     "lambda/tree-sitter/lib/include",
-    "lambda/tree-sitter-typescript/bindings/c",
-    "lambda/tree-sitter-javascript/bindings/c",
     "lib/font/woff2/include",
     "mac-deps/thorvg/src/bindings/capi"
   ],
@@ -98,14 +108,14 @@
     {
       "name": "tree-sitter-typescript",
       "version": "0.23.2-fork",
-      "include": "lambda/tree-sitter-typescript/bindings/c",
+      "include": "",
       "lib": "lambda/tree-sitter-typescript/libtree-sitter-typescript.a",
       "link": "static"
     },
     {
       "name": "tree-sitter-javascript",
       "version": "0.23.1",
-      "include": "lambda/tree-sitter-javascript/bindings/c",
+      "include": "",
       "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
       "link": "static"
     },
@@ -488,11 +498,6 @@
           "wldap32"
         ]
       },
-      "linux": {
-        "additional_libraries": [
-          "gomp"
-        ]
-      },
       "defines": [
         "UTF8PROC_STATIC",
         "MEMPOOL_RUNTIME_VM_PROVIDER"
@@ -663,6 +668,9 @@
       "source_files": [
         "lambda/module/node_core/node_events.cpp",
         "lambda/module/node_core/node_url.cpp",
+        "lambda/runtime/parser/source_parser.c",
+        "lambda/js/parser/js_lexer.c",
+        "lambda/js/parser/js_parser.c",
         "lambda/runtime/parse.c",
         "lambda/runtime/mir.c",
         "lambda/runtime/mir_dump.cpp",
@@ -870,6 +878,7 @@
       "lang": "c17",
       "source_files": [
         "test/lambda_parser_poc_diff.c",
+        "lambda/runtime/parser/source_parser.c",
         "lambda/runtime/parser/lambda_lexer.c",
         "lambda/runtime/parser/lambda_parser.c"
       ],
@@ -897,6 +906,7 @@
         "-Wl,/force:unresolved"
       ],
       "source_files": [
+        "lambda/runtime/parser/source_parser.c",
         "lambda/runtime/parse.c",
         "lambda/runtime/build_ast.cpp",
         "lambda/validator/ast_validate.cpp",
@@ -3010,7 +3020,6 @@
             ],
             "additional_sources": [
               "radiant/animation.cpp",
-              "radiant/css_display.cpp",
               "radiant/css_animation.cpp",
               "radiant/css_cascade.cpp",
               "radiant/css_prop_table.cpp",
@@ -4471,6 +4480,7 @@
             "source": "test/test_lambda_parser_poc_gtest.cpp",
             "name": "Lambda C Parser POC Tests",
             "additional_sources": [
+              "lambda/runtime/parser/source_parser.c",
               "lambda/runtime/parser/lambda_lexer.c",
               "lambda/runtime/parser/lambda_parser.c"
             ],
@@ -4728,6 +4738,61 @@
             "icon": "🟨"
           },
           {
+            "source": "test/test_js_c_parser_gtest.cpp",
+            "name": "JavaScript C Parser Tests",
+            "additional_sources": [
+              "lambda/runtime/parser/source_parser.c",
+              "lambda/js/parser/js_lexer.c",
+              "lambda/js/parser/js_parser.c",
+              "lambda/js/js_regex_generated_properties.cpp"
+            ],
+            "binary": "test_js_c_parser_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main",
+              "utf8proc"
+            ],
+            "icon": "🧩"
+          },
+          {
+            "source": "test/test_js_parser_benchmark_gtest.cpp",
+            "name": "JavaScript Parser Benchmark",
+            "category": "extended",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "binary": "test_js_parser_benchmark_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main",
+              "tree-sitter-javascript",
+              "tree-sitter-typescript"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "icon": "⏱️"
+          },
+          {
             "source": "test/test_js_script_gtest.cpp",
             "name": "JavaScript Script Ownership Tests",
             "dependencies": [
@@ -4738,7 +4803,9 @@
             "binary": "test_js_script_gtest.exe",
             "libraries": [
               "gtest",
-              "gtest_main"
+              "gtest_main",
+              "tree-sitter-javascript",
+              "tree-sitter-typescript"
             ],
             "macos": {
               "libraries": [

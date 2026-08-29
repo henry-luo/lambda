@@ -1,7 +1,9 @@
 #pragma once
 
 #include "js_ast.hpp"
+#include "parser/js_parser.h"
 #include "../runtime/transpiler.hpp"
+#include "../../lib/strbuf.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,6 +12,7 @@ extern "C" {
 // Forward declarations
 typedef struct JsScript JsScript;
 typedef struct JsTranspiler JsTranspiler;
+struct JsDirectScopeState;
 typedef NameScope JsScope;
 struct hashmap;
 
@@ -94,6 +97,8 @@ struct JsTranspiler : JsScript {
     bool in_expression;             // True when transpiling inside an expression (for function expressions)
     bool in_async_function;         // True while building an async function body/parameters
     bool in_generator_function;     // True while building a generator body/parameters
+    bool direct_ast_building;       // Direct parser bindings are rebuilt after reduction
+    JsDirectScopeState* direct_scope_state;
     
     // ANY-census [Type_Infer TI3]: per-reason counts of expressions whose
     // static type fell back to `any`. Diagnostic only — shares the Lambda
@@ -132,6 +137,11 @@ NameEntry* js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVa
 // var scope rather than a simple catch parameter's legacy var target.
 NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* scope,
     String* name, JsAstNode* node, JsVarKind kind);
+void js_record_interp_import(JsTranspiler* tp, String* local, String* source,
+    String* export_name, bool namespace_import);
+void js_record_interp_export(JsTranspiler* tp, String* local,
+    String* export_name, String* source, bool namespace_export,
+    bool star_export);
 
 // AST building functions (build_js_ast.cpp)
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root);
@@ -201,6 +211,45 @@ JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node);
 // AST utility functions (build_js_ast.cpp)
 JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode node, size_t size);
 JsOperator js_operator_from_string(const char* op_str, size_t len);
+bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast);
+JsAstNode* publish_js_ast_indexed(JsTranspiler* tp, JsAstNode* ast);
+
+// Parser backends. Tree-sitter remains the explicit reference/differential
+// lane; the C parser owns normal JS/TS source admission in release builds.
+TSParser* js_transpiler_reference_parser(JsTranspiler* tp);
+bool js_transpiler_reference_set_language(JsTranspiler* tp,
+                                          const TSLanguage* language);
+TSTree* js_transpiler_reference_tree(JsTranspiler* tp);
+bool js_transpiler_parse_reference(JsTranspiler* tp, const char* source,
+                                   size_t length);
+bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
+                           JsParseMode mode);
+bool js_transpiler_parse_c_auto(JsTranspiler* tp, const char* source,
+                                size_t length);
+bool js_transpiler_parse_compare(JsTranspiler* tp, const char* source,
+                                 size_t length);
+bool js_transpiler_parse_compare_mode(JsTranspiler* tp, const char* source,
+                                       size_t length, JsParseMode mode);
+bool js_transpiler_parse_module(JsTranspiler* tp, const char* source,
+                                size_t length);
+
+// Return the AST owned by the selected parser backend, building the reference
+// AST only when the C parser did not publish one.
+static inline JsAstNode* js_transpiler_build_ast(JsTranspiler* tp) {
+    if (!tp) return NULL;
+    if (tp->ast_root) return (JsAstNode*)tp->ast_root;
+    TSTree* reference_tree = js_transpiler_reference_tree(tp);
+    return reference_tree ? build_js_ast_indexed(tp,
+        ts_tree_root_node(reference_tree)) : NULL;
+}
+
+typedef enum JsParserBackend {
+    JS_PARSER_BACKEND_REFERENCE = 0,
+    JS_PARSER_BACKEND_C = 1,
+    JS_PARSER_BACKEND_COMPARE = 2,
+} JsParserBackend;
+
+JsParserBackend js_parser_backend_selection(void);
 
 // Error handling functions
 void js_error(JsTranspiler* tp, SourceSpan span, const char* format, ...);

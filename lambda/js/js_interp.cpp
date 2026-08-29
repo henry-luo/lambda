@@ -2419,8 +2419,12 @@ static bool js_interp_eval_redeclares_parameter(JsInterpFrame* frame, Item code)
         js_transpiler_destroy(transpiler);
         return false;
     }
-    JsAstNode* eval_ast = build_js_ast_indexed(transpiler,
-        ts_tree_root_node(transpiler->tree));
+    TSTree* reference_tree = js_transpiler_reference_tree(transpiler);
+    JsAstNode* eval_ast = transpiler->ast_root
+        ? (JsAstNode*)transpiler->ast_root
+        : (reference_tree
+            ? build_js_ast_indexed(transpiler,
+                ts_tree_root_node(reference_tree)) : NULL);
     bool redeclares_parameter = false;
     if (eval_ast && transpiler->global_scope) {
         for (NameEntry* declared = transpiler->global_scope->first; declared &&
@@ -5823,7 +5827,8 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
         : js_get_global_this());
     Rooted<Item> new_target_root(roots, js_get_new_target());
     Rooted<Item> home_class_root(roots, ItemNull);
-    if (script->test262_native_harness) {
+    if (script->test262_native_harness &&
+            !js_test262_realm_template_is_active()) {
         Item installed = js_test262_native_harness_install();
         if (item_is_error(installed)) return installed;
     }
@@ -5851,7 +5856,11 @@ JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
         js_transpiler_destroy(transpiler);
         return NULL;
     }
-    JsAstNode* ast = build_js_ast_indexed(transpiler, ts_tree_root_node(transpiler->tree));
+    TSTree* reference_tree = js_transpiler_reference_tree(transpiler);
+    JsAstNode* ast = transpiler->ast_root ? (JsAstNode*)transpiler->ast_root
+        : (reference_tree
+            ? build_js_ast_indexed(transpiler,
+                ts_tree_root_node(reference_tree)) : NULL);
     if (!ast || transpiler->has_errors) {
         js_transpiler_destroy(transpiler);
         return NULL;

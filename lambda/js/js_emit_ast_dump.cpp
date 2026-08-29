@@ -332,6 +332,15 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
         case JS_AST_NODE_BLOCK_STATEMENT:
             emit_js_dump_list(source, "statements", ((JsBlockNode*)node)->statements, indent + 1);
             break;
+        case JS_AST_NODE_FOR_OF_STATEMENT:
+        case JS_AST_NODE_FOR_IN_STATEMENT: {
+            JsForOfNode* iteration = (JsForOfNode*)node;
+            emit_js_dump_field(source, "left", iteration->left, indent + 1);
+            emit_js_dump_field(source, "init", iteration->init, indent + 1);
+            emit_js_dump_field(source, "right", iteration->right, indent + 1);
+            emit_js_dump_field(source, "body", iteration->body, indent + 1);
+            break;
+        }
         case JS_AST_NODE_IF_STATEMENT: {
             JsIfNode* if_node = (JsIfNode*)node;
             emit_js_dump_field(source, "test", if_node->test, indent + 1);
@@ -470,8 +479,7 @@ extern "C" int emit_js_ast_dump_file(const char* script_path) {
         return 1;
     }
 
-    TSNode root = ts_tree_root_node(tp->tree);
-    JsAstNode* ast = build_js_ast_indexed(tp, root);
+    JsAstNode* ast = js_transpiler_build_ast(tp);
     if (!ast) {
         fprintf(stderr, "Error: Failed to build JS AST for '%s'\n", script_path);
         js_transpiler_destroy(tp);

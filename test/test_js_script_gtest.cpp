@@ -26,8 +26,10 @@ TEST(JsScriptOwnership, AdoptsCommonScriptPrefixIntoRuntimeCatalog) {
     ASSERT_NE(tp, nullptr);
     ASSERT_TRUE(js_transpiler_parse(tp, source, sizeof(source) - 1));
 
-    TSNode root = ts_tree_root_node(tp->tree);
-    JsAstNode* ast = build_js_ast_indexed(tp, root);
+    TSTree* reference_tree = js_transpiler_reference_tree(tp);
+    JsAstNode* ast = tp->ast_root ? (JsAstNode*)tp->ast_root
+        : (reference_tree ? build_js_ast_indexed(tp,
+            ts_tree_root_node(reference_tree)) : nullptr);
     ASSERT_NE(ast, nullptr);
 
     Pool* ast_pool = tp->pool;

@@ -816,6 +816,16 @@ void js_register_global_var_module_bindings_bulk(const Item* keys, const int* in
 void js_batch_reset(void);
 void js_intrinsic_state_teardown(void);
 void js_batch_reset_to(int checkpoint_var_count);
+// AST-native Test262 batches keep a private pristine realm template in the
+// current EvalContext. Each reset rebuilds globalThis while preserving the
+// validated intrinsic/prototype snapshot owned by that template.
+bool js_test262_realm_template_create(void);
+bool js_test262_realm_template_reset(void);
+bool js_test262_realm_template_is_active(void);
+bool js_test262_realm_template_capture_global(void);
+bool js_test262_realm_template_restore_global(void);
+bool js_test262_realm_template_capture_iterator_prototype(Item prototype);
+bool js_test262_realm_template_restore_iterator_prototypes(void);
 void js_prepare_compiled_preamble_vars(int declaration_count);
 extern int js_batch_execution_mode;
 void js_symbol_registry_batch_reset(void);
