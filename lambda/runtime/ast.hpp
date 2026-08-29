@@ -435,14 +435,17 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
             if (ast_body_may_write_entry(if_node->otherwise, root, include_rebind)) return true;
             break;
         }
-        case AST_NODE_WHILE_STAM: {
-            AstWhileNode* wh = (AstWhileNode*)stmt;
-            if (ast_body_may_write_entry(wh->cond, root, include_rebind)) return true;
-            if (ast_body_may_write_entry(wh->body, root, include_rebind)) return true;
+        case AST_NODE_LOOP: {
+            // one tag covers while / do-while / C-style for (D8.2.2); every
+            // clause can hide a write, so all four are walked
+            AstLoopControlNode* lc = (AstLoopControlNode*)stmt;
+            if (ast_body_may_write_entry(lc->init, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(lc->cond, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(lc->update, root, include_rebind)) return true;
+            if (ast_body_may_write_entry(lc->body, root, include_rebind)) return true;
             break;
         }
-        case AST_NODE_FOR_EXPR:
-        case AST_NODE_FOR_STAM: {
+        case AST_NODE_FOR_EXPR: {
             AstForNode* nested = (AstForNode*)stmt;
             for (AstNode* lv = nested->loop; lv; lv = lv->next) {
                 if (ast_body_may_write_entry(((AstLoopNode*)lv)->as, root, include_rebind)) return true;

@@ -1674,9 +1674,9 @@ static AstIdentNode* compound_root_ident(AstNode* node) {
 // view's own entry so the call-site exclusivity check can conflict two `var`
 // arguments that share a base -- the same whole-base granularity as face 3.
 // Chasing view_base here keeps view-of-view chains one hop at check time.
-static void lambda_ast_note_view_binding(AstNamedNode* named) {
-    if (!named || !named->entry || !named->as) return;
-    AstNode* init = ast_unwrap_primary(named->as);
+static void lambda_ast_note_view_binding(AstDeclaratorNode* named) {
+    if (!named || !named->entry || !named->init) return;
+    AstNode* init = ast_unwrap_primary(named->init);
     if (!init || init->node_type != AST_NODE_CALL_EXPR) return;
     AstCallNode* call = (AstCallNode*)init;
     AstNode* callee = ast_unwrap_primary(call->function);
@@ -8670,9 +8670,9 @@ static void direct_validate_mutable_compound(Transpiler* tp,
 // Gated on the same switch as capture itself: with the flag off the aliasing
 // behavior is still in force and the write does reach the container, so the
 // error would be false.
-void lambda_ast_mark_place_copy(AstNamedNode* named) {
-    if (!named || !named->entry || !named->as) return;
-    AstNode* init = unwrap_primary_node(named->as);
+void lambda_ast_mark_place_copy(AstDeclaratorNode* named) {
+    if (!named || !named->entry || !named->init) return;
+    AstNode* init = unwrap_primary_node(named->init);
     if (!init || (init->node_type != AST_NODE_MEMBER_EXPR &&
             init->node_type != AST_NODE_INDEX_EXPR)) return;
     // Only a place rooted at a MUTABLE binding is a lost update. Rooted at a
