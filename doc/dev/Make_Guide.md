@@ -12,7 +12,7 @@ Run `make help` for a quick summary, or see below for full details.
 
 | Target          | Description                                                                                                                                                                          |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `build`         | **Default target.** Incremental debug build via Premake. Auto-detects platform and compiler toolchain (Clang on all platforms; CLANG64 on Windows/MSYS2 to avoid Universal CRT). Builds the normal Tree-sitter input libraries, RE2, and embed headers. The Lambda reference grammar is built only by `lambda-cst`. |
+| `build`         | **Default target.** Incremental debug build via Premake. Auto-detects platform and compiler toolchain (Clang on all platforms; CLANG64 on Windows/MSYS2 to avoid Universal CRT). Builds normal Tree-sitter input libraries, RE2, and embed headers. The Lambda, JavaScript, and TypeScript reference grammars are built only by `lambda-cst`. |
 | `debug`         | Debug build with AddressSanitizer enabled.                                                                                                                                           |
 | `release`       | Optimized release build. Runs `clean-all` first, then compiles with LTO, dead code elimination, symbol visibility control, and strips debug symbols. Output: `lambda_release.exe`.   |
 | `rebuild`       | Force complete rebuild (`clean-all` + `build`).                                                                                                                                      |
@@ -71,7 +71,7 @@ distclean
 | Target | Description |
 |--------|-------------|
 | `generate-grammar` | Regenerate the isolated Lambda CST parser artifacts from `grammar.js`. |
-| `tree-sitter-libs` | Build the Tree-sitter static libraries used by input grammars and other language frontends. The isolated Lambda CST archive is built by `lambda-cst`. |
+| `tree-sitter-libs` | Build the Tree-sitter static libraries used by normal input grammars. The isolated Lambda/JavaScript/TypeScript reference archives are built by `lambda-cst`. |
 
 ### Auto-generation Rules
 

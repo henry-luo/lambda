@@ -1,7 +1,7 @@
 flowchart TB
   SRC["JS source (.js / .mjs / .cjs)"]
-  TS["Tree-sitter parse<br/>js_transpiler_parse"]
-  AST["build_js_ast<br/>JsAstNode tree"]
+  PARSE["C lexer + RD/Pratt parse<br/>js_transpiler_parse"]
+  AST["direct JsAstNode reduction<br/>scope + index publication"]
   EE["js_check_early_errors<br/>6-phase validator + strict-mode"]
   CTX["EvalContext / GC heap / name pool / Input<br/>(reused in batch hot-reload)"]
   IMP["import precompile / load<br/>jm_precompile_js_imports / jm_load_imports"]
@@ -13,7 +13,7 @@ flowchart TB
   RUN["find_func js_main<br/>js_main(Context*) returns Item"]
   DRAIN["js_event_loop_drain<br/>(before MIR_finish)"]
   RES["Item result<br/>(float to int normalize)"]
-  SRC --> TS --> AST --> EE --> CTX --> IMP --> JIT --> MT --> LOWER --> SEL
+  SRC --> PARSE --> AST --> EE --> CTX --> IMP --> JIT --> MT --> LOWER --> SEL
   SEL -->|gen interface| LINK
   SEL -->|interp interface| LINK
   LINK --> RUN --> DRAIN --> RES

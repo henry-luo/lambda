@@ -9,7 +9,7 @@ workspace "LambdaJS" "Embedded JavaScript runtime inside Lambda" {
       cli = container "CLI" "Dispatches the js and js-test-batch subcommands and document commands." "lambda/main.cpp"
 
       js = container "LambdaJS engine" "Compiles JavaScript to MIR and executes it." "lambda/js" {
-        frontend = component "Front-end" "Tree-sitter parse, AST build, early errors, lexical scope." "build_js_ast, js_early_errors, js_scope"
+        frontend = component "Front-end" "First-party C parse/direct AST, early errors, lexical scope." "parser/js_lexer, parser/js_parser, js_c_parser, js_early_errors, js_scope"
         transpiler = component "MIR transpiler" "Multi-phase AST to MIR lowering, code generation, eval." "js_mir_*, transpile_js_mir"
         runtimecore = component "Runtime core" "Values, property and prototype system, functions, closures, exceptions." "js_runtime*, js_props, js_property_attrs"
         stdlib = component "Standard library" "Object, Array, String, RegExp, TypedArrays, collections, Proxy." "js_globals, js_regex_*, js_typed_array"

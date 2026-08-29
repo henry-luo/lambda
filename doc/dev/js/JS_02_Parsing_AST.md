@@ -1,19 +1,19 @@
 # LambdaJS — Parsing, AST & Front-End Validation
 
-> **Last verified against tree:** 2026-06-16 *(initial stamp from git history)*
+> **Last verified against tree:** 2026-08-29
 
-> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the front end of the engine: how JS source becomes a Tree-sitter CST, how `build_js_ast.cpp` lowers that CST into a typed `JsAstNode` tree, how lexical scope is resolved during construction, how the early-error validator enforces the spec's parse-time `SyntaxError`/`ReferenceError` rules, and how strict mode is detected. The MIR lowering that consumes the AST is in [JS_04 — MIR Lowering](JS_04_MIR_Lowering.md); where this front end sits in the overall flow is in [JS_01 — Compilation Pipeline](JS_01_Compilation_Pipeline.md).
+> **Part of the [LambdaJS detailed-design set](JS_00_Overview.md).** This document covers the front end of the engine: how the first-party C lexer and hybrid recursive-descent/Pratt parser reduce JS/TS source directly into a typed `JsAstNode` tree, how lexical scope is resolved after reduction, how the early-error validator enforces the spec's parse-time `SyntaxError`/`ReferenceError` rules, and how strict mode is detected. The vendored JS/TS Tree-sitter grammars and their CST adapter are isolated to `lambda-cst` for comparison under **D8.1.3v10**. The MIR lowering that consumes the AST is in [JS_04 — MIR Lowering](JS_04_MIR_Lowering.md); where this front end sits in the overall flow is in [JS_01 — Compilation Pipeline](JS_01_Compilation_Pipeline.md).
 >
-> **Primary sources:** `lambda/js/js_ast.hpp` (`JsAstNode` hierarchy, `JsAstNodeType`, `JsOperator`), `lambda/js/build_js_ast.cpp` (CST→AST builder), `lambda/js/js_scope.cpp` (parser lifecycle, source normalization, scope management), `lambda/js/js_early_errors.cpp` (static semantic validation), `lambda/js/js_print.cpp` (debug AST dumper), `lambda/js/js_transpiler.hpp` (`JsTranspiler`, `JsScope`, `JsVarKind`, `JsScopeType`). The grammar is `lambda/tree-sitter-javascript/` with auto-generated `parser.c`.
+> **Primary sources:** `lambda/js/parser/js_lexer.c` and `js_parser.c` (JS/TS lexer and RD/Pratt recognizer), `lambda/js/js_c_parser.cpp` (direct AST reduction), `lambda/js/js_c_ast_helpers.cpp` (shared AST construction and scope helpers), `lambda/js/js_ast.hpp` (`JsAstNode` hierarchy, `JsAstNodeType`, `JsOperator`), `lambda/js/js_scope.cpp` (parser lifecycle and scope management), `lambda/js/js_early_errors.cpp` (static semantic validation), `lambda/js/js_print.cpp` (debug AST dumper), and `lambda/js/js_transpiler.hpp` (`JsTranspiler`, `JsScope`, `JsVarKind`, `JsScopeType`). `lambda/js/build_js_ast.cpp` and `lambda/tree-sitter-{javascript,typescript}/` are retained reference-only components.
 > **Audience:** engine developers. **Convention:** `file:line` references drift; confirm against the named symbols.
 
 ---
 
 ## 1. Purpose & scope
 
-The front end turns a source buffer into a validated, typed AST in three stages: parse (`js_transpiler_parse`), build (`build_js_ast`), validate (`js_check_early_errors`). All three are driven from the MIR entrypoints — `js_mir_eval_lowering.cpp:120`/`:128`/`:136`, `js_mir_entrypoints_require.cpp:449`/`:462`/`:474`, and the module batch path `js_mir_module_batch_lowering.cpp:6073`/`:6080`/`:6355` call them in sequence and abort if any reports failure. The output is a tree of `JsAstNode`-rooted structs that the lowering layer walks; this document describes the tree's shape, how it is built, and the validation gate in front of codegen. It does **not** cover Tree-sitter internals (`parser.c` is generated and opaque here) nor the lowering of individual node types into MIR.
+The front end turns a source buffer into a validated, typed AST in three stages: direct parse/reduction (`js_transpiler_parse` → `js_transpiler_parse_c`), scope reconstruction, and validation/index publication (`js_check_early_errors` plus the shared compiler passes). The MIR entrypoints call them in sequence and abort if any reports failure. The output is a tree of `JsAstNode`-rooted structs that the lowering layer walks; this document describes the tree's shape, how it is built, and the validation gate in front of codegen. It does not cover individual MIR lowering rules.
 
-A recurring theme is that **the JS and TypeScript front ends share one Tree-sitter parser and one builder.** `tp->strict_js` (true by default) gates whether TS-only node types are accepted; the same `JsAstNode` enum range is deliberately kept wide enough (`JS_AST_NODE_TS_EXTENSION_SENTINEL = 1100`, `js_ast.hpp:157`) so the TS parser's extension-node values can be stored in `JsAstNode::node_type` without the compiler folding away comparisons.
+A recurring theme is that **the JS and TypeScript front ends share one C lexer and parser core.** `tp->strict_js` (true by default) gates TS-only syntax; the parser receives `JS_PARSE_TYPESCRIPT` only for the TS profile and reduces extension nodes into the retained AST range.
 
 ---
 
@@ -21,7 +21,7 @@ A recurring theme is that **the JS and TypeScript front ends share one Tree-sitt
 
 <img alt="JsAstNode hierarchy" src="diagram/d02_ast_hierarchy.svg" width="720">
 
-Every node begins with a common header, `struct JsAstNode` (`js_ast.hpp:241`): a `JsAstNodeType node_type` tag, a `Type* type` (the inferred Lambda type — same `Type*` vocabulary as the rest of the engine, e.g. `&TYPE_FLOAT`, `&TYPE_STRING`, `&TYPE_ANY`), a `JsAstNode* next` sibling pointer, and the originating `TSNode node`. The field order is **load-bearing**: the comment at `js_ast.hpp:239` notes it must match `AstNode`'s layout because `NameEntry::node` is typed `AstNode*` but points at `JsAstNode` memory — the scope table and the Lambda symbol-table machinery are reused verbatim. Subtypes (e.g. `JsBinaryNode`, `JsFunctionNode`, `JsForOfNode`) embed `JsAstNode base` as their first member and are reached by a pointer cast keyed on `node_type`.
+Every node begins with the common `AstNode` header: a `JsAstNodeType node_type` tag, a `Type* type` (the inferred Lambda type — same `Type*` vocabulary as the rest of the engine, e.g. `&TYPE_FLOAT`, `&TYPE_STRING`, `&TYPE_ANY`), a `JsAstNode* next` sibling pointer, and a source span. The field order is **load-bearing** because `NameEntry::node` is typed `AstNode*` but points at `JsAstNode` memory — the scope table and the Lambda symbol-table machinery are reused verbatim. Subtypes (e.g. `JsBinaryNode`, `JsFunctionNode`, `JsForOfNode`) embed `JsAstNode base` as their first member and are reached by a pointer cast keyed on `node_type`.
 
 Sibling lists rather than child arrays are the norm: a program body, a block's statements, an argument list, and object properties are all singly-linked through `base.next`. This keeps allocation simple (each node is one `pool_alloc` from `tp->ast_pool` via `alloc_js_ast_node`, `build_js_ast.cpp:144`, which `memset`s the block and stamps `node_type`/`node`) and lets builders append by walking to the tail.
 
@@ -33,21 +33,23 @@ Two node-shape details worth noting: `JsForOfNode` and `JsForInNode` are the **s
 
 ---
 
-## 3. Tree-sitter integration & CST→AST construction
+## 3. Production C parser & reference CST adapter
 
 <img alt="CST to AST flow" src="diagram/d02_cst_to_ast.svg" width="720">
 
-**Parser setup.** `js_transpiler_create` (`js_scope.cpp:202`) allocates the `ts_parser_new()` and prefers `tree_sitter_javascript()`, falling back to `tree_sitter_typescript()` if the JS language is unavailable (`js_scope.cpp:215`). One AST memory pool (`MEM_ROLE_AST`) and a name pool back all node and string allocation; `strict_js` defaults to true (reject TS syntax).
+**Production parser setup.** `js_transpiler_parse` selects the C backend in normal builds. `js_transpiler_parse_c` supplies `JS_PARSE_SCRIPT`/`JS_PARSE_MODULE` and `JS_PARSE_TYPESCRIPT` as appropriate to `js_parser_parse_source`; its reduction sink builds the retained AST immediately. It then rebuilds the direct scope graph and publishes validation and `AstIndex` facts. One AST memory pool (`MEM_ROLE_AST`) and a name pool back all node and string allocation; `strict_js` defaults to true (reject TS syntax).
 
-**Source normalization.** `js_transpiler_parse` (`js_scope.cpp:975`) does not feed the raw bytes straight to Tree-sitter. First it rejects source containing an unescaped U+180E (MONGOLIAN VOWEL SEPARATOR) outside strings/comments/regex via the state-machine scan `js_source_has_unescaped_u180e_code_char` (`js_scope.cpp:356`). Then `js_normalize_source_for_parser` (`js_scope.cpp:658`) conditionally rewrites the buffer **in place at constant length** (to keep diagnostic byte offsets stable): CR and CRLF become LF (+ space), Unicode whitespace/line-terminators are folded to ASCII space/newline, an HTML `<!--` open comment is rewritten to `//` (the grammar's HTML-comment handling), `\0` becomes `@`, soft-keyword `await`/`yield` *used as identifiers* (detected heuristically by `js_source_soft_await_identifier_at`/`js_source_soft_yield_identifier_at`) are mangled so Tree-sitter does not parse them as operators, and invalid escapes in **tagged** template literals are neutralized. The rewriter carries its own lexer state (`ST_SQ`/`ST_DQ`/`ST_TPL`/`ST_LINE_COMMENT`/`ST_BLOCK_COMMENT`/`ST_REGEX`/`ST_REGEX_CLASS`) plus a `prev_allows_regex` flag so a `/` is correctly disambiguated as regex-open versus division — the same decision the grammar's external scanner makes — ensuring `<!--` inside a regex body is not rewritten. The whole pass is **skipped entirely** (returns NULL, original bytes parsed) when none of the triggering features are present, so the common case pays only the detection scans.
+**Reference adapter.** `JS_C_PRODUCTION` removes the JS/TS grammar dependency from normal targets. Only `lambda-cst` links the vendored grammar archives for acceptance comparison; its Tree-sitter CST remains a reference artifact, not a production input to LambdaJS execution.
 
-**Error reporting.** After `ts_parser_parse_string`, if `ts_node_has_error(root)` is set, the parser descends (bounded to 50 levels) to the deepest `ERROR`/`MISSING` node, logging each with line:column and a ±50-byte source snippet (`js_scope.cpp:1008`), then returns failure. Syntax errors therefore never reach the builder.
+**Reference-only normalization.** The retained CST adapter's `js_normalize_source_for_parser` and its U+180E check exist solely for the Tree-sitter comparison path. The production C lexer owns lexical goals, source spans, and JS/TS token recognition directly; it does not rewrite source before parsing.
 
-**The dispatch builders.** `build_js_ast` (`build_js_ast.cpp:4495`) requires a `program` root and calls `build_js_program` (`:2553`), which iterates **named** children, calls `build_js_statement` per child, and links the results through `base.next` — walking to the end of any returned chain because some builders (notably TS decorator → class) return multi-node lists. `build_js_statement` (`:2193`) and `build_js_expression` (`:1670`) are large `strcmp`-on-`ts_node_type` dispatchers; child access uses **field names** (`ts_node_child_by_field_name`, e.g. `"left"`/`"right"`/`"operator"` in `build_js_binary_expression` `:519`) precisely so that interspersed comment nodes do not shift positional child indices.
+**Error reporting.** The C parser reports the first syntax error through `JsParseError`, carrying original-source spans, expected-token bits, and a stable message; it publishes no AST on failure. Tree-sitter's deepest `ERROR`/`MISSING` traversal remains reference-only.
 
-**Gotchas grounded in the code:**
+**Direct reductions.** `js_parser_parse_source` combines recursive descent for declarations, statements, patterns, classes, modules, and delimited forms with Pratt loops for JS expressions and TS types. `js_c_reduce` receives each committed production with its source span and child facts, constructs the matching `JsAstNode`, and links program/body lists through `base.next`. `build_js_ast.cpp`'s `TSNode` dispatchers are retained only for the reference lane.
 
-- **Comment-node skipping.** Tree-sitter emits `comment` and `html_comment` as real CST nodes. `build_js_statement` returns NULL for both (`:2342`), as it does for `empty_statement` (`:2345`); `build_js_program` simply skips NULL results. Directive detection (`js_ts_body_has_use_strict_directive`, `:1124`) explicitly `continue`s past comment children so a leading comment does not hide a `"use strict"` prologue. Builders that read children positionally avoid corruption by going through field names instead.
+**Reference-adapter gotchas (not the production C path):**
+
+- **Comment-node skipping.** Tree-sitter emits `comment` and `html_comment` as real CST nodes. `build_js_statement` returns NULL for both, as it does for `empty_statement`; `build_js_program` simply skips NULL results. Direct reduction never constructs comment nodes.
 - **One `for_in_statement` node for both for-in and for-of.** The grammar produces a single `for_in_statement` for `for (x in y)` and `for (x of y)`. `build_js_for_in_statement` (`:2951`) disambiguates by reading the `operator` field and comparing its node type to `"of"` (`:2957`), selecting `JS_AST_NODE_FOR_OF_STATEMENT` vs `JS_AST_NODE_FOR_IN_STATEMENT` accordingly. `for await` is detected by scanning children for an `await` node. The same function also carries a workaround for a Tree-sitter misparse where `for await (let [a,b] of ...)` parses `let [a,b]` as a `subscript_expression` (`let[a,b]`); it detects the literal `let` object and reinterprets the index as an `array_pattern` (`:2984`).
 - **Numeric-literal decode.** `build_js_literal` (`:217`) strips numeric separators (`_`), records `has_decimal` (presence of `.`/`e`/`E`) and `is_bigint` (trailing `n`), and decodes the value: `0b`/`0o` prefixes via `strtoull` base 2/8, leading-zero all-octal-digit integers as Annex B legacy octal, otherwise `strtod` (which also covers `0x` hex and scientific notation). All JS numbers are typed `&TYPE_FLOAT` (`:280`). BigInt literals additionally retain the cleaned digit text in `bigint_str` (pool-allocated) for arbitrary precision.
 - **Identifier/string decode.** Both string literals (`:281`) and identifiers (`js_decode_identifier_name`, `:394`) take a fast path when `memchr` finds no backslash — interning the raw source slice straight into the name pool with no temp buffer. Otherwise they decode escapes: `\uXXXX`/`\u{…}` (with surrogate-pair handling via `js_decode_unicode_escape`, encoded WTF-8 through `wtf8_encode`), `\xHH`, line continuations, and Annex B legacy octal escapes (`js_decode_legacy_octal_escape`). Identifier decode uses a fixed 512-byte stack buffer and only handles `\u` escapes (the only escape form valid in identifiers).
@@ -117,13 +119,16 @@ Detection of the directive prologue is `js_ts_body_has_use_strict_directive` (`b
 
 | File | Responsibility (this doc) |
 |---|---|
-| `lambda/js/js_ast.hpp` | `JsAstNode` + all subtype structs, `JsAstNodeType`, `JsOperator`, `JsLiteralType`, Tree-sitter symbol/field macros. |
-| `lambda/js/build_js_ast.cpp` | CST→AST builders, literal/identifier/number decode, for-in/for-of discrimination, directive-prologue detection, comment/empty skipping. |
-| `lambda/js/js_scope.cpp` | Parser lifecycle (`js_transpiler_create`/`destroy`/`parse`), source normalization, scope create/push/pop/define/lookup, scope counters. |
+| `lambda/js/parser/js_lexer.c`, `js_parser.c` | Production JS/TS lexer, recursive descent, Pratt parsers, diagnostics, and reduction callbacks. |
+| `lambda/js/js_c_parser.cpp` | Direct reduction sink, scope reconstruction, and AST/index publication. |
+| `lambda/js/js_c_ast_helpers.cpp` | Shared source-span AST constructors, lexical scope, directive, and type helpers. |
+| `lambda/js/js_ast.hpp` | `JsAstNode` + all subtype structs, `JsAstNodeType`, `JsOperator`, `JsLiteralType`; legacy Tree-sitter macros remain reference-only. |
+| `lambda/js/build_js_ast.cpp` | Reference-only CST→AST adapter and legacy decode helpers. |
+| `lambda/js/js_scope.cpp` | Parser lifecycle (`js_transpiler_create`/`destroy`/`parse`), direct/reference selection, scope create/push/pop/define/lookup, scope counters. |
 | `lambda/js/js_early_errors.cpp` | `js_check_early_errors`, the six validation phases, reserved-word tables, context flags, block-redeclaration hashmap. |
 | `lambda/js/js_print.cpp` | `#ifndef NDEBUG` AST dumper (`print_js_ast_node`, `js_node_type_name`). |
 | `lambda/js/js_transpiler.hpp` | `JsTranspiler`, `JsScope`, `JsScopeType`, `JsVarKind`, public front-end entry-point declarations. |
-| `lambda/tree-sitter-javascript/` | Tree-sitter JS grammar; generates `parser.c` (not read here). |
+| `lambda/tree-sitter-{javascript,typescript}/` | Vendored reference grammars linked only by `lambda-cst`; generated sources are not modified. |
 
 ## Appendix B — Related documents
 

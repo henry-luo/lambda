@@ -82,7 +82,8 @@ These libraries and tools are required on every platform.
 |---------|--------|---------|
 | **tree-sitter** | Built from `lambda/tree-sitter/` | Incremental parser framework. Built using the **amalgamated `lib.c`** approach — compiles to a single object file with **no ICU/Unicode library dependency**. |
 | **tree-sitter-lambda** | Built from `lambda/tree-sitter-lambda/` | Optional Lambda reference grammar for the `lambda-cst` differential verifier |
-| **tree-sitter-javascript** | Built from `lambda/tree-sitter-javascript/` | JavaScript/JSX input parsing |
+| **tree-sitter-javascript** | Built from `lambda/tree-sitter-javascript/` | JavaScript/JSX reference grammar for `lambda-cst` only |
+| **tree-sitter-typescript** | Built from `lambda/tree-sitter-typescript/` | TypeScript reference grammar for `lambda-cst` only |
 | **tree-sitter-latex** | Built from `lambda/tree-sitter-latex/` | LaTeX document parsing |
 | **tree-sitter-latex-math** | Built from `lambda/tree-sitter-latex-math/` | LaTeX math expression parsing |
 | **MIR** | Built from `mac-deps/mir/` | JIT compiler backend (Medium Internal Representation) |
@@ -355,15 +356,19 @@ The grammar (`grammar.js`) defines:
 
 ### Additional Grammars
 
-Lambda also includes Tree-sitter grammars for input parsing:
+Lambda also includes Tree-sitter grammars for document parsing and isolated
+language-reference checks:
 
 | Grammar | Location | Purpose |
 |---------|----------|---------|
-| JavaScript | `lambda/tree-sitter-javascript/` | JSX/JavaScript input parsing |
+| JavaScript | `lambda/tree-sitter-javascript/` | `lambda-cst` JavaScript/JSX reference grammar |
+| TypeScript | `lambda/tree-sitter-typescript/` | `lambda-cst` TypeScript reference grammar |
 | LaTeX | `lambda/tree-sitter-latex/` | LaTeX document parsing |
 | LaTeX Math | `lambda/tree-sitter-latex-math/` | LaTeX math expression parsing |
 
-These follow the same `grammar.js` → `parser.c` pattern and are built as static libraries.
+These follow the same `grammar.js` → `parser.c` pattern. The JS/TS archives
+are built only by `lambda-cst`; normal Lambda builds use the first-party C
+parser under D8.1.3v10.
 
 ---
 

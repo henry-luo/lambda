@@ -673,7 +673,7 @@ MIR substrate are shared.
 
 | Aspect | JS Transpiler | Python Transpiler |
 |--------|---------------|-------------------|
-| Source grammar | Tree-sitter JavaScript | Tree-sitter Python |
+| Source grammar | First-party JS/TS C lexer + RD/Pratt parser (Tree-sitter reference in `lambda-cst`) | Tree-sitter Python |
 | Entry function | `js_main()` | `py_main()` |
 | User function prefix | inline naming | `_name` / nested-name MIR symbols |
 | Variables | `var`/`let`/`const` with hoisting | Assignment-based, LEGB scoping |

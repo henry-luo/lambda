@@ -69,18 +69,12 @@
   "defines": [
     "SQLITE_THREADSAFE=0",
     "SQLITE_OMIT_LOAD_EXTENSION",
-    "LAMBDA_NODE_MODULES_DYNAMIC_ONLY=1"
+    "LAMBDA_NODE_MODULES_DYNAMIC_ONLY=1",
+    "JS_C_PRODUCTION"
   ],
   "configurable_defines": {
     "JS_TEST262_FAST_PATHS": "1"
   },
-  "release_exclude_libraries": [
-    "tree-sitter-javascript",
-    "tree-sitter-typescript"
-  ],
-  "release_defines": [
-    "JS_C_PRODUCTION"
-  ],
   "includes": [
     ".",
     "lambda/mir",
@@ -103,20 +97,6 @@
       "version": "0.25.0",
       "include": "lambda/tree-sitter/lib/include",
       "lib": "lambda/tree-sitter/libtree-sitter.a",
-      "link": "static"
-    },
-    {
-      "name": "tree-sitter-typescript",
-      "version": "0.23.2-fork",
-      "include": "",
-      "lib": "lambda/tree-sitter-typescript/libtree-sitter-typescript.a",
-      "link": "static"
-    },
-    {
-      "name": "tree-sitter-javascript",
-      "version": "0.23.1",
-      "include": "",
-      "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
       "link": "static"
     },
     {
@@ -715,15 +695,14 @@
         "lambda-lib",
         "mir",
         "tree-sitter",
-        "tree-sitter-javascript",
-        "tree-sitter-typescript",
         "re2",
         "mpdec",
         "libuv",
         "pthread"
       ],
       "defines": [
-        "UTF8PROC_STATIC"
+        "UTF8PROC_STATIC",
+        "JS_C_PRODUCTION"
       ],
       "link": "static"
     },
@@ -841,8 +820,6 @@
         "lambda-lib",
         "mir",
         "tree-sitter",
-        "tree-sitter-javascript",
-        "tree-sitter-typescript",
         "tree-sitter-latex",
         "tree-sitter-latex-math",
         "gif",
@@ -874,18 +851,25 @@
     },
     {
       "name": "lambda-cst",
-      "description": "Tree-sitter Lambda CST differential verifier",
-      "lang": "c17",
+      "description": "Tree-sitter Lambda/JS/TS CST differential verifier",
+      "lang": "c++17",
       "source_files": [
         "test/lambda_parser_poc_diff.c",
         "lambda/runtime/parser/source_parser.c",
         "lambda/runtime/parser/lambda_lexer.c",
-        "lambda/runtime/parser/lambda_parser.c"
+        "lambda/runtime/parser/lambda_parser.c",
+        "lambda/js/parser/js_lexer.c",
+        "lambda/js/parser/js_parser.c",
+        "lambda/js/js_regex_generated_properties.cpp"
       ],
       "libraries": [
         "tree-sitter",
-        "tree-sitter-lambda"
+        "tree-sitter-lambda",
+        "tree-sitter-javascript",
+        "tree-sitter-typescript",
+        "utf8proc"
       ],
+      "target_name": "lambda-cst",
       "target_dir": ".",
       "link": "executable",
       "only_variants": [
@@ -1106,13 +1090,27 @@
       "debug": true
     },
     "lambda-cst": {
-      "description": "Tree-sitter Lambda CST differential-verification profile",
+      "description": "Tree-sitter Lambda/JS/TS CST differential-verification profile",
       "additional_libraries": [
         {
           "name": "tree-sitter-lambda",
           "version": "0.1.0",
           "include": "lambda/tree-sitter-lambda/bindings/c",
           "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+          "link": "static"
+        },
+        {
+          "name": "tree-sitter-javascript",
+          "version": "0.23.1",
+          "include": "",
+          "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
+          "link": "static"
+        },
+        {
+          "name": "tree-sitter-typescript",
+          "version": "0.23.2-fork",
+          "include": "",
+          "lib": "lambda/tree-sitter-typescript/libtree-sitter-typescript.a",
           "link": "static"
         }
       ]
@@ -4758,6 +4756,9 @@
             "source": "test/test_js_parser_benchmark_gtest.cpp",
             "name": "JavaScript Parser Benchmark",
             "category": "extended",
+            "defines": [
+              "JS_C_PRODUCTION"
+            ],
             "dependencies": [
               "lambda-rt",
               "node-core",
@@ -4766,9 +4767,7 @@
             "binary": "test_js_parser_benchmark_gtest.exe",
             "libraries": [
               "gtest",
-              "gtest_main",
-              "tree-sitter-javascript",
-              "tree-sitter-typescript"
+              "gtest_main"
             ],
             "macos": {
               "libraries": [
@@ -4803,9 +4802,7 @@
             "binary": "test_js_script_gtest.exe",
             "libraries": [
               "gtest",
-              "gtest_main",
-              "tree-sitter-javascript",
-              "tree-sitter-typescript"
+              "gtest_main"
             ],
             "macos": {
               "libraries": [
