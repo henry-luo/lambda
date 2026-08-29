@@ -1568,8 +1568,8 @@ void jm_analyze_captures(JsFuncCollected* fc, struct hashmap* outer_scope_names,
         log_debug("js-mir: arrow capture '_js_arguments' in function '%s'", fc->name);
     }
 
-    // v18q: Check if function uses 'arguments' keyword
-    fc->uses_arguments = !fn->is_arrow && jm_name_set_has(refs, "_js_arguments");
+    // v18q: publish the shared AST fact; refs still carry lexical captures.
+    fc->uses_arguments = !fn->is_arrow && js_ast_function_uses_arguments(fn);
     fc->analysis.captures = fc->captures;
     fc->analysis.capture_count = fc->capture_count;
     if (fn) {

@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29
 
-**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3f compile-unit migrations, and P4a–P4b collection-owned function facts are verified; the remaining P3/P4–P6 driver work remains proposed. The current `master` tree is 312,272 governed `lambda/runtime` + `lambda/js` lines before the P1e slice; the older 310,711-line project anchor remains historical and its final 308,711 cap is not yet claimed.
+**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3f compile-unit migrations, and P4a–P4c collection-owned function facts are verified; the remaining P3/P4–P6 driver work remains proposed. The current merge-base tree is 313,883 governed `lambda/runtime` + `lambda/js` lines before P4c; the older 310,711-line project anchor remains historical and its final 308,711 cap is not yet claimed.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -1096,6 +1096,32 @@ LAMBDA_TEST_MAX_CONCURRENT=1 node test/test_run.js --target=lambda --category=ba
 ```
 
 The final **D8.6.4v2** timing and `-2,000`-line project target remain open.
+
+#### P4c implementation record — shared `arguments` observation fact, 2026-08-29
+
+The next P4 slice gives `arguments` observation one AST-support owner. The
+shared function fact scans parameters and the body through the common
+core/extension child contract, keeps lexical arrows in the enclosing scan, and
+stops at nested ordinary functions, methods, and classes that own their own
+binding facts. MIR collection and the AST interpreter now consume the same
+classification; the interpreter's private 29-line scan is retired while MIR's
+reference set remains responsible for capture edges.
+
+This is a deletion-funded **D8.2.4** ownership slice with no semantic ruling or
+AST layout change. The merge-base governed tree and candidate are both 313,883
+lines (`0` phase delta); changed first-party C/C++ and source counters are each
+`+30/-30` (`0` delta). The earlier P4a/P4b reductions remain recorded against
+their pre-merge bases and are not double-counted here.
+
+Focused verification after rebuilding the release-native JS script target:
+
+```text
+./test/test_js_script_gtest.exe --gtest_color=no
+# 104/104 passed
+```
+
+This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+target.
 
 ### 4.6 P5 — Consolidate lowering by semantic family
 

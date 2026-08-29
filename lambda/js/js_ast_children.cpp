@@ -164,6 +164,32 @@ bool js_ast_function_has_direct_eval(JsFunctionNode* function) {
     return js_ast_has_direct_eval_call((JsAstNode*)function->body);
 }
 
+static bool js_ast_arguments_node(JsAstNode* node, JsAstNode* root);
+static bool js_ast_arguments_child(JsAstNode* child, void* opaque) {
+    return js_ast_arguments_node(child, (JsAstNode*)opaque);
+}
+
+static bool js_ast_arguments_node(JsAstNode* node, JsAstNode* root) {
+    if (!node) return false;
+    // nested functions/classes own their facts; arrows remain lexical.
+    if (node != root && (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION || node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION || node->node_type == JS_AST_NODE_METHOD_DEFINITION || node->node_type == JS_AST_NODE_CLASS_DECLARATION || node->node_type == JS_AST_NODE_CLASS_EXPRESSION)) return false;
+    if (node->node_type == JS_AST_NODE_IDENTIFIER) {
+        JsIdentifierNode* id = (JsIdentifierNode*)node;
+        return id->name && id->name->len == 9 && strncmp(id->name->chars, "arguments", 9) == 0;
+    }
+    return js_ast_any_child(node, js_ast_arguments_child, root);
+}
+
+bool js_ast_function_uses_arguments(JsFunctionNode* function) {
+    if (!function) return false;
+    for (JsAstNode* param = (JsAstNode*)function->params; param;
+            param = (JsAstNode*)param->next) {
+        if (js_ast_arguments_node(param, (JsAstNode*)function)) return true;
+    }
+    return js_ast_arguments_node((JsAstNode*)function->body,
+        (JsAstNode*)function);
+}
+
 bool js_ast_publish_extension_facts(AstNode* node, struct AstIndex* index) {
     if (!node || !index) return true;
     switch (node->node_type) {

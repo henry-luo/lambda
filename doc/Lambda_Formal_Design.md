@@ -1445,6 +1445,15 @@ including the collector's former 96-line implementation. This is an
 implementation-only **D8.2.4** slice; no formal semantic ruling or document
 semver changes.
 
+P4c (2026-08-29) moves JavaScript `arguments` observation to the same shared
+AST-support owner. The function fact scans parameters and the body through the
+core/extension child contract, retains lexical arrows, and excludes nested
+ordinary functions, methods, and classes. MIR collection and the AST
+interpreter consume that fact; the interpreter-local scan is retired while
+MIR's reference set remains the capture-edge source. This is an
+implementation-only **D8.2.4** slice; no formal semantic ruling or document
+semver changes.
+
 | Ruling | Status |
 |---|---|
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
