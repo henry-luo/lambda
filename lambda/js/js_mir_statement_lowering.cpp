@@ -1047,7 +1047,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         MIR_reg_t reg = jm_new_reg(mt, vname, MIR_T_I64);
                         // Set assignment target hint for closure self-capture detection
                         mt->assign_target_vname = vname;
-                    MIR_reg_t val = jm_transpile_box_item(mt, d->init);
+                        MIR_reg_t val = jm_transpile_box_item(mt, d->init);
                         mt->assign_target_vname = NULL;
                         jm_emit_mov(mt, reg, val);
                         jm_set_var(mt, vname, reg, MIR_T_I64, init_type);
@@ -1253,11 +1253,9 @@ static void jm_init_if_clause_function_binding(JsMirTranspiler* mt, JsAstNode* s
     JsFunctionNode* fn = (JsFunctionNode*)stmt;
     if (!fn->name) return;
     JsFuncCollected* fc = jm_find_collected_func(mt, fn);
-    if (fn->name->len == 11 && memcmp(fn->name->chars, "declaration", 11) == 0)
     if (!fc || !fc->func_item) return;
     const char* vname = jm_var_name(fn->name);
     MIR_reg_t fn_reg = jm_create_func_or_closure(mt, fc);
-    if (fn->name->len == 11 && memcmp(fn->name->chars, "declaration", 11) == 0)
     jm_set_var(mt, vname, fn_reg);
     JsMirVarEntry* ve = jm_find_var(mt, vname);
     if (ve) ve->from_block_func_decl = true;
