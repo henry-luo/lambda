@@ -68,6 +68,9 @@ struct JsScript : Script {
     // while ES modules set both this bit and strict_mode.
     bool is_module;
     bool is_es_module;
+    // A Test262 source admitted by the runner's conservative native-harness
+    // gate receives realm-local native assert helpers before evaluation.
+    bool test262_native_harness;
     // ES declaration instantiation happens before recursive dependency
     // evaluation so circular imports observe hoisted function exports.
     bool es_module_scope_initialized;
@@ -90,6 +93,7 @@ struct JsTranspiler : JsScript {
     int label_counter;              // Counter for labels
     bool in_expression;             // True when transpiling inside an expression (for function expressions)
     bool in_async_function;         // True while building an async function body/parameters
+    bool in_generator_function;     // True while building a generator body/parameters
     
     // ANY-census [Type_Infer TI3]: per-reason counts of expressions whose
     // static type fell back to `any`. Diagnostic only — shares the Lambda
@@ -222,6 +226,11 @@ Item transpile_js_to_mir(Runtime* runtime, const char* js_source, const char* fi
                           uint64_t* result_home);
 Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                              const char* filename, uint64_t* result_home);
+// Execute an admitted Test262 source with the AST tier's realm-local native
+// harness. MIR callers retain their existing lowering interception path.
+Item transpile_js_to_mir_test262_native_len(Runtime* runtime, const char* js_source,
+                                            size_t js_source_len, const char* filename,
+                                            uint64_t* result_home);
 // Compile preprocessed TypeScript with the JS parser while retaining the TS
 // language-profile intrinsics during MIR lowering.
 Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,

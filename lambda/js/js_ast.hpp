@@ -334,11 +334,16 @@ typedef bool (*JsAstChildPredicate)(JsAstNode* child, void* ctx);
 void js_ast_visit_children(JsAstNode* node, JsAstChildVisit visit, void* ctx);
 // Short-circuiting variant: stops at the first child the predicate accepts.
 bool js_ast_any_child(JsAstNode* node, JsAstChildPredicate predicate, void* ctx);
+// Structural gate: every JS-only child layout must appear in the extension table.
+bool js_ast_child_catalog_complete(void);
 
 // Syntactic direct eval belongs to the immediately enclosing function. Both
 // compiler and AST executor use this one classification when installing the
 // shared EvalContext bridge.
 bool js_ast_has_direct_eval_call(JsAstNode* node);
+bool js_ast_function_has_direct_eval(JsFunctionNode* function);
+bool js_ast_function_uses_arguments(JsFunctionNode* function);
+bool js_ast_function_tail_reuse_safe(JsFunctionNode* function);
 bool js_ast_is_proto_literal_key(JsAstNode* key);
 
 // Adapter for the shared AstIndex walker. Core-shaped JavaScript nodes are

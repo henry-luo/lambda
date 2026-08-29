@@ -692,7 +692,8 @@ static bool js_ast_is_es_module(JsAstNode* ast) {
 static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* js_source,
                                                  size_t js_source_len, const char* filename,
                                                  uint64_t* result_home,
-                                                 bool typescript_profile) {
+                                                 bool typescript_profile,
+                                                 bool test262_native_harness) {
     // Recovery ownership begins before parsing. The first entry may initialize
     // an idle eval thread, but compilation cannot borrow and restore another
     // live context.
@@ -844,6 +845,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
             mem_free(owned_source);
             return ItemError;
         }
+        script->test262_native_harness = test262_native_harness;
         jm_clear_active_js_transpile(NULL, NULL, owned_source);
         mem_free(owned_source);
         Item result = js_ast_is_es_module(js_ast)
@@ -1243,7 +1245,7 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
                                   size_t js_source_len, const char* filename,
                                   uint64_t* result_home) {
     return transpile_js_to_mir_core_profile_len(runtime, js_source, js_source_len,
-                                                filename, result_home, false);
+                                                filename, result_home, false, false);
 }
 
 Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source,
@@ -1269,6 +1271,16 @@ Item transpile_js_to_mir_len(Runtime* runtime, const char* js_source, size_t js_
     return transpile_js_to_mir_core_len(runtime, js_source, js_source_len, filename, result_home);
 }
 
+Item transpile_js_to_mir_test262_native_len(Runtime* runtime, const char* js_source,
+                                            size_t js_source_len, const char* filename,
+                                            uint64_t* result_home) {
+    g_jm_preamble_mode = false;
+    g_jm_preamble_out = NULL;
+    g_jm_preamble_in = NULL;
+    return transpile_js_to_mir_core_profile_len(runtime, js_source, js_source_len,
+                                                filename, result_home, false, true);
+}
+
 Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,
                                         size_t js_source_len, const char* filename,
                                         uint64_t* result_home) {
@@ -1276,7 +1288,7 @@ Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,
     g_jm_preamble_out = NULL;
     g_jm_preamble_in = NULL;
     return transpile_js_to_mir_core_profile_len(runtime, js_source, js_source_len,
-                                                filename, result_home, true);
+                                                filename, result_home, true, false);
 }
 
 Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,

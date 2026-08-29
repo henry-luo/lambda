@@ -1,8 +1,8 @@
 # LambdaJS and Lambda Runtime Unification
 
-**Date:** 2026-08-28
+**Date:** 2026-08-29
 
-**Status:** ACTIVE — P0a LOC gates, P1a–P1d core-layout migrations, P2a–P2c shared identity publication/lowering, and P3a–P3f compile-unit migrations are verified; P0b, P1e, and the remaining P3–P6 driver work remain proposed.
+**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3f compile-unit migrations, and P4a–P4d collection-owned function facts are verified; the remaining P3/P4–P6 driver work remains proposed. The current merge-base tree is 313,947 governed `lambda/runtime` + `lambda/js` lines before P4d; the older 310,711-line project anchor remains historical and its final 308,711 cap is not yet claimed.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -408,11 +408,11 @@ The cumulative numbers below are measured from the project-specific anchor, not 
 
 | Phase | Consolidation | Same-phase retirement | Planned cumulative governed delta |
 |---|---|---|---:|
-| P0 | P0a counters complete; P0b catalog assertions and timing manifests pending | stale assertions/helpers and any superseded catalog test code | `0` |
-| P1 | P1a iterator-for, P1b declarator, P1c assignment/declaration-wrapper, and P1d condition-loop layouts complete | private loop-layout casts, Lambda declaration-as-assignment casts, duplicate assignment/wrapper structs, old condition-loop tags, and migrated core-child cases | `-110` |
+| P0 | P0a counters and P0b catalog/timing gates complete | stale assertions/helpers, historical row-count literals, and superseded catalog test code | `0` |
+| P1 | P1a iterator-for, P1b declarator, P1c assignment/declaration-wrapper, P1d condition-loop layouts, and P1e shared child ownership complete | private loop-layout casts, Lambda declaration-as-assignment casts, duplicate assignment/wrapper structs, old condition-loop tags, duplicated JS core-child rows, and migrated core-child cases | `-110` |
 | P2 | P2a/P2b source and synthetic `FunctionId` authority plus P2c binding/scope/class identity, use/definition edges, and extension-scope publication landed | lowering name repair, pointer indexes, builder lookup cache, repeated identity walks | `<= -500` |
 | P3 | one compilation unit, typed pass schedule, and one compile lifecycle | duplicated parse/build/validate/index/link/cleanup orchestration and false fact publication | `<= -800` |
-| P4 | `FunctionId`-owned analysis and graph worklists | duplicate `JsFuncCollected` analysis, count/fill scans, per-pass AST caches and propagation loops | `<= -1,200` |
+| P4 | P4a–P4b collection-owned function facts; then `FunctionId`-owned analysis and graph worklists | duplicate strictness/direct-eval scans, duplicate `JsFuncCollected` analysis, count/fill scans, per-pass AST caches and propagation loops | `<= -1,200` |
 | P5 | full-contract `MirValue` core and shared structural MIR lowering | corresponding Lambda/JS bare-register cases, duplicate structural statement/expression/call plumbing | `<= -2,100` |
 | P6 | shared execution shell and runtime root/module activation services | duplicate AST/MIR context guards, JS-only generic root-range machinery, obsolete aliases and cleanup paths | `<= -2,400` |
 
@@ -450,7 +450,42 @@ Verified commands and results:
 # AST_TUNE_PHASE_SOURCE ... added=31 removed=34 delta=-3
 ```
 
-The final project cap of 308,711 is intentionally not claimed: the current candidate is still 310,711. P0b must record complete release-host timing manifests. The catalog-completeness test is deferred to its deletion-funded P1 node-family slice, because P0a retired no traversal implementation that could honestly fund new test source.
+The final project cap of 308,711 is intentionally not claimed: the current candidate is 312,216 after P4a (312,260 after P1e). P0b now records a complete release-host capture for the current baseline lane; the formal compiler-time ratchets remain open until an unchanged-tree formal baseline is captured for comparison. The catalog-completeness test was funded by the P1e node-family deletion, where its assertion landed with the retired child rows.
+
+#### P0b implementation record — release timing manifests and live-corpus ratchet, 2026-08-29
+
+The timing capture utility had two stale historical assumptions: fixed 698/324
+row counts, and an unqualified JS run that included the three extended library
+fixtures excluded by the production `--baseline` lane. P0b retires those
+assumptions. Each capture now derives the required row count from the exact
+filtered GTest manifest, while JS captures pass `--baseline`; Lambda retains its
+full corpus. This keeps completeness fail-closed as the repository corpus grows
+and does not weaken the existing failed-record checks. The utility diff is
+`+5/-5` source lines (`0` net), so all three D8.6.4v2 LOC counters remain
+non-positive.
+
+Release-mode test targets were built after the release host:
+
+```text
+make build-release-compile
+make -C build/premake config=release_native test_lambda_gtest test_js_gtest -j8 CC=clang CXX=clang++
+```
+
+The complete one-warm-up/five-run capture is retained under
+`./temp/ast_tune/p1e_release/` (the tree was dirty only because of the tracked
+P1e/P0b edits). Every measured record was cold, status `0`, complete, and had a
+matching sorted sample manifest across all five runs:
+
+| suite | samples | run totals (us) | median (us) | run-0 MIR instructions |
+|---|---:|---|---:|---:|
+| Lambda baseline | 767 | 5,308,963 / 5,252,807 / 5,291,808 / 5,189,950 / 5,406,437 | 5,291,808 | n/a |
+| JS baseline (`--baseline`) | 340 | 196,595,270 / 206,217,202 / 206,229,646 / 211,457,713 / 185,232,717 | 206,217,202 | 5,964,634 (large-library cohort 4,846,800) |
+
+These are current-candidate manifests, not a claimed performance win: the
+required formal-anchor comparison still needs a clean historical release
+capture. `make test-lambda-baseline` remains the semantic gate and is recorded
+below; no test harness or fixture was changed to admit the excluded
+`lib_tom_select` case.
 
 ### 4.2 P1 — Repair the core AST contract one family at a time
 
@@ -564,13 +599,49 @@ git diff --check                                      # clean
 
 Recommended order:
 
-1. labels and remaining block/match/try child edges;
-2. extension-only JS child visitor;
-3. catalog-completeness assertions over the migrated core forms.
+1. catalog-completeness assertions over the migrated core forms;
+2. P4's strictness and owning-function/class relations.
 
 For each family, the same slice updates both producers and all consumers, switches the shared visitor, deletes the matching cases from `interp_visit_children()` and `js_ast_children.cpp`, and proves catalog completeness. No compatibility struct or second tag interpretation remains.
 
 P1 exits only when core ownership is described once. Language semantic walkers may still switch on a core node to evaluate it, but they delegate child ownership/enumeration to the common contract and do not carry another structural catalog.
+
+#### P1e implementation record — shared JS core-child ownership, 2026-08-29
+
+**D8.2.4** requires one common child-enumeration contract and forbids private
+core-child walks. The JavaScript child table now contains only the five
+extension layouts (`static_block`, `labeled`, `with`, template literal, and
+tagged template). Block, match/switch, try/catch/finally, labels' core body
+edges, loops, declarations, calls, patterns, classes, and the remaining shared
+forms route through `ast_visit_core_children()`.
+
+The JS adapter preserves list-valued `next` chains, suppresses the core
+visitor's parent-sibling callback, and retains the source-order `do...while`
+special case. `js_ast_any_child()` uses the same adapter, so predicate walks do
+not grow a second structural catalog. The former 40-plus JS rows and their
+duplicate field accessors are retired in the same slice; extension-only rows
+remain owned by `js_ast_children.cpp`.
+
+The independent P1e diff against the immediately preceding `master` tree is
+C/C++ `+54/-62 = -8`; all governed hand source is also `+54/-62 = -8`.
+The pre-slice current tree is 312,272 governed lines and the post-slice tree is
+312,260, so this slice is non-positive even though later unrelated `master`
+changes have moved the historical 310,711-line project anchor. The formal
+319,606-line anchor remains at `-7,346`; the final `-2,000` project ratchet is
+not claimed until the remaining phases retire their duplicate implementations.
+
+Focused evidence:
+
+```text
+make build-test                                      # Errors: 0, Warnings: 40
+./test/test_js_opt_gtest.exe                         # 19/19 passed
+./test/test_js_script_gtest.exe --gtest_filter='JsScriptOwnership.*:JsInterpreter.*'
+                                                       # 73/73 passed
+./test/test_js_gtest.exe                             # 356/357; the pre-existing lib_tom_select fixture remains excluded by the baseline
+./utils/check_ast_tune_loc.sh --base HEAD --cap 312272 --phase-base HEAD
+                                                       # candidate 312,260; phase C/C++ -8; source -8
+git diff --check                                     # clean
+```
 
 ### 4.3 P2 — Bind once and publish stable identity
 
@@ -933,6 +1004,150 @@ Recommended order:
 Synthetic functions, such as class field initializers, receive real `FunctionId` values when created; they do not justify a second identity table.
 
 P4 deletes the `JsFuncCollected` fields that have moved to common or JS extension facts. The record may survive temporarily only for backend MIR items that have not yet moved to the artifact table, and its shrinking must be visible in the deletion ledger every slice.
+
+#### P4a implementation record — collection-owned strictness, 2026-08-29
+
+The first P4 slice moves strictness facts to the function collection boundary,
+where the owning function, class method, synthetic field initializer, and
+class-heritage function ranges are already known. Ordinary functions now derive
+their own strictness from the compilation-unit policy, class syntax, and direct
+`use strict` directive; strict parents mark every collected descendant in their
+range. Class methods retain both `is_class_method` and strict facts at creation,
+synthetic field initializers mark their descendants, and functions collected
+from `extends` expressions are marked strict before class metadata is published.
+This preserves the **D8.2.4** indexed ownership boundary and removes the
+post-collection AST/class propagation walk from `js_mir_module_batch_lowering.cpp`.
+
+The retired block was 55 lines; the collection changes are `+15/-4` (`-44`
+net C/C++ and source lines for this slice). No AST layout or runtime semantic
+contract changed. The current combined checker remains non-positive:
+
+```text
+./utils/check_ast_tune_loc.sh --base HEAD --cap 312272 --phase-base HEAD
+# AST_TUNE_LOC baseline=312272 candidate=312216 delta=-56
+# AST_TUNE_PHASE_CPP base=HEAD added=69 removed=121 delta=-52
+# AST_TUNE_PHASE_SOURCE base=HEAD added=74 removed=126 delta=-52
+```
+
+Focused verification passed after rebuilding the affected targets with
+`CC=clang CXX=clang++`:
+
+```text
+./test/test_js_script_gtest.exe --gtest_color=no   # release_native: 74/74 passed
+./test/test_js_opt_gtest.exe --gtest_color=no      # debug_native: 19/19 passed
+git diff --check                                 # clean
+```
+
+After rebuilding the JS script runner and its Node core DSO in one release
+configuration, the serialized baseline aggregate passed:
+
+```text
+LAMBDA_TEST_MAX_CONCURRENT=1 node test/test_run.js --target=lambda --category=baseline \
+  --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest \
+  --parallel --input-results=test_output/input_baseline_results.json
+# Input parsers 2104/2104; Lambda runtime 1901/1901; combined 4005/4005
+```
+
+This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+target.
+
+#### P4b implementation record — shared direct-eval facts, 2026-08-29
+
+The second P4 slice gives syntactic direct-`eval` detection one AST-support
+owner. The recursive scanner now uses the shared core/extension child contract,
+explicitly stops at nested functions/classes/methods, and keeps the optional-call
+rule (`eval?.()` is indirect). `js_ast_function_has_direct_eval` applies that
+same node fact to parameters and the body, so MIR collection and the AST
+interpreter agree on default-parameter evaluation as well as body evaluation.
+The collector's private 96-line scanner and the interpreter's duplicate
+function wrapper are retired; class-field initializer expressions continue to
+use the node-level helper because they are not function nodes.
+
+This is a deletion-funded **D8.2.4** ownership slice with no semantic ruling or
+AST layout change. Relative to the pre-P4b candidate, the governed tree falls
+from 312,216 to 312,159 lines (a `-57` slice delta); the cumulative phase remains
+non-positive:
+
+```text
+./utils/check_ast_tune_loc.sh --base HEAD --cap 312272 --phase-base HEAD
+# AST_TUNE_LOC baseline=312272 candidate=312159 delta=-113
+# AST_TUNE_PHASE_CPP base=HEAD added=114 removed=223 delta=-109
+# AST_TUNE_PHASE_SOURCE base=HEAD added=119 removed=228 delta=-109
+```
+
+Focused verification passed after the release-native JS script and debug-native
+optimization targets were rebuilt with `CC=clang CXX=clang++`:
+
+```text
+./test/test_js_script_gtest.exe --gtest_color=no   # release_native: 74/74 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no  # release_native: 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no      # debug_native: 19/19 passed
+git diff --check                                 # clean
+```
+
+The serialized baseline aggregate also passed with the same release-native
+script runner and a single worker:
+
+```text
+LAMBDA_TEST_MAX_CONCURRENT=1 node test/test_run.js --target=lambda --category=baseline \
+  --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest \
+  --parallel --input-results=test_output/input_baseline_results.json
+# Input parsers 2104/2104; Lambda runtime 1901/1901; combined 4005/4005
+```
+
+The final **D8.6.4v2** timing and `-2,000`-line project target remain open.
+
+#### P4c implementation record — shared `arguments` observation fact, 2026-08-29
+
+The next P4 slice gives `arguments` observation one AST-support owner. The
+shared function fact scans parameters and the body through the common
+core/extension child contract, keeps lexical arrows in the enclosing scan, and
+stops at nested ordinary functions, methods, and classes that own their own
+binding facts. MIR collection and the AST interpreter now consume the same
+classification; the interpreter's private 29-line scan is retired while MIR's
+reference set remains responsible for capture edges.
+
+This is a deletion-funded **D8.2.4** ownership slice with no semantic ruling or
+AST layout change. The merge-base governed tree and candidate are both 313,883
+lines (`0` phase delta); changed first-party C/C++ and source counters are each
+`+30/-30` (`0` delta). The earlier P4a/P4b reductions remain recorded against
+their pre-merge bases and are not double-counted here.
+
+Focused verification after rebuilding the release-native JS script target:
+
+```text
+./test/test_js_script_gtest.exe --gtest_color=no
+# 104/104 passed
+```
+
+This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+target.
+
+#### P4d implementation record — shared tail-reuse eligibility fact, 2026-08-29
+
+The next P4 slice moves AST tail-reuse eligibility into the shared AST-support
+owner. Direct-eval, `arguments`, and tail-reuse scanners now use one explicit
+nested-function/method/class boundary predicate; tail reuse still rejects
+`eval`, `with`, `try`, and any nested function, while `arguments` remains a
+shared function fact. The interpreter's private 24-line structural scanner is
+retired, and the call path consumes the shared fact without changing the
+activation or completion contract.
+
+This is a deletion-funded **D8.2.4** ownership slice with no semantic ruling or
+AST layout change. The merge-base governed tree falls from 313,947 to 313,938
+lines (`-9`); changed first-party C/C++ and source counters are `+32/-41`
+(`-9` delta). The prior P4 records retain their original merge-base accounting.
+
+Focused verification after rebuilding the affected targets:
+
+```text
+./test/test_js_script_gtest.exe --gtest_color=no       # 104/104 passed
+./test/test_js_mir_emission_gtest.exe --gtest_color=no # 21/21 passed
+./test/test_js_opt_gtest.exe --gtest_color=no          # 19/19 passed
+```
+
+This slice does not claim the final **D8.6.4v2** timing or `-2,000`-line
+target.
 
 ### 4.6 P5 — Consolidate lowering by semantic family
 

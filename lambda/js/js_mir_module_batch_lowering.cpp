@@ -2156,61 +2156,6 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
     }
     log_debug("js-mir: collected %d functions, %d classes", mt->func_count, mt->class_count);
 
-    // Phase 1.0b: Determine strict mode for each collected function.
-    // A function is strict if: (a) it has "use strict" directive, (b) global/module is strict,
-    // (c) it's a class method, or (d) its parent is strict (strict propagates down).
-    {
-        // Step 1: mark functions with own "use strict" directive or global/module strict
-        for (int fi = 0; fi < mt->func_count; fi++) {
-            JsFuncCollected* e = &mt->func_entries[fi];
-            if (mt->is_global_strict || mt->is_module) {
-                e->is_strict = true;
-            } else if (e->node && jm_has_use_strict_directive(e->node)) {
-                e->is_strict = true;
-            } else if (e->is_constructor) {
-                e->is_strict = true; // class constructors are strict
-            }
-        }
-        // Step 2: mark class methods as strict (class bodies are implicitly strict)
-        for (int ci = 0; ci < mt->class_count; ci++) {
-            JsClassEntry* ce = &mt->class_entries[ci];
-            for (int mi = 0; mi < ce->method_count; mi++) {
-                JsClassMethodEntry* me = &ce->methods[mi];
-                if (me->fc) {
-                    me->fc->is_class_method = true;
-                    me->fc->is_strict = true;
-                }
-            }
-        }
-        // Step 3: propagate strict from parent to child (func_entries are post-order,
-        // so parent_index > child index; iterate in reverse to propagate top-down)
-        for (int fi = mt->func_count - 1; fi >= 0; fi--) {
-            JsFuncCollected* e = &mt->func_entries[fi];
-            if (e->is_strict) {
-                // mark all direct children
-                for (int ci = 0; ci < fi; ci++) {
-                    if (mt->func_entries[ci].parent_index == fi) {
-                        mt->func_entries[ci].is_strict = true;
-                    }
-                }
-            }
-        }
-        // Class definition evaluation, including a heritage expression, is
-        // strict.  A function created in `extends expr` therefore needs the
-        // strict arguments object even though it is not a class method.
-        for (int fi = 0; fi < mt->func_count; fi++) {
-            JsFuncCollected* e = &mt->func_entries[fi];
-            for (int ci = 0; ci < mt->class_count; ci++) {
-                JsClassNode* cls = (JsClassNode*)mt->class_entries[ci].node;
-                if (cls && cls->superclass && e->node &&
-                    jm_ast_contains_node(cls->superclass, (JsAstNode*)e->node)) {
-                    e->is_strict = true;
-                    break;
-                }
-            }
-        }
-    }
-
     // Phase 1.1: Pre-scan top-level const declarations with literal values
     // These become module-level constants accessible from any function scope
     mt->module_consts = hashmap_new(sizeof(JsModuleConstEntry), 16, 0, 0,

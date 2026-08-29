@@ -1263,6 +1263,11 @@ extern "C" uint64_t js_get_heap_epoch();
 #define js_percent_prefix_cache (js_runtime_state.string_concat.percent_prefixes)
 #define js_percent_byte_cache (js_runtime_state.string_concat.percent_bytes)
 
+static bool js_string_concat_caches_ensure_roots(void) {
+    return js_active_runtime_state && js_root_range_ensure_registered(
+        &js_runtime_state.string_concat.roots);
+}
+
 static bool js_percent_escape_four_byte_cp(String* s, uint32_t* cp_out) {
     if (!s || s->len != 12) return false;
     if (s->chars[0] != '%' || s->chars[3] != '%' ||
@@ -1292,7 +1297,8 @@ static bool js_percent_escape_four_byte_cp(String* s, uint32_t* cp_out) {
 }
 
 extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item) {
-    if (str_item.item == g_last_four_byte_uri_escape_string.item &&
+    if (js_string_concat_caches_ensure_roots() &&
+        str_item.item == g_last_four_byte_uri_escape_string.item &&
         g_last_four_byte_uri_escape_epoch == js_get_heap_epoch()) {
         return (int64_t)g_last_four_byte_uri_escape_cp;
     }
@@ -1300,41 +1306,50 @@ extern "C" int64_t js_string_last_four_byte_uri_escape_cp(Item str_item) {
 }
 
 extern "C" void js_string_remember_four_byte_uri_escape_cp(Item str_item, int64_t cp) {
-    if (cp < 0x10000 || cp > 0x10FFFF) return;
+    if (cp < 0x10000 || cp > 0x10FFFF ||
+            !js_string_concat_caches_ensure_roots()) return;
     g_last_four_byte_uri_escape_string = str_item;
     g_last_four_byte_uri_escape_cp = (uint32_t)cp;
     g_last_four_byte_uri_escape_epoch = js_get_heap_epoch();
 }
 
 static inline Item js_try_concat_percent_hex(String* left, String* right) {
+    bool cache_rooted = js_string_concat_caches_ensure_roots();
     if (!left->is_ascii || !right->is_ascii || right->len != 1) return ItemNull;
     char right_ch = right->chars[0];
     int right_value = js_upper_hex_digit_value(right_ch);
     if (right_value < 0) return ItemNull;
     if (left->len == 1 && left->chars[0] == '%') {
-        if (js_percent_prefix_cache[right_value].item) return js_percent_prefix_cache[right_value];
+        if (cache_rooted && js_percent_prefix_cache[right_value].item) {
+            return js_percent_prefix_cache[right_value];
+        }
         char buf[2];
         buf[0] = '%';
         buf[1] = right_ch;
-        js_percent_prefix_cache[right_value] = js_name_item(buf, 2);
-        return js_percent_prefix_cache[right_value];
+        Item result = js_name_item(buf, 2);
+        if (cache_rooted) js_percent_prefix_cache[right_value] = result;
+        return result;
     }
     int left_value = left->len == 2 && left->chars[0] == '%' ? js_upper_hex_digit_value(left->chars[1]) : -1;
     if (left_value >= 0) {
         int byte_value = (left_value << 4) | right_value;
-        if (js_percent_byte_cache[byte_value].item) return js_percent_byte_cache[byte_value];
+        if (cache_rooted && js_percent_byte_cache[byte_value].item) {
+            return js_percent_byte_cache[byte_value];
+        }
         char buf[3];
         buf[0] = '%';
         buf[1] = left->chars[1];
         buf[2] = right_ch;
-        js_percent_byte_cache[byte_value] = js_name_item(buf, 3);
-        return js_percent_byte_cache[byte_value];
+        Item result = js_name_item(buf, 3);
+        if (cache_rooted) js_percent_byte_cache[byte_value] = result;
+        return result;
     }
     return ItemNull;
 }
 
 static inline Item js_concat_strings_fast(String* left, String* right) {
     if (!left || !right) return ItemNull;
+    bool cache_rooted = js_string_concat_caches_ensure_roots();
     RootFrame roots(2);
     Rooted<Item> left_root(roots, (Item){.item = s2it(left)});
     Rooted<Item> right_root(roots, (Item){.item = s2it(right)});
@@ -1355,7 +1370,8 @@ static inline Item js_concat_strings_fast(String* left, String* right) {
     result->chars[result->len] = '\0';
     Item result_item = (Item){.item = s2it(result)};
     uint32_t cp = 0;
-    if (result->len == 12 && js_percent_escape_four_byte_cp(result, &cp)) {
+    if (cache_rooted && result->len == 12 &&
+            js_percent_escape_four_byte_cp(result, &cp)) {
         g_last_four_byte_uri_escape_string = result_item;
         g_last_four_byte_uri_escape_cp = cp;
         g_last_four_byte_uri_escape_epoch = js_get_heap_epoch();

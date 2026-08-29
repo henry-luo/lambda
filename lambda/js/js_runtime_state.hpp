@@ -40,6 +40,7 @@ struct JsFunction;
 struct JsInterpEnv;
 struct JsInterpGeneratorLoopContinuation;
 struct JsInterpGeneratorListContinuation;
+struct JsInterpGeneratorArrayBindingContinuation;
 struct AstNode;
 struct DomDocument;
 struct DomElement;
@@ -688,10 +689,16 @@ struct JsGeneratorStateRecord {
     JsInterpEnv* ast_function_env = NULL;
     JsInterpEnv* ast_body_env = NULL;
     int64_t ast_yield_skip = 0;
+    // Replay uses prior next() values when a nested yield resumes before its
+    // enclosing yield is reached again.
+    Item ast_yield_values = {};
     // Terminal-yield loop continuations keep AST generators resumable without
     // replaying completed iterations on every next().
     JsInterpGeneratorLoopContinuation* ast_loop_continuations = NULL;
     JsInterpGeneratorListContinuation* ast_list_continuation = NULL;
+    // A destructuring target can suspend after IteratorStep. Retain its
+    // iterator/value cursor so replay does not advance the iterator twice.
+    JsInterpGeneratorArrayBindingContinuation* ast_array_binding_continuations = NULL;
     bool ast_resumable_loop_active = false;
     // Retain an injected throw/return while a finally block yields before it
     // can finish propagating that abrupt completion.

@@ -465,6 +465,7 @@ static void js_test262_clear_ast_harness(Runtime* runtime,
 static Item js_test262_execute_batch_source(Runtime* runtime,
         JsTest262AstHarness* ast_harness, const char* source, size_t source_len,
         const char* filename, bool inline_module_source,
+        bool test262_native_harness,
         const JsPreambleState* preamble, bool has_preamble,
         uint64_t* result_home) {
     if (ast_harness) {
@@ -481,6 +482,10 @@ static Item js_test262_execute_batch_source(Runtime* runtime,
     }
     if (inline_module_source) {
         return transpile_js_module_to_mir(runtime, source, filename);
+    }
+    if (test262_native_harness && js_ast_interpreter_requested()) {
+        return transpile_js_to_mir_test262_native_len(runtime, source, source_len,
+            filename, result_home);
     }
     if (has_preamble) {
         return transpile_js_to_mir_with_preamble_len(runtime, source, source_len,
@@ -4305,6 +4310,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         bool has_preamble = false;
         int preamble_var_checkpoint = 0;
         JsTest262AstHarness ast_harness = {};
+        bool test262_native_harness = false;
         int batch_crash_count = 0;
         int batch_test_count = 0;  // diagnostic: track how many tests processed
 #ifndef _WIN32
@@ -4355,6 +4361,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     path_reset();
                 }
                 js_test262_clear_ast_harness(&runtime, &ast_harness);
+                test262_native_harness = false;
                 // A document directive belongs only to its next source job;
                 // a manifest boundary must not leak it into the next manifest.
                 batch_document_path[0] = '\0';
@@ -4374,6 +4381,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 } else {
                     memcpy(batch_document_path, document_path, document_len + 1);
                 }
+                continue;
+            }
+
+            if (strncmp(line, "native-harness:", 15) == 0) {
+                // The runner emits this only for its conservative AST-native
+                // subset. Keep the flag manifest-scoped so no helper state
+                // leaks into the next batch boundary.
+                test262_native_harness = strcmp(line + 15, "ast") == 0;
                 continue;
             }
 
@@ -4399,6 +4414,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 // function objects still refer to its Script while it lives.
                 js_test262_clear_preamble(&preamble, &has_preamble,
                     &preamble_var_checkpoint, &saved_harness_src, &saved_harness_len);
+                test262_native_harness = false;
                 if (ast_harness.script || ast_harness.prepare_failed) {
                     jm_cleanup_deferred_mir();
                     if (hot_reload) {
@@ -4619,6 +4635,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                         Item res = js_test262_execute_batch_source(&runtime,
                             ast_harness.script || ast_harness.prepare_failed ? &ast_harness : NULL,
                             js_source, js_source_len, script_exec_path, inline_module_source,
+                            test262_native_harness,
                             &preamble, has_preamble, &result_home);
                         alarm(0);
                         batch_timeout_active = 0;
@@ -4647,6 +4664,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     Item res = js_test262_execute_batch_source(&runtime,
                         ast_harness.script || ast_harness.prepare_failed ? &ast_harness : NULL,
                         js_source, js_source_len, script_exec_path, inline_module_source,
+                        test262_native_harness,
                         &preamble, has_preamble, &result_home);
                     mir_error_active = 0;
                     if (item_is_error(res)) {
@@ -4663,6 +4681,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             Item res = js_test262_execute_batch_source(&runtime,
                 ast_harness.script || ast_harness.prepare_failed ? &ast_harness : NULL,
                 js_source, js_source_len, script_exec_path, inline_module_source,
+                test262_native_harness,
                 &preamble, has_preamble, &result_home);
             if (item_is_error(res)) {
                 batch_error = res;
