@@ -54,6 +54,7 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lambda/input/html5/html5_parser.h"
 #include "../lambda/format/format.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_transpiler.hpp"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_event_loop.h"
@@ -5308,7 +5309,10 @@ int cmd_layout(int argc, char** argv) {
         log_error("Failed to initialize UI context");
         return 1;
     }
-    bool js_mir_cache_enabled = batch_mode &&
+    // AST execution does not consume cached MIR preambles or units; entering
+    // the cache's compile-only MIR realm path leaves DOM registration state
+    // incompatible with the AST document realm.
+    bool js_mir_cache_enabled = batch_mode && !js_ast_interpreter_requested() &&
         shell_getenv("LAMBDA_DISABLE_JS_MIR_CACHE") == nullptr;
     JsMirCache* js_mir_cache = js_mir_cache_enabled ? js_mir_cache_create() : nullptr;
     if (js_mir_cache_enabled && !js_mir_cache) {

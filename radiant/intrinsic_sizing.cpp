@@ -2062,6 +2062,9 @@ static bool intrinsic_has_cyclic_percentage_descendant(
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* child_element = child->as_element();
+        // ::marker stores MarkerProp in the shared blk slot, not BlockProp;
+        // it is generated content and cannot contribute a descendant cycle.
+        if (child_element->view_type == RDT_VIEW_MARKER) continue;
         ViewBlock* child_view = lam::unsafe_view_block_element_storage(child_element);
         if (layout_block_is_display_none(child_view) ||
             layout_view_is_abs_or_fixed(child_view) ||
