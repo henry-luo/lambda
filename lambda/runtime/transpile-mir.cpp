@@ -21146,6 +21146,24 @@ static MIR_reg_t emit_typed_array_store_fallback(MirTranspiler* mt,
     return replacement;
 }
 
+// CW32v2: one byte-test of Container.cow_state (offset 4, static-asserted in
+// lambda.h) before a raw lane store. Emitted ONLY for roots the emitter knows
+// crossed a sharing boundary (cow_marked / children_may_be_shared) -- the
+// functional default emits nothing. The cold arm detaches once and clears the
+// bit, so a marked-and-hot loop pays one not-taken branch per store after the
+// first iteration.
+static void emit_array_num_cow_guard(MirTranspiler* mt, MIR_reg_t arr_ptr,
+        MIR_label_t l_cold) {
+    MIR_reg_t state = new_reg(mt, "cowst", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, state),
+        MIR_new_mem_op(mt->ctx, MIR_T_U8, 4, arr_ptr, 0, 1)));
+    MIR_reg_t shared_bit = new_reg(mt, "cowsh", MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND, MIR_new_reg_op(mt->ctx, shared_bit),
+        MIR_new_reg_op(mt->ctx, state), MIR_new_int_op(mt->ctx, 1)));
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_cold),
+        MIR_new_reg_op(mt->ctx, shared_bit)));
+}
+
 static void emit_array_num_store_fallback(MirTranspiler* mt,
         MIR_reg_t obj, TypeId obj_tid, MIR_reg_t arr_ptr, MIR_reg_t index,
         MIR_reg_t boxed_value, MirVarEntry* root, bool guarded,
@@ -21154,6 +21172,29 @@ static void emit_array_num_store_fallback(MirTranspiler* mt,
     if (guarded && root && root->full_type) {
         result = emit_typed_array_store_fallback(mt, obj, obj_tid, index,
             boxed_value, root);
+    } else if (root && (root->cow_marked || root->cow_children_may_be_shared)) {
+        // CW32v2: the root crossed a sharing boundary, so the cold store goes
+        // through the flag-consulting wrapper -- raw fn_array_set would write
+        // the shared bytes a snapshot still observes. The possibly detached
+        // owner is republished into the binding in its own representation.
+        MIR_reg_t owner_boxed = emit_box(mt, obj, obj_tid);
+        MIR_reg_t replacement = emit_call_3(mt, "array_num_set_cow_idx", MIR_T_I64,
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, owner_boxed),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, index),
+            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_value));
+        emit_return_if_item_error(mt, replacement);
+        if (root->type_id == LMD_TYPE_ARRAY_NUM) {
+            MIR_reg_t raw_array = emit_unbox(mt, replacement, LMD_TYPE_ARRAY_NUM);
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, root->reg), MIR_new_reg_op(mt->ctx, raw_array)));
+            // a detach moved the storage; any cached layout is stale
+            mir_rebind_typed_array_layout(mt, root);
+        } else {
+            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                MIR_new_reg_op(mt->ctx, root->reg), MIR_new_reg_op(mt->ctx, replacement)));
+        }
+        update_gc_root_slot(mt, root);
+        result = emit_null_item_reg(mt);
     } else {
         result = emit_call_3(mt, "fn_array_set", MIR_T_I64,
             MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
@@ -21605,6 +21646,31 @@ static MIR_reg_t transpile_expr_value_legacy_impl(MirTranspiler* mt,
                 MIR_reg_t arr_item = transpile_box_item(mt, ca->object);
                 MIR_reg_t key_item = transpile_box_item(mt, ca->key);
                 MIR_reg_t val_item = transpile_box_item(mt, ca->value);
+                // CW32v2: under mark-only binds a mask write's owner may be
+                // shared; the _cow wrapper prepares and returns the owner for
+                // republication. Only a bare-binding object can republish;
+                // other shapes keep the raw call (pre-existing residue).
+                MirVarEntry* mask_root = mir_direct_root_binding(mt, ca->object);
+                if (mask_root) {
+                    MIR_reg_t owner_result = emit_call_3(mt, "index_assign_cow", MIR_T_I64,
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_item),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item),
+                        MIR_T_I64, MIR_new_reg_op(mt->ctx, val_item));
+                    emit_return_if_item_error(mt, owner_result);
+                    if (mask_root->type_id == LMD_TYPE_ARRAY_NUM) {
+                        MIR_reg_t raw_array = emit_unbox(mt, owner_result, LMD_TYPE_ARRAY_NUM);
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, mask_root->reg),
+                            MIR_new_reg_op(mt->ctx, raw_array)));
+                        mir_rebind_typed_array_layout(mt, mask_root);
+                    } else {
+                        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+                            MIR_new_reg_op(mt->ctx, mask_root->reg),
+                            MIR_new_reg_op(mt->ctx, owner_result)));
+                    }
+                    update_gc_root_slot(mt, mask_root);
+                    return emit_null_item_reg(mt);
+                }
                 MIR_reg_t write_result = emit_call_3(mt, "fn_index_assign", MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, arr_item),
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, key_item),
@@ -21733,6 +21799,12 @@ static MIR_reg_t transpile_expr_value_legacy_impl(MirTranspiler* mt,
                 }
             }
         }
+        // CW32v2: only a root the emitter knows crossed a sharing boundary
+        // consults the shared bit; every other binding keeps today's fully
+        // raw lane stores with no check at all.
+        bool assign_obj_cow_guard = assign_obj_var &&
+            (assign_obj_var->cow_marked ||
+             assign_obj_var->cow_children_may_be_shared);
         TypeId runtime_obj_elem = assign_obj_elem != LMD_TYPE_ANY
             ? assign_obj_elem : mir_known_index_element_type(mt, ca->object);
         // Matching semantic TypeIds do not prove the MIR carrier: boxed
@@ -21835,6 +21907,7 @@ static MIR_reg_t transpile_expr_value_legacy_impl(MirTranspiler* mt,
                     (uint8_t)(assign_obj_elem == LMD_TYPE_INT64 ? ELEM_INT64 : ELEM_INT), l_oob);
             }
 
+            if (assign_obj_cow_guard) emit_array_num_cow_guard(mt, arr_ptr, l_oob);
             // Bounds check
             emit_array_num_bounds_check(mt, arr_ptr, idx_int, l_oob);
 
@@ -22013,6 +22086,7 @@ static MIR_reg_t transpile_expr_value_legacy_impl(MirTranspiler* mt,
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
                 MIR_new_reg_op(mt->ctx, fview)));
 
+            if (assign_obj_cow_guard) emit_array_num_cow_guard(mt, arr_ptr, l_oob);
             // Bounds check
             emit_array_num_bounds_check(mt, arr_ptr, idx_int, l_oob);
 
@@ -22070,6 +22144,7 @@ static MIR_reg_t transpile_expr_value_legacy_impl(MirTranspiler* mt,
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT, MIR_new_label_op(mt->ctx, l_oob),
                 MIR_new_reg_op(mt->ctx, is_view)));
 
+            if (assign_obj_cow_guard) emit_array_num_cow_guard(mt, arr_ptr, l_oob);
             emit_array_num_bounds_check(mt, arr_ptr, idx_int, l_oob);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_ok)));
 
@@ -22100,12 +22175,18 @@ static MIR_reg_t transpile_expr_value_legacy_impl(MirTranspiler* mt,
         // ==================================================================
         else {
             MIR_reg_t val = transpile_box_item(mt, ca->value);
-            MIR_reg_t call_result = emit_call_3(mt, "fn_array_set", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_int),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, assign_result),
-                MIR_new_reg_op(mt->ctx, call_result)));
+            if (assign_obj_cow_guard) {
+                // CW32v2: a marked root's boxed store also consults the bit
+                emit_array_num_store_fallback(mt, obj, obj_tid, arr_ptr, idx_int,
+                    val, assign_obj_var, assign_elem_guarded, assign_result);
+            } else {
+                MIR_reg_t call_result = emit_call_3(mt, "fn_array_set", MIR_T_I64,
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, arr_ptr),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, idx_int),
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+                emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, assign_result),
+                    MIR_new_reg_op(mt->ctx, call_result)));
+            }
         }
 
         // Return helper status so OOB write failures participate in T^ propagation.

@@ -4318,11 +4318,15 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         owner.set(interp_read_binding(f, root));
 
         if (ast_is_direct_numeric_mask_assignment(node)) {
-            // A mask store mutates the numeric buffer in place. Alias and var
-            // boundaries have already detached this binding, so this must use
-            // MIR's shared helper rather than fabricate a scalar COW index.
-            Item write_result = fn_index_assign(owner.get(), key_slot.get(), value_slot.get());
-            return item_is_error(write_result) ? write_result : ItemNull;
+            // CW32v2: alias boundaries no longer eagerly detach ArrayNum, so
+            // a mask store's owner may be shared. The _cow wrapper prepares
+            // (one packed memcpy when shared) and returns the owner, which
+            // MUST be republished into the binding.
+            Item owner_result = index_assign_cow(owner.get(), key_slot.get(),
+                value_slot.get());
+            if (item_is_error(owner_result)) return owner_result;
+            interp_write_binding(f, root, owner_result);
+            return ItemNull;
         }
 
         // Dispatch on the owner's runtime type, not the syntax: `m["k"] = v`

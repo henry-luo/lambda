@@ -7757,9 +7757,17 @@ Item cow_mark_shared(Item value) {
 // update. Callers must treat this as possibly allocating: the ArrayNum arm
 // still copies eagerly.
 Item cow_bind_var(Item value) {
-    // ArrayNum views keep their Stage-2 mutable-view contract; generic COW
-    // ownership starts only at the core Item-container subset.
-    if (get_type_id(value) == LMD_TYPE_ARRAY_NUM) return fn_mutable_value(value);
+    if (get_type_id(value) == LMD_TYPE_ARRAY_NUM) {
+        ArrayNum* an = value.array_num;
+        // CW32v2: mutable views keep their write-through contract (open/todo
+        // by designer ruling 2026-08-29) -- marking one would make its first
+        // write detach and stop reaching the base. The old eager clone also
+        // returned views unclonied, so behavior is unchanged for them.
+        if (an && an->is_view) return value;
+        // plain ArrayNum joins the uniform mark: O(1) bind, one memcpy detach
+        // at the first COW-aware write. This retires the last Stage-1
+        // eager-clone exception.
+    }
     return cow_mark_shared(value);
 }
 
@@ -8417,6 +8425,40 @@ Item lambda_array_set_checked_inplace_lane(Item owner, int64_t index, Item value
     LaneStorageDesc hint = lambda_array_lane_hint(expected, lane_kind, lane_nullable,
         lane_byte_size);
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary, true, &hint);
+}
+
+// CW32v2: numeric mask stores (`arr[mask] = v`) mutate the packed buffer in
+// place. Under mark-only binds the owner may be shared, so the wrapper
+// prepares first and returns the (possibly replaced) owner for mandatory
+// republication -- the raw fn_index_assign keeps reference semantics (CW21).
+Item index_assign_cow(Item owner, Item key, Item value) {
+    RootFrame roots(3);
+    Rooted<Item> rooted_owner(roots, owner);
+    Rooted<Item> rooted_key(roots, key);
+    Rooted<Item> rooted_value(roots, value);
+    Item replacement = cow_prepare_write(rooted_owner.get());
+    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+    rooted_owner.set(replacement);
+    Item result = fn_index_assign(rooted_owner.get(), rooted_key.get(),
+        rooted_value.get());
+    if (item_is_error(result)) return result;
+    return rooted_owner.get();
+}
+
+// CW32v2: the MIR lane-store cold arm's entry -- machine index, no key
+// decode. Prepares (detaching a shared owner with one packed memcpy), then
+// delegates to the raw setter (CW21) and returns the owner for mandatory
+// republication into the binding.
+Item array_num_set_cow_idx(Item owner, int64_t index, Item value) {
+    Item replacement = cow_prepare_write(owner);
+    if (get_type_id(replacement) == LMD_TYPE_ERROR) return replacement;
+    TypeId type_id = get_type_id(replacement);
+    if (type_id != LMD_TYPE_ARRAY && type_id != LMD_TYPE_ARRAY_NUM) {
+        log_error("cow lane store rejected non-array owner type %d", type_id);
+        return ItemError;
+    }
+    if (fn_array_set(replacement.array, index, value).item == ItemError.item) return ItemError;
+    return replacement;
 }
 
 Item array_set_cow(Item owner, Item key, Item value) {

@@ -1950,6 +1950,8 @@ JitImport jit_runtime_imports[] = {
     {"fn_mutable_value", FPTR(fn_mutable_value)},
     {"fn_map_set", FPTR(fn_map_set)},
     {"cow_mark_shared", FPTR(cow_mark_shared)},
+    {"array_num_set_cow_idx", FPTR(array_num_set_cow_idx)},
+    {"index_assign_cow", FPTR(index_assign_cow)},
     {"cow_capture_value", FPTR(cow_capture_value)},
     {"cow_bind_var", FPTR(cow_bind_var)},
     {"cow_prepare_write", FPTR(cow_prepare_write)},

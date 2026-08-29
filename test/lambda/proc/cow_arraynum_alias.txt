@@ -1,0 +1,8 @@
+1 99 (ruled 1 99)
+77 5 (ruled 77 5)
+1.5 9.5 (ruled 1.5 9.5)
+9 0 (ruled 9 0)
+999 (ruled 999: view writes through)
+9 (ruled 9)
+0 3 (ruled 0 3)
+
