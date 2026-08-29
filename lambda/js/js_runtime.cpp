@@ -779,6 +779,34 @@ extern "C" void js_register_global_var_module_bindings_bulk(const Item* keys,
     }
 }
 
+extern "C" void js_release_global_var_module_bindings_from(
+        uint32_t first_module_state_id) {
+    if (first_module_state_id == UINT32_MAX) return;
+    int retained = 0;
+    for (int i = 0; i < js_global_var_module_binding_count; i++) {
+        if (js_global_var_module_binding_state_ids[i] >= first_module_state_id) {
+            continue;
+        }
+        if (retained != i) {
+            js_global_var_module_binding_keys[retained] =
+                js_global_var_module_binding_keys[i];
+            js_global_var_module_binding_indices[retained] =
+                js_global_var_module_binding_indices[i];
+            js_global_var_module_binding_state_ids[retained] =
+                js_global_var_module_binding_state_ids[i];
+        }
+        retained++;
+    }
+    // Registry keys borrow script NamePool storage; clear released slots before
+    // their generation destroys that pool (D5.3.3).
+    for (int i = retained; i < js_global_var_module_binding_count; i++) {
+        js_global_var_module_binding_keys[i] = ItemNull;
+        js_global_var_module_binding_indices[i] = 0;
+        js_global_var_module_binding_state_ids[i] = UINT32_MAX;
+    }
+    js_global_var_module_binding_count = retained;
+}
+
 static void js_sync_global_var_module_binding(Item object, Item key, Item value) {
     js_global_var_binding_refresh();
     if (object.item != js_global_var_module_binding_global.item ||

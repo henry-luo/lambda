@@ -795,8 +795,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         return js_dynamic_function_throw_syntax_error("Invalid function source");
     }
 
-    TSNode root = ts_tree_root_node(tp->tree);
-    JsAstNode* js_ast = build_js_ast_indexed(tp, root);
+    JsAstNode* js_ast = js_transpiler_build_ast(tp);
     if (!js_ast) {
         log_error("js-new-function: AST build failed");
         (void)js_mir_compile_unit_fail(NULL, NULL, tp, source,
@@ -1511,18 +1510,6 @@ static Item js_eval_parse_error_message(const JsTranspiler* tp) {
 }
 
 
-static void js_eval_unwind_direct_bridge(bool is_direct_eval, bool is_global_scope) {
-    if (js_eval_env_is_active()) {
-        // CJS/direct eval exposes local bindings as temporary global slots;
-        // thrown eval compilation must remove active bridges before caller cleanup is skipped.
-        js_eval_env_pop_frame();
-    }
-    if (is_direct_eval || is_global_scope) {
-        // Global-script direct eval bridges top-level lexicals through globalThis.
-        js_eval_global_lexical_pop_frame();
-    }
-}
-
 extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
                                          Item filename_item,
                                          int64_t line_offset,
@@ -1541,6 +1528,9 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
     bool is_global_scope = (eval_flags & 1) != 0;
     bool is_vm_global_context = (eval_flags & JS_EVAL_FLAG_VM_GLOBAL_CONTEXT) != 0;
     bool inherited_strict = (eval_flags & 4) != 0;
+    // Direct-eval callers own the environment bridge and must write back
+    // mutations made before a throw, so keep that bridge live for all eval
+    // completions and let the caller close it after writeback.
     bool has_eval_filename = get_type_id(filename_item) == LMD_TYPE_STRING;
     const char* eval_filename = has_eval_filename ? it2s(filename_item)->chars : "<eval>";
     bool native_probe_value = false;
@@ -1777,7 +1767,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             fn_item = js_new_function_from_string_kind(&body_item, 1,
                 "function", "function anonymous", is_direct_eval);
             if (item_is_error(fn_item)) {
-                js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
                 return fn_item;
             }
         }
@@ -1791,7 +1780,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         // passed through instead so only a `this` read inside the eval throws.
         Item eval_this = js_get_lexical_this_binding();
         Item result = js_call_function(fn_item, eval_this, NULL, 0);
-        if (item_is_error(result)) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
         return result;
     }
 
@@ -1815,14 +1803,12 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             Item syntax_message = js_eval_parse_error_message(tp);
             (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
                 js_current_runtime(), context, true);
-            js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
             // Dynamic eval surfaces parser diagnostics through SyntaxError;
             // the REPL uses the same location to render the source caret.
             return js_throw_syntax_error(syntax_message);
         }
 
-        TSNode root = ts_tree_root_node(tp->tree);
-        JsAstNode* js_ast = build_js_ast_indexed(tp, root);
+        JsAstNode* js_ast = js_transpiler_build_ast(tp);
         if (!js_ast) {
             log_error("js-eval: AST build failed for direct script");
             (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
@@ -1979,7 +1965,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         }
         Item result = js_mir_execute_compiled_entry((void*)js_main_fn);
         if (!is_direct_eval) js_set_this(previous_this.get());
-        if (item_is_error(result)) js_eval_unwind_direct_bridge(is_direct_eval, is_global_scope);
 
         if (js_eval_fresh_module_scope) {
             js_set_active_module_state_id(js_eval_prev_module_state_id);

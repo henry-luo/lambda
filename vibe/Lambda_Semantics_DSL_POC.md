@@ -51,7 +51,12 @@ of Tier 1, for this scope:
 What big-step gives up — modeling divergence distinctly from stuckness, and the
 per-step traces the parent's §7.1 mismatch reports want — is an acceptable POC
 trade: fixtures terminate, and mismatch localization falls back to per-check
-granularity (§6).
+granularity (§6) — once divergence is handled. It initially was not: a wrong
+rule that made a modelled program *diverge* printed nothing at all, erasing
+every other result in the file (finding **F5**, §7). M2 closed this with a
+`fuel` argument bounding recursion depth, which turns divergence into ordinary
+stuckness and restores per-check localization. The model is therefore **total**:
+every term either yields a value or is stuck, and omega is just another check.
 
 ### 1.2 Decision ledger
 
@@ -311,10 +316,15 @@ section). No declaration form needed at this scale.
 ## 5. Files and layout
 
 ```
-test/lambda/sem/sem_poc_core.ls      // kernel + arith/let/if/closure/recursion/stuck  [LANDED]
-test/lambda/sem/sem_poc_collect.ls   // arrays/maps/for arms                    (+ .txt)
-test/lambda/sem/sem_poc_stuck.ls     // negative checks: every stuck form       (+ .txt)
+test/lambda/sem/sem_poc_kernel.ls    // the interpreter, `pub fn`s — NO .txt, so not discovered
+test/lambda/sem/sem_poc_core.ls      // positive differential checks, M0-M2      (57)  [LANDED]
+test/lambda/sem/sem_poc_stuck.ls     // negative suite: STUCK / TOTAL / ADOPTED  (36)  [LANDED]
+test/lambda/sem/sem_poc_fixtures.ls  // real test/lambda programs, translated    (33)  [LANDED]
 ```
+
+Discovery collects only `.ls` files that have a matching `.txt`, so the kernel
+module is skipped automatically and the three fixtures share one copy of the
+interpreter — no duplication, and no harness change to arrange it.
 
 Per P7 these are ordinary `.ls`+`.txt` fixtures under `test/lambda/sem/`, so
 CLAUDE.md rule 8 supplies the golden discipline and no harness, Makefile
@@ -457,6 +467,91 @@ that building the model is itself the hardening instrument:
   The line-delimiter rules protect statement position but not content
   position; the silent `error` child is the sharp part.
 
+- **F5 — a diverging model destroys the whole fixture's output, not one
+  check.** Mutation-testing M1 (a wrong `sub` arm computing addition) turned
+  the modelled factorial into a non-terminating program: `error[E308]: Stack
+  overflow`, and the fixture printed **nothing at all** — because a script's
+  top level is collected content that prints only once evaluation completes
+  (S16.7), one diverging check erases the other 34 results. The golden still
+  catches it (empty ≠ 35 lines), so the suite has teeth, but §6.1's claim of
+  *per-expression* localization does not hold for divergence: big-step cannot
+  distinguish it from stuckness (§1.1), and the crash is whole-file. The
+  standard remedy is a **fuel parameter** — `ev(t, env, fuel)` decrementing
+  per step and raising `out of fuel` at zero — which converts divergence into
+  ordinary stuckness, makes the judgment total, and restores per-check
+  localization. Deferred: it threads an extra argument through every arm, and
+  is worth doing when M2's coverage makes accidental divergence likelier.
+
+- **F6 — compile-time rejection of literal `div`/`%` by zero contradicts the
+  run-time answer.** `1 % 0` and `1 div 0` are **compile errors** (E312,
+  `build_ast.cpp:7727`, guarded on `OPERATOR_IDIV`/`OPERATOR_MOD` and a literal
+  zero, citing S3.3.4). But the identical operations are **legal at run time**
+  once the zero is not a literal: `10 % zero(3)` = `nan`, `1 div zero(3)` =
+  `inf`. So constant-foldability decides program legality — the same expression
+  is rejected or accepted depending only on whether the compiler can see the
+  operand — which is the observable-inference class SI3v2 rules out. Note the
+  check does NOT cover `/`: `1 / 0` compiles and yields `inf` at both times,
+  consistently.
+  The comparison languages do not support the current combination. Go, Rust,
+  Swift, C# and Zig all reject a literal integer division by zero at compile
+  time — but in every one of them the run-time operation *traps or panics*, so
+  the compile-time error is an early diagnosis of a real fault. Lambda has no
+  such fault to diagnose: the run-time answer is an ordinary `inf`/`nan` value.
+  Either the run time should reject what the compiler rejects, or the compiler
+  should accept what the run time accepts; today a program's legality depends
+  on where the zero comes from. Pinned by a check in `sem_poc_core.ls`.
+  Two adjacent oddities surfaced with it, not yet triaged: an integer operator
+  (`div`) escaping to a float `inf`, and `type(nan)` answering `int`.
+
+- **F7 — an unknown infix word silently splits an expression.** There is no
+  `mod` operator (the table has `div` and `%` only), so `let b = 7 mod 2` does
+  not fail — it binds `b = 7` and leaves `mod` and `2` as separate top-level
+  content, printing an `error` value and `2`. A misspelled operator should be a
+  diagnostic, not a silent three-way split; same family as F4.
+
+- **F8 — a comprehension's result stays spreadable, so two `==`-equal arrays
+  behave differently later.** A `for`-expression yields a *spreadable* array,
+  and that flag survives a `let` binding and a function return. Minimal repro:
+  `fn mk_comp() => for (x in [1]) x` and `fn mk_lit() => [1]` produce values for
+  which `c == l` is **true**, yet `for (i in [0]) c` gives `[1]` (spliced) while
+  `for (i in [0]) l` gives `[[1]]`. Equal values, identical use, different
+  results — a referential-transparency break. S8.3.3 says for-expressions
+  "splice at the construction site"; here the splice happens at a *later,
+  unrelated* site, one function boundary away from the construction.
+  A second face of the same flag: an empty comprehension returned from a
+  function's **block** body yields `null`, while the identical expression as an
+  arrow body yields `[]` — the empty spreadable splices away to nothing in the
+  block's result position.
+  Cost to the POC: every array-producing rule (`arr`, `forr`) must launder its
+  result through `[*items]`, or nested arrays silently flatten and empty ones
+  vanish. Both failure modes appeared, and mutation-testing confirms the
+  laundering is load-bearing (removing it fails exactly 2 checks). Needs a
+  ruling: either spreadability ends at the construction site as S8.3.3 reads,
+  or it is a real property of values and `==` should not equate values that
+  splice differently.
+
+- **F9 — the model collapses Lambda's two error channels into one.** Lambda has
+  a returned error *value* that flows as ordinary data and a raised error that
+  must be handled. Natively `1 + "str"` (a real line in `test/lambda/expr.ls`)
+  yields an error **value**; the model reports `'stuck'`, because every arm
+  propagates with `^` and so routes it into the raised channel. Both sides agree
+  the term has no ordinary value, and disagree about which channel says so. This
+  is a **model limitation, not a runtime defect** — P8 puts errors-as-modelled-
+  values out of POC scope — and `sem_poc_stuck.ls` pins it as a fact (comparing
+  is-there-a-value rather than equality) instead of hiding it. Modelling the two
+  channels honestly is the natural M4+ scope increase.
+
+- **F10 — an identifier in element-content position followed by `<` parses as
+  less-than.** `<app make_adder <lit v:10>>` does not parse ("expected a
+  statement separator"), while `<app make_adder a10>` (both children names) and
+  `<app <lam ...> <lit v:10>>` (literal first) both do. The ambiguity is
+  resolved toward comparison, so a *variable* child may not be followed by an
+  *element-literal* sibling — including across a line break. Cost to the POC:
+  every argument term in `sem_poc_fixtures.ls` is bound to a name first, purely
+  to get around this. Same family as F3/F4: content position has parsing rules
+  that surprise, and this one bites hardest exactly where terms are assembled
+  from reusable pieces — the normal way to write a model.
+
 Disposition: F1 is a runtime defect to fix; F2 a doc fix; F3/F4 are
 grammar-ruling questions to raise per `doc/Doc_Convention.md` (ask, don't
 assume). All four go to the `Lambda_Semantics_Formal.md` worklist. The POC
@@ -478,19 +573,75 @@ Each milestone is a committed fixture set, green under
   (unbound variable, no-rule tag, propagation out of a nested position). All 11
   return `true`. `lam`/`fun` share one `app` arm: a plain `clo` has no `f`
   attribute, so `f.f` reads null and the self-rebind is skipped.
-- **M1 — functional-core breadth.** Remaining scalar ops (sub/div/mod, full
-  comparison set, logical with short-circuit, string concat), n-ary `lam`/`app`
-  (parameter list as child or attribute-array), multi-binding `lett`,
-  shadowing checks, `iff` chains. Deliverable: `sem_poc_core.ls` grown +
-  `sem_poc_closure.ls`.
-- **M2 — collections + comprehension.** `arr`/`idx`, `mp`/`fld`, `forr`
-  (map over a sequence), slicing if cheap; mutual recursion if a covered
-  fixture needs it. Deliverable: `sem_poc_collect.ls`.
-- **M3 — negative suite + real-fixture slice.** `sem_poc_stuck.ls`
-  (every stuck form: unbound var, non-bool guard, apply-non-closure, arity,
-  OOB index — pinning down what the *model* says is an error, as a spec
-  artifact) + Phase-2 hand-translations of the chosen `arith*`/`closure*`
-  slice. **This is the POC's exit evidence.**
+- **M1 — functional-core breadth. LANDED** (2026-08-29), `sem_poc_core.ls`
+  grown to **35 checks**, all `true`. Added `div`/`mod`/`cat`, the full
+  comparison set (`gt`/`ge`/`eq`/`ne`), short-circuit `andd`/`orr` plus `nott`,
+  and n-ary `lamn`/`appn`/`clon` with the parameter list in a `ps` attribute
+  and arity enforced as a semantic rule. Stuckness widened: arity mismatch
+  (both directions), applying a non-function, and mixing the unary and n-ary
+  application forms. **Multi-binding `lett` was deliberately dropped** — the
+  fold over bindings would need mutual recursion between the folder and `ev`,
+  or dynamic term construction, and nested `lett` already has identical
+  semantics.
+  Two encoding rules keep the model stable against a pending runtime change:
+  child access is always `t[i]` (children-only) and `len(t)` is read only on
+  attribute-free terms, so it does not matter whether element `len` counts
+  attributes (S8.3.1).
+  Notable: short-circuit is **proven, not asserted** — the right operand of the
+  deciding cases is an unbound variable, so a value coming back is evidence the
+  model never recursed into it, and the converse cases confirm it is reached
+  when the left operand does not decide.
+- **M2 — collections + comprehension. LANDED** (2026-08-29), **56 checks**,
+  all `true`, in `sem_poc_core.ls` (kept as one self-contained fixture rather
+  than the planned `sem_poc_collect.ls`: a shared kernel module would itself be
+  discovered as a test and need its own golden once `sem/` enters the list).
+  Added `arr`/`idx`/`slice`/`forr`, `lenn` as a declared host builtin (the
+  parent's §5.6 boundary), and `mp`/`fld` for maps.
+  **Totality (closes F5):** `ev` now takes a `fuel` argument bounding recursion
+  DEPTH, decremented on every arm including tail positions. Omega —
+  `(\x. x x)(\x. x x)` — and a base-case-free recursive function are now
+  ordinary stuck terms, and a check *after* them still reports, so divergence
+  no longer erases the file. Verified by mutation: deleting the fuel guard
+  returns the run to zero output lines, exactly F5's signature.
+  **Maps are the one place the model cannot mirror the host.** `{(k): v}` is a
+  parse error and there is no runtime map constructor, so a modelled map is an
+  assoc-list element and the checks compare *field reads* (S8.4) rather than
+  whole values. This is the sharpest Tier-1 requirement the POC has produced:
+  a DSL over this data model needs dynamic map construction.
+  Deliberately not covered: `mp` key collisions, and slicing beyond one
+  inclusive-range case.
+- **M3 — negative suite + real-fixture slice. LANDED** (2026-08-29).
+  **126 checks across three fixtures**, all `true`, sharing one kernel:
+  `sem_poc_kernel.ls` holds the interpreter as `pub fn`s and has **no golden**,
+  so test discovery — which only collects `.ls` files having a matching `.txt` —
+  skips it. That removes the kernel duplication the original layout implied.
+  - `sem_poc_core.ls` (57) — positive differential checks, M0-M2.
+  - `sem_poc_stuck.ls` (36) — the negative suite, written as a **spec artifact**
+    rather than a differential one: it partitions terms into **STUCK** (no rule
+    applies), **TOTAL** (a rule applies and answers null — OOB and negative
+    indices, missing keys, a field of a non-map, an attribute-less `lit`; these
+    are *not* errors, because Lambda's reads are total per S7.1.1v2/C15), and
+    **ADOPTED** (the model has no opinion and takes the host's — a non-boolean
+    `iff` guard is truthiness, not a type error).
+  - `sem_poc_fixtures.ls` (33) — Phase-2 hand-translations of real programs from
+    `test/lambda/closure.ls` (all seven closure tests) and `test/lambda/expr.ls`,
+    checked against both those fixtures' own expectations and the runtime
+    evaluating the native source.
+
+  **The headline result is a mutation test.** Switching the model from lexical
+  to dynamic scoping — capturing the caller's environment instead of the
+  definition's, about as fundamental an error as this model admits — left
+  **every check in `sem_poc_core.ls` still passing**, while **10 of the 33
+  real-fixture translations failed immediately**. The invented checks were blind
+  because their captured name happened to also be in scope at the call site;
+  the real closure factories (`make_adder`, `make_nested`, `outer(2)(3)(4)`)
+  are exactly the shape where it is not. This is the empirical case for §6.2:
+  a model exercised only on self-authored examples is graded on what it is
+  already good at. A discriminating check has since been added to
+  `sem_poc_core.ls`, and the mutation now fails there too.
+  Also notable: the discriminator's native side needs a factory, because
+  rebinding a name in one scope is a duplicate-definition error — only the
+  *term* can spell the shadowing that makes it discriminating.
 - **M4 (optional) — Mark ingestion.** §6.3's `--emit-ast-mark` + `normalize`
   + first mechanically-ingested fixture. Graduation gate to the parent's
   Stage 5 machinery.

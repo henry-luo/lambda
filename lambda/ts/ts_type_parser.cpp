@@ -19,6 +19,7 @@
 //                   | literal_type | template_literal_type
 
 #include "ts_type_parser.hpp"
+#include "../js/js_c_ast_helpers.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mempool.h"
 #include <cstring>
@@ -34,11 +35,12 @@ struct TsTypeParser {
     const char* text;
     int len;
     int pos;
-    TSNode null_node; // zeroed TSNode for allocation
-
     // allocation helpers
     JsAstNode* alloc_node(TsAstNodeType type, size_t size) {
-        return alloc_js_ast_node(tp, (JsAstNodeType)type, null_node, size);
+        // Type-text nodes have no Tree-sitter owner; use the span allocator
+        // rather than passing an invalid zero Tree-sitter node.
+        return alloc_js_ast_node_span(tp, (JsAstNodeType)type,
+            (SourceSpan){0, 0}, size);
     }
 
     String* make_string(const char* src, int slen) {
@@ -1166,8 +1168,6 @@ TsTypeNode* ts_parse_type_text(JsTranspiler* tp, const char* text, int len) {
     parser.text = text;
     parser.len = len;
     parser.pos = 0;
-    memset(&parser.null_node, 0, sizeof(TSNode));
-
     TsTypeNode* result = parser.parse_type();
     return result ? result : parser.make_any();
 }
@@ -1189,7 +1189,6 @@ TsTypeNode* ts_parse_interface_body_text(JsTranspiler* tp, const char* text, int
     parser.text = text;
     parser.len = len;
     parser.pos = 0;
-    memset(&parser.null_node, 0, sizeof(TSNode));
 
     // consume opening { (or {|)
     parser.skip_ws();

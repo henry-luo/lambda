@@ -362,7 +362,7 @@ Measured after v11 Track A performance optimizations (property hash table, array
 JavaScript Source
        │
        ▼
-  Tree-sitter Parser (tree-sitter-javascript)
+  First-party C Parser (JS lexer + RD/Pratt)
        │
        ▼
   AST Builder (build_js_ast.cpp) ─── 40+ AST node types

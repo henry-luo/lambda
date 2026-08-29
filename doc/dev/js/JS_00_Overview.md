@@ -9,7 +9,7 @@
 
 ## 1. What LambdaJS is, and its design goals
 
-LambdaJS reuses Lambda's runtime instead of shipping a separate JS VM. A `.js` source is parsed by Tree-sitter, lowered through a typed AST to MIR IR, and JIT-compiled (or interpreted) by the shared MIR backend; the resulting code calls a large C/C++ runtime that implements JS semantics over Lambda `Item` values. The design optimizes for four goals, each visible throughout the set:
+LambdaJS reuses Lambda's runtime instead of shipping a separate JS VM. A `.js` or `.ts` source is parsed by the first-party C lexer and hybrid recursive-descent/Pratt parser, reduced directly to a typed AST, and JIT-compiled (or interpreted) by the shared MIR backend; the resulting code calls a large C/C++ runtime that implements JS semantics over Lambda `Item` values. The vendored JS/TS Tree-sitter grammars remain only in `lambda-cst` for reference/differential checks under D8.1.3v10. The design optimizes for four goals, each visible throughout the set:
 
 - **Unified runtime** — JS values *are* Lambda `Item` values (no marshalling boundary); see [JS_03 — Value Model & Memory](JS_03_Value_Model.md).
 - **Near-native performance** — multi-phase type inference plus native arithmetic / shaped-object / fast-dispatch paths; see [JS_15 — Performance & Optimization](JS_15_Performance.md).
@@ -50,7 +50,7 @@ Inside the engine, a front-end feeds a multi-phase MIR transpiler; the runtime c
 
 <img alt="Compilation pipeline overview" src="diagram/pipeline_overview.svg" width="318">
 
-Source → Tree-sitter parse → typed `JsAstNode` → early-error validation → a 14-step lowering pipeline producing a MIR module → link as native code (default) or the MIR interpreter (large/cold/document scripts) → execute `js_main` → drain the event loop → result. The full pipeline, phase model, and interpreter-vs-JIT policy are in [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md).
+Source → first-party C parse/direct AST reduction → early-error validation → a 14-step lowering pipeline producing a MIR module → link as native code (default) or the MIR interpreter (large/cold/document scripts) → execute `js_main` → drain the event loop → result. The full pipeline, phase model, and interpreter-vs-JIT policy are in [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md).
 
 ---
 
@@ -63,7 +63,7 @@ The set is organized in five parts. Read JS_01–JS_04 first for the engine; the
 | Doc | Covers |
 |---|---|
 | [JS_01 — Compilation Pipeline & Phase Model](JS_01_Compilation_Pipeline.md) | Entry points, `JsMirTranspiler`, the 14-step phase model, interpreter-vs-JIT selection, MIR import resolution, CLI/batch dispatch. |
-| [JS_02 — Parsing, AST & Front-End Validation](JS_02_Parsing_AST.md) | Tree-sitter integration, the `JsAstNode` model, lexical scope, the six-phase early-error validator, strict-mode detection. |
+| [JS_02 — Parsing, AST & Front-End Validation](JS_02_Parsing_AST.md) | First-party C parsing, direct `JsAstNode` reduction, lexical scope, the six-phase early-error validator, strict-mode detection, and the isolated Tree-sitter reference lane. |
 | [JS_03 — Value Model, Memory & GC Interop](JS_03_Value_Model.md) | The tagged `Item`, JS↔`TypeId` mapping, undefined/null/TDZ/symbol/BigInt encodings, GC ownership, execution side stacks, closure environments, call arguments, module-variable storage, `JsRuntimeState`. |
 | [JS_04 — MIR Lowering, Code Generation & Exceptions](JS_04_MIR_Lowering.md) | Boxed-Item-by-default emission with native fast paths, boxing/unboxing, condition `_raw` facades, constant folding, call emission, the exception model, `eval`/`Function`. |
 

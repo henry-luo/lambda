@@ -808,6 +808,7 @@ bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
 void js_eval_preamble_cache_reset(void);
 void js_register_global_var_module_binding(Item key, int64_t index);
 void js_register_global_var_module_bindings_bulk(const Item* keys, const int* indices, int count);
+void js_release_global_var_module_bindings_from(uint32_t first_module_state_id);
 
 /**
  * Reset all JS runtime global state between batch test runs.

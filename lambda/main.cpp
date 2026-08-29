@@ -4891,11 +4891,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
                         break;
                     }
                 } else if (ast_test_generation_active) {
-                    // AST harnesses retain only parsed source and scope facts.
-                    // Replacing the realm after every source prevents a test
-                    // from mutating harness functions, globals, or intrinsics
-                    // observed by its successor.
                     jm_cleanup_deferred_mir();
+                    // AST JS-harness batches retain parsed source and scope
+                    // facts only. Replacing their realm prevents a test
+                    // from mutating harness functions seen by its successor.
                     if (!js_test262_hot_context_recycle(&runtime, batch_context)) break;
                     runtime_release_script_generation(&runtime,
                         ast_test_script_checkpoint, ast_test_module_state_checkpoint);

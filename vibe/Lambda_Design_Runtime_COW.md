@@ -1,6 +1,6 @@
 # Lambda Design: Copy-on-Write for Mutable Value Semantics
 
-- **Status:** rev 8, 2026-08-29. **Stage 1 is LANDED** (`vibe/impl/Lambda_Impl_Tune_COW (done).md`;
+- **Status:** rev 9, 2026-08-29 (CW33 ratified — the `var`-param address ABI, §11.10). **Stage 1 is LANDED** (`vibe/impl/Lambda_Impl_Tune_COW (done).md`;
   formal-spec conformance: "COW Stage 1 landed" — `let`-finality real for
   Array/Map/Object/Element/VMap). The main body now carries only the **latest
   design**; the rev-1–7 decision narrative, the pre-Stage-1 motivating
@@ -33,6 +33,7 @@
 | Stage-1 core-container COW (Array/Map/Object/Element/VMap) | CW3, CW6–CW14, CW19, CW21 | **LANDED** — eager clone anchor retired (CW10); `_cow` wrapper family live; counters (CW5) live |
 | S9.3.1 insertion capture | formal spec S9.3.1 | **UNCONDITIONAL — escape hatch retired 2026-08-29** (env no longer consulted; gated arms and `is_proc_param` deleted) |
 | Nested mutation: CW24 mutated-place-copy error, CW25 path borrows | CW22–CW28 (companion doc) | **Implemented on worktree branch `nm-impl-work` (unmerged)**; 9 corpus scripts migrated |
+| `var`-param borrow ABI | **CW33** (§11.10) | **T0 stage + MIR M1a IMPLEMENTED 2026-08-29**: T0 homes channel + chain-root prologue prepare; MIR context-transport (`Context::mir_var_homes`) with epilogue publish + caller reload — **the rebind divergence is closed**. Remaining: full pointer ABI (typed `Container**`/lane homes, delete the transport), after which `E229`/face-2 can lift |
 | S9.1.3 plain-param snapshots | **CW29** (§11.9) | **DEFAULT ON — flipped 2026-08-29.** The 88-script sweep ceiling collapsed to **13 real reliance sites**, all migrated to `var` (goldens unchanged). Place-copy binds now mark (true S9.1.2 snapshots); CW24v2 phase 2 live (observed copies legal; dead-store shape warns) |
 | Snapshot iteration (S9.2.3) | **CW30** (§11.6) | **Implemented 2026-08-29** (worktree `nm-impl-work`, pending merge): compile-gated, tier-shared decision; fixture `cow_snapshot_iteration.ls` |
 | Exclusivity faces | §11.3, **CW31** | Faces 1+3 **landed** (`E211`, whole-base). Face 2 unreachable behind `E229` (callee-side design recorded). Face 4 **implemented 2026-08-29** (worktree `nm-impl-work`, pending merge): `NameEntry::view_base` + effective-root compare; fixture `var_view_overlap.ls` |
@@ -478,7 +479,7 @@ one), test pairwise overlap:
 | Face | Overlap to reject | Example | State (2026-08-29) |
 |---|---|---|---|
 | 1 — two+ `var` args | same variable | `f(x, x)` | **Landed** (`E211`) |
-| 2 — receiver vs `var` args | receiver is a `var` param | `list.append_all(list)` | **Unreachable** — dynamic dispatch of `var`-param `pn`s is itself deferred (`E229`), so no such call compiles; see CW31 |
+| 2 — receiver vs `var` args | receiver is a `var` param | `list.append_all(list)` | **Unreachable** — dynamic dispatch of `var`-param `pn`s is itself deferred (`E229`), so no such call compiles; see CW31, and CW33 (§11.10), whose address ABI un-defers `E229` and reduces this check to a slot-address compare |
 | 3 — path borrows | **path-prefix** relation: `x` vs `x.f` conflict | `f(var t, var t.nodes[i])` | **Landed** at whole-base granularity: same base ⇒ conflict, so `f(var t.a, var t.b)` is also rejected — the ladder's sanctioned v1 false positive |
 | 4 — mutable view borrows | same **base**, per CW31 v1 | `f(var view(img,r1), var view(img,r2))` | **Implemented 2026-08-29** (`nm-impl-work`): `NameEntry::view_base` recorded at `var v = subview(base,…)` bindings, effective-root compare in the call check; fixture `var_view_overlap.ls` |
 
@@ -498,7 +499,9 @@ one), test pairwise overlap:
   `var` params (receiver included) performs one pointer-identity/overlap
   check in its prologue; every other call pays nothing. Static call sites
   keep the caller-side face-1/3/4 checks, which subsume face 2 there.
-  Implementing anything sooner is dead code.
+  Implementing anything sooner is dead code. **CW33 (§11.10) is the path
+  that lifts `E229`**: under the address ABI the check is literally comparing
+  the incoming slot addresses.
 
 **Granularity ladder** (start coarse, refine on demand): v1 = whole-base
 conservative (same base ⇒ conflict; sound, rejects some safe programs).
@@ -588,6 +591,15 @@ unconditional version is already verified working).
 
 Non-mutating loops — the functional default — are untouched on both tiers:
 no mark, no extra slot, no reload.
+
+**Addendum (2026-08-29):** the MIR hooks must also set the emitter's
+compile-time `cow_marked` on the loop-written ROOT, not just the runtime
+bit — the ArrayNum store fast arms are compile-gated (CW32), so without the
+emitter mark they keep emitting raw lane stores that never consult the
+runtime bit and the loop iterates live. This surfaced as a fixture
+regression when upstream widened the int fast arm's admission; the runtime
+mark alone had been passing only because the store previously fell to a
+flag-consulting fallback arm.
 
 ### 11.7 Stage-2 acceptance
 
@@ -789,6 +801,197 @@ written-once witness is the eventual answer if it matters.
    `interp_bind_declared_value` funnel, MIR in the decl lowering), and
    **CW24v2 phase 2** (observed mutated copies are legal; only the
    dead-store shape warns — `cow-dead-snapshot`).
+
+### 11.10 CW33 — the `var`-param ABI: address of the representation home (RATIFIED, designer, 2026-08-29; T0 stage + MIR M1a IMPLEMENTED same day)
+
+**Supersedes the caller-side pre-detach + T0 write-back design.** The current
+borrow machinery is three mechanisms: a caller-side `cow_prepare_write` +
+republish emitted at *every* call shape in MIR (`mir_prepare_cow_root` — the
+per-shape surface that produced the `mir_root_may_need_cow` allow-list bug),
+T0's parallel write-back apparatus (`ast_direct_call_var_parameter_entries`,
+`InterpBorrowedCall`, the post-call republish loop, `borrowed_scratch`), and
+the `E229` refusal of dynamic dispatch for `var`-param functions (a flat
+argument list loses binding identity). CW33 replaces all three with one
+convention.
+
+**The ruling.** A `var` parameter's argument is the **address of the caller
+binding's declared-representation home**:
+
+| Declared param type | Home holds | ABI word |
+|---|---|---|
+| untyped / `any` | tagged Item | `Item*` |
+| typed container (invariant, S9.2.1) | raw untagged `Container*` | `Container**` |
+| typed scalar (if admitted) | the native lane word | lane address |
+
+The callee reads `*slot` for the current value; when COW must detach, it
+builds the replacement and stores it through the slot — the caller's binding
+is updated *by construction*, because the slot IS the caller's binding
+storage. No tag travels in the argument word: which positions are addresses
+is read off the callee's own signature (available at dynamic dispatch too).
+
+**The one thing that survives, relocated:** un-share-at-borrow (S9.2.2) is
+semantics, not plumbing, so the prepare remains — as **one line in the callee
+prologue**:
+
+```
+*slot = cow_prepare_write(*slot)   // once; byte-test no-op when unique
+local = *slot                      // cache; body writes stay RAW (CW1)
+```
+
+(the `Container**` form goes through a thin `cow_prepare_write_raw` wrapper
+so the typed prologue stays tag- and box-free). This is the CW29 placement
+principle again: the work sits where the knowledge is, emitted once, and
+every call form — static, dynamic, method — inherits it instead of each
+call-site shape re-implementing it. After the prologue the root is unique;
+children stay shared and nested writes keep checking the spine
+(`cow_children_may_be_shared`), unchanged.
+
+**Why the raw convention is sound.** `Container**` hands the callee a slot it
+writes raw pointers into with no runtime type information. That is licensed
+statically by two ratified rules: **S9.2.1** (`var` params are invariant) and
+**E207** (arguments must match the declared type *exactly*). No caller can
+connect an Item-homed binding to a `Container**` parameter — the exactness
+check rejects the mismatch at compile time. The E207 strictness that felt
+like friction during the flip migration is precisely what licenses this ABI.
+
+**Dual-entry mapping (DF series).** The `Item*`/`Container**` split is the
+existing boxed/native entry split applied to the borrow channel:
+
+| Entry | `var` convention |
+|---|---|
+| boxed entry (T0 callers, dynamic dispatch) | `Item*` for every `var` position |
+| native direct entry (typed JIT→JIT) | representation home (`Container**`, lane) |
+
+The boxed→native **adapter** bridges: untag `*item_slot` into a local raw
+home, invoke the direct entry with its address, re-tag and store back on
+return. That residual micro-write-back lives in exactly one place — the
+adapter, where DF8 representation coercions already live — instead of being
+a per-call-site mechanism. T0 frames hold Item words uniformly, so T0 always
+calls boxed entries with `&frame->slots[i]` and needs no other change.
+
+**What implementing CW33 deletes:** `mir_prepare_cow_root` emissions at every
+MIR call shape (boxed arm, native-witness arm, receiver, CW25 leaf); T0's
+`borrowed_entries`/`InterpBorrowedCall`/post-call republish/`borrowed_scratch`;
+and **`E229`** — an address carries binding identity, so dynamic dispatch of
+`var`-param functions un-defers, and the face-2 exclusivity check (§11.3)
+collapses to a slot-address compare in the callee prologue.
+
+**Costs and requirements:**
+
+1. **MIR var-passed bindings need a memory home.** The GC root slot already
+   is one (`JIT_VALUE_RAW_GC_POINTER` class exists for raw pointers); the
+   caller reloads its register from the home after the call — one load per
+   `var` arg, cheaper than today's pre-detach *call*.
+2. **CW25 place arguments** (`f(var m.rows[i])`): the leaf address is
+   `&parent->items[i]` — stable under the non-moving GC and face-3
+   exclusivity — but the call-site spine detach stays: the address must point
+   into the unique spine.
+3. **Wide scalars** stored through a slot must be rehomed off the callee's
+   number stack first (`lambda_item_heap_rehome`) — the subtlety
+   `borrowed_scratch` handles today, reduced to a single site.
+4. **Breadth**: call lowering on both tiers, callee prologues, `fn->invoke`
+   entries, the native-witness path, method receivers, and the DF adapters.
+   A proper migration, sequenced T0 first (frame slots are already
+   addressable Item homes), then MIR native entries.
+
+**Precedent:** Swift's `inout` lowering (address + exclusivity enforcement);
+the C `T**` idiom.
+
+**T0 stage — implemented 2026-08-29 (revised same day after a cd2_orig
+regression).** `InterpBorrowedCall` gained the `homes[]` address channel
+beside the legacy `entries[]`; `interp_borrow_home` resolves
+`&f->slots[entry->slot]` for register-storage bindings (view-state overlays
+and object-field entries keep the legacy channel — their writes need
+`tmpl_state_set` / `fn_map_set`, not a plain store). The call-site
+pre-detach moved into the callee prologue, and the final param value
+publishes straight through the address (`*home = value`), covering rebinds
+and mid-body detaches with no entry resolution; the wide-scalar capture/box
+split across the number extent stays.
+
+**The prologue prepare is NOT unconditional — the chain-root rule.** The
+first cut prepared every homed arg; cd2_orig then computed collisions=0.
+Root cause: a prepare at a **mid-chain** borrow — a `var`-param re-borrow,
+or a CW29-marked plain param passed onward — honors a conservative
+capture-mark by *detaching*, which orphans the interior borrows outer
+frames still hold (`zn = rbt_nd(tree, id)` … a nested `rbt_*(var tree)`
+call detached the tree out from under `zn`, and every later `zn[..] = v`
+wrote the dead copy). Un-share-at-borrow is only safe at the **chain
+root**, where no interior borrows exist yet — which on T0 is exactly
+`entry->cow_owned` (an owner-rooted binding). Chain hops inherit
+uniqueness from the root prepare (§11.5 single-writer chain). The old T0
+gate was never the defect — the allow-list bug that motivated an
+unconditional stance was MIR-only. **The MIR stage must carry the same
+chain-root rule.** All eight COW fixtures and the alias-then-borrow probes
+conform on the final form.
+
+**MIR M1a stage — implemented 2026-08-29.** Rather than re-signature every
+native entry in one shot, the home address travels through
+`Context::mir_var_homes[16]` — the `mir_companion_slot` transport pattern:
+the caller writes the cells for the callee's **untyped** `var` positions
+immediately before a direct call (an address of the binding's GC root slot,
+or 0 when the argument has no boxed-classed home — place borrows, raw
+ArrayNum roots), the callee prologue consumes them into registers and
+ZEROES the cells (always-zero-outside-the-window contract, so any call
+path that does not know the protocol degrades safely to the pre-CW33
+behavior), and the shared `finish_function_epilogue` publishes each `var`
+param's FINAL value through its home before cleanup. The caller reloads
+its binding register from its own slot after the call. Consume-once
+discipline in the epilogue also guards auxiliary lowerings (boxed
+wrappers, handlers) that share the transpiler state — the first cut read
+stale entries from the primary function's freed pool (ASan UAF).
+
+**This closes the rebind divergence**: `pn reset(var m) { m = {n: 42} }`
+now propagates on both tiers. Scope: untyped `var` params only (single
+boxed `Item*` convention); typed/raw (`Container**`) and scalar lane homes
+remain with the full pointer-ABI stage, as does deleting the transport in
+favor of real pointer arguments.
+
+**Full-pointer-ABI attempt (2026-08-29) — reverted; the two real blockers,
+found the hard way.** A same-day attempt moved the address from the context
+cells into the argument word itself (callee loop-head deref is
+representation-transparent — every downstream arm sees the boxed word it saw
+under the value ABI; the wrapper forwards its incoming address verbatim, so
+no post-call glue exists end to end). It reached "compiles, rebind works
+through the full wrapper chain" before two subsystem walls:
+
+1. **Home slots sit behind the root-latest cache.** `create_gc_root_slot`
+   defers the memory store (the register is the authoritative copy until a
+   safepoint spill), so the address taken of a slot points at STALE memory
+   at call time. Homes need either explicit raw stores that bypass the
+   cache at address-taking, or a dedicated non-cached home area in the
+   frame.
+2. **`em_call_direct` classifies arguments from the CALLEE's
+   `FnVariantAnalysis` descriptor.** A `var` position's canonical rep is
+   boxed, so the emitter roots the ADDRESS as a boxed Item — a GC hazard
+   (the collector would scan a frame-interior pointer as a tagged value)
+   and wrong spill behavior. The fix is at the analysis layer: variant
+   descriptors must carry a POINTER rep for `var` positions, so the em
+   neither roots nor rescans them.
+
+Both are descriptor/emitter-layer work, not call-site patches — exactly why
+the ruling staged the ABI. The validated design pieces carry forward: the
+loop-head deref, verbatim wrapper forwarding, in-place witness admission
+through the home, the single address-emission point at the final call-ops
+pass (after all argument evaluation), and a build-time rejection of `var`
+parameters on async `pn`s (the home cannot survive suspension). M1a remains
+the shipped state.
+
+**`E229` stays, deliberately.** Lifting it requires home transport through
+dynamic dispatch; accepting `var` signatures with value-only argument
+lists would silently lose borrow writes — the exact C4.1 failure class.
+Reflective `call(f, [x])` can never express a borrow through a value list
+(no reference values, CW27); statically-resolvable method dispatch routes
+around the dispatcher when the full ABI stage lands.
+
+**Pre-existing tier gap surfaced while probing (not caused by the T0
+stage; verified on the pre-change binary):** a full REBIND of a `var`
+parameter (`pn reset(var m) { m = {n: 42} }`) propagates to the caller on
+T0 (the write-back always covered it) but is silently LOST on MIR, whose
+borrow passes the container by value and has no post-call channel. The MIR
+stage of CW33 fixes this by construction — a rebind through `Container**`
+is a store through the caller's home. Until then the shape is a standing
+T0/MIR divergence for a rarely-written idiom (rebind-through-borrow rather
+than mutate-through-borrow).
 
 ## 12. Settled decisions and residual risks
 
@@ -1010,6 +1213,11 @@ operation, decided per §5.2.
   latest-design-only with history in this appendix; CW30–CW32 added under
   the general-path-simple principle; CW29 extended with the NM-O8
   dissolution and the NM-O2 idiom.
+- **rev 9 (CW33, designer 2026-08-29):** the `var`-param ABI becomes
+  address-of-representation-home (§11.10), superseding the caller-side
+  pre-detach + T0 write-back design and un-deferring `E229` when
+  implemented. Ratified the same day the flip and the escape-hatch
+  retirement landed.
 
 ### C.2 Pre-Stage-1 motivating measurements (Result10, 2026-07-22)
 

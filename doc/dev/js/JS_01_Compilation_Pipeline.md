@@ -11,7 +11,7 @@
 
 ## 1. Purpose & scope
 
-LambdaJS reuses Lambda's `Item` value model, GC heap, name pool, module registry, event-loop host, shared AST substrate, compiler-fact scaffolding, `MirEmitter`, and MIR JIT under **D1.2–D1.3** and **D8.1.3v9**. It retains its own JavaScript front end and semantic lowering. Under **D8.2.2** and **D8.2.4**, P1b reserves shared `AST_NODE_ASSIGN` for its single `AstAssignNode {op, left, right}` contract and moves Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`; P1c extends that physical assignment record to Lambda's procedural assignment tags, with the common visitor owning every assignment's `left/right` children; P1d publishes `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` for while/do-while/JS C-style for, while iterator clauses use `AST_NODE_FOR_CLAUSE`. A `.js` source reaches this lane through the explicit `js` / `js-test-batch` CLI subcommands, through `require`/`import` and `load_js_module`, or through the explicit AST backend. This document maps the MIR compilation lane; the lowering *mechanics* are in [JS_04 — MIR Lowering & Code Generation](JS_04_MIR_Lowering.md), and the front end is in [JS_02 — Parsing, AST & Front-End](JS_02_Parsing_AST.md).
+LambdaJS reuses Lambda's `Item` value model, GC heap, name pool, module registry, event-loop host, shared AST substrate, compiler-fact scaffolding, `MirEmitter`, and MIR JIT under **D1.2–D1.3** and **D8.1.3v10**. It retains its own JavaScript front end and semantic lowering. Under **D8.2.2** and **D8.2.4**, P1b reserves shared `AST_NODE_ASSIGN` for its single `AstAssignNode {op, left, right}` contract and moves Lambda declarations to `AST_NODE_VARIABLE_DECLARATOR`; P1c extends that physical assignment record to Lambda's procedural assignment tags, with the common visitor owning every assignment's `left/right` children; P1d publishes `AST_NODE_LOOP`/`AstLoopControlNode {form, init, test, update, body}` for while/do-while/JS C-style for, while iterator clauses use `AST_NODE_FOR_CLAUSE`. A `.js` source reaches this lane through the explicit `js` / `js-test-batch` CLI subcommands, through `require`/`import` and `load_js_module`, or through the explicit AST backend. This document maps the MIR compilation lane; the lowering *mechanics* are in [JS_04 — MIR Lowering & Code Generation](JS_04_MIR_Lowering.md), and the front end is in [JS_02 — Parsing, AST & Front-End](JS_02_Parsing_AST.md).
 
 ---
 
@@ -21,14 +21,14 @@ LambdaJS reuses Lambda's `Item` value model, GC heap, name pool, module registry
 
 Source bytes flow through parse → AST/build-time binding → early-error validation pass → shared AST index → context setup → import resolution → compile-unit opening → multi-phase lowering → link → execution of `js_main` → event-loop drain → result. The ordinary MIR implementation is `transpile_js_to_mir_core_profile_len`; wrappers delegate through `transpile_js_to_mir_core_len`. Ordinary source, pre-built-AST, ES-module, direct-eval, and new-Function entries share `js_mir_open_compile_unit` for MIR context/transpiler/module ownership. Eval-preamble publication and batch/preamble declaration snapshots share `js_preamble_entries_from_module_consts` for the owned map-to-array copy, while finalized MIR volume accounting uses the cross-language `mir_count_module_volume` walk; mode-specific registry/TLA, lexical/global preamble, and eval module-scope policy remain active consolidation residue under **D8.2.5**.
 
-`JS_EXECUTION_BACKEND=ast` is the explicit fail-closed AST lane under **D8.1.3v9**. It shares the same indexed AST, early errors, `Runtime`/`EvalContext`, heap, module registry, and event-loop host, then enters `js_interp.cpp` rather than MIR lowering. The default remains MIR.
+`JS_EXECUTION_BACKEND=ast` is the explicit fail-closed AST lane under **D8.1.3v10**. It shares the same indexed AST, early errors, `Runtime`/`EvalContext`, heap, module registry, and event-loop host, then enters `js_interp.cpp` rather than MIR lowering. The default remains MIR.
 
 The control/data flow, step by step (CLI `lambda js script.js`):
 
 1. `main.cpp:1699` → `transpile_js_to_mir_len` → `transpile_js_to_mir_core_len`.
 2. Copy source into an owned buffer; for a real file lacking an explicit `var __filename`, compute the realpath and **inject `var __filename` / `var __dirname`** after the directive prologue (CommonJS ergonomics) (`js_mir_entrypoints_require.cpp:374`).
 3. Resolve interpreter env flags once and cache them (`:421`).
-4. `js_transpiler_create` → `js_transpiler_parse` (Tree-sitter) → `build_js_ast_indexed`'s validation pass → indexed AST publication, each timed. The pass manager now produces `VALIDATED` only after `js_check_early_errors` succeeds; the remaining schedule is residue under **D8.2.5**.
+4. `js_transpiler_create` → `js_transpiler_parse` (first-party C parser) → direct `JsAstNode` publication, scope reconstruction, validation, and index passes, each timed. The pass manager produces `VALIDATED` only after `js_check_early_errors` succeeds; the remaining schedule is residue under **D8.2.5**.
 5. Set up or **reuse** the `EvalContext` + GC heap + name pool + `Input` (reuse is the batch hot-reload fast path); set the `_lambda_rt` runtime pointer (`:483`–`:519`).
 6. Resolve imports: a fast-path skip unless the source contains `import `, else parallel precompile (`jm_precompile_js_imports`) then serial fallback (`jm_load_imports`) (`:521`).
 7. `js_mir_open_compile_unit` performs `jit_init`, installs the optional batch error handler, calls `jm_create_mir_transpiler`, tracks the active owner, publishes the selected name base, and opens a script or ES-module MIR module (see [§4](#4-the-transpiler-context-jsmirtranspiler)).
@@ -76,7 +76,7 @@ The preamble mechanism (compile a shared harness once, then compile each test pr
 
 Supporting records in the same header include `JsFuncCollected`, whose captures and `FnAnalysis::param_types` are dynamically sized but whose constructor-shape evidence retains 16 slots, and `JsClassEntry`, whose methods/fields/static blocks are exact-sized per class. `JsModuleConstEntry`, `JsMirVarEntry`, `JsCaptureEntry`, and `JsTryContext` carry the remaining pass-local metadata.
 
-The companion `JsTranspiler` (`js_transpiler.hpp:40`) holds the parse/AST context (Tree-sitter tree, name pool, scope); see [JS_02](JS_02_Parsing_AST.md).
+The companion `JsTranspiler` (`js_transpiler.hpp:40`) holds the parse/AST context (direct-parser state, name pool, scope, and reference-tree fields only in the isolated lane); see [JS_02](JS_02_Parsing_AST.md).
 
 ---
 

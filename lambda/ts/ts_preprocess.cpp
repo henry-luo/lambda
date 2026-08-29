@@ -9,6 +9,8 @@
 // modifiers, and 'import type' statements.
 
 #include "ts_transpiler.hpp"
+
+#ifndef JS_C_PRODUCTION
 #include "../../lib/strbuf.h"
 #include <cstring>
 #include "../../lib/mem.h"
@@ -1007,3 +1009,5 @@ char* ts_preprocess_source(const char* src, size_t len, size_t* out_len) {
     *out_len = len;
     return pp.out;
 }
+
+#endif

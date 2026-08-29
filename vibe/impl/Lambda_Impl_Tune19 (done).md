@@ -675,7 +675,7 @@ The shape of the trend is unchanged — steady improvement, with the Tune17/18 r
 doing the heavy lifting — but every level is ~25% worse than the 47-row basis reported at the
 time. Reports whose C2MIR column was never present (Result19/20/24) were left alone: those
 sessions recorded no C2MIR at all, and filling them would fabricate a session rather than
-complete one. `Overall_Result.md` (2026-02-21) is also out of scope — its "C2MIR" is the
+complete one. `Overall_Result1.md` (2026-02-21) is also out of scope — its "C2MIR" is the
 retired `lambda --c2mir` transpiler measured by whole-process wall clock, a different quantity.
 
 ~~Caveat recorded in `C2MIR_COVERAGE.md`: `crypto_sha1.ls` currently computes a WRONG digest

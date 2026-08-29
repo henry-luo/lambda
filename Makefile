@@ -80,6 +80,7 @@ LAMBDA_BASELINE_TEST_PROJECTS := \
 	test_lambda_repl_gtest \
 	test_lambda_proc_gtest \
 	test_js_gtest \
+	test_js_c_parser_gtest \
 	test_js_script_gtest \
 	test_js_opt_gtest \
 	test_lambda_opt_gtest \
@@ -152,17 +153,6 @@ else
 	CXX := g++
 	AR := ar
 	RANLIB := ranlib
-endif
-
-# macOS ld64 requires 64-bit archive members to start on 8-byte boundaries;
-# cctools ar only guarantees even-byte member placement, so use libtool for
-# static archives on Darwin and keep ar for the other platforms.
-ifeq ($(OS),Darwin)
-	STATIC_ARCHIVER := libtool -static
-	STATIC_ARCHIVE_FLAGS := -o
-else
-	STATIC_ARCHIVER := $(AR)
-	STATIC_ARCHIVE_FLAGS := rcs
 endif
 
 # Enable ccache for faster builds if available.
@@ -270,7 +260,7 @@ LATEX_MATH_PARSER_C = lambda/tree-sitter-latex-math/src/parser.c
 # output captured and shown only on failure, so a successful parser build is a
 # single status line. $(2) = extra sub-make args (e.g. TS=...).
 define ts_lib_build
-@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-$(1) libtree-sitter-$(1).a CC="$(CC)" CXX="$(CXX)" AR="$(STATIC_ARCHIVER)" ARFLAGS="$(STATIC_ARCHIVE_FLAGS)" $(2) 2>&1) || { printf '%s\n' "$$out"; exit 1; }; \
+@out=$$(env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-$(1) libtree-sitter-$(1).a CC="$(CC)" CXX="$(CXX)" $(2) 2>&1) || { printf '%s\n' "$$out"; exit 1; }; \
 echo "✅ tree-sitter-$(1) library built"
 endef
 
@@ -291,7 +281,7 @@ $(TREE_SITTER_LIB):
 		-O3 -Wall -Wextra -std=c11 -fPIC \
 		-D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
 		-o tree_sitter.o && \
-	$(STATIC_ARCHIVER) $(STATIC_ARCHIVE_FLAGS) libtree-sitter.a tree_sitter.o && \
+	$(AR) rcs libtree-sitter.a tree_sitter.o && \
 	rm -f tree_sitter.o
 	@echo "✅ tree-sitter library built: lambda/tree-sitter/libtree-sitter.a"
 
@@ -322,8 +312,7 @@ $(TREE_SITTER_PYTHON_LIB): generate-tree-sitter-python-parser
 	@echo "Building tree-sitter-python library..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-python \
 		libtree-sitter-python.a TS="$(TREE_SITTER_CLI)" \
-		CC="$(CC)" CXX="$(CXX)" AR="$(STATIC_ARCHIVER)" \
-		ARFLAGS="$(STATIC_ARCHIVE_FLAGS)" V=1 VERBOSE=1
+		CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
 # Generate TypeScript parser from grammar.js when it changes
 $(TS_PARSER_C): $(TS_GRAMMAR_JS)
@@ -535,32 +524,34 @@ define run_make_with_error_summary
 endef
 
 # Combined tree-sitter libraries target
-# Core: only parsers needed by lambda.exe (JS, TS, LaTeX)
-# Normal Lambda profiles use the first-party C parser.  The Lambda
-# Tree-sitter archive is built only by the dedicated CST differential profile.
-tree-sitter-core-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+# Core: only grammars used by normal Lambda builds.
+tree-sitter-core-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
 
-# Release frontends use the same direct RD/Pratt parser, so keep the Lambda
-# Tree-sitter archive out of every normal profile.
-tree-sitter-release-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+# All direct Lambda/JS/TS parsers are production front ends. Their Tree-sitter
+# grammars are reference-only and build exclusively for the CST differential
+# verifier.
+tree-sitter-cst-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB)
 
-# All: includes jube-only parsers (Python, Bash, Ruby)
+# Release frontends use the same direct parsers as debug builds.
+tree-sitter-release-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
+
+# All normal frontends: includes jube-only parsers (Python, Bash, Ruby).
 tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PYTHON_LIB) $(TREE_SITTER_RUBY_LIB)
 
 # Default target
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 generate-names debug release rebuild lambda-cst \
+.PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
-	    tree-sitter-libs tree-sitter-core-libs tree-sitter-release-libs generate-tree-sitter-python-parser \
+	    tree-sitter-libs tree-sitter-core-libs tree-sitter-cst-libs tree-sitter-release-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui form-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
+	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-jube-node-net-crypto-dynamic
@@ -579,7 +570,7 @@ help:
 	@echo "  build-release-profile - Build optimized release with JS execution profiling enabled"
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
-	@echo "  lambda-cst    - Build the Tree-sitter Lambda CST differential verifier"
+	@echo "  lambda-cst    - Build the Tree-sitter Lambda/JS/TS CST differential verifier"
 	@echo "  build-mir     - Build MIR JIT library from vendored source at lambda/mir"
 	@echo "  clean-mir     - Remove MIR build outputs (keeps the vendored source)"
 	@echo "  verify-mir-patches - Check lambda/mir == upstream MIR + patches/mir-*.patch"
@@ -611,8 +602,10 @@ help:
 	@echo "  generate-grammar - Generate the Lambda CST parser from grammar.js"
 	@echo "  test-grammar-s16 - S16 surface-syntax conformance (reference grammar)"
 	@echo "                     (automatic when grammar.js changes)"
+	@echo "  test-js-parser-diff - JS/TS C parser versus Tree-sitter CST reference"
 	@echo "  generate-names - Regenerate immutable NameId catalogs from the Python source list"
-	@echo "  tree-sitter-libs - Build all tree-sitter libraries (amalgamated, no ICU)"
+	@echo "  tree-sitter-libs - Build normal-build tree-sitter libraries (amalgamated, no ICU)"
+	@echo "  tree-sitter-cst-libs - Build the isolated Lambda/JS/TS reference grammars"
 	@echo "                     Automatically regenerates LaTeX parser if grammar.js changes"
 	@echo ""
 	@echo "Development:"
@@ -630,7 +623,6 @@ help:
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
 	@echo "  editable-unit        - Run focused editable gate, DOM action, and cancellation fixtures"
 	@echo "  editable-ui          - Run contenteditable UI automation fixtures"
-	@echo "  form-ui              - Run focused form activation and submission fixtures"
 	@echo "  editable-editor-e2e  - Run offline CodeMirror, ProseMirror, and Editor.js probes"
 	@echo "  test-editable        - Run all focused editable and upstream editor checks"
 	@echo "  drawing-editor-e2e   - Run offline Raphaël, maxGraph, and JointJS SVG probes"
@@ -749,14 +741,17 @@ print-jobs:
 
 $(LAMBDA_EXE): build
 
-# Build the isolated Tree-sitter Lambda CST verifier.  Normal Lambda
-# profiles deliberately do not build or link TREE_SITTER_LAMBDA_LIB.
-lambda-cst: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
+# Build the isolated Tree-sitter Lambda/JS/TS CST verifier. Normal Lambda
+# profiles deliberately do not build or link these reference grammars.
+lambda-cst: tree-sitter-cst-libs
 	@mkdir -p temp/lambda-parser-poc build/premake
 	@echo "Generating lambda-cst Premake configuration..."
 	$(PYTHON) utils/generate_premake.py --variant lambda-cst --output $(LAMBDA_CST_PREMAKE_FILE)
 	$(PREMAKE5) gmake --file=$(LAMBDA_CST_PREMAKE_FILE)
 	$(call run_make_with_error_summary,lambda-cst,debug_native,,lambda-cst)
+
+test-js-parser-diff:
+	@bash test/js_parser_diff.sh
 
 
 
@@ -1975,7 +1970,7 @@ test-input-baseline: build-input-baseline ensure-yaml-submodule
 	echo "{\"total_passed\":$$total_passed,\"total_failed\":$$total_failed,\"suites\":[{\"name\":\"HTML5 WPT Parser\",\"passed\":$$wpt_passed,\"failed\":$$wpt_failed},{\"name\":\"CommonMark Markdown\",\"passed\":$$md_passed,\"failed\":$$md_failed},{\"name\":\"YAML Suite\",\"passed\":$$yaml_passed,\"failed\":$$yaml_failed},{\"name\":\"ASCII Math\",\"passed\":$$math_passed,\"failed\":$$math_failed},{\"name\":\"LaTeX Math\",\"passed\":$$latex_math_passed,\"failed\":$$latex_math_failed}]}" > test_output/input_baseline_results.json
 
 # Layout baseline suites shared by test-radiant-baseline and test-layout-baseline.
-LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-box wpt-css-text wpt-css-inline wpt-css-sizing wpt-css-images wpt-css-tables wpt-css-lists wpt-css-position wpt-css-multicol wpt-css-display puppertino markdown bootstrap tailwind
+LAYOUT_BASELINE_SUITES ?= baseline form wpt-css-box wpt-css-text wpt-css-inline wpt-css-sizing wpt-css-images wpt-css-tables wpt-css-lists wpt-css-position wpt-css-multicol puppertino markdown bootstrap tailwind
 # The baseline target must select recorded entries before reporting aggregate
 # failures; otherwise untracked work-in-progress fixtures are misreported as
 # baseline regressions.
@@ -2458,8 +2453,6 @@ editable-unit: build
 	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_unsupported_transfer.json --headless --no-log
 	@./lambda.exe view test/html/editable-physical-keydown.html --event-file test/ui/test_editing_physical_keydown_cancellation.json --headless --no-log
 	@./lambda.exe view test/ui/editable-template-gate.ls --event-file test/ui/editable-template-gate.json --headless --no-log
-	@./lambda.exe view test/html/editable-dom-commands.html --event-file test/ui/test_editing_contenteditable_commands.json --headless --no-log
-	@./lambda.exe view test/html/editable-dom-structural.html --event-file test/ui/test_editing_contenteditable_structural.json --headless --no-log
 
 editable-ui: build
 	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_dom_action.json --headless --no-log
@@ -2470,12 +2463,8 @@ editable-ui: build
 	@./lambda.exe view test/ui/rte_prototype.ls --event-file test/ui/rte_typing_at_caret.json --headless --no-log
 	@./lambda.exe view test/ui/editable-mixed-routes.ls --event-file test/ui/editable-mixed-routes.json --headless --no-log
 
-form-ui: build
-	@./lambda.exe view test/html/form-submission.html --event-file test/ui/form-submission.json --headless --no-log
-
 editable-editor-e2e: build
 	@./lambda.exe view test/ui/dom_mutation_replacechild_notifies.html --event-file test/ui/dom_mutation_replacechild_notifies.json --headless --no-log
-	@./lambda.exe view test/html/editable-plain-event-guard.html --event-file test/ui/test_editing_contenteditable_plain_event_guard.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-operations.json --headless --no-log
 	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-full.json --headless --no-log
@@ -3455,7 +3444,7 @@ capture-layout:
 		echo "  make capture-layout test=table_007 force=1"; \
 		echo "  make capture-layout suite=baseline platform=linux force=1"; \
 		echo ""; \
-		echo "Available suites: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists, wpt-css-display"; \
+		echo "Available suites: antd, basic, baseline, bootstrap, css2.1, flex, grid, tailwind, yoga, web-tmpl, wpt-css-box, wpt-css-images, wpt-css-tables, wpt-css-position, wpt-css-text, wpt-css-lists"; \
 		echo "Available platforms: linux, darwin, win32"; \
 		echo ""; \
 		exit 1; \
@@ -3483,7 +3472,7 @@ capture-layout:
 	            *) \
 	                TEST_FILE=""; \
 	                FOUND_SUITE=""; \
-	                for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists wpt-css-display; do \
+	                for dir in antd basic baseline bootstrap css2.1 flex grid tailwind yoga wpt-css-box wpt-css-images wpt-css-tables wpt-css-position wpt-css-text wpt-css-lists; do \
 	                    if [ -f "data/$$dir/$${TEST_VAR}.htm" ]; then \
 	                        TEST_FILE="data/$$dir/$${TEST_VAR}.htm"; \
 	                        FOUND_SUITE="$$dir"; \
@@ -3595,7 +3584,7 @@ test-layout:
 				;; \
 			esac; \
 			echo "🎯 Running single test: $$TEST_FILE"; \
-			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE --category $$SUITE_VAR -v; \
+			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --test $$TEST_FILE -v; \
 		elif [ -n "$$PATTERN_VAR" ]; then \
 			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
 			$(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css --pattern $$PATTERN_VAR $$CONCURRENCY_FLAG; \

@@ -818,11 +818,13 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     g_last_js_mir_phase_timing.parse_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ts_parsed");
 
-    TSNode root = ts_tree_root_node(tp->tree);
-
     // Build JavaScript AST
     phase_start = js_mir_phase_now_us();
-    JsAstNode* js_ast = build_js_ast_indexed(tp, root);
+    TSTree* reference_tree = js_transpiler_reference_tree(tp);
+    JsAstNode* js_ast = tp->ast_root ? (JsAstNode*)tp->ast_root
+        : (reference_tree
+            ? build_js_ast_indexed(tp, ts_tree_root_node(reference_tree))
+            : NULL);
     if (!js_ast) {
         log_error("js-mir: AST build failed");
         return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,

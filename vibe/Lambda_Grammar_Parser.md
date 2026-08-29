@@ -312,7 +312,7 @@ Run both parsers over the frozen manifest in one test process:
 
 For valid sources, Phase 1 also records top-level import ranges and major production counts as cheap structural checks. Full AST equivalence belongs to Phase 2.
 
-**P1.3 valid-source checkpoint (2026-08-19):** `bash utils/lambda_parser_diff.sh` regenerates the P1.0 manifest, builds `test/lambda_parser_poc_diff.c` under `temp/`, and runs the production Tree-sitter archive and C POC in one process. The frozen 1,472-source manifest contains 1,382 sources whose shipped Tree-sitter root has no error; the C recognizer accepts all **1,382 / 1,382** (`missing=0`). The focused POC suite has 28 tests and strict C17 compilation (`-Wall -Wextra -Werror`) is clean.
+**P1.3 valid-source checkpoint (2026-08-19):** `bash test/lambda_parser_diff.sh` regenerates the P1.0 manifest, builds `test/lambda_parser_poc_diff.c` under `temp/`, and runs the production Tree-sitter archive and C POC in one process. The frozen 1,472-source manifest contains 1,382 sources whose shipped Tree-sitter root has no error; the C recognizer accepts all **1,382 / 1,382** (`missing=0`). The focused POC suite has 28 tests and strict C17 compilation (`-Wall -Wextra -Werror`) is clean.
 
 The checker also reports eight sources accepted by the C recognizer for which the Tree-sitter root carries an error. They are retained as an explicit classification queue, not silently declared parity: three shipped schema/OpenAPI sources, three positive source tests, one semantic-negative fixture, and one validator fixture. The known syntax-negative fixtures for empty parenthesized expressions and bare string `<` comparison now return non-OK. Therefore the valid-source acceptance requirement is green, but the full P1.3 reject/status gate remains open until each of the eight Tree-sitter-error sources is classified and the intended acceptance status is pinned.
 
@@ -349,7 +349,7 @@ Phase 1 compares parse stages only. Phase 2 repeats an end-to-end `Tree-sitter p
 
 The standalone CST performance harness has been retired. The measurements
 below are historical recognizer-only snapshots; the maintained verification
-runner is `bash utils/lambda_parser_diff.sh`, which keeps the Tree-sitter
+runner is `bash test/lambda_parser_diff.sh`, which keeps the Tree-sitter
 grammar isolated in the `lambda-cst` profile.
 
 **P1.5 recognizer-only checkpoint (2026-08-20):** on the 1,472-source,

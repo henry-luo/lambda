@@ -1,4 +1,5 @@
 #include "js_regex_generated_properties.h"
+#include "utf8proc.h"
 #include <cstring>
 
 static bool js_regex_match_property_name(const char* name, int len, const char* target) {
@@ -108,19 +109,31 @@ extern "C" int js_regex_wrapper_lookup_property_ranges(const char* name, int nam
     return 0;
 }
 
+// ECMAScript IdentifierStart/IdentifierPart follows Unicode categories;
+// the generated RegExp tables are pinned to older property data.
+static bool js_unicode_id_is_start_base(uint32_t cp) {
+    if (cp == 0x2118 || cp == 0x212E || (cp >= 0x309B && cp <= 0x309C) ||
+            (cp >= 0x1885 && cp <= 0x1886)) return true;
+    utf8proc_category_t category = utf8proc_category((utf8proc_int32_t)cp);
+    return category == UTF8PROC_CATEGORY_LU || category == UTF8PROC_CATEGORY_LL ||
+           category == UTF8PROC_CATEGORY_LT || category == UTF8PROC_CATEGORY_LM ||
+           category == UTF8PROC_CATEGORY_LO || category == UTF8PROC_CATEGORY_NL;
+}
+
 extern "C" bool js_unicode_id_is_start(uint32_t cp) {
     if (cp == '$' || cp == '_') return true;
     if (cp < 0x80) return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z');
-    return js_regex_sorted_range_contains(js_regex_generated_ranges_70_id_start,
-        (int)(sizeof(js_regex_generated_ranges_70_id_start) / sizeof(js_regex_generated_ranges_70_id_start[0])),
-        (int)cp);
+    return js_unicode_id_is_start_base(cp);
 }
 
 extern "C" bool js_unicode_id_is_continue(uint32_t cp) {
     if (cp == '$' || cp == '_' || cp == 0x200C || cp == 0x200D) return true;
     if (cp < 0x80) return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
                           (cp >= '0' && cp <= '9');
-    return js_regex_sorted_range_contains(js_regex_generated_ranges_69_id_continue,
-        (int)(sizeof(js_regex_generated_ranges_69_id_continue) / sizeof(js_regex_generated_ranges_69_id_continue[0])),
-        (int)cp);
+    if (js_unicode_id_is_start_base(cp)) return true;
+    if (cp == 0x00B7 || cp == 0x0387 || cp == 0x30FB || cp == 0xFF65 ||
+            (cp >= 0x1369 && cp <= 0x1371) || cp == 0x19DA) return true;
+    utf8proc_category_t category = utf8proc_category((utf8proc_int32_t)cp);
+    return category == UTF8PROC_CATEGORY_MN || category == UTF8PROC_CATEGORY_MC ||
+           category == UTF8PROC_CATEGORY_ND || category == UTF8PROC_CATEGORY_PC;
 }

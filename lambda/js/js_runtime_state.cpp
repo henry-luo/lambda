@@ -325,7 +325,7 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     M(&state->global_var_module_bindings.roots, &state->global_var_module_bindings.global, 1 + JS_GLOBAL_VAR_MODULE_BINDING_CAP, "global var module bindings") \
     M(&state->runtime_core_cache.roots, &state->runtime_core_cache.proto_key, 1, "runtime prototype key cache") \
     M(&state->function_prototypes.roots, &state->function_prototypes.generator_function, 3, "generator function prototypes") \
-    M(&state->global_string_caches.roots, &state->global_string_caches.uri_last_four_byte_string, 132, "global URI and ASCII string caches") \
+    M(&state->global_string_caches.roots, &state->global_string_caches.uri_last_four_byte_string, 389, "global URI, ASCII, and Test262 string caches") \
     M(&state->global_bindings.roots, &state->global_bindings.global_this, 1 + 64 + 1 + 1 + 1 + 2 * JS_GLOBAL_LEX_BIND_MAX, "global object and lexical bindings") \
     M(&state->constructors.roots, state->constructors.global_builtin_functions, JS_BUILTIN_GLOBAL_MAX + JS_CTOR_MAX + 2 + JS_TYPED_ARRAY_CACHE_TYPE_COUNT, "global builtin and constructor caches") \
     M(&state->namespaces.roots, &state->namespaces.math, 8, "core JS namespace objects") \

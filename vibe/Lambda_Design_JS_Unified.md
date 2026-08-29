@@ -6,7 +6,7 @@
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
-**Formal authority:** **S1.6**, **S1.11**, and **S3.1–S3.3** in [`doc/Lambda_Formal_Semantics.md`](../doc/Lambda_Formal_Semantics.md); **D1.2–D1.6**, **D1.8–D1.10**, **D2.4.1–D2.4.3**, **D3.2.3**, **D3.3.1v2**, **D5.3.4**, **D8.1.1v5**, **D8.1.3v9**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specifications win on disagreement.
+**Formal authority:** **S1.6**, **S1.11**, and **S3.1–S3.3** in [`doc/Lambda_Formal_Semantics.md`](../doc/Lambda_Formal_Semantics.md); **D1.2–D1.6**, **D1.8–D1.10**, **D2.4.1–D2.4.3**, **D3.2.3**, **D3.3.1v2**, **D5.3.4**, **D8.1.1v5**, **D8.1.3v10**, **D8.2.1–D8.2.6**, **D8.4.1v2**, **D8.4.3v2**, and **D8.6.1–D8.6.4v2** in [`doc/Lambda_Formal_Design.md`](../doc/Lambda_Formal_Design.md). The formal specifications win on disagreement.
 
 **Design lineage:** This document specializes the already-confirmed compiler-consolidation rulings **U27–U36** in [`Lambda_Design_Unified_AST.md`](Lambda_Design_Unified_AST.md). It does not create a new ruling series or replace that document's language-neutral catalog. It narrows the next implementation to Lambda and LambdaJS, records the live structural defects that must be removed, and adds the phase-local LOC conservation rule requested on 2026-08-28.
 
@@ -23,7 +23,7 @@ The end state is:
 ```text
 Lambda source -> first-party Lambda parser -> Lambda syntax builder --+
                                                                     |
-JS source     -> Tree-sitter JavaScript -> JS syntax builder -------+
+JS source     -> first-party JS/TS C parser -> JS syntax builder ---+
                                                                     v
                                                         CompilationUnit
                                       build -> bind -> validate -> index
@@ -185,7 +185,7 @@ The two AST interpreters correctly keep separate semantic frames:
 - Lambda has slot-planned `InterpFrame` records and `EvalSignal`.
 - JavaScript has `JsInterpFrame`, traced lexical environments, references, labels, `this`/`new.target`/home-class state, and JS completion kinds including throw, yield, and await.
 
-**D8.1.3v9** explicitly requires separate semantic walkers and activation records while sharing the runtime, heap, event loop, module registry, module state, and call kernels. A single semantic interpreter switch would add language branches to nearly every node and would risk applying Lambda truthiness (**S3.1–S3.3**) to JavaScript.
+**D8.1.3v10** explicitly requires separate semantic walkers and activation records while sharing the runtime, heap, event loop, module registry, module state, and call kernels. A single semantic interpreter switch would add language branches to nearly every node and would risk applying Lambda truthiness (**S3.1–S3.3**) to JavaScript.
 
 The duplication worth removing here is the execution shell: context preparation, current-file and module-state guards, root setup, execution-turn lifecycle, result publication, event-loop ownership, and cleanup.
 
@@ -195,7 +195,7 @@ The duplication worth removing here is the execution shell: context preparation,
 
 ### 3.1 Syntax adapters remain language-specific
 
-Lambda retains its first-party lexer and recursive-descent/Pratt parser under **D8.1.1v5**. JavaScript retains the vendored Tree-sitter JavaScript grammar and its Lambda-side builder. No vendor source is modified.
+Lambda retains its first-party lexer and recursive-descent/Pratt parser under **D8.1.1v5**. JavaScript and TypeScript use their first-party C lexer and recursive-descent/Pratt parser under **D8.1.3v10**; their vendored Tree-sitter grammars are unchanged and isolated to `lambda-cst`. No vendor source is modified.
 
 The builders share only mechanics that are independent of grammar shape:
 
@@ -573,7 +573,7 @@ body-before-test order of `do...while`); the JS child table uses the same row.
 JS early-error, AST-interpreter, MIR-lowering, module-lexical, capture, type,
 and return analyses now dispatch on `form` instead of maintaining three node
 switches. The JS and Lambda semantic execution frames remain separate as
-required by **D8.1.3v9**; only structural storage and traversal were unified.
+required by **D8.1.3v10**; only structural storage and traversal were unified.
 
 The independent P1d source delta, measured after the already-landed P1c
 changes, is C/C++ `+273/-369 = -96`; all hand source is also `+273/-369 = -96`.
@@ -1614,7 +1614,7 @@ Recommended order:
 6. root-range registration/reset only with the two-client proof and same-slice `runtime-state.cpp` retirement required by §3.9;
 7. cleanup and artifact-retention decisions.
 
-The two interpreter frames and completion enums remain. Shared lifecycle code must not introduce a second runtime, event loop, heap, module registry, or stack owner, satisfying **D8.1.3v9**.
+The two interpreter frames and completion enums remain. Shared lifecycle code must not introduce a second runtime, event loop, heap, module registry, or stack owner, satisfying **D8.1.3v10**.
 
 P6 also removes stale compatibility aliases only after build/cache versioning proves no retained artifact can import them. Deleting an ABI symbol without that proof is not an acceptable LOC shortcut.
 
@@ -1710,7 +1710,7 @@ If residual duplication is non-empty because another caller still depends on the
 
 ### 7.1 One semantic interpreter
 
-Rejected. **D8.1.3v9** requires separate semantic walkers and activation records. A language branch in nearly every expression and statement case would increase LOC, obscure semantics, and invite cross-language mistakes.
+Rejected. **D8.1.3v10** requires separate semantic walkers and activation records. A language branch in nearly every expression and statement case would increase LOC, obscure semantics, and invite cross-language mistakes.
 
 ### 7.2 One parser or CST
 
@@ -1759,7 +1759,7 @@ This proposal is complete only when all statements are true:
 - [ ] `FunctionId` is the sole function-analysis identity; duplicate JS collection indexes and analysis records are gone.
 - [ ] Core expression boundaries return full `MirValue` and accept explicit demands under **D8.2.6**.
 - [ ] `MirEmitter` is the sole owner of representation conversion, root/final-store policy, and common finalization under **D5.3.4**.
-- [ ] Lambda and JS retain separate semantic interpreters but share one execution shell and runtime substrate under **D8.1.3v9**.
+- [ ] Lambda and JS retain separate semantic interpreters but share one execution shell and runtime substrate under **D8.1.3v10**.
 - [ ] Every phase and subphase has non-positive governed, changed-C/C++, and changed-source LOC deltas.
 - [ ] The deletion ledger proves that replacements and retirements landed atomically.
 - [ ] Final governed C/C++ LOC is at most 308,711: at least 2,000 below the project anchor, with a target of at most 308,311.
@@ -1805,6 +1805,6 @@ The initial stale-document set was reconciled on 2026-08-28:
 | `vibe/impl/Lambda_Impl_Tune_Ast (retired).md` | Renamed from `(done)` to `(retired)` and marked as a historical partial record whose G1/G2/G3 closeout was not accepted. Open work points here. |
 | `doc/dev/js/JS_01_Compilation_Pipeline.md` | Reverified against the 2026-08-28 tree: function/class/member arrays are exact-sized after count/fill collection, control stacks are dynamic, duplicate pointer identity and orchestration residue are explicit, and **D8.4.1v2** no-inline-cache terminology is restored. |
 | `Lambda_Design_Unified_AST.md` | Current continuation links now point here; the retired plan is historical only; `JsLoadIC`/`JsStoreIC` wording was removed and replaced by the formal **D8.4.1v2** boundary. |
-| `Lambda_Design_Ast_Interpreter.md` | The retired-plan cross-reference and header were synchronized with landed **D8.1.1v5**; its historical JavaScript Stage-2 section now defers to **D8.1.3v9**, keeps separate completion/frame semantics, reflects dynamic MIR stacks, and rejects per-node ICs under **D8.4.1v2**. |
+| `Lambda_Design_Ast_Interpreter.md` | The retired-plan cross-reference and header were synchronized with landed **D8.1.1v5**; its historical JavaScript Stage-2 section now defers to **D8.1.3v10**, keeps separate completion/frame semantics, reflects dynamic MIR stacks, and rejects per-node ICs under **D8.4.1v2**. |
 
 Future implementation phases update status prose as they land, but do not revise an S#/D# ruling unless the user changes the design. Documentation edits do not earn code-deletion credit.

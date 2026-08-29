@@ -409,6 +409,11 @@ struct JsGlobalStringCacheState : JsRootedState {
     Item decode_uri_component_error = {};
     Item decode_uri_error = {};
     Item ascii_chars[128] = {};
+    Item test262_percent_hex[256] = {};
+    Item test262_cached_percent_left = {};
+    uint32_t test262_percent_byte0 = 0;
+    uint32_t test262_percent_byte1 = 0;
+    uint32_t test262_percent_byte2 = 0;
     uint32_t uri_last_four_byte_cp = 0;
     uint64_t uri_last_four_byte_epoch = 0;
     int last_from_char_code_cp = -1;

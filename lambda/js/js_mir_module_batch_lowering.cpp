@@ -4889,7 +4889,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     jm_track_active_js_transpile(tp, NULL, NULL);
 
 
-    if (!js_transpiler_parse(tp, js_source, strlen(js_source))) {
+    if (!js_transpiler_parse_module(tp, js_source, strlen(js_source))) {
         // Js57 P7b: parse failure is a SyntaxError. Return ITEM_ERROR (not
         // ItemNull) so the batch driver short-circuits its post-test global
         // probes (async_required check), which SEGV when the heap was never
@@ -4901,8 +4901,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return (Item){.item = ITEM_ERROR};
     }
 
-    TSNode root = ts_tree_root_node(tp->tree);
-    JsAstNode* js_ast = build_js_ast_indexed(tp, root);
+    JsAstNode* js_ast = js_transpiler_build_ast(tp);
     if (!js_ast) {
         log_error("js-mir: module: AST build failed for '%s'", filename);
         (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,

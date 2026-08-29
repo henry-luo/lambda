@@ -12,10 +12,12 @@
 #include <cstdlib>
 #include "../../lib/mem.h"
 
-// TypeScript parser (unified: handles both JS and TS)
+// Tree-sitter is retained for the explicit reference/differential backend.
 extern "C" {
+#ifndef JS_C_PRODUCTION
     const TSLanguage* tree_sitter_typescript(void);
     const TSLanguage* tree_sitter_javascript(void);
+#endif
 }
 
 static void js_script_destroy_extension(Script* base_script);
@@ -266,13 +268,15 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     tp->name_pool = name_pool_create(tp->pool, NULL);
     tp->error_buf = NULL;
 
-    // Initialize Tree-sitter parser
+    // Initialize the reference parser only when that backend is available.
+#ifndef JS_C_PRODUCTION
     tp->parser = ts_parser_new();
     const TSLanguage* lang = tree_sitter_javascript();
     if (!lang) {
         lang = tree_sitter_typescript();
     }
     ts_parser_set_language(tp->parser, lang);
+#endif
 
     // Initialize scopes
     tp->global_scope = js_scope_create(tp, JS_SCOPE_GLOBAL, NULL);
@@ -449,6 +453,92 @@ static bool js_source_slash_starts_regex(const char* source, size_t pos) {
         return false;
     }
     return true;
+}
+
+TSParser* js_transpiler_reference_parser(JsTranspiler* tp) {
+#ifdef JS_C_PRODUCTION
+    (void)tp;
+    return NULL;
+#else
+    return tp ? tp->parser : NULL;
+#endif
+}
+
+TSTree* js_transpiler_reference_tree(JsTranspiler* tp) {
+#ifdef JS_C_PRODUCTION
+    (void)tp;
+    return NULL;
+#else
+    return tp ? tp->tree : NULL;
+#endif
+}
+
+bool js_transpiler_reference_set_language(JsTranspiler* tp,
+        const TSLanguage* language) {
+#ifdef JS_C_PRODUCTION
+    (void)tp;
+    (void)language;
+    return false;
+#else
+    TSParser* parser = js_transpiler_reference_parser(tp);
+    return parser && language && ts_parser_set_language(parser, language);
+#endif
+}
+
+JsParserBackend js_parser_backend_selection(void) {
+#ifdef JS_C_PRODUCTION
+    return JS_PARSER_BACKEND_C;
+#else
+    static const JsParserBackend backend = []() {
+        const char* value = getenv("JS_PARSER");
+        if (!value || !value[0]) value = getenv("JS_PARSER_BACKEND");
+        if (!value || !value[0] || strcmp(value, "c") == 0) {
+            return JS_PARSER_BACKEND_C;
+        }
+        if (strcmp(value, "tree") == 0 ||
+                strcmp(value, "treesitter") == 0 ||
+                strcmp(value, "reference") == 0) {
+            return JS_PARSER_BACKEND_REFERENCE;
+        }
+        if (strcmp(value, "compare") == 0) {
+            return JS_PARSER_BACKEND_COMPARE;
+        }
+        log_error("js-parser: unknown parser backend '%s'", value);
+        return JS_PARSER_BACKEND_C;
+    }();
+    return backend;
+#endif
+}
+
+bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length) {
+    JsParserBackend backend = js_parser_backend_selection();
+    if (backend == JS_PARSER_BACKEND_C) {
+        return js_transpiler_parse_c_auto(tp, source, length);
+    }
+    if (backend == JS_PARSER_BACKEND_COMPARE) {
+        return js_transpiler_parse_compare(tp, source, length);
+    }
+    return js_transpiler_parse_reference(tp, source, length);
+}
+
+bool js_transpiler_parse_module(JsTranspiler* tp, const char* source,
+        size_t length) {
+    if (!tp || !source) return false;
+    JsParserBackend backend = js_parser_backend_selection();
+    JsParseMode mode = (JsParseMode)(JS_PARSE_SCRIPT | JS_PARSE_MODULE);
+    if (backend == JS_PARSER_BACKEND_C) {
+        return js_transpiler_parse_c(tp, source, length, mode);
+    }
+    if (backend == JS_PARSER_BACKEND_COMPARE) {
+        return js_transpiler_parse_compare_mode(tp, source, length, mode);
+    }
+
+    // Tree-sitter does not receive a parser mode, but the downstream scope
+    // and module passes still need the known module context.
+    tp->is_module = true;
+    tp->is_es_module = true;
+    tp->strict_mode = true;
+    return js_transpiler_parse_reference(tp, source, length);
 }
 
 static bool js_source_has_unescaped_u180e_code_char(const char* source, size_t length) {
@@ -1067,7 +1157,8 @@ static char* js_normalize_source_for_parser(const char* source, size_t length) {
     return out;
 }
 
-bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length) {
+bool js_transpiler_parse_reference(JsTranspiler* tp, const char* source,
+        size_t length) {
     js_parse_error_reset(tp);
     if (tp->normalized_source) {
         mem_free(tp->normalized_source);

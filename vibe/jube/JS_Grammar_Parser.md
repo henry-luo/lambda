@@ -1,10 +1,16 @@
 # JavaScript and TypeScript Grammar Parser: First-Party C Proposal
 
 - **Date:** 2026-08-28
-- **Status:** **PROPOSED, NOT RATIFIED, NOT IMPLEMENTED.** This document changes no production parser. The Tree-sitter JavaScript production parser and TypeScript fallback/reference parser remain in place until every cutover gate in §12 passes.
+- **Status:** **PRODUCTION CUTOVER COMPLETE (2026-08-29).** Normal LambdaJS and TypeScript compilation uses the first-party C lexer plus hybrid recursive-descent/Pratt parser and direct `JsAstNode` sink. The vendored Tree-sitter JavaScript and TypeScript grammars remain unchanged and link only into `lambda-cst` for reference/differential checks.
 - **Scope:** replace the production JavaScript and TypeScript Tree-sitter front ends with one small first-party C lexer plus hybrid recursive-descent/Pratt parser that reduces directly into the retained `JsAstNode` graph.
-- **Formal linkage:** **D1.1** (a guest is grammar + AST builder + `LangProfile`), **D1.3** (guests reuse contracts below their semantic boundary), **D4.1.1v2/D4.1.4v4** (AST-pool lifetime and the closed allocator-mechanism set), **D8.1.3v9** (retained `JsScript`/JavaScript AST), **D8.2.1–D8.2.5** (one core-node catalog, no tree rewriting, indexed compilation unit, typed pass schedule), and **D8.6.4v2** (release timing methodology). A first-party JS/TS production-parser selection is not yet a formal ruling; ratification requires a new or revised **D8.1** ruling before cutover.
+- **Formal linkage:** **D1.1** (a guest is grammar + AST builder + `LangProfile`), **D1.3** (guests reuse contracts below their semantic boundary), **D4.1.1v2/D4.1.4v4** (AST-pool lifetime and the closed allocator-mechanism set), **D8.1.3v10** (retained `JsScript`/JavaScript AST and first-party source parser), **D8.2.1–D8.2.5** (one core-node catalog, no tree rewriting, indexed compilation unit, typed pass schedule), and **D8.6.4v2** (release timing methodology).
 - **Related:** `vibe/Lambda_Grammar_Parser.md`, `vibe/jube/TS_Grammar_Reduce2.md`, `doc/dev/js/JS_02_Parsing_AST.md`, `doc/dev/js/JS_16_Testing.md`, `lambda/runtime/parser/`, `lambda/js/build_js_ast.cpp`, `lambda/js/js_scope.cpp`, `lambda/ts/`, and the checked-in reference grammars under `lambda/tree-sitter-{javascript,typescript}/`.
+
+The historical phased proposal below records the cutover criteria. Its P5
+build-isolation result is now landed: only `lambda-cst` carries the JS/TS
+Tree-sitter archives and reference driver; all normal Lambda targets select
+the C parser at compile time. `make test-js-parser-diff` checks the retained
+reference grammars against the C recognizer.
 
 ## 1. Proposal
 
@@ -612,6 +618,8 @@ Symbol audit and link-map evidence are required; source grep alone is insufficie
 9. Cutover requires canonical AST/fact parity, at least 50% smaller combined parser archives, at least 10% faster aggregate release parsing/front-end time with no p95 regression, fully green JS/TS suites, and a zero-retry full Test262 baseline.
 10. A failed gate stops the project without hard-coding, weakening syntax, masking tests, or silently falling back after partial parsing.
 
-## 15. Immediate next action
+## 15. Follow-up work
 
-Implement P0 only: add the frozen JS/TS parser manifest, canonical AST/fact serializer, clean A/B size script, and release parser/front-end benchmark. Do not begin the C parser or edit build linkage until the existing production behavior—including the TypeScript preprocessor path and negative Test262 classifications—is reproducible as an oracle.
+The parser and build-isolation cutover is complete. Maintain the reference
+manifest/differential target when extending JS or TS syntax; do not reintroduce
+the JS/TS Tree-sitter archives into normal Lambda targets.

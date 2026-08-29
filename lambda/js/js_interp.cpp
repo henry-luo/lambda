@@ -2419,8 +2419,12 @@ static bool js_interp_eval_redeclares_parameter(JsInterpFrame* frame, Item code)
         js_transpiler_destroy(transpiler);
         return false;
     }
-    JsAstNode* eval_ast = build_js_ast_indexed(transpiler,
-        ts_tree_root_node(transpiler->tree));
+    TSTree* reference_tree = js_transpiler_reference_tree(transpiler);
+    JsAstNode* eval_ast = transpiler->ast_root
+        ? (JsAstNode*)transpiler->ast_root
+        : (reference_tree
+            ? build_js_ast_indexed(transpiler,
+                ts_tree_root_node(reference_tree)) : NULL);
     bool redeclares_parameter = false;
     if (eval_ast && transpiler->global_scope) {
         for (NameEntry* declared = transpiler->global_scope->first; declared &&
@@ -2465,10 +2469,15 @@ static Item js_interp_direct_eval(JsInterpFrame* frame, Item code) {
     js_set_this(caller_this_root.get());
     result_root.set(js_builtin_eval(code, 3 | (frame && frame->strict ? 4 : 0)));
     js_set_this(prior_this_root.get());
-    Item captured = js_interp_capture_eval_bindings(frame);
+    // The dynamic evaluator leaves caller-owned bridges active through throws;
+    // write back while the temporary globals still expose the eval's writes.
     Item writeback = bridge.writeback();
     private_bridge.close();
     bridge.close();
+    // Capture after bridge removal so an eval-created var observes mutations
+    // made by a later eval instead of copying the pre-eval journal value back
+    // into the interpreter environment.
+    Item captured = js_interp_capture_eval_bindings(frame);
     if (item_is_error(result_root.get())) return result_root.get();
     if (item_is_error(captured)) return captured;
     return item_is_error(writeback) ? writeback : result_root.get();
@@ -5799,7 +5808,11 @@ JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
         js_transpiler_destroy(transpiler);
         return NULL;
     }
-    JsAstNode* ast = build_js_ast_indexed(transpiler, ts_tree_root_node(transpiler->tree));
+    TSTree* reference_tree = js_transpiler_reference_tree(transpiler);
+    JsAstNode* ast = transpiler->ast_root ? (JsAstNode*)transpiler->ast_root
+        : (reference_tree
+            ? build_js_ast_indexed(transpiler,
+                ts_tree_root_node(reference_tree)) : NULL);
     if (!ast || transpiler->has_errors) {
         js_transpiler_destroy(transpiler);
         return NULL;

@@ -9368,21 +9368,19 @@ static bool js_test262_item_to_uint32(Item item, uint32_t* out) {
 extern "C" Item js_test262_decimal_to_percent_hex_string(Item n_item) {
     uint32_t n = 0;
     if (!js_test262_item_to_uint32(n_item, &n)) return ItemNull;
-    static Item cached[256];
-    static uint64_t cached_epoch = 0;
-    uint64_t epoch = js_get_heap_epoch();
-    if (cached_epoch != epoch) {
-        memset(cached, 0, sizeof(cached));
-        cached_epoch = epoch;
-    }
     uint32_t byte = n & 0xFF;
-    if (cached[byte].item) return cached[byte];
+    // These strings survive hot-batch resets; store them in the context root
+    // range so a later collection cannot turn the 256-entry table into stale Items.
+    bool cache_rooted = js_global_string_caches_ensure_roots();
+    Item* cached = js_runtime_state.global_string_caches.test262_percent_hex;
+    if (cache_rooted && cached[byte].item) return cached[byte];
     char buf[3];
     buf[0] = '%';
     buf[1] = hex_encode_nibble_upper((byte >> 4) & 0xF);
     buf[2] = hex_encode_nibble_upper(byte & 0xF);
-    cached[byte] = js_make_small_string(buf, 3, true);
-    return cached[byte];
+    Item result = js_make_small_string(buf, 3, true);
+    if (cache_rooted) cached[byte] = result;
+    return result;
 }
 
 static inline int js_test262_upper_hex_digit(char ch) {
@@ -9397,16 +9395,15 @@ static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32
     if (!left || left->len != 9 || !left->is_ascii) return false;
     if (left->chars[0] != '%' || left->chars[3] != '%' || left->chars[6] != '%') return false;
 
-    static String* cached_left = NULL;
-    static uint64_t cached_epoch = 0;
-    static uint32_t cached_byte0 = 0;
-    static uint32_t cached_byte1 = 0;
-    static uint32_t cached_byte2 = 0;
-    uint64_t epoch = js_get_heap_epoch();
-    uint32_t byte0 = cached_byte0;
-    uint32_t byte1 = cached_byte1;
-    uint32_t byte2 = cached_byte2;
-    if (cached_left != left || cached_epoch != epoch) {
+    // Keep the cached prefix and its decoded bytes in the same rooted capsule;
+    // the prior static pointer outlived both GC and hot-realm reset boundaries.
+    bool cache_rooted = js_global_string_caches_ensure_roots();
+    Item left_value = (Item){.item = s2it(left)};
+    Item cached_left_item = js_runtime_state.global_string_caches.test262_cached_percent_left;
+    uint32_t byte0 = 0;
+    uint32_t byte1 = 0;
+    uint32_t byte2 = 0;
+    if (!cache_rooted || cached_left_item.item != left_value.item) {
         int b0_high = js_test262_upper_hex_digit(left->chars[1]);
         int b0_low = js_test262_upper_hex_digit(left->chars[2]);
         int b1_high = js_test262_upper_hex_digit(left->chars[4]);
@@ -9417,11 +9414,16 @@ static inline bool js_test262_percent_escape_cp_from_append(String* left, uint32
         byte0 = (uint32_t)((b0_high << 4) | b0_low);
         byte1 = (uint32_t)((b1_high << 4) | b1_low);
         byte2 = (uint32_t)((b2_high << 4) | b2_low);
-        cached_left = left;
-        cached_epoch = epoch;
-        cached_byte0 = byte0;
-        cached_byte1 = byte1;
-        cached_byte2 = byte2;
+        if (cache_rooted) {
+            js_runtime_state.global_string_caches.test262_cached_percent_left = left_value;
+            js_runtime_state.global_string_caches.test262_percent_byte0 = byte0;
+            js_runtime_state.global_string_caches.test262_percent_byte1 = byte1;
+            js_runtime_state.global_string_caches.test262_percent_byte2 = byte2;
+        }
+    } else {
+        byte0 = js_runtime_state.global_string_caches.test262_percent_byte0;
+        byte1 = js_runtime_state.global_string_caches.test262_percent_byte1;
+        byte2 = js_runtime_state.global_string_caches.test262_percent_byte2;
     }
     if (byte0 < 0xF0 || byte0 > 0xF4) return false;
     if ((byte1 & 0xC0) != 0x80 || (byte2 & 0xC0) != 0x80 || (byte3 & 0xC0) != 0x80) return false;
@@ -12984,6 +12986,9 @@ extern "C" void js_globals_batch_reset() {
     js_runtime_state.global_string_caches.decode_uri_error = (Item){0};
     memset(js_runtime_state.global_string_caches.ascii_chars, 0,
            sizeof(js_runtime_state.global_string_caches.ascii_chars));
+    memset(js_runtime_state.global_string_caches.test262_percent_hex, 0,
+           sizeof(js_runtime_state.global_string_caches.test262_percent_hex));
+    js_runtime_state.global_string_caches.test262_cached_percent_left = (Item){0};
     js_runtime_state.global_string_caches.uri_last_four_byte_epoch = 0;
     js_runtime_state.global_string_caches.last_from_char_code_cp = -1;
     js_runtime_state.global_string_caches.last_from_char_code_epoch = 0;
