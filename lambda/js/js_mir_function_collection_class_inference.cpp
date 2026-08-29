@@ -5,6 +5,10 @@ static bool jm_function_inside_class_syntax(JsFunctionNode* fn) {
     return fn && fn->node_type == JS_AST_NODE_METHOD_DEFINITION;
 }
 
+static bool js_ast_child_has_direct_eval_call(JsAstNode* child, void*) {
+    return js_ast_has_direct_eval_call(child);
+}
+
 bool js_ast_has_direct_eval_call(JsAstNode* node) {
     if (!node) return false;
     switch (node->node_type) {
@@ -19,6 +23,7 @@ bool js_ast_has_direct_eval_call(JsAstNode* node) {
             if (id->name && id->name->len == 4 &&
                     strncmp(id->name->chars, "eval", 4) == 0) return true;
         }
+        if (js_ast_has_direct_eval_call(call->callee)) return true;
         for (JsAstNode* arg = call->arguments; arg; arg = arg->next) {
             if (js_ast_has_direct_eval_call(arg)) return true;
         }
@@ -91,7 +96,9 @@ bool js_ast_has_direct_eval_call(JsAstNode* node) {
     case JS_AST_NODE_AWAIT_EXPRESSION:
         return js_ast_has_direct_eval_call(((JsAwaitNode*)node)->argument);
     default:
-        return false;
+        // Keep classification complete as new expression and binding-pattern
+        // nodes are added; nested function/class cases remain explicit above.
+        return js_ast_any_child(node, js_ast_child_has_direct_eval_call, NULL);
     }
 }
 

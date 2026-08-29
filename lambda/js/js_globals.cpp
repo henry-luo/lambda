@@ -10327,8 +10327,22 @@ extern "C" Item js_has_own_property(Item obj, Item key) {
             return (Item){.item = b2it(status == JS_SHAPE_SLOT_DATA ||
                 status == JS_SHAPE_SLOT_ACCESSOR)};
         }
-        // "length" is always an own property of arrays
+        // Arguments objects keep their physical element count in Array::length,
+        // but expose a configurable ordinary `length` property in the
+        // companion map.  A deleted companion slot must not resurrect the
+        // internal array length as an own property.
         if (ks->len == 6 && strncmp(ks->chars, "length", 6) == 0) {
+            Array* arr = obj.array;
+            if (arr->is_content == 1) {
+                if (!js_array_has_props(arr)) {
+                    return (Item){.item = b2it(false)};
+                }
+                Item props_item = (Item){.map = js_array_props(arr)};
+                JsShapeSlotStatus status = js_own_shape_slot_status(props_item,
+                    "length", 6, NULL, NULL);
+                return (Item){.item = b2it(status == JS_SHAPE_SLOT_DATA ||
+                    status == JS_SHAPE_SLOT_ACCESSOR)};
+            }
             return (Item){.item = b2it(true)};
         }
         // Check if it's a valid numeric index within bounds
@@ -14352,8 +14366,13 @@ static Item js_with_binding_is_visible(Item key, Item scope_obj) {
 }
 
 extern "C" Item js_probe_with_binding(Item key) {
-    if (js_with_stack_depth <= 0) return (Item){.item = b2it(false)};
-    for (int i = js_with_stack_depth - 1; i >= 0; i--) {
+    return js_probe_with_binding_from(key, 0);
+}
+
+extern "C" Item js_probe_with_binding_from(Item key, int64_t minimum_depth) {
+    int start = minimum_depth < 0 ? 0 : (int)minimum_depth;
+    if (start >= js_with_stack_depth) return (Item){.item = b2it(false)};
+    for (int i = js_with_stack_depth - 1; i >= start; i--) {
         Item scope_obj = js_with_stack[i];
         if (!js_with_scope_is_object(scope_obj)) continue;
         JS_ASSIGN_OR_RETURN(visible, js_with_binding_is_visible(key, scope_obj));
@@ -14365,9 +14384,14 @@ extern "C" Item js_probe_with_binding(Item key) {
 }
 
 extern "C" Item js_capture_with_binding(Item key) {
+    return js_capture_with_binding_from(key, 0);
+}
+
+extern "C" Item js_capture_with_binding_from(Item key, int64_t minimum_depth) {
     js_last_with_binding_valid = false;
-    if (js_with_stack_depth <= 0) return (Item){.item = b2it(false)};
-    for (int i = js_with_stack_depth - 1; i >= 0; i--) {
+    int start = minimum_depth < 0 ? 0 : (int)minimum_depth;
+    if (start >= js_with_stack_depth) return (Item){.item = b2it(false)};
+    for (int i = js_with_stack_depth - 1; i >= start; i--) {
         Item scope_obj = js_with_stack[i];
         if (!js_with_scope_is_object(scope_obj)) continue;
         JS_ASSIGN_OR_RETURN(visible, js_with_binding_is_visible(key, scope_obj));
@@ -14387,15 +14411,13 @@ extern "C" Item js_capture_with_binding(Item key) {
 
 static Item js_set_with_binding_resolved(Item scope_obj, Item key, Item value,
                                          int64_t strict) {
-    JS_ASSIGN_OR_RETURN(in_result, js_in(key, scope_obj));
-    if (it2b(in_result)) {
-        JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(scope_obj, key, value));
-        return (Item){.item = b2it(true)};
+    // SetMutableBinding rechecks HasProperty: an earlier @@unscopables getter
+    // or compound-read accessor may have removed the resolved binding.
+    JS_ASSIGN_OR_RETURN(still_exists, js_in(key, scope_obj));
+    if (!it2b(still_exists)) {
+        if (strict) return js_throw_binding_reference_error(key);
     }
-    if (strict) {
-        return js_throw_binding_reference_error(key);
-    }
-    JS_ASSIGN_OR_RETURN(set_result, js_set_key_default(scope_obj, key, value));
+    JS_ASSIGN_OR_RETURN(set_result, js_set_key_policy(scope_obj, key, value, strict));
     return (Item){.item = b2it(true)};
 }
 
@@ -14410,8 +14432,11 @@ extern "C" Item js_set_last_with_binding_if_valid(Item key, Item value, int64_t 
 }
 
 extern "C" Item js_set_with_binding_base(Item scope_obj, Item key, Item value, int64_t strict) {
-    // `var x = rhs` in a with statement resolves x before evaluating rhs.
-    // Store through that saved base even if rhs deletes or shadows the property.
+    // A reference keeps the resolved Object Environment Record base across
+    // RHS evaluation, but SetMutableBinding must still recheck HasProperty.
+    // Accessors and @@unscopables can delete the binding between resolution
+    // and PutValue, which is a strict-mode ReferenceError rather than a new
+    // own property on the saved object.
     if (!js_with_scope_is_object(scope_obj)) return (Item){.item = b2it(false)};
     return js_set_with_binding_resolved(scope_obj, key, value, strict);
 }
@@ -14518,7 +14543,7 @@ extern "C" Item js_get_global_property(Item key) {
     return result;
 }
 
-static Item js_get_global_property_strict_without_with(Item key) {
+extern "C" Item js_get_global_property_after_with_lookup(Item key) {
     Item lex = js_eval_global_lexical_get_or_fallback(key, ItemError);
     if (lex.item != ItemError.item) return lex;
     lex = js_global_lexical_get_or_fallback(key, ItemError);
@@ -14551,7 +14576,7 @@ extern "C" Item js_get_global_property_strict(Item key) {
         Item result = js_with_scope_lookup(key, &found, true);
         if (found) return result;
     }
-    return js_get_global_property_strict_without_with(key);
+    return js_get_global_property_after_with_lookup(key);
 }
 
 extern "C" Item js_get_global_property_reference(Item key, int64_t strict_reference) {
@@ -14565,17 +14590,11 @@ extern "C" Item js_get_global_property_reference(Item key, int64_t strict_refere
     // This entry already performed Object Environment Record HasBinding.
     // Calling the public strict lookup repeated the same Proxy [[Has]] trap
     // before reaching the global environment fallback.
-    Item result = js_get_global_property_strict_without_with(key);
+    Item result = js_get_global_property_after_with_lookup(key);
     return result;
 }
 
-extern "C" int64_t js_global_binding_exists(Item key) {
-    if (js_with_stack_depth > 0) {
-        bool found = false;
-        Item with_result = js_with_scope_lookup(key, &found, false);
-        if (found) return 1;
-        if (item_is_error(with_result)) return 0;
-    }
+extern "C" int64_t js_global_binding_exists_after_with_lookup(Item key) {
     // Script global lexical declarations are bindings in the realm record,
     // not properties on globalThis. Later classic Scripts (including a
     // Test262 test after its harness) must find them before probing the
@@ -14586,6 +14605,16 @@ extern "C" int64_t js_global_binding_exists(Item key) {
     Item exists = js_in(key, global);
     if (item_is_error(exists)) return 0;
     return it2b(exists) ? 1 : 0;
+}
+
+extern "C" int64_t js_global_binding_exists(Item key) {
+    if (js_with_stack_depth > 0) {
+        bool found = false;
+        Item with_result = js_with_scope_lookup(key, &found, false);
+        if (found) return 1;
+        if (item_is_error(with_result)) return 0;
+    }
+    return js_global_binding_exists_after_with_lookup(key);
 }
 
 static Item js_throw_binding_reference_error(Item key) {
@@ -14610,6 +14639,21 @@ static Item js_set_global_target_property(Item target, Item key, Item value,
         return js_throw_type_error("Cannot set read-only global property");
     }
     return js_status_ok();
+}
+
+static Item js_set_global_property_after_with_lookup_impl(Item key, Item value,
+        bool strict) {
+    js_last_with_binding_valid = false;
+    JS_ASSIGN_OR_RETURN(lexical_result, js_eval_global_lexical_set_if_exists(key, value));
+    if (it2b(lexical_result)) return js_status_ok();
+    JS_ASSIGN_OR_RETURN_INTO(lexical_result, js_global_lexical_set_if_exists(key, value));
+    if (it2b(lexical_result)) return js_status_ok();
+    Item global = js_get_global_this();
+    JS_ASSIGN_OR_RETURN(global_in, js_in(key, global));
+    if (strict && !it2b(global_in)) {
+        return js_throw_binding_reference_error(key);
+    }
+    return js_set_global_target_property(global, key, value, strict);
 }
 
 static Item js_set_global_property_impl(Item key, Item value, bool strict) {
@@ -14650,17 +14694,7 @@ static Item js_set_global_property_impl(Item key, Item value, bool strict) {
             }
         }
     }
-    js_last_with_binding_valid = false;
-    JS_ASSIGN_OR_RETURN(lexical_result, js_eval_global_lexical_set_if_exists(key, value));
-    if (it2b(lexical_result)) return js_status_ok();
-    JS_ASSIGN_OR_RETURN_INTO(lexical_result, js_global_lexical_set_if_exists(key, value));
-    if (it2b(lexical_result)) return js_status_ok();
-    Item global = js_get_global_this();
-    JS_ASSIGN_OR_RETURN(global_in, js_in(key, global));
-    if (strict && !it2b(global_in)) {
-        return js_throw_binding_reference_error(key);
-    }
-    return js_set_global_target_property(global, key, value, strict);
+    return js_set_global_property_after_with_lookup_impl(key, value, strict);
 }
 
 // Tune8 §2.2: js_set_global_property absorbs js_set_global_property_strict.
@@ -14668,6 +14702,11 @@ static Item js_set_global_property_impl(Item key, Item value, bool strict) {
 // 1 = strict throw-on-undeclared). The hot variant js_set_global_var_property_fast
 // stays direct because it has a substantially different fast-path body.
 JS_FORWARD_ITEM(js_set_global_property, (Item key, Item value, int64_t strict), js_set_global_property_impl, (key, value, strict != 0))
+
+extern "C" Item js_set_global_property_after_with_lookup(Item key, Item value,
+        int64_t strict) {
+    return js_set_global_property_after_with_lookup_impl(key, value, strict != 0);
+}
 
 extern "C" Item js_set_global_var_property_fast(Item key, Item value) {
     if (js_with_stack_depth == 0 && get_type_id(key) == LMD_TYPE_STRING) {
@@ -15143,6 +15182,31 @@ extern "C" void js_eval_local_export_var(Item key, Item value) {
     int binding_idx = js_eval_local_binding_count++;
     js_eval_local.keys[binding_idx] = key;
     js_eval_local.values[binding_idx] = value;
+}
+
+extern "C" int64_t js_eval_local_current_var_count(void) {
+    if (js_eval_local_frame_depth <= 0) return 0;
+    int frame_start = js_eval_local.frame_marks[
+        js_eval_local_frame_depth - 1].local_mark;
+    return js_eval_local_binding_count - frame_start;
+}
+
+extern "C" Item js_eval_local_current_var_key(int64_t index) {
+    if (js_eval_local_frame_depth <= 0 || index < 0) return ItemNull;
+    int frame_start = js_eval_local.frame_marks[
+        js_eval_local_frame_depth - 1].local_mark;
+    int binding_index = frame_start + (int)index;
+    return binding_index >= frame_start && binding_index < js_eval_local_binding_count
+        ? js_eval_local.keys[binding_index] : ItemNull;
+}
+
+extern "C" Item js_eval_local_current_var_value(int64_t index) {
+    if (js_eval_local_frame_depth <= 0 || index < 0) return ItemNull;
+    int frame_start = js_eval_local.frame_marks[
+        js_eval_local_frame_depth - 1].local_mark;
+    int binding_index = frame_start + (int)index;
+    return binding_index >= frame_start && binding_index < js_eval_local_binding_count
+        ? js_eval_local.values[binding_index] : ItemNull;
 }
 
 static void js_eval_local_note_binding(Item key, Item* keys, int* count,

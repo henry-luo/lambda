@@ -296,6 +296,9 @@ struct NameEntry {
     // be recovered from parser structure at the binding node.
     bool is_for_in_head;
     bool is_const;
+    // Named function expressions own an immutable self binding, but unlike a
+    // lexical const binding a sloppy write is ignored rather than rejected.
+    bool is_function_name_binding;
     bool tdz_active;
     bool is_exported;
     // T0 frame-plan facts (AI5). NameEntry is pool-calloc'd, so zero-init must
@@ -345,6 +348,12 @@ struct NameScope {
     // JavaScript B.3.5 permits a legacy var redeclaration of a simple catch
     // BindingIdentifier; JavaScript marks only that handler scope.
     bool allows_legacy_var_redeclaration;
+    // A named function expression owns an immutable lexical name record that
+    // sits outside its ordinary Function Environment Record.
+    bool is_function_name_scope;
+    // Switch case clauses share one lexical scope; their declarations never
+    // receive an Annex B outer-var companion.
+    bool is_switch_scope;
 };
 
 struct AstNode {

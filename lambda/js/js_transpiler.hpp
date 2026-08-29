@@ -91,6 +91,7 @@ struct JsTranspiler : JsScript {
     int label_counter;              // Counter for labels
     bool in_expression;             // True when transpiling inside an expression (for function expressions)
     bool in_async_function;         // True while building an async function body/parameters
+    bool in_generator_function;     // True while building a generator body/parameters
     
     // ANY-census [Type_Infer TI3]: per-reason counts of expressions whose
     // static type fell back to `any`. Diagnostic only — shares the Lambda

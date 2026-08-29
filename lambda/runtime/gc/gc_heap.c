@@ -1579,6 +1579,8 @@ static void gc_trace_object(gc_heap_t* gc, gc_header_t* header) {
         gc_mark_item(gc, env->arguments_object);
         gc_mark_item(gc, env->private_home_class);
         gc_mark_item(gc, env->private_bindings);
+        gc_mark_item(gc, env->eval_bindings);
+        gc_mark_item(gc, env->lexical_this);
         for (uint32_t i = 0; i < env->slot_count; i++) {
             gc_mark_item(gc, env->slots[i]);
         }
