@@ -11,16 +11,20 @@ test-only switches are deliberately excluded from the main tables.
 
 | Profile | Build configuration | Meaning |
 |---|---|---|
-| debug | `debug_native` | `DEBUG`, symbols, `-Og`, frame pointers, and AddressSanitizer for the main executable. |
-| debug_profile | `debug_profile_native` | `DEBUG`, symbols, optimized code, frame pointers, and `LAMBDA_JS_EXEC_PROFILE`. |
+| debug | `debug_native` | `DEBUG`, symbols, `-O3`, frame pointers, `LAMBDA_JS_EXEC_PROFILE`, and other runtime profiling controls. |
+| debug_asan | `debug_asan_native` | `DEBUG`, symbols, `-Og`, frame pointers, and AddressSanitizer for the separate `lambda-debug-asan.exe` host; no `LAMBDA_JS_EXEC_PROFILE`. |
 | release | `release_native` | `NDEBUG`, `LAMBDA_HOME_RELEASE`, `-O3`, ThinLTO, section stripping, and native CPU tuning. |
 | release_profile | `release_profile_native` | The release profile plus `LAMBDA_JS_EXEC_PROFILE`. |
 
 The generator is authoritative: `utils/generate_premake.py`; `make debug`,
-`make build-debug-profile`, `make build-release`, and
-`make build-release-profile` select the four configurations.  Release builds
+`make build-debug-asan`, `make build-release`, and `make build-release-profile`
+select the four configurations. Release builds
 compile `log_debug()` and `log_info()` out, so log-only diagnostics are not
 functional there.
+
+The detailed variable matrix below uses `Debug` for the ordinary optimized,
+instrumented debug host. `debug_asan` is the separate `-Og` sanitizer host and
+omits `LAMBDA_JS_EXEC_PROFILE`.
 
 In the tables, **✓** means the variable can affect that build when the relevant
 runtime path is exercised; **✗** means the code is compiled out.  A check is
@@ -30,34 +34,34 @@ several optimization controls are enabled by default and use `=0` to disable.
 
 ## Core runtime, logging, and MIR
 
-| Variable | Effect / accepted value | Debug | Debug profile | Release | Release profile |
-|---|---|:---:|:---:|:---:|:---:|
-| `LAMBDA_HOME` | Overrides runtime asset directory. Defaults are `./lambda` for debug and `./lmd` for release, with fallback to the other layout. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_PROFILE` | `1` or `true`: write Lambda compilation-phase timing to `temp/phase_profile.txt`. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_DISABLE_MIR_CACHE` | `1` or `true`: disable retained Lambda MIR-import cache. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_MIR_DUMP_PATH` | Write finalized MIR to this path. `--no-log` and disabled default log category suppress it. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_MIR_LOG_FRAME_SLOTS` | Emit MIR frame-slot telemetry; also gated by normal logging / `--no-log`. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_C2MIR_DEBUG` | `1` or `true`: capture legacy C2MIR debug messages. It is behind the separate `LAMBDA_C2MIR` compile flag, which none of these four profiles defines. | ✗ | ✗ | ✗ | ✗ |
-| `LAMBDA_LOG_LEVEL` | Overrides configured log severity. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_LOG_FILE` | Overrides `log.txt` destination for file logging. | ✓ | ✓ | ✓ | ✓ |
+| Variable | Effect / accepted value | Debug | Release | Release profile |
+|---|---|:---:|:---:|:---:|
+| `LAMBDA_HOME` | Overrides runtime asset directory. Defaults are `./lambda` for debug and `./lmd` for release, with fallback to the other layout. | ✓ | ✓ | ✓ |
+| `LAMBDA_PROFILE` | `1` or `true`: write Lambda compilation-phase timing to `temp/phase_profile.txt`. | ✓ | ✓ | ✓ |
+| `LAMBDA_DISABLE_MIR_CACHE` | `1` or `true`: disable retained Lambda MIR-import cache. | ✓ | ✓ | ✓ |
+| `LAMBDA_MIR_DUMP_PATH` | Write finalized MIR to this path. `--no-log` and disabled default log category suppress it. | ✓ | ✓ | ✓ |
+| `LAMBDA_MIR_LOG_FRAME_SLOTS` | Emit MIR frame-slot telemetry; also gated by normal logging / `--no-log`. | ✓ | ✓ | ✓ |
+| `LAMBDA_C2MIR_DEBUG` | `1` or `true`: capture legacy C2MIR debug messages. It is behind the separate `LAMBDA_C2MIR` compile flag, which none of these four profiles defines. | ✗ | ✗ | ✗ |
+| `LAMBDA_LOG_LEVEL` | Overrides configured log severity. | ✓ | ✓ | ✓ |
+| `LAMBDA_LOG_FILE` | Overrides `log.txt` destination for file logging. | ✓ | ✓ | ✓ |
 
 ## GC, allocation, and execution diagnostics
 
-| Variable | Effect / accepted value | Debug | Debug profile | Release | Release profile |
-|---|---|:---:|:---:|:---:|:---:|
-| `LAMBDA_GC_FORCE_EVERY` | Positive allocation interval: force a collection every N public GC allocations. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_GC_FORCE_SEED` | Seed for deterministic randomized forced collection; must accompany `LAMBDA_GC_FORCE_ONE_IN`. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_GC_FORCE_ONE_IN` | Positive denominator for randomized forced collection; must accompany the seed. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_GC_POISON_FREED` | `1`: poison freed GC memory; `0`: off. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_GC_STATS` | Dump GC tuning counters at heap teardown. | ✓ | ✓ | ✓ | ✓ |
-| `MEMTRACK_MODE` | `DEBUG` enables debug memory tracking; other/unset values use stats mode. | ✓ | ✓ | ✓ | ✓ |
-| `VIEW_MEM_STAGES` | Emit process-memory checkpoints. | ✓ | ✓ | ✓ | ✓ |
-| `VIEW_MEM_STATS` | `1`: print memory categories before CLI exit. | ✓ | ✓ | ✓ | ✓ |
-| `VIEW_PAUSE_BEFORE_EXIT` | Positive integer: wait that many seconds before exit for external inspection. | ✓ | ✓ | ✓ | ✓ |
-| `POOL_TRACE` | Enable memory-pool trace diagnostics. | ✓ | ✓ | ✗ | ✗ |
-| `POOL_STATS` | Enable memory-pool statistics diagnostics. | ✓ | ✓ | ✓ | ✓ |
-| `COW_EXEC_PROFILE` | Enable copy-on-write execution counter profile. | ✓ | ✓ | ✓ | ✓ |
-| `COW_EXEC_PROFILE_OUT` | Destination for the COW TSV; default `temp/cow_exec_profile.tsv`. | ✓ | ✓ | ✓ | ✓ |
+| Variable | Effect / accepted value | Debug | Release | Release profile |
+|---|---|:---:|:---:|:---:|
+| `LAMBDA_GC_FORCE_EVERY` | Positive allocation interval: force a collection every N public GC allocations. | ✓ | ✓ | ✓ |
+| `LAMBDA_GC_FORCE_SEED` | Seed for deterministic randomized forced collection; must accompany `LAMBDA_GC_FORCE_ONE_IN`. | ✓ | ✓ | ✓ |
+| `LAMBDA_GC_FORCE_ONE_IN` | Positive denominator for randomized forced collection; must accompany the seed. | ✓ | ✓ | ✓ |
+| `LAMBDA_GC_POISON_FREED` | `1`: poison freed GC memory; `0`: off. | ✓ | ✓ | ✓ |
+| `LAMBDA_GC_STATS` | Dump GC tuning counters at heap teardown. | ✓ | ✓ | ✓ |
+| `MEMTRACK_MODE` | `DEBUG` enables debug memory tracking; other/unset values use stats mode. | ✓ | ✓ | ✓ |
+| `VIEW_MEM_STAGES` | Emit process-memory checkpoints. | ✓ | ✓ | ✓ |
+| `VIEW_MEM_STATS` | `1`: print memory categories before CLI exit. | ✓ | ✓ | ✓ |
+| `VIEW_PAUSE_BEFORE_EXIT` | Positive integer: wait that many seconds before exit for external inspection. | ✓ | ✓ | ✓ |
+| `POOL_TRACE` | Enable memory-pool trace diagnostics. | ✓ | ✗ | ✗ |
+| `POOL_STATS` | Enable memory-pool statistics diagnostics. | ✓ | ✓ | ✓ |
+| `COW_EXEC_PROFILE` | Enable copy-on-write execution counter profile. | ✓ | ✓ | ✓ |
+| `COW_EXEC_PROFILE_OUT` | Destination for the COW TSV; default `temp/cow_exec_profile.tsv`. | ✓ | ✓ | ✓ |
 
 `POOL_TRACE` is marked unavailable in release because it only produces
 `log_debug()` output.  `LAMBDA_GC_STATS` deliberately uses a notice-level log,
@@ -65,22 +69,22 @@ so it remains useful under `NDEBUG`.
 
 ## Lambda/LambdaJS compilation, optimization, and diagnostics
 
-| Variable | Effect / accepted value | Debug | Debug profile | Release | Release profile |
-|---|---|:---:|:---:|:---:|:---:|
-| `LAMBDA_JS_LARGE_INTERP` | Default on; `0`/`false` disables automatic large-module/document MIR interpretation for Lambda and LambdaJS. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_LARGE_INTERP_BYTES` | Positive source-size threshold for automatic O0 interpretation; default 15000 bytes. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_DISABLE_JS_MIR_CACHE` | Presence disables Radiant batch JS-MIR cache. | ✓ | ✓ | ✓ | ✓ |
-| `JS_MIR_INTERP` | `1`/`true`: force the MIR interpreter path for Lambda and LambdaJS. | ✓ | ✓ | ✓ | ✓ |
-| `JS_LAZY_MIR` | Non-zero: select per-function lazy MIR code generation. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_CONST_FOLD` | Default on; `0` disables JS MIR constant folding. | ✓ | ✓ | ✓ | ✓ |
-| `JS_TRANSPILE_TIMING` | Non-zero: print parse/AST/import/MIR/link/execute timing and AST counters. | ✓ | ✓ | ✓ | ✓ |
+| Variable | Effect / accepted value | Debug | Release | Release profile |
+|---|---|:---:|:---:|:---:|
+| `LAMBDA_JS_LARGE_INTERP` | Default on; `0`/`false` disables automatic large-module/document MIR interpretation for Lambda and LambdaJS. | ✓ | ✓ | ✓ |
+| `LAMBDA_JS_LARGE_INTERP_BYTES` | Positive source-size threshold for automatic O0 interpretation; default 15000 bytes. | ✓ | ✓ | ✓ |
+| `LAMBDA_DISABLE_JS_MIR_CACHE` | Presence disables Radiant batch JS-MIR cache. | ✓ | ✓ | ✓ |
+| `JS_MIR_INTERP` | `1`/`true`: force the MIR interpreter path for Lambda and LambdaJS. | ✓ | ✓ | ✓ |
+| `JS_LAZY_MIR` | Non-zero: select per-function lazy MIR code generation. | ✓ | ✓ | ✓ |
+| `LAMBDA_JS_CONST_FOLD` | Default on; `0` disables JS MIR constant folding. | ✓ | ✓ | ✓ |
+| `JS_TRANSPILE_TIMING` | Non-zero: print parse/AST/import/MIR/link/execute timing and AST counters. | ✓ | ✓ | ✓ |
 
 ## LambdaJS counters and executable profiling
 
-| Variable | Effect / accepted value | Debug | Debug profile | Release | Release profile |
-|---|---|:---:|:---:|:---:|:---:|
-| `JS_OPT_TRACE` | Truthy: record optimization hit/miss/fallback counters and dump them at exit. Requires `LAMBDA_JS_EXEC_PROFILE` at compile time. | ✓ | ✓ | ✗ | ✓ |
-| `JS_OPT_TRACE_OUT` | Output TSV for `JS_OPT_TRACE`; defaults to `temp/js_opt_trace_<pid>.tsv`. | ✓ | ✓ | ✗ | ✓ |
+| Variable | Effect / accepted value | Debug | Release | Release profile |
+|---|---|:---:|:---:|:---:|
+| `JS_OPT_TRACE` | Truthy: record optimization hit/miss/fallback counters and dump them at exit. Requires `LAMBDA_JS_EXEC_PROFILE` at compile time. | ✓ | ✗ | ✓ |
+| `JS_OPT_TRACE_OUT` | Output TSV for `JS_OPT_TRACE`; defaults to `temp/js_opt_trace_<pid>.tsv`. | ✓ | ✗ | ✓ |
 
 `JS_OPT_TRACE` is the only surviving member of this group; the ten
 `JS_EXEC_PROFILE*` / `LAMBDA_JS_*_STATS*` counters that this audit previously
@@ -93,78 +97,78 @@ present in every build because `lambda/main.cpp` reads it with an ungated
 
 ## Node-compatible runtime and process integration
 
-| Variable | Effect / accepted value | Debug | Debug profile | Release | Release profile |
-|---|---|:---:|:---:|:---:|:---:|
-| `NODE_COMPILE_CACHE` | Enables Node-compatible compile-cache directory. | ✓ | ✓ | ✓ | ✓ |
-| `NODE_DISABLE_COMPILE_CACHE` | Non-zero disables Node-compatible compile cache. | ✓ | ✓ | ✓ | ✓ |
-| `NODE_DEBUG_NATIVE` | Include `COMPILE_CACHE` to report compile-cache activity to stderr. | ✓ | ✓ | ✓ | ✓ |
-| `NODE_DEBUG` | Controls Node-compatible `util.debuglog()` namespaces. | ✓ | ✓ | ✓ | ✓ |
-| `NODE_EXTRA_CA_CERTS` | File containing additional TLS CA certificates. | ✓ | ✓ | ✓ | ✓ |
-| `NODE_UNIQUE_ID` | Marks a cluster worker and supplies its worker id. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_IPC` | Internal child-process IPC marker; normally set/cleared by the runtime. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_IPC_FD` | Internal child-process IPC file descriptor. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_JS_IPC_REF` | Internal IPC reference state for cluster/child processes. | ✓ | ✓ | ✓ | ✓ |
-| `PATH` | Used for Node/Bash command lookup and temporary `node_modules/.bin` augmentation. | ✓ | ✓ | ✓ | ✓ |
+| Variable | Effect / accepted value | Debug | Release | Release profile |
+|---|---|:---:|:---:|:---:|
+| `NODE_COMPILE_CACHE` | Enables Node-compatible compile-cache directory. | ✓ | ✓ | ✓ |
+| `NODE_DISABLE_COMPILE_CACHE` | Non-zero disables Node-compatible compile cache. | ✓ | ✓ | ✓ |
+| `NODE_DEBUG_NATIVE` | Include `COMPILE_CACHE` to report compile-cache activity to stderr. | ✓ | ✓ | ✓ |
+| `NODE_DEBUG` | Controls Node-compatible `util.debuglog()` namespaces. | ✓ | ✓ | ✓ |
+| `NODE_EXTRA_CA_CERTS` | File containing additional TLS CA certificates. | ✓ | ✓ | ✓ |
+| `NODE_UNIQUE_ID` | Marks a cluster worker and supplies its worker id. | ✓ | ✓ | ✓ |
+| `LAMBDA_JS_IPC` | Internal child-process IPC marker; normally set/cleared by the runtime. | ✓ | ✓ | ✓ |
+| `LAMBDA_JS_IPC_FD` | Internal child-process IPC file descriptor. | ✓ | ✓ | ✓ |
+| `LAMBDA_JS_IPC_REF` | Internal IPC reference state for cluster/child processes. | ✓ | ✓ | ✓ |
+| `PATH` | Used for Node/Bash command lookup and temporary `node_modules/.bin` augmentation. | ✓ | ✓ | ✓ |
 
 ## Jube and hosted-language runtime
 
-| Variable | Effect / accepted value | Debug | Debug profile | Release | Release profile |
-|---|---|:---:|:---:|:---:|:---:|
-| `JUBE_MODULE_PATH` | Path-list of module roots searched before/alongside installed module roots. | ✓ | ✓ | ✓ | ✓ |
-| `JUBE_DYNAMIC_MODULE` | Dynamic module library path to load at startup. | ✓ | ✓ | ✓ | ✓ |
-| `JUBE_DYNAMIC_ENTRY` | Optional dynamic-module entry symbol accompanying `JUBE_DYNAMIC_MODULE`. | ✓ | ✓ | ✓ | ✓ |
-| `JUBE_HOSTOBJ_DEMO_DYNAMIC_ONLY` | Non-zero: suppress static host-object demo so its dynamic version can register. Development/test integration switch. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_PYTHON` | Python executable for the serve backend. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_SHELL` | Shell executable for the serve Bash backend. | ✓ | ✓ | ✓ | ✓ |
-| `HOME` | Lambda npm cache, fonts, Bash and JS home-directory support. | ✓ | ✓ | ✓ | ✓ |
-| `XDG_DATA_HOME` | Linux font-discovery location. | ✓ | ✓ | ✓ | ✓ |
-| `PWD` | Embedded Bash current-directory state. | ✓ | ✓ | ✓ | ✓ |
-| `OLDPWD` | Embedded Bash previous-directory state. | ✓ | ✓ | ✓ | ✓ |
-| `BASH_COMMAND` | Set internally when Lambda dispatches inline Bash. | ✓ | ✓ | ✓ | ✓ |
+| Variable | Effect / accepted value | Debug | Release | Release profile |
+|---|---|:---:|:---:|:---:|
+| `JUBE_MODULE_PATH` | Path-list of module roots searched before/alongside installed module roots. | ✓ | ✓ | ✓ |
+| `JUBE_DYNAMIC_MODULE` | Dynamic module library path to load at startup. | ✓ | ✓ | ✓ |
+| `JUBE_DYNAMIC_ENTRY` | Optional dynamic-module entry symbol accompanying `JUBE_DYNAMIC_MODULE`. | ✓ | ✓ | ✓ |
+| `JUBE_HOSTOBJ_DEMO_DYNAMIC_ONLY` | Non-zero: suppress static host-object demo so its dynamic version can register. Development/test integration switch. | ✓ | ✓ | ✓ |
+| `LAMBDA_PYTHON` | Python executable for the serve backend. | ✓ | ✓ | ✓ |
+| `LAMBDA_SHELL` | Shell executable for the serve Bash backend. | ✓ | ✓ | ✓ |
+| `HOME` | Lambda npm cache, fonts, Bash and JS home-directory support. | ✓ | ✓ | ✓ |
+| `XDG_DATA_HOME` | Linux font-discovery location. | ✓ | ✓ | ✓ |
+| `PWD` | Embedded Bash current-directory state. | ✓ | ✓ | ✓ |
+| `OLDPWD` | Embedded Bash previous-directory state. | ✓ | ✓ | ✓ |
+| `BASH_COMMAND` | Set internally when Lambda dispatches inline Bash. | ✓ | ✓ | ✓ |
 
 ## Radiant, rendering, and document JavaScript
 
-| Variable | Effect / accepted value | Debug | Debug profile | Release | Release profile |
-|---|---|:---:|:---:|:---:|:---:|
-| `LAMBDA_JS_EXEC_TIMEOUT_SECONDS` | Positive document-script timeout override. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_JS_SOURCE_CACHE` | Default on; `0` disables external script-source cache. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_JS_SOURCE_CACHE_BYTES` | Positive source-cache byte limit. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_JS_PRELAYOUT_DEFER_BYTES` | Positive pre-layout script deferral threshold. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_JS_EXTERNAL_SCRIPT_BYTES` | Positive external-script byte limit. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_JS_TOTAL_SCRIPT_BYTES` | Positive total document-script byte limit. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_JS_LOAD_BLOCK_TIMEOUT_MS` | Positive block-load timeout. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_JS_TASK_DIAGNOSTICS` | Non-zero task diagnostic logging. | ✓ | ✓ | ✗ | ✗ |
-| `RADIANT_JS_TASK_TIMING` | Non-zero task timing logging. | ✓ | ✓ | ✗ | ✗ |
-| `RADIANT_SCRIPT_BEFORE_CASCADE` | Non-zero: legacy script-before-CSS-cascade order. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_LAYOUT_RESOURCE_TIMEOUT_MS` | Positive layout resource wait timeout. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_RENDER_THREADS` | Positive renderer worker count. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_TILE_STRIP_H` | Positive raster tile-strip height. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_TILE_THRESHOLD` | Positive PNG tile threshold in bytes. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_VERIFY_INCREMENTAL_LAYOUT` | `1`: run incremental-layout verification. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_UPDATE_STATE_DUMPS` | `1`/`true`/`yes`: update event-simulation state dumps. | ✓ | ✓ | ✓ | ✓ |
-| `LAYOUT_DEBUG` | Comma/semicolon/space-separated layout debug categories. | ✓ | ✓ | ✓ | ✓ |
-| `LAYOUT_PROFILE` | Non-zero layout profiling. | ✓ | ✓ | ✓ | ✓ |
-| `RADIANT_TRACE_RENDER` | Render trace logging. | ✓ | ✓ | ✗ | ✗ |
-| `RADIANT_TRACE_TEXT` | Text-render trace logging. | ✓ | ✓ | ✗ | ✗ |
-| `RADIANT_TRACE_FONT` | Font metric trace logging. | ✓ | ✓ | ✗ | ✗ |
-| `RENDER_BATCH_MEM_REPORT` | Positive batch interval for memory reports. | ✓ | ✓ | ✓ | ✓ |
-| `RENDER_BATCH_RSS_REPORT` | Non-zero: per-job RSS reports. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_IMAGE_DECODE_TRACE` | Non-empty image-decode trace logging (notice level, retained in release). | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_AUTO_CLOSE` | Presence auto-closes Radiant window after first frame / enables batch close. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_HEADLESS_GLFW_WINDOW` | Presence restores a hidden GLFW window in headless mode. | ✓ | ✓ | ✓ | ✓ |
+| Variable | Effect / accepted value | Debug | Release | Release profile |
+|---|---|:---:|:---:|:---:|
+| `LAMBDA_JS_EXEC_TIMEOUT_SECONDS` | Positive document-script timeout override. | ✓ | ✓ | ✓ |
+| `RADIANT_JS_SOURCE_CACHE` | Default on; `0` disables external script-source cache. | ✓ | ✓ | ✓ |
+| `RADIANT_JS_SOURCE_CACHE_BYTES` | Positive source-cache byte limit. | ✓ | ✓ | ✓ |
+| `RADIANT_JS_PRELAYOUT_DEFER_BYTES` | Positive pre-layout script deferral threshold. | ✓ | ✓ | ✓ |
+| `RADIANT_JS_EXTERNAL_SCRIPT_BYTES` | Positive external-script byte limit. | ✓ | ✓ | ✓ |
+| `RADIANT_JS_TOTAL_SCRIPT_BYTES` | Positive total document-script byte limit. | ✓ | ✓ | ✓ |
+| `RADIANT_JS_LOAD_BLOCK_TIMEOUT_MS` | Positive block-load timeout. | ✓ | ✓ | ✓ |
+| `RADIANT_JS_TASK_DIAGNOSTICS` | Non-zero task diagnostic logging. | ✓ | ✗ | ✗ |
+| `RADIANT_JS_TASK_TIMING` | Non-zero task timing logging. | ✓ | ✗ | ✗ |
+| `RADIANT_SCRIPT_BEFORE_CASCADE` | Non-zero: legacy script-before-CSS-cascade order. | ✓ | ✓ | ✓ |
+| `RADIANT_LAYOUT_RESOURCE_TIMEOUT_MS` | Positive layout resource wait timeout. | ✓ | ✓ | ✓ |
+| `RADIANT_RENDER_THREADS` | Positive renderer worker count. | ✓ | ✓ | ✓ |
+| `RADIANT_TILE_STRIP_H` | Positive raster tile-strip height. | ✓ | ✓ | ✓ |
+| `RADIANT_TILE_THRESHOLD` | Positive PNG tile threshold in bytes. | ✓ | ✓ | ✓ |
+| `RADIANT_VERIFY_INCREMENTAL_LAYOUT` | `1`: run incremental-layout verification. | ✓ | ✓ | ✓ |
+| `RADIANT_UPDATE_STATE_DUMPS` | `1`/`true`/`yes`: update event-simulation state dumps. | ✓ | ✓ | ✓ |
+| `LAYOUT_DEBUG` | Comma/semicolon/space-separated layout debug categories. | ✓ | ✓ | ✓ |
+| `LAYOUT_PROFILE` | Non-zero layout profiling. | ✓ | ✓ | ✓ |
+| `RADIANT_TRACE_RENDER` | Render trace logging. | ✓ | ✗ | ✗ |
+| `RADIANT_TRACE_TEXT` | Text-render trace logging. | ✓ | ✗ | ✗ |
+| `RADIANT_TRACE_FONT` | Font metric trace logging. | ✓ | ✗ | ✗ |
+| `RENDER_BATCH_MEM_REPORT` | Positive batch interval for memory reports. | ✓ | ✓ | ✓ |
+| `RENDER_BATCH_RSS_REPORT` | Non-zero: per-job RSS reports. | ✓ | ✓ | ✓ |
+| `LAMBDA_IMAGE_DECODE_TRACE` | Non-empty image-decode trace logging (notice level, retained in release). | ✓ | ✓ | ✓ |
+| `LAMBDA_AUTO_CLOSE` | Presence auto-closes Radiant window after first frame / enables batch close. | ✓ | ✓ | ✓ |
+| `LAMBDA_HEADLESS_GLFW_WINDOW` | Presence restores a hidden GLFW window in headless mode. | ✓ | ✓ | ✓ |
 
 ## OS compatibility variables
 
-| Variable | Effect / accepted value | Debug | Debug profile | Release | Release profile |
-|---|---|:---:|:---:|:---:|:---:|
-| `TMPDIR` | Native/JS temporary-directory selection and Node compile-cache default. | ✓ | ✓ | ✓ | ✓ |
-| `TMP` | Fallback temporary-directory selection. | ✓ | ✓ | ✓ | ✓ |
-| `TEMP` | Fallback temporary-directory selection, primarily Windows. | ✓ | ✓ | ✓ | ✓ |
-| `USERPROFILE` | Windows home directory for shell/JS OS support. | ✓ | ✓ | ✓ | ✓ |
-| `HOMEDRIVE` | Windows fallback home directory for shell support. | ✓ | ✓ | ✓ | ✓ |
-| `USERNAME` | Windows JS OS user information. | ✓ | ✓ | ✓ | ✓ |
-| `LANG` | REPL locale selection. | ✓ | ✓ | ✓ | ✓ |
-| `LC_ALL` | Overrides `LANG` for REPL locale selection. | ✓ | ✓ | ✓ | ✓ |
+| Variable | Effect / accepted value | Debug | Release | Release profile |
+|---|---|:---:|:---:|:---:|
+| `TMPDIR` | Native/JS temporary-directory selection and Node compile-cache default. | ✓ | ✓ | ✓ |
+| `TMP` | Fallback temporary-directory selection. | ✓ | ✓ | ✓ |
+| `TEMP` | Fallback temporary-directory selection, primarily Windows. | ✓ | ✓ | ✓ |
+| `USERPROFILE` | Windows home directory for shell/JS OS support. | ✓ | ✓ | ✓ |
+| `HOMEDRIVE` | Windows fallback home directory for shell support. | ✓ | ✓ | ✓ |
+| `USERNAME` | Windows JS OS user information. | ✓ | ✓ | ✓ |
+| `LANG` | REPL locale selection. | ✓ | ✓ | ✓ |
+| `LC_ALL` | Overrides `LANG` for REPL locale selection. | ✓ | ✓ | ✓ |
 
 ## Deliberately excluded names
 
@@ -196,12 +200,12 @@ The recommended policy has four classes:
    required to implement a public runtime feature. These remain in all builds.
 2. **Debug/test (34):** diagnostics, fault injection, validation, trace output,
    legacy ordering, and test automation. Compile only in `debug` and
-   `debug_profile`.
+   `debug_asan`.
 3. **Profiling (15):** timers, counters, reports, and output destinations.
-   Compile only in `debug_profile` and `release_profile`.
+   Compile only in `debug` and `release_profile`.
 4. **Experimental/A-B (11):** temporary optimization and resource-strategy
    controls used for differential correctness tests and performance A/B runs.
-   Keep in `debug`, `debug_profile`, and `release_profile` during migration,
+   Keep in `debug` and `release_profile` during migration,
    but compile them out of `release`. Retire each switch after its optimized
    path becomes unconditional.
 
@@ -213,8 +217,8 @@ environment hook rather than carrying it into a new profile.
 
 | Profile | Truly needed after cleanup | Composition |
 |---|---:|---|
-| debug | **69** | 30 runtime + 28 debug/test + 11 experimental |
-| debug_profile | **84** | 30 runtime + 28 debug/test + 15 profiling + 11 experimental |
+| debug | **84** | 30 runtime + 28 debug/test + 15 profiling + 11 experimental |
+| debug_asan | **69** | 30 runtime + 28 debug/test + 11 experimental |
 | release | **30** | 30 runtime only |
 | release_profile | **56** | 30 runtime + 15 profiling + 11 experimental |
 
@@ -225,8 +229,8 @@ each of which has been re-verified against the current source. The original
 compiled-out analysis, so leaving stale numbers beside verified ones would be
 worse than omitting them. Re-add it with a fresh audit.
 
-The profiling-only rule removes 15 profiler variables from both non-profile
-builds; `JS_OPT_TRACE*` already obey it, the other 13 do not yet.
+The profiling-only rule removes 15 profiler variables from non-profile builds;
+`JS_OPT_TRACE*` already obey it, the other 13 do not yet.
 
 ### Release/runtime allowlist (30)
 
@@ -300,14 +304,15 @@ Add two explicit generated-build defines rather than scattering assumptions
 about `DEBUG` and `NDEBUG`:
 
 ```c
-// debug and debug_profile
+// debug and debug_asan
 #define LAMBDA_DEBUG_TOOLS 1
 
-// debug_profile and release_profile
+// debug and release_profile
 #define LAMBDA_PROFILE_TOOLS 1
 ```
 
-`debug_profile` receives both. `release` receives neither. The existing
+`debug` receives both, `debug_asan` receives only `LAMBDA_DEBUG_TOOLS`, and
+`release` receives neither. The existing
 `LAMBDA_JS_EXEC_PROFILE` can become an implementation detail selected by
 `LAMBDA_PROFILE_TOOLS`, or be retained as a JS-specific sub-feature.
 
@@ -366,7 +371,7 @@ strings lambda_release.exe |
 
 The production gate should use a checked-in exact denylist generated from the
 classification above, not only the illustrative regular expression. Also
-compile and smoke-test all four profiles so an accidentally over-broad guard
+compile and smoke-test all five profiles so an accidentally over-broad guard
 cannot leave profile-only code unbuilt.
 
 ## Audit commands
@@ -378,7 +383,7 @@ rg -n 'configurations:|LAMBDA_JS_EXEC_PROFILE|LAMBDA_HOME_RELEASE|sanitize' prem
 
 # Rebuild each behaviorally distinct profile.
 make debug
-make build-debug-profile
+make build-debug-asan
 make build-release
 make build-release-profile
 

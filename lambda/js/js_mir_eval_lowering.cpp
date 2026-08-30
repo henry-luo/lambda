@@ -595,7 +595,7 @@ static void js_install_realm_global_preamble(JsMirTranspiler* mt,
         JsTranspiler* tp) {
     if (!mt || !tp || !g_eval_preamble_entries ||
             g_eval_preamble_entry_count <= 0) return;
-    uint32_t harness_var_count = js_get_batch_preamble_var_count();
+    uint32_t harness_var_count = js_runtime_state.batch_preamble_var_count;
     JsModuleConstEntry* global_entries = (JsModuleConstEntry*)pool_calloc(
         tp->pool, sizeof(JsModuleConstEntry) * g_eval_preamble_entry_count);
     if (!global_entries) return;
@@ -814,7 +814,8 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     snprintf(module_name, sizeof(module_name), "js_dynfunc_%d", js_dynamic_func_counter++);
     MIR_context_t ctx = NULL;
     JsMirTranspiler* mt = js_mir_open_compile_unit(tp, "<new Function>",
-        module_name, false, js_active_module_name_count(), 0, true,
+        module_name, false,
+        lambda_module_state_property_key_count(lambda_active_module_state_id()), 0, true,
         "js-new-function", true, &ctx);
     if (!mt) {
         (void)js_mir_compile_unit_fail(ctx, NULL, tp, source,
@@ -874,7 +875,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
     // its generated inline module slots can exceed that caller's original
     // declaration count (for example a generated class after a batch reset).
     // Grow the shared slab before js_main can address those fixed offsets.
-    if (!js_ensure_active_module_var_capacity((uint32_t)mt->module_var_count)) {
+    if (!lambda_active_module_state_ensure_vars((uint32_t)mt->module_var_count)) {
         log_error("js-new-function: failed to grow active module state");
         (void)js_mir_compile_unit_fail(ctx, mt, tp, source,
             js_current_runtime(), context, true);
@@ -1647,7 +1648,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         // state which that function cannot capture; use the direct-program
         // evaluator, which preserves the active eval bridge instead.
         bool ast_execution_active = js_ast_interpreter_requested() ||
-            js_runtime_state.ast_interpreter.execution_depth > 0;
+            (context && context->execution_depth > 0);
         bool skip_expr_form = !is_direct_eval || ast_execution_active;
         const char* s = code_str->chars;
         size_t slen = code_str->len;
@@ -1835,7 +1836,8 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         snprintf(module_name, sizeof(module_name), "js_eval_%d", js_dynamic_func_counter++);
         MIR_context_t eval_ctx = NULL;
         JsMirTranspiler* mt = js_mir_open_compile_unit(tp, eval_filename, module_name,
-            false, js_eval_fresh_module_scope ? 0 : js_active_module_name_count(),
+            false, js_eval_fresh_module_scope ? 0
+                : lambda_module_state_property_key_count(lambda_active_module_state_id()),
             0, true, "js-eval", true, &eval_ctx);
         if (!mt) {
             (void)js_mir_compile_unit_fail(eval_ctx, NULL, tp, NULL,
@@ -1867,7 +1869,8 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             }
         }
         if (is_direct_eval && !is_vm_global_context) {
-            uint32_t active_var_count = js_active_module_var_count();
+            uint32_t active_var_count = context && context->active_module_state
+                ? context->active_module_state->var_count : 0;
             if (active_var_count > (uint32_t)mt->preamble_var_count) {
                 // An AST caller owns a live slab but no MIR preamble snapshot.
                 // Reserve that prefix so eval's private compiler slots append
@@ -1918,25 +1921,26 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         // VM scripts and indirect eval each compile a separate global script.
         // Their own slots begin after the retained harness prefix, preventing
         // either unit from aliasing caller module bindings.
+        RuntimeModuleStateScope eval_module_state(context);
         uint32_t js_eval_prev_module_state_id = UINT32_MAX;
         if (js_eval_fresh_module_scope) {
-            js_eval_prev_module_state_id = js_get_active_module_state_id();
-            if (!js_activate_module_state((uint32_t)mt->module_var_count)) {
+            js_eval_prev_module_state_id = lambda_active_module_state_id();
+            if (!lambda_module_state_reserve_and_activate(
+                    (uint32_t)mt->module_var_count)) {
                 js_set_direct_new_target(prev_nt);
                 (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
                     js_current_runtime(), context, true);
                 return ItemError;
             }
             if (!is_direct_eval && mt->preamble_var_count > 0 &&
-                    !js_copy_module_state_var_prefix(js_eval_prev_module_state_id,
-                        js_get_active_module_state_id(), (uint32_t)mt->preamble_var_count)) {
-                js_set_active_module_state_id(js_eval_prev_module_state_id);
+                    !lambda_module_state_copy_var_prefix(js_eval_prev_module_state_id,
+                        lambda_active_module_state_id(), (uint32_t)mt->preamble_var_count)) {
                 js_set_direct_new_target(prev_nt);
                 (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
                     js_current_runtime(), context, true);
                 return ItemError;
             }
-        } else if (!js_ensure_active_module_var_capacity(
+        } else if (!lambda_active_module_state_ensure_vars(
                 (uint32_t)mt->module_var_count)) {
             js_set_direct_new_target(prev_nt);
             (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
@@ -1946,9 +1950,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
 
         if (!js_append_compiled_name_table(mt)) {
             log_error("js-eval: failed to append NameId table");
-            if (js_eval_fresh_module_scope) {
-                js_set_active_module_state_id(js_eval_prev_module_state_id);
-            }
             js_set_direct_new_target(prev_nt);
             (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
                 js_current_runtime(), context, true);
@@ -1965,10 +1966,6 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         }
         Item result = js_mir_execute_compiled_entry((void*)js_main_fn);
         if (!is_direct_eval) js_set_this(previous_this.get());
-
-        if (js_eval_fresh_module_scope) {
-            js_set_active_module_state_id(js_eval_prev_module_state_id);
-        }
 
         js_set_direct_new_target(prev_nt);
 

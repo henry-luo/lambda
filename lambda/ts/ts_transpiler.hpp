@@ -34,14 +34,6 @@ Type* ts_resolve_type(TsTranspiler* tp, TsTypeNode* node);
 void ts_resolve_all_types(TsTranspiler* tp, JsAstNode* root);
 TypeId ts_predefined_name_to_type_id(const char* name, int len);
 
-// Error handling functions (build_js_ast.cpp — merged)
-void ts_error(TsTranspiler* tp, TSNode node, const char* format, ...);
-void ts_warning(TsTranspiler* tp, TSNode node, const char* format, ...);
-
-// Source preprocessing: strip TS type annotations to produce valid JS
-// Returns a malloc'd buffer (caller must free). out_len receives the length.
-char* ts_preprocess_source(const char* src, size_t len, size_t* out_len);
-
 #ifdef __cplusplus
 }
 #endif

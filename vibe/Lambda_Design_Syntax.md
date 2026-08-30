@@ -2917,8 +2917,8 @@ never lead.
 
 | Group | Words |
 |---|---|
-| Clause words (11) — only meaningful inside a `for` header | `order` `by` `group` `into` `limit` `offset` `asc` `desc` `where` `that` `as` |
-| Infix word operators (13) — each takes a left operand | `and` `or` `to` `is` `in` `at` `div` `eq` `ne` `lt` `le` `ge` `gt` |
+| Clause words (10) — only meaningful inside a `for` header | `order` `by` `group` `into` `limit` `offset` `asc` `desc` `where` `as` |
+| Infix word operators (14) — each takes a left operand | `and` `or` `to` `is` `in` `at` `div` `that` `eq` `ne` `lt` `le` `ge` `gt` |
 | Continuation-only words (4) — claimed by an enclosing `if`/`match`/view | `else` `case` `default` `on` |
 
 This group is why `let offset = 5` and `fn f(limit)` have always worked, and

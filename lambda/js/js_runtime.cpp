@@ -19,6 +19,7 @@
 #include "../runtime/lambda-error.h"
 #include "../runtime/lambda-root-frame.hpp"
 #include "../runtime/heap_api.h"
+#include "../runtime/runtime-state.h"
 #include "../runtime/hosted-call-dispatch.hpp"
 #include "../core/lambda_typed.hpp"
 #include "../runtime/gc/gc_heap.h"
@@ -739,7 +740,7 @@ static void js_global_var_binding_refresh(void) {
 extern "C" void js_register_global_var_module_binding(Item key, int64_t index) {
     js_global_var_binding_refresh();
     if (get_type_id(key) != LMD_TYPE_STRING || index < 0) return;
-    uint32_t module_state_id = js_get_active_module_state_id();
+    uint32_t module_state_id = lambda_active_module_state_id();
     for (int i = 0; i < js_global_var_module_binding_count; i++) {
         if (js_global_var_binding_key_same(js_global_var_module_binding_keys[i], key)) {
             js_global_var_module_binding_indices[i] = (int)index;
@@ -758,7 +759,7 @@ extern "C" void js_register_global_var_module_bindings_bulk(const Item* keys,
         const int* indices, int count) {
     js_global_var_binding_refresh();
     if (!keys || !indices || count <= 0) return;
-    uint32_t module_state_id = js_get_active_module_state_id();
+    uint32_t module_state_id = lambda_active_module_state_id();
     for (int i = 0; i < count; i++) {
         Item key = keys[i];
         int index = indices[i];
@@ -823,14 +824,11 @@ static void js_sync_global_var_module_binding(Item object, Item key, Item value)
             // The writer may be an indirect-eval function in another slab, so
             // update the binding's owner rather than its currently active slab.
             uint32_t owner_state_id = js_global_var_module_binding_state_ids[i];
-            uint32_t previous_state_id = js_get_active_module_state_id();
-            bool switched_state = owner_state_id != UINT32_MAX &&
-                owner_state_id != previous_state_id;
-            if (switched_state && !js_set_active_module_state_id(owner_state_id)) return;
-            js_set_module_var(js_global_var_module_binding_indices[i], value);
-            if (switched_state && previous_state_id != UINT32_MAX) {
-                js_set_active_module_state_id(previous_state_id);
-            }
+            RuntimeModuleStateScope module_state(context);
+            if (owner_state_id != UINT32_MAX &&
+                    !module_state.activate(owner_state_id)) return;
+            lambda_active_module_var_store(
+                (uint32_t)js_global_var_module_binding_indices[i], value);
             return;
         }
     }
@@ -14274,9 +14272,10 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
     js_prepare_new_target_for_call(install_new_target,
         construct_target_root.get());
     // Switch to callee's module vars if it belongs to a different module
-    uint32_t prev_module_state_id = js_get_active_module_state_id();
-    if (fn->module_state_id != UINT32_MAX && fn->module_state_id != prev_module_state_id) {
-        js_set_active_module_state_id(fn->module_state_id);
+    RuntimeModuleStateScope module_state(context);
+    if (fn->module_state_id != UINT32_MAX &&
+            !module_state.activate(fn->module_state_id)) {
+        return js_throw_type_error("function module state is unavailable");
     }
     Item prev_global = ItemNull;
     Item caller_global = js_get_global_this();
@@ -14329,9 +14328,6 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         js_with_set_stack(saved_with_stack, saved_with_depth);
     }
     if (switched_global) js_vm_swap_global_this(prev_global);
-    if (prev_module_state_id != UINT32_MAX) {
-        js_set_active_module_state_id(prev_module_state_id);
-    }
     if (install_this) js_current_this = saved_this_root.get();
     if (install_new_target) js_new_target = saved_new_target_root.get();
     // D6.2.2v2: nested calls during parameter evaluation must not replace the
@@ -31310,10 +31306,9 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
     if (!js_mir_owner_is_current(ctx->runtime_context, "js-async-drive")) {
         return;
     }
-    uint32_t previous_module_state_id = js_get_active_module_state_id();
-    if (ctx->module_state_id != UINT32_MAX) {
-        js_set_active_module_state_id(ctx->module_state_id);
-    }
+    RuntimeModuleStateScope module_state(context);
+    if (ctx->module_state_id != UINT32_MAX &&
+            !module_state.activate(ctx->module_state_id)) return;
     JS_ROOTS(roots,
         input_root, input,
         result_root, ItemNull,
@@ -31321,15 +31316,6 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
         resume_root, ItemNull,
         reject_root, ItemNull);
     Item prev_this = js_current_this;
-    uint32_t prev_module_state_id = js_get_active_module_state_id();
-    bool switched_module_state = ctx->module_state_id != UINT32_MAX &&
-        ctx->module_state_id != prev_module_state_id;
-    if (switched_module_state) {
-        // An async continuation can run after another module has become active;
-        // restore the suspended function's name image before state code
-        // resolves sealed property lanes (D5.4.3).
-        js_set_active_module_state_id(ctx->module_state_id);
-    }
     js_current_this = ctx->this_val;
     if (get_type_id(ctx->ast_function) == LMD_TYPE_FUNC) {
         result_root.set(js_interp_resume_async(ctx, input_root.get()));
@@ -31338,25 +31324,16 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
             ctx->state_fn, ctx->env, input_root.get(), state));
     }
     js_current_this = prev_this;
-    if (switched_module_state) {
-        js_set_active_module_state_id(prev_module_state_id);
-    }
     // Parse result: [value, next_state]
     if (get_type_id(result_root.get()) != LMD_TYPE_ARRAY) {
         JsPromise* promise = js_get_promise(ctx->promise);
         if (promise) js_promise_settle(promise, JS_PROMISE_REJECTED, result_root.get());
-        if (previous_module_state_id != UINT32_MAX) {
-            js_set_active_module_state_id(previous_module_state_id);
-        }
         return;
     }
     Array* arr = result_root.get().array;
     if (arr->length < 2) {
         JsPromise* promise = js_get_promise(ctx->promise);
         if (promise) js_promise_settle(promise, JS_PROMISE_REJECTED, ItemNull);
-        if (previous_module_state_id != UINT32_MAX) {
-            js_set_active_module_state_id(previous_module_state_id);
-        }
         return;
     }
     value_root.set(arr->items[0]);
@@ -31388,9 +31365,6 @@ static void js_async_drive(int ctx_idx, Item input, int64_t state) {
 
         // Register on the pending promise
         js_promise_then(value_root.get(), resume_root.get(), reject_root.get());
-    }
-    if (previous_module_state_id != UINT32_MAX) {
-        js_set_active_module_state_id(previous_module_state_id);
     }
 }
 
@@ -31437,10 +31411,10 @@ static Item js_async_context_create_current(void* fn_ptr, Item* env,
     js_env_rehome_scalars(env);
     ctx->env = env;
     ctx->env_size = (int)env_size;
-    ctx->module_state_id = js_get_active_module_state_id();
+    ctx->module_state_id = lambda_active_module_state_id();
     ctx->state = 0;
     ctx->this_val = this_val;
-    ctx->module_state_id = js_get_active_module_state_id();
+    ctx->module_state_id = lambda_active_module_state_id();
     ctx->ast_function = ast_function;
     ctx->ast_arguments = ast_arguments;
     ctx->ast_function_env = NULL;
@@ -31980,17 +31954,19 @@ static void js_tla_flush_pending_modules(bool skip_pending_awaits) {
             m->path ? m->path : "<module>", m->async_eval_order);
         js_main_fn main_fn = (js_main_fn)m->deferred_main_ptr;
         m->deferred_main_ptr = NULL;
+        Item spec = m->specifier_item;
         // Restore the module's evaluation context (module-vars and namespace)
         // so the re-entered js_main sees the same state it had during the pre-
         // await phase.
-        uint32_t prev_module_state_id = js_get_active_module_state_id();
-        Item prev_ns = js_set_active_module_namespace(m->namespace_obj);
+        RuntimeModuleStateScope module_state(context);
+        JsModuleNamespaceScope module_namespace(m->namespace_obj, true);
         if (m->saved_module_state_id != UINT32_MAX) {
-            js_set_active_module_state_id(m->saved_module_state_id);
+            if (!module_state.activate(m->saved_module_state_id)) {
+                js_module_record_evaluation_error(spec, ItemError);
+                continue;
+            }
         }
-        Item spec = m->specifier_item;
-        const char* previous_current_file = context ? context->current_file : NULL;
-        if (context) context->current_file = m->path;
+        RuntimeCurrentFileScope current_file(context, m->path);
         Item awaited_target = m->awaited_target;
         if (get_type_id(awaited_target) != LMD_TYPE_NULL) {
             // The continuation must not run until the first TLA target has
@@ -31999,20 +31975,10 @@ static void js_tla_flush_pending_modules(bool skip_pending_awaits) {
             Item awaited_result = js_await_sync(awaited_target);
             if (item_is_error(awaited_result)) {
                 js_module_record_evaluation_error(spec, awaited_result);
-                if (prev_module_state_id != UINT32_MAX) {
-                    js_set_active_module_state_id(prev_module_state_id);
-                }
-                js_set_active_module_namespace(prev_ns);
-                if (context) context->current_file = previous_current_file;
                 continue;
             }
         }
         Item continuation_result = main_fn(context);
-        if (context) context->current_file = previous_current_file;
-        if (prev_module_state_id != UINT32_MAX) {
-            js_set_active_module_state_id(prev_module_state_id);
-        }
-        js_set_active_module_namespace(prev_ns);
         if (item_is_error(continuation_result)) {
             js_module_record_evaluation_error(spec, continuation_result);
         } else {

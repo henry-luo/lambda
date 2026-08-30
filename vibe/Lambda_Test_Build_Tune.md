@@ -7,7 +7,7 @@ Proposal for reducing `make build-test` wall-clock and trimming dead weight from
 Snapshot at proposal time:
 
 - ~120 `*.cpp` test sources, 147 test executables defined in [build_lambda_config.json](../build_lambda_config.json).
-- `make build-test` runs `make -C build/premake config=debug_native -j$(TEST_JOBS)` where `TEST_JOBS = (NPROCS+1)/2` ([Makefile:55](../Makefile#L55)) — intentionally halved for Debug+ASan memory pressure.
+- `make build-test` runs `make -C build/premake config=debug_native -j$(TEST_JOBS)` where `TEST_JOBS = (NPROCS+1)/2` ([Makefile:55](../Makefile#L55)) — ordinary debug is now non-ASan; the bound remains a conservative parallel test-memory/host-load limit.
 - `lambda-input-full` is already a dynamic library (`"link": "dynamic"`), shared by 69 test entries. `lambda-lib` is still **static**, with 31 sources.
 
 The proposal has three independent tracks. Each can land on its own; they compound.
@@ -86,7 +86,7 @@ The biggest already-implemented win at proposal time was `lambda-input-full` as 
 - **Fixed:**
   - Installed ccache 4.13.6 (mac) via `brew install ccache`; added ccache installs to [setup-mac-deps.sh](../setup-mac-deps.sh) and [setup-linux-deps.sh](../setup-linux-deps.sh) ([setup-windows-deps.sh](../setup-windows-deps.sh) already had it).
   - Moved the ccache wrap to AFTER the CC/CXX detection block.
-  - Bumped `CCACHE_MAXSIZE` from `500M` → `5G` (matches ccache's own default; 500M was undersized for 147 Debug+ASan TUs).
+  - Bumped `CCACHE_MAXSIZE` from `500M` → `5G` (matches ccache's own default; 500M was undersized for 147 Debug TUs).
   - Added `CCACHE_SLOPPINESS=time_macros,include_file_mtime` to avoid false misses on `__DATE__` / `__TIME__` and regenerated files like `parser.c` / `ts-enum.h`.
 - **Measured.** Single-TU compile of `test_dir_gtest.cpp`: cold ccache **0.707s**, warm ccache **0.012s** = **60× speedup** on cached builds.
 

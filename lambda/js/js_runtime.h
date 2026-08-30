@@ -785,26 +785,9 @@ bool js_prepare_eval_context(Runtime* runtime, bool initialize_thread,
 // Module Variable Table
 // =============================================================================
 
-void js_set_module_var(int index, Item value);
-Item js_get_module_var(int index);
 void js_init_module_vars_undefined_bulk(const int* indices,
     const uint32_t* module_name_indices, const NameId* direct_name_ids,
     int count, int define_global_var_properties);
-void js_reset_module_vars(void);
-uint32_t js_alloc_module_state(uint32_t var_count);
-bool js_activate_module_state(uint32_t var_count);
-bool js_ensure_active_module_var_capacity(uint32_t required_var_count);
-uint32_t js_get_active_module_state_id(void);
-bool js_set_active_module_state_id(uint32_t module_state_id);
-bool js_module_state_is_available(uint32_t module_state_id);
-uint32_t js_active_module_var_count(void);
-uint64_t js_active_module_name_id(uint32_t index);
-Item js_active_module_name_item(uint32_t module_name_index, NameId direct_name_id);
-uint32_t js_active_module_name_count(void);
-uint32_t js_get_batch_preamble_var_count(void);
-bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
-                                     uint32_t destination_module_state_id,
-                                     uint32_t count);
 void js_eval_preamble_cache_reset(void);
 void js_register_global_var_module_binding(Item key, int64_t index);
 void js_register_global_var_module_bindings_bulk(const Item* keys, const int* indices, int count);

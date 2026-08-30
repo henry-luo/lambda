@@ -46,6 +46,7 @@ typedef struct JsParser {
     bool type_stop_at_arrow;
     bool stop_for_in_of;
     bool assignment_target_pattern;
+    bool probing_assignment_member_base;
     bool in_ts_namespace;
     uint8_t pending_parameter_accessibility;
     bool pending_parameter_readonly;
@@ -1342,7 +1343,8 @@ static bool js_parser_parser_has_async_arrow(JsParser* parser) {
 }
 
 static bool js_parser_parser_has_assignment_pattern(JsParser* parser) {
-    if (!parser || (parser->current.kind != JS_TOK_LBRACKET &&
+    if (!parser || parser->probing_assignment_member_base ||
+            (parser->current.kind != JS_TOK_LBRACKET &&
             parser->current.kind != JS_TOK_LBRACE)) return false;
     JsParserProbe probe;
     js_parser_parser_probe_begin(parser, &probe);
@@ -1458,6 +1460,9 @@ static bool js_parser_parser_has_assignment_member_target(JsParser* parser) {
             parser->current.kind != JS_TOK_LBRACKET)) return false;
     JsParserProbe probe;
     js_parser_parser_probe_begin(parser, &probe);
+    // The member base is an expression. Suppress nested assignment-pattern
+    // probes so ordinary nested literals are not recursively reparsed.
+    parser->probing_assignment_member_base = true;
     SourceSpan base_span;
     bool valid = js_parser_parse_primary(parser, &base_span) &&
         (parser->current.kind == JS_TOK_DOT ||

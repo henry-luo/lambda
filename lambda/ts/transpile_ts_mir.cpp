@@ -18,12 +18,6 @@
 #include <cstdio>
 #include "../../lib/mem.h"
 
-#ifndef JS_C_PRODUCTION
-extern "C" {
-    const TSLanguage* tree_sitter_typescript(void);
-}
-#endif
-
 // ============================================================================
 // TS transpiler creation — uses unified JsTranspiler with TS mode
 // ============================================================================
@@ -41,16 +35,6 @@ static TsTranspiler* ts_transpiler_create(Runtime* runtime) {
     // use the unified JS transpiler, then configure for TS mode
     TsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) return NULL;
-
-#ifndef JS_C_PRODUCTION
-    // Reference mode needs the TypeScript grammar; direct C mode keeps the
-    // reference parser unconstructed for this compilation unit.
-    if (js_parser_backend_selection() != JS_PARSER_BACKEND_C) {
-        TSParser* parser = js_transpiler_reference_parser(tp);
-        const TSLanguage* ts_lang = tree_sitter_typescript();
-        if (parser && ts_lang) ts_parser_set_language(parser, ts_lang);
-    }
-#endif
 
     tp->strict_js = false;           // allow TS syntax
     tp->strict_mode = true;          // TS always implies strict mode
@@ -801,22 +785,6 @@ Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* fi
 
     size_t ts_len = strlen(ts_source);
 
-#ifndef JS_C_PRODUCTION
-    // The direct parser owns TS syntax and must see the original source. The
-    // preprocessor remains an explicit reference-path oracle until cutover.
-    if (js_parser_backend_selection() != JS_PARSER_BACKEND_C) {
-        size_t js_len = 0;
-        char* js_source = ts_preprocess_source(ts_source, ts_len, &js_len);
-        if (js_source) {
-            log_debug("ts-mir: preprocessed TypeScript source to JavaScript (%zu bytes)", js_len);
-            Item result = transpile_js_typescript_to_mir_len(
-                runtime, js_source, js_len, filename, result_home);
-            mem_free(js_source);
-            return result;
-        }
-    }
-#endif
-
     // create TS transpiler
     TsTranspiler* tp = ts_transpiler_create(runtime);
     if (!tp) {
@@ -824,19 +792,16 @@ Item transpile_ts_to_mir(Runtime* runtime, const char* ts_source, const char* fi
         return (Item){.item = ITEM_ERROR};
     }
 
-    // Phase 1: Parse the TypeScript source with the TS parser (types preserved in CST)
+    // Phase 1: Parse TypeScript and publish its direct AST.
     if (!js_transpiler_parse(tp, ts_source, ts_len)) {
         log_error("ts-mir: parse failed");
         ts_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
 
-    // Phase 2: Build AST from the TS CST (unified builder handles both JS and TS nodes)
+    // Phase 2: Consume the parser-published AST.
     log_debug("ts-mir: building AST...");
-    TSTree* reference_tree = js_transpiler_reference_tree(tp);
-    JsAstNode* ts_ast = tp->ast_root ? (JsAstNode*)tp->ast_root
-        : (reference_tree ? build_js_ast_indexed(tp,
-            ts_tree_root_node(reference_tree)) : NULL);
+    JsAstNode* ts_ast = js_transpiler_build_ast(tp);
     if (!ts_ast) {
         log_error("ts-mir: AST build failed");
         ts_transpiler_destroy(tp);

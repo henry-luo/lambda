@@ -18,6 +18,7 @@
 #include "../lib/arena.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/runtime-state.h"
 #include "../lambda/js/js_dom.h"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_runtime.h"
@@ -98,16 +99,11 @@ static bool sim_focus_element_with_js_runtime(DomDocument* doc, View* target) {
 
     EvalContext* focus_ctx = runtime_get_eval_context(runtime);
     if (!focus_ctx || !runtime->heap || !runtime->name_pool) return false;
-    focus_ctx->heap = runtime->heap;
-    focus_ctx->name_pool = runtime->name_pool;
-    focus_ctx->type_list = runtime->type_list;
-    focus_ctx->pool = runtime->heap->pool;
-
     Context* saved_input_ctx = input_context;
     void* saved_doc = js_dom_get_document();
     // Simulated events execute on the document's eval thread; a host callback
     // must not borrow the thread by replacing another runtime's TLS owner.
-    if (!eval_context_init(focus_ctx)) return false;
+    if (!runtime_context_bind_retained(runtime, focus_ctx)) return false;
     input_context = nullptr;
     if (focus_ctx->js_state && !js_runtime_state_init(focus_ctx)) {
         input_context = saved_input_ctx;

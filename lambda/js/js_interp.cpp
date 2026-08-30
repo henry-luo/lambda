@@ -513,69 +513,6 @@ static Item js_interp_frame_home_class(const JsInterpFrame* frame) {
         ? (Item){.item = *frame->home_class_home} : ItemNull;
 }
 
-struct JsInterpCurrentFileScope {
-    const char* previous;
-
-    explicit JsInterpCurrentFileScope(const char* filename)
-        : previous(context ? context->current_file : NULL) {
-        if (context) context->current_file = filename;
-    }
-    ~JsInterpCurrentFileScope() {
-        if (context) context->current_file = previous;
-    }
-    JsInterpCurrentFileScope(const JsInterpCurrentFileScope&) = delete;
-    JsInterpCurrentFileScope& operator=(const JsInterpCurrentFileScope&) = delete;
-};
-
-struct JsInterpModuleStateScope {
-    uint32_t previous;
-
-    JsInterpModuleStateScope() : previous(js_get_active_module_state_id()) {}
-    ~JsInterpModuleStateScope() {
-        if (previous != UINT32_MAX) js_set_active_module_state_id(previous);
-    }
-    JsInterpModuleStateScope(const JsInterpModuleStateScope&) = delete;
-    JsInterpModuleStateScope& operator=(const JsInterpModuleStateScope&) = delete;
-};
-
-struct JsInterpModuleNamespaceScope {
-    Item previous;
-    bool active;
-
-    explicit JsInterpModuleNamespaceScope(JsScript* script)
-        : previous(ItemNull), active(false) {
-        if (!script || !script->is_es_module || !script->reference) return;
-        Item namespace_obj = js_module_get(js_make_string(script->reference));
-        if (get_type_id(namespace_obj) == LMD_TYPE_NULL) return;
-        previous = js_set_active_module_namespace(namespace_obj);
-        active = true;
-    }
-    ~JsInterpModuleNamespaceScope() {
-        if (active) js_set_active_module_namespace(previous);
-    }
-    JsInterpModuleNamespaceScope(const JsInterpModuleNamespaceScope&) = delete;
-    JsInterpModuleNamespaceScope& operator=(const JsInterpModuleNamespaceScope&) = delete;
-};
-
-struct JsInterpExecutionScope {
-    bool outermost;
-
-    JsInterpExecutionScope() : outermost(false) {
-        outermost = js_runtime_state.ast_interpreter.execution_depth == 0;
-        js_runtime_state.ast_interpreter.execution_depth++;
-    }
-    ~JsInterpExecutionScope() {
-        if (js_runtime_state.ast_interpreter.execution_depth > 0) {
-            js_runtime_state.ast_interpreter.execution_depth--;
-        }
-    }
-    bool should_initialize_event_loop() const {
-        return outermost && !js_runtime_state.event_loop.callback_running;
-    }
-    JsInterpExecutionScope(const JsInterpExecutionScope&) = delete;
-    JsInterpExecutionScope& operator=(const JsInterpExecutionScope&) = delete;
-};
-
 static Item js_interp_super_this(JsInterpFrame* frame) {
     Item value = js_interp_frame_this(frame);
     if (value.item != ITEM_JS_TDZ) return value;
@@ -1271,7 +1208,7 @@ static Item js_interp_read_binding(JsInterpFrame* frame, NameEntry* entry,
     }
     Item value = ItemNull;
     if (entry->scope == frame->script->global_scope) {
-        value = js_get_module_var(entry->slot);
+        value = lambda_active_module_var_at((uint32_t)entry->slot);
     } else {
         JsInterpEnv* env = js_interp_find_env(frame->env, entry->scope);
         if (!env || entry->slot < 0 || (uint32_t)entry->slot >= env->slot_count) {
@@ -1320,7 +1257,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     }
     Item current = ItemNull;
     if (entry->scope == frame->script->global_scope) {
-        current = js_get_module_var(entry->slot);
+        current = lambda_active_module_var_at((uint32_t)entry->slot);
         if (!initialize && current.item == ITEM_JS_TDZ) {
             return js_interp_tdz_error(entry->name);
         }
@@ -1333,7 +1270,7 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
             return js_throw_const_assign(entry->name ? name_ref_id(entry->name) : NAME_ID_NONE,
                 entry->name ? (int)entry->name->len : 0);
         }
-        js_set_module_var(entry->slot, value);
+        lambda_active_module_var_store((uint32_t)entry->slot, value);
         if (!entry->is_lexical) {
             // Module declarations, including the synthetic CJS wrapper,
             // must never publish their cells as realm-global properties.
@@ -2249,7 +2186,7 @@ static bool js_interp_scope_has_name(NameScope* scope, String* name) {
 static Item js_interp_binding_raw_value(JsInterpFrame* frame, NameEntry* entry) {
     if (!frame || !entry) return ItemError;
     if (entry->scope == frame->script->global_scope) {
-        return js_get_module_var(entry->slot);
+        return lambda_active_module_var_at((uint32_t)entry->slot);
     }
     JsInterpEnv* env = js_interp_find_env(frame->env, entry->scope);
     if (!env || entry->slot < 0 || (uint32_t)entry->slot >= env->slot_count) {
@@ -2486,12 +2423,7 @@ static bool js_interp_eval_redeclares_parameter(JsInterpFrame* frame, Item code)
         js_transpiler_destroy(transpiler);
         return false;
     }
-    TSTree* reference_tree = js_transpiler_reference_tree(transpiler);
-    JsAstNode* eval_ast = transpiler->ast_root
-        ? (JsAstNode*)transpiler->ast_root
-        : (reference_tree
-            ? build_js_ast_indexed(transpiler,
-                ts_tree_root_node(reference_tree)) : NULL);
+    JsAstNode* eval_ast = js_transpiler_build_ast(transpiler);
     bool redeclares_parameter = false;
     if (eval_ast && transpiler->global_scope) {
         for (NameEntry* declared = transpiler->global_scope->first; declared &&
@@ -5821,34 +5753,42 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     // DOM wrapper construction interns runtime property names, so it must run
     // after the common JS name pool becomes dynamic, as it does on the MIR path.
     if (!js_activate_runtime_name_pool()) return ItemError;
-    JsInterpExecutionScope execution_scope;
-    if (execution_scope.should_initialize_event_loop() &&
+    RuntimeExecutionScope execution_scope;
+    if (execution_scope.is_outermost() &&
+            !js_runtime_state.event_loop.callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
-    JsInterpCurrentFileScope current_file(script->reference);
+    RuntimeCurrentFileScope current_file(context, script->reference);
     Input* input = Input::create(context->pool);
     js_runtime_set_input(input);
     // Rejection happens before declaration instantiation or a user-visible
     // runtime action, but after the realm exists so its SyntaxError uses the
     // same JavaScript error lane as an admitted script.
     if (!js_interp_script_is_supported(script)) {
-        return js_throw_syntax_error(js_make_string("unsupported AST interpreter script"));
+        return runtime_publish_result(context,
+            js_throw_syntax_error(js_make_string("unsupported AST interpreter script")));
     }
     int global_slots = js_interp_scope_slot_count(script->global_scope);
     // CJS/ES module evaluation can re-enter this executor through require or
     // import. The caller's slab is the dynamic state seen after that call.
-    JsInterpModuleStateScope module_state;
+    RuntimeModuleStateScope module_state;
     if (!lambda_module_state_prepare(script->module_state_id,
             (uint32_t)(global_slots > 0 ? global_slots : 1)) ||
-            !js_set_active_module_state_id(script->module_state_id)) {
-        return ItemError;
+            !module_state.activate(script->module_state_id)) {
+        return runtime_publish_result(context, ItemError);
     }
     // DOM globals publish through the active module slab. MIR binds the
     // document only after that slab and its property-name image are ready.
     if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
-    JsInterpModuleNamespaceScope module_namespace(script);
-    if (script->is_es_module && !module_namespace.active) return ItemError;
+    Item namespace_obj = ItemNull;
+    if (script->is_es_module) {
+        namespace_obj = js_module_get(js_make_string(script->reference));
+        if (get_type_id(namespace_obj) == LMD_TYPE_NULL) {
+            return runtime_publish_result(context, ItemError);
+        }
+    }
+    JsModuleNamespaceScope module_namespace(namespace_obj, script->is_es_module);
     RootFrame roots(3);
     // ES module code has an undefined top-level this; classic scripts keep
     // the shared realm receiver.
@@ -5858,7 +5798,7 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     Rooted<Item> home_class_root(roots, ItemNull);
     if (script->test262_native_harness) {
         Item installed = js_test262_native_harness_install();
-        if (item_is_error(installed)) return installed;
+        if (item_is_error(installed)) return runtime_publish_result(context, installed);
     }
     JsInterpFrame frame = {script, NULL, this_root.home(), new_target_root.home(),
         home_class_root.home(),
@@ -5866,10 +5806,12 @@ Item js_interp_execute_script(Runtime* runtime, JsScript* script,
     if (!script->is_es_module || !script->es_module_scope_initialized) {
         JsInterpCompletion initialized = js_interp_initialize_scope(&frame,
             script->global_scope);
-        if (initialized.kind != JS_INTERP_NORMAL) return initialized.value;
+        if (initialized.kind != JS_INTERP_NORMAL) {
+            return runtime_publish_result(context, initialized.value);
+        }
     }
     JsInterpCompletion result = js_interp_exec(&frame, (JsAstNode*)script->ast_root);
-    return result.value;
+    return runtime_publish_result(context, result.value);
 }
 
 JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
@@ -5884,11 +5826,7 @@ JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
         js_transpiler_destroy(transpiler);
         return NULL;
     }
-    TSTree* reference_tree = js_transpiler_reference_tree(transpiler);
-    JsAstNode* ast = transpiler->ast_root ? (JsAstNode*)transpiler->ast_root
-        : (reference_tree
-            ? build_js_ast_indexed(transpiler,
-                ts_tree_root_node(reference_tree)) : NULL);
+    JsAstNode* ast = js_transpiler_build_ast(transpiler);
     if (!ast || transpiler->has_errors) {
         js_transpiler_destroy(transpiler);
         return NULL;
@@ -6063,16 +6001,17 @@ static Item js_interp_validate_star_exports(Runtime* runtime, JsScript* script) 
 static Item js_interp_instantiate_es_module(Runtime* runtime, JsScript* script) {
     if (!runtime || !script || !script->is_es_module) return ItemError;
     if (script->es_module_scope_initialized) return make_js_undefined();
-    JsInterpCurrentFileScope current_file(script->reference);
+    RuntimeCurrentFileScope current_file(context, script->reference);
     int global_slots = js_interp_scope_slot_count(script->global_scope);
-    JsInterpModuleStateScope module_state;
+    RuntimeModuleStateScope module_state;
     if (!lambda_module_state_prepare(script->module_state_id,
             (uint32_t)(global_slots > 0 ? global_slots : 1)) ||
-            !js_set_active_module_state_id(script->module_state_id)) {
+            !module_state.activate(script->module_state_id)) {
         return ItemError;
     }
-    JsInterpModuleNamespaceScope module_namespace(script);
-    if (!module_namespace.active) return ItemError;
+    Item namespace_obj = js_module_get(js_make_string(script->reference));
+    if (get_type_id(namespace_obj) == LMD_TYPE_NULL) return ItemError;
+    JsModuleNamespaceScope module_namespace(namespace_obj, true);
     RootFrame roots(3);
     Rooted<Item> this_root(roots, make_js_undefined());
     Rooted<Item> new_target_root(roots, js_get_new_target());
@@ -6105,8 +6044,9 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
     // parser root first so both languages append runtime names through the
     // canonical dynamic child rather than mutating the frozen static table.
     if (!js_activate_runtime_name_pool()) return ItemError;
-    JsInterpExecutionScope execution_scope;
-    if (execution_scope.should_initialize_event_loop() &&
+    RuntimeExecutionScope execution_scope;
+    if (execution_scope.is_outermost() &&
+            !js_runtime_state.event_loop.callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
@@ -6158,7 +6098,7 @@ Item js_interp_execute_es_module_script(Runtime* runtime, JsScript* script,
     module->namespace_obj = namespace_root.get();
     module->initialized = true;
     module->loading = false;
-    return namespace_root.get();
+    return runtime_publish_result(context, namespace_root.get());
 }
 
 Item js_interp_execute_es_module_source(Runtime* runtime, const char* source,

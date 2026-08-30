@@ -535,7 +535,7 @@ find("no-match", digits)
 // [] (empty array)
 
 // Extract just matching values via pipe
-find("a1b22", digits) | ~.value     // ["1", "22"]
+find("a1b22", digits) |> ~.value     // ["1", "22"]
 ```
 
 ### contains(str, substring)
@@ -1288,7 +1288,7 @@ Execute a shell command and return the result.
 ```lambda
 pn run_commands() {
     let files = cmd("ls", "-la")
-    let date = cmd("date", "+%Y-%m-%d")
+    let today_str = cmd("date", "+%Y-%m-%d")
 
     // With multiple arguments
     cmd("git", "commit", "-m", "Update files")

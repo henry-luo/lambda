@@ -2102,6 +2102,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         dom_doc->js.auto_close_event_loop = js_host_config->auto_close_event_loop;
         dom_doc->js.virtual_clock_enabled = js_host_config->virtual_clock_enabled;
         dom_doc->js.virtual_clock_ms = js_host_config->virtual_clock_ms;
+        dom_doc->js.redirect_stdout_to_stderr = js_host_config->redirect_stdout_to_stderr;
     }
     dom_doc->document_charset = detected_charset;
     // HTML parsing always runs with scripting enabled in the layout loader;
@@ -4823,7 +4824,8 @@ static bool layout_single_file(
         false,
         auto_close,
         false,
-        0.0
+        0.0,
+        result_stream != nullptr
     };
 
     Url* input_url = url_parse_with_base(input_file, cwd);

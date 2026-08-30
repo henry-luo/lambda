@@ -26,10 +26,7 @@ TEST(JsScriptOwnership, AdoptsCommonScriptPrefixIntoRuntimeCatalog) {
     ASSERT_NE(tp, nullptr);
     ASSERT_TRUE(js_transpiler_parse(tp, source, sizeof(source) - 1));
 
-    TSTree* reference_tree = js_transpiler_reference_tree(tp);
-    JsAstNode* ast = tp->ast_root ? (JsAstNode*)tp->ast_root
-        : (reference_tree ? build_js_ast_indexed(tp,
-            ts_tree_root_node(reference_tree)) : nullptr);
+    JsAstNode* ast = js_transpiler_build_ast(tp);
     ASSERT_NE(ast, nullptr);
 
     Pool* ast_pool = tp->pool;
@@ -105,7 +102,7 @@ TEST(JsInterpreter, PreservesMutableClosuresOnTheSharedHeap) {
         }
     }
     ASSERT_NE(counter_entry, nullptr);
-    Item counter = js_get_module_var(counter_entry->slot);
+    Item counter = lambda_active_module_var_at((uint32_t)counter_entry->slot);
     heap_gc_collect();
     Item increment = flt2it(2.0);
     Item after_gc = js_call_function(counter, make_js_undefined(), &increment, 1);
@@ -801,7 +798,7 @@ TEST(JsInterpreter, AppliesArrayHoleSemanticsThroughNativeCallbacks) {
     runtime_cleanup(&runtime);
 }
 
-TEST(JsInterpreter, KeepsDeclarationIdentityAndPerIterationClosures) {
+TEST(JsInterpreter, KeepsDeclarationAndShadowedClosureBindingIdentity) {
     Runtime runtime = {};
     runtime_init(&runtime);
 
@@ -812,12 +809,16 @@ TEST(JsInterpreter, KeepsDeclarationIdentityAndPerIterationClosures) {
         "if (i === 0) first = () => i; "
         "if (i === 1) second = () => i; "
         "if (i === 2) third = () => i; } "
-        "(declaration === identity ? 0 : 1000) + first() * 100 + second() * 10 + third();";
+        "function make(value) { var outer = () => value; { let value = 7; "
+        "var inner = () => value; return [outer, inner]; } } var pair = make(3); "
+        "[(declaration === identity ? 0 : 1000) + first() * 100 + second() * 10 + third(), "
+        "pair[0]() * 10 + pair[1]()];";
     Item result = js_interp_execute_source(&runtime, source, sizeof(source) - 1,
         "iteration-closure.js", NULL);
 
     ASSERT_FALSE(item_is_error(result));
-    EXPECT_EQ(js_strict_equal(result, flt2it(12.0)).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(12.0)).item, b2it(true));
+    EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 1), flt2it(37.0)).item, b2it(true));
 
     runtime_cleanup(&runtime);
 }
@@ -2364,7 +2365,7 @@ TEST(JsInterpreter, RetainsPrivateClassIdentityForEscapedClosuresAcrossGc) {
         }
     }
     ASSERT_NE(reader_entry, nullptr);
-    Item reader = js_get_module_var(reader_entry->slot);
+    Item reader = lambda_active_module_var_at((uint32_t)reader_entry->slot);
     heap_gc_collect();
     Item result = js_call_function(reader, make_js_undefined(), NULL, 0);
     ASSERT_FALSE(item_is_error(result));

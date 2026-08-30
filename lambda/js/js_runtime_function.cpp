@@ -417,7 +417,7 @@ static Item js_new_function_impl(void* func_ptr, int param_count,
     fn->runtime_context = runtime;
     fn->env = NULL;
     fn->env_size = 0;
-    fn->module_state_id = js_get_active_module_state_id();
+    fn->module_state_id = lambda_active_module_state_id();
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
@@ -443,7 +443,7 @@ extern "C" Item js_new_interpreted_function(AstFuncNode* function,
     fn->interp_env = environment;
     fn->body_kind = JS_FUNCTION_BODY_AST;
     fn->flags = flags;
-    fn->module_state_id = js_get_active_module_state_id();
+    fn->module_state_id = lambda_active_module_state_id();
     fn->home_global = js_get_global_this();
     fn->ast_lexical_this = (flags & JS_FUNC_FLAG_ARROW)
         ? js_get_this() : ItemNull;
@@ -985,7 +985,7 @@ static Item js_new_method_function_impl(void* func_ptr, int param_count,
     fn->env = NULL;
     fn->env_size = 0;
     fn->prototype = ItemNull;
-    fn->module_state_id = js_get_active_module_state_id();
+    fn->module_state_id = lambda_active_module_state_id();
     fn->home_global = js_get_global_this();
     js_function_root_item_if_needed(fn, &fn->home_global);
     js_function_capture_with_env(fn);
@@ -1018,7 +1018,7 @@ static Item js_new_closure_impl(void* func_ptr, int param_count, Item* env,
         fn->env = env;
         fn->env_size = env_size;
         fn->prototype = ItemNull;
-        fn->module_state_id = js_get_active_module_state_id();
+        fn->module_state_id = lambda_active_module_state_id();
     }
     // A new closure is not owned by its caller until return. Root it across
     // scalar rehoming and dynamic-with capture, both of which may allocate.

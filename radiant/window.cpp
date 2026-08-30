@@ -33,6 +33,7 @@
 #include "../lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/runtime-state.h"
 extern "C" {
 #include "../lib/url.h"
 }
@@ -68,16 +69,11 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     Runtime* runtime = doc->js.runtime;
     EvalContext* pump_ctx = runtime_get_eval_context(runtime);
     if (!pump_ctx || !runtime->heap || !runtime->name_pool) return false;
-    pump_ctx->heap = runtime->heap;
-    pump_ctx->name_pool = runtime->name_pool;
-    pump_ctx->type_list = runtime->type_list;
-    pump_ctx->pool = runtime->heap->pool;
-
     Context* saved_input_ctx = input_context;
     // Promise and timer callbacks allocate during the host pump just like event
     // listeners do. The pump may initialize a fresh host thread, but it cannot
     // replace a different evaluator already assigned to that thread.
-    if (!eval_context_init(pump_ctx)) return false;
+    if (!runtime_context_bind_retained(runtime, pump_ctx)) return false;
     input_context = nullptr;
     if (pump_ctx->js_state && !js_runtime_state_init(pump_ctx)) {
         input_context = saved_input_ctx;
@@ -1127,7 +1123,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             host_driven_loop,
             false,
             headless && sim_ctx != nullptr,
-            0.0
+            0.0,
+            false
         };
         DomDocument* doc = nullptr;
         if (doc_source) {
