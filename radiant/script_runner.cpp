@@ -21,6 +21,7 @@
 #include "../lambda/js/js_dom_events.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/js/js_host_hooks.h"
 #include "../lambda/js/js_xhr.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/edit_bridge.h"
@@ -2360,6 +2361,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         script_runner_cleanup_source_cache();
         return;
     }
+    js_host_hooks_set_redirect_stdout_to_stderr(dom_doc->js.redirect_stdout_to_stderr);
     js_dom_set_ui_context(runtime->dom_ui_context);
     js_dom_set_host_driven_loop(dom_doc->js.host_driven_loop);
 

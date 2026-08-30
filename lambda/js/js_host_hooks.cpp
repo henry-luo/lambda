@@ -46,3 +46,13 @@ Item js_host_hooks_format_console(Item args) {
     if (!hooks || !hooks->console_format_hook) return ItemNull;
     return hooks->console_format_hook(args);
 }
+
+void js_host_hooks_set_redirect_stdout_to_stderr(bool enabled) {
+    JsHostHooksState* hooks = js_host_hooks_current();
+    if (hooks) hooks->redirect_stdout_to_stderr = enabled;
+}
+
+bool js_host_hooks_redirect_stdout_to_stderr(void) {
+    JsHostHooksState* hooks = js_host_hooks_current();
+    return hooks && hooks->redirect_stdout_to_stderr;
+}

@@ -19,6 +19,8 @@ void js_host_hooks_set_cluster_online_hook(JsHostClusterOnlineHook hook);
 void js_host_hooks_emit_cluster_online(Item child);
 void js_host_hooks_set_console_format_hook(JsHostConsoleFormatHook hook);
 Item js_host_hooks_format_console(Item args);
+void js_host_hooks_set_redirect_stdout_to_stderr(bool enabled);
+bool js_host_hooks_redirect_stdout_to_stderr(void);
 
 // Shared JS runtime predicates and Unicode helpers live in js_runtime.cpp so
 // global builtins and runtime dispatch use one implementation of each rule.

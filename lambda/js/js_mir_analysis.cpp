@@ -290,68 +290,94 @@ void jm_collect_indexed_func_assignments(JsMirTranspiler* mt, JsAstNode* root,
     }
 }
 
-// Collect local declarations from the indexed owner graph. Function bodies
-// are excluded by owner id; direct function declarations are retained as the
-// hoisted binding in their enclosing owner.
+typedef struct JsBodyLocalsWalk {
+    AstIndex* index;
+    AstFunctionId owner;
+    struct hashmap* locals;
+    bool var_only;
+} JsBodyLocalsWalk;
+
+static void jm_collect_indexed_body_locals_node(JsAstNode* current,
+        JsBodyLocalsWalk* walk) {
+    if (current->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)current;
+        if (walk->var_only && declaration->kind != JS_VAR_VAR) return;
+        for (JsAstNode* d = declaration->declarations; d; d = d->next) {
+            if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)d;
+                if (declarator->id) {
+                    jm_collect_pattern_names(declarator->id, walk->locals);
+                }
+            }
+        }
+    } else if (current->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+        JsFunctionNode* fn = (JsFunctionNode*)current;
+        if (walk->var_only && (fn->is_generator || fn->is_async)) return;
+        if (fn->name) {
+            JsNameSetEntry entry;
+            memset(&entry, 0, sizeof(entry));
+            entry.name = jm_persist_name(jm_var_name(fn->name));
+            entry.from_func_decl = true;
+            if (!hashmap_get(walk->locals, &entry)) {
+                hashmap_set(walk->locals, &entry);
+            }
+        }
+    } else if (!walk->var_only &&
+            current->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+        JsClassNode* cls = (JsClassNode*)current;
+        if (cls->name) jm_name_set_add(walk->locals, jm_var_name(cls->name));
+    } else if (current->node_type == JS_AST_NODE_FOR_OF_STATEMENT ||
+            current->node_type == JS_AST_NODE_FOR_IN_STATEMENT) {
+        JsForOfNode* loop = (JsForOfNode*)current;
+        if (!loop->left) return;
+        if (loop->left->node_type == JS_AST_NODE_IDENTIFIER) {
+            if (!walk->var_only || loop->kind == JS_VAR_VAR) {
+                if (loop->kind == JS_VAR_LET || loop->kind == JS_VAR_CONST) {
+                    JsIdentifierNode* id = (JsIdentifierNode*)loop->left;
+                    jm_name_set_add_binding(walk->locals,
+                        jm_var_name(id->name), loop->left);
+                } else {
+                    jm_collect_pattern_names(loop->left, walk->locals);
+                }
+            }
+        } else if (loop->left->node_type != JS_AST_NODE_VARIABLE_DECLARATION &&
+                loop->declares_binding &&
+                (!walk->var_only || loop->kind == JS_VAR_VAR)) {
+            jm_collect_pattern_names(loop->left, walk->locals);
+        }
+    }
+}
+
+static void jm_collect_indexed_body_locals_child(JsAstNode* current, void* opaque) {
+    JsBodyLocalsWalk* walk = (JsBodyLocalsWalk*)opaque;
+    AstNodeId current_id = ast_index_find(walk->index, (AstNode*)current);
+    if (current_id == AST_NODE_ID_INVALID) return;
+    bool same_owner = walk->index->owner_functions[current_id] == walk->owner;
+    AstNode* parent = walk->index->parents[current_id];
+    AstNodeId parent_id = parent ? ast_index_find(walk->index, parent)
+        : AST_NODE_ID_INVALID;
+    bool direct_function = current->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
+        parent_id != AST_NODE_ID_INVALID &&
+        walk->index->owner_functions[parent_id] == walk->owner;
+    if (!same_owner && !direct_function) return;
+
+    jm_collect_indexed_body_locals_node(current, walk);
+    // A direct declaration contributes its hoisted name, not its child scope.
+    if (!same_owner) return;
+    js_ast_visit_children(current, jm_collect_indexed_body_locals_child, walk);
+}
+
+// Walk only the requested indexed subtree. The former whole-index scan made
+// repeated statement/function queries quadratic on large bundled scripts.
 void jm_collect_indexed_body_locals(JsMirTranspiler* mt, JsAstNode* node,
         struct hashmap* locals, bool var_only) {
     if (!mt || !mt->tp || !node || !locals) return;
     AstIndex* index = &mt->tp->ast_index;
     AstNodeId root_id = ast_index_find(index, (AstNode*)node);
     if (root_id == AST_NODE_ID_INVALID) return;
-    AstFunctionId owner = index->owner_functions[root_id];
-    for (uint32_t i = 0; i < index->count; i++) {
-        AstNode* current = index->nodes[i];
-        if (!current || !jm_index_node_descends(index, i, root_id)) continue;
-        bool same_owner = index->owner_functions[i] == owner;
-        AstNodeId parent_id = i;
-        AstNode* parent = index->parents[parent_id];
-        parent_id = parent ? ast_index_find(index, parent) : AST_NODE_ID_INVALID;
-        bool enclosing_owner = parent_id != AST_NODE_ID_INVALID &&
-            index->owner_functions[parent_id] == owner;
-        if (!same_owner && !(current->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
-                enclosing_owner)) continue;
-        if (current->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-            JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)current;
-            if (var_only && declaration->kind != JS_VAR_VAR) continue;
-            for (JsAstNode* d = declaration->declarations; d; d = d->next) {
-                if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
-                    JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)d;
-                    if (declarator->id) jm_collect_pattern_names(declarator->id, locals);
-                }
-            }
-        } else if (current->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
-            JsFunctionNode* fn = (JsFunctionNode*)current;
-            if (var_only && (fn->is_generator || fn->is_async)) continue;
-            if (fn->name) {
-                JsNameSetEntry entry;
-                memset(&entry, 0, sizeof(entry));
-                entry.name = jm_persist_name(jm_var_name(fn->name));
-                entry.from_func_decl = true;
-                if (!hashmap_get(locals, &entry)) hashmap_set(locals, &entry);
-            }
-        } else if (!var_only && current->node_type == JS_AST_NODE_CLASS_DECLARATION) {
-            JsClassNode* cls = (JsClassNode*)current;
-            if (cls->name) jm_name_set_add(locals, jm_var_name(cls->name));
-        } else if (current->node_type == JS_AST_NODE_FOR_OF_STATEMENT ||
-                current->node_type == JS_AST_NODE_FOR_IN_STATEMENT) {
-            JsForOfNode* loop = (JsForOfNode*)current;
-            if (!loop->left) continue;
-            if (loop->left->node_type == JS_AST_NODE_IDENTIFIER) {
-                if (!var_only || loop->kind == JS_VAR_VAR) {
-                    if (loop->kind == JS_VAR_LET || loop->kind == JS_VAR_CONST) {
-                        JsIdentifierNode* id = (JsIdentifierNode*)loop->left;
-                        jm_name_set_add_binding(locals, jm_var_name(id->name), loop->left);
-                    } else {
-                        jm_collect_pattern_names(loop->left, locals);
-                    }
-                }
-            } else if (loop->left->node_type != JS_AST_NODE_VARIABLE_DECLARATION &&
-                    loop->declares_binding && (!var_only || loop->kind == JS_VAR_VAR)) {
-                jm_collect_pattern_names(loop->left, locals);
-            }
-        }
-    }
+    JsBodyLocalsWalk walk = {
+        index, index->owner_functions[root_id], locals, var_only};
+    jm_collect_indexed_body_locals_child(node, &walk);
 }
 
 // v20 TDZ: Collect names of let/const variables declared in a block statement.

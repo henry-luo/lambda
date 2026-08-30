@@ -138,6 +138,38 @@ TEST(JsCParser, ParsesModernJavaScriptWithOneReductionStream) {
     EXPECT_EQ(recorder.last_span.end_byte, strlen(source));
 }
 
+TEST(JsCParser, ParsesDeepArrayLiteralsWithoutRecursivePatternProbes) {
+    enum { NESTING_DEPTH = 32 };
+    char source[128];
+    const char* prefix = "const data = ";
+    size_t length = strlen(prefix);
+    memcpy(source, prefix, length);
+    for (int i = 0; i < NESTING_DEPTH; i++) source[length++] = '[';
+    source[length++] = '0';
+    for (int i = 0; i < NESTING_DEPTH; i++) source[length++] = ']';
+    source[length++] = ';';
+    source[length] = '\0';
+
+    JsParseError error = {};
+    JsParseStatus status = js_parser_parse_source(source, length,
+        JS_PARSE_SCRIPT, NULL, NULL, NULL, &error);
+
+    EXPECT_EQ(status, JS_PARSE_OK) << (error.message ? error.message : "")
+        << " at byte " << error.span.start_byte;
+}
+
+TEST(JsCParser, PreservesDestructuringAssignmentMemberTargets) {
+    const char* source =
+        "let first; let receiver = {};"
+        "[first, receiver.value, [].slot] = input;"
+        "({key: receiver.key} = input);";
+    JsParseError error = {};
+    EXPECT_EQ(js_parser_parse_source(source, strlen(source), JS_PARSE_SCRIPT,
+        NULL, NULL, NULL, &error), JS_PARSE_OK)
+        << (error.message ? error.message : "") << " at byte "
+        << error.span.start_byte;
+}
+
 TEST(JsCParser, RescansRegexAtStatementBoundaries) {
     const char* source = "value;\n/ready/.test(value);\nif (value)\n/also/.test(value);";
     JsParseError error = {};

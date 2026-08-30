@@ -106,13 +106,15 @@ struct DomJsRuntime {
     bool auto_close_event_loop;
     bool virtual_clock_enabled;
     double virtual_clock_ms;
+    bool redirect_stdout_to_stderr;
 
     DomJsRuntime() : mir_ctx(nullptr), preamble_state(nullptr), runtime(nullptr),
         doc_node(nullptr), mutation_count(0), mutation_sequence(0), mutation_kind_mask(0),
         mutation_record_count(0), mutation_record_overflow(0), mutation_records{},
         ready_state("complete"), host_ui_context(nullptr), host_driven_loop(false),
         auto_close_event_loop(false),
-        virtual_clock_enabled(false), virtual_clock_ms(0.0) {}
+        virtual_clock_enabled(false), virtual_clock_ms(0.0),
+        redirect_stdout_to_stderr(false) {}
 };
 
 // tier-1: document-owned semantic zoom and raster-output scale inputs

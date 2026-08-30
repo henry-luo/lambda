@@ -2001,6 +2001,23 @@ format_duration() { \
 	};
 endef
 
+# Parse the checker's fail-closed runner summary and preserve its exit status.
+define CLASSIFY_LAYOUT_SNAPSHOT_RESULT
+snapshot_result_output="$${$(1)}"; \
+snapshot_passed=$$(echo "$$snapshot_result_output" | grep "^Runner:" | grep -oE "[0-9]+ successful" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+snapshot_failed=$$(echo "$$snapshot_result_output" | grep "^Runner:" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+snapshot_errors=$$(echo "$$snapshot_result_output" | grep "^Runner:" | grep -oE "[0-9]+ errors" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+snapshot_passed=$${snapshot_passed:-0}; snapshot_failed=$${snapshot_failed:-0}; snapshot_errors=$${snapshot_errors:-0}; \
+if [ $$snapshot_errors -gt $$snapshot_failed ]; then snapshot_failed=$$snapshot_errors; fi; \
+if [ $$snapshot_exit -ne 0 ]; then \
+	snapshot_status="❌ FAIL"; if [ $$snapshot_failed -eq 0 ]; then snapshot_failed=1; fi; any_failed=1; \
+elif echo "$$snapshot_result_output" | grep -q "Snapshot check passed"; then \
+	snapshot_status="✅ PASS"; \
+else \
+	snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
+fi;
+endef
+
 define COLLECT_LAYOUT_BASELINE_RESULTS
 layout_results=$$(cat $(LAYOUT_BASELINE_RESULTS)); \
 while IFS='|' read -r suite s_status s_passed s_partial s_failed s_skipped s_elapsed; do \
@@ -2120,20 +2137,13 @@ run-radiant-baseline:
 	if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
 		echo "📦 Layout Page Suite Regression:"; \
+		snapshot_exit=0; \
 		snapshot_start=$$(date +%s); \
 		snap_output=$$($(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
-			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || true; \
+			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || snapshot_exit=$$?; \
 		snapshot_elapsed=$$(($$(date +%s) - snapshot_start)); \
 		echo "$$snap_output" | tail -5; \
-		snapshot_passed=$$(echo "$$snap_output" | grep "Current:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		snapshot_passed=$${snapshot_passed:-0}; \
-		if echo "$$snap_output" | grep -q "REGRESSION\|regression detected"; then \
-			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
-		elif echo "$$snap_output" | grep -q "snapshot check passed\|No regressions\|No average regression"; then \
-			snapshot_status="✅ PASS"; \
-		else \
-			snapshot_status="✅ PASS"; \
-		fi; \
+		$(call CLASSIFY_LAYOUT_SNAPSHOT_RESULT,snap_output) \
 	fi; \
 	\
 	echo ""; \
@@ -2344,15 +2354,7 @@ test-layout-baseline: build-test
 			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || snapshot_exit=$$?; \
 		snapshot_elapsed=$$(($$(date +%s) - snapshot_start)); \
 		echo "$$snapshot_output" | tail -5; \
-		snapshot_passed=$$(echo "$$snapshot_output" | grep "Current:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		snapshot_passed=$${snapshot_passed:-0}; \
-		if echo "$$snapshot_output" | grep -q "REGRESSION\|regression detected" || [ $$snapshot_exit -ne 0 ]; then \
-			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
-		elif echo "$$snapshot_output" | grep -q "snapshot check passed\|No regressions\|No average regression"; then \
-			snapshot_status="✅ PASS"; \
-		else \
-			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
-		fi; \
+		$(call CLASSIFY_LAYOUT_SNAPSHOT_RESULT,snapshot_output) \
 	fi; \
 	\
 	total_passed=$$((layout_total_passed + snapshot_passed)); \
