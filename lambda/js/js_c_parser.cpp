@@ -332,8 +332,8 @@ static JsAstNode* js_c_build_ts_declaration(JsCAstSink* sink,
             int i = 0;
             for (JsAstNode* item = block->statements; item;) {
                 JsAstNode* next = item->next;
-                // namespace members are stored as an array; do not retain the
-                // block sibling edge that the reference adapter does not set.
+                // namespace members are stored as an array; detach their
+                // former block sibling edge before transferring ownership.
                 item->next = NULL;
                 ns->body[i++] = item;
                 item = next;
@@ -593,8 +593,8 @@ static JsAstNode* js_c_leaf(JsCAstSink* sink, const JsParseReduction* reduction)
             reduction->kind != JS_REDUCE_PATTERN &&
             reduction->introducer.kind != JS_TOK_LBRACKET &&
             reduction->introducer.kind != JS_TOK_LBRACE) {
-        return build_js_binding_identifier_from_source(sink->transpiler,
-            source, reduction->span);
+        return build_js_identifier_from_source(sink->transpiler, source,
+            reduction->span);
     }
     if ((reduction->flags & JS_REDUCTION_FLAG_PROPERTY) &&
             reduction->introducer.kind != JS_TOK_NUMBER &&
@@ -1413,18 +1413,6 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             ? nodes[index++] : NULL;
         JsAstNode* finalizer = (reduction->flags & JS_REDUCTION_FLAG_TRY_FINALIZER)
             ? nodes[index++] : NULL;
-        if (finalizer) {
-            SourceSpan finalizer_span = finalizer->source_span;
-            if (reduction->operator_token.kind == JS_TOK_FINALLY &&
-                    reduction->operator_token.span.start_byte <=
-                        finalizer_span.start_byte) {
-                finalizer_span.start_byte =
-                    reduction->operator_token.span.start_byte;
-            }
-            finalizer = build_js_finally_block_from_child(sink->transpiler,
-                finalizer_span, finalizer);
-            if (!finalizer) return js_c_unsupported(sink);
-        }
         JsAstNode* tried = build_js_try_from_children(sink->transpiler,
             reduction->span, block, handler, finalizer);
         return tried ? js_c_push(sink, tried, reduction->span) :
@@ -1973,10 +1961,6 @@ JsAstNode* publish_js_ast_indexed(JsTranspiler* tp, JsAstNode* ast) {
 bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
         JsParseMode mode) {
     if (!tp || !source || length > UINT32_MAX) return false;
-    if (tp->tree) {
-        ts_tree_delete(tp->tree);
-        tp->tree = NULL;
-    }
     tp->source = source;
     tp->source_length = length;
     tp->parse_error_valid = false;
@@ -1988,7 +1972,6 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
     tp->is_module = (mode & JS_PARSE_MODULE) != 0;
     tp->is_es_module = tp->is_module;
     tp->strict_mode = caller_strict || tp->is_module;
-    tp->direct_ast_building = true;
     if ((mode & JS_PARSE_TYPESCRIPT) && !tp->type_registry) {
         ts_type_registry_init(tp);
     }
@@ -2001,7 +1984,6 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
     JsParseStatus status = js_parser_parse_source(source, length, mode, &sink,
         &sink_context, &metrics, &error);
     if (status != JS_PARSE_OK || sink_context.unsupported || !sink_context.root) {
-        tp->direct_ast_building = false;
         tp->has_errors = true;
         if (sink_context.unsupported) {
             JsParseError rejected_error = {};
@@ -2040,7 +2022,6 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
         if (tp->global_scope) tp->global_scope->strict = true;
     }
     if (!js_rebuild_direct_scope_graph(tp, sink_context.root)) {
-        tp->direct_ast_building = false;
         tp->has_errors = true;
         tp->parse_error_valid = true;
         strncpy(tp->parse_error_message,
@@ -2049,7 +2030,6 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
         tp->parse_error_message[sizeof(tp->parse_error_message) - 1] = '\0';
         return false;
     }
-    tp->direct_ast_building = false;
     if (!publish_js_ast_indexed(tp, sink_context.root)) {
         tp->has_errors = true;
         strncpy(tp->parse_error_message, "JavaScript C AST indexing failed",

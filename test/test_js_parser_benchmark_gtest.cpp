@@ -10,13 +10,6 @@
 #include "../lambda/ts/ts_transpiler.hpp"
 #include "../lambda/js/parser/js_parser.h"
 
-#ifndef JS_C_PRODUCTION
-extern "C" {
-const TSLanguage* tree_sitter_javascript(void);
-const TSLanguage* tree_sitter_typescript(void);
-}
-#endif
-
 namespace {
 
 enum { BENCH_RUNS = 5, BENCH_FIXTURES = 26 };
@@ -132,16 +125,6 @@ static void bench_free_fixtures() {
     }
 }
 
-static bool bench_use_reference() {
-#ifdef JS_C_PRODUCTION
-    return false;
-#else
-    const char* backend = getenv("JS_BENCH_BACKEND");
-    return backend && (strcmp(backend, "tree") == 0 ||
-        strcmp(backend, "reference") == 0);
-#endif
-}
-
 static bool bench_c_recognizer(const BenchFixture* fixture) {
     JsParseError error = {};
     JsParseMetrics metrics = {};
@@ -160,43 +143,6 @@ static bool bench_c_frontend(const BenchFixture* fixture) {
     js_transpiler_destroy(transpiler);
     return ok;
 }
-
-#ifndef JS_C_PRODUCTION
-static bool bench_reference_recognizer(const BenchFixture* fixture) {
-    JsTranspiler* transpiler = js_transpiler_create(NULL);
-    if (!transpiler) return false;
-    const TSLanguage* language = fixture->typescript
-        ? tree_sitter_typescript() : tree_sitter_javascript();
-    bool ok = js_transpiler_reference_set_language(transpiler, language) &&
-        js_transpiler_parse_reference(transpiler, fixture->source,
-            fixture->length);
-    js_transpiler_destroy(transpiler);
-    return ok;
-}
-
-static bool bench_reference_frontend(const BenchFixture* fixture) {
-    JsTranspiler* transpiler = js_transpiler_create(NULL);
-    if (!transpiler) return false;
-    const TSLanguage* language = fixture->typescript
-        ? tree_sitter_typescript() : tree_sitter_javascript();
-    transpiler->strict_js = !fixture->typescript;
-    if (fixture->typescript) {
-        transpiler->strict_mode = true;
-        ts_type_registry_init(transpiler);
-    }
-    bool ok = js_transpiler_reference_set_language(transpiler, language) &&
-        js_transpiler_parse_reference(transpiler, fixture->source,
-            fixture->length);
-    TSTree* tree = ok ? js_transpiler_reference_tree(transpiler) : NULL;
-    JsAstNode* ast = ok && tree ? build_js_ast_indexed(transpiler,
-        ts_tree_root_node(tree)) : NULL;
-    if (ok) ok = ast != NULL;
-    if (ok && fixture->typescript) ts_resolve_all_types(transpiler, ast);
-    if (ok) ok = js_check_early_errors(transpiler, ast) == 0;
-    js_transpiler_destroy(transpiler);
-    return ok;
-}
-#endif
 
 typedef bool (*BenchOperation)(const BenchFixture* fixture);
 
@@ -280,32 +226,17 @@ TEST(JsParserBenchmark, PreloadedRecognizerAndFrontend) {
             << "cannot preload " << g_fixtures[i].path;
     }
 
-    const bool reference = bench_use_reference();
     BenchResult recognizer_js = {};
     BenchResult recognizer_ts = {};
     BenchResult frontend_js = {};
     BenchResult frontend_ts = {};
-#ifndef JS_C_PRODUCTION
-    if (reference) {
-        ASSERT_TRUE(bench_run("reference-recognizer",
-            bench_reference_recognizer, &recognizer_js, false));
-        ASSERT_TRUE(bench_run("reference-recognizer-ts",
-            bench_reference_recognizer, &recognizer_ts, true));
-        ASSERT_TRUE(bench_run("reference-frontend",
-            bench_reference_frontend, &frontend_js, false));
-        ASSERT_TRUE(bench_run("reference-frontend-ts",
-            bench_reference_frontend, &frontend_ts, true));
-    } else
-#endif
-    {
-        ASSERT_TRUE(bench_run("c-recognizer", bench_c_recognizer,
-            &recognizer_js, false));
-        ASSERT_TRUE(bench_run("c-recognizer-ts", bench_c_recognizer,
-            &recognizer_ts, true));
-        ASSERT_TRUE(bench_run("c-frontend", bench_c_frontend,
-            &frontend_js, false));
-        ASSERT_TRUE(bench_run("c-frontend-ts", bench_c_frontend,
-            &frontend_ts, true));
-    }
+    ASSERT_TRUE(bench_run("c-recognizer", bench_c_recognizer,
+        &recognizer_js, false));
+    ASSERT_TRUE(bench_run("c-recognizer-ts", bench_c_recognizer,
+        &recognizer_ts, true));
+    ASSERT_TRUE(bench_run("c-frontend", bench_c_frontend,
+        &frontend_js, false));
+    ASSERT_TRUE(bench_run("c-frontend-ts", bench_c_frontend,
+        &frontend_ts, true));
     bench_free_fixtures();
 }

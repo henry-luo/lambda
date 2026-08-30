@@ -138,6 +138,9 @@ typedef struct EvalContext : Context {
     // pointer and use ordinary owner-thread loads/stores in the selected slab.
     LambdaModuleState** module_states;
     uint32_t module_state_capacity;
+    // Keep new shell bookkeeping at the tail: generated and native callers
+    // depend on the established module-state offsets (D8.1.3v10).
+    uint32_t execution_depth;
 } EvalContext;
 
 // Unicode-enhanced comparison functions are declared in utf_string.h

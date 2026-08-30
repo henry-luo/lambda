@@ -1,70 +1,10 @@
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#include <tree_sitter/api.h>
 #include "../runtime/ast.hpp"
 #include "../lambda-data.hpp"
 
 // forward declaration so JsFunctionNode and JsVariableDeclaratorNode can reference it
 struct TsTypeAnnotationNode;
-
-// JavaScript-specific Tree-sitter symbols
-#define JS_SYM_PROGRAM sym_program
-#define JS_SYM_FUNCTION_DECLARATION sym_function_declaration
-#define JS_SYM_VARIABLE_DECLARATION sym_variable_declaration
-#define JS_SYM_LEXICAL_DECLARATION sym_lexical_declaration
-#define JS_SYM_EXPRESSION_STATEMENT sym_expression_statement
-#define JS_SYM_BLOCK_STATEMENT sym_statement_block
-#define JS_SYM_IF_STATEMENT sym_if_statement
-#define JS_SYM_WHILE_STATEMENT sym_while_statement
-#define JS_SYM_FOR_STATEMENT sym_for_statement
-#define JS_SYM_RETURN_STATEMENT sym_return_statement
-#define JS_SYM_BREAK_STATEMENT sym_break_statement
-#define JS_SYM_CONTINUE_STATEMENT sym_continue_statement
-
-// Expression symbols
-#define JS_SYM_IDENTIFIER sym_identifier
-#define JS_SYM_NUMBER sym_number
-#define JS_SYM_STRING sym_string
-#define JS_SYM_TRUE sym_true
-#define JS_SYM_FALSE sym_false
-#define JS_SYM_NULL sym_null
-#define JS_SYM_UNDEFINED sym_undefined
-#define JS_SYM_BINARY_EXPRESSION sym_binary_expression
-#define JS_SYM_UNARY_EXPRESSION sym_unary_expression
-#define JS_SYM_ASSIGNMENT_EXPRESSION sym_assignment_expression
-#define JS_SYM_CALL_EXPRESSION sym_call_expression
-#define JS_SYM_MEMBER_EXPRESSION sym_member_expression
-#define JS_SYM_SUBSCRIPT_EXPRESSION sym_subscript_expression
-#define JS_SYM_ARRAY_EXPRESSION sym_array
-#define JS_SYM_OBJECT_EXPRESSION sym_object
-#define JS_SYM_FUNCTION_EXPRESSION sym_function_expression
-#define JS_SYM_ARROW_FUNCTION sym_arrow_function
-#define JS_SYM_CONDITIONAL_EXPRESSION sym_ternary_expression
-
-// Field names
-#define JS_FIELD_NAME field_name
-#define JS_FIELD_VALUE field_value
-#define JS_FIELD_LEFT field_left
-#define JS_FIELD_RIGHT field_right
-#define JS_FIELD_OPERATOR field_operator
-#define JS_FIELD_OPERAND field_operand
-#define JS_FIELD_FUNCTION field_function
-#define JS_FIELD_ARGUMENTS field_arguments
-#define JS_FIELD_OBJECT field_object
-#define JS_FIELD_PROPERTY field_property
-#define JS_FIELD_BODY field_body
-#define JS_FIELD_PARAMETERS field_parameters
-#define JS_FIELD_CONDITION field_condition
-#define JS_FIELD_CONSEQUENCE field_consequence
-#define JS_FIELD_ALTERNATIVE field_alternative
-
-#ifdef __cplusplus
-}
-#endif
 
 // JavaScript AST node types share AstNodeType's underlying space. Core-shaped
 // nodes use core values now; JS-only or not-yet-merged variants stay in 1000–1499.

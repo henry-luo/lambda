@@ -56,8 +56,7 @@ static MIR_reg_t jm_emit_module_const_or_null(JsMirTranspiler* mt, const char* n
     if (!mt->module_consts) return jm_emit_null(mt);
     JsModuleConstEntry* entry = jm_find_module_const(mt, name);
     if (entry && entry->const_type == MCONST_MODVAR) {
-        return jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)entry->int_val));
+        return jm_load_module_var(mt, (uint32_t)entry->int_val);
     }
     if (entry && entry->const_type == MCONST_FUNC) {
         int fi = (int)entry->int_val;
@@ -298,9 +297,7 @@ MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce) 
     if (ce->inner_module_var_index >= 0) {
         // Nested class bindings are not globals; dynamic constructor paths
         // must recover their class identity from the definition-time slot.
-        return jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-            MIR_T_I64,
-            MIR_new_int_op(mt->ctx, (int64_t)ce->inner_module_var_index));
+        return jm_load_module_var(mt, (uint32_t)ce->inner_module_var_index);
     }
     // Anonymous class expressions have no inner name. Their outer alias is
     // the only runtime binding, and omitting it loses the private home class
@@ -530,9 +527,7 @@ static void jm_hoisted_func_modvar_write_through(JsMirTranspiler* mt, const char
     JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
     if (mc && mc->const_type == MCONST_MODVAR && mc->var_kind == 0 &&
         !mc->annexb_suppressed) {
-        jm_call_void_2(mt, "js_set_module_var",
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, val_reg));
+        jm_store_module_var(mt, (uint32_t)mc->int_val, val_reg);
     }
 }
 
@@ -736,7 +731,12 @@ static void jm_hoist_inner_function_declarations(JsMirTranspiler* mt,
         jm_set_var(mt, var_name, var_reg);
         jm_function_clear_shadowed_capture_binding(
             jm_function_find_current_scope_var(mt, var_name));
-        if (write_scope_env) jm_scope_env_mark_and_writeback(mt, var_name, var_reg);
+        if (write_scope_env) {
+            // A same-named lexical can force a source-keyed scope cell. Match
+            // the declaration itself so its hoisted closure updates that cell.
+            jm_scope_env_mark_and_writeback_binding(mt, var_name,
+                (JsAstNode*)inner_fn, var_reg);
+        }
         // nested closures may resolve a hoisted declaration through the module slot.
         jm_hoisted_func_modvar_write_through(mt, var_name, var_reg);
     }
@@ -1545,8 +1545,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // to null/undefined BEFORE function hoisting (mirrors JS var hoisting)
         jm_hoist_function_body_bindings(mt, fn, fc);
 
-        // Hoist inner function declarations (same as boxed path).
-        jm_hoist_inner_function_declarations(mt, fn, false);
+        // Native functions can still create boxed closures. Keep their hoisted
+        // declarations live in that shared lexical environment (D5.2).
+        jm_hoist_inner_function_declarations(mt, fn, true);
 
         // Transpile body (same as original, but params are native-typed)
         if (fn->body) {

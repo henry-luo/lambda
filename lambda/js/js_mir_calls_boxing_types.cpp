@@ -47,6 +47,38 @@ bool jm_is_native_unary_expression(JsMirTranspiler* mt, JsUnaryNode* un) {
 
 MIR_reg_t jm_box_float(JsMirTranspiler* mt, MIR_reg_t d_reg);
 
+static MirValue jm_module_slot_load_item(void* owner, uint32_t slot,
+        TypeId semantic_type) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)owner;
+    MIR_reg_t item = jm_call_1(mt, "lambda_active_module_var_at", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)slot));
+    return em_value(item, MIR_T_I64, semantic_type, VALUE_REP_ITEM,
+        JIT_VALUE_BOXED_ITEM);
+}
+
+static void jm_module_slot_store_item(void* owner, uint32_t slot,
+        MirValue item) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)owner;
+    jm_call_void_2(mt, "lambda_active_module_var_store",
+        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)slot),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, item.reg));
+}
+
+MIR_reg_t jm_load_module_var(JsMirTranspiler* mt, uint32_t slot) {
+    MirModuleSlotProfile profile = {&mt->em, mt, jm_module_slot_load_item,
+        jm_module_slot_store_item};
+    return em_load_module_slot(&profile, slot, LMD_TYPE_ANY,
+        MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM).reg;
+}
+
+void jm_store_module_var(JsMirTranspiler* mt, uint32_t slot, MIR_reg_t item) {
+    MirValue value = em_value(item, MIR_T_I64, LMD_TYPE_ANY, VALUE_REP_ITEM,
+        JIT_VALUE_BOXED_ITEM);
+    MirModuleSlotProfile profile = {&mt->em, mt, jm_module_slot_load_item,
+        jm_module_slot_store_item};
+    em_store_module_slot(&profile, slot, value);
+}
+
 MIR_reg_t jm_call_1_or_inline(JsMirTranspiler* mt, const char* fn_name,
         MIR_type_t ret_type, MIR_type_t a1t, MIR_op_t a1) {
     // The module-var slab can grow while a generated function is running.
@@ -138,12 +170,8 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
     MirCallResult direct = em_call_direct(&mt->em, callee->body_name,
         callee->body_func_item, body, arg_count, types, ops,
         &options);
-    if (direct.normal.maybe_pending) {
-        // direct boxed bodies share the lazy shape-2 transport with Lambda;
-        // publish only after resolving the companion so JS cannot execute a
-        // pending tag as an ordinary Item (D5.2.1v3, D5.2.2v3).
-        direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
-    }
+    direct.normal = em_finish_direct_call_normal(&mt->em, direct,
+        MIR_PENDING_REASON_UNKNOWN_CALL);
     MIR_reg_t result = jm_adopt_direct_scalar_result(mt, body, direct.normal.reg);
     return jm_publish_call_result(mt, result);
 }
@@ -241,11 +269,8 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
     MirCallResult direct = em_call_direct(&mt->em, callee->name,
         callee->native_func_item, native, arg_count, types, ops,
         &options);
-    if (direct.normal.maybe_pending) {
-        // native entries may still use the boxed shape for a dynamic result;
-        // resolve that pair before handing the register to later lowering.
-        direct.normal = em_materialize_pending_value(&mt->em, direct.normal);
-    }
+    direct.normal = em_finish_direct_call_normal(&mt->em, direct,
+        MIR_PENDING_REASON_UNKNOWN_CALL);
     MIR_reg_t result = direct.normal.reg;
     mt->last_call_result_reg = 0;
     return result;
@@ -552,7 +577,7 @@ MIR_reg_t jm_module_name_id_at_index(JsMirTranspiler* mt, uint32_t index) {
             return mt->module_name_id_cache[i].reg;
         }
     }
-    MIR_reg_t result = jm_call_1(mt, "js_active_module_name_id", MIR_T_I64,
+    MIR_reg_t result = jm_call_1(mt, "lambda_active_module_name_id", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)index));
     if (result && mt->module_name_id_cache_count <
             (int)(sizeof(mt->module_name_id_cache) /
@@ -615,7 +640,7 @@ MIR_reg_t jm_box_property_name_literal(JsMirTranspiler* mt,
             return mt->property_name_cache[i].reg;
         }
     }
-    MIR_reg_t result = jm_call_2(mt, "js_active_module_name_item", MIR_T_I64,
+    MIR_reg_t result = jm_call_2(mt, "lambda_active_module_name_item", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)module_name_index),
         MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)direct_name_id));
     if (result && mt->property_name_cache_count <
@@ -1477,8 +1502,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
             // check module-level variables (e.g. top-level let/var accessed from for-loop update)
             JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
             if (mc && mc->const_type == MCONST_MODVAR) {
-                boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                boxed = jm_load_module_var(mt, (uint32_t)mc->int_val);
                 if (mc->var_kind == JS_VAR_LET || mc->var_kind == JS_VAR_CONST) {
                     jm_call_3(mt, "js_check_tdz", MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),

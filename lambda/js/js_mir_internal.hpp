@@ -10,12 +10,6 @@
 
 extern "C" void *import_resolver(const char *name);
 extern __thread EvalContext* context;
-extern "C" void js_reset_module_vars();
-extern "C" uint32_t js_alloc_module_state(uint32_t var_count);
-extern "C" bool js_activate_module_state(uint32_t var_count);
-extern "C" uint32_t js_get_active_module_state_id(void);
-extern "C" bool js_set_active_module_state_id(uint32_t module_state_id);
-extern "C" bool js_module_state_is_available(uint32_t module_state_id);
 extern void js_double_to_string(double d, char* out, int out_size);
 extern "C" Item js_process_emit_before_exit(int code);
 extern "C" void js_process_emit_exit(int code);
@@ -28,8 +22,6 @@ extern int g_js_force_document_interp;
 // for modules above this (moderate) insn count — see Transpile_Js_Tune6_AST.md §0.2d.
 #define JM_RADIANT_INTERP_INSN_THRESHOLD MIR_RADIANT_INTERP_INSN_THRESHOLD
 extern "C" int g_mir_interp_mode;
-extern "C" const TSLanguage* tree_sitter_typescript(void);
-extern "C" const TSLanguage* tree_sitter_javascript(void);
 extern "C" void ensure_jit_imports_initialized(void);
 
 bool jm_float_const_is_inline(double value);
@@ -689,6 +681,9 @@ void jm_emit_class_static_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
 MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr);
+MirValue jm_transpile_box_value(JsMirTranspiler* mt, JsAstNode* item);
+MIR_reg_t jm_load_module_var(JsMirTranspiler* mt, uint32_t slot);
+void jm_store_module_var(JsMirTranspiler* mt, uint32_t slot, MIR_reg_t item);
 void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var);
 JsIdentifierNode* jm_detect_typeof_pattern(JsAstNode* test,
                                                     TypeId* narrowed_type, bool* negate);
@@ -747,18 +742,7 @@ void jm_emit_eval_local_pop_if_needed(JsMirTranspiler* mt);
 bool jm_scope_env_name_matches_binding(const char* scope_name, const char* name,
     JsAstNode* binding_node);
 bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root);
-uint64_t js_path_index_hash(const void* item, uint64_t seed0, uint64_t seed1);
-int js_path_index_compare(const void* a, const void* b, void* udata);
-void jm_add_dep(JsImportGraphNode* nodes, int parent_idx, int dep_idx);
-void jm_discover_js_imports_recursive(
-    TSParser* parser, int parent_idx,
-    JsImportGraphNode** nodes, int* count, int* capacity,
-    struct hashmap* path_map);
-int jm_compute_depth(JsImportGraphNode* nodes, int idx);
 bool jm_validate_mir_labels(MIR_context_t ctx);
-bool jm_compile_js_module(Runtime* runtime, JsImportGraphNode* node);
-void* jm_compile_js_worker(void* arg);
-int jm_precompile_js_imports(Runtime* runtime, const char* js_source, const char* filename);
 bool js_activate_runtime_name_pool(void);
 bool js_prelink_compiled_name_table(const JsMirTranspiler* mt);
 Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const char* filename);

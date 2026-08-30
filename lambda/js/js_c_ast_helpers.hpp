@@ -3,6 +3,7 @@
 #include "js_transpiler.hpp"
 
 Type* js_set_type_any(JsTranspiler* tp, AnyReason reason);
+JsOperator js_operator_from_string(const char* op_str, size_t len);
 
 JsAstNode* alloc_js_ast_node_span(JsTranspiler* tp, JsAstNodeType node_type,
                                   SourceSpan span, size_t size);
@@ -11,9 +12,6 @@ JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
 JsAstNode* build_js_identifier_from_source(JsTranspiler* tp, StrView source,
                                            SourceSpan span);
 JsAstNode* build_js_new_target_from_span(JsTranspiler* tp, SourceSpan span);
-JsAstNode* build_js_binding_identifier_from_source(JsTranspiler* tp,
-                                                   StrView source,
-                                                   SourceSpan span);
 JsAstNode* build_js_binary_from_children(JsTranspiler* tp, SourceSpan span,
                                           JsOperator op, JsAstNode* left,
                                           JsAstNode* right);
@@ -186,8 +184,6 @@ JsAstNode* build_js_switch_case_from_children(JsTranspiler* tp, SourceSpan span,
 JsAstNode* build_js_try_from_children(JsTranspiler* tp, SourceSpan span,
                                       JsAstNode* block, JsAstNode* handler,
                                       JsAstNode* finalizer);
-JsAstNode* build_js_finally_block_from_child(JsTranspiler* tp, SourceSpan span,
-                                              JsAstNode* body);
 JsAstNode* build_js_catch_from_children(JsTranspiler* tp, SourceSpan span,
                                         JsAstNode* parameter, JsAstNode* body);
 JsAstNode* build_js_import_specifier_from_children(JsTranspiler* tp,
