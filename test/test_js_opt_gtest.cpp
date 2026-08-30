@@ -264,15 +264,9 @@ static bool parse_trace(char* text, TraceResult* out) {
     return true;
 }
 
-// Run against the ordinary debug lambda.exe, which defines
-// LAMBDA_JS_EXEC_PROFILE and which `make build` keeps current.
-//
-// This deliberately no longer prefers ./lambda-debug-profile.exe. Nothing in
-// the normal build flow refreshes that artifact, and selecting it on mere
-// existence bound the whole suite to whatever stale copy happened to be on
-// disk. A copy built without LAMBDA_JS_EXEC_PROFILE compiles the trace hooks
-// down to no-op inlines, so the child exits 0 and writes its MIR dump but
-// never writes a .trace — turning every fixture here red with no hint why.
+// run against the executable supplied by the test target. `make test-js-opt`
+// builds the ordinary debug host, which carries the compile-time hooks;
+// callers may override that path for a different instrumented binary.
 static const char* opt_executable() {
     const char* configured = getenv("LAMBDA_JS_OPT_EXE");
     if (configured && configured[0]) return configured;
@@ -346,7 +340,7 @@ static bool run_fixture_mode(const char* name, const char* source, bool trace_en
         fprintf(stderr,
             "js-opt fixture '%s': %s ran cleanly but wrote no trace to '%s'.\n"
             "  That binary was built without LAMBDA_JS_EXEC_PROFILE.\n"
-            "  Rebuild it with `make build`, or set LAMBDA_JS_OPT_EXE to a"
+            "  Rebuild it with `make debug`, or set LAMBDA_JS_OPT_EXE to a"
             " profiling build.\n",
             name, executable, trace_path);
         return false;
