@@ -150,9 +150,9 @@ p is Point                                // true (nominal)
 
 | Kind | Expression | Result / meaning |
 |---|---|---|
-| Pipe | `[1, 2, 3] \| ~ * 2` | `[2, 4, 6]` |
-| | `users \| ~.name that (len(~) > 3)` | filter and transform |
-| Pipe/filter spread | `[1, [2, 3] \| ~, 4, 5]` | `[1, 2, 3, 4, 5]` |
+| Pipe | `[1, 2, 3] \|> ~ * 2` | `[2, 4, 6]` |
+| | `users \|> ~.name that (len(~) > 3)` | filter and transform |
+| Pipe/filter spread | `[1, [2, 3] \|> ~, 4, 5]` | `[1, 2, 3, 4, 5]` |
 | | `[0, items that (~ > 3), 9]` | flattened into the enclosing array |
 | Query — recursive | `html?<img>` | all `<img>` at any depth |
 | | `html?<div class: string>` | `<div>` with a class attribute |
@@ -429,7 +429,7 @@ print(format(report, 'json'))
 let doc = input("article.md", 'markdown');
 
 // Query for all headings using type-based search
-let headings = doc?(h1 | h2) | ~.content;
+let headings = doc?(h1 | h2) |> ~.content;
 
 // Generate table of contents
 let toc = <div class: "toc",

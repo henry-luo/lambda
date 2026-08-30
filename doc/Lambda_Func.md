@@ -66,7 +66,7 @@ fn greet(name: string) string {
 
 fn process(data) {
     let filtered = data where ~ > 0;
-    let doubled = filtered | ~ * 2;
+    let doubled = filtered |> ~ * 2;
     doubled
 }
 ```
@@ -505,7 +505,7 @@ add1_then_double(5)   // 12 (double(add1(5)))
 fn filter(arr, pred) => arr where pred(~)
 
 // Map
-fn map(arr, f) => arr | f(~)
+fn map(arr, f) => arr |> f(~)
 
 // Reduce/Fold
 fn reduce(arr, init, f) => {

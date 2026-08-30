@@ -24,15 +24,15 @@ Lambda has **static typing with inference** (`let x: int = 42`, union types `int
 
 ### Error Handling
 
-This is a major divergence. Lambda uses **error-as-return-value** with `T^E` types, `raise`, and `?` propagation — compile-time enforced, no exceptions. Clojure uses **JVM exceptions** (`try`/`catch`/`throw`). Lambda's approach is closer to Rust's `Result<T, E>` than anything in the Clojure world.
+This is a major divergence. Lambda uses **error-as-return-value** with `T^E` types, `raise`, postfix `^` propagation, and `e ^ { … }` handlers (S7.6) — compile-time enforced, no exceptions. Clojure uses **JVM exceptions** (`try`/`catch`/`throw`). Lambda's approach is closer to Rust's `Result<T, E>` than anything in the Clojure world.
 
 ### Pipe Expressions
 
-Lambda's `|` and `~` placeholder (`data | ~.name where len(~) > 3`) is very expressive for data pipelines. Clojure has `->` and `->>` threading macros, which are powerful but work differently — they thread the result positionally rather than using a placeholder symbol.
+Lambda's `|>` pipe with the `~` placeholder (`data |> ~.name`) and `where` filtering (`data where len(~) > 3`) are very expressive for data pipelines (S10.1.1: `|` is union, `|>` is the pipe). Clojure has `->` and `->>` threading macros, which are powerful but work differently — they thread the result positionally rather than using a placeholder symbol.
 
 ### Document Processing
 
-Lambda has **built-in markup elements** (`<div class: "toc"; ...>`) and native parsers for 12+ formats (JSON, XML, HTML, CSS, Markdown, PDF, etc.). Clojure has nothing like this natively — you'd pull in libraries for each format.
+Lambda has **built-in markup elements** (`<div class: "toc", ...>`) and native parsers for 12+ formats (JSON, XML, HTML, CSS, Markdown, PDF, etc.). Clojure has nothing like this natively — you'd pull in libraries for each format.
 
 ### Procedural Escape Hatch
 
@@ -40,11 +40,11 @@ Lambda explicitly separates pure (`fn`) from impure (`pn`) functions, with I/O o
 
 ### Runtime
 
-Lambda is a **custom C/C++ runtime with MIR JIT** and reference counting. Clojure runs on the **JVM** (or JS via ClojureScript), inheriting its garbage collector and ecosystem. This gives Clojure a massive library ecosystem but Lambda much tighter control over memory and startup time.
+Lambda is a **custom C/C++ runtime with MIR JIT** and a tracing garbage collector. Clojure runs on the **JVM** (or JS via ClojureScript), inheriting its garbage collector and ecosystem. This gives Clojure a massive library ecosystem but Lambda much tighter control over memory and startup time.
 
 ### Concurrency
 
-Clojure has **STM, atoms, agents, core.async** — concurrency is a first-class design concern. Lambda's docs don't mention concurrency primitives; it seems focused on single-threaded data processing pipelines.
+Clojure has **STM, atoms, agents, core.async** — coordinating *shared* mutable state is a first-class design concern. Lambda takes the opposite route: there is no shared mutable state at all (S9.1.7), so nothing needs coordinating. Concurrency enters through the colorless `start` builtin plus bounded per-task mailboxes with `send`/`receive`/`select` (S13) — closer to Erlang's actors than to Clojure's coordinated references. `core.async` channels are the nearest Clojure analog, but Lambda adds structured scope (block-owned handles, cancel-then-join on error exit, S13.3.1) and typed backpressure (`send` returns `ok^E`, S13.2.2).
 
 ## Where Lambda Stands Out
 

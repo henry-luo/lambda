@@ -1065,9 +1065,9 @@ let report = {
     title: "Sales Report",
     generated: datetime(),
     summary: {
-        total: sum(sales | ~.amount),
+        total: sum(sales |> ~.amount),
         count: len(sales),
-        average: avg(sales | ~.amount)
+        average: avg(sales |> ~.amount)
     },
     items: (for (sale in sales) {
         id: sale.id,

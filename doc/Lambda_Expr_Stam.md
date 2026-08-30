@@ -441,10 +441,10 @@ When `~` is not used, the pipe passes the entire collection/data on left side to
 | `[1, 2, 3, 4, 5] that (~ > 3)` | `[4, 5]` | basic filtering |
 | `users that (age >= 18)` | adult users only | filter objects |
 | `[1, 2, 3, 4, 5] that ~ == 3` | `[3]` | `==` and `!=` work without parens |
-| `data \| ~.name that (len(~) > 3) \| ~.upper()` | | combined with pipe |
+| `data \|> ~.name that (len(~) > 3) \|> ~.upper()` | | combined with pipe |
 
 > **Note:** The relational operators `<`, `>`, `<=`, `>=` conflict with element-tag
-> syntax in the parser. When a `that` (or `|`) condition uses any of these
+> syntax in the parser. When a `that` (or `|>`) condition uses any of these
 > operators, wrap the condition in parentheses: `items that (~ > 0)`.
 > The operators `==`, `!=`, `and`, `or`, `+`, `-`, `*`, `/` work without parens.
 
@@ -485,15 +485,15 @@ users that (age >= min_age)
 
 ### Spreading in Array Literals
 
-Pipe (`|`) and filter (`that`) expressions inside array literals produce **spreadable results** — their array output is automatically flattened into the enclosing array, just like for-expressions and the spread operator:
+Pipe (`|>`) and filter (`that`) expressions inside array literals produce **spreadable results** — their array output is automatically flattened into the enclosing array, just like for-expressions and the spread operator:
 
 | Expression | Result | |
 |---|---|---|
-| `[1, [2, 3] \| ~, 4, 5]` | `[1, 2, 3, 4, 5]` | pipe spreads into enclosing array |
-| `[0, [1, 2, 3] \| ~ * 10, 99]` | `[0, 10, 20, 30, 99]` | |
+| `[1, [2, 3] \|> ~, 4, 5]` | `[1, 2, 3, 4, 5]` | pipe spreads into enclosing array |
+| `[0, [1, 2, 3] \|> ~ * 10, 99]` | `[0, 10, 20, 30, 99]` | |
 | `[1, [1, 5, 7, 10, 15] that (~ > 5), 99]` | `[1, 7, 10, 15, 99]` | `that` spreads into enclosing array |
-| `[1, 5 \| double, 4]` | `[1, 10, 4]` | non-array pipe results are pushed normally (given `fn double(x: int) { x * 2 }`) |
-| `[for (x in [1, 2]) x, [3, 4] \| ~ * 10, [5, 6, 7] that (~ > 5)]` | `[1, 2, 30, 40, 6, 7]` | mixed for-expr + pipe + `that` |
+| `[1, 5 \|> double, 4]` | `[1, 10, 4]` | non-array pipe results are pushed normally (given `fn double(x: int) { x * 2 }`) |
+| `[for (x in [1, 2]) x, [3, 4] \|> ~ * 10, [5, 6, 7] that (~ > 5)]` | `[1, 2, 30, 40, 6, 7]` | mixed for-expr + pipe + `that` |
 
 > **Rationale:** This is consistent with for-expression and spread behavior — collection-producing
 > sub-expressions flatten into the enclosing array literal, giving a uniform "inline expansion" semantics.
@@ -763,7 +763,7 @@ for (x in [2, 3, 4], let sq = x * x, let cube = sq * x where cube > 10) [x, sq, 
 
 // let avoids redundant computation
 for (order in orders,
-     let subtotal = sum(order.items | ~.price * ~.qty),
+     let subtotal = sum(order.items |> ~.price * ~.qty),
      let tax = subtotal * 0.08,
      let total = subtotal + tax
      where total > 100)
@@ -1186,7 +1186,7 @@ From highest to lowest:
 | 9          | `or`                       | Logical OR      |
 | 10         | `to`                       | Range           |
 | 11         | `is`, `in`                 | Type operations |
-| 12         | `\|`, `that`               | Pipe, Filter    |
+| 12         | `\|>`, `that`              | Pipe, Filter    |
 
 ### Arithmetic Operators
 

@@ -535,7 +535,7 @@ find("no-match", digits)
 // [] (empty array)
 
 // Extract just matching values via pipe
-find("a1b22", digits) | ~.value     // ["1", "22"]
+find("a1b22", digits) |> ~.value     // ["1", "22"]
 ```
 
 ### contains(str, substring)
