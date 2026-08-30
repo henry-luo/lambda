@@ -92,22 +92,6 @@ struct JsModuleConstEntry {
     const char* live_binding_specifier; // resolved module path, NamePool-owned
 };
 
-struct JsImportGraphNode {
-    char* path;            // resolved file path (owned)
-    char* source;          // source text (owned)
-    int* deps;             // indices of dependency nodes (owned)
-    int dep_count;
-    int dep_cap;
-    int depth;             // topological depth (-1 = uncomputed)
-    MIR_context_t mir_ctx;
-    void* js_main_func;    // typed as js_main_func_t at call sites
-    uint32_t module_var_count;
-    PropertyKeySpec* module_property_specs;
-    uint32_t module_property_count;
-    uint32_t module_property_bytes_size;
-    bool compiled;
-};
-
 struct JsNameSetEntry {
     const char* name;   // NamePool-owned semantic binding name
     int var_kind;  // v20 TDZ: 0=var, 1=let, 2=const (mirrors JsVarKind)

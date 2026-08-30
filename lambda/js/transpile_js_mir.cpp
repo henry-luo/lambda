@@ -51,9 +51,6 @@ extern "C" int js_is_diagnose_enabled(void) {
 // POC: MIR interpreter mode — set from mir.c
 extern "C" int g_mir_interp_mode;
 
-// External declarations for parallel module compilation
 extern "C" {
-    const TSLanguage* tree_sitter_typescript(void);
-    const TSLanguage* tree_sitter_javascript(void);
     void ensure_jit_imports_initialized(void);
 }

@@ -544,8 +544,8 @@ Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
     jm_clear_active_js_transpile(NULL, mt, NULL);
     jm_destroy_mir_transpiler(mt);
     jit_cleanup_mode(ctx, !g_mir_interp_mode);
-    // the AST entry point owns the parser after delegation; its TypeScript
-    // caller must not destroy the same Tree-sitter objects a second time.
+    // the AST entry point owns parser state after delegation; its TypeScript
+    // caller must not destroy that parser-owned state a second time.
     js_transpiler_destroy(tp);
 
     // stash ephemeral GC heap on Runtime for caller cleanup

@@ -1619,7 +1619,16 @@ void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {
     // expression initializers such as `i = 0` evaluate in the surrounding
     // environment; only let/const for-inits need the synthetic loop scope.
     if (for_node->init && !init_is_lexical_decl) {
-        jm_transpile_statement(mt, for_node->init);
+        if (for_node->init->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            jm_transpile_statement(mt, for_node->init);
+        } else {
+            // A classic for initializer is an expression, not a statement node.
+            JsAstNode* saved_discarded = mt->discarded_expression;
+            mt->discarded_expression = for_node->init;
+            (void)em_apply_value_demand(&mt->em, jm_transpile_box_value(mt,
+                for_node->init), MIR_VALUE_DISCARD);
+            mt->discarded_expression = saved_discarded;
+        }
     }
 
     jm_push_scope(mt);

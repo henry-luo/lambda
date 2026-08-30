@@ -1157,8 +1157,8 @@ struct TsTypeParser {
 
 TsTypeNode* ts_parse_type_text(JsTranspiler* tp, const char* text, int len) {
     if (!text || len <= 0) {
-        TsPredefinedTypeNode* pn = (TsPredefinedTypeNode*)alloc_js_ast_node(tp,
-            (JsAstNodeType)TS_AST_NODE_PREDEFINED_TYPE, (TSNode){{0},0,0}, sizeof(TsPredefinedTypeNode));
+        TsPredefinedTypeNode* pn = (TsPredefinedTypeNode*)alloc_js_ast_node_span(tp,
+            (JsAstNodeType)TS_AST_NODE_PREDEFINED_TYPE, {0, 0}, sizeof(TsPredefinedTypeNode));
         pn->predefined_id = LMD_TYPE_ANY;
         return (TsTypeNode*)pn;
     }
@@ -1178,8 +1178,8 @@ TsTypeNode* ts_parse_type_text(JsTranspiler* tp, const char* text, int len) {
 
 TsTypeNode* ts_parse_interface_body_text(JsTranspiler* tp, const char* text, int len) {
     if (!text || len <= 0) {
-        TsObjectTypeNode* on = (TsObjectTypeNode*)alloc_js_ast_node(tp,
-            (JsAstNodeType)TS_AST_NODE_OBJECT_TYPE, (TSNode){{0},0,0}, sizeof(TsObjectTypeNode));
+        TsObjectTypeNode* on = (TsObjectTypeNode*)alloc_js_ast_node_span(tp,
+            (JsAstNodeType)TS_AST_NODE_OBJECT_TYPE, {0, 0}, sizeof(TsObjectTypeNode));
         on->member_count = 0;
         return (TsTypeNode*)on;
     }

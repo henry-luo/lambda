@@ -1634,6 +1634,14 @@ The deleted implementation files are `lambda/js/build_js_ast.cpp`, `lambda/js/js
 
 The post-P6 governed LOC result is `326,064 → 318,980` (`-7,084`), including the direct frontend retirement and its shared-helper consolidation. Validation passed: debug and release builds; C parser `16/16`; JS library `354/354`; JS script ownership `104/104`; JS MIR emission `21/21`; TypeScript `19/19`; parser differential `418/418`; sequential Lambda/Input baseline `4,061/4,061`; and Test262 `40,261/40,261` with zero regressions. The ordinary parallel baseline still exposes its pre-existing nested-process pressure failure in the recursive-stack-fault fixture; its isolated and sequential canonical runs pass, so this record does not weaken or alter the test runner. No formal-spec ruling or semver changed.
 
+#### Post-P6 implementation record — residual direct-AST retirement, 2026-08-30
+
+The C parser and its direct scope rebuild remain the sole production JavaScript/TypeScript frontend under **D8.1.3v10**. This follow-up removes the remaining direct-builder compatibility emulation: construction-order fact replay, transient reduction-time scopes, binding-identifier/finally wrappers, stale Tree-sitter AST macros and allocator entry points, and the unused parallel-import graph declarations. The direct scope pass now owns every binding and the direct lowering path consumes the parser's semantic AST shapes, including expression-form classic `for` initializers.
+
+This is a genuine deletion under **D8.6.4v2**: the eliminated paths have no forwarding API, hidden frontend selection, or replacement copy. The residual direct-class scope wrapper was inlined at its sole call site; source comments were corrected only to describe the surviving authority. No blank lines were removed and no formatting-only reduction was used.
+
+The JavaScript-engine diff for this cleanup is measured from the workspace base as `+65/-1067 = -1,002` lines under `lambda/js`. Validation passed: coherent debug test build; C parser `16/16`; TypeScript `19/19`; JS interpreter `357/357`; JS script ownership `104/104`; JS MIR emission `21/21`; JS optimization `19/19`; and the complete Test262 runner with zero regressions against its `40,261` passing-case baseline. This is an implementation-status record only; no formal ruling or semver changed.
+
 ---
 
 ## 5. Phase Exit Gates

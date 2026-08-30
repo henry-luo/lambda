@@ -12,7 +12,6 @@ extern "C" {
 // Forward declarations
 typedef struct JsScript JsScript;
 typedef struct JsTranspiler JsTranspiler;
-struct JsDirectScopeState;
 typedef NameScope JsScope;
 struct hashmap;
 
@@ -95,8 +94,6 @@ struct JsTranspiler : JsScript {
     bool in_expression;             // True when transpiling inside an expression (for function expressions)
     bool in_async_function;         // True while building an async function body/parameters
     bool in_generator_function;     // True while building a generator body/parameters
-    bool direct_ast_building;       // Direct parser bindings are rebuilt after reduction
-    JsDirectScopeState* direct_scope_state;
     
     // ANY-census [Type_Infer TI3]: per-reason counts of expressions whose
     // static type fell back to `any`. Diagnostic only — shares the Lambda
@@ -153,7 +150,6 @@ static inline int js_validate_compiler_pass(void* opaque) {
 }
 
 // AST utility functions shared by direct JS and TypeScript reductions.
-JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode node, size_t size);
 JsOperator js_operator_from_string(const char* op_str, size_t len);
 bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast);
 JsAstNode* publish_js_ast_indexed(JsTranspiler* tp, JsAstNode* ast);

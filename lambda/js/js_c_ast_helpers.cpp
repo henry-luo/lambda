@@ -321,12 +321,6 @@ JsAstNode* alloc_js_ast_node_span(JsTranspiler* tp, JsAstNodeType node_type,
     return js_alloc_ast_node(tp, node_type, span, size);
 }
 
-JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type,
-        TSNode node, size_t size) {
-    SourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
-    return js_alloc_ast_node(tp, node_type, span, size);
-}
-
 JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
         StrView source, SourceSpan span) {
     JsLiteralNode* literal = (JsLiteralNode*)alloc_js_ast_node_span(tp,
@@ -506,7 +500,7 @@ JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
     return (JsAstNode*)literal;
 }
 
-// Build JavaScript literal node from the Tree-sitter reference adapter.
+// build a JavaScript identifier from source text.
 JsAstNode* build_js_identifier_from_source(JsTranspiler* tp, StrView source,
         SourceSpan span) {
     JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node_span(tp,
@@ -522,20 +516,9 @@ JsAstNode* build_js_identifier_from_source(JsTranspiler* tp, StrView source,
         log_error("Failed to create identifier name");
         return NULL;
     }
-    // Look up in symbol table
-    identifier->entry = js_scope_lookup(tp, identifier->name);
-
-    if (identifier->entry) {
-        log_debug("id-lookup: '%.*s' found, entry->node=%p, entry->node->type=%p",
-            (int)identifier->name->len, identifier->name->chars,
-            identifier->entry->node, identifier->entry->node->type);
-        identifier->type = identifier->entry->node->type;
-    } else {
-        // Undefined identifier - could be global or error
-        identifier->type = js_set_type_any(tp, ANY_OPEN_PARAM);
-        log_debug("Undefined identifier: %.*s", (int)identifier->name->len,
-            identifier->name->chars);
-    }
+    // The direct scope pass attaches bindings after every AST child exists.
+    identifier->entry = NULL;
+    identifier->type = js_set_type_any(tp, ANY_OPEN_PARAM);
 
     return (JsAstNode*)identifier;
 }
@@ -547,81 +530,6 @@ JsAstNode* build_js_new_target_from_span(JsTranspiler* tp, SourceSpan span) {
     identifier->entry = NULL;
     identifier->type = js_set_type_any(tp, ANY_STATEMENT);
     return (JsAstNode*)identifier;
-}
-
-// build a binding identifier without resolving it against the current scope
-JsAstNode* build_js_binding_identifier_from_source(JsTranspiler* tp,
-        StrView source, SourceSpan span) {
-    JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_IDENTIFIER, span, sizeof(JsIdentifierNode));
-    if (source.length == 0) {
-        log_error("Empty binding identifier source");
-        return NULL;
-    }
-    identifier->name = js_decode_identifier_name(tp, source.str,
-        (int)source.length);
-    if (!identifier->name) {
-        log_error("Failed to create binding identifier name");
-        return NULL;
-    }
-    identifier->entry = NULL;
-    identifier->type = js_set_type_any(tp, ANY_OPEN_PARAM);
-    return (JsAstNode*)identifier;
-}
-
-static void js_bind_pattern_names(JsTranspiler* tp, JsAstNode* pattern, JsVarKind kind) {
-    if (!pattern) return;
-    if (pattern->node_type == (int)TS_AST_NODE_PARAMETER) {
-        TsParameterNode* param = (TsParameterNode*)pattern;
-        js_bind_pattern_names(tp, param->pattern, kind);
-        return;
-    }
-    switch (pattern->node_type) {
-    case JS_AST_NODE_IDENTIFIER: {
-        JsIdentifierNode* id = (JsIdentifierNode*)pattern;
-        NameEntry* entry = js_scope_define(tp, id->name, pattern, kind);
-        id->entry = entry;
-        id->type = entry && entry->node ? entry->node->type : &TYPE_ANY;
-        break;
-    }
-    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
-        JsAssignmentPatternNode* pat = (JsAssignmentPatternNode*)pattern;
-        js_bind_pattern_names(tp, pat->left, kind);
-        break;
-    }
-    case JS_AST_NODE_REST_ELEMENT: {
-        JsSpreadElementNode* rest = (JsSpreadElementNode*)pattern;
-        js_bind_pattern_names(tp, rest->argument, kind);
-        break;
-    }
-    case JS_AST_NODE_ARRAY_PATTERN:
-    case JS_AST_NODE_ARRAY_EXPRESSION: {
-        JsArrayNode* arr = (JsArrayNode*)pattern;
-        JsAstNode* item = arr->elements;
-        while (item) {
-            js_bind_pattern_names(tp, item, kind);
-            item = item->next;
-        }
-        break;
-    }
-    case JS_AST_NODE_OBJECT_PATTERN:
-    case JS_AST_NODE_OBJECT_EXPRESSION: {
-        JsObjectNode* obj = (JsObjectNode*)pattern;
-        JsAstNode* prop = obj->properties;
-        while (prop) {
-            if (prop->node_type == JS_AST_NODE_PROPERTY) {
-                JsPropertyNode* p = (JsPropertyNode*)prop;
-                js_bind_pattern_names(tp, p->value, kind);
-            } else {
-                js_bind_pattern_names(tp, prop, kind);
-            }
-            prop = prop->next;
-        }
-        break;
-    }
-    default:
-        break;
-    }
 }
 
 void refresh_js_binary_type(JsTranspiler* tp, JsBinaryNode* binary) {
@@ -713,7 +621,7 @@ JsAstNode* build_js_binary_from_children(JsTranspiler* tp, SourceSpan span,
     return (JsAstNode*)binary;
 }
 
-// build JavaScript binary expression node from the Tree-sitter reference adapter.
+// build a JavaScript unary expression from its operand.
 JsAstNode* build_js_unary_from_child(JsTranspiler* tp, SourceSpan span,
         JsOperator op, JsAstNode* operand, bool prefix) {
     JsUnaryNode* unary = (JsUnaryNode*)alloc_js_ast_node_span(tp,
@@ -938,9 +846,6 @@ JsAstNode* build_js_template_from_parts(JsTranspiler* tp, SourceSpan span,
         JsAstNode* next = part->next;
         part->next = NULL;
         if (part->node_type == JS_AST_NODE_TEMPLATE_ELEMENT) {
-            // Tree-sitter's template-element builder records the containing
-            // template span for every quasi, not the individual token span.
-            part->source_span = span;
             if (!quasis) quasis = part;
             else previous_quasi->next = part;
             previous_quasi = part;
@@ -1302,7 +1207,7 @@ JsAstNode* build_js_declarator_with_type_from_children(JsTranspiler* tp,
     return (JsAstNode*)declarator;
 }
 
-// build a variable declaration and publish simple bindings to the current scope
+// build a variable declaration from parser-owned declarators
 JsAstNode* build_js_variable_declaration_from_list(JsTranspiler* tp,
         SourceSpan span, JsAstNode* declarations, uint32_t length, int kind) {
     (void)length;
@@ -1313,22 +1218,6 @@ JsAstNode* build_js_variable_declaration_from_list(JsTranspiler* tp,
     declaration->declarations = declarations;
     declaration->kind = kind;
     declaration->type = &TYPE_NULL;
-    for (JsAstNode* item = declarations; item; item = item->next) {
-        if (item->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
-        JsVariableDeclaratorNode* declarator =
-            (JsVariableDeclaratorNode*)item;
-        if (declarator->id &&
-                declarator->id->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* id = (JsIdentifierNode*)declarator->id;
-            if (tp->direct_ast_building) continue;
-            NameEntry* entry = js_scope_define(tp, id->name,
-                (JsAstNode*)declarator, (JsVarKind)kind);
-            id->entry = entry;
-            // the declaration carries the initializer type; the binding
-            // identifier itself remains the reference builder's open `any`.
-            id->type = &TYPE_ANY;
-        }
-    }
     return (JsAstNode*)declaration;
 }
 
@@ -1339,7 +1228,6 @@ JsAstNode* build_js_block_from_list(JsTranspiler* tp, SourceSpan span,
     JsBlockNode* block = (JsBlockNode*)alloc_js_ast_node_span(tp,
         JS_AST_NODE_BLOCK_STATEMENT, span, sizeof(JsBlockNode));
     block->statements = statements;
-    block->vars = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
     block->type = &TYPE_NULL;
     return (JsAstNode*)block;
 }
@@ -1756,41 +1644,6 @@ static JsAstNode* build_js_function_from_children_common(
         function->ts_return_type = (TsTypeAnnotationNode*)return_type;
     }
 
-    if (tp->direct_ast_building) {
-        // Direct reductions build a function after its body, so binding it
-        // here would publish nested declarations in the transient outer scope.
-        // js_rebuild_direct_scope_graph installs the complete lexical graph.
-        return (JsAstNode*)function;
-    }
-
-    JsScope* outer_scope = tp->current_scope;
-    JsScope* function_scope = js_scope_create(tp, JS_SCOPE_FUNCTION,
-        outer_scope);
-    function->vars = function_scope;
-    function_scope->strict = outer_scope ? outer_scope->strict :
-        tp->strict_mode;
-    if (function->has_use_strict_directive) function_scope->strict = true;
-    js_scope_push(tp, function_scope);
-    if (function->name && !declaration) {
-        js_scope_define(tp, function->name, (JsAstNode*)function, JS_VAR_VAR);
-    }
-    for (JsAstNode* parameter = params; parameter;
-            parameter = parameter->next) {
-        js_bind_pattern_names(tp, parameter, JS_VAR_VAR);
-    }
-    if (body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-        JsBlockNode* block = (JsBlockNode*)body;
-        if (block->vars) block->vars->parent = function_scope;
-    }
-    js_scope_pop(tp);
-
-    if (function->name && declaration) {
-        NameEntry* entry = js_scope_define(tp, function->name,
-            (JsAstNode*)function, JS_VAR_VAR);
-        if (name->node_type == JS_AST_NODE_IDENTIFIER) {
-            ((JsIdentifierNode*)name)->entry = entry;
-        }
-    }
     return (JsAstNode*)function;
 }
 
@@ -1809,7 +1662,7 @@ JsAstNode* build_js_function_with_return_type_from_children(
         return_type, async, generator, declaration, arrow);
 }
 
-// build JavaScript unary expression node from the Tree-sitter reference adapter.
+// transfer the parsed function payload into its owning method node.
 static void js_method_adopt_function_payload(JsMethodDefinitionNode* method, JsAstNode* value) {
     if (!method) return;
     if (!value || (value->node_type != JS_AST_NODE_FUNCTION_EXPRESSION &&
@@ -1955,8 +1808,8 @@ JsAstNode* build_js_static_block_from_child(JsTranspiler* tp, SourceSpan span,
     JsStaticBlockNode* block = (JsStaticBlockNode*)alloc_js_ast_node_span(
         tp, JS_AST_NODE_STATIC_BLOCK, span, sizeof(JsStaticBlockNode));
     block->body = body;
-    // Static blocks are execution containers; the reference adapter leaves
-    // their derived value type unset while the nested block carries null.
+    // Static blocks are execution containers, not value expressions; their
+    // derived value type remains unset while the nested block carries null.
     block->type = NULL;
     return (JsAstNode*)block;
 }
@@ -1978,28 +1831,6 @@ JsAstNode* build_js_class_from_children(JsTranspiler* tp, SourceSpan span,
     class_node->body = body;
     class_node->type = &TYPE_FUNC;
 
-    if (tp->direct_ast_building) {
-        // Class bindings require the enclosing lexical scope, which direct
-        // reductions have not entered yet; defer them to scope reconstruction.
-        return (JsAstNode*)class_node;
-    }
-
-    if (class_node->name && !declaration) {
-        JsScope* expression_scope = js_scope_create(tp, JS_SCOPE_BLOCK,
-            tp->current_scope);
-        class_node->expression_scope = expression_scope;
-        if (expression_scope) {
-            js_scope_push(tp, expression_scope);
-            js_scope_define(tp, class_node->name, (JsAstNode*)class_node,
-                JS_VAR_LET);
-            js_scope_pop(tp);
-        }
-    }
-    if (class_node->name && declaration) {
-        NameEntry* entry = js_scope_define(tp, class_node->name,
-            (JsAstNode*)class_node, JS_VAR_LET);
-        ((JsIdentifierNode*)name)->entry = entry;
-    }
     return (JsAstNode*)class_node;
 }
 
@@ -2012,19 +1843,11 @@ JsAstNode* build_js_for_from_children(JsTranspiler* tp, SourceSpan span,
     }
     JsForNode* loop = (JsForNode*)alloc_js_ast_node_span(tp,
         JS_AST_NODE_FOR_STATEMENT, span, sizeof(JsForNode));
-    if (init && init->node_type != JS_AST_NODE_VARIABLE_DECLARATION &&
-            init->node_type != JS_AST_NODE_EXPRESSION_STATEMENT) {
-        // Tree-sitter builds the classic-for initializer through its statement
-        // path, so expression initializers retain an expression-statement node.
-        init = build_js_expression_statement_from_child(tp,
-            init->source_span, init);
-    }
     loop->init = init;
     loop->test = test;
     loop->update = update;
     loop->body = body;
     loop->form = LOOP_FORM_FOR_C;
-    loop->vars = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
     loop->type = &TYPE_NULL;
     return (JsAstNode*)loop;
 }
@@ -2117,18 +1940,6 @@ JsAstNode* build_js_for_of_from_children(JsTranspiler* tp, SourceSpan span,
         left = ((JsVariableDeclaratorNode*)item)->id;
         if (left && left->node_type == JS_AST_NODE_IDENTIFIER) {
             left->type = &TYPE_ANY;
-            if (tp->direct_ast_building) {
-                // The normalized iteration head is a binding identifier in
-                // the shared AST. Replace the transient declaration entry so
-                // subsequent body reductions do not retain a declarator type
-                // that the reference builder never exposes.
-                NameEntry* entry = js_scope_lookup(tp,
-                    ((JsIdentifierNode*)left)->name);
-                if (entry) {
-                    entry->node = (AstNode*)left;
-                    ((JsIdentifierNode*)left)->entry = entry;
-                }
-            }
         }
     }
     JsForOfNode* loop = (JsForOfNode*)alloc_js_ast_node_span(tp,
@@ -2141,7 +1952,6 @@ JsAstNode* build_js_for_of_from_children(JsTranspiler* tp, SourceSpan span,
     loop->kind = kind;
     loop->declares_binding = declares_binding;
     loop->is_await = is_for_await;
-    loop->vars = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
     loop->type = &TYPE_NULL;
     return (JsAstNode*)loop;
 }
@@ -2158,10 +1968,6 @@ JsAstNode* build_js_switch_from_children(JsTranspiler* tp, SourceSpan span,
     switched->discriminant = discriminant;
     switched->cases = cases;
     (void)length;
-    // The JS reference builder leaves this legacy match-field at zero; case
-    // traversal uses the retained linked list instead.
-    switched->arm_count = 0;
-    switched->vars = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
     switched->type = &TYPE_NULL;
     return (JsAstNode*)switched;
 }
@@ -2195,23 +2001,6 @@ JsAstNode* build_js_try_from_children(JsTranspiler* tp, SourceSpan span,
     return (JsAstNode*)tried;
 }
 
-// preserve the reference builder's finally-clause wrapper and nested body
-JsAstNode* build_js_finally_block_from_child(JsTranspiler* tp, SourceSpan span,
-        JsAstNode* body) {
-    if (!tp || !body || body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
-        log_error("JavaScript finally clause has invalid body");
-        return NULL;
-    }
-    JsBlockNode* finalizer = (JsBlockNode*)alloc_js_ast_node_span(tp,
-        JS_AST_NODE_BLOCK_STATEMENT, span, sizeof(JsBlockNode));
-    finalizer->vars = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
-    finalizer->statements = body;
-    JsBlockNode* body_block = (JsBlockNode*)body;
-    if (body_block->vars) body_block->vars->parent = finalizer->vars;
-    finalizer->type = &TYPE_NULL;
-    return (JsAstNode*)finalizer;
-}
-
 // build a catch clause and its handler binding scope
 JsAstNode* build_js_catch_from_children(JsTranspiler* tp, SourceSpan span,
         JsAstNode* parameter, JsAstNode* body) {
@@ -2223,15 +2012,6 @@ JsAstNode* build_js_catch_from_children(JsTranspiler* tp, SourceSpan span,
         JS_AST_NODE_CATCH_CLAUSE, span, sizeof(JsCatchNode));
     handler->param = parameter;
     handler->body = body;
-    handler->vars = js_scope_create(tp, JS_SCOPE_BLOCK, tp->current_scope);
-    // Annex B.3.5 permits a var redeclaration only for a simple catch
-    // BindingIdentifier; destructured catch parameters remain lexical-only.
-    handler->vars->allows_legacy_var_redeclaration = parameter &&
-        parameter->node_type == JS_AST_NODE_IDENTIFIER;
-    if (body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
-        JsBlockNode* block = (JsBlockNode*)body;
-        if (block->vars) block->vars->parent = handler->vars;
-    }
     handler->type = &TYPE_NULL;
     return (JsAstNode*)handler;
 }
