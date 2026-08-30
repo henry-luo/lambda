@@ -543,11 +543,8 @@ static void layout_flex_abs_after_child(LayoutContext* lycon, ViewBlock* contain
     }
 
     if (adjust_cross) {
-        int item_align = align_items;
-        if (child_block->fi && child_block->fi->align_self != CSS_VALUE_AUTO &&
-            child_block->fi->align_self != 0) {
-            item_align = child_block->fi->align_self;
-        }
+        int item_align = flex_item_resolved_align_self(
+            static_cast<ViewElement*>(child_block), align_items);
         int effective_align = item_align;
         if (is_wrap_reverse) {
             if (item_align == CSS_VALUE_FLEX_START || item_align == CSS_VALUE_STRETCH) {
@@ -598,11 +595,9 @@ static void layout_flex_abs_prepare_child(LayoutContext* lycon, ViewBlock* conta
             continue;
         }
 
-        int alignment = axis == axes.main ? ctx->flex->justify : ctx->flex->align_items;
-        if (axis == axes.cross && child->fi &&
-            child->fi->align_self != CSS_VALUE_AUTO && child->fi->align_self != 0) {
-            alignment = child->fi->align_self;
-        }
+        int alignment = axis == axes.main ? ctx->flex->justify :
+            flex_item_resolved_align_self(static_cast<ViewElement*>(child),
+                                          ctx->flex->align_items);
         if (alignment != CSS_VALUE_CENTER) continue;
 
         float flex_start_x = 0.0f;
@@ -700,11 +695,10 @@ bool flex_height_is_parent_constrained(ViewBlock* container,
     }
     if (parent_is_row) {
         if (!include_row_cross_stretch) return false;
-        int align = container->fi->align_self;
-        if (align == ALIGN_AUTO) {
-            align = parent && parent->embed && parent->embedp()->flex
-                ? parent->embedp()->flex->align_items : ALIGN_STRETCH;
-        }
+        int parent_align_items = parent && parent->embed && parent->embedp()->flex
+            ? parent->embedp()->flex->align_items : ALIGN_STRETCH;
+        int align = flex_item_resolved_align_self(
+            static_cast<ViewElement*>(container), parent_align_items);
         return align == ALIGN_STRETCH;
     }
     return include_column_main_size && container->fi->flex_basis >= 0.0f;
@@ -732,8 +726,8 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     if (pa_flex && flex_container->fi) {
         bool is_parent_horizontal = is_main_axis_horizontal(pa_flex);
 
-        int align_type = ((int)flex_container->fi->align_self != ALIGN_AUTO) ?
-                         flex_container->fi->align_self : pa_flex->align_items;
+        int align_type = flex_item_resolved_align_self(
+            static_cast<ViewElement*>(flex_container), pa_flex->align_items);
         bool should_stretch = (align_type == ALIGN_STRETCH);
 
         if (!is_parent_horizontal && should_stretch) {
@@ -1129,8 +1123,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                                       flex_item->display.inner == CSS_VALUE_GRID);
         bool skip_for_stretch = false;
         if (flex_item->fi && !has_explicit_height) {
-            int align = flex_item->fi->align_self;
-            if (align == ALIGN_AUTO) align = parent_flex->align_items;
+            int align = flex_item_resolved_align_self(
+                static_cast<ViewElement*>(flex_item), parent_flex->align_items);
             if (align == ALIGN_STRETCH && parent_flex->has_definite_cross_size) {
                 skip_for_stretch = true;
             }
@@ -1636,8 +1630,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                     bool has_explicit_height = (fi->blk && fi->block_mut()->given_height >= 0);
                     bool is_definite_stretched = false;
                     if (fi->fi && !has_explicit_height && flex->has_definite_cross_size) {
-                        int align = fi->fi->align_self;
-                        if (align == ALIGN_AUTO) align = flex->align_items;
+                        int align = flex_item_resolved_align_self(fi, flex->align_items);
                         is_definite_stretched = (align == ALIGN_STRETCH);
                     }
 
@@ -1724,9 +1717,8 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
                         [&](ViewElement* item) {
                             bool has_explicit_height = item->blk &&
                                 item->block_mut()->given_height >= 0;
-                            int align_type = item->fi &&
-                                (int)item->fi->align_self != ALIGN_AUTO
-                                ? item->fi->align_self : flex->align_items;
+                            int align_type = flex_item_resolved_align_self(
+                                item, flex->align_items);
                             if (has_explicit_height || align_type != ALIGN_STRETCH) return;
                             float margins = layout_axis_margin_start(
                                 item->bound, LAYOUT_AXIS_Y) +

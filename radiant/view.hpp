@@ -1408,6 +1408,8 @@ typedef struct PositionProp {
     ViewBlock* first_abs_child;   // first child absolute/fixed positioned view
     ViewBlock* last_abs_child;    // last child absolute/fixed positioned view
     ViewBlock* next_abs_sibling;    // next sibling absolute/fixed positioned view
+    ViewBlock* next_static_line_alignment; // current line's deferred static self-alignment link
+    float static_line_initial_extent; // provisional line-box extent used for static self-alignment
     bool static_x_needs_parent_offset;  // flex static x was computed in parent-local coords
     bool static_x_needs_inline_cb_extent; // inline CB width is finalized after abs layout
     bool static_x_uses_inline_start;    // blockified abs child uses inline CB start edge
@@ -1488,11 +1490,242 @@ enum TextAutospaceFlags : uint8_t {
 static constexpr uint8_t TEXT_AUTOSPACE_NORMAL =
     TEXT_AUTOSPACE_IDEOGRAPH_ALPHA | TEXT_AUTOSPACE_IDEOGRAPH_NUMERIC;
 
+// CSS Box Alignment’s compound self-alignment value. This is style-owned so
+// absolute boxes can retain it without becoming synthetic flex or grid items.
+typedef struct CssSelfAlignment {
+    CssEnum value;
+    bool safe;
+    bool overflow_explicit;
+    bool last_baseline;
+} CssSelfAlignment;
+
+static inline int css_self_alignment_value_count(const CssValue* value) {
+    if (!value) return 0;
+    return value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+}
+
+static inline const CssValue* css_self_alignment_value_at(const CssValue* value,
+                                                          int index) {
+    if (!value || index < 0) return nullptr;
+    if (value->type != CSS_VALUE_TYPE_LIST) return index == 0 ? value : nullptr;
+    return index < value->data.list.count ? value->data.list.values[index] : nullptr;
+}
+
+static inline bool css_is_self_alignment_position(CssEnum value,
+                                                   bool allow_physical) {
+    switch (value) {
+        case CSS_VALUE_AUTO:
+        case CSS_VALUE_NORMAL:
+        case CSS_VALUE_STRETCH:
+        case CSS_VALUE_START:
+        case CSS_VALUE_END:
+        case CSS_VALUE_ANCHOR_CENTER:
+        case CSS_VALUE_SELF_START:
+        case CSS_VALUE_SELF_END:
+        case CSS_VALUE_FLEX_START:
+        case CSS_VALUE_FLEX_END:
+        case CSS_VALUE_CENTER:
+        case CSS_VALUE_BASELINE:
+            return true;
+        case CSS_VALUE_LEFT:
+        case CSS_VALUE_RIGHT:
+            return allow_physical;
+        default:
+            return false;
+    }
+}
+
+// Parse one <self-position> sequence. place-self uses the consumed count to
+// split its two logical values without reparsing or allocating a temporary list.
+static inline CssSelfAlignment css_parse_self_alignment_segment(const CssValue* value,
+                                                                 int start, int end,
+                                                                 bool allow_physical,
+                                                                 int* consumed) {
+    CssSelfAlignment result = {};
+    if (consumed) *consumed = 0;
+    const CssValue* token = css_self_alignment_value_at(value, start);
+    if (!token || token->type != CSS_VALUE_TYPE_KEYWORD) return result;
+
+    int cursor = start;
+    if (token->data.keyword == CSS_VALUE_SAFE || token->data.keyword == CSS_VALUE_UNSAFE) {
+        result.safe = token->data.keyword == CSS_VALUE_SAFE;
+        result.overflow_explicit = true;
+        token = css_self_alignment_value_at(value, ++cursor);
+        if (!token || token->type != CSS_VALUE_TYPE_KEYWORD) return CssSelfAlignment{};
+    }
+
+    if ((token->data.keyword == CSS_VALUE_FIRST || token->data.keyword == CSS_VALUE_LAST) &&
+        cursor + 1 < end) {
+        const CssValue* baseline = css_self_alignment_value_at(value, cursor + 1);
+        if (baseline && baseline->type == CSS_VALUE_TYPE_KEYWORD &&
+            baseline->data.keyword == CSS_VALUE_BASELINE) {
+            result.value = CSS_VALUE_BASELINE;
+            result.last_baseline = token->data.keyword == CSS_VALUE_LAST;
+            cursor += 2;
+            if (consumed) *consumed = cursor - start;
+            return result;
+        }
+    }
+
+    if (!css_is_self_alignment_position(token->data.keyword, allow_physical)) return {};
+    result.value = token->data.keyword;
+    if (consumed) *consumed = cursor - start + 1;
+    return result;
+}
+
+static inline CssSelfAlignment css_parse_self_alignment_value(const CssValue* value,
+                                                               bool allow_physical) {
+    return css_parse_self_alignment_segment(value, 0,
+                                            css_self_alignment_value_count(value),
+                                            allow_physical, nullptr);
+}
+
+static inline bool css_parse_place_self_alignment(const CssValue* value,
+                                                   CssSelfAlignment* align,
+                                                   CssSelfAlignment* justify) {
+    if (!align || !justify) return false;
+    const int value_count = css_self_alignment_value_count(value);
+    int align_count = 0;
+    CssSelfAlignment parsed_align = css_parse_self_alignment_segment(
+        value, 0, value_count, false, &align_count);
+    if (parsed_align.value == CSS_VALUE__UNDEF) return false;
+    CssSelfAlignment parsed_justify = parsed_align;
+    if (align_count < value_count) {
+        parsed_justify = css_parse_self_alignment_segment(
+            value, align_count, value_count, true, nullptr);
+        if (parsed_justify.value == CSS_VALUE__UNDEF) return false;
+    }
+    *align = parsed_align;
+    *justify = parsed_justify;
+    return true;
+}
+
+static inline bool css_is_content_alignment_position(CssEnum value,
+                                                      bool allow_physical) {
+    switch (value) {
+        case CSS_VALUE_NORMAL:
+        case CSS_VALUE_STRETCH:
+        case CSS_VALUE_START:
+        case CSS_VALUE_END:
+        case CSS_VALUE_FLEX_START:
+        case CSS_VALUE_FLEX_END:
+        case CSS_VALUE_CENTER:
+        case CSS_VALUE_BASELINE:
+        case CSS_VALUE_SPACE_BETWEEN:
+        case CSS_VALUE_SPACE_AROUND:
+        case CSS_VALUE_SPACE_EVENLY:
+            return true;
+        case CSS_VALUE_LEFT:
+        case CSS_VALUE_RIGHT:
+            return allow_physical;
+        default:
+            return false;
+    }
+}
+
+static inline bool css_is_content_alignment_overflow_position(CssEnum value,
+                                                               bool allow_physical) {
+    switch (value) {
+        case CSS_VALUE_START:
+        case CSS_VALUE_END:
+        case CSS_VALUE_FLEX_START:
+        case CSS_VALUE_FLEX_END:
+        case CSS_VALUE_CENTER:
+            return true;
+        case CSS_VALUE_LEFT:
+        case CSS_VALUE_RIGHT:
+            return allow_physical;
+        default:
+            return false;
+    }
+}
+
+// Parse one <content-distribution> / <content-position> sequence. The
+// consumed count lets place-content split its two component values in-place.
+static inline CssSelfAlignment css_parse_content_alignment_segment(const CssValue* value,
+                                                                    int start, int end,
+                                                                    bool allow_physical,
+                                                                    int* consumed) {
+    CssSelfAlignment result = {};
+    if (consumed) *consumed = 0;
+    const CssValue* token = css_self_alignment_value_at(value, start);
+    if (!token || token->type != CSS_VALUE_TYPE_KEYWORD) return result;
+
+    int cursor = start;
+    if ((token->data.keyword == CSS_VALUE_FIRST || token->data.keyword == CSS_VALUE_LAST) &&
+        cursor + 1 < end) {
+        const CssValue* baseline = css_self_alignment_value_at(value, cursor + 1);
+        if (baseline && baseline->type == CSS_VALUE_TYPE_KEYWORD &&
+            baseline->data.keyword == CSS_VALUE_BASELINE) {
+            result.value = CSS_VALUE_BASELINE;
+            result.last_baseline = token->data.keyword == CSS_VALUE_LAST;
+            if (consumed) *consumed = 2;
+            return result;
+        }
+    }
+
+    if (token->data.keyword == CSS_VALUE_SAFE || token->data.keyword == CSS_VALUE_UNSAFE) {
+        result.safe = token->data.keyword == CSS_VALUE_SAFE;
+        result.overflow_explicit = true;
+        token = css_self_alignment_value_at(value, ++cursor);
+        if (!token || token->type != CSS_VALUE_TYPE_KEYWORD ||
+            !css_is_content_alignment_overflow_position(token->data.keyword,
+                                                         allow_physical)) {
+            return CssSelfAlignment{};
+        }
+    } else if (!css_is_content_alignment_position(token->data.keyword, allow_physical)) {
+        return CssSelfAlignment{};
+    }
+
+    result.value = token->data.keyword;
+    if (consumed) *consumed = cursor - start + 1;
+    return result;
+}
+
+static inline CssSelfAlignment css_parse_content_alignment_value(const CssValue* value,
+                                                                  bool allow_physical) {
+    int consumed = 0;
+    const int value_count = css_self_alignment_value_count(value);
+    CssSelfAlignment result = css_parse_content_alignment_segment(
+        value, 0, value_count, allow_physical, &consumed);
+    return consumed == value_count ? result : CssSelfAlignment{};
+}
+
+static inline bool css_parse_place_content_alignment(const CssValue* value,
+                                                      CssSelfAlignment* align,
+                                                      CssSelfAlignment* justify) {
+    if (!align || !justify) return false;
+    const int value_count = css_self_alignment_value_count(value);
+    int align_count = 0;
+    CssSelfAlignment parsed_align = css_parse_content_alignment_segment(
+        value, 0, value_count, false, &align_count);
+    if (parsed_align.value == CSS_VALUE__UNDEF) return false;
+    CssSelfAlignment parsed_justify = parsed_align;
+    if (align_count < value_count) {
+        int justify_count = 0;
+        parsed_justify = css_parse_content_alignment_segment(
+            value, align_count, value_count, true, &justify_count);
+        if (parsed_justify.value == CSS_VALUE__UNDEF ||
+            align_count + justify_count != value_count) {
+            return false;
+        }
+    } else if (parsed_align.value == CSS_VALUE_BASELINE) {
+        // CSS Align 3 §8: baseline cannot be the omitted justify-content value.
+        parsed_justify = {CSS_VALUE_START};
+    }
+    *align = parsed_align;
+    *justify = parsed_justify;
+    return true;
+}
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct BlockProp {
     CssEnum text_align;
     CssEnum text_align_last;  // CSS text-align-last (auto, start, end, left, right, center, justify)
     CssEnum align_content;    // CSS Box Alignment align-content for block containers
+    CssSelfAlignment align_content_detail;  // preserves align-content safe/unsafe modifiers
+    CssSelfAlignment align_self;
+    CssSelfAlignment justify_self;
     bool legacy_align_center_blocks;  // HTML align=center compatibility: center block/table descendants
     CssEnum legacy_block_align;  // HTML align compatibility for block/table descendants
     CssEnum direction;  // CSS_VALUE_LTR or CSS_VALUE_RTL (CSS 2.1 §9.2.1)
@@ -1711,6 +1944,7 @@ typedef struct GridProp {
     int justify_content;         // CSS_VALUE_START, etc.
     int align_content;           // CSS_VALUE_START, etc.
     int justify_items;           // CSS_VALUE_STRETCH, etc.
+    CssSelfAlignment justify_items_detail;  // preserves safe/unsafe and baseline modifiers
     int align_items;             // CSS_VALUE_STRETCH, etc.
     int grid_auto_flow;          // CSS_VALUE_ROW, CSS_VALUE_COLUMN
     // Grid gap properties
@@ -1942,6 +2176,10 @@ struct TableCellProp {
     // Intrinsic width (content + padding) measured during column sizing
     // Used in border-collapse mode to re-compute column widths with per-cell border halves
     float intrinsic_width;
+    // Baseline formed with the cell's starting row before rowspan distribution.
+    float first_row_baseline;
+    // Computed vertical-align retained for a rowspan's pre-distribution baseline.
+    bool uses_baseline_vertical_align;
 
     // Border-collapse resolved borders (CSS 2.1 §17.6.2)
     // Only populated when table has border-collapse: collapse

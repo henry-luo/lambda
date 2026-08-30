@@ -18,7 +18,6 @@
 static const CssValue* lookup_css_variable(LayoutContext* lycon, const char* var_name);
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 static bool css_value_is_background_color_candidate(const CssValue* value);
-static CssEnum css_resolve_content_alignment_keyword(const CssValue* value);
 static CssEnum find_inherited_block_keyword(DomElement* element,
                                             CssPropertyCode property,
                                             bool check_specified,
@@ -1120,48 +1119,110 @@ static void resolve_grid_placement_property(LayoutContext* lycon, ViewSpan* span
     }
 }
 
-static void resolve_flex_grid_container_alignment(LayoutContext* lycon,
-                                                   ViewBlock* block,
-                                                   CssPropertyCode property,
-                                                   const CssValue* value) {
-    if (!block) {
-        return;
-    }
-    if (property == CSS_PROPERTY_ALIGN_CONTENT) {
-        CssEnum alignment = css_resolve_content_alignment_keyword(value);
-        if (alignment == CSS_VALUE__UNDEF) return;
-        block->ensure_block(lycon)->align_content = alignment;
+static void css_store_content_alignment(LayoutContext* lycon, ViewBlock* block,
+                                        bool justify, CssSelfAlignment alignment) {
+    if (!block) return;
+    if (!justify) {
+        BlockProp* block_prop = block->ensure_block(lycon);
+        block_prop->align_content = alignment.value;
+        block_prop->align_content_detail = alignment;
         if (block->display.inner == CSS_VALUE_FLEX) {
             alloc_flex_prop(lycon, block);
-            block->embedp()->flex->align_content = alignment;
+            block->embedp()->flex->align_content = alignment.value;
         }
         if (block->display.inner == CSS_VALUE_GRID) {
             alloc_grid_prop(lycon, block);
-            block->embedp()->grid->align_content = alignment;
+            block->embedp()->grid->align_content = alignment.value;
         }
         return;
     }
     alloc_flex_prop(lycon, block);
     alloc_grid_prop(lycon, block);
-    bool justify = property == CSS_PROPERTY_JUSTIFY_CONTENT;
-    resolve_keyword_slot(value, justify ? &block->embedp()->flex->justify
-                                        : &block->embedp()->flex->align_items);
-    resolve_keyword_slot(value, justify ? &block->embedp()->grid->justify_content
-                                        : &block->embedp()->grid->align_items);
+    block->embedp()->flex->justify = alignment.value;
+    block->embedp()->grid->justify_content = alignment.value;
+}
+
+static void resolve_flex_grid_container_alignment(LayoutContext* lycon,
+                                                   ViewBlock* block,
+                                                   CssPropertyCode property,
+                                                   const CssValue* value) {
+    if (!block) return;
+    if (property == CSS_PROPERTY_ALIGN_CONTENT ||
+        property == CSS_PROPERTY_JUSTIFY_CONTENT) {
+        bool justify = property == CSS_PROPERTY_JUSTIFY_CONTENT;
+        CssSelfAlignment alignment = css_parse_content_alignment_value(value, justify);
+        if (alignment.value != CSS_VALUE__UNDEF) {
+            css_store_content_alignment(lycon, block, justify, alignment);
+        }
+        return;
+    }
+    alloc_flex_prop(lycon, block);
+    alloc_grid_prop(lycon, block);
+    resolve_keyword_slot(value, &block->embedp()->flex->align_items);
+    resolve_keyword_slot(value, &block->embedp()->grid->align_items);
+}
+
+static void css_store_self_alignment(LayoutContext* lycon, ViewSpan* span,
+                                     bool justify, CssSelfAlignment value);
+
+static CssEnum css_parse_legacy_justify_items(const CssValue* value) {
+    if (!value || value->type != CSS_VALUE_TYPE_LIST || value->data.list.count != 2) {
+        return CSS_VALUE__UNDEF;
+    }
+
+    bool has_legacy = false;
+    CssEnum position = CSS_VALUE__UNDEF;
+    for (int i = 0; i < value->data.list.count; i++) {
+        const CssValue* part = value->data.list.values[i];
+        if (part && part->type == CSS_VALUE_TYPE_CUSTOM &&
+            part->data.custom_property.name &&
+            str_ieq_const(part->data.custom_property.name,
+                          strlen(part->data.custom_property.name), "legacy")) {
+            if (has_legacy) return CSS_VALUE__UNDEF;
+            has_legacy = true;
+            continue;
+        }
+        if (part && part->type == CSS_VALUE_TYPE_KEYWORD &&
+            (part->data.keyword == CSS_VALUE_LEFT ||
+             part->data.keyword == CSS_VALUE_RIGHT ||
+             part->data.keyword == CSS_VALUE_CENTER)) {
+            if (position != CSS_VALUE__UNDEF) return CSS_VALUE__UNDEF;
+            position = part->data.keyword;
+            continue;
+        }
+        return CSS_VALUE__UNDEF;
+    }
+    return has_legacy ? position : CSS_VALUE__UNDEF;
+}
+
+static CssSelfAlignment css_parse_justify_items(const CssValue* value) {
+    CssSelfAlignment result = css_parse_self_alignment_value(value, true);
+    if (result.value != CSS_VALUE__UNDEF) return result;
+
+    // CSS Align 3 §7.1: legacy is a separate grammar branch for this property.
+    result.value = css_parse_legacy_justify_items(value);
+    return result;
+}
+
+static void css_store_grid_justify_items(LayoutContext* lycon, ViewBlock* block,
+                                         CssSelfAlignment value) {
+    if (!block || value.value == CSS_VALUE__UNDEF) return;
+    alloc_grid_prop(lycon, block);
+    block->embedp()->grid->justify_items = value.value;
+    block->embedp()->grid->justify_items_detail = value;
 }
 
 static void resolve_grid_alignment_property(LayoutContext* lycon, ViewBlock* block,
                                             ViewSpan* span, CssPropertyCode property,
                                             const CssValue* value) {
     if (property == CSS_PROPERTY_ALIGN_SELF) {
-        if (value->type != CSS_VALUE_TYPE_KEYWORD || value->data.keyword <= 0) return;
-        CssEnum alignment = value->data.keyword;
+        CssSelfAlignment self = css_parse_self_alignment_value(value, false);
+        if (self.value == CSS_VALUE__UNDEF) return;
+        css_store_self_alignment(lycon, span, false, self);
+        CssEnum alignment = self.value;
         if (span->parent_item_kind() == DomElement::PARENT_ITEM_GRID) {
             span->gi->align_self_grid = alignment;
         } else if (span->parent_item_kind() == DomElement::PARENT_ITEM_FLEX) {
-            span->fi->align_self = alignment;
-        } else {
-            alloc_flex_item_prop(lycon, span);
             span->fi->align_self = alignment;
         }
         return;
@@ -1171,15 +1232,14 @@ static void resolve_grid_alignment_property(LayoutContext* lycon, ViewBlock* blo
         return;
     }
     if (self) {
-        alloc_grid_item_prop(lycon, span);
-        if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-            span->gi->justify_self = value->data.keyword;
+        CssSelfAlignment alignment = css_parse_self_alignment_value(value, true);
+        if (alignment.value == CSS_VALUE__UNDEF) return;
+        css_store_self_alignment(lycon, span, true, alignment);
+        if (span->parent_item_kind() == DomElement::PARENT_ITEM_GRID) {
+            span->gi->justify_self = alignment.value;
         }
     } else {
-        alloc_grid_prop(lycon, block);
-        if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-            block->embedp()->grid->justify_items = value->data.keyword;
-        }
+        css_store_grid_justify_items(lycon, block, css_parse_justify_items(value));
     }
 }
 
@@ -1204,44 +1264,6 @@ static void resolve_flex_item_number(LayoutContext* lycon, ViewSpan* span,
     float number = (float)value->data.number.value;
     if (property == CSS_PROPERTY_FLEX_GROW) span->fi->flex_grow = number;
     else span->fi->flex_shrink = number;
-}
-
-static bool css_is_content_alignment_keyword(CssEnum value) {
-    switch (value) {
-        case CSS_VALUE_NORMAL:
-        case CSS_VALUE_STRETCH:
-        case CSS_VALUE_START:
-        case CSS_VALUE_END:
-        case CSS_VALUE_FLEX_START:
-        case CSS_VALUE_FLEX_END:
-        case CSS_VALUE_CENTER:
-        case CSS_VALUE_BASELINE:
-        case CSS_VALUE_SPACE_BETWEEN:
-        case CSS_VALUE_SPACE_AROUND:
-        case CSS_VALUE_SPACE_EVENLY:
-            return true;
-        default:
-            return false;
-    }
-}
-
-static CssEnum css_resolve_content_alignment_keyword(const CssValue* value) {
-    if (!value) return CSS_VALUE__UNDEF;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        CssEnum keyword = value->data.keyword;
-        return css_is_content_alignment_keyword(keyword) ? keyword : CSS_VALUE__UNDEF;
-    }
-    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.values) {
-        CssEnum resolved = CSS_VALUE__UNDEF;
-        for (int i = 0; i < value->data.list.count; i++) {
-            CssEnum candidate = css_resolve_content_alignment_keyword(value->data.list.values[i]);
-            if (candidate != CSS_VALUE__UNDEF) {
-                resolved = candidate;
-            }
-        }
-        return resolved;
-    }
-    return CSS_VALUE__UNDEF;
 }
 
 static const char* css_join_font_family_parts(LayoutContext* lycon,
@@ -3061,10 +3083,15 @@ static DisplayValue css_default_display_for_element(DomElement* dom_elem, DomNod
     return {CSS_VALUE_INLINE, CSS_VALUE_FLOW};
 }
 
+static DisplayValue resolve_display_value_raw(void* child,
+                                               bool skip_flex_grid_child_check = false);
+
 static bool display_contents_child_of_flex_or_grid(DomNode* node) {
     for (DomNode* ancestor = node ? node->parent : nullptr;
          ancestor && ancestor->is_element(); ancestor = ancestor->parent) {
-        DisplayValue ancestor_display = resolve_display_value(ancestor);
+        // The ancestor probe only needs its own display value. Avoid asking
+        // each ancestor to rescan its ancestors, which made deep trees O(n^3).
+        DisplayValue ancestor_display = resolve_display_value_raw(ancestor, true);
         if (ancestor_display.outer == CSS_VALUE_NONE) return false;
         if (ancestor_display.outer == CSS_VALUE_CONTENTS) continue;
         return ancestor_display.inner == CSS_VALUE_FLEX ||
@@ -3073,7 +3100,15 @@ static bool display_contents_child_of_flex_or_grid(DomNode* node) {
     return false;
 }
 
-DisplayValue resolve_display_value(void* child) {
+static bool css_display_is_ruby_internal(CssEnum display) {
+    return display == CSS_VALUE_RUBY_BASE ||
+        display == CSS_VALUE_RUBY_TEXT ||
+        display == CSS_VALUE_RUBY_BASE_CONTAINER ||
+        display == CSS_VALUE_RUBY_TEXT_CONTAINER;
+}
+
+static DisplayValue resolve_display_value_raw(void* child,
+                                              bool skip_flex_grid_child_check) {
     DisplayValue display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW};
     DomNode* node = static_cast<DomNode*>(child);
     if (node && node->is_element()) {
@@ -3106,7 +3141,8 @@ DisplayValue resolve_display_value(void* child) {
         // CSS Display 3 §2.5 / Flexbox §4 / Grid §9: display:contents
         // removes the wrapper from the box tree, so blockification follows the
         // flattened-tree ancestor rather than only the DOM parent.
-        bool is_flex_or_grid_child = display_contents_child_of_flex_or_grid(node);
+        bool is_flex_or_grid_child = !skip_flex_grid_child_check &&
+            display_contents_child_of_flex_or_grid(node);
         // CSS 2.1 §9.7 rule 2: absolute/fixed position also triggers blockification
         bool needs_blockify = is_floated || is_abspos || is_flex_or_grid_child;
         CssDeclaration* specified_display_decl = nullptr;
@@ -3237,6 +3273,38 @@ DisplayValue resolve_display_value(void* child) {
         }
         return needs_blockify ? blockify_display(display) : display;
     }
+    return display;
+}
+
+DisplayValue resolve_display_value(void* child) {
+    DisplayValue display = resolve_display_value_raw(child);
+    DomNode* node = static_cast<DomNode*>(child);
+    if (!node || !node->is_element() || !node->parent ||
+        !node->parent->is_element()) {
+        return display;
+    }
+
+    // CSS Ruby 1 §2.2: in-flow block-level children of ruby boxes are
+    // inlinified, so a block child of ruby-text computes to inline-block.
+    DomElement* element = node->as_element();
+    CssEnum float_value = layout_specified_keyword(
+        element, CSS_PROPERTY_FLOAT, CSS_VALUE_NONE);
+    CssEnum position_value = layout_specified_keyword(
+        element, CSS_PROPERTY_POSITION, CSS_VALUE_NONE);
+    bool out_of_flow = float_value == CSS_VALUE_LEFT ||
+        float_value == CSS_VALUE_RIGHT ||
+        position_value == CSS_VALUE_ABSOLUTE ||
+        position_value == CSS_VALUE_FIXED;
+    if (out_of_flow) return display;
+
+    DomElement* parent = node->parent->as_element();
+    DisplayValue parent_display = resolve_display_value_raw(parent, true);
+    if (!css_display_is_ruby_internal(parent_display.inner)) return display;
+
+    bool block_level = display.outer == CSS_VALUE_BLOCK ||
+        display.outer == CSS_VALUE_LIST_ITEM ||
+        display.outer == CSS_VALUE_TABLE;
+    if (block_level) display.outer = CSS_VALUE_INLINE_BLOCK;
     return display;
 }
 
@@ -5319,6 +5387,15 @@ static void css_resolve_keyword_pair(const CssValue* value, CssEnum initial,
         ? second_value->data.keyword : *first;
 }
 
+static void css_store_self_alignment(LayoutContext* lycon, ViewSpan* span,
+                                     bool justify, CssSelfAlignment value) {
+    if (!span || value.value == CSS_VALUE__UNDEF) return;
+    BlockProp* block = span->ensure_block(lycon);
+    if (!block) return;
+    if (justify) block->justify_self = value;
+    else block->align_self = value;
+}
+
 static void css_set_flex_item_values(DomElement* span,
                                      float grow, float shrink, float basis,
                                      bool basis_is_percent) {
@@ -6608,6 +6685,19 @@ static CssEnum find_inherited_block_keyword(DomElement* element,
     return fallback;
 }
 
+static CssEnum css_parse_webkit_text_align(const CssValue* value) {
+    if (!value || value->type != CSS_VALUE_TYPE_CUSTOM ||
+        !value->data.custom_property.name) {
+        return CSS_VALUE__UNDEF;
+    }
+    const char* name = value->data.custom_property.name;
+    size_t length = strlen(name);
+    if (str_ieq_const(name, length, "-webkit-left")) return CSS_VALUE_LEFT;
+    if (str_ieq_const(name, length, "-webkit-center")) return CSS_VALUE_CENTER;
+    if (str_ieq_const(name, length, "-webkit-right")) return CSS_VALUE_RIGHT;
+    return CSS_VALUE__UNDEF;
+}
+
 static CssEnum logical_inline_direction(DomElement* element) {
     for (DomElement* parent = dom_parent_element(element); parent;
          parent = dom_parent_element(parent)) {
@@ -6840,7 +6930,17 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         }
         case CSS_PROPERTY_TEXT_ALIGN: {
             if (!block) break;
-        block->ensure_block(lycon);
+            block->ensure_block(lycon);
+            CssEnum webkit_legacy_align = css_parse_webkit_text_align(value);
+            if (webkit_legacy_align != CSS_VALUE__UNDEF) {
+                // WebKit compatibility values align block descendants unless a
+                // child supplies an explicit non-normal justify-self value.
+                block->blk->text_align = webkit_legacy_align;
+                block->blk->legacy_block_align = webkit_legacy_align;
+                block->blk->legacy_align_center_blocks =
+                    webkit_legacy_align == CSS_VALUE_CENTER;
+                break;
+            }
             if (value->type == CSS_VALUE_TYPE_KEYWORD) {
                 CssEnum align_value = value->data.keyword;
                 if (align_value == CSS_VALUE_INHERIT) {
@@ -7725,6 +7825,14 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_ALIGN_CONTENT:
             resolve_flex_grid_container_alignment(lycon, block, prop_id, value);
             break;
+        case CSS_PROPERTY_PLACE_CONTENT: {
+            CssSelfAlignment align_val = {};
+            CssSelfAlignment justify_val = {};
+            if (!css_parse_place_content_alignment(value, &align_val, &justify_val)) break;
+            css_store_content_alignment(lycon, block, false, align_val);
+            css_store_content_alignment(lycon, block, true, justify_val);
+            break;
+        }
         case CSS_PROPERTY_GRID_ROW_GAP:
         case CSS_PROPERTY_ROW_GAP:
             resolve_gap_property(lycon, block, prop_id, value, true);
@@ -7900,24 +8008,23 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             css_resolve_keyword_pair(value, CSS_VALUE_STRETCH,
                                      &align_val, &justify_val);
             block->embedp()->grid->align_items = align_val;
-            block->embedp()->grid->justify_items = justify_val;
+            CssSelfAlignment justify_detail = {};
+            justify_detail.value = justify_val;
+            css_store_grid_justify_items(lycon, block, justify_detail);
             block->embedp()->flex->align_items = align_val;
             break;
         }
         case CSS_PROPERTY_PLACE_SELF: {
-            CssEnum align_val = CSS_VALUE_AUTO;
-            CssEnum justify_val = CSS_VALUE_AUTO;
-            css_resolve_keyword_pair(value, CSS_VALUE_AUTO,
-                                     &align_val, &justify_val);
+            CssSelfAlignment align_val = {};
+            CssSelfAlignment justify_val = {};
+            if (!css_parse_place_self_alignment(value, &align_val, &justify_val)) break;
+            css_store_self_alignment(lycon, span, false, align_val);
+            css_store_self_alignment(lycon, span, true, justify_val);
             if (span->parent_item_kind() == DomElement::PARENT_ITEM_GRID) {
-                span->gi->align_self_grid = align_val;
-                span->gi->justify_self = justify_val;
+                span->gi->align_self_grid = align_val.value;
+                span->gi->justify_self = justify_val.value;
             } else if (span->parent_item_kind() == DomElement::PARENT_ITEM_FLEX) {
-                span->fi->align_self = align_val;
-            } else {
-                alloc_grid_item_prop(lycon, span);
-                span->gi->align_self_grid = align_val;
-                span->gi->justify_self = justify_val;
+                span->fi->align_self = align_val.value;
             }
             break;
         }

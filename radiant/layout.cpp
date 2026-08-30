@@ -521,6 +521,18 @@ static void reset_non_inherited_style_cache(ViewSpan* view) {
 
     if (!view->bound) return;
 
+    // margin collapsing changes the used boundary in place; discard that
+    // layout state before a retained recascade rebuilds the computed style.
+    BoundaryProp* boundary = view->boundary_mut();
+    boundary->margin = BOUNDARY_PROP_DEFAULT.margin;
+    boundary->flow_margin = BOUNDARY_PROP_DEFAULT.flow_margin;
+    boundary->has_flow_margin = false;
+    boundary->collapsed_through_mb = 0.0f;
+    boundary->has_clearance = false;
+    boundary->clearance_in_margin_chain = false;
+    boundary->margin_chain_positive = 0.0f;
+    boundary->margin_chain_negative = 0.0f;
+
     if (view->boundary()->outline) {
         view->boundary_mut()->outline->width = 0.0f;
         view->boundary_mut()->outline->offset = 0.0f;
@@ -1818,7 +1830,7 @@ bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
     return false;
 }
 
-static bool inline_span_has_direct_visible_text_child(ViewSpan* span) {
+bool layout_inline_span_has_direct_visible_text_child(ViewSpan* span) {
     if (!span) return false;
     View* child = span->first_child;
     while (child) {
@@ -1835,7 +1847,7 @@ static bool element_has_anonymous_table_tag(DomElement* elem, const char* tag_na
     return elem && elem->tag_name && strcmp(elem->tag_name, tag_name) == 0;
 }
 
-static ViewBlock* inline_span_anonymous_inline_table_child(ViewSpan* span) {
+ViewBlock* layout_inline_span_anonymous_inline_table_child(ViewSpan* span) {
     if (!span) return nullptr;
     View* child = span->first_child;
     while (child) {
@@ -1852,6 +1864,26 @@ static ViewBlock* inline_span_anonymous_inline_table_child(ViewSpan* span) {
         child = child->next();
     }
     return nullptr;
+}
+
+bool layout_inline_span_has_direct_text_on_both_sides_of_anonymous_table(ViewSpan* span) {
+    ViewBlock* table = layout_inline_span_anonymous_inline_table_child(span);
+    if (!table) return false;
+    bool saw_table = false;
+    bool text_before = false;
+    bool text_after = false;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (child == static_cast<View*>(table)) {
+            saw_table = true;
+            continue;
+        }
+        bool visible_text = child->view_type == RDT_VIEW_TEXT &&
+            child->width > 0.0f && child->height > 0.0f;
+        if (!visible_text) continue;
+        if (saw_table) text_after = true;
+        else text_before = true;
+    }
+    return text_before && text_after;
 }
 
 static bool inline_span_is_in_anonymous_table_cell(ViewSpan* span) {
@@ -2056,9 +2088,8 @@ float layout_inline_atomic_extent(LayoutContext* lycon, ViewBlock* block) {
     ViewElement* parent_view = block->parent_view();
     ViewBlock* parent = layout_nearest_block_ancestor(parent_view);
     bool vertical_parent = parent && layout_block_inline_axis_is_vertical(parent);
-    bool vertical_child = layout_block_inline_axis_is_vertical(block);
     float extent = vertical_parent
-        ? (vertical_child ? block->height : block->width)
+        ? (layout_block_inline_axis_is_vertical(block) ? block->height : block->width)
         : block->height;
     if (block->bound) {
         if (vertical_parent) {
@@ -2273,9 +2304,11 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         bool is_inline_flex = block->display.outer == CSS_VALUE_INLINE_BLOCK &&
             block->display.inner == CSS_VALUE_FLEX;
         if (is_inline_grid && block->blk) {
+            // CSS Grid §8.5: an inline-grid exports the last line baseline
+            // when its alignment context does not request a first baseline.
             float grid_baseline = radiant::layout_select_cached_baseline(
                 block, block->block()->first_line_baseline,
-                block->block()->last_line_baseline, false, 0.0f);
+                block->block()->last_line_baseline, true, 0.0f);
             if (grid_baseline > 0.0f) {
                 item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
                     grid_baseline;
@@ -2289,18 +2322,53 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                     layout_block_start_content_offset(block) + flex_baseline;
             }
         } else if (!is_inline_table &&
-                   !layout_inline_box_is_orthogonal_to_parent(block) &&
-                   block->blk && block->block_mut()->last_line_max_ascender > 0) {
-            // CSS Writing Modes synthesizes an orthogonal inline-block baseline
+                   !layout_inline_box_is_orthogonal_to_parent(block)) {
             bool is_replaced_elem = (block->tag() == MARKUP_NAME_IMG || block->tag() == MARKUP_NAME_IFRAME ||
                 block->tag() == MARKUP_NAME_VIDEO || block->tag() == MARKUP_NAME_EMBED ||
                 (block->tag() == MARKUP_NAME_OBJECT && block->get_attribute(MARKUP_NAME_DATA)) ||
                 block->tag() == MARKUP_NAME_TEXTAREA);
+            float content_baseline = block->blk &&
+                block->block_mut()->last_line_max_ascender > 0.0f
+                ? radiant::layout_inline_baseline_for_source(
+                    block, block->block()->last_line_max_ascender)
+                : layout_block_last_in_flow_flex_baseline(block);
+            if (content_baseline <= 0.0f && block->display.inner == CSS_VALUE_FLOW) {
+                // CSS Grid §9.1: an in-flow grid child's synthesized baseline
+                // participates in the containing inline-block's baseline.
+                for (DomNode* child_node = block->first_child; child_node;
+                     child_node = child_node->next_sibling) {
+                    if (!child_node->is_element()) continue;
+                    ViewBlock* child_block = lam::view_as_block(child_node);
+                    if (!child_block || child_block->display.inner != CSS_VALUE_GRID ||
+                        !child_block->first_child) continue;
+                    bool has_in_flow_item = false;
+                    for (DomNode* item_node = child_block->first_child; item_node;
+                         item_node = item_node->next_sibling) {
+                        if (!item_node->is_element()) continue;
+                        ViewBlock* item_block = lam::view_as_block(item_node);
+                        if (item_block &&
+                            !layout_block_is_out_of_flow_positioned(item_block)) {
+                            has_in_flow_item = true;
+                            break;
+                        }
+                    }
+                    if (!has_in_flow_item) continue;
+                    float child_baseline = radiant::compute_element_first_baseline(
+                        lycon, child_block, true);
+                    if (child_baseline > 0.0f) {
+                        content_baseline = child_block->y + child_baseline;
+                        break;
+                    }
+                }
+            }
             if (!is_replaced_elem &&
-                (overflow_visible || radiant::layout_uses_explicit_baseline_source(block))) {
+                content_baseline > 0.0f &&
+                radiant::layout_exports_content_baseline(
+                    block, overflow_visible)) {
+                // CSS Inline 3 takes the last in-flow line box; Flexbox §8.5
+                // exports the last baseline of a direct flex child for that line.
                 item_baseline = (block->bound ? block->boundary()->margin.top : 0) +
-                    radiant::layout_inline_baseline_for_source(
-                        block, block->block()->last_line_max_ascender);
+                    content_baseline;
             }
         }
         CssEnum align = block->in_line && block->inl()->vertical_align ?
@@ -2380,7 +2448,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
              has_block_fragment_child);
         bool recompute_split_inline_bounds =
             preserve_inline_list_marker_fragment && has_block_fragment_child &&
-            span_is_multi_line && inline_span_has_direct_visible_text_child(span);
+            span_is_multi_line && layout_inline_span_has_direct_visible_text_child(span);
         bool is_ruby_container = span->tag() == MARKUP_NAME_RUBY &&
             span->display.inner == CSS_VALUE_RUBY;
         if (!has_block_fragment_child || recompute_split_inline_bounds) {
@@ -2460,12 +2528,14 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             }
             float expected_height = content_area + bt + pt + pb + bb;
             ViewBlock* anonymous_inline_table =
-                inline_span_anonymous_inline_table_child(span);
+                layout_inline_span_anonymous_inline_table_child(span);
+            bool preserve_anonymous_table_line_origin = anonymous_inline_table &&
+                layout_inline_span_has_direct_text_on_both_sides_of_anonymous_table(span);
             bool use_anonymous_table_cell_fragment =
                 anonymous_inline_table &&
                 inline_span_is_in_anonymous_table_cell(span) &&
                 inline_span_has_non_baseline_vertical_align(span) &&
-                !inline_span_has_direct_visible_text_child(span);
+                !layout_inline_span_has_direct_visible_text_child(span);
 
             if (materialized_empty_inline) {
                 // CSS 2.1 §10.8.1: an empty inline still has its own font box
@@ -2478,8 +2548,16 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                     lycon, static_cast<View*>(anonymous_inline_table), 0.0f, true);
                 if (table_baseline >= 0.0f &&
                     anonymous_inline_table->height > table_baseline) {
-                    span->y = anonymous_inline_table->y +
-                        (anonymous_inline_table->height - table_baseline);
+                    // CSS 2.1 §10.8.1: align the inline fragment's own font
+                    // baseline with the anonymous table's exported baseline;
+                    // the table contents may overflow the fragment above it.
+                    float span_content_height = max(span->content_height,
+                        span_asc + span_desc);
+                    float span_half_leading = (span_content_height -
+                        span_asc - span_desc) / 2.0f;
+                    float span_baseline_offset = bt + pt + span_asc + span_half_leading;
+                    span->y = anonymous_inline_table->y + table_baseline -
+                        span_baseline_offset;
                     span->height = expected_height;
                 }
             } else if (span->height < expected_height) {
@@ -2490,10 +2568,13 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                     span_asc, span_desc, baseline_pos, bt, pt);
                 span->height = expected_height;
             } else if (!span_is_multi_line && span->height > expected_height) {
-                // CSS 2.1 §10.6.1 and §10.8.1: an inline non-replaced element's
-                span->y = layout_inline_font_box_y(
-                    lycon, span, span->content_height,
-                    span_asc, span_desc, baseline_pos, bt, pt);
+                // CSS 2.1 §10.6.1: normalize a non-replaced inline's font box.
+                // Direct text keeps an anonymous table wrapper on its original line.
+                if (!preserve_anonymous_table_line_origin) {
+                    span->y = layout_inline_font_box_y(
+                        lycon, span, span->content_height,
+                        span_asc, span_desc, baseline_pos, bt, pt);
+                }
                 span->height = expected_height;
             }
         }
@@ -3469,6 +3550,54 @@ static void layout_move_display_contents_pseudo_to_edge(
     parent->last_child = last;
 }
 
+static bool layout_node_is_descendant_or_self(DomNode* node,
+                                              DomNode* ancestor) {
+    for (DomNode* current = node; current; current = current->parent) {
+        if (current == ancestor) return true;
+    }
+    return false;
+}
+
+static bool layout_node_is_hidden_by_closed_details(DomNode* node) {
+    if (!node) return false;
+    for (DomNode* ancestor = node->parent; ancestor;
+         ancestor = ancestor->parent) {
+        if (!ancestor->is_element()) continue;
+        DomElement* details = ancestor->as_element();
+        if (details->tag() != MARKUP_NAME_DETAILS ||
+            details->has_attribute(MARKUP_NAME_OPEN)) {
+            continue;
+        }
+        DomNode* summary = nullptr;
+        for (DomNode* child = details->first_child; child;
+             child = child->next_sibling) {
+            if (child->is_element() &&
+                child->as_element()->tag() == MARKUP_NAME_SUMMARY) {
+                summary = child;
+                break;
+            }
+        }
+        if (!summary || !layout_node_is_descendant_or_self(node, summary)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool layout_details_needs_default_summary(ViewBlock* block) {
+    if (!block || !block->is_element() || block->tag() != MARKUP_NAME_DETAILS) {
+        return false;
+    }
+    DomElement* details = block->as_element();
+    for (DomNode* child = details->first_child; child; child = child->next_sibling) {
+        if (child->is_element() &&
+            child->as_element()->tag() == MARKUP_NAME_SUMMARY) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     if (lycon->depth >= MAX_LAYOUT_DEPTH) {
         log_error("layout_flow_node: max depth %d exceeded, skipping node %s",
@@ -3486,32 +3615,12 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     }
 
     lycon->depth++;
-    // hidden. CSS selectors cannot target text nodes, so this must be handled
-    if (node->parent && node->parent->is_element()) {
-        DomElement* parent_elem = node->parent->as_element();
-        if (parent_elem->tag() == MARKUP_NAME_DETAILS &&
-            !parent_elem->has_attribute(MARKUP_NAME_OPEN) &&
-            !lycon->layout_hidden_details_content) {
-            bool is_summary = node->is_element() && node->tag() == MARKUP_NAME_SUMMARY;
-            if (!is_summary) {
-                bool is_contents = node->is_element() &&
-                    resolve_display_value(node).outer == CSS_VALUE_CONTENTS;
-                if (!is_contents) {
-                    // HTML rendering §15.5.5: closed details content uses
-                    // content-visibility:hidden, so retain descendant boxes
-                    // while restoring the parent's flow state afterward.
-                    LayoutContextScope hidden_content_scope(lycon);
-                    bool saved_hidden_details_content =
-                        lycon->layout_hidden_details_content;
-                    lycon->layout_hidden_details_content = true;
-                    layout_flow_node(lycon, node);
-                    lycon->layout_hidden_details_content =
-                        saved_hidden_details_content;
-                    lycon->depth--;
-                    return;
-                }
-            }
-        }
+    if (layout_node_is_hidden_by_closed_details(node)) {
+        // HTML §4.11.1 hides every closed-details descendant except its first
+        // direct summary, including text nodes and display:contents subtrees.
+        node->view_type = RDT_VIEW_NONE;
+        lycon->depth--;
+        return;
     }
 
     const char* node_name = node->node_name();
@@ -3847,6 +3956,18 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     lycon->depth--;
 }
 
+static void layout_set_root_available_width(LayoutContext* lycon, ViewBlock* root,
+                                            float border_box_width, float given_width) {
+    if (!lycon || !root) return;
+    root->width = border_box_width;
+    // Root decorations are removed after its used border-box width is resolved.
+    root->content_width = border_box_width;
+    lycon->block.content_width = border_box_width;
+    lycon->block.max_width = border_box_width;
+    lycon->block.given_width = given_width;
+    lycon->block.float_right_edge = border_box_width;
+}
+
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     using namespace std::chrono;
     auto t_start = high_resolution_clock::now();
@@ -4060,12 +4181,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     if (root_has_explicit_width) {
         // CSS 2.1 §10.3: Root element with explicit width.
         float border_box_width = root_css_width + root_bp_left + root_bp_right;
-        html->width = border_box_width;
-        html->content_width = border_box_width;
-        lycon->block.content_width = border_box_width;
-        lycon->block.max_width = border_box_width;
-        lycon->block.given_width = root_css_width;
-        lycon->block.float_right_edge = border_box_width;
+        layout_set_root_available_width(lycon, html, border_box_width, root_css_width);
         line_init(lycon, 0, border_box_width);
     }
 
@@ -4116,14 +4232,21 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             if (html->bound) margin_h = html->boundary()->margin.left + html->boundary()->margin.right;
             if (margin_h > 0 && !root_is_form_control) {
                 float new_width = physical_width - margin_h;
-                html->width = new_width;
-                html->content_width = new_width;
-                lycon->block.content_width = new_width;
-                lycon->block.max_width = new_width;
-                lycon->block.given_width = new_width;
-                lycon->block.float_right_edge = new_width;
+                layout_set_root_available_width(lycon, html, new_width, new_width);
                 line_init(lycon, 0, new_width);
             }
+        }
+    }
+    if (!root_is_form_control) {
+        float constrained_width = layout_apply_min_max_axis(html, html->width, true, true);
+        if (fabsf(constrained_width - html->width) > 0.01f) {
+            // CSS Sizing: root min/max-width constrains the used size before its
+            // descendants establish multicolumn tracks from the available width.
+            float constrained_content_width = layout_content_size_from_border_box(
+                html, constrained_width, true);
+            layout_set_root_available_width(
+                lycon, html, constrained_width, constrained_content_width);
+            line_init(lycon, 0, constrained_width);
         }
     }
     // CSS 2.1 §10.3.3: Apply root element border and padding to reduce content area
@@ -4163,7 +4286,23 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     }
     bool root_is_flex_or_grid = html->display.inner == CSS_VALUE_FLEX ||
         html->display.inner == CSS_VALUE_GRID;
-    if (root_is_flex_or_grid) {
+    if (is_multicol_container(html)) {
+        // CSS Multicol §3: the root establishes its own column formatting
+        // context, just like an ordinary block container.
+        layout_multicol_content(lycon, html);
+        block_context_refresh_descendant_float_geometry(
+            block_context_find_bfc(&lycon->block), lam::view_require_element(html));
+        if (elmt->is_element()) {
+            for (DomNode* root_child = elmt->as_element()->first_child;
+                 root_child; root_child = root_child->next_sibling) {
+                if (root_child->is_element() &&
+                    strcmp(root_child->node_name(), "body") == 0) {
+                    body_node = root_child;
+                    break;
+                }
+            }
+        }
+    } else if (root_is_flex_or_grid) {
         // CSS Flexbox/Grid: the root's formatting context must lay out its
         // children; treating them as ordinary blocks loses auto cross sizing.
         for (DomNode* root_child = elmt->is_element()
@@ -4682,7 +4821,6 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         }
         layout_apply_sticky_positions(&lycon, static_cast<View*>(root_block));
     }
-
     auto t_layout = high_resolution_clock::now();
     double layout_ms = duration<double, std::milli>(t_layout - t_init).count();
     log_info("[TIMING] layout_html_root: %.1fms", layout_ms);

@@ -6672,7 +6672,7 @@ static bool document_has_hover_rules(DomDocument* doc) {
     if (!doc) return false;
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets ? doc->stylesheets[i] : NULL;
-        if (!stylesheet) continue;
+        if (!stylesheet || stylesheet->disabled) continue;
         for (size_t r = 0; r < stylesheet->rule_count; r++) {
             if (css_rule_uses_hover(stylesheet->rules ? stylesheet->rules[r] : NULL)) {
                 return true;

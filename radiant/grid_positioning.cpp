@@ -540,6 +540,37 @@ static int resolve_grid_item_self_alignment(const ViewBlock* item,
     return resolved;
 }
 
+static CssSelfAlignment resolve_grid_item_self_alignment_detail(
+        ViewBlock* item, const GridItemProp* grid_item,
+        ViewBlock* container, int container_alignment, bool horizontal) {
+    CssSelfAlignment result = {};
+    if (!item || !grid_item) return result;
+
+    // GridItemProp keeps the effective keyword for track sizing; style storage
+    // preserves the safe/unsafe modifier needed by the final positioning pass.
+    result = horizontal ? item->block()->justify_self : item->block()->align_self;
+    CssEnum requested = horizontal ? (CssEnum)grid_item->justify_self
+                                   : (CssEnum)grid_item->align_self_grid;
+    if (horizontal && (requested == CSS_VALUE_AUTO || requested == CSS_VALUE__UNDEF) &&
+        container && container->embed && container->embedp()->grid) {
+        result = container->embedp()->grid->justify_items_detail;
+    }
+    result.value = requested;
+    int resolved = resolve_grid_item_self_alignment(
+        item, grid_item, container_alignment, horizontal);
+    result.value = static_cast<CssEnum>(resolved);
+
+    if ((result.value == CSS_VALUE_SELF_START || result.value == CSS_VALUE_SELF_END) &&
+        container) {
+        CssSelfAlignment logical = result;
+        logical.value = requested;
+        CssEnum physical = layout_resolve_self_alignment_value(
+            logical, item, container, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y);
+        if (physical != CSS_VALUE__UNDEF) result.value = physical;
+    }
+    return result;
+}
+
 static float grid_item_intrinsic_minimum_size(GridContainerLayout* grid_layout,
                                               ViewBlock* item,
                                               GridItemProp* grid_item,
@@ -566,10 +597,10 @@ static bool grid_item_has_cyclic_replaced_percentage_block_size(ViewBlock* item)
         layout_axis_size_is_percentage(item, false);
 }
 
-static void grid_stretch_axis(ViewBlock* item, LayoutAxis axis, float available,
+static bool grid_stretch_axis(ViewBlock* item, LayoutAxis axis, float available,
                               float maximum, bool has_explicit_size,
                               bool use_aspect_ratio) {
-    if (!item || has_explicit_size || use_aspect_ratio) return;
+    if (!item || has_explicit_size || use_aspect_ratio) return false;
     layout_axis_set_size(static_cast<ViewElement*>(item), axis, available);
 
     LayoutAxisRefs constraints(item->block_mut(), axis);
@@ -589,6 +620,7 @@ static void grid_stretch_axis(ViewBlock* item, LayoutAxis axis, float available,
             layout_axis_set_size(static_cast<ViewElement*>(item), axis, border_box_min);
         }
     }
+    return true;
 }
 
 // Align a single grid item
@@ -827,8 +859,9 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
 
     // Apply justify-self (horizontal alignment)
     // Using unified resolve function from layout_alignment.hpp
-    int justify = resolve_grid_item_self_alignment(
-        item, gi, grid_layout->justify_items, true);
+    CssSelfAlignment justify_alignment = resolve_grid_item_self_alignment_detail(
+        item, gi, grid_container, grid_layout->justify_items, true);
+    int justify = justify_alignment.value;
 
     // For non-stretch alignment, an auto-sized grid item uses fit-content sizing.
     // Its max-content width is capped by the grid area but never below min-content.
@@ -849,19 +882,28 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         }
     }
 
-    auto align_axis = [&](LayoutAxis axis, int alignment, bool auto_margin,
+    auto align_axis = [&](LayoutAxis axis, CssSelfAlignment alignment, bool auto_margin,
                           bool explicit_size, float available, float actual,
                           float maximum) {
         if (auto_margin) return;
-        if (!radiant::alignment_is_stretch(alignment)) {
+        if (!radiant::alignment_is_stretch(alignment.value)) {
             layout_axis_set_pos(static_cast<ViewElement*>(item), axis,
                 layout_axis_pos(static_cast<ViewElement*>(item), axis) +
-                radiant::compute_alignment_offset_simple(alignment, available - actual));
+                // CSS Align 3 §6 resolves logical start/end against the grid's axis.
+                layout_self_alignment_offset(alignment.value, alignment.safe,
+                                             grid_container, axis, available - actual));
             return;
         }
-        grid_stretch_axis(item, axis, available, maximum, explicit_size, use_aspect_ratio);
+        if (!grid_stretch_axis(item, axis, available, maximum, explicit_size,
+                               use_aspect_ratio)) {
+            // CSS Align 3 §5.3: an ineligible stretch falls back to logical start.
+            layout_axis_set_pos(static_cast<ViewElement*>(item), axis,
+                layout_axis_pos(static_cast<ViewElement*>(item), axis) +
+                layout_self_alignment_offset(CSS_VALUE_START, false, grid_container,
+                                             axis, available - actual));
+        }
     };
-    align_axis(LAYOUT_AXIS_X, justify, applied_horiz_auto, has_explicit_width,
+    align_axis(LAYOUT_AXIS_X, justify_alignment, applied_horiz_auto, has_explicit_width,
                available_width, actual_width, max_width);
 
     if (definite_inline_area && max_width > 0.0f && item->width > 0.0f) {
@@ -876,8 +918,9 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
 
     // Apply align-self (vertical alignment)
     // Using unified resolve function from layout_alignment.hpp
-    int align = resolve_grid_item_self_alignment(
-        item, gi, grid_layout->align_items, false);
+    CssSelfAlignment align_alignment = resolve_grid_item_self_alignment_detail(
+        item, gi, grid_container, grid_layout->align_items, false);
+    int align = align_alignment.value;
 
     // For non-stretch alignment, use content height if available (set by Pass 3 content layout)
     // This allows center/start/end to work correctly with intrinsic content size
@@ -914,7 +957,7 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
         item->height = actual_height;
     }
 
-    align_axis(LAYOUT_AXIS_Y, align, applied_vert_auto, has_explicit_height,
+    align_axis(LAYOUT_AXIS_Y, align_alignment, applied_vert_auto, has_explicit_height,
                available_height, actual_height, max_height);
 
     layout_shift_static_positioned_abs_descendants(

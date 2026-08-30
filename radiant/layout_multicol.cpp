@@ -933,7 +933,10 @@ static bool multicol_relayout_special_spanner_text(
         }
     }
     if (!has_direct_text) return false;
-    bool preserve_native_height = spanner->tag() == MARKUP_NAME_DETAILS;
+    bool details_needs_default_summary =
+        layout_details_needs_default_summary(spanner);
+    bool preserve_native_height = spanner->tag() == MARKUP_NAME_DETAILS &&
+        layout_axis_has_given_size(spanner, false);
     float original_height = spanner->height;
 
     LayoutContextScope context_scope(lycon);
@@ -954,7 +957,9 @@ static bool multicol_relayout_special_spanner_text(
     lycon->block.content_height = content.height;
     lycon->block.given_width = content.width;
     lycon->block.given_height = -1.0f;
-    lycon->block.advance_y = content_start_y;
+    float default_summary_line = details_needs_default_summary
+        ? layout_list_item_marker_line_height(lycon) : 0.0f;
+    lycon->block.advance_y = content_start_y + default_summary_line;
     lycon->block.max_width = 0.0f;
     lycon->block.text_align = spanner->blk ? spanner->block()->text_align : CSS_VALUE_START;
     lycon->block.direction = spanner->blk ? spanner->block()->direction : CSS_VALUE_LTR;
@@ -964,9 +969,12 @@ static bool multicol_relayout_special_spanner_text(
 
     float used_content_height = lycon->block.advance_y - content_start_y;
     if (used_content_height < 0.0f) used_content_height = 0.0f;
-    // html special-element flow layout publishes direct text at the completed
-    // line edge; move the retained child back to the content origin.
-    layout_shift_view_children(static_cast<View*>(spanner), 0.0f, -used_content_height);
+    // HTML §4.11.1 supplies a legend for summary-less details. Keep that
+    // generated line ahead of the direct-text line when multicol relays it out.
+    float direct_text_height = max(
+        used_content_height - default_summary_line, 0.0f);
+    layout_shift_view_children(static_cast<View*>(spanner), 0.0f,
+                               -direct_text_height);
     spanner->content_width = content.width;
     spanner->content_height = used_content_height;
     float relaid_height = layout_border_size_from_content_box(
@@ -1826,6 +1834,11 @@ static void multicol_apply_static_fragment_anchor(ViewBlock* multicol, ViewBlock
         lam::view_require_element(oof));
     bool local_to_fragmented_containing_block = positioned_containing_block &&
         positioned_containing_block->as_element()->layout_fragments_count() > 1;
+    if (positioned_containing_block && !local_to_fragmented_containing_block) {
+        // CSS Position §3.5.3 keeps the hypothetical static position when its
+        // positioned containing block did not fragment.
+        return;
+    }
     if (!local_to_fragmented_containing_block && parent && parent->is_block()) {
         multicol_absolute_normal_origin(lam::view_require_block(parent), &anchor_origin_x, &anchor_origin_y);
     } else {
@@ -2259,6 +2272,9 @@ static bool multicol_has_fragmentable_block_children(ViewBlock* child) {
         return false;
     }
     bool is_list_item = child->view_type == RDT_VIEW_LIST_ITEM;
+    ViewBlock* parent = lam::view_as_block(child->parent);
+    bool root_body_flow = parent && is_multicol_container(parent) &&
+        layout_block_is_viewport_body(child);
     int in_flow_block_count = 0;
     bool all_blocks_size_contained = true;
     for (View* descendant = child->first_placed_child(); descendant;
@@ -2274,7 +2290,11 @@ static bool multicol_has_fragmentable_block_children(ViewBlock* child) {
             all_blocks_size_contained = false;
         }
     }
-    return is_list_item || (in_flow_block_count > 1 && all_blocks_size_contained);
+    // CSS Multicol §3 fragments the root body's normal-flow block sequence
+    // in the root's column context; ordinary nested wrappers retain their
+    // containment-specific projection path below.
+    return is_list_item || (in_flow_block_count > 1 &&
+        (all_blocks_size_contained || root_body_flow));
 }
 
 static bool multicol_is_scroll_container(ViewBlock* block) {
@@ -10204,11 +10224,14 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
             // css multicol: a definite fragmentainer height caps the line before a spanner.
             group_target = definite_fragmentainer_height;
         }
-        if (group_follows_spanner && !multicol_group_wraps_rows(block) &&
-            definite_fragmentainer_height > 0.0f) {
-            // css fragmentation: after a spanner, the next group uses the
-            // remaining space in the current fixed fragmentainer; overflow
-            // then continues in additional columns.
+        bool continuation_exhausts_fragmentainer = definite_fragmentainer_height > 0.0f &&
+            max_column_height >= definite_fragmentainer_height;
+        if (group_follows_spanner &&
+            (block->multicol_prop()->fill == COLUMN_FILL_AUTO ||
+             continuation_exhausts_fragmentainer) &&
+            !multicol_group_wraps_rows(block) && definite_fragmentainer_height > 0.0f) {
+            // CSS Multicol §7.1: auto fill uses remaining space; once a prior
+            // group exhausts the fragmentainer, the next group starts at 1px.
             group_target = max(definite_fragmentainer_height -
                 max_column_height, 1.0f);
         }

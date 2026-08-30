@@ -137,6 +137,7 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         // Keep the CSS initial normal value so aspect-ratio items can tell it
         // apart from an explicitly requested stretch during self-alignment.
         grid->justify_items = CSS_VALUE_NORMAL;
+        grid->justify_items_detail.value = CSS_VALUE_NORMAL;
         grid->align_items = CSS_VALUE_NORMAL;
         grid->grid_auto_flow = CSS_VALUE_ROW;
         // Initialize gaps

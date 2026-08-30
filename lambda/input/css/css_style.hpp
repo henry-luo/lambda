@@ -14,6 +14,7 @@
 typedef struct CssSelectorComponent CssSelectorComponent;
 typedef struct CssCalcNode CssCalcNode;
 typedef struct CssValue CssValue;
+struct DomElement;
 
 /**
  * CSS Style System
@@ -331,6 +332,7 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_JUSTIFY_CONTENT,
     CSS_PROPERTY_ALIGN_ITEMS,
     CSS_PROPERTY_ALIGN_CONTENT,
+    CSS_PROPERTY_PLACE_CONTENT,
     CSS_PROPERTY_ALIGN_SELF,
     CSS_PROPERTY_FLEX_GROW,
     CSS_PROPERTY_FLEX_SHRINK,
@@ -927,6 +929,8 @@ typedef struct CssStylesheet {
     const char* origin_url;      // URL where stylesheet was loaded from
     CssOrigin origin;
     bool disabled;
+    // Inline sheets retain their owning style element for CSSOM state changes.
+    struct DomElement* owner_style_element;
 
     // Source information
     const char* source_text;

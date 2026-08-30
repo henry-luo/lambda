@@ -63,7 +63,7 @@ font-feature-settings font-language-override font-optical-sizing font-variation-
 font-display letter-spacing word-spacing text-shadow line-height text-align text-decoration
 text-transform initial-letter text-wrap-style text-spacing-trim text-autospace white-space vertical-align
 background-color background-image background-repeat background-position background-size
-flex-direction flex-wrap flex-flow justify-content align-items align-content align-self
+flex-direction flex-wrap flex-flow justify-content align-items align-content place-content align-self
 flex-grow flex-shrink flex-basis order grid-template-columns grid-template-rows
 grid-column-start grid-column-end grid-row-start grid-row-end grid-column-gap grid-row-gap
 justify-items justify-self place-items place-self grid-template grid-template-areas grid-auto-rows

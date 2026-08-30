@@ -122,7 +122,7 @@ static void grid_store_inline_baseline(LayoutContext* lycon,
             float grid_baseline = vertical_baseline >= 0.0f
                 // Grid baseline caches are consumed from the border-box origin.
                 ? layout_block_start_content_offset(grid_container) + vertical_baseline
-                : item->y + item_baseline;
+                : item_baseline + (prefer_last ? item->y : 0.0f);
             if (prefer_last) {
                 // The last set comes from an item ending in the block-end-most row;
                 // using the first-row cache ignores baseline-source:last.
@@ -144,11 +144,17 @@ static void grid_store_inline_baseline(LayoutContext* lycon,
 static void grid_store_inline_baselines(LayoutContext* lycon,
                                         GridContainerLayout* grid_layout,
                                         ViewBlock* grid_container) {
-    if (!lycon || !grid_layout || !grid_container || !grid_container->blk ||
+    if (!lycon || !grid_layout || !grid_container ||
         grid_container->display.outer != CSS_VALUE_INLINE_BLOCK ||
         grid_container->display.inner != CSS_VALUE_GRID) {
         return;
     }
+
+    if (!grid_container->blk) {
+        // CSS Grid §9.1: an inline-grid exports its track baseline to inline flow.
+        grid_container->ensure_block(lycon);
+    }
+    if (!grid_container->blk) return;
 
     grid_container->blk->first_line_baseline = 0.0f;
     grid_container->blk->last_line_baseline = 0.0f;
@@ -172,7 +178,8 @@ static bool layout_grid_anonymous_text_content(
     if (!has_text) return false;
 
     // css grid §4.2: non-empty direct text is laid out as an anonymous grid item.
-    float content_width = grid_container->content_width;
+    LayoutContentBox used_content = layout_content_box(grid_container);
+    float content_width = used_content.width;
     if (content_width <= 0.0f) {
         content_width = layout_content_size_from_border_box(
             grid_container, grid_container->width, true);
@@ -191,6 +198,11 @@ static bool layout_grid_anonymous_text_content(
     if (!lycon->line.is_line_start) line_break(lycon);
 
     float content_height = max(lycon->block.advance_y, 0.0f);
+    if (layout_axis_has_given_size(grid_container, false)) {
+        // CSS Grid §2.1: anonymous text must not replace a definite grid
+        // container block size with its intrinsic line height.
+        content_height = used_content.height;
+    }
     grid_container->content_height = content_height;
     grid_container->height = layout_border_size_from_content_box(
         grid_container, content_height, false);
@@ -262,10 +274,7 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             log_leave();
             return;
         }
-        // Check if there are absolutely positioned children that use grid lines
-        // for their containing block (CSS Grid §9.1 - grid container is containing block).
-        // If so, we still need to run track sizing to produce correct grid line positions,
-        // then layout those absolute children in Pass 4.
+        // Check whether positioned children need the resolved grid lines.
         bool has_absolute_children = false;
         int node_capacity = lycon->grid_container->allocated_items;
         DomNode** nodes = node_capacity > 0
@@ -293,13 +302,12 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             }
         }
         if (nodes) scratch_free(&lycon->scratch, nodes);
-        if (!has_absolute_children) {
-            log_leave();
-            return;
-        }
-        // Fall through: run Passes 2 and 4 only
+        // CSS Grid §11: explicit tracks size an empty grid, even without
+        // positioned children that consume its grid lines.
         layout_grid_container(lycon, grid_container);
-        layout_grid_absolute_children(lycon, grid_container);
+        if (has_absolute_children) {
+            layout_grid_absolute_children(lycon, grid_container);
+        }
         log_leave();
         return;
     }
@@ -484,16 +492,21 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
 
     WritingMode grid_writing_mode = layout_block_writing_mode(grid_container);
     if (grid_writing_mode == WM_VERTICAL_LR || grid_writing_mode == WM_VERTICAL_RL) {
-        float logical_width = grid_container->width;
-        float logical_height = grid_container->height;
-        // Grid rows and columns are logical block/inline tracks; the grid
-        // implementation stores them in horizontal/vertical surrogate axes.
-        grid_container->width = logical_height;
-        grid_container->height = logical_width;
+        bool preserve_surrogate_axes =
+            radiant::layout_inline_context_has_explicit_baseline_source(grid_container);
+        if (preserve_surrogate_axes) {
+            // Explicit baseline-source publication consumes the legacy surrogate
+            // track axes; retain that representation until the parent maps it.
+            float logical_width = grid_container->width;
+            float logical_height = grid_container->height;
+            grid_container->width = logical_height;
+            grid_container->height = logical_width;
+        }
         LayoutContentBox grid_content = layout_content_box(grid_container);
         grid_container->content_width = grid_content.width;
         grid_container->content_height = grid_content.height;
-        layout_publish_vertical_children(grid_container, grid_writing_mode, true,
+        layout_publish_vertical_children(grid_container, grid_writing_mode,
+            preserve_surrogate_axes,
             lycon->block.line_height, lycon->block.first_line_max_descender);
     }
 
