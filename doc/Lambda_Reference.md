@@ -403,7 +403,7 @@ let data = input("sales.json", 'json');
 let total = data.sales |> ~.amount |> sum;
 
 // Filter high-value sales
-let high_value = data.sales where ~.amount > 1000;
+let high_value = data.sales that ~.amount > 1000;
 
 // Summarize by region — each group `g` is a <group> element
 // (grouping key becomes an attribute, members become children)

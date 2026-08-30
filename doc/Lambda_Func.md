@@ -65,7 +65,7 @@ fn greet(name: string) string {
 }
 
 fn process(data) {
-    let filtered = data where ~ > 0;
+    let filtered = data that ~ > 0;
     let doubled = filtered |> ~ * 2;
     doubled
 }
@@ -479,10 +479,10 @@ Functions that take or return functions.
 ### Functions as Arguments
 
 ```lambda
-fn apply(f, x) => f(x)
+fn apply_fn(f, x) => f(x)
 fn map_array(arr, f) => (for (x in arr) f(x))
 
-apply((x) => x * 2, 5)           // 10
+apply_fn((x) => x * 2, 5)            // 10
 map_array([1, 2, 3], (x) => x ** 2)  // [1, 4, 9]
 ```
 
@@ -501,15 +501,15 @@ add1_then_double(5)   // 12 (double(add1(5)))
 ### Common Higher-Order Patterns
 
 ```lambda
-// Filter
-fn filter(arr, pred) => arr where pred(~)
+// Filter -- `where` is a for-header clause, not a standalone operator
+fn filter(arr, pred) => [for (x in arr where pred(x)) x]
 
-// Map
-fn map(arr, f) => arr |> f(~)
+// Map -- the free `~` makes this a mapping pipe (S10.1.2)
+fn map_array(arr, f) => arr |> f(~)
 
-// Reduce/Fold
-fn reduce(arr, init, f) => {
-    let result = init
+// Reduce/Fold -- accumulating into a binding mutates, so this one is a `pn`
+pn fold(arr, init, f) {
+    var result = init
     for (x in arr) {
         result = f(result, x)
     }
@@ -518,8 +518,8 @@ fn reduce(arr, init, f) => {
 
 // Usage
 filter([1, 2, 3, 4, 5], (x) => x > 2)      // [3, 4, 5]
-map([1, 2, 3], (x) => x * 2)               // [2, 4, 6]
-reduce([1, 2, 3, 4], 0, (a, b) => a + b)   // 10
+map_array([1, 2, 3], (x) => x * 2)         // [2, 4, 6]
+fold([1, 2, 3, 4], 0, (a, b) => a + b)     // 10
 ```
 
 ---

@@ -1288,7 +1288,7 @@ Execute a shell command and return the result.
 ```lambda
 pn run_commands() {
     let files = cmd("ls", "-la")
-    let date = cmd("date", "+%Y-%m-%d")
+    let today_str = cmd("date", "+%Y-%m-%d")
 
     // With multiple arguments
     cmd("git", "commit", "-m", "Update files")

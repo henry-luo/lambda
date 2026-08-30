@@ -62,7 +62,7 @@ The price of the library route is visible from orbit: three-parameter generic gy
 
 ## 6. The road not taken: effect rows
 
-Koka's inferred effect rows, Unison's abilities, and Flix's Boolean effects are the theoretically complete versions — fine-grained *and* composition-clean (rows compose where transformers don't), with the one capability a 1-bit system genuinely lacks: **effect polymorphism** — a higher-order function that is pure iff its argument is pure, expressed generically. Lambda dodges the gap by convention (the idiomatic HOF surface — pipes, `map`, `where` — takes `fn` arguments; `pn`-taking HOFs are rare), the same way D lived with it until growing "weakly pure" as a patch. If the pressure ever becomes real, **Flix's Boolean effect polymorphism is the minimal fix**: polymorphism over the bit, not a lattice. Recorded here so the future fix is a lookup, not a redesign.
+Koka's inferred effect rows, Unison's abilities, and Flix's Boolean effects are the theoretically complete versions — fine-grained *and* composition-clean (rows compose where transformers don't), with the one capability a 1-bit system genuinely lacks: **effect polymorphism** — a higher-order function that is pure iff its argument is pure, expressed generically. Lambda dodges the gap by convention (the idiomatic HOF surface — pipes, `map`, `that` — takes `fn` arguments; `pn`-taking HOFs are rare), the same way D lived with it until growing "weakly pure" as a patch. If the pressure ever becomes real, **Flix's Boolean effect polymorphism is the minimal fix**: polymorphism over the bit, not a lattice. Recorded here so the future fix is a lookup, not a redesign.
 
 ## 7. The delivery principle: color contracts, infer mechanics
 

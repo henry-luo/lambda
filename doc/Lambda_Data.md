@@ -982,8 +982,8 @@ users |> ~.name             // ["Alice", "Bob", ...]
     |> ~ + 1                 // add 1
 // Result: [2, 5, 10, 17, 26]
 
-// Filter with where
-[1, 2, 3, 4, 5] where ~ > 3  // [4, 5]
+// Filter with that
+[1, 2, 3, 4, 5] that ~ > 3   // [4, 5]
 ```
 
 ---

@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 18.1.0 (2026-08-28)
+**Spec version:** 19.0.0 (2026-08-30)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -1037,7 +1037,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
 ## S10 Operators
 
-### S10.1 Union and pipe
+### S10.1 Union, pipe, and filter
 
 - **S10.1.1** `|` means union/alternative **everywhere**: type expressions,
   match or-patterns, string patterns, value expressions (types are
@@ -1053,6 +1053,18 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   clauses, match arms, and `last` (S7.2.2); reach an outer item via a `let`.
 - **S10.1.4** File write/append syntax is deferred; `output(data, file)` is
   the interim. [C6a]
+- **S10.1.5** `that` is the **filter**: `c that p` keeps the members of `c`
+  for which `p` is truthy. It binds `~` per member and `~#` to the key/index
+  on the same discipline as the mapping pipe (S10.1.2), scoped by S10.1.3, and
+  it sits at the **pipe precedence tier**, left-associative, so filters and
+  pipes chain left to right (`c |> f that p`). Its result spreads into an
+  enclosing array literal exactly as a pipe or `for` does. A scalar filters as
+  a one-member collection; an empty result is absent (`null`) by the ordinary
+  collection rule, not an empty container. Filtering a map tests its **values**
+  and yields an array — the keys are dropped (SO38). The filter was spelled
+  `where` before it was renamed to remove the ambiguity with the `for`-header
+  clause; that spelling is retired (S10.3.1v2).
+  [Grammar_Reduce2 appendix]
 
 ### S10.2 Vectorization
 
@@ -1070,9 +1082,12 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
 
 ### S10.3 Keyword operators
 
-- **S10.3.1** `and or not is in to div that where at eq ne lt le gt ge` —
-  Lambda is a keyword-operator language; new operators prefer words over
-  sigils.
+- **S10.3.1v2** `and or not is in to div that at eq ne lt le gt ge` — Lambda is
+  a keyword-operator language; new operators prefer words over sigils. `where`
+  is **not** among them: binary `where` was retired in favour of `that`
+  (S10.1.5), and `where` survives only as a `for`-header clause word. A `where`
+  in infix position is the retired spelling and is a compile error naming
+  `that`, never a silent reinterpretation. [Grammar_Reduce2 appendix]
 
 ### S10.4 Parent navigation
 
@@ -1205,7 +1220,7 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
 - **S11.4.6*** User-defined types are enforced by the validator: deep, on
   first crossing, or a rich error with a validator path and no binding.
   Named map types are **open** — extra fields pass. Constrained types
-  (`T where …`) enforce the base only, for now. [TE-10]
+  (`T that …`) enforce the base only, for now. [TE-10]
 - **S11.4.7** Containment and discharge follow §S7.7–S7.8: skip at
   declaration boundaries, destination-contract container acceptance, and
   `^ { }` as the engagement form that suppresses the skip.
@@ -1788,8 +1803,8 @@ below by its section.
   the rejection is a compile error at the declaration site (E201). Words
   that can never begin a construct stay **legal** as binding names:
   for-header clause words (`order` `by` `group` `into` `limit` `offset`
-  `asc` `desc` `where` `that` `as`), infix word operators (`and` `or` `to`
-  `is` `in` `at` `div` `eq` `ne` `lt` `le` `ge` `gt`), and the
+  `asc` `desc` `where` `as`), infix word operators (`and` `or` `to`
+  `is` `in` `at` `div` `that` `eq` `ne` `lt` `le` `ge` `gt`), and the
   continuation-only words `else` `case` `default` (S16.2.2v2) together with
   `on`. **Where both readings fit, the clause wins** — an enclosing `if`,
   `match`, `for`, or view claims its clause word before an expression is
@@ -2000,6 +2015,12 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 - **SO35** A dedicated formal syntax document: S16 parks the surface-syntax rulings here because syntax and semantics are argued together, and one source beats two. If the grammar surface outgrows a section, extract S16 into a formal syntax spec and leave pointers — not a second, competing statement. [Design_Syntax]
 - **SO37** *(closed 2026-08-27 — ruled in as S17.2.1/S17.2.2: `lambda.sys.*`
   with a reserved `lambda` root.)*
+- **SO38** Whether `that` over a **map** should keep the surviving keys
+  (yielding a map) rather than dropping them (yielding an array of values, the
+  current behaviour recorded in S10.1.5). The pipe has the same question, and
+  the two should answer it together: `~#` binds the key in both, so the key is
+  observable to the predicate but absent from the result. An S10 container-
+  shape question. [S10.1.2, S10.1.5]
 - **SO36** Whether a `pn` call may appear nested inside an expression
   (`(pn_func(), 123)`, `if (exists(path)) …`), or only as a bare statement /
   the whole RHS of a binding — the A-normal-form effect-sequencing

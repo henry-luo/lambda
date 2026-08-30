@@ -23,6 +23,9 @@ typedef struct LambdaRdParser {
     uint32_t pipe_rhs_depth;
     bool pipe_rhs_has_current;
     bool top_level_statement_relation;
+    // non-zero while a `for` header is being parsed, where `where` is a live
+    // clause word rather than the retired value-level filter (S10.3.1v2).
+    uint32_t for_header_depth;
 } LambdaRdParser;
 
 // keep parser diagnostics in one catalog. Call sites select a named message
@@ -37,6 +40,9 @@ static const char* const error_incomplete_type_occurrence_suffix = "incomplete t
 static const char* const error_incomplete_primary_type = "incomplete primary type";
 static const char* const error_expected_expression = "expected an expression";
 static const char* const error_unexpected_trailing_input = "unexpected trailing input";
+static const char* const error_retired_value_where =
+    "'where' is not a filter operator; write 'that' (e.g. items that ~ > 0). "
+    "'where' is only a 'for' header clause";
 static const char* const error_too_many_grouped_expressions = "too many grouped expressions in parser POC";
 static const char* const error_too_many_call_arguments = "too many call arguments in parser POC";
 static const char* const error_too_many_index_dimensions = "too many index dimensions in parser POC";
@@ -1164,7 +1170,12 @@ static LambdaParseValue parse_for_expression(LambdaRdParser* parser) {
     parser_context(parser, LAMBDA_REDUCTION_FORM_FOR_BEGIN, first.span, first);
     bool parenthesized = parser_accept(parser, LAMBDA_TOK_LPAREN);
     LambdaParseValue clauses;
-    if (!parser_parse_for_header(parser, first, &clauses)) return 0;
+    // the header owns `where`; bracket it so the retired-filter diagnostic below
+    // does not fire on a legal `for (x in items where cond)` clause.
+    parser->for_header_depth++;
+    bool header_ok = parser_parse_for_header(parser, first, &clauses);
+    parser->for_header_depth--;
+    if (!header_ok) return 0;
     if (parenthesized && !parser_expect(parser, LAMBDA_TOK_RPAREN)) return 0;
     if (!parser_parse_control_body(parser, first, LAMBDA_REDUCTION_FORM_NONE, LAMBDA_REDUCTION_FORM_NONE, error_for_body_close,
             error_unbraced_for_body, error_for_body_open, parenthesized, false, &children[0])) return 0;
@@ -1497,6 +1508,19 @@ static LambdaParseValue parse_expression(LambdaRdParser* parser, int min_bp) {
         }
         if (left_is_element && parser->stop_at_element_close && parser->current.kind == LAMBDA_TOK_LT) {
             break;
+        }
+        // binary `where` was retired in favour of `that`. It carries no infix
+        // binding power, so without this it would quietly end the expression and
+        // start a new statement: the operand stayed unfiltered while `where`
+        // parsed as an unbound name (it is a legal binding per S16.10.1v2),
+        // leaking a stray error into top-level content. Same line only — a
+        // line-start `where` is a new statement per S16.2.2v2 — and never inside
+        // a `for` header, where `where` is still a clause word.
+        if (parser->current.kind == LAMBDA_TOK_WHERE && !parser->current.nl_before &&
+            !parser->for_header_depth) {
+            parser_set_error(parser, error_retired_value_where, LAMBDA_TOK_THAT);
+            parser->expression_depth--;
+            return 0;
         }
         bool right_associative = false;
         int bp = infix_binding_power(parser, parser->current.kind, &right_associative);

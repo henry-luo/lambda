@@ -128,8 +128,8 @@ if (result.valid) {
     print("Validation passed")
 } else {
     print("Validation failed:")
-    for (error in result.errors) {
-        print("  - " + error.message + " at " + error.path)
+    for (err in result.errors) {
+        print("  - " + err.message + " at " + err.path)
     }
 }
 ```
@@ -207,10 +207,10 @@ type ValidationResult = {
 // handle type mismatches
 let result = validate(schema, data)
 if (!result.valid) {
-    for (error in result.errors) {
-        if (contains(error.message, "type mismatch")) {
-            print("Type error at " + error.path + ": expected " +
-                  error.expected + ", got " + error.actual)
+    for (err in result.errors) {
+        if (contains(err.message, "type mismatch")) {
+            print("Type error at " + err.path + ": expected " +
+                  err.expected + ", got " + err.actual)
         }
     }
 }
@@ -221,8 +221,8 @@ if (!result.valid) {
     let missing = filter(result.errors, fn(e) contains(e.message, "required"))
     if (length(missing) > 0) {
         print("Missing required fields:")
-        for (error in missing) {
-            print("  - " + error.path)
+        for (err in missing) {
+            print("  - " + err.path)
         }
     }
 }
@@ -230,8 +230,8 @@ if (!result.valid) {
 // handle array occurrence violations
 let result = validate(schema, data)
 if (!result.valid) {
-    for (error in result.errors) {
-        if (contains(error.message, "one or more")) {
+    for (err in result.errors) {
+        if (contains(err.message, "one or more")) {
             print("Array at " + error.path + " must have at least one element")
         }
     }

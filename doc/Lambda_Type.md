@@ -395,8 +395,8 @@ let isPositive: Predicate = (x) => x > 0
 let upper: Transform = (s) => s.upper()
 
 // Higher-order function
-fn apply(f: fn (int) int, x: int) int => f(x)
-apply((x) => x * 2, 5)  // 10
+fn apply_fn(f: fn (int) int, x: int) int => f(x)
+apply_fn((x) => x * 2, 5)  // 10
 ```
 
 ---
@@ -1187,7 +1187,7 @@ fn greet(name: string) => "Hello, " ++ name  // Returns string
 
 // Complex inference
 fn process(items: int[]) => {
-    let filtered = items where ~ > 0
+    let filtered = items that ~ > 0
     let doubled = filtered |> ~ * 2
     sum(doubled)
 }  // Returns int

@@ -443,10 +443,12 @@ When `~` is not used, the pipe passes the entire collection/data on left side to
 | `[1, 2, 3, 4, 5] that ~ == 3` | `[3]` | `==` and `!=` work without parens |
 | `data \|> ~.name that (len(~) > 3) \|> ~.upper()` | | combined with pipe |
 
-> **Note:** The relational operators `<`, `>`, `<=`, `>=` conflict with element-tag
-> syntax in the parser. When a `that` (or `|>`) condition uses any of these
-> operators, wrap the condition in parentheses: `items that (~ > 0)`.
-> The operators `==`, `!=`, `and`, `or`, `+`, `-`, `*`, `/` work without parens.
+> **Note:** A `that` (or `|>`) condition needs no parentheses around the
+> relational operators `<`, `>`, `<=`, `>=` — `items that ~ > 0` is fine, and
+> the parenthesized form is only a readability choice. The element-tag
+> ambiguity is resolved by context and bites solely inside an element's tag
+> region, where `>` closes the tag: `<div w: 1 > 2>` is rejected, so wrap that
+> operand — `<div w: (1 > 2)>`.
 
 #### Implicit Field Access in `that` Clause
 
