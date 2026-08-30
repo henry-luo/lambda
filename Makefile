@@ -1590,13 +1590,13 @@ interp-bench:
 	@python3 test/interp/repl_bench.py
 
 test-lambda-baseline: TEST_BUILD_QUIET := 1
-test-lambda-baseline: build-lambda-baseline test-input-baseline
+test-lambda-baseline: build-lambda-baseline test-input-baseline build-debug-profile
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
-	# Pin the baseline's optimization contract to its ordinary debug host;
-	# otherwise a stale standalone profile binary could be selected implicitly.
-	@LAMBDA_TEST_HEAVY_LOAD=1 LAMBDA_JS_OPT_EXE=./lambda.exe node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
+	# JS optimization assertions require the profile-instrumented host even
+	# when the selected Lambda baseline host is a release executable.
+	@LAMBDA_TEST_HEAVY_LOAD=1 LAMBDA_JS_OPT_EXE=./lambda-debug-profile.exe node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
 
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline

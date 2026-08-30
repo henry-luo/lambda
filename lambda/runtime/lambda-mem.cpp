@@ -1204,9 +1204,7 @@ void mir_guest_finish_context(Runtime* runtime, bool reusing_context) {
             // A standalone guest result may reference this heap after the MIR
             // entrypoint returns. Transfer all context-owned state so the one
             // runtime cleanup path can release it after output is consumed.
-            runtime->heap = context->heap;
-            runtime->name_pool = context->name_pool;
-            runtime->type_list = (ArrayList*)context->type_list;
+            runtime_context_publish_owners(runtime, context);
         } else {
             if (context->type_list) arraylist_free((ArrayList*)context->type_list);
             if (context->heap) heap_destroy();

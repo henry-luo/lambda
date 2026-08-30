@@ -270,6 +270,10 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
             hashmap_free(analysis->js_cached_annexb_suppressed);
             analysis->js_cached_annexb_suppressed = NULL;
         }
+        if (analysis && analysis->js_cached_scope_slot_collisions) {
+            hashmap_free(analysis->js_cached_scope_slot_collisions);
+            analysis->js_cached_scope_slot_collisions = NULL;
+        }
         if (analysis) analysis->js_cached_annexb_suppressed_ready = false;
         if (func_entries[i].scope_env_names) {
             mem_free(func_entries[i].scope_env_names);
@@ -430,6 +434,10 @@ struct JsMirTranspiler {
     int func_capacity;
     int func_count;
     JsFuncCollected** func_by_id;       // shared AstIndex function identity -> collected entry
+    // JS compilation only: exact indexed-subtree links avoid repeated parent
+    // walks while keeping the shared AstIndex lightweight for Lambda clients.
+    AstNodeId* indexed_subtree_storage;
+    uint32_t indexed_traversal_count;
 
     // Collected classes
     JsClassEntry* class_entries;        // exact-sized after the shared count pass
@@ -437,6 +445,8 @@ struct JsMirTranspiler {
     int class_count;
     bool collection_count_only;
     bool collection_failed;
+    // Built once from AstIndex: each function's same-spelling binding cells.
+    bool scope_slot_collisions_prepared;
 
     // Current class being transpiled (for super resolution)
     JsClassEntry* current_class;
@@ -655,6 +665,9 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         arraylist_free(mt->module_name_specs);
         mt->module_name_specs = NULL;
     }
+    if (mt->indexed_subtree_storage) mem_free(mt->indexed_subtree_storage);
+    mt->indexed_subtree_storage = NULL;
+    mt->indexed_traversal_count = 0;
     if (mt->func_entries) jm_free_scope_env_names(mt->func_entries, mt->func_count);
     mt->func_entries = NULL;
     mt->class_entries = NULL;

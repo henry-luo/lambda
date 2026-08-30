@@ -1973,10 +1973,6 @@ JsAstNode* publish_js_ast_indexed(JsTranspiler* tp, JsAstNode* ast) {
 bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
         JsParseMode mode) {
     if (!tp || !source || length > UINT32_MAX) return false;
-    if (tp->tree) {
-        ts_tree_delete(tp->tree);
-        tp->tree = NULL;
-    }
     tp->source = source;
     tp->source_length = length;
     tp->parse_error_valid = false;

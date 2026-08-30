@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29
 
-**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3j compile-unit migrations, and P4a–P4k indexed function facts are verified; the remaining P5 lowering-family work remains proposed. The current HEAD governs 314,814 `lambda/runtime` + `lambda/js` lines and the working candidate is 314,192; the older 310,711-line project anchor remains historical and its final 308,711 cap is not yet claimed.
+**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3j compile-unit migrations, P4a–P4l indexed function facts, P5 semantic-family MIR lowering, and P6 shared execution/runtime lifecycle are fully implemented and verified. The P5/P6 review base and candidate each governed 326,064 `lambda/runtime` + `lambda/js` lines; the post-P6 direct-frontend retirement reduces that scope to 318,980 (`-7,084`). Proposal-wide structural convergence and the historical 308,711-line project target remain open.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -1617,6 +1617,22 @@ Recommended order:
 The two interpreter frames and completion enums remain. Shared lifecycle code must not introduce a second runtime, event loop, heap, module registry, or stack owner, satisfying **D8.1.3v10**.
 
 P6 also removes stale compatibility aliases only after build/cache versioning proves no retained artifact can import them. Deleting an ABI symbol without that proof is not an acceptable LOC shortcut.
+
+#### P5–P6 implementation record — semantic MIR profiles and shared runtime lifecycle, 2026-08-30
+
+P5 now routes the structural lowering boundaries through demand-carrying `MirValue` profile calls: discard, branch and destination demands; linked sequences and conditions; module-slot loads/stores; call argument/root/result completion; return/completion routing; function publication; and module finalization/link plumbing. Lambda and JS retain semantic callbacks for their truthiness, coercion, language extensions, and boxed fallback, while the shared emitter owns the structural contract. This realizes **D2.4.1–D2.4.3**, **D5.2.1v3**, **D5.3.4**, and **D8.2.6** without collapsing language-specific lowering modules. Binding-aware hoisted declaration writeback preserves source-keyed lexical cells for recursive nested closures; the HLJS fixture covers that regression.
+
+P6 centralizes retained/fresh context-owner binding, result-root publication, current-file, execution-turn, and module-state scopes, plus generic active-module name and slot access, in `runtime-state`. The superseded JS-specific runtime-state aliases and duplicated restoration paths are deleted. Semantic interpreters, frames, completions, and language-owned execution policies remain separate, as required by **D7.2.1** and **D8.1.3v10**.
+
+The final P5/P6 delta is 326,064 to 326,064 governed lines (`0`); changed C/C++ is `+1246/-1253 = -7` and all first-party source is `+1255/-1257 = -2`. Verification passed: coherent debug-profile and release builds; Lambda MIR emission `63/63`; JS MIR emission `21/21`; MIR GC stress `93/93`; JS optimization `19/19`; JS script ownership `104/104`; Lambda/Input baseline `4,061/4,061`; Test262 baseline `40,261/40,261`; the HLJS MIR fixture; `git diff --check`; and the LOC gates. The matched P4 release capture has identical manifests and reports Lambda compiler median `7,745,692 → 5,956,751 us` (`0.769041`) and JS MIR-direct median `327,798,863 → 126,591,876 us` (`0.386188`); JS complete/library MIR volume changes are `+24/+31` instructions with no zero-MIR JS record. This is an implementation-status record, not a change to a formal ruling.
+
+#### Post-P6 implementation record — direct JavaScript frontend retirement, 2026-08-30
+
+Production JavaScript and TypeScript parsing now have one authority: the first-party C parser publishes the indexed AST consumed directly by the interpreter and MIR entry points. The obsolete Tree-sitter AST builder, its production-disabled parser-comparison façade, TypeScript source-preprocess fallback, backend-selection state, and repeated AST fallback calls are retired together. The remaining direct-parser facts—node allocation, operator decoding, and parser errors—are centralized in `js_c_ast_helpers`/`js_scope`; script-owned import/export recording stays with the scope owner. This keeps the single runtime/compilation boundary required by **D8.1.3v10** while preserving semantic profiles and AST ownership under **D2.4.1–D2.4.3**.
+
+The deleted implementation files are `lambda/js/build_js_ast.cpp`, `lambda/js/js_parser_compare.cpp`, and `lambda/ts/ts_preprocess.cpp`; `build_lambda_config.json` no longer compiles the removed comparison façade. The independent C-parser versus grammar differential remains a test-only validator (`418/418` accepted sources) and is not a second production frontend. This is genuine retirement under **D8.6.4v2**: no flag, stub, alternate runtime entry, blank-line deletion, or formatting-only reduction remains.
+
+The post-P6 governed LOC result is `326,064 → 318,980` (`-7,084`), including the direct frontend retirement and its shared-helper consolidation. Validation passed: debug and release builds; C parser `16/16`; JS library `354/354`; JS script ownership `104/104`; JS MIR emission `21/21`; TypeScript `19/19`; parser differential `418/418`; sequential Lambda/Input baseline `4,061/4,061`; and Test262 `40,261/40,261` with zero regressions. The ordinary parallel baseline still exposes its pre-existing nested-process pressure failure in the recursive-stack-fault fixture; its isolated and sequential canonical runs pass, so this record does not weaken or alter the test runner. No formal-spec ruling or semver changed.
 
 ---
 

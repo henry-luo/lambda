@@ -4,6 +4,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/mem.h"
 #include "../../lib/log.h"
+#include "../../lib/strbuf.h"
 #include "../../lib/utf.h"
 
 #include <cstring>
@@ -14,6 +15,94 @@ Type* js_set_type_any(JsTranspiler* tp, AnyReason reason) {
         tp->any_census[reason]++;
     }
     return &TYPE_ANY;
+}
+
+void js_report_any_census(JsTranspiler* tp) {
+    if (!tp) return;
+    int any_total = 0;
+    for (int reason = 0; reason < ANY_REASON_COUNT; reason++) {
+        any_total += tp->any_census[reason];
+    }
+    if (!any_total) return;
+    StrBuf* census = strbuf_new();
+    if (!census) return;
+    strbuf_append_format(census, "any_census: total=%d", any_total);
+    for (int reason = 0; reason < ANY_REASON_COUNT; reason++) {
+        if (!tp->any_census[reason]) continue;
+        strbuf_append_format(census, " %s=%d",
+            any_reason_name((AnyReason)reason), tp->any_census[reason]);
+    }
+    log_notice("%s (js)", census->str);
+    strbuf_free(census);
+}
+
+JsOperator js_operator_from_string(const char* op_str, size_t len) {
+    if (len == 1) {
+        switch (op_str[0]) {
+        case '+': return JS_OP_ADD;
+        case '-': return JS_OP_SUB;
+        case '*': return JS_OP_MUL;
+        case '/': return JS_OP_DIV;
+        case '%': return JS_OP_MOD;
+        case '<': return JS_OP_LT;
+        case '>': return JS_OP_GT;
+        case '!': return JS_OP_NOT;
+        case '~': return JS_OP_BIT_NOT;
+        case '&': return JS_OP_BIT_AND;
+        case '|': return JS_OP_BIT_OR;
+        case '^': return JS_OP_BIT_XOR;
+        case '=': return JS_OP_ASSIGN;
+        }
+    } else if (len == 2) {
+        if (strncmp(op_str, "==", 2) == 0) return JS_OP_EQ;
+        if (strncmp(op_str, "!=", 2) == 0) return JS_OP_NE;
+        if (strncmp(op_str, "<=", 2) == 0) return JS_OP_LE;
+        if (strncmp(op_str, ">=", 2) == 0) return JS_OP_GE;
+        if (strncmp(op_str, "&&", 2) == 0) return JS_OP_AND;
+        if (strncmp(op_str, "||", 2) == 0) return JS_OP_OR;
+        if (strncmp(op_str, "<<", 2) == 0) return JS_OP_BIT_LSHIFT;
+        if (strncmp(op_str, ">>", 2) == 0) return JS_OP_BIT_RSHIFT;
+        if (strncmp(op_str, "**", 2) == 0) return JS_OP_EXP;
+        if (strncmp(op_str, "++", 2) == 0) return JS_OP_INCREMENT;
+        if (strncmp(op_str, "--", 2) == 0) return JS_OP_DECREMENT;
+        if (strncmp(op_str, "+=", 2) == 0) return JS_OP_ADD_ASSIGN;
+        if (strncmp(op_str, "-=", 2) == 0) return JS_OP_SUB_ASSIGN;
+        if (strncmp(op_str, "*=", 2) == 0) return JS_OP_MUL_ASSIGN;
+        if (strncmp(op_str, "/=", 2) == 0) return JS_OP_DIV_ASSIGN;
+        if (strncmp(op_str, "%=", 2) == 0) return JS_OP_MOD_ASSIGN;
+        if (strncmp(op_str, "&=", 2) == 0) return JS_OP_BIT_AND_ASSIGN;
+        if (strncmp(op_str, "|=", 2) == 0) return JS_OP_BIT_OR_ASSIGN;
+        if (strncmp(op_str, "^=", 2) == 0) return JS_OP_BIT_XOR_ASSIGN;
+        if (strncmp(op_str, "??", 2) == 0) return JS_OP_NULLISH_COALESCE;
+        if (strncmp(op_str, "in", 2) == 0) return JS_OP_IN;
+    } else if (len == 3) {
+        if (strncmp(op_str, "===", 3) == 0) return JS_OP_STRICT_EQ;
+        if (strncmp(op_str, "!==", 3) == 0) return JS_OP_STRICT_NE;
+        if (strncmp(op_str, ">>>", 3) == 0) return JS_OP_BIT_URSHIFT;
+        if (strncmp(op_str, "**=", 3) == 0) return JS_OP_EXP_ASSIGN;
+        if (strncmp(op_str, "<<=", 3) == 0) return JS_OP_LSHIFT_ASSIGN;
+        if (strncmp(op_str, ">>=", 3) == 0) return JS_OP_RSHIFT_ASSIGN;
+        if (strncmp(op_str, "?\?=", 3) == 0) return JS_OP_NULLISH_ASSIGN;
+        if (strncmp(op_str, "&&=", 3) == 0) return JS_OP_AND_ASSIGN;
+        if (strncmp(op_str, "||=", 3) == 0) return JS_OP_OR_ASSIGN;
+    } else if (len == 4) {
+        if (strncmp(op_str, "void", 4) == 0) return JS_OP_VOID;
+        if (strncmp(op_str, ">>>=", 4) == 0) return JS_OP_URSHIFT_ASSIGN;
+    } else if (len == 6) {
+        if (strncmp(op_str, "typeof", 6) == 0) return JS_OP_TYPEOF;
+        if (strncmp(op_str, "delete", 6) == 0) return JS_OP_DELETE;
+    } else if (len == 10) {
+        if (strncmp(op_str, "instanceof", 10) == 0) return JS_OP_INSTANCEOF;
+    }
+
+    log_error("Unknown JavaScript operator: %.*s", (int)len, op_str);
+    return JS_OP_ADD;
+}
+
+JsOperator js_unary_operator_from_string(const char* op_str, size_t len) {
+    if (len == 1 && op_str[0] == '+') return JS_OP_PLUS;
+    if (len == 1 && op_str[0] == '-') return JS_OP_MINUS;
+    return js_operator_from_string(op_str, len);
 }
 
 static char js_c_decode_escape_char(char c) {
@@ -218,13 +307,24 @@ static String* js_c_decode_identifier_name(JsTranspiler* tp,
 #define js_is_octal_digit js_c_is_octal_digit
 #define js_decode_legacy_octal_escape js_c_decode_legacy_octal_escape
 #define js_decode_identifier_name js_c_decode_identifier_name
-JsAstNode* alloc_js_ast_node_span(JsTranspiler* tp, JsAstNodeType node_type,
-        SourceSpan span, size_t size) {
+static JsAstNode* js_alloc_ast_node(JsTranspiler* tp,
+        JsAstNodeType node_type, SourceSpan span, size_t size) {
     JsAstNode* ast_node = (JsAstNode*)pool_alloc(tp->pool, size);
     memset(ast_node, 0, size);
     ast_node->node_type = node_type;
     ast_node->source_span = span;
     return ast_node;
+}
+
+JsAstNode* alloc_js_ast_node_span(JsTranspiler* tp, JsAstNodeType node_type,
+        SourceSpan span, size_t size) {
+    return js_alloc_ast_node(tp, node_type, span, size);
+}
+
+JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type,
+        TSNode node, size_t size) {
+    SourceSpan span = {ts_node_start_byte(node), ts_node_end_byte(node)};
+    return js_alloc_ast_node(tp, node_type, span, size);
 }
 
 JsAstNode* build_js_literal_from_source(JsTranspiler* tp, const char* node_type,
@@ -1656,6 +1756,13 @@ static JsAstNode* build_js_function_from_children_common(
         function->ts_return_type = (TsTypeAnnotationNode*)return_type;
     }
 
+    if (tp->direct_ast_building) {
+        // Direct reductions build a function after its body, so binding it
+        // here would publish nested declarations in the transient outer scope.
+        // js_rebuild_direct_scope_graph installs the complete lexical graph.
+        return (JsAstNode*)function;
+    }
+
     JsScope* outer_scope = tp->current_scope;
     JsScope* function_scope = js_scope_create(tp, JS_SCOPE_FUNCTION,
         outer_scope);
@@ -1870,6 +1977,12 @@ JsAstNode* build_js_class_from_children(JsTranspiler* tp, SourceSpan span,
     class_node->superclass = superclass;
     class_node->body = body;
     class_node->type = &TYPE_FUNC;
+
+    if (tp->direct_ast_building) {
+        // Class bindings require the enclosing lexical scope, which direct
+        // reductions have not entered yet; defer them to scope reconstruction.
+        return (JsAstNode*)class_node;
+    }
 
     if (class_node->name && !declaration) {
         JsScope* expression_scope = js_scope_create(tp, JS_SCOPE_BLOCK,

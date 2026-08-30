@@ -14905,7 +14905,7 @@ extern "C" void js_init_module_vars_undefined_bulk(const int* indices,
         keys = (Item*)mem_alloc(sizeof(Item) * (size_t)count, MEM_CAT_JS_RUNTIME);
         if (keys) {
             for (int i = 0; i < count; i++) {
-                keys[i] = js_active_module_name_item(module_name_indices[i],
+                keys[i] = lambda_active_module_name_item(module_name_indices[i],
                     direct_name_ids[i]);
             }
         }
@@ -14918,7 +14918,7 @@ extern "C" void js_init_module_vars_undefined_bulk(const int* indices,
             for (int i = 0; i < count; i++) {
                 int index = indices[i];
                 if (index < 0 || index >= JS_MAX_MODULE_VARS) continue;
-                js_set_module_var(index, undef);
+                lambda_active_module_var_store((uint32_t)index, undef);
             }
             js_register_global_var_module_bindings_bulk(keys, indices, count);
             mem_free(keys);
@@ -14928,12 +14928,12 @@ extern "C" void js_init_module_vars_undefined_bulk(const int* indices,
     for (int i = 0; i < count; i++) {
         int index = indices[i];
         if (index < 0 || index >= JS_MAX_MODULE_VARS) continue;
-        js_set_module_var(index, undef);
+        lambda_active_module_var_store((uint32_t)index, undef);
         if (define_global_var_properties) {
             // Allocation failure may disable only the bulk acceleration; it
             // must not drop CreateGlobalVarBinding or its module-slot bridge.
             Item key = keys ? keys[i]
-                : js_active_module_name_item(module_name_indices[i],
+                : lambda_active_module_name_item(module_name_indices[i],
                     direct_name_ids[i]);
             if (!js_define_global_var_property_fast_absent(global, key, undef)) {
                 js_define_global_var_property(key, undef);

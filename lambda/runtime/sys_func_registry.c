@@ -1232,12 +1232,14 @@ extern void lambda_function_mark_mir_public_return_shape(Function* fn, uint32_t 
 extern void* lambda_module_const_at(const LambdaModuleLayout* layout, uint32_t index);
 extern void* lambda_module_const_at_state(void* module_state, uint32_t index);
 extern Item lambda_module_var_at(void* module_state, uint32_t slot);
+extern Item lambda_active_module_var_at(uint32_t slot);
+extern void lambda_active_module_var_store(uint32_t slot, Item item);
+extern uint64_t lambda_active_module_name_id(uint32_t index);
+extern Item lambda_active_module_name_item(uint32_t module_name_index,
+                                           NameId direct_name_id);
 extern Item lambda_name_id_to_item(NameId name_id);
 extern uint64_t lambda_module_name_id_at(void* module_state, uint32_t index);
 extern Item fn_member_by_id(Item item, NameId name_id);
-extern uint64_t js_active_module_name_id(uint32_t index);
-extern Item js_active_module_name_item(uint32_t module_name_index,
-                                       NameId direct_name_id);
 extern Function* to_sys_fn_named(fn_ptr ptr, int arity, const char* name);
 
 // Property-kernel declarations live in C++ headers with the exact ABI typedefs;
@@ -1657,7 +1659,7 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     // D8.4.3: a NameId lookup has no Item carrier and preserves the error lane.
-    {"js_active_module_name_id", FPTR(js_active_module_name_id),
+    {"lambda_active_module_name_id", FPTR(lambda_active_module_name_id),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_NUMBER_STACK_PRESERVES |
@@ -1665,7 +1667,7 @@ JitImport jit_runtime_imports[] = {
       // Name-id lookup only reads the active module table and cannot publish
       // an error carrier, so its raw scalar result preserves the lane.
       JIT_EXCEPTION_PRESERVES}},
-    {"js_active_module_name_item", FPTR(js_active_module_name_item),
+    {"lambda_active_module_name_item", FPTR(lambda_active_module_name_item),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
@@ -2585,7 +2587,7 @@ JitImport jit_runtime_imports[] = {
     {"js_dataview_new", FPTR(js_dataview_new)},
     // SharedArrayBuffer
     {"js_sharedarraybuffer_construct_with_options", FPTR(js_sharedarraybuffer_construct_with_options)},
-    {"js_set_module_var", FPTR(js_set_module_var),
+    {"lambda_active_module_var_store", FPTR(lambda_active_module_var_store),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
       JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM),
@@ -2593,7 +2595,7 @@ JitImport jit_runtime_imports[] = {
       JIT_EXCEPTION_PRESERVES,
       JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
       JIT_ARG_EFFECT(1, JIT_ARG_PERSISTENT_STORE)}},
-    {"js_get_module_var", FPTR(js_get_module_var),
+    {"lambda_active_module_var_at", FPTR(lambda_active_module_var_at),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
@@ -3558,7 +3560,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "owned_item_slot_store", "lambda_module_var_store", "lambda_module_var_at",
         "lambda_module_const_at_state",
         "lambda_module_name_id_at",
-        "js_active_module_name_id", "js_active_module_name_item",
+        "lambda_active_module_name_id", "lambda_active_module_name_item",
         "lambda_async_frame_get_word",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         // v5 int lane: pure integer arithmetic on lane values, no allocation.
@@ -3572,8 +3574,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "js_error_lane_payload",
         "js_set_this", "js_get_new_target",
         "js_set_direct_new_target", "js_set_function_source",
-        "js_set_module_var",
-        "js_get_module_var",
+        "lambda_active_module_var_store",
+        "lambda_active_module_var_at",
         "js_with_save_depth", "js_with_restore_depth",
     };
     const int audited_count = (int)(sizeof(audited) / sizeof(audited[0]));

@@ -165,10 +165,7 @@ const char* jm_make_fn_name(JsFunctionNode* fn, JsMirTranspiler* mt) {
 }
 
 int jm_count_params(JsFunctionNode* fn) {
-    int count = 0;
-    JsAstNode* p = fn->params;
-    while (p) { count++; p = p->next; }
-    return count;
+    return fn ? em_linked_node_count(fn->params) : 0;
 }
 
 // Compute ES spec .length: number of params before first default/rest/destructuring-with-default.
@@ -2264,9 +2261,7 @@ MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg) 
 }
 
 int jm_count_args(JsAstNode* arg) {
-    int count = 0;
-    while (arg) { count++; arg = arg->next; }
-    return count;
+    return em_linked_node_count(arg);
 }
 
 // ============================================================================

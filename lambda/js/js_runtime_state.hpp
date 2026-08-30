@@ -9,6 +9,7 @@
 #include "js_builtin_catalog.hpp"
 #include "js_class.h"
 #include "../lambda-data.hpp"
+#include "../runtime/runtime-state.h"
 #include "../runtime/async.h"
 #include "../../lib/hashmap.h"
 
@@ -46,6 +47,24 @@ struct DomDocument;
 struct DomElement;
 struct UiContext;
 
+// Namespace selection is the JS profile's counterpart to the shared module
+// slab scope.  Keep restoration identical for AST and MIR module entries.
+class JsModuleNamespaceScope {
+public:
+    JsModuleNamespaceScope(Item namespace_obj = ItemNull, bool active = false)
+            : previous_(active ? js_set_active_module_namespace(namespace_obj) : ItemNull),
+              active_(active) {}
+    JsModuleNamespaceScope(const JsModuleNamespaceScope&) = delete;
+    JsModuleNamespaceScope& operator=(const JsModuleNamespaceScope&) = delete;
+    ~JsModuleNamespaceScope() {
+        if (active_) js_set_active_module_namespace(previous_);
+    }
+
+private:
+    Item previous_;
+    bool active_;
+};
+
 struct JsTemplateRegistryEntry {
     int64_t site_id = 0;
     int count = 0;
@@ -78,11 +97,6 @@ struct JsEventLoopQueueState {
     bool shutting_down = false;
     // Dynamic source compiled from a queued callback belongs to its parent turn.
     bool callback_running = false;
-};
-
-struct JsAstInterpreterState {
-    // Nested eval, Function, require, and module execution share one turn.
-    int execution_depth = 0;
 };
 
 struct JsEventLoopTimerState {
@@ -919,7 +933,6 @@ struct JsRuntimeState {
     JsIntrinsicState intrinsics = {};
     JsEvalState eval = {};
     JsEventLoopQueueState event_loop = {};
-    JsAstInterpreterState ast_interpreter = {};
     JsEventLoopTimerState timers = {};
     JsWithScopeState with_scope = {};
     JsDeferredMirState deferred_mir = {};
@@ -952,7 +965,6 @@ struct JsRuntimeState {
     uint64_t async_roots_registered_epoch = UINT64_MAX;
     int dynamic_func_counter = 0;
 
-    int module_var_count = 0;
     // Test262 keeps its harness in one module slab while each script needs an
     // isolated copy of that binding prefix. These ids are per-runtime state,
     // never process-global, because harness closures retain their owner slab.
@@ -1007,26 +1019,16 @@ extern "C" bool js_promise_initial_unhandled_rejections_strict(void);
 
 #define js_runtime_state (*js_active_runtime_state)
 
-extern "C" Item* js_ensure_active_module_vars(void);
-extern "C" Item** js_active_module_vars_slot(void);
-
 // The caller's `with`-scope depth is a per-call dispatch input. The state is
 // owner-local, so dispatch keeps the old direct-load cost without a call,
 // lock, atomic, or shared-cache probe.
 #define js_with_stack_state (js_runtime_state.with_scope.stack)
 static inline int js_with_stack_depth_now(void) { return js_with_stack_state.depth; }
 
-static inline Item*& js_active_module_vars_ref() {
-    return *js_active_module_vars_slot();
-}
-
 #define js_input (js_runtime_state.input)
 #define js_strict_mode (js_runtime_state.strict_mode)
 #define js_intrinsic_state (js_runtime_state.intrinsics)
 #define g_array_sym_iter_ever_set (js_intrinsic_state.array_sym_iter_ever_set)
-#define js_module_vars (js_active_module_vars)
-#define js_active_module_vars (js_active_module_vars_ref())
-#define js_module_var_count (js_runtime_state.module_var_count)
 #define js_heap_epoch (js_runtime_state.heap_epoch)
 #define js_regexp_last_match (js_runtime_state.regexp_last_match)
 #define js_current_this (js_runtime_state.current_this)

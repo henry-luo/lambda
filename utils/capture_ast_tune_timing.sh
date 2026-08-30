@@ -24,6 +24,10 @@ esac
 [ -x "$test_exe" ] || { echo "missing $test_exe; run make build-test" >&2; exit 1; }
 # JS timing matches the production baseline lane; Lambda keeps its full corpus.
 test_options=""; [ "$suite" = js ] && test_options="--baseline"
+# The JS GTest runner defaults to its mixed AST/MIR admission mode for semantic
+# coverage. Compiler ratchets must instead measure the production MIR-direct lane.
+js_gtest_mode=""
+if [ "$suite" = js ]; then js_gtest_mode=mir; fi
 
 root="./temp/ast_tune/$label/$suite"
 run_dir="$root/runs"
@@ -52,6 +56,7 @@ while [ "$i" -lt "$total" ]; do
     rm -f "$tsv"
     echo "capture suite=$suite label=$label run=$i/$total"
     set +e
+    JS_GTEST_MODE="$js_gtest_mode" \
     LAMBDA_COMPILER_TIMING=1 \
     AST_TUNE_BATCH_WORKERS=4 \
     AST_TUNE_BATCH_CHUNK=50 \

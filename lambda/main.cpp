@@ -397,9 +397,7 @@ static void js_test262_hot_context_create(Runtime* runtime, EvalContext* batch_c
     // Batch recovery replaces the realm in place. Keep Runtime's integration
     // fields on that same canonical EvalContext so JS helpers never retain the
     // previous heap generation.
-    runtime->heap = batch_context->heap;
-    runtime->name_pool = batch_context->name_pool;
-    runtime->type_list = (ArrayList*)batch_context->type_list;
+    runtime_context_publish_owners(runtime, batch_context);
 }
 
 static void js_test262_hot_context_destroy(Runtime* runtime, EvalContext* batch_context) {
@@ -438,9 +436,7 @@ static bool js_test262_hot_context_recycle(Runtime* runtime,
     batch_context->pool = batch_context->heap->pool;
     batch_context->name_pool = name_pool_create_runtime(batch_context->pool);
     batch_context->type_list = arraylist_new(64);
-    runtime->heap = batch_context->heap;
-    runtime->name_pool = batch_context->name_pool;
-    runtime->type_list = (ArrayList*)batch_context->type_list;
+    runtime_context_publish_owners(runtime, batch_context);
     return true;
 }
 
@@ -525,7 +521,7 @@ static void js_test262_abandon_preamble_for_recovery(
 }
 
 static bool js_test262_restore_preamble_module_state(const JsPreambleState* preamble) {
-    if (!preamble || !js_set_active_module_state_id(preamble->module_state_id)) {
+    if (!preamble || !lambda_module_state_activate(preamble->module_state_id)) {
         log_error("test262 batch: retained preamble module slab is unavailable");
         return false;
     }

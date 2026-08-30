@@ -88,8 +88,6 @@ struct JsScript : Script {
 // Its tail contains only parser, diagnostics, and current-build state; adoption
 // moves the prefix into a runtime-owned JsScript before destroying this tail.
 struct JsTranspiler : JsScript {
-    char* normalized_source;        // owned parse buffer when normalization applies
-
     // Current-build state
     int function_counter;           // Counter for anonymous functions
     int temp_var_counter;           // Counter for temporary variables
@@ -113,10 +111,6 @@ struct JsTranspiler : JsScript {
     int64_t parse_error_col;
     char parse_error_message[128];
     
-    // Tree-sitter integration
-    TSParser* parser;               // Tree-sitter parser
-    TSTree* tree;                   // Parse tree
-
     // Runtime integration
     Runtime* runtime;               // builder's borrowed runtime
 };
@@ -143,8 +137,7 @@ void js_record_interp_export(JsTranspiler* tp, String* local,
     String* export_name, String* source, bool namespace_export,
     bool star_export);
 
-// AST building functions (build_js_ast.cpp)
-JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root);
+// Shared direct-parser AST facts.
 void js_report_any_census(JsTranspiler* tp);
 typedef struct JsAstIndexPassContext {
     JsTranspiler* transpiler;
@@ -158,95 +151,24 @@ static inline int js_validate_compiler_pass(void* opaque) {
     pass->validation_errors = js_check_early_errors(pass->transpiler, pass->root);
     return pass->validation_errors == 0;
 }
-static inline JsAstNode* build_js_ast_indexed(JsTranspiler* tp, TSNode root) {
-    JsAstNode* ast = build_js_ast(tp, root);
-    if (!ast) return NULL;
-    // The shared Script owner is the AST lifetime authority after adoption.
-    // Publish the root before post-build passes attach indexed facts to it.
-    tp->ast_root = (AstNode*)ast;
-    js_report_any_census(tp);
-    JsAstIndexPassContext pass_context = {tp, ast, -1};
-    AstIndexPassContext index_context = {
-        &tp->ast_index, (AstNode*)ast, tp->profile};
-    CompilerPassManager pass_manager;
-    compiler_pass_manager_init(&pass_manager, COMPILER_FACT_AST | COMPILER_FACT_BOUND);
-    CompilerPassSpec validate_pass = {"validate", COMPILER_FACT_AST |
-        COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED, js_validate_compiler_pass,
-        &pass_context};
-    CompilerPassSpec index_pass = {"index",
-        COMPILER_FACT_AST | COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED,
-        COMPILER_FACT_INDEXED, ast_index_compiler_pass, &index_context};
-    if (!compiler_pass_manager_add(&pass_manager, &validate_pass) ||
-            !compiler_pass_manager_add(&pass_manager, &index_pass) ||
-            !compiler_pass_manager_run(&pass_manager, NULL)) {
-        if (pass_context.validation_errors > 0) return ast;
-        log_error("js-ast: failed to run indexed AST pass");
-        return NULL;
-    }
-    return ast;
-}
-JsAstNode* build_js_program(JsTranspiler* tp, TSNode program_node);
-JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node);
-JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node);
-JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node);
-JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node);
-JsAstNode* build_js_binary_expression(JsTranspiler* tp, TSNode binary_node);
-JsAstNode* build_js_unary_expression(JsTranspiler* tp, TSNode unary_node);
-JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node);
-JsAstNode* build_js_member_expression(JsTranspiler* tp, TSNode member_node);
-JsAstNode* build_js_array_expression(JsTranspiler* tp, TSNode array_node);
-JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node);
-JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node);
-JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node);
-JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node,
-    JsScopeType scope_type = JS_SCOPE_BLOCK, bool is_function_body = false);
-JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node);
-JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node);
-JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node);
-JsAstNode* build_js_field_definition(JsTranspiler* tp, TSNode field_node);
 
-// AST utility functions (build_js_ast.cpp)
+// AST utility functions shared by direct JS and TypeScript reductions.
 JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode node, size_t size);
 JsOperator js_operator_from_string(const char* op_str, size_t len);
 bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast);
 JsAstNode* publish_js_ast_indexed(JsTranspiler* tp, JsAstNode* ast);
 
-// Parser backends. Tree-sitter remains the explicit reference/differential
-// lane; the C parser owns normal JS/TS source admission in release builds.
-TSParser* js_transpiler_reference_parser(JsTranspiler* tp);
-bool js_transpiler_reference_set_language(JsTranspiler* tp,
-                                          const TSLanguage* language);
-TSTree* js_transpiler_reference_tree(JsTranspiler* tp);
-bool js_transpiler_parse_reference(JsTranspiler* tp, const char* source,
-                                   size_t length);
 bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
                            JsParseMode mode);
 bool js_transpiler_parse_c_auto(JsTranspiler* tp, const char* source,
                                 size_t length);
-bool js_transpiler_parse_compare(JsTranspiler* tp, const char* source,
-                                 size_t length);
-bool js_transpiler_parse_compare_mode(JsTranspiler* tp, const char* source,
-                                       size_t length, JsParseMode mode);
 bool js_transpiler_parse_module(JsTranspiler* tp, const char* source,
                                 size_t length);
 
-// Return the AST owned by the selected parser backend, building the reference
-// AST only when the C parser did not publish one.
+// The C parser publishes the indexed AST as part of successful reduction.
 static inline JsAstNode* js_transpiler_build_ast(JsTranspiler* tp) {
-    if (!tp) return NULL;
-    if (tp->ast_root) return (JsAstNode*)tp->ast_root;
-    TSTree* reference_tree = js_transpiler_reference_tree(tp);
-    return reference_tree ? build_js_ast_indexed(tp,
-        ts_tree_root_node(reference_tree)) : NULL;
+    return tp ? (JsAstNode*)tp->ast_root : NULL;
 }
-
-typedef enum JsParserBackend {
-    JS_PARSER_BACKEND_REFERENCE = 0,
-    JS_PARSER_BACKEND_C = 1,
-    JS_PARSER_BACKEND_COMPARE = 2,
-} JsParserBackend;
-
-JsParserBackend js_parser_backend_selection(void);
 
 // Error handling functions
 void js_error(JsTranspiler* tp, SourceSpan span, const char* format, ...);

@@ -23,6 +23,7 @@
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/js/js_xhr.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/edit_bridge.h"
 #include "../lambda/runtime/module_registry.h"
 #include "../lambda/runtime/template_registry.h"
@@ -1797,13 +1798,14 @@ static bool execute_lifecycle_snippet(Runtime* runtime, JsPreambleState* preambl
 
 static bool prepare_browser_preamble_consumer(const JsPreambleState* preamble) {
     if (!preamble || preamble->module_state_id == UINT32_MAX) return false;
-    uint32_t active_state_id = js_get_active_module_state_id();
+    uint32_t active_state_id = lambda_active_module_state_id();
     if (active_state_id != preamble->module_state_id) return true;
 
     uint32_t preamble_state_id = preamble->module_state_id;
-    if (!js_activate_module_state((uint32_t)preamble->module_var_count) ||
-            !js_copy_module_state_var_prefix(preamble_state_id,
-                js_get_active_module_state_id(),
+    if (!lambda_module_state_reserve_and_activate(
+                    (uint32_t)preamble->module_var_count) ||
+            !lambda_module_state_copy_var_prefix(preamble_state_id,
+                lambda_active_module_state_id(),
                 (uint32_t)preamble->module_var_count)) {
         return false;
     }
@@ -2795,11 +2797,7 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
         mem_pool_destroy(handlers_pool);
         return;
     }
-    handler_compile_ctx->heap = runtime->heap;
-    handler_compile_ctx->name_pool = runtime->name_pool;
-    handler_compile_ctx->type_list = runtime->type_list;
-    handler_compile_ctx->pool = runtime->heap->pool;
-    if (!eval_context_init(handler_compile_ctx) ||
+    if (!runtime_context_bind_retained(runtime, handler_compile_ctx) ||
             (handler_compile_ctx->js_state &&
              !js_runtime_state_init(handler_compile_ctx))) {
         strbuf_free(compile_buf);

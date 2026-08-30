@@ -3,6 +3,7 @@
 #include "js_transpiler.hpp"
 
 Type* js_set_type_any(JsTranspiler* tp, AnyReason reason);
+JsOperator js_operator_from_string(const char* op_str, size_t len);
 
 JsAstNode* alloc_js_ast_node_span(JsTranspiler* tp, JsAstNodeType node_type,
                                   SourceSpan span, size_t size);

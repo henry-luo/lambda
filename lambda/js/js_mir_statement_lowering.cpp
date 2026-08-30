@@ -45,9 +45,7 @@ static void jm_bind_module_import_value(JsMirTranspiler* mt, const char* vname,
     jm_set_var(mt, vname, var_reg);
     JsModuleConstEntry* mce = jm_find_module_const(mt, vname);
     if (mce && mce->const_type == MCONST_MODVAR) {
-        jm_call_void_2(mt, "js_set_module_var",
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, value));
+        jm_store_module_var(mt, (uint32_t)mce->int_val, value);
     }
 }
 
@@ -225,9 +223,7 @@ static void jm_emit_for_loop_var_writeback(JsMirTranspiler* mt,
         JsMirVarEntry* local_var = jm_find_var(mt, wb_vname);
         bool is_function_local = local_var && mt->current_func_index >= 0;
         if (!is_function_local && mc && mc->const_type == MCONST_MODVAR) {
-            jm_call_void_2(mt, "js_set_module_var",
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, loop_var));
+            jm_store_module_var(mt, (uint32_t)mc->int_val, loop_var);
         } else if (!mc && !is_function_local) {
             MIR_reg_t name_reg = jm_box_property_name_literal(mt, var_name, var_len);
             jm_call_3(mt, "js_set_global_property", MIR_T_I64,
@@ -628,9 +624,7 @@ static void jm_writeback_pattern_bindings(JsMirTranspiler* mt,
             if (in_modvar_scope && mc && mc->const_type == MCONST_MODVAR) {
                 JsMirVarEntry* ve = jm_find_var(mt, ne->name);
                 if (ve) {
-                    jm_call_void_2(mt, "js_set_module_var",
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, ve->reg));
+                    jm_store_module_var(mt, (uint32_t)mc->int_val, ve->reg);
                 }
             }
         }
@@ -738,9 +732,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     jm_emit_jmp(mt, init_done);
                     jm_emit_label(mt, normal_init);
                     if (is_modvar) {
-                        jm_call_void_2(mt, "js_set_module_var",
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                        jm_store_module_var(mt, (uint32_t)modvar_index, boxed_val);
                         JsMirVarEntry* existing_modvar_local = jm_find_var(mt, vname);
                         if (existing_modvar_local && existing_modvar_local->reg &&
                             existing_modvar_local->mir_type == MIR_T_I64) {
@@ -793,9 +785,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         mt->assign_target_vname = vname;
                         MIR_reg_t boxed_val = jm_transpile_box_item(mt, d->init);
                         mt->assign_target_vname = saved_assign_target;
-                        jm_call_void_2(mt, "js_set_module_var",
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                        jm_store_module_var(mt, (uint32_t)modvar_index, boxed_val);
                         JsMirVarEntry* existing_modvar_local = jm_find_var(mt, vname);
                         if (existing_modvar_local && existing_modvar_local->reg &&
                             existing_modvar_local->mir_type == MIR_T_I64) {
@@ -859,9 +849,7 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                         // let/const without initializer: set to undefined (exits TDZ)
                         MIR_reg_t undef_reg = jm_new_reg(mt, "undef_init", MIR_T_I64);
                         jm_emit_reg_op(mt, MIR_MOV, undef_reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
-                        jm_call_void_2(mt, "js_set_module_var",
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)modvar_index),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_reg));
+                        jm_store_module_var(mt, (uint32_t)modvar_index, undef_reg);
                         if (mt->is_eval_direct) {
                             MIR_reg_t eval_env_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
                             MIR_label_t skip_global_lex = jm_new_label(mt);
@@ -1138,18 +1126,14 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                             if (jm_is_native_type(ve->type_id)) {
                                 boxed_val = jm_box_native(mt, ve->reg, ve->type_id);
                             }
-                            jm_call_void_2(mt, "js_set_module_var",
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_val));
+                            jm_store_module_var(mt, (uint32_t)mc->int_val, boxed_val);
                         }
                     }
                     // Store class object to module var so closures/methods can access it
                     if (in_modvar_scope && mc && mc->const_type == MCONST_CLASS) {
                         JsMirVarEntry* ve = jm_find_var(mt, vname);
                         if (ve) {
-                            jm_call_void_2(mt, "js_set_module_var",
-                                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                                MIR_T_I64, MIR_new_reg_op(mt->ctx, ve->reg));
+                            jm_store_module_var(mt, (uint32_t)mc->int_val, ve->reg);
                         }
                     }
                 }
@@ -1514,8 +1498,7 @@ void jm_scope_env_reload_vars(JsMirTranspiler* mt) {
                 JsModuleConstEntry* mc = jm_find_module_const(mt, e->name);
                 if (mc && mc->const_type == MCONST_MODVAR && mc->is_iife_var &&
                     e->var.is_iife_module_var_binding) {
-                    MIR_reg_t boxed = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val));
+                    MIR_reg_t boxed = jm_load_module_var(mt, (uint32_t)mc->int_val);
                     jm_reload_typed_scope_value(mt, e, boxed);
                 }
             }
@@ -1926,8 +1909,7 @@ void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassE
     if (sf->computed && sf->key_expr) {
         MIR_reg_t key;
         if (sf->key_module_var_index >= 0) {
-            key = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)sf->key_module_var_index));
+            key = jm_load_module_var(mt, (uint32_t)sf->key_module_var_index);
         } else {
             key = jm_transpile_box_item(mt, sf->key_expr);
             key = jm_callr_1(mt, "js_to_property_key", MIR_T_I64, key);
@@ -1943,9 +1925,7 @@ void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassE
 
     MIR_reg_t val = jm_emit_class_static_field_value(mt, cls_obj, ce, sf);
     if (sf->module_var_index >= 0) {
-        jm_call_void_2(mt, "js_set_module_var",
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)sf->module_var_index),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+        jm_store_module_var(mt, (uint32_t)sf->module_var_index, val);
     }
     if (sf->name) {
         MIR_reg_t fn_name = jm_box_string_literal(mt, sf->name->chars, (int)sf->name->len);
@@ -3349,9 +3329,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     existing->mir_type = MIR_T_I64;
                     jm_scope_env_mark_and_writeback(mt, fn_vname, existing->reg);
                 } else if (annexb_modvar) {
-                    jm_call_void_2(mt, "js_set_module_var",
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)annexb_modvar->int_val),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+                    jm_store_module_var(mt, (uint32_t)annexb_modvar->int_val, fn_reg);
                     if (annexb_modvar->is_nested_func_hoist && !annexb_modvar->is_iife_var) {
                         MIR_reg_t key_reg = jm_box_property_name_literal(mt,
                             fn_decl->name->chars, (int)fn_decl->name->len);
@@ -3369,9 +3347,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     JsModuleConstEntry* mvc = jm_find_module_const(mt, fn_vname);
                         if (mvc && mvc->const_type == MCONST_MODVAR && mvc->var_kind == 0 &&
                             !mvc->annexb_suppressed && mvc != annexb_modvar) {
-                        jm_call_void_2(mt, "js_set_module_var",
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mvc->int_val),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, fn_reg));
+                        jm_store_module_var(mt, (uint32_t)mvc->int_val, fn_reg);
                         if (mvc->is_nested_func_hoist && !mvc->is_iife_var) {
                             MIR_reg_t key_reg = jm_box_property_name_literal(mt,
                                 fn_decl->name->chars, (int)fn_decl->name->len);
@@ -3427,14 +3403,10 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                         // Static member lowering reads the class module slot.
                         // Nested lexical classes still need that mirror even
                         // when their authoritative binding is a local register.
-                        jm_call_void_2(mt, "js_set_module_var",
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                        jm_store_module_var(mt, (uint32_t)mc->int_val, cls_obj);
                     }
                     if (ce->inner_module_var_index >= 0) {
-                        jm_call_void_2(mt, "js_set_module_var",
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ce->inner_module_var_index),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                        jm_store_module_var(mt, (uint32_t)ce->inner_module_var_index, cls_obj);
                     }
                     if (mt->is_eval_direct) {
                         MIR_reg_t evalscript_active = jm_call_0(mt, "js_262_eval_script_is_active", MIR_T_I64);
@@ -3603,13 +3575,17 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             }
             JsAstNode* saved_discarded = mt->discarded_expression;
             if (!mt->eval_completion_reg) mt->discarded_expression = es->expression;
-            MIR_reg_t val = jm_transpile_box_item(mt, es->expression);
+            uint32_t demand = mt->eval_completion_reg
+                ? MIR_VALUE_ANY : MIR_VALUE_DISCARD;
+            MirValue value = em_apply_value_demand(&mt->em,
+                jm_transpile_box_value(mt, es->expression), demand);
             mt->discarded_expression = saved_discarded;
             // Eval completion value: update the completion register so that
             // expression statements inside control flow (for/while/if/switch)
             // propagate their value as the eval() result.
             if (mt->eval_completion_reg) {
-                jm_emit_mov(mt, mt->eval_completion_reg, val);
+                em_move_value_to_destination(&mt->em, value,
+                    mt->eval_completion_reg, VALUE_REP_ITEM);
             }
         }
         break;

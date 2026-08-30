@@ -1529,9 +1529,7 @@ void runner_setup_context(Runner* runner) {
     if (rt && rt->heap) {
         // Reuse retained heap and name_pool from a previous evaluation
         log_debug("runner_setup_context: reusing retained heap from Runtime");
-        ctx->heap = rt->heap;
-        ctx->name_pool = rt->name_pool;
-        ctx->pool = ctx->heap->pool;
+        if (!runtime_context_bind_retained(rt, ctx)) return;
     } else {
         // First evaluation on this Runtime — create fresh resources
         ctx->name_pool = name_pool_create_runtime(ctx->pool);
@@ -1540,11 +1538,9 @@ void runner_setup_context(Runner* runner) {
         }
         heap_init();
         ctx->pool = ctx->heap->pool;
-        // Store on Runtime for reuse
-        if (rt) {
-            rt->heap = ctx->heap;
-            rt->name_pool = ctx->name_pool;
-        }
+        // Publish the owner pair together so retained-context users always
+        // observe a coherent heap/name-pool generation (D5.2.1v3).
+        runtime_context_publish_owners(rt, ctx);
     }
     path_register_pool_provider(runner_path_pool_provider);
 
@@ -1658,6 +1654,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     runner_setup_context(runner);
     EvalContext* ctx = runner->context;
     if (!ctx) return nullptr;
+    RuntimeExecutionScope execution_scope(ctx);
 
     // Establish the script's context-owned global binding slab.
     if (runner->script->jit_context) {
@@ -1678,8 +1675,8 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         (Context*)context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
     if (!recovery_frame) {
         log_error("exec: failed to allocate recovery frame");
-        result = context->result = lambda_recovery_publish_fault_item(
-            (Context*)context, LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK);
+        result = runtime_publish_result(context, lambda_recovery_publish_fault_item(
+            (Context*)context, LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK));
     } else if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
         Item recovered = ItemError;
         if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
@@ -1692,16 +1689,17 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         }
         _lambda_stack_overflow_flag = false;
         lambda_recovery_frame_end(recovery_frame);
-        result = context->result = recovered;
+        result = runtime_publish_result(context, recovered);
     } else {
         if (!lambda_recovery_frame_arm(recovery_frame)) {
             log_error("exec: failed to arm recovery frame");
             lambda_recovery_frame_end(recovery_frame);
-            result = context->result = lambda_recovery_publish_fault_item(
-                (Context*)context, LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
+            result = runtime_publish_result(context, lambda_recovery_publish_fault_item(
+                (Context*)context, LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK));
         } else {
             log_debug("exec main func");
-            result = context->result = runner->script->main_func(context);
+            result = runtime_publish_result(context,
+                runner->script->main_func(context));
             lambda_recovery_frame_end(recovery_frame);
             log_debug("after main func, result type_id=%d", get_type_id(result));
         }
@@ -1709,10 +1707,6 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
     if ((!runner->runtime || !runner->runtime->no_task_drain) && context->scheduler) {
         lambda_scheduler_drain(context->scheduler);
     }
-    if (context->heap) {
-        context->heap->result_root = context->result.item;
-    }
-
     preserve_context_last_error(result);
 
     // Create output Input with its own pool (independent from Script's pool)
@@ -1953,10 +1947,7 @@ void runtime_reset_heap(Runtime* runtime) {
     if (runtime->heap) {
         EvalContext* cleanup_context = runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
-        if (!eval_context_init(cleanup_context)) return;
-        cleanup_context->heap = runtime->heap;
-        cleanup_context->name_pool = runtime->name_pool;
-        cleanup_context->type_list = runtime->type_list;
+        if (!runtime_context_bind_retained(runtime, cleanup_context)) return;
         cleanup_context->result = ItemNull;
         cleanup_context->scheduler = runtime->scheduler;
         if (cleanup_context->js_state &&
@@ -2076,10 +2067,7 @@ void runtime_cleanup(Runtime* runtime) {
         EvalContext* cleanup_context = cleanup_owner
             ? cleanup_owner : runtime_get_eval_context(runtime);
         if (!cleanup_context) return;
-        if (!eval_context_init(cleanup_context)) return;
-        cleanup_context->heap = runtime->heap;
-        cleanup_context->name_pool = runtime->name_pool;
-        cleanup_context->type_list = runtime->type_list;
+        if (!runtime_context_bind_retained(runtime, cleanup_context)) return;
         cleanup_context->result = ItemNull;
         if (cleanup_context->js_state &&
                 !js_runtime_state_init(cleanup_context)) return;
