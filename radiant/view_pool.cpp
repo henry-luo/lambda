@@ -882,6 +882,7 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
         // CSS Grid initial self-alignment is normal; aspect-ratio sizing must
         // distinguish it from an explicitly requested stretch.
         grid->justify_items = CSS_VALUE_NORMAL;
+        grid->justify_items_detail.value = CSS_VALUE_NORMAL;
         grid->align_items = CSS_VALUE_NORMAL;
         grid->grid_auto_flow = CSS_VALUE_ROW;
         // Initialize gaps
@@ -3024,7 +3025,6 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent) {
         strbuf_append_str(buf, "null");
         return;
     }
-
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
 

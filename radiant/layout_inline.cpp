@@ -2568,10 +2568,16 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     (lycon->font.style ? lycon->font.style->ascender : 0.0f);
                 float span_desc = span->font ? span->fontp()->descender :
                     (lycon->font.style ? lycon->font.style->descender : 0.0f);
-                float baseline_pos = line_baseline_position(lycon, nullptr);
-                span->y = layout_inline_font_box_y(
-                    lycon, span, span_resolved_line_height,
-                    span_asc, span_desc, baseline_pos, bt, pt_val);
+                ViewBlock* anonymous_inline_table =
+                    layout_inline_span_anonymous_inline_table_child(span);
+                bool preserve_anonymous_table_line_origin = anonymous_inline_table &&
+                    layout_inline_span_has_direct_text_on_both_sides_of_anonymous_table(span);
+                if (!preserve_anonymous_table_line_origin) {
+                    float baseline_pos = line_baseline_position(lycon, nullptr);
+                    span->y = layout_inline_font_box_y(
+                        lycon, span, span_resolved_line_height,
+                        span_asc, span_desc, baseline_pos, bt, pt_val);
+                }
                 span->height = expected_height;
             }
             // CSS 2.1 §10.8.1: For empty inline elements with inline decorations

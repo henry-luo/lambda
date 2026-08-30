@@ -63,6 +63,23 @@ IntrinsicSize layout_measure_replaced(LayoutContext* lycon, ViewBlock* block, Av
         if (block->embedp()->img->height > 0) height = (float)block->embedp()->img->height;
     }
     NameId tag = block->tag();
+    if (tag == MARKUP_NAME_CANVAS && (width <= 0.0f || height <= 0.0f)) {
+        float natural_width = 0.0f;
+        float natural_height = 0.0f;
+        // Canvas bitmap attributes supply its natural object size before the
+        // generic replaced-element fallback is considered.
+        if (layout_canvas_natural_size(block, &natural_width, &natural_height) &&
+            natural_width > 0.0f && natural_height > 0.0f) {
+            if (width <= 0.0f) {
+                width = height > 0.0f ? height * natural_width / natural_height
+                                      : natural_width;
+            }
+            if (height <= 0.0f) {
+                height = width > 0.0f ? width * natural_height / natural_width
+                                      : natural_height;
+            }
+        }
+    }
     if (width <= 0.0f || height <= 0.0f) {
         if (tag == MARKUP_NAME_IFRAME || tag == MARKUP_NAME_VIDEO || tag == MARKUP_NAME_CANVAS ||
             tag == MARKUP_NAME_OBJECT || tag == MARKUP_NAME_EMBED || tag == MARKUP_NAME_SVG) {

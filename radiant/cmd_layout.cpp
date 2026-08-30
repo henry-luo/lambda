@@ -89,7 +89,9 @@ extern __thread Context* input_context;
 // Forward declarations
 Element* get_html_root_element(Input* input);
 extern void fontface_cleanup(UiContext* uicon);
-CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out = nullptr);
+CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root,
+                                        CssEngine* engine, const char* base_path, Pool* pool,
+                                        int* stylesheet_count, int* linked_count_out = nullptr);
 static void populate_layout_document(DomDocument* doc, DomElement* root,
                                      Element* html_root, HtmlVersion version,
                                      Url* url, Runtime* runtime);
@@ -906,7 +908,7 @@ static CssStylesheet* parse_and_collect_stylesheet(
     int* count, int* capacity, int import_depth) {
     CssStylesheet* stylesheet = css_parse_stylesheet(engine, css, source_path);
     annotate_css_stylesheet_source_file(stylesheet, source_path);
-    if (!stylesheet || stylesheet->rule_count == 0) return stylesheet;
+    if (!stylesheet) return nullptr;
 
     if (!lam::pool_grow_array(pool, stylesheets, capacity, *count + 1, 4)) {
         // stylesheet arrays are dereferenced immediately after append; skip this sheet if the pool cannot grow.
@@ -915,8 +917,10 @@ static CssStylesheet* parse_and_collect_stylesheet(
     }
     (*stylesheets)[*count] = stylesheet;
     (*count)++;
-    resolve_stylesheet_imports(stylesheet, import_base, engine, pool,
-                               stylesheets, count, capacity, import_depth);
+    if (stylesheet->rule_count > 0) {
+        resolve_stylesheet_imports(stylesheet, import_base, engine, pool,
+                                   stylesheets, count, capacity, import_depth);
+    }
     return stylesheet;
 }
 
@@ -1356,7 +1360,49 @@ static void load_linked_stylesheet(Element* elem, CssEngine* engine, const char*
             }
 }
 
-static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engine,
+static DomElement* find_dom_element_for_source(DomElement* root, const Element* source) {
+    if (!root || !source) return nullptr;
+    if (dom_element_render_source(root) == source) return root;
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* found = find_dom_element_for_source(child->as_element(), source);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+typedef struct InlineStyleTextChunk {
+    const char* text;
+    size_t length;
+} InlineStyleTextChunk;
+
+static CssStylesheet* parse_inline_style_chunks(CssEngine* engine,
+                                                 const InlineStyleTextChunk* chunks,
+                                                 size_t chunk_count,
+                                                 DomElement* owner,
+                                                 const char* base_path, Pool* pool,
+                                                 CssStylesheet*** stylesheets,
+                                                 int* count, int* capacity) {
+    if (!engine || !chunks || chunk_count == 0 || !pool) return nullptr;
+    size_t css_length = 0;
+    for (size_t i = 0; i < chunk_count; i++) css_length += chunks[i].length;
+    if (css_length == 0) return nullptr;
+    char* css = (char*)pool_alloc(pool, css_length + 1);
+    if (!css) return nullptr;
+    size_t offset = 0;
+    for (size_t i = 0; i < chunk_count; i++) {
+        memcpy(css + offset, chunks[i].text, chunks[i].length);
+        offset += chunks[i].length;
+    }
+    css[offset] = '\0';
+    CssStylesheet* stylesheet = parse_and_collect_stylesheet(
+        engine, css, "<inline-style>", base_path, pool, stylesheets, count, capacity, 0);
+    if (stylesheet) stylesheet->owner_style_element = owner;
+    return stylesheet;
+}
+
+static void collect_stylesheets_in_document_order(Element* elem, DomElement* dom_root,
+                                                  CssEngine* engine,
                                                   const char* base_path, Pool* pool,
                                                   CssStylesheet*** stylesheets,
                                                   int* count, int* capacity,
@@ -1377,15 +1423,21 @@ static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engi
         } else if (str_ieq_const(type->name.str, strlen(type->name.str), "style")) {
             const char* media = extract_element_attribute(elem, "media", nullptr);
             if (!media || css_evaluate_media_query(engine, media)) {
-                for (int64_t i = 0; i < elem->length; i++) {
-                    Item child_item = elem->items[i];
-                    if (get_type_id(child_item) != LMD_TYPE_STRING) continue;
-                    String* css_text = (String*)child_item.string_ptr;
-                    if (css_text && css_text->len > 0) {
-                        parse_and_collect_stylesheet(
-                            engine, css_text->chars, "<inline-style>", base_path,
-                            pool, stylesheets, count, capacity, 0);
+                InlineStyleTextChunk* chunks = (InlineStyleTextChunk*)pool_alloc(
+                    pool, (size_t)elem->length * sizeof(InlineStyleTextChunk));
+                if (chunks || elem->length == 0) {
+                    size_t chunk_count = 0;
+                    for (int64_t i = 0; i < elem->length; i++) {
+                        Item child_item = elem->items[i];
+                        if (get_type_id(child_item) != LMD_TYPE_STRING) continue;
+                        String* css_text = (String*)child_item.string_ptr;
+                        if (css_text && css_text->len > 0) {
+                            chunks[chunk_count++] = {css_text->chars, (size_t)css_text->len};
+                        }
                     }
+                    parse_inline_style_chunks(engine, chunks, chunk_count,
+                        find_dom_element_for_source(dom_root, elem), base_path, pool,
+                        stylesheets, count, capacity);
                 }
             }
         }
@@ -1394,7 +1446,7 @@ static void collect_stylesheets_in_document_order(Element* elem, CssEngine* engi
     for (int64_t i = 0; i < elem->length; i++) {
         Item child_item = elem->items[i];
         if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
-            collect_stylesheets_in_document_order(child_item.element, engine,
+            collect_stylesheets_in_document_order(child_item.element, dom_root, engine,
                                                   base_path, pool, stylesheets,
                                                   count, capacity, linked_count, depth + 1);
         }
@@ -1415,18 +1467,29 @@ void collect_inline_styles_from_dom(DomElement* elem, CssEngine* engine, const c
             // Check media attribute
             const char* media = elem->get_attribute("media");
             if (!media || css_evaluate_media_query(engine, media)) {
-                // Extract text content from DomText children
+                size_t text_count = 0;
                 DomNode* child = elem->first_child;
                 while (child) {
                     if (child->node_type == DOM_NODE_TEXT) {
                         DomText* text_node = lam::dom_require_text(child);
-                        if (text_node->text && text_node->length > 0) {
-                            parse_and_collect_stylesheet(
-                                engine, text_node->text, "<inline-style>", base_path,
-                                pool, stylesheets, count, capacity, 0);
-                        }
+                        if (text_node->text && text_node->length > 0) text_count++;
                     }
                     child = child->next_sibling;
+                }
+                InlineStyleTextChunk* chunks = text_count
+                    ? (InlineStyleTextChunk*)pool_alloc(pool,
+                        text_count * sizeof(InlineStyleTextChunk)) : nullptr;
+                if (chunks || text_count == 0) {
+                    size_t chunk_count = 0;
+                    for (child = elem->first_child; child; child = child->next_sibling) {
+                        if (child->node_type != DOM_NODE_TEXT) continue;
+                        DomText* text_node = lam::dom_require_text(child);
+                        if (text_node->text && text_node->length > 0) {
+                            chunks[chunk_count++] = {text_node->text, text_node->length};
+                        }
+                    }
+                    parse_inline_style_chunks(engine, chunks, chunk_count, elem, base_path,
+                        pool, stylesheets, count, capacity);
                 }
         }
     }
@@ -1490,7 +1553,9 @@ static bool dom_js_mutation_requires_inline_stylesheet_rescan(DomDocument* doc) 
 }
 
 // collect linked and inline document stylesheets in source order.
-CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count, int* linked_count_out) {
+CssStylesheet** extract_and_collect_css(Element* html_root, DomElement* dom_root,
+                                        CssEngine* engine, const char* base_path, Pool* pool,
+                                        int* stylesheet_count, int* linked_count_out) {
     if (!html_root || !engine || !pool || !stylesheet_count) return nullptr;
 
 
@@ -1506,7 +1571,7 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
     // both <link rel=stylesheet> and <style>. A later external sheet must win
     // ties against earlier inline rules, and vice versa.
     int linked_count = 0;
-    collect_stylesheets_in_document_order(html_root, engine, base_path, pool,
+    collect_stylesheets_in_document_order(html_root, dom_root, engine, base_path, pool,
                                           &stylesheets, stylesheet_count,
                                           &stylesheet_capacity, &linked_count, 0);
     if (linked_count_out) *linked_count_out = linked_count;
@@ -2037,6 +2102,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         dom_doc->js.auto_close_event_loop = js_host_config->auto_close_event_loop;
         dom_doc->js.virtual_clock_enabled = js_host_config->virtual_clock_enabled;
         dom_doc->js.virtual_clock_ms = js_host_config->virtual_clock_ms;
+        dom_doc->js.redirect_stdout_to_stderr = js_host_config->redirect_stdout_to_stderr;
     }
     dom_doc->document_charset = detected_charset;
     // HTML parsing always runs with scripting enabled in the layout loader;
@@ -2104,7 +2170,8 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     const char* css_base_path = url_get_href(html_url);
     g_css_document_charset = dom_doc->document_charset; // set fallback encoding for CSS files
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
-        html_root, css_engine, css_base_path, pool, &inline_stylesheet_count, &linked_stylesheet_count);
+        html_root, dom_root, css_engine, css_base_path, pool,
+        &inline_stylesheet_count, &linked_stylesheet_count);
     g_css_document_charset = nullptr; // reset after CSS collection
 
     auto t_css_parse = high_resolution_clock::now();
@@ -3363,7 +3430,7 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
 
     int inline_stylesheet_count = 0;
     CssStylesheet** inline_stylesheets = extract_and_collect_css(
-        html_root, css_engine, latex_filepath, pool, &inline_stylesheet_count);
+        html_root, dom_root, css_engine, latex_filepath, pool, &inline_stylesheet_count);
 
     CssStylesheet* latex_stylesheets[2] = {latex_stylesheet, katex_stylesheet};
     int latex_sheet_count = 0;
@@ -3782,7 +3849,7 @@ DomDocument* load_lambda_script_source_doc(Url* script_url, const char* script_s
         mem_free(css_filename);
     } else {
         inline_stylesheets = extract_and_collect_css(
-            html_elem, css_engine, script_filepath, pool, &inline_stylesheet_count);
+            html_elem, dom_root, css_engine, script_filepath, pool, &inline_stylesheet_count);
     }
 
     auto step6_end = std::chrono::high_resolution_clock::now();
@@ -4100,7 +4167,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
         css_engine = css_engine_create(doc->document_pool);
         if (css_engine) {
             inline_sheets = extract_and_collect_css(
-                html_elem, css_engine, nullptr, doc->document_pool, &inline_count);
+                html_elem, new_root, css_engine, nullptr, doc->document_pool, &inline_count);
             doc->cached_inline_sheets = inline_sheets;
             doc->cached_inline_sheet_count = inline_count;
             doc->services.cached_css_engine = css_engine;
@@ -4757,7 +4824,8 @@ static bool layout_single_file(
         false,
         auto_close,
         false,
-        0.0
+        0.0,
+        result_stream != nullptr
     };
 
     Url* input_url = url_parse_with_base(input_file, cwd);

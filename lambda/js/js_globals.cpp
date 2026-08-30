@@ -1183,6 +1183,9 @@ static bool js_process_string_equals(Item item, const char* expected, int expect
 }
 
 static Item js_process_stdio_write(Item str_item, FILE* stream) {
+    // A host may reserve stdout for a machine protocol; page output remains
+    // observable on stderr without corrupting that protocol.
+    if (stream == stdout && js_host_hooks_redirect_stdout_to_stderr()) stream = stderr;
     TypeId type = get_type_id(str_item);
     if (type == LMD_TYPE_STRING) {
         String* s = it2s(str_item);
@@ -5090,6 +5093,7 @@ extern "C" Item js_string_raw(Item* args, int argc) {
 // =============================================================================
 
 static void js_console_write_to_stream(const char* data, int len, FILE* stream) {
+    if (stream == stdout && js_host_hooks_redirect_stdout_to_stderr()) stream = stderr;
     fwrite(data, 1, len, stream);
     fflush(stream);
 }

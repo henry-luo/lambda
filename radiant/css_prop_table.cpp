@@ -230,6 +230,118 @@ static bool serialize_decl(const CssPropAccessor* accessor, DomElement* element,
                                                 out, out_size);
 }
 
+static bool format_self_alignment(char* out, size_t out_size,
+                                  CssSelfAlignment alignment) {
+    const CssEnumInfo* info = css_enum_info(alignment.value);
+    if (!info || !info->name) return false;
+    const char* modifier = alignment.overflow_explicit
+        ? (alignment.safe ? "safe " : "unsafe ") : "";
+    if (alignment.value == CSS_VALUE_BASELINE && alignment.last_baseline) {
+        snprintf(out, out_size, "%slast baseline", modifier);
+    } else {
+        snprintf(out, out_size, "%s%s", modifier, info->name);
+    }
+    return true;
+}
+
+static bool self_alignment_equal(CssSelfAlignment left, CssSelfAlignment right) {
+    return left.value == right.value && left.safe == right.safe &&
+        left.overflow_explicit == right.overflow_explicit &&
+        left.last_baseline == right.last_baseline;
+}
+
+static bool resolve_place_self_component(CssDeclaration* shorthand,
+                                         CssDeclaration* longhand,
+                                         bool allow_physical,
+                                         CssSelfAlignment* component) {
+    if (!component || !longhand ||
+        (shorthand && css_declaration_cascade_compare(longhand, shorthand) <= 0)) {
+        return true;
+    }
+    CssSelfAlignment parsed = css_parse_self_alignment_value(longhand->value,
+                                                             allow_physical);
+    if (parsed.value == CSS_VALUE__UNDEF) return false;
+    *component = parsed;
+    return true;
+}
+
+static bool serialize_place_self(const CssPropAccessor*, DomElement* element,
+                                 int pseudo_type, char* out, size_t out_size) {
+    if (!element || pseudo_type != 0) return false;
+    CssDeclaration* shorthand = computed_decl(element, CSS_PROPERTY_PLACE_SELF, 0);
+    CssSelfAlignment align = {CSS_VALUE_AUTO};
+    CssSelfAlignment justify = {CSS_VALUE_AUTO};
+    if (shorthand && (!shorthand->value ||
+        !css_parse_place_self_alignment(shorthand->value, &align, &justify))) {
+        return serialize_decl_recursive(element, CSS_PROPERTY_PLACE_SELF, 0, 0,
+                                        out, out_size);
+    }
+    // CSS Cascade expands a shorthand before constituent longhands compete.
+    if (!resolve_place_self_component(shorthand,
+            computed_decl(element, CSS_PROPERTY_ALIGN_SELF, 0), false, &align) ||
+        !resolve_place_self_component(shorthand,
+            computed_decl(element, CSS_PROPERTY_JUSTIFY_SELF, 0), true, &justify)) {
+        return false;
+    }
+
+    char align_text[64];
+    char justify_text[64];
+    if (!format_self_alignment(align_text, sizeof(align_text), align) ||
+        !format_self_alignment(justify_text, sizeof(justify_text), justify)) {
+        return false;
+    }
+    // CSS Align 3 §8 omits the second component when both longhand values match.
+    if (self_alignment_equal(align, justify)) return copy_text(out, out_size, align_text);
+    snprintf(out, out_size, "%s %s", align_text, justify_text);
+    return true;
+}
+
+static bool resolve_place_content_component(CssDeclaration* shorthand,
+                                            CssDeclaration* longhand,
+                                            bool allow_physical,
+                                            CssSelfAlignment* component) {
+    if (!component || !longhand ||
+        (shorthand && css_declaration_cascade_compare(longhand, shorthand) <= 0)) {
+        return true;
+    }
+    CssSelfAlignment parsed = css_parse_content_alignment_value(longhand->value,
+                                                                allow_physical);
+    if (parsed.value == CSS_VALUE__UNDEF) return false;
+    *component = parsed;
+    return true;
+}
+
+static bool serialize_place_content(const CssPropAccessor*, DomElement* element,
+                                    int pseudo_type, char* out, size_t out_size) {
+    if (!element || pseudo_type != 0) return false;
+    CssDeclaration* shorthand = computed_decl(element, CSS_PROPERTY_PLACE_CONTENT, 0);
+    CssSelfAlignment align = {CSS_VALUE_NORMAL};
+    CssSelfAlignment justify = {CSS_VALUE_NORMAL};
+    if (shorthand && (!shorthand->value ||
+        !css_parse_place_content_alignment(shorthand->value, &align, &justify))) {
+        return serialize_decl_recursive(element, CSS_PROPERTY_PLACE_CONTENT, 0, 0,
+                                        out, out_size);
+    }
+    // CSS Cascade expands a shorthand before constituent longhands compete.
+    if (!resolve_place_content_component(shorthand,
+            computed_decl(element, CSS_PROPERTY_ALIGN_CONTENT, 0), false, &align) ||
+        !resolve_place_content_component(shorthand,
+            computed_decl(element, CSS_PROPERTY_JUSTIFY_CONTENT, 0), true, &justify)) {
+        return false;
+    }
+
+    char align_text[64];
+    char justify_text[64];
+    if (!format_self_alignment(align_text, sizeof(align_text), align) ||
+        !format_self_alignment(justify_text, sizeof(justify_text), justify)) {
+        return false;
+    }
+    // CSS Align 3 §8 omits the second component when both longhand values match.
+    if (self_alignment_equal(align, justify)) return copy_text(out, out_size, align_text);
+    snprintf(out, out_size, "%s %s", align_text, justify_text);
+    return true;
+}
+
 static bool serialize_display(const CssPropAccessor*, DomElement* element, int pseudo_type,
                               char* out, size_t out_size) {
     if (!element || pseudo_type != 0) return false;
@@ -489,7 +601,10 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DERIVED_ROW(CSS_PROPERTY_COLOR, serialize_color_prop, 0),
     DIRECT_ROW(CSS_PROPERTY_OPACITY, PROP_GROUP_INLINE, InlineProp, opacity, CSS_PROP_VALUE_NUMBER, 0),
     DIRECT_ROW(CSS_PROPERTY_CURSOR, PROP_GROUP_INLINE, InlineProp, cursor, CSS_PROP_VALUE_ENUM, 0),
-    DIRECT_ROW(CSS_PROPERTY_ALIGN_SELF, PROP_GROUP_FLEX_ITEM, FlexItemProp, align_self, CSS_PROP_VALUE_ENUM, 0),
+    DECL_ROW(CSS_PROPERTY_ALIGN_SELF),
+    // CSS Align modifiers such as safe/unsafe are retained in the declaration tree.
+    DECL_ROW(CSS_PROPERTY_JUSTIFY_SELF),
+    DERIVED_ROW(CSS_PROPERTY_PLACE_SELF, serialize_place_self, 0),
     DIRECT_ROW(CSS_PROPERTY_FLEX_GROW, PROP_GROUP_FLEX_ITEM, FlexItemProp, flex_grow, CSS_PROP_VALUE_NUMBER, 0),
     DIRECT_ROW(CSS_PROPERTY_FLEX_SHRINK, PROP_GROUP_FLEX_ITEM, FlexItemProp, flex_shrink, CSS_PROP_VALUE_NUMBER, 0),
     DIRECT_ROW(CSS_PROPERTY_FLEX_BASIS, PROP_GROUP_FLEX_ITEM, FlexItemProp, flex_basis, CSS_PROP_VALUE_PX, 0),
@@ -499,6 +614,7 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DECL_ROW(CSS_PROPERTY_JUSTIFY_CONTENT),
     DECL_ROW(CSS_PROPERTY_ALIGN_ITEMS),
     DECL_ROW(CSS_PROPERTY_ALIGN_CONTENT),
+    DERIVED_ROW(CSS_PROPERTY_PLACE_CONTENT, serialize_place_content, 0),
     DECL_ROW(CSS_PROPERTY_GAP),
     DECL_ROW(CSS_PROPERTY_ROW_GAP),
     DECL_ROW(CSS_PROPERTY_COLUMN_GAP),

@@ -94,6 +94,9 @@ bool layout_get_text_initial_letter_info(const DomNode* text_node,
 InitialLetterBoxInsets layout_initial_letter_box_insets(ViewText* text);
 bool layout_overflow_establishes_scroll_container(CssEnum overflow);
 bool layout_block_establishes_scroll_container(ViewBlock* block);
+bool layout_block_inline_axis_is_vertical(ViewBlock* block);
+bool layout_details_needs_default_summary(ViewBlock* block);
+float layout_list_item_marker_line_height(LayoutContext* lycon);
 // maximum DOM nesting depth. guards call-stack overflow in layout_flow_node()
 // and layout_abs_block() — both use the same lycon->depth counter.
 constexpr int MAX_LAYOUT_DEPTH = 300;
@@ -1266,6 +1269,32 @@ inline bool layout_uses_explicit_baseline_source(const ViewBlock* block) {
     return baseline_source == CSS_VALUE_FIRST || baseline_source == CSS_VALUE_LAST;
 }
 
+inline bool layout_exports_content_baseline(const ViewBlock* block,
+                                            bool overflow_visible) {
+    if (!block) return false;
+    if (overflow_visible || layout_uses_explicit_baseline_source(block)) {
+        return true;
+    }
+    // CSS Align 3 §9.1 gives a scrolling block container an end-margin
+    // baseline; flex and grid containers instead export their own baseline set.
+    return block->display.inner == CSS_VALUE_FLEX ||
+        block->display.inner == CSS_VALUE_GRID;
+}
+
+inline bool layout_uses_scrollable_block_end_baseline(ViewBlock* block) {
+    if (!block || !block->blk || !block->scroller ||
+        block->block()->baseline_source != CSS_VALUE_AUTO) {
+        return false;
+    }
+    if (block->display.inner != CSS_VALUE_FLOW &&
+        block->display.inner != CSS_VALUE_FLOW_ROOT) {
+        return false;
+    }
+    CssEnum block_axis_overflow = layout_block_inline_axis_is_vertical(block)
+        ? block->scroll()->overflow_x : block->scroll()->overflow_y;
+    return layout_overflow_establishes_scroll_container(block_axis_overflow);
+}
+
 bool layout_inline_context_has_explicit_baseline_source(
     ViewBlock* block);
 // Form controls own editable line boxes without exposing child ViewText nodes.
@@ -1898,6 +1927,8 @@ typedef struct Linebox {
     LineMetricsSnapshot last_space_metrics;
     LineMetricsSnapshot last_non_shy_space_metrics;
     View* start_view;
+    ViewBlock* first_static_line_alignment; // abspos inline descendants awaiting line-box extent
+    ViewBlock* last_static_line_alignment;
     bool has_phantom_inline_fragment; // zero-height inline run still needing text-align
     CssEnum vertical_align;
     float vertical_align_offset;    // length/percentage vertical-align offset (px), positive = raise
@@ -2590,6 +2621,13 @@ inline bool has_flex_item_prop(ViewElement* item) {
     return item && item->flex_item();
 }
 
+inline int flex_item_resolved_align_self(ViewElement* item, int align_items) {
+    CssEnum self_alignment = has_flex_item_prop(item)
+        ? item->fi->align_self : CSS_VALUE_AUTO;
+    // CSS Align 3 §6.2: normal stretches a flex item while auto uses align-items.
+    return radiant::resolve_align_self(self_alignment, align_items);
+}
+
 inline LayoutAxis flex_main_axis_from_props(const FlexProp* flex) {
     if (!flex) return LAYOUT_AXIS_X;
     bool column_direction = flex->direction == CSS_VALUE_COLUMN ||
@@ -2705,6 +2743,8 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 void align_content(FlexContainerLayout* flex_layout);
 void reposition_baseline_items(LayoutContext* lycon, ViewBlock* flex_container);
+float layout_flex_baseline_for_source(ViewBlock* container, bool prefer_last);
+float layout_block_last_in_flow_flex_baseline(ViewBlock* block);
 float get_cross_axis_size(ViewElement* item, FlexContainerLayout* flex_layout);
 float get_cross_axis_position(ViewElement* item, FlexContainerLayout* flex_layout);
 void set_main_axis_position(ViewElement* item, float position, FlexContainerLayout* flex_layout);
@@ -3059,9 +3099,6 @@ typedef struct LayoutContext {
     // CSS Tables 3 §3.10.2 first cell-content layout uses special handling for
     // direct percentage-height descendants while row heights are provisional.
     bool table_cell_first_row_layout;
-    // HTML details rendering keeps closed content laid out but out of parent flow.
-    bool layout_hidden_details_content;
-
     // Total node count guard against pathological layouts (fuzzer-found timeouts)
     int node_count;
     // CSS Align 3 abspos sizing can temporarily provide an auto-axis size from
@@ -3102,6 +3139,88 @@ bool layout_percentage_height_basis_is_algorithmically_definite(ViewBlock* conta
 bool layout_block_has_automatic_height(ViewBlock* block);
 WritingMode layout_block_writing_mode(ViewBlock* block);
 WritingMode layout_writing_mode_from_css(CssEnum writing_mode);
+// CSS Align uses the container's logical axis, then maps it to physical layout
+// coordinates after accounting for each box's writing mode and direction.
+inline bool layout_axis_is_inline_for_block(ViewBlock* block, LayoutAxis axis) {
+    WritingMode mode = layout_block_writing_mode(block);
+    bool vertical = mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL;
+    return vertical ? axis == LAYOUT_AXIS_Y : axis == LAYOUT_AXIS_X;
+}
+
+inline bool layout_logical_start_is_physical_start(ViewBlock* block,
+                                                    LayoutAxis axis) {
+    WritingMode mode = layout_block_writing_mode(block);
+    CssEnum direction = block && block->blk ? block->block()->direction : CSS_VALUE_LTR;
+    if (axis == LAYOUT_AXIS_X) {
+        if (mode == WM_HORIZONTAL_TB) return direction != CSS_VALUE_RTL;
+        return mode == WM_VERTICAL_LR;
+    }
+    if (mode == WM_HORIZONTAL_TB) return true;
+    return direction != CSS_VALUE_RTL;
+}
+
+// Resolve the logical self-position to start/end on the container's physical
+// axis. Auto, normal, and stretch retain their layout-mode-specific behavior.
+inline CssEnum layout_resolve_self_alignment_value(
+        CssSelfAlignment alignment, ViewBlock* subject,
+        ViewBlock* container, LayoutAxis axis) {
+    if (!subject || !container) return CSS_VALUE__UNDEF;
+    switch (alignment.value) {
+        case CSS_VALUE_AUTO:
+        case CSS_VALUE_NORMAL:
+        case CSS_VALUE_STRETCH:
+        case CSS_VALUE__UNDEF:
+            return CSS_VALUE__UNDEF;
+        case CSS_VALUE_BASELINE:
+            return alignment.last_baseline ? CSS_VALUE_END : CSS_VALUE_START;
+        case CSS_VALUE_SELF_START:
+        case CSS_VALUE_SELF_END: {
+            bool same_start = layout_logical_start_is_physical_start(subject, axis) ==
+                layout_logical_start_is_physical_start(container, axis);
+            bool align_start = alignment.value == CSS_VALUE_SELF_START
+                ? same_start : !same_start;
+            return align_start ? CSS_VALUE_START : CSS_VALUE_END;
+        }
+        case CSS_VALUE_FLEX_START:
+            return CSS_VALUE_START;
+        case CSS_VALUE_FLEX_END:
+            return CSS_VALUE_END;
+        // CSS Anchor Positioning §4.2: without a default anchor, this is center.
+        case CSS_VALUE_ANCHOR_CENTER:
+            return CSS_VALUE_CENTER;
+        case CSS_VALUE_START:
+        case CSS_VALUE_END:
+        case CSS_VALUE_CENTER:
+        case CSS_VALUE_LEFT:
+        case CSS_VALUE_RIGHT:
+            return alignment.value;
+        default:
+            return CSS_VALUE__UNDEF;
+    }
+}
+
+inline float layout_self_alignment_offset(CssEnum alignment, bool safe,
+                                          ViewBlock* container, LayoutAxis axis,
+                                          float free_space) {
+    bool logical_start_is_physical_start =
+        layout_logical_start_is_physical_start(container, axis);
+    CssEnum physical_alignment = alignment;
+    if (safe && free_space < 0.0f) {
+        physical_alignment = logical_start_is_physical_start
+            ? CSS_VALUE_START : CSS_VALUE_END;
+    } else if (alignment == CSS_VALUE_START || alignment == CSS_VALUE_FLEX_START) {
+        physical_alignment = logical_start_is_physical_start
+            ? CSS_VALUE_START : CSS_VALUE_END;
+    } else if (alignment == CSS_VALUE_END || alignment == CSS_VALUE_FLEX_END) {
+        physical_alignment = logical_start_is_physical_start
+            ? CSS_VALUE_END : CSS_VALUE_START;
+    } else if (alignment == CSS_VALUE_LEFT) {
+        physical_alignment = CSS_VALUE_START;
+    } else if (alignment == CSS_VALUE_RIGHT) {
+        physical_alignment = CSS_VALUE_END;
+    }
+    return radiant::compute_alignment_offset_simple(physical_alignment, free_space);
+}
 inline bool layout_inline_span_isolate(ViewSpan* span) {
     if (!span || !span->blk) return false;
     CssEnum unicode_bidi = span->block()->unicode_bidi;
@@ -3139,7 +3258,6 @@ void layout_publish_vertical_children(ViewBlock* block, WritingMode mode,
                                       float line_block_start = 0.0f,
                                       bool publish_atomic_lines = false);
 void layout_normalize_vertical_breaks(ViewBlock* block);
-bool layout_block_inline_axis_is_vertical(ViewBlock* block);
 float layout_compute_in_flow_child_width_extent(
     ViewBlock* parent, bool include_margin_box = false);
 bool layout_compute_vertical_in_flow_child_inline_extent(
@@ -3358,6 +3476,7 @@ void block_context_add_initial_letter(BlockContext* ctx, ViewBlock* element,
  * Per CSS 2.2 Section 9.4.1
  */
 bool block_context_establishes_bfc(ViewBlock* block);
+bool layout_block_is_viewport_body(ViewBlock* block);
 
 /**
  * Add a positioned float to the BlockContext
@@ -3674,6 +3793,8 @@ inline bool layout_parse_font_shorthand(const CssValue* value,
  */
 
 void line_break(LayoutContext* lycon);
+void layout_finalize_static_line_self_alignment(LayoutContext* lycon,
+                                                float used_line_height);
 void contribute_inline_strut(LayoutContext* lycon, DomNode* source, ViewSpan* span);
 void line_consume_trailing_collapsible_space(LayoutContext* lycon,
                                              bool trim_text_bounds,
@@ -4244,6 +4365,9 @@ void layout_apply_simple_ruby_column_geometry(ViewSpan* ruby);
 bool inline_span_has_multiple_line_fragments(ViewSpan* span);
 bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
                                                 bool include_inline_table = false);
+bool layout_inline_span_has_direct_visible_text_child(ViewSpan* span);
+ViewBlock* layout_inline_span_anonymous_inline_table_child(ViewSpan* span);
+bool layout_inline_span_has_direct_text_on_both_sides_of_anonymous_table(ViewSpan* span);
 bool inline_span_float_continuation_x(
     ViewSpan* span, float* continuation_x, bool* has_left_float);
 // CSS text-transform

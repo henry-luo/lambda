@@ -331,7 +331,7 @@ This mirrors Mark Notation exactly.
 let lib = input("library.xml", 'xml')
 lib?<book>              // all book elements
 lib?<book lang:"en">    // books where lang == "en"
-lib?<book> | ~.title    // ["Clean Code", "The Pragmatic Programmer"]
+lib?<book> |> ~.title    // ["Clean Code", "The Pragmatic Programmer"]
 ```
 
 ### 2.4 YAML → Lambda Map / Array
@@ -592,7 +592,7 @@ reconstruction. Binary streams inside the PDF are decompressed before parsing.
 
 ```lambda
 let report = input("annual_report.pdf", 'pdf')
-report?<p> | ~[0]             // first paragraph text
+report?<p> |> ~[0]             // first paragraph text
 ```
 
 ### 3.3 RTF
@@ -664,7 +664,7 @@ Calendar files are parsed into a map with a `vcalendar` root and an array of `ve
 
 ```lambda
 let cal = input("events.ics", 'ics')
-cal.vcalendar.vevent | ~.summary    // ["Team standup", "Sprint review", …]
+cal.vcalendar.vevent |> ~.summary    // ["Team standup", "Sprint review", …]
 ```
 
 ### 3.7 Graph Formats
@@ -681,7 +681,7 @@ Three flavors are supported via the `graph` parser type:
 
 ```lambda
 let g = input("arch.dot", 'graph')
-g?<node> | ~.id          // list all node IDs
+g?<node> |> ~.id          // list all node IDs
 g?<edge src:"a">         // edges leaving node "a"
 ```
 
@@ -765,7 +765,7 @@ A local directory path can be treated as an input, producing an array of file-in
 
 ```lambda
 let files = input("./src", 'dir')
-files that ~.ext == ".cpp" | ~.name     // list all .cpp filenames
+files that ~.ext == ".cpp" |> ~.name     // list all .cpp filenames
 ```
 
 ---

@@ -187,6 +187,12 @@ void block_context_recompute_lowest_float_bottom(BlockContext* ctx) {
 // BFC Detection
 // ============================================================================
 
+bool layout_block_is_viewport_body(ViewBlock* block) {
+    return block && block->tag_name_id() == MARKUP_NAME_BODY &&
+        block->parent && block->parent->is_element() &&
+        block->parent->as_element()->tag_name_id() == MARKUP_NAME_HTML;
+}
+
 bool block_context_establishes_bfc(ViewBlock* block) {
     // CSS 2.2 Section 9.4.1 - Block formatting contexts
 
@@ -228,9 +234,7 @@ bool block_context_establishes_bfc(ViewBlock* block) {
         return true;
     }
 
-    bool is_viewport_body = block->tag_name_id() == MARKUP_NAME_BODY &&
-        block->parent && block->parent->is_element() &&
-        block->parent->as_element()->tag_name_id() == MARKUP_NAME_HTML;
+    bool is_viewport_body = layout_block_is_viewport_body(block);
     ViewBlock* html_block = is_viewport_body ? lam::view_require_block(block->parent) : nullptr;
     bool html_overflow_visible = !html_block || !html_block->scroller ||
         (html_block->scroll()->overflow_x == CSS_VALUE_VISIBLE &&
@@ -251,7 +255,14 @@ bool block_context_establishes_bfc(ViewBlock* block) {
         return true;
     }
 
-    // 8. Flex and Grid containers establish BFC for their children
+    // 8. CSS Align §5.1.1: non-normal align-content makes a block container
+    // establish an independent formatting context.
+    if (block->blk && block->block()->align_content != CSS_VALUE__UNDEF &&
+        block->block()->align_content != CSS_VALUE_NORMAL) {
+        return true;
+    }
+
+    // 9. Flex and Grid containers establish BFC for their children
     if (block->display.inner == CSS_VALUE_FLEX ||
         block->display.inner == CSS_VALUE_GRID) {
         return true;
@@ -263,14 +274,14 @@ bool block_context_establishes_bfc(ViewBlock* block) {
         return true;
     }
 
-    // 9. Multi-column containers establish BFC (CSS Multicol §3)
+    // 10. Multi-column containers establish BFC (CSS Multicol §3)
     // Reuse the multicol classifier so `columns:1 0px` keeps its formatting
     // context; narrowing this check would let its child margins escape.
     if (is_multicol_container(block)) {
         return true;
     }
 
-    // 10. Flex items and Grid items establish independent formatting contexts
+    // 11. Flex items and Grid items establish independent formatting contexts
     // CSS Flexbox §4.2: "a flex item establishes an independent formatting context"
     // CSS Grid §6.1: "a grid item establishes an independent formatting context"
     if (block->parent && block->parent->is_block()) {

@@ -781,6 +781,14 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
     switch (form->control_type) {
     case FORM_CONTROL_TEXT:
         calc_text_input_size(lycon, block, form, font);
+        if (layout_block_inline_axis_is_vertical(block)) {
+            // CSS Writing Modes maps a text control's logical inline axis to
+            // physical height; rotate the auto intrinsic axes before resolving
+            // the authored inline-size declaration.
+            float logical_inline = form->intrinsic_width;
+            form->intrinsic_width = form->intrinsic_height;
+            form->intrinsic_height = logical_inline;
+        }
         break;
 
     case FORM_CONTROL_TEXTAREA:

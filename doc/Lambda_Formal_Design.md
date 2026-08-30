@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 1.38.10 (2026-08-29)
+**Spec version:** 1.38.11 (2026-08-30)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -425,7 +425,7 @@ that carries them.
   conversions. [TE-6]
 - **D3.2.2*** The **validator is the runtime enforcer** for user-defined
   types: deep, on first crossing, producing a rich error with a validator
-  path — or the binding never exists. Constrained types (`T where …`)
+  path — or the binding never exists. Constrained types (`T that …`)
   enforce the base only, for now; `is`, `fn_is`, the emitter, and the
   validator must consolidate onto the shared foundation (a known
   three-way divergence today). [TE-10, TE-6 P5]

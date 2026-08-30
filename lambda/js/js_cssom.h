@@ -42,6 +42,7 @@ bool js_is_rule_style_decl(Item item);
  * @return Item wrapping the stylesheet
  */
 Item js_cssom_wrap_stylesheet(void* stylesheet);
+Item js_cssom_stylesheet_get_disabled(Item sheet);
 
 /**
  * Get property of a CSSStyleSheet wrapper.
@@ -146,6 +147,9 @@ Item js_cssom_get_document_stylesheets(void);
  * @return Wrapped CSSStyleSheet Item, or ITEM_NULL
  */
 Item js_cssom_get_style_element_sheet(Item elem);
+
+/** Update a stylesheet's disabled state and request a document recascade. */
+bool js_cssom_stylesheet_set_disabled(Item sheet, bool disabled);
 
 // =============================================================================
 // CSS Namespace Object (CSS.supports, CSS.escape)

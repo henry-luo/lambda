@@ -149,7 +149,24 @@ static float intrinsic_element_preferred_aspect_ratio(ViewBlock* view) {
 
 float layout_used_preferred_aspect_ratio(ViewBlock* block) {
     float specified_ratio = layout_preferred_aspect_ratio(block);
-    if (!block || !layout_aspect_ratio_uses_content_box(block)) {
+    if (!block) return specified_ratio;
+
+    bool uses_content_box_ratio = layout_aspect_ratio_uses_content_box(block);
+    if (block->tag() == MARKUP_NAME_CANVAS &&
+        (layout_css_size_is_automatic(block, true) ||
+         layout_css_size_is_automatic(block, false)) &&
+        (specified_ratio <= 0.0f || uses_content_box_ratio)) {
+        float natural_width = 0.0f;
+        float natural_height = 0.0f;
+        // An automatic canvas axis uses its bitmap's natural preferred ratio;
+        // definite sizing keywords such as stretch retain their own sizing.
+        if (layout_canvas_natural_size(block, &natural_width, &natural_height) &&
+            natural_width > 0.0f && natural_height > 0.0f) {
+            return natural_width / natural_height;
+        }
+    }
+
+    if (!uses_content_box_ratio) {
         return specified_ratio;
     }
 
@@ -5735,11 +5752,14 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         }
     }
 
+    bool multicol_has_content = multicol_has_in_flow_non_spanner_content(element);
+    bool multicol_has_fixed_column_width = view_block->multicol_prop() &&
+        view_block->multicol_prop()->column_width > 0.0f;
     if (view_block->multicol_prop() &&
         (view_block->multicol_prop()->column_count > 1 ||
          (view_block->multicol_prop()->column_count == 0 &&
           view_block->multicol_prop()->column_width > 0.0f)) &&
-        multicol_has_in_flow_non_spanner_content(element)) {
+        (multicol_has_content || multicol_has_fixed_column_width)) {
         const MultiColumnProp* multicol = view_block->multicol_prop();
         int intrinsic_column_count = multicol->column_count > 0
             ? multicol->column_count : 1;
@@ -5764,8 +5784,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             float column_floor = multicol->column_width;
             float column_min = max(sizes.min_content, column_floor);
             float column_max = max(sizes.max_content, column_floor);
-            // Auto column-count resolves to one column for this intrinsic query; the
-            // fixed column width is still a floor even when content is hidden.
+            // CSS Multi-column §3.4: fixed tracks contribute to a shrink-to-fit
+            // width even when their column flow is empty.
             sizes.min_content = column_min * intrinsic_column_count + total_gap;
             sizes.max_content = column_max * intrinsic_column_count + total_gap;
         }

@@ -1511,10 +1511,18 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 if (is_date_time) {
                     radiant_spacing_set_all(&block->boundary_mut()->padding, 0);
                 } else {
+                    bool vertical_inline_axis = layout_element_inline_axis_is_vertical(
+                        block->as_element());
+                    // HTML's text-control padding is logical: vertical writing
+                    // modes exchange the inline and block padding pairs.
                     radiant_spacing_set_pair(&block->boundary_mut()->padding,
-                        CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM, FormDefaults::TEXT_PADDING_V);
+                        CSS_BOX_SIDE_TOP, CSS_BOX_SIDE_BOTTOM,
+                        vertical_inline_axis ? FormDefaults::TEXT_PADDING_H :
+                            FormDefaults::TEXT_PADDING_V);
                     radiant_spacing_set_pair(&block->boundary_mut()->padding,
-                        CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT, FormDefaults::TEXT_PADDING_H);
+                        CSS_BOX_SIDE_LEFT, CSS_BOX_SIDE_RIGHT,
+                        vertical_inline_axis ? FormDefaults::TEXT_PADDING_V :
+                            FormDefaults::TEXT_PADDING_H);
                 }
             }
             break;

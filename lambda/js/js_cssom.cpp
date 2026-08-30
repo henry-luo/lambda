@@ -36,10 +36,13 @@ extern "C" const void* radiant_dom_rule_style_decl_host_type(void);
 static Pool* get_document_pool();
 extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent);
 
-static void js_cssom_notify_stylesheet_mutation(void) {
+static void js_cssom_notify_stylesheet_mutation(CssStylesheet* stylesheet = nullptr) {
     // stylesheet edits do not touch a DOM node, but they still require post-script cascade.
-    style_epoch_mark_global_change((DomDocument*)js_dom_get_document());
-    js_dom_notify_mutation(DOM_JS_MUTATION_STYLE, nullptr, nullptr);
+    DomDocument* doc = stylesheet && stylesheet->owner_style_element
+        ? stylesheet->owner_style_element->doc : (DomDocument*)js_dom_get_document();
+    style_epoch_mark_global_change(doc);
+    DomElement* owner = stylesheet ? stylesheet->owner_style_element : nullptr;
+    js_dom_notify_mutation(DOM_JS_MUTATION_STYLE, owner, owner ? owner->parent : nullptr);
 }
 
 // =============================================================================
@@ -361,6 +364,16 @@ extern "C" Item js_cssom_stylesheet_get_disabled(Item sheet_item) {
     if (!sheet) return ItemNull;
     return sheet->disabled ? (Item){.item = ITEM_TRUE} : (Item){.item = ITEM_FALSE};
 }
+
+extern "C" bool js_cssom_stylesheet_set_disabled(Item sheet_item, bool disabled) {
+    CssStylesheet* sheet = unwrap_stylesheet(sheet_item);
+    if (!sheet) return false;
+    if (sheet->disabled == disabled) return true;
+    sheet->disabled = disabled;
+    // CSSOM's disabled flag changes which rules participate in the cascade.
+    js_cssom_notify_stylesheet_mutation(sheet);
+    return true;
+}
 JS_FORWARD_EXPRESSION(Item, js_cssom_stylesheet_get_type, (Item sheet_item), (unwrap_stylesheet(sheet_item) ? make_string_item("text/css") : ItemNull))
 
 extern "C" Item js_cssom_stylesheet_get_href(Item sheet_item) {
@@ -440,7 +453,7 @@ extern "C" Item js_cssom_insert_rule(Item sheet_item, Item text_arg, Item index_
     sheet->rule_count++;
 
     log_debug("js_cssom_stylesheet_method insertRule: inserted at index %d, count=%zu", index, sheet->rule_count);
-    js_cssom_notify_stylesheet_mutation();
+    js_cssom_notify_stylesheet_mutation(sheet);
     return (Item){.item = i2it((int64_t)index)};
 }
 
@@ -465,7 +478,7 @@ extern "C" Item js_cssom_delete_rule(Item sheet_item, Item index_arg) {
     sheet->rule_count--;
 
     log_debug("js_cssom_stylesheet_method deleteRule: removed index %d, count=%zu", index, sheet->rule_count);
-    js_cssom_notify_stylesheet_mutation();
+    js_cssom_notify_stylesheet_mutation(sheet);
     return ItemNull;
 }
 
@@ -911,112 +924,13 @@ extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
     DomDocument* doc = elem->doc;
     if (!doc) return ItemNull;
 
-    // if no stylesheets array exists yet, create one for the empty <style> element
-    if (!doc->stylesheets || doc->stylesheet_count <= 0) {
-        Pool* pool = doc->document_pool;
-        if (!pool) return ItemNull;
-
-        CssStylesheet* sheet = (CssStylesheet*)pool_calloc(pool, sizeof(CssStylesheet));
-        if (!sheet) return ItemNull;
-        sheet->pool = pool;
-        sheet->rule_capacity = 16;
-        sheet->rules = (CssRule**)pool_calloc(pool, sheet->rule_capacity * sizeof(CssRule*));
-        sheet->rule_count = 0;
-
-        if (!doc->stylesheets) {
-            doc->stylesheet_capacity = 4;
-            doc->stylesheets = (CssStylesheet**)pool_calloc(pool, doc->stylesheet_capacity * sizeof(CssStylesheet*));
-        }
-        doc->stylesheets[doc->stylesheet_count++] = sheet;
-        return js_cssom_wrap_stylesheet(sheet);
-    }
-
-    // We need to find the stylesheet associated with this <style> element.
-    // The stylesheets are collected from <style> elements in document order,
-    // so we count which <style> element this is (0-based index among <style>s)
-    // and map it to the corresponding stylesheet.
-    //
-    // Note: linked stylesheets (<link rel="stylesheet">) may also be in the array,
-    // occupying earlier indices. We need to account for those.
-
-    // Count linked stylesheets (those with href set)
-    int linked_count = 0;
     for (int i = 0; i < doc->stylesheet_count; i++) {
-        if (doc->stylesheets[i] && doc->stylesheets[i]->href) {
-            linked_count++;
+        CssStylesheet* sheet = doc->stylesheets[i];
+        if (sheet && sheet->owner_style_element == elem) {
+            return js_cssom_wrap_stylesheet(sheet);
         }
     }
-
-    // Find this <style> element's index among all <style> elements in doc order.
-    // We do a simple tree walk to count.
-    int style_index = -1;
-    int current_style_idx = 0;
-
-    // helper: recursively walk DOM tree counting <style> elements
-    struct StyleCounter {
-        static bool find_style(DomNode* node, DomElement* target, int* current, int* found) {
-            if (!node) return false;
-            if (node->is_element()) {
-                DomElement* el = node->as_element();
-                if (el->tag_name && strcasecmp(el->tag_name, "style") == 0) {
-                    if (el == target) {
-                        *found = *current;
-                        return true;
-                    }
-                    (*current)++;
-                }
-                // recurse into children via linked list
-                DomNode* child = el->first_child;
-                while (child) {
-                    if (find_style(child, target, current, found)) return true;
-                    child = child->next_sibling;
-                }
-            }
-            return false;
-        }
-    };
-
-    if (doc->root) {
-        StyleCounter::find_style(doc->root, elem, &current_style_idx, &style_index);
-    }
-
-    if (style_index < 0) {
-        log_debug("js_cssom_get_style_element_sheet: <style> element not found in tree");
-        return ItemNull;
-    }
-
-    // The stylesheet array has linked stylesheets first, then inline styles.
-    // Map style_index to the actual array index.
-    int sheet_idx = linked_count + style_index;
-    if (sheet_idx >= doc->stylesheet_count) {
-        // empty <style> element — create an empty stylesheet and add it to the document
-        log_debug("js_cssom_get_style_element_sheet: creating empty sheet for <style> index %d", style_index);
-        Pool* pool = doc->document_pool;
-        if (!pool) return ItemNull;
-
-        CssStylesheet* sheet = (CssStylesheet*)pool_calloc(pool, sizeof(CssStylesheet));
-        if (!sheet) return ItemNull;
-        sheet->pool = pool;
-        sheet->rule_capacity = 16;
-        sheet->rules = (CssRule**)pool_calloc(pool, sheet->rule_capacity * sizeof(CssRule*));
-        sheet->rule_count = 0;
-
-        // expand document stylesheet array if needed
-        if (doc->stylesheet_count >= doc->stylesheet_capacity) {
-            int new_cap = doc->stylesheet_capacity > 0 ? doc->stylesheet_capacity * 2 : 8;
-            CssStylesheet** new_arr = (CssStylesheet**)pool_calloc(pool, new_cap * sizeof(CssStylesheet*));
-            if (!new_arr) return ItemNull;
-            if (doc->stylesheets && doc->stylesheet_count > 0) {
-                memcpy(new_arr, doc->stylesheets, doc->stylesheet_count * sizeof(CssStylesheet*));
-            }
-            doc->stylesheets = new_arr;
-            doc->stylesheet_capacity = new_cap;
-        }
-        doc->stylesheets[doc->stylesheet_count++] = sheet;
-        return js_cssom_wrap_stylesheet(sheet);
-    }
-
-    return js_cssom_wrap_stylesheet(doc->stylesheets[sheet_idx]);
+    return ItemNull;
 }
 
 // =============================================================================

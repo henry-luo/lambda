@@ -2406,6 +2406,8 @@ void line_break(LayoutContext* lycon) {
         used_line_height = max(used_line_height, lycon->line.max_atomic_inline_height);
     }
 
+    layout_finalize_static_line_self_alignment(lycon, used_line_height);
+
     record_inline_line_box_union(lycon, lycon->block.advance_y,
                                  lycon->block.advance_y + used_line_height);
 

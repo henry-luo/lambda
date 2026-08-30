@@ -309,6 +309,7 @@ struct JsHostHooksState {
     Item (*ipc_accept_hook)(void*) = NULL;
     void (*cluster_online_hook)(Item) = NULL;
     Item (*console_format_hook)(Item) = NULL;
+    bool redirect_stdout_to_stderr = false;
 };
 
 // fs owns several lazily assembled namespace and prototype objects. They are

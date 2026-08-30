@@ -108,7 +108,7 @@ void radiant_apply_css_stylesheet_to_tree(DomElement* root,
                                           CssStylesheet* stylesheet,
                                           SelectorMatcher* matcher, Pool* pool,
                                           CssEngine* engine) {
-    if (!root || !stylesheet || stylesheet->rule_count == 0 ||
+    if (!root || !stylesheet || stylesheet->disabled || stylesheet->rule_count == 0 ||
         !matcher || !pool || !engine) {
         return;
     }
@@ -129,7 +129,7 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
     bool epoch_scope = style_epoch_cascade_begin(doc, root, engine, false);
     for (int i = 0; i < count; i++) {
         CssStylesheet* stylesheet = stylesheets[i];
-        if (stylesheet && stylesheet->rule_count > 0) {
+        if (stylesheet && !stylesheet->disabled && stylesheet->rule_count > 0) {
             apply_stylesheet_to_tree(root, stylesheet, matcher, pool, engine, 0);
         }
     }
@@ -152,7 +152,7 @@ void radiant_cascade_styles_for_element(DomElement* element) {
 
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets[i];
-        if (!stylesheet) continue;
+        if (!stylesheet || stylesheet->disabled) continue;
         for (size_t j = 0; j < stylesheet->rule_count; j++) {
             CssRule* rule = stylesheet->rules[j];
             if (rule) apply_rule_to_element(element, rule, matcher, pool, engine);

@@ -179,6 +179,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_JUSTIFY_CONTENT, "justify-content", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "flex-start", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_ALIGN_ITEMS, "align-items", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "stretch", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_ALIGN_CONTENT, "align-content", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "stretch", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_PLACE_CONTENT, "place-content", PROP_TYPE_LIST, PROP_INHERIT_NO, "normal", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_ALIGN_SELF, "align-self", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_FLEX_GROW, "flex-grow", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_number, NULL},
     {CSS_PROPERTY_FLEX_SHRINK, "flex-shrink", PROP_TYPE_NUMBER, PROP_INHERIT_NO, "1", true, false, NULL, 0, validate_number, NULL},

@@ -2075,7 +2075,7 @@ static CssEnum cascaded_keyword(const DomElement* e, CssPropertyCode prop) {
     CssSpecificity best_spec = {0, 0, 0, 0, false};
     for (int s = 0; s < doc->stylesheet_count; s++) {
         CssStylesheet* sheet = doc->stylesheets[s];
-        if (!sheet) continue;
+        if (!sheet || sheet->disabled) continue;
         for (size_t r = 0; r < sheet->rule_count; r++) {
             CssRule* rule = sheet->rules[r];
             if (!rule || rule->type != CSS_RULE_STYLE) continue;

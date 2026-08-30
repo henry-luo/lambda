@@ -4399,7 +4399,7 @@ static CssDeclaration* js_match_custom_property(DomElement* elem, const char* pr
         if (matcher) {
             for (int s = 0; s < doc->stylesheet_count; s++) {
                 CssStylesheet* sheet = doc->stylesheets[s];
-                if (!sheet) continue;
+                if (!sheet || sheet->disabled) continue;
 
                 for (size_t r = 0; r < sheet->rule_count; r++) {
                     CssRule* rule = sheet->rules[r];
@@ -9490,6 +9490,11 @@ extern "C" Item js_dom_get_property_impl(Item elem_item, Item prop_name) {
     if (prop_id == JS_DOM_PROP_SHEET && elem->tag_name && strcasecmp(elem->tag_name, "style") == 0) {
         return js_cssom_get_style_element_sheet(elem_item);
     }
+    if (prop_id == JS_DOM_PROP_DISABLED && _is_tag(elem, "style")) {
+        Item sheet = js_cssom_get_style_element_sheet(elem_item);
+        Item disabled = js_cssom_stylesheet_get_disabled(sheet);
+        return disabled.item == ITEM_NULL ? (Item){.item = ITEM_FALSE} : disabled;
+    }
 
     // ------------------------------------------------------------------
     // F-5: HTMLSelectElement / HTMLOptionElement IDL properties
@@ -10206,6 +10211,13 @@ extern "C" Item js_dom_set_property_impl(Item elem_item, Item prop_name, Item va
         return value;
     }
     DomElement* elem = node->as_element();
+
+    if (prop_id == JS_DOM_PROP_DISABLED && _is_tag(elem, "style")) {
+        // HTML §4.2.6: style.disabled toggles its associated sheet, not an attribute.
+        Item sheet = js_cssom_get_style_element_sheet(elem_item);
+        js_cssom_stylesheet_set_disabled(sheet, js_is_truthy(value));
+        return value;
+    }
 
     if (prop_id == JS_DOM_PROP_STYLE) {
         const char* style_text = fn_to_cstr(value);
