@@ -62,7 +62,6 @@
 #include "bash/bash_transpiler.hpp"  // Bash transpiler
 #include "bash/bash_runtime.h"       // bash_exit_code()
 #endif
-#include "ts/ts_transpiler.hpp"      // TypeScript transpiler
 #ifdef LAMBDA_RUBY
 #include "module/rb/rb_transpiler.hpp"      // Ruby transpiler
 #endif
@@ -3077,7 +3076,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
             }
 
             uint64_t result_home = 0;
-            Item result = transpile_ts_to_mir(&runtime, ts_source, ts_file, &result_home);
+            Item result = transpile_js_typescript_to_mir_len(&runtime, ts_source,
+                strlen(ts_source), ts_file, &result_home);
 
             TypeId result_type = get_type_id(result);
             // TypeScript scripts share JavaScript's non-printing completion

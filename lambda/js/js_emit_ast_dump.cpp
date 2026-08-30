@@ -101,22 +101,8 @@ static const char* js_dump_kind_name(int type) {
         case JS_AST_NODE_EXPORT_SPECIFIER: return "JS_AST_NODE_EXPORT_SPECIFIER";
         case JS_AST_NODE_WITH_STATEMENT: return "JS_AST_NODE_WITH_STATEMENT";
         case JS_AST_NODE_TAGGED_TEMPLATE: return "JS_AST_NODE_TAGGED_TEMPLATE";
-        case TS_AST_NODE_TYPE_ANNOTATION: return "TS_AST_NODE_TYPE_ANNOTATION";
         case TS_AST_NODE_TYPE_ALIAS: return "TS_AST_NODE_TYPE_ALIAS";
         case TS_AST_NODE_INTERFACE: return "TS_AST_NODE_INTERFACE";
-        case TS_AST_NODE_TYPE_PARAMETER: return "TS_AST_NODE_TYPE_PARAMETER";
-        case TS_AST_NODE_PREDEFINED_TYPE: return "TS_AST_NODE_PREDEFINED_TYPE";
-        case TS_AST_NODE_TYPE_REFERENCE: return "TS_AST_NODE_TYPE_REFERENCE";
-        case TS_AST_NODE_UNION_TYPE: return "TS_AST_NODE_UNION_TYPE";
-        case TS_AST_NODE_INTERSECTION_TYPE: return "TS_AST_NODE_INTERSECTION_TYPE";
-        case TS_AST_NODE_ARRAY_TYPE: return "TS_AST_NODE_ARRAY_TYPE";
-        case TS_AST_NODE_AS_EXPRESSION: return "TS_AST_NODE_AS_EXPRESSION";
-        case TS_AST_NODE_NON_NULL_EXPRESSION: return "TS_AST_NODE_NON_NULL_EXPRESSION";
-        case TS_AST_NODE_SATISFIES_EXPRESSION: return "TS_AST_NODE_SATISFIES_EXPRESSION";
-        case TS_AST_NODE_ENUM_DECLARATION: return "TS_AST_NODE_ENUM_DECLARATION";
-        case TS_AST_NODE_ENUM_MEMBER: return "TS_AST_NODE_ENUM_MEMBER";
-        case TS_AST_NODE_NAMESPACE_DECLARATION: return "TS_AST_NODE_NAMESPACE_DECLARATION";
-        case TS_AST_NODE_DECORATOR: return "TS_AST_NODE_DECORATOR";
         case TS_AST_NODE_PARAMETER: return "TS_AST_NODE_PARAMETER";
         default: return "JS_AST_NODE_UNKNOWN";
     }
@@ -242,7 +228,6 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
             JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)node;
             emit_js_dump_field(source, "id", decl->id, indent + 1);
             emit_js_dump_field(source, "init", decl->init, indent + 1);
-            emit_js_dump_field(source, "ts_type", (JsAstNode*)decl->ts_type, indent + 1);
             break;
         }
         case JS_AST_NODE_IDENTIFIER:
@@ -295,7 +280,6 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
             JsFunctionNode* fn = (JsFunctionNode*)node;
             dump_string_field("name", fn->name);
             emit_js_dump_list(source, "params", fn->params, indent + 1);
-            emit_js_dump_field(source, "return_type", (JsAstNode*)fn->ts_return_type, indent + 1);
             emit_js_dump_field(source, "body", fn->body, indent + 1);
             break;
         }
@@ -384,7 +368,6 @@ static void emit_js_dump_node(const char* source, JsAstNode* node, int indent) {
             dump_string_field("name", method->name);
             emit_js_dump_field(source, "key", method->key, indent + 1);
             emit_js_dump_list(source, "params", method->params, indent + 1);
-            emit_js_dump_field(source, "return_type", (JsAstNode*)method->ts_return_type, indent + 1);
             emit_js_dump_field(source, "body", method->body, indent + 1);
             break;
         }

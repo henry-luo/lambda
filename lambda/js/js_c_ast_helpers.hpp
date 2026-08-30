@@ -92,7 +92,7 @@ JsAstNode* build_js_declarator_from_children(JsTranspiler* tp, SourceSpan span,
 JsAstNode* build_js_declarator_with_type_from_children(JsTranspiler* tp,
                                                         SourceSpan span,
                                                         JsAstNode* id,
-                                                        JsAstNode* type_node,
+                                                        Type* declared_type,
                                                         JsAstNode* init);
 JsAstNode* build_js_variable_declaration_from_list(JsTranspiler* tp,
                                                    SourceSpan span,
@@ -130,7 +130,7 @@ JsAstNode* build_js_function_from_children(JsTranspiler* tp, SourceSpan span,
                                             bool arrow);
 JsAstNode* build_js_function_with_return_type_from_children(
     JsTranspiler* tp, SourceSpan span, JsAstNode* name, JsAstNode* params,
-    JsAstNode* body, JsAstNode* return_type, bool async, bool generator,
+    JsAstNode* body, Type* return_type, bool async, bool generator,
     bool declaration, bool arrow);
 JsAstNode* build_js_parameter_from_children(JsTranspiler* tp, SourceSpan span,
                                              JsAstNode* pattern,
@@ -139,7 +139,7 @@ JsAstNode* build_js_parameter_from_children(JsTranspiler* tp, SourceSpan span,
 JsAstNode* build_js_parameter_with_type_from_children(JsTranspiler* tp,
                                                        SourceSpan span,
                                                        JsAstNode* pattern,
-                                                       JsAstNode* type_node,
+                                                       Type* declared_type,
                                                        JsAstNode* default_value,
                                                        bool optional, bool rest);
 JsAstNode* build_js_type_expression_from_children(JsTranspiler* tp,
@@ -211,4 +211,3 @@ JsAstNode* build_js_object_method_from_children(JsTranspiler* tp,
                                                 uint32_t flags);
 JsOperator js_unary_operator_from_string(const char* op_str, size_t len);
 bool js_ast_statement_list_has_use_strict_directive(JsAstNode* statements);
-SourceSpan js_ts_annotation_span(JsTranspiler* tp, SourceSpan type_span);

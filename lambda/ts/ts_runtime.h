@@ -8,17 +8,8 @@ extern "C" {
 
 #include "../lambda.h"
 
-// runtime type checking
-Item ts_typeof(Item value);
-Item ts_check_shape(Item obj, Item type_item);
-Item ts_assert_type(Item value, Item type_item);
+// runtime type reporting
 Item ts_type_info(Item value);
-Item ts_box_type(Type* type);
-
-// enum support
-Item ts_enum_create(int member_count);
-Item ts_enum_add_member(Item enum_obj, Item name, Item value);
-Item ts_enum_freeze(Item enum_obj);
 
 #ifdef __cplusplus
 }

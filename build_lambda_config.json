@@ -679,7 +679,6 @@
         "lambda/runtime/lambda-eval-num.cpp",
         "lambda/runtime/runner.cpp",
         "lambda/runtime/transpile-mir.cpp",
-        "lambda/ts/transpile_ts_mir.cpp",
         "lambda/runtime/transpile_shared.cpp",
         "lambda/runtime/safety_analyzer.cpp",
         "lambda/runtime/vmap.cpp",

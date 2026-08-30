@@ -3381,14 +3381,7 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // TS runtime
     // ========================================================================
-    {"ts_typeof", FPTR(ts_typeof)},
-    {"ts_check_shape", FPTR(ts_check_shape)},
-    {"ts_assert_type", FPTR(ts_assert_type)},
     {"ts_type_info", FPTR(ts_type_info)},
-    {"ts_box_type", FPTR(ts_box_type)},
-    {"ts_enum_create", FPTR(ts_enum_create)},
-    {"ts_enum_add_member", FPTR(ts_enum_add_member)},
-    {"ts_enum_freeze", FPTR(ts_enum_freeze)},
 
 #ifdef LAMBDA_RUBY
     // Ruby runtime functions

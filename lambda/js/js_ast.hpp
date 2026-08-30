@@ -3,9 +3,6 @@
 #include "../runtime/ast.hpp"
 #include "../lambda-data.hpp"
 
-// forward declaration so JsFunctionNode and JsVariableDeclaratorNode can reference it
-struct TsTypeAnnotationNode;
-
 // JavaScript AST node types share AstNodeType's underlying space. Core-shaped
 // nodes use core values now; JS-only or not-yet-merged variants stay in 1000–1499.
 typedef AstNodeType JsAstNodeType;

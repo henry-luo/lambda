@@ -379,26 +379,6 @@ static void direct_predeclare_one(JsTranspiler* tp, JsAstNode* node) {
     }
 }
 
-static void direct_predeclare_namespace_functions(JsTranspiler* tp,
-        TsNamespaceDeclarationNode* namespace_node) {
-    if (!tp || !namespace_node) return;
-    for (int i = 0; i < namespace_node->body_count; i++) {
-        JsAstNode* item = namespace_node->body[i];
-        JsAstNode* declaration = item;
-        if (item && item->node_type == JS_AST_NODE_EXPORT_DECLARATION) {
-            declaration = ((JsExportNode*)item)->declaration;
-        }
-        if (!declaration) continue;
-        if (declaration->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
-            direct_predeclare_one(tp, item);
-        } else if (declaration->node_type ==
-                (JsAstNodeType)TS_AST_NODE_NAMESPACE_DECLARATION) {
-            direct_predeclare_namespace_functions(tp,
-                (TsNamespaceDeclarationNode*)declaration);
-        }
-    }
-}
-
 static void direct_predeclare_scope(JsTranspiler* tp, JsAstNode* node) {
     if (!node) return;
     // Function declarations are visible throughout their containing scope,
@@ -411,10 +391,6 @@ static void direct_predeclare_scope(JsTranspiler* tp, JsAstNode* node) {
         if (declaration && declaration->node_type ==
                 JS_AST_NODE_FUNCTION_DECLARATION) {
             direct_predeclare_one(tp, item);
-        } else if (declaration && declaration->node_type ==
-                (JsAstNodeType)TS_AST_NODE_NAMESPACE_DECLARATION) {
-            direct_predeclare_namespace_functions(tp,
-                (TsNamespaceDeclarationNode*)declaration);
         }
     }
     for (JsAstNode* item = node; item; item = item->next) {
@@ -867,32 +843,6 @@ static void direct_walk_node(JsTranspiler* tp, JsAstNode* node) {
         direct_walk_node(tp, parameter->default_value);
         break;
     }
-    case TS_AST_NODE_ENUM_DECLARATION:
-        for (int i = 0; i < ((TsEnumDeclarationNode*)node)->member_count; i++) {
-            direct_walk_node(tp, ((TsEnumDeclarationNode*)node)->members[i]);
-        }
-        break;
-    case TS_AST_NODE_ENUM_MEMBER:
-        direct_walk_node(tp, ((TsEnumMemberNode*)node)->initializer);
-        break;
-    case TS_AST_NODE_NAMESPACE_DECLARATION: {
-        TsNamespaceDeclarationNode* ns = (TsNamespaceDeclarationNode*)node;
-        for (int i = 0; i < ns->body_count; i++) direct_walk_node(tp, ns->body[i]);
-        break;
-    }
-    case TS_AST_NODE_DECORATOR:
-        direct_walk_node(tp, ((TsDecoratorNode*)node)->expression);
-        break;
-    case TS_AST_NODE_AS_EXPRESSION:
-    case TS_AST_NODE_SATISFIES_EXPRESSION:
-    case TS_AST_NODE_TYPE_ASSERTION: {
-        TsTypeExprNode* expression = (TsTypeExprNode*)node;
-        direct_walk_node(tp, expression->inner);
-        break;
-    }
-    case TS_AST_NODE_NON_NULL_EXPRESSION:
-        direct_walk_node(tp, ((TsNonNullNode*)node)->inner);
-        break;
     default:
         js_ast_visit_children(node, direct_walk_child, tp);
         break;

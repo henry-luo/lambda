@@ -138,7 +138,6 @@ static bool bench_c_frontend(const BenchFixture* fixture) {
     bool ok = js_transpiler_parse_c(transpiler, fixture->source,
         fixture->length, fixture->mode);
     JsAstNode* ast = ok ? (JsAstNode*)transpiler->ast_root : NULL;
-    if (ok && fixture->typescript) ts_resolve_all_types(transpiler, ast);
     if (ok) ok = ast && js_check_early_errors(transpiler, ast) == 0;
     js_transpiler_destroy(transpiler);
     return ok;

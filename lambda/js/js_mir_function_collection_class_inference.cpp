@@ -1402,7 +1402,7 @@ void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc) {
         while (p) {
             if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
                 TsParameterNode* tsp = (TsParameterNode*)p;
-                if (tsp->ts_type) ann_count++;
+                if (tsp->declared_type) ann_count++;
             }
             p = p->next;
         }
@@ -1413,16 +1413,12 @@ void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc) {
             for (int i = 0; i < pc && p; i++, p = p->next) {
                 if (p->node_type == (int)TS_AST_NODE_PARAMETER) {
                     TsParameterNode* tsp = (TsParameterNode*)p;
-                    if (tsp->ts_type && tsp->ts_type->type_expr && !tsp->optional) {
+                    if (tsp->declared_type && !tsp->optional) {
                         TypeId tid = ts_predefined_name_to_type_id(NULL, 0);  // default
-                        // resolve from the predefined_type or type_expr
-                        TsTypeNode* tex = tsp->ts_type->type_expr;
-                        if (tex->node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
-                            TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)tex;
-                            tid = pt->predefined_id;
-                        } else {
-                            // fallback: resolve via ts_resolve_type
-                            tid = LMD_TYPE_ANY;
+                        TypeId declared = tsp->declared_type->type_id;
+                        if (declared == LMD_TYPE_FLOAT || declared == LMD_TYPE_INT ||
+                                declared == LMD_TYPE_STRING || declared == LMD_TYPE_BOOL) {
+                            tid = declared;
                         }
                         jm_set_param_type(fc, i, tid);
                     } else {
@@ -1667,11 +1663,11 @@ void jm_infer_return_type(JsMirTranspiler* mt, JsFuncCollected* fc) {
     JM_JS_FACT(fc, return_type) = LMD_TYPE_ANY;
 
     // Phase 3.4: check for explicit TS return type annotation
-    if (fn->ts_return_type) {
-        TsTypeAnnotationNode* ann = fn->ts_return_type;
-        if (ann->type_expr && ann->type_expr->node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
-            TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)ann->type_expr;
-            JM_JS_FACT(fc, return_type) = pt->predefined_id;
+    if (fn->declared_return_type) {
+        TypeId declared = fn->declared_return_type->type_id;
+        if (declared == LMD_TYPE_FLOAT || declared == LMD_TYPE_INT ||
+                declared == LMD_TYPE_STRING || declared == LMD_TYPE_BOOL) {
+            JM_JS_FACT(fc, return_type) = declared;
             log_debug("js-mir P3.4: annotation-based return type for %s: %s",
                 fn->name ? fn->name->chars : "(anon)",
                 JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" : JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT ? "FLOAT" : "ANY");

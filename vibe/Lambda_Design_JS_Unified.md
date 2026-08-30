@@ -1642,6 +1642,37 @@ This is a genuine deletion under **D8.6.4v2**: the eliminated paths have no forw
 
 The JavaScript-engine diff for this cleanup is measured from the workspace base as `+65/-1067 = -1,002` lines under `lambda/js`. Validation passed: coherent debug test build; C parser `16/16`; TypeScript `19/19`; JS interpreter `357/357`; JS script ownership `104/104`; JS MIR emission `21/21`; JS optimization `19/19`; and the complete Test262 runner with zero regressions against its `40,261` passing-case baseline. This is an implementation-status record only; no formal ruling or semver changed.
 
+#### Post-P6 implementation record — direct Lambda type facts for TypeScript, 2026-08-30
+
+The C parser now reduces every admitted TypeScript type span directly to Lambda's
+canonical `Type*` representation. Variable declarations use the existing shared
+`declared_type` field; function, method, and parameter contracts carry the same
+resolved fact rather than a TypeScript wrapper AST. This implements the
+declared-versus-effective type separation of **D3.2.3** while preserving the
+single direct frontend and indexed executable AST required by **D8.1.3v10** and
+**D8.2.4**. Type aliases and interfaces register their resolved facts at their
+declaration boundary; runtime enum, namespace, and decorator syntax continues
+to lower to ordinary JavaScript before scope/index passes.
+
+This retires `transpile_ts_mir.cpp`, `ts_type_builder.cpp`, the pre-resolved
+TypeScript type-expression hierarchy, annotation-wrapper nodes, generic
+parameter payloads that no runtime consumer read, and the post-parse visitors
+for already-lowered enum/namespace/decorator intermediates. The surviving
+authority is the direct C parser plus `ts_type_parser.cpp`, which admits no
+syntax independently and builds only Lambda `Type*` facts. This is genuine
+retirement under **D8.6.4v2**: there is no alternate TypeScript driver,
+recursive type-AST resolution pass, forwarding API, or retained pre-lowering
+visitor.
+
+The JavaScript-engine source slice (`lambda/js` plus its `lambda/ts` compiler
+profile) is `+782/-3223 = -2,441` substantive lines from the workspace base.
+No blank lines were removed and no formatting-only reduction was used.
+Validation passed: `make build-test`; TypeScript `19/19`; C parser `16/16`;
+JS MIR emission `21/21`; JS optimizer `19/19`; Lambda/Input baseline
+`4,061/4,061`; Test262 `40,261/40,261` with zero regressions; and
+`git diff --check`.
+No formal-spec ruling or semver changed.
+
 ---
 
 ## 5. Phase Exit Gates

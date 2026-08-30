@@ -285,10 +285,6 @@ void jm_cleanup_deferred_mir();
 // Get the most recently deferred MIR context (for function pointer lookup after with_preamble compilation)
 void* jm_get_last_deferred_mir_ctx();
 
-// Transpile a pre-built JS AST to MIR (used by TS transpiler)
-Item transpile_js_ast_to_mir(Runtime* runtime, JsTranspiler* tp, JsAstNode* ast,
-                             const char* filename, uint64_t* result_home);
-
 // JavaScript runtime function declarations (js_runtime.cpp)
 #ifdef __cplusplus
 extern "C" {

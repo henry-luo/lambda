@@ -13,7 +13,6 @@ typedef struct NameEntry NameEntry;
 typedef struct NameScope NameScope;
 typedef struct LangProfile LangProfile;
 struct hashmap;
-typedef struct TsTypeAnnotationNode TsTypeAnnotationNode;
 typedef struct _ArrayList ArrayList;
 
 typedef enum AstNodeType : uint16_t {
@@ -899,7 +898,6 @@ typedef struct AstExprStmtNode : AstNode {
 typedef struct AstDeclaratorNode : AstNode {
     AstNode* id;
     AstNode* init;
-    TsTypeAnnotationNode* ts_type;
     // Lambda declarations retain binding metadata through the shared layout.
     String* name;
     NameEntry* entry;
@@ -951,7 +949,7 @@ typedef struct AstFuncNode : AstNode {
     bool is_async;
     bool is_generator;
     bool has_use_strict_directive;
-    TsTypeAnnotationNode* ts_return_type;
+    Type* declared_return_type;
 } AstFuncNode;
 
 typedef struct AstMethodNode : AstFuncNode {

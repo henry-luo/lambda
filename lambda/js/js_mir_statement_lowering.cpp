@@ -908,10 +908,8 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
                     TypeId init_type = jm_get_effective_type(mt, d->init);
 
                     // Phase 3.4: override with TS type annotation if present
-                    if (d->ts_type && d->ts_type->type_expr &&
-                        d->ts_type->type_expr->node_type == (int)TS_AST_NODE_PREDEFINED_TYPE) {
-                        TsPredefinedTypeNode* pt = (TsPredefinedTypeNode*)d->ts_type->type_expr;
-                        TypeId ann_type = pt->predefined_id;
+                    if (d->declared_type) {
+                        TypeId ann_type = d->declared_type->type_id;
                         if (ann_type == LMD_TYPE_FLOAT || ann_type == LMD_TYPE_INT ||
                             ann_type == LMD_TYPE_STRING || ann_type == LMD_TYPE_BOOL) {
                             log_debug("var-decl P3.4: '%s' annotation type overrides inference", vname);
@@ -1069,10 +1067,10 @@ void jm_transpile_var_decl(JsMirTranspiler* mt, JsVariableDeclarationNode* var) 
 
                         // Phase 3.4: if annotated with a non-predefined TS type (e.g. interface/type alias),
                         // resolve it and store TypeMap in full_type for member access inference.
-                        if (d->ts_type && d->ts_type->type_expr && mt->tp &&
-                            d->ts_type->type_expr->node_type != (int)TS_AST_NODE_PREDEFINED_TYPE) {
-                            Type* resolved = ts_resolve_type((TsTranspiler*)mt->tp, d->ts_type->type_expr);
-                            if (resolved && resolved->type_id == LMD_TYPE_MAP) {
+                        if (d->declared_type &&
+                                d->declared_type->type_id == LMD_TYPE_MAP) {
+                            Type* resolved = d->declared_type;
+                            if (resolved->type_id == LMD_TYPE_MAP) {
                                 JsMirVarEntry* var_entry = jm_find_var(mt, vname);
                                 if (var_entry) {
                                     var_entry->full_type = resolved;

@@ -34,8 +34,6 @@ typedef struct JsCAstSink {
 
 typedef struct JsCTypeParametersNode {
     JsAstNode base;
-    TsTypeParamNode** parameters;
-    uint32_t count;
 } JsCTypeParametersNode;
 
 static bool js_c_span_contains(SourceSpan outer, SourceSpan inner) {
@@ -57,31 +55,16 @@ static bool js_c_unsupported(JsCAstSink* sink) {
 }
 
 static bool js_c_is_ts_type_node(const JsAstNode* node) {
-    return node && (int)node->node_type >= TS_AST_NODE_TYPE_ANNOTATION &&
-        (int)node->node_type <= TS_AST_NODE_INFER_TYPE;
+    return node && (int)node->node_type == TS_AST_NODE_TYPE_FACT;
 }
 
 static bool js_c_is_type_parameters(const JsAstNode* node) {
     return node && (int)node->node_type == TS_AST_NODE_TYPE_PARAMETERS;
 }
 
-static JsCTypeParametersNode* js_c_as_type_parameters(JsAstNode* node) {
-    return js_c_is_type_parameters(node)
-        ? (JsCTypeParametersNode*)node : NULL;
-}
-
-static TsTypeAnnotationNode* js_c_type_annotation(JsCAstSink* sink,
-        JsAstNode* type_node) {
-    if (!sink || !type_node || !js_c_is_ts_type_node(type_node)) return NULL;
-    SourceSpan annotation_span = js_ts_annotation_span(sink->transpiler,
-        type_node->source_span);
-    type_node->source_span = (SourceSpan){0, 0};
-    TsTypeAnnotationNode* annotation = (TsTypeAnnotationNode*)
-        alloc_js_ast_node_span(sink->transpiler,
-            (JsAstNodeType)TS_AST_NODE_TYPE_ANNOTATION,
-            annotation_span, sizeof(TsTypeAnnotationNode));
-    annotation->type_expr = (TsTypeNode*)type_node;
-    return annotation;
+static Type* js_c_type_fact(JsAstNode* type_node) {
+    return js_c_is_ts_type_node(type_node)
+        ? ((TsTypeFactNode*)type_node)->resolved_type : NULL;
 }
 
 static bool js_c_is_space(char c) {
@@ -173,6 +156,334 @@ static bool js_c_read_name(const char* source, size_t end, size_t* offset,
     return true;
 }
 
+// A TS enum has a JavaScript runtime value. Construct that value directly so
+// the published tree never needs a second TS-to-JS rewrite or fact rebuild.
+static JsAstNode* js_c_lower_ts_enum(JsCAstSink* sink,
+        TsEnumDeclarationNode* enumeration) {
+    if (!sink || !enumeration) return NULL;
+    SourceSpan span = enumeration->source_span;
+    JsObjectNode* object = (JsObjectNode*)alloc_js_ast_node_span(
+        sink->transpiler, JS_AST_NODE_OBJECT_EXPRESSION, span,
+        sizeof(JsObjectNode));
+    if (!object) return NULL;
+    object->type = &TYPE_MAP;
+
+    JsAstNode* last_property = NULL;
+    for (int i = 0; i < enumeration->member_count; i++) {
+        TsEnumMemberNode* member = (TsEnumMemberNode*)enumeration->members[i];
+        if (!member || !member->name) continue;
+        JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node_span(
+            sink->transpiler, JS_AST_NODE_PROPERTY, span,
+            sizeof(JsPropertyNode));
+        JsIdentifierNode* key = (JsIdentifierNode*)alloc_js_ast_node_span(
+            sink->transpiler, JS_AST_NODE_IDENTIFIER, span,
+            sizeof(JsIdentifierNode));
+        if (!property || !key) return NULL;
+        key->name = member->name;
+        key->type = &TYPE_STRING;
+        property->key = (JsAstNode*)key;
+        property->computed = false;
+        property->method = false;
+        if (member->initializer && member->auto_value < 0) {
+            property->value = member->initializer;
+        } else {
+            JsLiteralNode* value = (JsLiteralNode*)alloc_js_ast_node_span(
+                sink->transpiler, JS_AST_NODE_LITERAL, span,
+                sizeof(JsLiteralNode));
+            if (!value) return NULL;
+            value->literal_type = JS_LITERAL_NUMBER;
+            value->value.number_value = (double)member->auto_value;
+            value->type = &TYPE_INT;
+            property->value = (JsAstNode*)value;
+        }
+        property->type = property->value ? property->value->type : &TYPE_ANY;
+        if (last_property) last_property->next = (JsAstNode*)property;
+        else object->properties = (JsAstNode*)property;
+        last_property = (JsAstNode*)property;
+    }
+
+    for (int i = 0; i < enumeration->member_count; i++) {
+        TsEnumMemberNode* member = (TsEnumMemberNode*)enumeration->members[i];
+        if (!member || !member->name || member->auto_value < 0) continue;
+        JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node_span(
+            sink->transpiler, JS_AST_NODE_PROPERTY, span,
+            sizeof(JsPropertyNode));
+        JsLiteralNode* key = (JsLiteralNode*)alloc_js_ast_node_span(
+            sink->transpiler, JS_AST_NODE_LITERAL, span,
+            sizeof(JsLiteralNode));
+        JsLiteralNode* value = (JsLiteralNode*)alloc_js_ast_node_span(
+            sink->transpiler, JS_AST_NODE_LITERAL, span,
+            sizeof(JsLiteralNode));
+        if (!property || !key || !value) return NULL;
+        key->literal_type = JS_LITERAL_NUMBER;
+        key->value.number_value = (double)member->auto_value;
+        key->type = &TYPE_INT;
+        value->literal_type = JS_LITERAL_STRING;
+        value->value.string_value = member->name;
+        value->type = &TYPE_STRING;
+        property->key = (JsAstNode*)key;
+        property->value = (JsAstNode*)value;
+        property->type = &TYPE_STRING;
+        if (last_property) last_property->next = (JsAstNode*)property;
+        else object->properties = (JsAstNode*)property;
+        last_property = (JsAstNode*)property;
+    }
+
+    JsVariableDeclaratorNode* declarator =
+        (JsVariableDeclaratorNode*)alloc_js_ast_node_span(sink->transpiler,
+            JS_AST_NODE_VARIABLE_DECLARATOR, span,
+            sizeof(JsVariableDeclaratorNode));
+    JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node_span(
+        sink->transpiler, JS_AST_NODE_IDENTIFIER, span, sizeof(JsIdentifierNode));
+    JsVariableDeclarationNode* declaration =
+        (JsVariableDeclarationNode*)alloc_js_ast_node_span(sink->transpiler,
+            JS_AST_NODE_VARIABLE_DECLARATION, span,
+            sizeof(JsVariableDeclarationNode));
+    if (!declarator || !identifier || !declaration) return NULL;
+    identifier->name = enumeration->name;
+    identifier->type = &TYPE_MAP;
+    declarator->id = (JsAstNode*)identifier;
+    declarator->init = (JsAstNode*)object;
+    declarator->type = &TYPE_MAP;
+    declaration->kind = JS_VAR_CONST;
+    declaration->declarations = (JsAstNode*)declarator;
+    declaration->type = &TYPE_NULL;
+    return (JsAstNode*)declaration;
+}
+
+// Decorators affect a class value, so emit the ordinary JavaScript binding and
+// assignments before the tree is indexed instead of preserving decorator nodes
+// for a later AST rewrite.
+static JsAstNode* js_c_lower_decorated_class(JsCAstSink* sink,
+        TsDecoratorNode** decorators, uint32_t decorator_count,
+        JsAstNode* class_node) {
+    if (!sink || !decorators || !class_node ||
+            (class_node->node_type != JS_AST_NODE_CLASS_DECLARATION &&
+             class_node->node_type != JS_AST_NODE_CLASS_EXPRESSION)) return NULL;
+    JsClassNode* class_value = (JsClassNode*)class_node;
+    if (!class_value->name) return NULL;
+    SourceSpan span = class_node->source_span;
+    class_value->node_type = JS_AST_NODE_CLASS_EXPRESSION;
+
+    JsVariableDeclaratorNode* declarator =
+        (JsVariableDeclaratorNode*)alloc_js_ast_node_span(sink->transpiler,
+            JS_AST_NODE_VARIABLE_DECLARATOR, span,
+            sizeof(JsVariableDeclaratorNode));
+    JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node_span(
+        sink->transpiler, JS_AST_NODE_IDENTIFIER, span, sizeof(JsIdentifierNode));
+    JsVariableDeclarationNode* declaration =
+        (JsVariableDeclarationNode*)alloc_js_ast_node_span(sink->transpiler,
+            JS_AST_NODE_VARIABLE_DECLARATION, span,
+            sizeof(JsVariableDeclarationNode));
+    if (!declarator || !identifier || !declaration) return NULL;
+    identifier->name = class_value->name;
+    declarator->id = (JsAstNode*)identifier;
+    declarator->init = class_node;
+    declaration->kind = JS_VAR_LET;
+    declaration->declarations = (JsAstNode*)declarator;
+
+    JsAstNode* tail = (JsAstNode*)declaration;
+    for (uint32_t i = decorator_count; i > 0; i--) {
+        TsDecoratorNode* decorator = decorators[i - 1];
+        if (!decorator || !decorator->expression) continue;
+        JsIdentifierNode* argument = (JsIdentifierNode*)alloc_js_ast_node_span(
+            sink->transpiler, JS_AST_NODE_IDENTIFIER, span,
+            sizeof(JsIdentifierNode));
+        JsCallNode* call = (JsCallNode*)alloc_js_ast_node_span(sink->transpiler,
+            JS_AST_NODE_CALL_EXPRESSION, span, sizeof(JsCallNode));
+        JsIdentifierNode* fallback = (JsIdentifierNode*)alloc_js_ast_node_span(
+            sink->transpiler, JS_AST_NODE_IDENTIFIER, span,
+            sizeof(JsIdentifierNode));
+        JsBinaryNode* coalesce = (JsBinaryNode*)alloc_js_ast_node_span(
+            sink->transpiler, JS_AST_NODE_BINARY_EXPRESSION, span,
+            sizeof(JsBinaryNode));
+        JsIdentifierNode* left = (JsIdentifierNode*)alloc_js_ast_node_span(
+            sink->transpiler, JS_AST_NODE_IDENTIFIER, span,
+            sizeof(JsIdentifierNode));
+        JsAssignmentNode* assignment =
+            (JsAssignmentNode*)alloc_js_ast_node_span(sink->transpiler,
+                JS_AST_NODE_ASSIGNMENT_EXPRESSION, span,
+                sizeof(JsAssignmentNode));
+        JsExpressionStatementNode* statement =
+            (JsExpressionStatementNode*)alloc_js_ast_node_span(sink->transpiler,
+                JS_AST_NODE_EXPRESSION_STATEMENT, span,
+                sizeof(JsExpressionStatementNode));
+        if (!argument || !call || !fallback || !coalesce || !left ||
+                !assignment || !statement) return NULL;
+        argument->name = class_value->name;
+        call->callee = decorator->expression;
+        call->arguments = (JsAstNode*)argument;
+        fallback->name = class_value->name;
+        coalesce->op = JS_OP_NULLISH_COALESCE;
+        coalesce->left = (JsAstNode*)call;
+        coalesce->right = (JsAstNode*)fallback;
+        left->name = class_value->name;
+        assignment->op = JS_OP_ASSIGN;
+        assignment->left = (JsAstNode*)left;
+        assignment->right = (JsAstNode*)coalesce;
+        statement->expression = (JsAstNode*)assignment;
+        tail->next = (JsAstNode*)statement;
+        tail = (JsAstNode*)statement;
+    }
+    return (JsAstNode*)declaration;
+}
+
+static JsAstNode* js_c_make_namespace_identifier(JsCAstSink* sink,
+        SourceSpan span, String* name) {
+    JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node_span(
+        sink->transpiler, JS_AST_NODE_IDENTIFIER, span, sizeof(JsIdentifierNode));
+    if (identifier) identifier->name = name;
+    return (JsAstNode*)identifier;
+}
+
+static JsAstNode* js_c_make_namespace_member(JsCAstSink* sink, SourceSpan span,
+        String* namespace_name, JsAstNode* property) {
+    JsMemberNode* member = (JsMemberNode*)alloc_js_ast_node_span(
+        sink->transpiler, JS_AST_NODE_MEMBER_EXPRESSION, span,
+        sizeof(JsMemberNode));
+    if (!member) return NULL;
+    member->object = js_c_make_namespace_identifier(sink, span, namespace_name);
+    member->property = property;
+    member->computed = false;
+    return member->object && member->property ? (JsAstNode*)member : NULL;
+}
+
+static JsAstNode* js_c_make_namespace_assignment(JsCAstSink* sink,
+        SourceSpan span, String* namespace_name, JsAstNode* property,
+        JsAstNode* value) {
+    JsAstNode* member = js_c_make_namespace_member(sink, span, namespace_name,
+        property);
+    JsAssignmentNode* assignment = (JsAssignmentNode*)alloc_js_ast_node_span(
+        sink->transpiler, JS_AST_NODE_ASSIGNMENT_EXPRESSION, span,
+        sizeof(JsAssignmentNode));
+    JsExpressionStatementNode* statement =
+        (JsExpressionStatementNode*)alloc_js_ast_node_span(sink->transpiler,
+            JS_AST_NODE_EXPRESSION_STATEMENT, span,
+            sizeof(JsExpressionStatementNode));
+    if (!member || !assignment || !statement) return NULL;
+    assignment->op = JS_OP_ASSIGN;
+    assignment->left = member;
+    assignment->right = value;
+    statement->expression = (JsAstNode*)assignment;
+    return (JsAstNode*)statement;
+}
+
+static void js_c_append_namespace_statement(JsAstNode** first, JsAstNode** last,
+        JsAstNode* statement) {
+    if (!statement) return;
+    statement->next = NULL;
+    if (*last) (*last)->next = statement;
+    else *first = statement;
+    *last = statement;
+}
+
+// A TS namespace is emitted as the standard namespace IIFE before binding and
+// indexing. This keeps its synthetic function in the same one-pass AST facts.
+static JsAstNode* js_c_lower_ts_namespace(JsCAstSink* sink,
+        TsNamespaceDeclarationNode* namespace_node) {
+    if (!sink || !namespace_node || !namespace_node->name) return NULL;
+    SourceSpan span = namespace_node->source_span;
+    JsVariableDeclaratorNode* namespace_declarator =
+        (JsVariableDeclaratorNode*)alloc_js_ast_node_span(sink->transpiler,
+            JS_AST_NODE_VARIABLE_DECLARATOR, span,
+            sizeof(JsVariableDeclaratorNode));
+    JsVariableDeclarationNode* namespace_declaration =
+        (JsVariableDeclarationNode*)alloc_js_ast_node_span(sink->transpiler,
+            JS_AST_NODE_VARIABLE_DECLARATION, span,
+            sizeof(JsVariableDeclarationNode));
+    if (!namespace_declarator || !namespace_declaration) return NULL;
+    namespace_declarator->id = js_c_make_namespace_identifier(sink, span,
+        namespace_node->name);
+    if (!namespace_declarator->id) return NULL;
+    namespace_declaration->kind = JS_VAR_VAR;
+    namespace_declaration->declarations = (JsAstNode*)namespace_declarator;
+
+    JsAstNode* body_first = NULL;
+    JsAstNode* body_last = NULL;
+    for (int i = 0; i < namespace_node->body_count; i++) {
+        JsAstNode* statement = namespace_node->body[i];
+        if (!statement) continue;
+        bool exported = statement->node_type == JS_AST_NODE_EXPORT_DECLARATION;
+        if (exported) {
+            statement = ((JsExportNode*)statement)->declaration;
+            if (!statement) continue;
+        }
+        if (exported && statement->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+            JsFunctionNode* function = (JsFunctionNode*)statement;
+            if (!function->name) return NULL;
+            function->node_type = JS_AST_NODE_FUNCTION_EXPRESSION;
+            JsAstNode* property = js_c_make_namespace_identifier(sink, span,
+                function->name);
+            statement = js_c_make_namespace_assignment(sink, span,
+                namespace_node->name, property, (JsAstNode*)function);
+        } else if (exported &&
+                statement->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+            JsVariableDeclarationNode* variables =
+                (JsVariableDeclarationNode*)statement;
+            for (JsAstNode* item = variables->declarations; item;
+                    item = item->next) {
+                JsVariableDeclaratorNode* declarator =
+                    (JsVariableDeclaratorNode*)item;
+                if (!declarator->id || !declarator->init) continue;
+                JsAstNode* assignment = js_c_make_namespace_assignment(sink,
+                    span, namespace_node->name, declarator->id,
+                    declarator->init);
+                if (!assignment) return NULL;
+                js_c_append_namespace_statement(&body_first, &body_last,
+                    assignment);
+            }
+            continue;
+        }
+        if (!statement) return NULL;
+        js_c_append_namespace_statement(&body_first, &body_last, statement);
+    }
+
+    JsBlockNode* body = (JsBlockNode*)alloc_js_ast_node_span(sink->transpiler,
+        JS_AST_NODE_BLOCK_STATEMENT, span, sizeof(JsBlockNode));
+    JsFunctionNode* function = (JsFunctionNode*)alloc_js_ast_node_span(
+        sink->transpiler, JS_AST_NODE_FUNCTION_EXPRESSION, span,
+        sizeof(JsFunctionNode));
+    JsAstNode* parameter = js_c_make_namespace_identifier(sink, span,
+        namespace_node->name);
+    JsAstNode* argument = js_c_make_namespace_identifier(sink, span,
+        namespace_node->name);
+    JsAstNode* fallback_lhs = js_c_make_namespace_identifier(sink, span,
+        namespace_node->name);
+    JsObjectNode* fallback_object = (JsObjectNode*)alloc_js_ast_node_span(
+        sink->transpiler, JS_AST_NODE_OBJECT_EXPRESSION, span,
+        sizeof(JsObjectNode));
+    JsAssignmentNode* fallback_assignment =
+        (JsAssignmentNode*)alloc_js_ast_node_span(sink->transpiler,
+            JS_AST_NODE_ASSIGNMENT_EXPRESSION, span,
+            sizeof(JsAssignmentNode));
+    JsBinaryNode* fallback = (JsBinaryNode*)alloc_js_ast_node_span(
+        sink->transpiler, JS_AST_NODE_BINARY_EXPRESSION, span,
+        sizeof(JsBinaryNode));
+    JsCallNode* call = (JsCallNode*)alloc_js_ast_node_span(sink->transpiler,
+        JS_AST_NODE_CALL_EXPRESSION, span, sizeof(JsCallNode));
+    JsExpressionStatementNode* invocation =
+        (JsExpressionStatementNode*)alloc_js_ast_node_span(sink->transpiler,
+            JS_AST_NODE_EXPRESSION_STATEMENT, span,
+            sizeof(JsExpressionStatementNode));
+    if (!body || !function || !parameter || !argument || !fallback_lhs ||
+            !fallback_object || !fallback_assignment || !fallback || !call ||
+            !invocation) return NULL;
+    body->statements = body_first;
+    function->params = parameter;
+    function->body = (JsAstNode*)body;
+    fallback_assignment->op = JS_OP_ASSIGN;
+    fallback_assignment->left = fallback_lhs;
+    fallback_assignment->right = (JsAstNode*)fallback_object;
+    fallback->op = JS_OP_OR;
+    fallback->left = argument;
+    fallback->right = (JsAstNode*)fallback_assignment;
+    call->callee = (JsAstNode*)function;
+    call->arguments = (JsAstNode*)fallback;
+    invocation->expression = (JsAstNode*)call;
+    namespace_declaration->next = (JsAstNode*)invocation;
+    return (JsAstNode*)namespace_declaration;
+}
+
 static JsAstNode* js_c_build_ts_declaration(JsCAstSink* sink,
         const JsParseReduction* reduction, JsAstNode** children);
 
@@ -193,28 +504,17 @@ static JsAstNode* js_c_build_ts_declaration(JsCAstSink* sink,
 
     if (reduction->introducer.kind == JS_TOK_TYPE) {
         if (!children || reduction->child_count < 1) return NULL;
-        JsAstNode* type_expr = NULL;
-        JsCTypeParametersNode* type_parameters = NULL;
+        JsAstNode* type_fact = NULL;
         for (uint32_t i = 0; i < reduction->child_count; i++) {
-            if (js_c_is_type_parameters(children[i])) {
-                type_parameters = js_c_as_type_parameters(children[i]);
-            } else if (!type_expr) {
-                type_expr = children[i];
-            }
+            if (!js_c_is_type_parameters(children[i]) && !type_fact)
+                type_fact = children[i];
         }
-        if (!type_expr || !js_c_is_ts_type_node(type_expr)) return NULL;
+        if (!type_fact || !js_c_is_ts_type_node(type_fact)) return NULL;
         TsTypeAliasNode* alias = (TsTypeAliasNode*)alloc_js_ast_node_span(
             sink->transpiler, (JsAstNodeType)TS_AST_NODE_TYPE_ALIAS,
             reduction->span, sizeof(TsTypeAliasNode));
         alias->name = name;
-        type_expr->source_span = (SourceSpan){0, 0};
-        alias->type_expr = (TsTypeNode*)type_expr;
-        if (type_parameters) {
-            alias->type_params = type_parameters->parameters;
-            alias->type_param_count = (int)type_parameters->count;
-        }
-        alias->resolved_type = ts_resolve_type(sink->transpiler,
-            alias->type_expr);
+        alias->resolved_type = js_c_type_fact(type_fact);
         ts_type_registry_add(sink->transpiler, name->chars,
             alias->resolved_type);
         return (JsAstNode*)alias;
@@ -226,39 +526,19 @@ static JsAstNode* js_c_build_ts_declaration(JsCAstSink* sink,
             sink->transpiler, (JsAstNodeType)TS_AST_NODE_INTERFACE,
             reduction->span, sizeof(TsInterfaceNode));
         iface->name = name;
-        JsCTypeParametersNode* type_parameters = NULL;
+        bool has_type_parameters = false;
         for (uint32_t i = 0; i + 1 < reduction->child_count; i++) {
-            if (js_c_is_type_parameters(children[i])) {
-                type_parameters = js_c_as_type_parameters(children[i]);
-            }
+            if (js_c_is_type_parameters(children[i])) has_type_parameters = true;
         }
-        for (uint32_t i = 0; i < reduction->child_count; i++) {
-            if (children[i]) children[i]->source_span = (SourceSpan){0, 0};
-        }
-        iface->body = (TsObjectTypeNode*)children[reduction->child_count - 1];
-        if (!iface->body || !js_c_is_ts_type_node((JsAstNode*)iface->body)) {
+        JsAstNode* body = children[reduction->child_count - 1];
+        if (!body || !js_c_is_ts_type_node(body)) {
             return NULL;
         }
-        iface->extends_count = (int)reduction->child_count - 1 -
-            (type_parameters ? 1 : 0);
-        if (type_parameters) {
-            iface->type_params = type_parameters->parameters;
-            iface->type_param_count = (int)type_parameters->count;
+        for (uint32_t i = 0; i + 1 < reduction->child_count; i++) {
+            if (has_type_parameters && js_c_is_type_parameters(children[i])) continue;
+            if (!children[i] || !js_c_is_ts_type_node(children[i])) return NULL;
         }
-        if (iface->extends_count > 0) {
-            iface->extends_types = (TsTypeNode**)pool_alloc(
-                sink->transpiler->pool,
-                sizeof(TsTypeNode*) * (size_t)iface->extends_count);
-            if (!iface->extends_types) return NULL;
-            int target = 0;
-            for (uint32_t i = 0; i + 1 < reduction->child_count; i++) {
-                if (js_c_is_type_parameters(children[i])) continue;
-                if (!children[i] || !js_c_is_ts_type_node(children[i])) return NULL;
-                iface->extends_types[target++] = (TsTypeNode*)children[i];
-            }
-        }
-        iface->resolved_type = ts_resolve_type(sink->transpiler,
-            (TsTypeNode*)iface->body);
+        iface->resolved_type = js_c_type_fact(body);
         if (iface->resolved_type && iface->resolved_type->type_id == LMD_TYPE_MAP) {
             ((TypeMap*)iface->resolved_type)->struct_name = name->chars;
         }
@@ -306,7 +586,7 @@ static JsAstNode* js_c_build_ts_declaration(JsCAstSink* sink,
                 }
             }
         }
-        return (JsAstNode*)enum_node;
+        return js_c_lower_ts_enum(sink, enum_node);
     }
 
     if (reduction->introducer.kind == JS_TOK_NAMESPACE ||
@@ -339,7 +619,7 @@ static JsAstNode* js_c_build_ts_declaration(JsCAstSink* sink,
                 item = next;
             }
         }
-        return (JsAstNode*)ns;
+        return js_c_lower_ts_namespace(sink, ns);
     }
     (void)source;
     return NULL;
@@ -635,26 +915,14 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count,
                 reduction->span, &nodes)) return false;
-        StrView name_source;
-        if (!js_c_source_slice(sink, reduction->introducer.span,
-                &name_source)) return js_c_unsupported(sink);
-        TsTypeParamNode* parameter = (TsTypeParamNode*)alloc_js_ast_node_span(
-            sink->transpiler, (JsAstNodeType)TS_AST_NODE_TYPE_PARAMETER,
-            reduction->span, sizeof(TsTypeParamNode));
-        parameter->name = name_pool_create_len(sink->transpiler->name_pool,
-            name_source.str, (int)name_source.length);
-        if (!parameter->name) return js_c_unsupported(sink);
-        if (reduction->child_count > 0) {
-            if (!js_c_is_ts_type_node(nodes[0])) return js_c_unsupported(sink);
-            nodes[0]->source_span = (SourceSpan){0, 0};
-            parameter->constraint = (TsTypeNode*)nodes[0];
+        for (uint32_t i = 0; i < reduction->child_count; i++) {
+            if (!js_c_is_ts_type_node(nodes[i])) return js_c_unsupported(sink);
         }
-        if (reduction->child_count > 1) {
-            if (!js_c_is_ts_type_node(nodes[1])) return js_c_unsupported(sink);
-            nodes[1]->source_span = (SourceSpan){0, 0};
-            parameter->default_type = (TsTypeNode*)nodes[1];
-        }
-        return js_c_push(sink, (JsAstNode*)parameter, reduction->span);
+        JsAstNode* parameter = alloc_js_ast_node_span(sink->transpiler,
+            (JsAstNodeType)TS_AST_NODE_TYPE_PARAMETER, reduction->span,
+            sizeof(JsAstNode));
+        return parameter ? js_c_push(sink, parameter, reduction->span) :
+            js_c_unsupported(sink);
     }
 
     if (reduction->kind == JS_REDUCE_TYPE &&
@@ -667,19 +935,9 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 (JsAstNodeType)TS_AST_NODE_TYPE_PARAMETERS,
                 reduction->span, sizeof(JsCTypeParametersNode));
         if (!parameters) return js_c_unsupported(sink);
-        parameters->count = reduction->child_count;
-        if (parameters->count > 0) {
-            parameters->parameters = (TsTypeParamNode**)pool_alloc(
-                sink->transpiler->pool,
-                sizeof(TsTypeParamNode*) * parameters->count);
-            if (!parameters->parameters) return js_c_unsupported(sink);
-            for (uint32_t i = 0; i < parameters->count; i++) {
-                if (!nodes[i] || (int)nodes[i]->node_type !=
-                        TS_AST_NODE_TYPE_PARAMETER) {
-                    return js_c_unsupported(sink);
-                }
-                parameters->parameters[i] = (TsTypeParamNode*)nodes[i];
-            }
+        for (uint32_t i = 0; i < reduction->child_count; i++) {
+            if (!nodes[i] || (int)nodes[i]->node_type !=
+                    TS_AST_NODE_TYPE_PARAMETER) return js_c_unsupported(sink);
         }
         return js_c_push(sink, (JsAstNode*)parameters, reduction->span);
     }
@@ -690,7 +948,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         if (!js_c_source_slice(sink, reduction->span, &source)) {
             return js_c_unsupported(sink);
         }
-        TsTypeNode* type = ts_parse_type_text(sink->transpiler, source.str,
+        TsTypeFactNode* type = ts_parse_type_text(sink->transpiler, source.str,
             (int)source.length);
         if (type) type->source_span = reduction->span;
         return type ? js_c_push(sink, (JsAstNode*)type, reduction->span) :
@@ -739,15 +997,20 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* declaration = nodes[reduction->child_count - 1];
         if (!declaration) return js_c_unsupported(sink);
         declaration->source_span.start_byte = reduction->span.start_byte;
+        TsDecoratorNode* decorators[16];
+        uint32_t decorator_count = reduction->child_count - 1;
+        if (decorator_count > 16) return js_c_unsupported(sink);
         for (uint32_t i = 0; i + 1 < reduction->child_count; i++) {
             if (!nodes[i] || nodes[i]->node_type !=
                     (JsAstNodeType)TS_AST_NODE_DECORATOR) {
                 return js_c_unsupported(sink);
             }
-            nodes[i]->next = i + 1 == reduction->child_count - 1
-                ? declaration : nodes[i + 1];
+            decorators[i] = (TsDecoratorNode*)nodes[i];
         }
-        return js_c_push(sink, nodes[0], reduction->span);
+        JsAstNode* lowered = js_c_lower_decorated_class(sink, decorators,
+            decorator_count, declaration);
+        return lowered ? js_c_push(sink, lowered, reduction->span) :
+            js_c_unsupported(sink);
     }
 
     if (reduction->kind == JS_REDUCE_DECLARATION &&
@@ -919,7 +1182,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         }
         JsAstNode* declarator = type_node
             ? build_js_declarator_with_type_from_children(sink->transpiler,
-                reduction->span, nodes[0], type_node, init)
+                reduction->span, nodes[0], js_c_type_fact(type_node), init)
             : build_js_declarator_from_children(sink->transpiler,
                 reduction->span, nodes[0], init);
         return declarator ? js_c_push(sink, declarator, reduction->span) :
@@ -964,7 +1227,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         }
         JsAstNode* parameter = type_node
             ? build_js_parameter_with_type_from_children(sink->transpiler,
-                reduction->span, nodes[0], type_node, default_value,
+                reduction->span, nodes[0], js_c_type_fact(type_node), default_value,
                 (reduction->flags & JS_REDUCTION_FLAG_OPTIONAL) != 0,
                 (reduction->flags & JS_REDUCTION_FLAG_SPREAD) != 0)
             : build_js_parameter_from_children(sink->transpiler,
@@ -1008,12 +1271,10 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             name = nodes[0];
             parameter_start = 1;
         }
-        JsCTypeParametersNode* type_parameters = NULL;
         JsAstNode* params = NULL;
         JsAstNode* previous = NULL;
         for (uint32_t i = parameter_start; i < body_index; i++) {
             if (js_c_is_type_parameters(nodes[i])) {
-                type_parameters = js_c_as_type_parameters(nodes[i]);
                 continue;
             }
             if (!previous) params = nodes[i];
@@ -1028,7 +1289,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             ? build_js_function_with_return_type_from_children(
                 sink->transpiler, reduction->span, name, params,
                 nodes[reduction->child_count - 1],
-                js_c_type_annotation(sink, return_type),
+                js_c_type_fact(return_type),
                 (reduction->flags & 1u) != 0,
                 (reduction->flags & 2u) != 0,
                 declaration,
@@ -1040,13 +1301,8 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 (reduction->flags & 2u) != 0,
                 declaration,
                 arrow);
-        if (!function) return js_c_unsupported(sink);
-        if (type_parameters) {
-            TsFunctionNode* ts_function = (TsFunctionNode*)function;
-            ts_function->type_params = type_parameters->parameters;
-            ts_function->type_param_count = (int)type_parameters->count;
-        }
-        return js_c_push(sink, function, reduction->span);
+        return function ? js_c_push(sink, function, reduction->span) :
+            js_c_unsupported(sink);
     }
 
     if (reduction->kind == JS_REDUCE_CLASS_MEMBER &&
@@ -1099,8 +1355,8 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             if (body) body->source_span.end_byte = reduction->span.end_byte;
         }
         if (method && return_type) {
-            ((JsMethodDefinitionNode*)method)->ts_return_type =
-                js_c_type_annotation(sink, return_type);
+            ((JsMethodDefinitionNode*)method)->declared_return_type =
+                js_c_type_fact(return_type);
         }
         return method ? js_c_push(sink, method, reduction->span) :
             js_c_unsupported(sink);

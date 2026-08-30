@@ -1188,22 +1188,15 @@ JsAstNode* build_js_declarator_from_children(JsTranspiler* tp, SourceSpan span,
 }
 
 JsAstNode* build_js_declarator_with_type_from_children(JsTranspiler* tp,
-        SourceSpan span, JsAstNode* id, JsAstNode* type_node,
+        SourceSpan span, JsAstNode* id, Type* declared_type,
         JsAstNode* init) {
-    if (!type_node) return build_js_declarator_from_children(tp, span, id, init);
+    if (!declared_type) return build_js_declarator_from_children(tp, span, id, init);
     JsVariableDeclaratorNode* declarator =
         (JsVariableDeclaratorNode*)build_js_declarator_from_children(tp, span,
             id, init);
     if (!declarator) return NULL;
-    SourceSpan annotation_span = js_ts_annotation_span(tp,
-        type_node->source_span);
-    type_node->source_span = (SourceSpan){0, 0};
-    TsTypeAnnotationNode* annotation = (TsTypeAnnotationNode*)
-        alloc_js_ast_node_span(tp, (JsAstNodeType)TS_AST_NODE_TYPE_ANNOTATION,
-            annotation_span, sizeof(TsTypeAnnotationNode));
-    annotation->type_expr = (TsTypeNode*)type_node;
-    declarator->ts_type = annotation;
-    if (!init) declarator->type = ts_resolve_type(tp, annotation->type_expr);
+    declarator->declared_type = declared_type;
+    if (!init) declarator->type = declared_type;
     return (JsAstNode*)declarator;
 }
 
@@ -1439,9 +1432,9 @@ JsAstNode* build_js_parameter_from_children(JsTranspiler* tp, SourceSpan span,
 }
 
 JsAstNode* build_js_parameter_with_type_from_children(JsTranspiler* tp,
-        SourceSpan span, JsAstNode* pattern, JsAstNode* type_node,
+        SourceSpan span, JsAstNode* pattern, Type* declared_type,
         JsAstNode* default_value, bool optional, bool rest) {
-    if (!type_node) return build_js_parameter_from_children(tp, span, pattern,
+    if (!declared_type) return build_js_parameter_from_children(tp, span, pattern,
         default_value, optional, rest);
     if (!pattern || (rest && default_value)) {
         log_error("JavaScript TypeScript parameter has invalid children");
@@ -1456,17 +1449,10 @@ JsAstNode* build_js_parameter_with_type_from_children(JsTranspiler* tp,
         rest_node->type = &TYPE_ARRAY;
         parameter_pattern = (JsAstNode*)rest_node;
     }
-    SourceSpan annotation_span = js_ts_annotation_span(tp,
-        type_node->source_span);
-    type_node->source_span = (SourceSpan){0, 0};
-    TsTypeAnnotationNode* annotation = (TsTypeAnnotationNode*)
-        alloc_js_ast_node_span(tp, (JsAstNodeType)TS_AST_NODE_TYPE_ANNOTATION,
-            annotation_span, sizeof(TsTypeAnnotationNode));
-    annotation->type_expr = (TsTypeNode*)type_node;
     TsParameterNode* parameter = (TsParameterNode*)alloc_js_ast_node_span(tp,
         (JsAstNodeType)TS_AST_NODE_PARAMETER, span, sizeof(TsParameterNode));
     parameter->pattern = parameter_pattern;
-    parameter->ts_type = annotation;
+    parameter->declared_type = declared_type;
     parameter->default_value = default_value;
     parameter->optional = optional;
     parameter->type = js_set_type_any(tp, ANY_OPEN_PARAM);
@@ -1480,14 +1466,14 @@ JsAstNode* build_js_type_expression_from_children(JsTranspiler* tp,
         log_error("JavaScript TypeScript expression has invalid children");
         return NULL;
     }
+    // Assertions and satisfies are erased at construction time. Keeping a
+    // runtime wrapper forced the retired TS post-pass to walk every JS node.
     target_type->source_span = (SourceSpan){0, 0};
-    TsTypeExprNode* expression = (TsTypeExprNode*)alloc_js_ast_node_span(tp,
-        (JsAstNodeType)(assertion ? TS_AST_NODE_TYPE_ASSERTION :
-            (satisfies ? TS_AST_NODE_SATISFIES_EXPRESSION :
-                TS_AST_NODE_AS_EXPRESSION)), span, sizeof(TsTypeExprNode));
-    expression->inner = inner;
-    expression->target_type = (TsTypeNode*)target_type;
-    return (JsAstNode*)expression;
+    (void)tp;
+    (void)span;
+    (void)satisfies;
+    (void)assertion;
+    return inner;
 }
 
 JsAstNode* build_js_non_null_from_child(JsTranspiler* tp, SourceSpan span,
@@ -1496,11 +1482,10 @@ JsAstNode* build_js_non_null_from_child(JsTranspiler* tp, SourceSpan span,
         log_error("JavaScript non-null expression has no operand");
         return NULL;
     }
-    TsNonNullNode* expression = (TsNonNullNode*)alloc_js_ast_node_span(tp,
-        (JsAstNodeType)TS_AST_NODE_NON_NULL_EXPRESSION, span,
-        sizeof(TsNonNullNode));
-    expression->inner = inner;
-    return (JsAstNode*)expression;
+    // Non-null assertions are type-only and have no JavaScript runtime form.
+    (void)tp;
+    (void)span;
+    return inner;
 }
 
 static bool js_ast_string_is_use_strict(JsAstNode* node) {
@@ -1596,27 +1581,10 @@ bool js_ast_body_has_use_strict_directive_source(JsTranspiler* tp,
     return false;
 }
 
-SourceSpan js_ts_annotation_span(JsTranspiler* tp, SourceSpan type_span) {
-    if (!tp || !tp->source || type_span.start_byte > tp->source_length ||
-            type_span.end_byte < type_span.start_byte ||
-            type_span.end_byte > tp->source_length) {
-        return type_span;
-    }
-    uint32_t start = type_span.start_byte;
-    while (start > 0) {
-        char ch = tp->source[start - 1];
-        if (ch != ' ' && ch != '\t' && ch != '\n' && ch != '\r') break;
-        start--;
-    }
-    if (start > 0 && tp->source[start - 1] == ':') start--;
-    type_span.start_byte = start;
-    return type_span;
-}
-
 // build a function from parser-owned children after the body has reduced.
 static JsAstNode* build_js_function_from_children_common(
         JsTranspiler* tp, SourceSpan span, JsAstNode* name, JsAstNode* params,
-        JsAstNode* body, JsAstNode* return_type, bool async, bool generator,
+        JsAstNode* body, Type* return_type, bool async, bool generator,
         bool declaration, bool arrow) {
     if (!tp || !body || (name && name->node_type != JS_AST_NODE_IDENTIFIER)) {
         log_error("JavaScript function has invalid children");
@@ -1625,10 +1593,8 @@ static JsAstNode* build_js_function_from_children_common(
     JsAstNodeType node_type = arrow ? JS_AST_NODE_ARROW_FUNCTION :
         (declaration ? JS_AST_NODE_FUNCTION_DECLARATION :
             JS_AST_NODE_FUNCTION_EXPRESSION);
-    size_t node_size = return_type || !tp->strict_js
-        ? sizeof(TsFunctionNode) : sizeof(JsFunctionNode);
     JsFunctionNode* function = (JsFunctionNode*)alloc_js_ast_node_span(tp,
-        node_type, span, node_size);
+        node_type, span, sizeof(JsFunctionNode));
     function->type = &TYPE_FUNC;
     function->params = params;
     function->body = body;
@@ -1638,11 +1604,7 @@ static JsAstNode* build_js_function_from_children_common(
     function->has_use_strict_directive =
         js_ast_body_has_use_strict_directive_source(tp, body);
     function->name = name ? ((JsIdentifierNode*)name)->name : NULL;
-    if (return_type) {
-        TsFunctionNode* ts_function = (TsFunctionNode*)function;
-        ts_function->return_type = (TsTypeAnnotationNode*)return_type;
-        function->ts_return_type = (TsTypeAnnotationNode*)return_type;
-    }
+    function->declared_return_type = return_type;
 
     return (JsAstNode*)function;
 }
@@ -1656,7 +1618,7 @@ JsAstNode* build_js_function_from_children(JsTranspiler* tp, SourceSpan span,
 
 JsAstNode* build_js_function_with_return_type_from_children(
         JsTranspiler* tp, SourceSpan span, JsAstNode* name, JsAstNode* params,
-        JsAstNode* body, JsAstNode* return_type, bool async, bool generator,
+        JsAstNode* body, Type* return_type, bool async, bool generator,
         bool declaration, bool arrow) {
     return build_js_function_from_children_common(tp, span, name, params, body,
         return_type, async, generator, declaration, arrow);
@@ -1680,7 +1642,7 @@ static void js_method_adopt_function_payload(JsMethodDefinitionNode* method, JsA
     method->is_async = fn->is_async;
     method->is_generator = fn->is_generator;
     method->has_use_strict_directive = fn->has_use_strict_directive;
-    method->ts_return_type = fn->ts_return_type;
+    method->declared_return_type = fn->declared_return_type;
     method->type = fn->type;
 }
 
