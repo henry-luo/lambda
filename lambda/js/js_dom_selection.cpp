@@ -61,13 +61,7 @@ static Item js_dom_flush_selectionchange(Item this_val, Item* args, int argc);
 #define make_str make_string_item
 #define make_key make_string_item
 
-struct JsDocRuntimeScope {
-    EvalContext* runtime_ctx;
-};
-
-static bool js_doc_runtime_enter_if_needed(DomDocument* doc, JsDocRuntimeScope* scope) {
-    if (!scope) return false;
-    memset(scope, 0, sizeof(JsDocRuntimeScope));
+static bool js_doc_runtime_enter_if_needed(DomDocument* doc) {
     if (!doc) return false;
     if (!doc->js.runtime) {
         if (!context) return false;
@@ -75,21 +69,12 @@ static bool js_doc_runtime_enter_if_needed(DomDocument* doc, JsDocRuntimeScope* 
         return true;
     }
     Runtime* runtime = doc->js.runtime;
-    scope->runtime_ctx = runtime_get_eval_context(runtime);
-    if (!scope->runtime_ctx || !runtime->heap || !runtime->name_pool) return false;
-    scope->runtime_ctx->heap = runtime->heap;
-    scope->runtime_ctx->name_pool = runtime->name_pool;
-    scope->runtime_ctx->type_list = runtime->type_list;
-    scope->runtime_ctx->pool = runtime->heap->pool;
-    if (!eval_context_init(scope->runtime_ctx)) return false;
-    if (scope->runtime_ctx->js_state &&
-            !js_runtime_state_init(scope->runtime_ctx)) return false;
+    EvalContext* runtime_ctx = runtime_get_eval_context(runtime);
+    if (!runtime_ctx || !runtime->heap || !runtime->name_pool) return false;
+    if (!runtime_context_bind_retained(runtime, runtime_ctx)) return false;
+    if (runtime_ctx->js_state && !js_runtime_state_init(runtime_ctx)) return false;
     js_dom_set_document(doc);
     return true;
-}
-
-static void js_doc_runtime_exit(JsDocRuntimeScope* scope) {
-    (void)scope;
 }
 
 static int item_to_int(Item v) {
@@ -1289,12 +1274,10 @@ extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
     if (anchor.node) doc = node_owning_doc(anchor.node);
     if (!doc && focus.node) doc = node_owning_doc(focus.node);
     if (!doc) doc = (DomDocument*)js_dom_get_document();
-    JsDocRuntimeScope scope;
-    if (!js_doc_runtime_enter_if_needed(doc, &scope)) return;
+    if (!js_doc_runtime_enter_if_needed(doc)) return;
     state->selectionchange_pending = true;
     Item cb = js_new_native_this_span_function(_wpt_selectionchange_fire);
     js_setTimeout(cb, (Item){.item = i2it(0)});
-    js_doc_runtime_exit(&scope);
 }
 
 // ----------------------------------------------------------------------------
@@ -1307,11 +1290,9 @@ extern "C" void js_dom_queue_selectionchange(DomSelection* sel) {
 static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
     (void)this_val; (void)args; (void)argc;
     DomDocument* doc = (DomDocument*)js_dom_get_document();
-    JsDocRuntimeScope scope;
-    if (!js_doc_runtime_enter_if_needed(doc, &scope)) return ItemNull;
+    if (!js_doc_runtime_enter_if_needed(doc)) return ItemNull;
     DocState* state = get_or_create_state();
     if (!state) {
-        js_doc_runtime_exit(&scope);
         return ItemNull;
     }
     DomElement* head = state->tc_selectionchange_head;
@@ -1345,7 +1326,6 @@ static Item _tc_selectionchange_drain(Item this_val, Item* args, int argc) {
     // All selectionchange callbacks for this checkpoint have returned; nodes
     // whose final queue pin was released may now be recycled together.
     dom_retire_sweep(doc);
-    js_doc_runtime_exit(&scope);
     return ItemNull;
 }
 
@@ -1355,41 +1335,34 @@ extern "C" void js_dom_queue_textcontrol_selectionchange(DomElement* elem) {
     if (!js_active_runtime_state) return;
     if (!js_input || !js_input->pool) return;
     DomDocument* doc = elem->doc;
-    JsDocRuntimeScope scope;
-    if (!js_doc_runtime_enter_if_needed(doc, &scope)) {
+    if (!js_doc_runtime_enter_if_needed(doc)) {
         return;
     }
     DocState* state = get_or_create_state();
     if (!state) {
-        js_doc_runtime_exit(&scope);
         return;
     }
     DomElementExt* task_state = elem->ensure_ext();
     if (!task_state) {
-        js_doc_runtime_exit(&scope);
         return;
     }
     if (task_state->selectionchange_event_pending) {
-        js_doc_runtime_exit(&scope);
         return;
     }
     DomNodeRef pending_ref = dom_node_ref((DomNode*)elem);
     if (!doc || !dom_node_ref_validate(doc, pending_ref) ||
         !dom_node_pin(doc, pending_ref, DOM_NODE_PIN_EVENT_QUEUE)) {
-        js_doc_runtime_exit(&scope);
         return;
     }
     task_state->selectionchange_event_pending = 1;
     task_state->selectionchange_event_next = state->tc_selectionchange_head;
     state->tc_selectionchange_head = elem;
     if (state->tc_selectionchange_drain_scheduled) {
-        js_doc_runtime_exit(&scope);
         return;
     }
     state->tc_selectionchange_drain_scheduled = true;
     Item cb = js_new_native_this_span_function(_tc_selectionchange_drain);
     js_setTimeout(cb, (Item){.item = i2it(0)});
-    js_doc_runtime_exit(&scope);
 }
 
 extern "C" void js_dom_selection_reset(void) {

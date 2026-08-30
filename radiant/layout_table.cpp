@@ -4729,6 +4729,16 @@ struct TableCaptionCollection {
     float total_height;
 };
 
+static void table_release_caption_collection(TableCaptionCollection* collection) {
+    if (!collection) return;
+    arraylist_free(collection->captions);
+    arraylist_free(collection->top_captions);
+    arraylist_free(collection->bottom_captions);
+    collection->captions = nullptr;
+    collection->top_captions = nullptr;
+    collection->bottom_captions = nullptr;
+}
+
 static TableCaptionCollection table_collect_captions(ViewTable* table) {
     TableCaptionCollection result = {
         arraylist_new(4), arraylist_new(4), arraylist_new(4), nullptr,
@@ -5044,6 +5054,7 @@ static void table_publish_vertical_geometry(LayoutContext* lycon, ViewTable* tab
     table->content_width = table->width;
     table->content_height = table->height;
     layout_normalize_vertical_breaks(table);
+    table_release_caption_collection(&captions);
 }
 
 static float table_measure_caption_width_contribution(LayoutContext* lycon,
@@ -6663,6 +6674,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
             }
         }
+        table_release_caption_collection(&caption_collection);
         return;
     }
     int columns = meta->column_count;
@@ -7455,6 +7467,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     arraylist_free(ordered_elements);
     table_metadata_destroy(meta);
     scratch_free(&lycon->scratch, col_x_positions);
+    table_release_caption_collection(&caption_collection);
     #undef GRID
 }
 

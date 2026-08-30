@@ -49,9 +49,7 @@ static void jm_emit_function_decl_runtime_bindings(JsMirTranspiler* mt,
     // Function declarations share module persistence and sloppy-eval export rules regardless of closure shape.
     JsModuleConstEntry* pmc = jm_find_module_const(mt, vname);
     if (pmc && pmc->const_type == MCONST_MODVAR) {
-        jm_call_void_2(mt, "js_set_module_var",
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)pmc->int_val),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+        jm_store_module_var(mt, (uint32_t)pmc->int_val, var_reg);
     }
     if (mt->is_eval_direct && !mt->is_global_strict) {
         MIR_reg_t fk = jm_box_property_name_literal(mt, fn->name->chars, fn->name->len);
@@ -618,118 +616,113 @@ static void jm_mark_mixed_loop_parent_link(JsFuncCollected* child, JsFuncCollect
         child->name, child->closure_env_parent_link_slot);
 }
 
-static void jm_count_lexical_pattern_name_for_slot(JsAstNode* pat, const char* name, int* count) {
-    if (!pat || !name || !count) return;
-    struct hashmap* names = hashmap_new(sizeof(JsNameSetEntry), 8, 0, 0,
-        jm_name_hash, jm_name_cmp, NULL, NULL);
-    if (!names) return;
-    jm_collect_pattern_names(pat, names);
-    JsNameSetEntry key;
-    memset(&key, 0, sizeof(key));
-    key.name = jm_persist_name(name);
-    if (hashmap_get(names, &key)) (*count)++;
-    hashmap_free(names);
+static bool jm_entry_requires_distinct_lexical_slot(NameEntry* entry) {
+    return entry && (entry->is_lexical || entry->is_parameter ||
+        (entry->node && entry->node->node_type == JS_AST_NODE_FUNCTION_DECLARATION));
 }
 
-static void jm_count_lexical_binding_name_for_slot(JsAstNode* node, const char* name, int* count) {
-    if (!node || !name || !count) return;
-    switch (node->node_type) {
-    case JS_AST_NODE_BLOCK_STATEMENT:
-        for (JsAstNode* s = ((JsBlockNode*)node)->statements; s; s = s->next) {
-            jm_count_lexical_binding_name_for_slot(s, name, count);
-        }
-        return;
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
-        if (vd->kind != JS_VAR_LET && vd->kind != JS_VAR_CONST) return;
-        for (JsAstNode* d = vd->declarations; d; d = d->next) {
-            if (d->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
-                jm_count_lexical_pattern_name_for_slot(((JsVariableDeclaratorNode*)d)->id, name, count);
-            }
-        }
-        return;
+enum {
+    JM_SCOPE_SLOT_HAS_LEXICAL = 1 << 0,
+    JM_SCOPE_SLOT_HAS_FUNCTION_VAR = 1 << 1,
+    JM_SCOPE_SLOT_HAS_MULTIPLE_LEXICALS = 1 << 2,
+};
+
+static JsScope* jm_nearest_function_scope(JsScope* scope) {
+    for (; scope; scope = scope->parent) {
+        if (scope->kind == SCOPE_KIND_FUNCTION) return scope;
     }
-    case JS_AST_NODE_FUNCTION_DECLARATION: {
-        JsFunctionNode* fn = (JsFunctionNode*)node;
-        if (fn->name && strcmp(jm_var_name(fn->name), name) == 0) (*count)++;
-        return;
+    return NULL;
+}
+
+static void jm_note_scope_slot_collision(FnAnalysis* analysis,
+        JsScope* scope, JsScope* function_scope, NameEntry* binding) {
+    if (!analysis || !scope || !function_scope || !binding || !binding->name) return;
+    if (!analysis->js_cached_scope_slot_collisions) {
+        analysis->js_cached_scope_slot_collisions = hashmap_new(
+            sizeof(JsNameSetEntry), 16, 0, 0, jm_name_hash, jm_name_cmp,
+            NULL, NULL);
+        if (!analysis->js_cached_scope_slot_collisions) {
+            log_error("js-mir: failed to allocate indexed scope-slot collision cache");
+            abort();
+        }
     }
-    case JS_AST_NODE_IF_STATEMENT:
-        jm_count_lexical_binding_name_for_slot(((JsIfNode*)node)->consequent, name, count);
-        jm_count_lexical_binding_name_for_slot(((JsIfNode*)node)->alternate, name, count);
-        return;
-    case AST_NODE_LOOP:
-        if (((AstLoopControlNode*)node)->form == LOOP_FORM_FOR_C) {
-            jm_count_lexical_binding_name_for_slot(((AstLoopControlNode*)node)->init, name, count);
+    JsNameSetEntry key = {};
+    key.name = jm_persist_name(jm_var_name(binding->name));
+    JsNameSetEntry* cached = (JsNameSetEntry*)hashmap_get(
+        analysis->js_cached_scope_slot_collisions, &key);
+    if (!cached) {
+        hashmap_set(analysis->js_cached_scope_slot_collisions, &key);
+        cached = (JsNameSetEntry*)hashmap_get(
+            analysis->js_cached_scope_slot_collisions, &key);
+        if (!cached) {
+            log_error("js-mir: failed to publish indexed scope-slot collision fact");
+            abort();
         }
-        jm_count_lexical_binding_name_for_slot(((AstLoopControlNode*)node)->body, name, count);
-        return;
-    case JS_AST_NODE_FOR_OF_STATEMENT:
-    case JS_AST_NODE_FOR_IN_STATEMENT:
-        jm_count_lexical_binding_name_for_slot(((JsForOfNode*)node)->left, name, count);
-        jm_count_lexical_binding_name_for_slot(((JsForOfNode*)node)->body, name, count);
-        return;
-    case JS_AST_NODE_TRY_STATEMENT:
-        jm_count_lexical_binding_name_for_slot(((JsTryNode*)node)->block, name, count);
-        jm_count_lexical_binding_name_for_slot(((JsTryNode*)node)->handler, name, count);
-        jm_count_lexical_binding_name_for_slot(((JsTryNode*)node)->finalizer, name, count);
-        return;
-    case JS_AST_NODE_CATCH_CLAUSE:
-        jm_count_lexical_pattern_name_for_slot(((JsCatchNode*)node)->param, name, count);
-        jm_count_lexical_binding_name_for_slot(((JsCatchNode*)node)->body, name, count);
-        return;
-    case JS_AST_NODE_SWITCH_STATEMENT:
-        for (JsAstNode* c = ((JsSwitchNode*)node)->cases; c; c = c->next) {
-            jm_count_lexical_binding_name_for_slot(c, name, count);
+    }
+    if (jm_entry_requires_distinct_lexical_slot(binding)) {
+        if ((cached->var_kind & JM_SCOPE_SLOT_HAS_LEXICAL) &&
+                cached->entry != binding) {
+            cached->var_kind |= JM_SCOPE_SLOT_HAS_MULTIPLE_LEXICALS;
+        } else {
+            cached->entry = binding;
         }
-        return;
-    case JS_AST_NODE_SWITCH_CASE:
-        for (JsAstNode* s = ((JsSwitchCaseNode*)node)->consequent; s; s = s->next) {
-            jm_count_lexical_binding_name_for_slot(s, name, count);
-        }
-        return;
-    case JS_AST_NODE_LABELED_STATEMENT:
-        jm_count_lexical_binding_name_for_slot(((JsLabeledStatementNode*)node)->body, name, count);
-        return;
-    case JS_AST_NODE_FUNCTION_EXPRESSION:
-    case JS_AST_NODE_ARROW_FUNCTION:
-    case JS_AST_NODE_METHOD_DEFINITION:
-    case JS_AST_NODE_CLASS_DECLARATION:
-    case JS_AST_NODE_CLASS_EXPRESSION:
-        return;
-    default:
-        return;
+        cached->var_kind |= JM_SCOPE_SLOT_HAS_LEXICAL;
+    } else if (scope == function_scope) {
+        cached->var_kind |= JM_SCOPE_SLOT_HAS_FUNCTION_VAR;
     }
 }
 
-static struct hashmap* jm_cached_function_locals(JsMirTranspiler* mt,
-        JsFuncCollected* fc, bool var_only);
-
-static bool jm_parent_declares_function_var(JsMirTranspiler* mt,
-        JsFuncCollected* parent, const char* name) {
-    if (!parent || !parent->node || !parent->node->body || !name) return false;
-    struct hashmap* vars = jm_cached_function_locals(mt, parent, true);
-    if (!vars) return false;
-    JsNameSetEntry lookup;
-    memset(&lookup, 0, sizeof(lookup));
-    lookup.name = jm_persist_name(name);
-    JsNameSetEntry* entry = (JsNameSetEntry*)hashmap_get(vars, &lookup);
-    return entry && !entry->from_func_decl;
+static void jm_prepare_scope_slot_collisions(JsMirTranspiler* mt) {
+    if (!mt || mt->scope_slot_collisions_prepared) return;
+    mt->scope_slot_collisions_prepared = true;
+    if (!mt->tp) return;
+    AstIndex* index = &mt->tp->ast_index;
+    if (!index->scope_count) return;
+    JsFuncCollected** functions_by_scope = (JsFuncCollected**)mem_calloc(
+        index->scope_count, sizeof(JsFuncCollected*), MEM_CAT_JS_RUNTIME);
+    if (!functions_by_scope) {
+        log_error("js-mir: failed to allocate indexed function-scope table");
+        abort();
+    }
+    for (int i = 0; i < mt->func_count; i++) {
+        JsFuncCollected* function = &mt->func_entries[i];
+        JsScope* scope = function->node ? function->node->vars : NULL;
+        if (scope && scope->scope_id < index->scope_count) {
+            functions_by_scope[scope->scope_id] = function;
+        }
+    }
+    for (uint32_t scope_id = 0; scope_id < index->scope_count; scope_id++) {
+        JsScope* scope = index->scopes[scope_id];
+        JsScope* function_scope = jm_nearest_function_scope(scope);
+        if (!function_scope || function_scope->scope_id >= index->scope_count) continue;
+        JsFuncCollected* function = functions_by_scope[function_scope->scope_id];
+        FnAnalysis* analysis = jm_function_analysis(function);
+        if (!function || !analysis) continue;
+        for (NameEntry* binding = scope->first; binding; binding = binding->next) {
+            jm_note_scope_slot_collision(analysis, scope, function_scope, binding);
+        }
+    }
+    mem_free(functions_by_scope);
 }
 
-static bool jm_parent_var_has_lexical_slot_collision(JsMirTranspiler* mt,
-        JsFuncCollected* parent, const char* name) {
-    if (!parent || !parent->node || !parent->node->body || !name) return false;
-    int count = 0;
-    for (JsAstNode* param = parent->node->params; param; param = param->next) {
-        jm_count_lexical_pattern_name_for_slot(param, name, &count);
-    }
-    jm_count_lexical_binding_name_for_slot(parent->node->body, name, &count);
-    // Existing lexical/parameter collisions already need keyed slots. A
-    // captured var and any same-named nested lexical require them too;
-    // distinct cells; otherwise the lexical assignment overwrites the value
-    // observed by a callback created after that nested block has exited.
-    return count > 1 || (count > 0 && jm_parent_declares_function_var(mt, parent, name));
+static bool jm_parent_has_slot_identity_collision(JsMirTranspiler* mt,
+        JsFuncCollected* parent, const FnCapture* cap) {
+    if (!mt || !mt->tp || !parent || !parent->node || !parent->node->vars ||
+            !cap || !cap->name) return false;
+    // The indexed prepass visits each binding once; repeated closure captures
+    // only perform this name-keyed lookup, not another full scope traversal.
+    jm_prepare_scope_slot_collisions(mt);
+    FnAnalysis* analysis = jm_function_analysis(parent);
+    if (!analysis || !analysis->js_cached_scope_slot_collisions) return false;
+    JsNameSetEntry key = {};
+    key.name = jm_persist_name(cap->name);
+    JsNameSetEntry* cached = (JsNameSetEntry*)hashmap_get(
+        analysis->js_cached_scope_slot_collisions, &key);
+    if (!cached) return false;
+    int flags = cached->var_kind;
+    return (flags & JM_SCOPE_SLOT_HAS_MULTIPLE_LEXICALS) ||
+        ((flags & (JM_SCOPE_SLOT_HAS_LEXICAL | JM_SCOPE_SLOT_HAS_FUNCTION_VAR)) ==
+            (JM_SCOPE_SLOT_HAS_LEXICAL | JM_SCOPE_SLOT_HAS_FUNCTION_VAR));
 }
 
 static bool jm_modvar_is_iife_scope_binding(JsModuleConstEntry* mc) {
@@ -800,7 +793,7 @@ static const char* jm_capture_scope_env_slot_key(JsMirTranspiler* mt,
     // Only class methods need a source-keyed forced capture to distinguish an
     // IIFE lexical from its promoted same-named module binding; keying every
     // forced capture disconnects ordinary closures from their parent writes.
-    bool needs_binding_key = jm_parent_var_has_lexical_slot_collision(mt, parent, cap->name) ||
+    bool needs_binding_key = jm_parent_has_slot_identity_collision(mt, parent, cap) ||
         (cap->force_env_capture && child && child->is_class_method);
     if (needs_binding_key) {
         if (!cap->scope_env_key || !cap->scope_env_key[0] ||
@@ -1266,7 +1259,9 @@ void jm_cleanup_deferred_mir() {
     if (!js_active_runtime_state) return;
     js_dynfunc_cache_reset();
     for (int i = 0; i < module_mir_context_count; i++) {
-        MIR_finish(module_mir_contexts[i]);
+        // Deferred eval units use the same JIT generator as ordinary units;
+        // finishing only MIR leaves the generator arena and native code live.
+        jit_cleanup_mode(module_mir_contexts[i], !g_mir_interp_mode);
         if (module_mir_source_buffers[i]) mem_free(module_mir_source_buffers[i]);
     }
     module_mir_context_count = 0;
@@ -4054,9 +4049,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                 }
                 MIR_reg_t tdz_val = jm_new_reg(mt, "tdz_init", MIR_T_I64);
                 jm_emit_reg_op(mt, MIR_MOV, tdz_val, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_TDZ));
-                jm_call_void_2(mt, "js_set_module_var",
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, tdz_val));
+                jm_store_module_var(mt, (uint32_t)mce->int_val, tdz_val);
             }
         }
     }
@@ -4099,9 +4092,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                     init_val = jm_new_reg(mt, "var_init", MIR_T_I64);
                     jm_emit_reg_op(mt, MIR_MOV, init_val, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEF_VAL));
                 }
-                jm_call_void_2(mt, "js_set_module_var",
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, init_val));
+                jm_store_module_var(mt, (uint32_t)mce->int_val, init_val);
                 if (!mt->is_module && !mt->is_eval_direct &&
                     !mce->is_iife_var && !mce->is_implicit_global) {
                     const char* js_name = mce->name;
@@ -4162,9 +4153,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                 mce->annexb_suppressed = true;
                 MIR_reg_t unresolved_reg = jm_new_reg(mt, "annexb_unres", MIR_T_I64);
                 jm_emit_reg_op(mt, MIR_MOV, unresolved_reg, MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR));
-                jm_call_void_2(mt, "js_set_module_var",
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, unresolved_reg));
+                jm_store_module_var(mt, (uint32_t)mce->int_val, unresolved_reg);
                 continue;
             }
             const char* js_name = mce->name;
@@ -4301,9 +4290,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             // Also store null to module var so closures see the initial value
             JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
             if (mc && mc->const_type == MCONST_CLASS) {
-                jm_call_void_2(mt, "js_set_module_var",
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, var_reg));
+                jm_store_module_var(mt, (uint32_t)mc->int_val, var_reg);
             }
         }
     }
@@ -4479,14 +4466,10 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                     // Store class object in module var
                     JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
                     if (mc && mc->const_type == MCONST_CLASS) {
-                        jm_call_void_2(mt, "js_set_module_var",
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mc->int_val),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                        jm_store_module_var(mt, (uint32_t)mc->int_val, cls_obj);
                     }
                     if (ce->inner_module_var_index >= 0) {
-                        jm_call_void_2(mt, "js_set_module_var",
-                            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)ce->inner_module_var_index),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj));
+                        jm_store_module_var(mt, (uint32_t)ce->inner_module_var_index, cls_obj);
                     }
                     if (!mt->is_module) {
                         MIR_reg_t class_key = jm_box_property_name_literal(mt,
@@ -4687,8 +4670,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             const char* js_name = mce->name;
             if (strncmp(js_name, "_js_", 4) == 0) js_name += 4;
             MIR_reg_t key_reg = jm_box_property_name_literal(mt, js_name, strlen(js_name));
-            MIR_reg_t val_reg = jm_call_1(mt, "js_get_module_var", MIR_T_I64,
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)mce->int_val));
+            MIR_reg_t val_reg = jm_load_module_var(mt, (uint32_t)mce->int_val);
             MIR_reg_t eval_env_active = jm_call_0(mt, "js_eval_env_is_active", MIR_T_I64);
             MIR_label_t global_export = jm_new_label(mt);
             MIR_label_t export_done = jm_new_label(mt);
@@ -5028,30 +5010,32 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     // owner before its initializer creates values or property names.
     js_runtime_set_input(module_input);
 
-    // Allocate per-module variable storage and switch to it.
-    uint32_t prev_module_state_id = js_get_active_module_state_id();
-    const char* prev_module_current_file = context->current_file;
+    // Allocate per-module variable storage and switch to it.  The shared
+    // scopes restore importer state across nested evaluation (D7.2.1).
+    RuntimeCurrentFileScope current_file(context,
+        filename ? filename : context->current_file);
+    RuntimeModuleStateScope module_state(context);
+    RuntimeExecutionScope execution_scope(context);
     // Dynamic imports use the executing module's filename for relative
     // resolution; the batch entry's previous filename would resolve against
     // the worker instead of the module directory (D7.2.3, D8.5.1).
-    context->current_file = filename ? filename : prev_module_current_file;
-    Item prev_namespace = js_set_active_module_namespace(namespace_obj);
-    if (!js_activate_module_state((uint32_t)mt->module_var_count)) {
-        context->current_file = prev_module_current_file;
+    JsModuleNamespaceScope module_namespace(namespace_obj, true);
+    if (!lambda_module_state_reserve_and_activate((uint32_t)mt->module_var_count)) {
         return ItemNull;
     }
     if (!js_link_compiled_name_table(mt)) {
-        context->current_file = prev_module_current_file;
         return ItemNull;
     }
-    if (js_dynamic_import_suppress_module_drain <= 0) {
+    if (execution_scope.is_outermost() &&
+            !js_runtime_state.event_loop.callback_running &&
+            js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_init();
     }
     // Js57 P7d: save the module's evaluation context (module-state id +
     // namespace already on JsModule) and stash js_main as the deferred entry.
     // Used by the AEO drain to re-enter js_main with the same module-level
     // state when a deferred body / post-await chunk runs.
-    js_module_save_context(spec_item, js_get_active_module_state_id());
+    js_module_save_context(spec_item, lambda_active_module_state_id());
     js_module_set_deferred_main_ptr(spec_item, (void*)js_main);
     // Modules that already have TLA-transitive deps were registered as async
     // parents during jm_load_imports; their bodies must wait for those deps
@@ -5079,9 +5063,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     if (!module_body_threw && js_dynamic_import_suppress_module_drain <= 0) {
         js_event_loop_drain();
     }
-    js_set_active_module_state_id(prev_module_state_id);
-    js_set_active_module_namespace(prev_namespace);
-    context->current_file = prev_module_current_file;
     // Js57 P4 (Track B3): decrement and (at depth 0) flush queued post-await
     // chunks. Sits AFTER the namespace/module-vars restore so
     // continuations that touch module-level state read whichever active

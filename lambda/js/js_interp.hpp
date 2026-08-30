@@ -54,6 +54,7 @@ void js_interp_generator_trace_continuations(JsGeneratorStateRecord* state,
                                              struct gc_heap* gc);
 void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
 struct JsAsyncContextStateRecord;
+void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state);
 extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
                                         Item input);
 bool js_interp_script_is_supported(JsScript* script);

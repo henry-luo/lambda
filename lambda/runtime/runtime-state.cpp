@@ -6,8 +6,7 @@
 #include "../../lib/memtrack.h"
 #include "../../lib/log.h"
 
-// Keep the active evaluator in the runtime layer so runner orchestration and
-// focused runtime fixtures share one provider without linking each other.
+// The runtime layer owns the active evaluator for runners and fixtures.
 __thread EvalContext* context = nullptr;
 
 bool eval_context_init(EvalContext* owner) {
@@ -16,16 +15,13 @@ bool eval_context_init(EvalContext* owner) {
         return false;
     }
     if (context && context != owner) {
-        // A live evaluator thread cannot borrow another isolate at a nested
-        // boundary; that work must be routed to the other owner thread.
+        // Nested work cannot borrow another isolate's evaluator thread.
         log_error("eval-thread-init: refusing context switch current=%p owner=%p",
                   (void*)context, (void*)owner);
         return false;
     }
     context = owner;
-    // The side-stack regions are thread-local while EvalContext is reusable;
-    // rebinding here prevents a context handoff from pairing stale pointers
-    // with the new thread's uninitialized native root region.
+    // Rebind the reusable context to this thread's side-stack roots.
     if (!lambda_side_stack_bind_for((Context*)owner)) {
         context = nullptr;
         log_error("eval-thread-init: failed to bind side stack for owner=%p",
@@ -49,6 +45,62 @@ bool eval_context_shutdown(EvalContext* owner) {
     return true;
 }
 
+bool runtime_context_bind_retained(Runtime* runtime, EvalContext* owner) {
+    if (!runtime || !owner || !runtime->heap || !runtime->name_pool) {
+        log_error("runtime-context-bind: missing retained runtime owner");
+        return false;
+    }
+    owner->runtime = runtime;
+    owner->heap = runtime->heap;
+    owner->name_pool = runtime->name_pool;
+    owner->type_list = runtime->type_list;
+    owner->pool = runtime->heap->pool;
+    return eval_context_init(owner);
+}
+
+void runtime_context_publish_owners(Runtime* runtime, EvalContext* owner) {
+    if (!runtime || !owner) return;
+    owner->runtime = runtime;
+    runtime->heap = owner->heap;
+    runtime->name_pool = owner->name_pool;
+    runtime->type_list = (ArrayList*)owner->type_list;
+}
+
+Item runtime_publish_result(EvalContext* owner, Item result) {
+    if (!owner) return result;
+    owner->result = result;
+    if (owner->heap) owner->heap->result_root = result.item;
+    return result;
+}
+
+RuntimeCurrentFileScope::RuntimeCurrentFileScope(EvalContext* owner,
+        const char* filename)
+        : owner_(owner), previous_(owner ? owner->current_file : NULL) {
+    if (owner_ && filename) owner_->current_file = filename;
+}
+
+RuntimeCurrentFileScope::~RuntimeCurrentFileScope() { if (owner_) owner_->current_file = previous_; }
+
+RuntimeExecutionScope::RuntimeExecutionScope(EvalContext* owner)
+        : owner_(owner), outermost_(owner && owner->execution_depth == 0) {
+    if (owner_) owner_->execution_depth++;
+}
+
+RuntimeExecutionScope::~RuntimeExecutionScope() { if (owner_ && owner_->execution_depth > 0) owner_->execution_depth--; }
+
+RuntimeModuleStateScope::RuntimeModuleStateScope(EvalContext* owner)
+        : owner_(owner), previous_(owner ? owner->active_module_state : NULL),
+          restore_previous_(true) {}
+
+RuntimeModuleStateScope::~RuntimeModuleStateScope() {
+    // Top-level entries retain their slab; nested entries restore the caller (D7.2.1).
+    if (restore_previous_ && owner_ && context == owner_ && previous_) {
+        owner_->active_module_state = previous_;
+    }
+}
+
+bool RuntimeModuleStateScope::activate(uint32_t module_id) { return owner_ && context == owner_ && lambda_module_state_activate(module_id); }
+
 extern "C" Context* eval_context_tls_runtime(void) {
     return (Context*)context;
 }
@@ -57,6 +109,14 @@ static uint32_t module_state_capacity_for(uint32_t module_id) {
     uint32_t capacity = 8;
     while (capacity <= module_id) capacity *= 2;
     return capacity;
+}
+
+// All module-slab lookup validates against the owning context.
+static LambdaModuleState* lambda_module_state_at(EvalContext* owner,
+        uint32_t module_id) {
+    return owner && owner->module_states &&
+            module_id < owner->module_state_capacity
+        ? owner->module_states[module_id] : NULL;
 }
 
 static bool lambda_property_key_spec_decode(const PropertyKeySpec* specs,
@@ -212,15 +272,51 @@ extern "C" bool lambda_module_state_prepare(uint32_t module_id,
     return true;
 }
 
+extern "C" uint32_t lambda_active_module_state_id(void) {
+    return context && context->active_module_state
+        ? context->active_module_state->module_id : UINT32_MAX;
+}
+
+extern "C" bool lambda_module_state_activate(uint32_t module_id) {
+    EvalContext* owner = context;
+    LambdaModuleState* state = module_id == UINT32_MAX
+        ? NULL : lambda_module_state_at(owner, module_id);
+    // Empty modules activate their slab before a REPL append can allocate vars.
+    if (!state) return false;
+    owner->active_module_state = state;
+    return true;
+}
+
+extern "C" bool lambda_module_state_reserve_and_activate(uint32_t var_count) {
+    uint32_t module_id = UINT32_MAX;
+    return lambda_module_state_reserve(var_count, &module_id) &&
+        lambda_module_state_activate(module_id);
+}
+
+extern "C" bool lambda_module_state_copy_var_prefix(uint32_t source_module_id,
+        uint32_t destination_module_id, uint32_t count) {
+    EvalContext* owner = context;
+    LambdaModuleState* source = lambda_module_state_at(owner, source_module_id);
+    LambdaModuleState* destination = lambda_module_state_at(owner,
+        destination_module_id);
+    if (!source || !destination || count > source->var_count ||
+            count > destination->var_count) return false;
+    if (count > 0) {
+        memcpy(destination->vars, source->vars, (size_t)count * sizeof(Item));
+        memcpy(destination->var_payloads, source->var_payloads,
+            (size_t)count * sizeof(uint64_t));
+    }
+    return true;
+}
+
 extern "C" bool lambda_module_state_grow_vars(uint32_t module_id,
         uint32_t var_count) {
     EvalContext* owner = context;
     if (!owner) return false;
-    if (module_id >= owner->module_state_capacity || !owner->module_states ||
-            !owner->module_states[module_id]) {
+    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
+    if (!state) {
         return lambda_module_state_prepare(module_id, var_count);
     }
-    LambdaModuleState* state = owner->module_states[module_id];
     if (var_count <= state->var_count) return true;
 
     if (var_count <= state->var_capacity) {
@@ -275,9 +371,8 @@ extern "C" bool lambda_module_state_snapshot(uint32_t module_id,
     if (!snapshot) return false;
     memset(snapshot, 0, sizeof(*snapshot));
     EvalContext* owner = context;
-    if (!owner || module_id >= owner->module_state_capacity ||
-            !owner->module_states || !owner->module_states[module_id]) return false;
-    LambdaModuleState* state = owner->module_states[module_id];
+    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
+    if (!state) return false;
     snapshot->count = state->var_count;
     if (snapshot->count == 0) return true;
     snapshot->vars = (Item*)mem_calloc(snapshot->count, sizeof(Item), MEM_CAT_EVAL);
@@ -302,9 +397,8 @@ extern "C" bool lambda_module_state_snapshot(uint32_t module_id,
 extern "C" bool lambda_module_state_restore(uint32_t module_id,
         const LambdaModuleStateSnapshot* snapshot) {
     EvalContext* owner = context;
-    if (!snapshot || !owner || module_id >= owner->module_state_capacity ||
-            !owner->module_states || !owner->module_states[module_id]) return false;
-    LambdaModuleState* state = owner->module_states[module_id];
+    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
+    if (!snapshot || !state) return false;
     if (snapshot->count > state->var_count) return false;
     if (snapshot->count) {
         memcpy(state->vars, snapshot->vars, snapshot->count * sizeof(Item));
@@ -332,8 +426,7 @@ extern "C" void lambda_module_state_snapshot_dispose(
 }
 
 static void lambda_module_state_release_at(EvalContext* owner, uint32_t module_id) {
-    if (!owner || module_id >= owner->module_state_capacity || !owner->module_states) return;
-    LambdaModuleState* state = owner->module_states[module_id];
+    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
     if (!state) return;
     // A cleared REPL module must drop its exact root before its Script/AST is
     // destroyed; otherwise stale bindings remain live for the next session.
@@ -367,7 +460,7 @@ extern "C" bool lambda_module_state_prepare_layout(const LambdaModuleLayout* lay
     if (!layout || !lambda_module_state_prepare(layout->module_id,
             layout->var_count)) return false;
     EvalContext* owner = context;
-    LambdaModuleState* state = owner->module_states[layout->module_id];
+    LambdaModuleState* state = lambda_module_state_at(owner, layout->module_id);
     if (!state || state->property_key_count == 0) {
         if (state) state->property_key_count = layout->property_key_count;
     }
@@ -382,9 +475,8 @@ extern "C" bool lambda_module_state_prepare_layout(const LambdaModuleLayout* lay
 extern "C" bool lambda_module_state_link_property_keys(uint32_t module_id,
         const PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size) {
     EvalContext* owner = context;
-    if (!owner || module_id >= owner->module_state_capacity ||
-            !owner->module_states || !owner->module_states[module_id]) return false;
-    LambdaModuleState* state = owner->module_states[module_id];
+    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
+    if (!state) return false;
     if (state->property_key_count != 0 && state->property_key_count != count) {
         log_error("module-key-link: sealed count changed for module %u", module_id);
         return false;
@@ -397,9 +489,8 @@ extern "C" bool lambda_module_state_link_property_keys(uint32_t module_id,
 extern "C" bool lambda_module_state_append_property_keys(uint32_t module_id,
         const PropertyKeySpec* specs, uint32_t count, uint32_t bytes_size) {
     EvalContext* owner = context;
-    if (!owner || module_id >= owner->module_state_capacity ||
-            !owner->module_states || !owner->module_states[module_id]) return false;
-    LambdaModuleState* state = owner->module_states[module_id];
+    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
+    if (!state) return false;
     if (count == 0) return true;
     if (state->property_key_count > UINT32_MAX - count) return false;
 
@@ -477,18 +568,10 @@ extern "C" bool lambda_active_module_state_ensure_vars(
     return true;
 }
 
-extern "C" bool lambda_active_js_module_state_ensure_vars(
-        uint32_t required_var_count) {
-    // Preserve the imported symbol for cached JS MIR built before the shared
-    // EvalContext selector was named generically.
-    return lambda_active_module_state_ensure_vars(required_var_count);
-}
-
 extern "C" bool lambda_module_state_bind_static(uint32_t module_id,
         void* consts, void* type_list) {
     EvalContext* owner = context;
-    if (!owner || module_id >= owner->module_state_capacity) return false;
-    LambdaModuleState* state = owner->module_states[module_id];
+    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
     if (!state) return false;
     state->consts = consts;
     state->type_list = type_list;
@@ -497,9 +580,8 @@ extern "C" bool lambda_module_state_bind_static(uint32_t module_id,
 
 extern "C" uint32_t lambda_module_state_property_key_count(uint32_t module_id) {
     EvalContext* owner = context;
-    if (!owner || module_id >= owner->module_state_capacity ||
-            !owner->module_states || !owner->module_states[module_id]) return 0;
-    return owner->module_states[module_id]->property_key_count;
+    LambdaModuleState* state = lambda_module_state_at(owner, module_id);
+    return state ? state->property_key_count : 0;
 }
 
 extern "C" Item lambda_name_id_to_item(NameId name_id) {
@@ -516,6 +598,17 @@ extern "C" uint64_t lambda_module_name_id_at(void* module_state,
         return (uint64_t)NAME_ID_NONE;
     }
     return (uint64_t)state->property_keys[index];
+}
+
+extern "C" uint64_t lambda_active_module_name_id(uint32_t index) {
+    return lambda_module_name_id_at(context ? context->active_module_state : NULL, index);
+}
+
+extern "C" Item lambda_active_module_name_item(uint32_t module_name_index,
+        NameId direct_name_id) {
+    NameId name_id = direct_name_id != NAME_ID_NONE ? direct_name_id
+        : (NameId)lambda_active_module_name_id(module_name_index);
+    return lambda_name_id_to_item(name_id);
 }
 
 extern "C" void* lambda_module_const_at(const LambdaModuleLayout* layout,
@@ -575,6 +668,14 @@ extern "C" void lambda_module_var_store(void* module_state, uint32_t slot,
     }
 }
 
+extern "C" Item lambda_active_module_var_at(uint32_t slot) {
+    return lambda_module_var_at(context ? context->active_module_state : NULL, slot);
+}
+
+extern "C" void lambda_active_module_var_store(uint32_t slot, Item item) {
+    lambda_module_var_store(context ? context->active_module_state : NULL, slot, item);
+}
+
 extern "C" void lambda_module_state_reset(void) {
     EvalContext* owner = context;
     if (!owner || !owner->module_states) return;
@@ -595,18 +696,7 @@ extern "C" void lambda_module_state_reset(void) {
 extern "C" void lambda_module_state_destroy(void) {
     EvalContext* owner = context;
     if (!owner || !owner->module_states) return;
-    owner->active_module_state = NULL;
-    for (uint32_t i = 0; i < owner->module_state_capacity; i++) {
-        LambdaModuleState* state = owner->module_states[i];
-        if (!state) continue;
-        if (state->vars && state->vars_registered) {
-            heap_unregister_gc_root_range((uint64_t*)state->vars);
-        }
-        mem_free(state->vars);
-        mem_free(state->var_payloads);
-        mem_free(state->property_keys);
-        mem_free(state);
-    }
+    lambda_module_state_release_from(0);
     mem_free(owner->module_states);
     owner->module_states = NULL;
     owner->module_state_capacity = 0;

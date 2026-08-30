@@ -6,7 +6,7 @@
       "in_func": "_js_anon1_#_body",
       "expect_seq": [
         { "pattern": "call\tjs_new_function_mir_p" },
-        { "pattern": "call\tjs_set_module_var_p" }
+        { "pattern": "call\tlambda_active_module_var_store_p" }
       ],
       "expect": [
         ", _js_helper_"

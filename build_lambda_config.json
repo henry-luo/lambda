@@ -49,7 +49,6 @@
     "lambda/js/parser/js_lexer.c",
     "lambda/js/parser/js_parser.c",
     "lambda/js/js_direct_scope.cpp",
-    "lambda/js/js_parser_compare.cpp",
     "lambda/jube/jube_node_zlib_codec.cpp",
     "lambda/serve/serve_utils.cpp",
     "lambda/serve/tls_handler.cpp"
@@ -69,8 +68,7 @@
   "defines": [
     "SQLITE_THREADSAFE=0",
     "SQLITE_OMIT_LOAD_EXTENSION",
-    "LAMBDA_NODE_MODULES_DYNAMIC_ONLY=1",
-    "JS_C_PRODUCTION"
+    "LAMBDA_NODE_MODULES_DYNAMIC_ONLY=1"
   ],
   "configurable_defines": {
     "JS_TEST262_FAST_PATHS": "1"
@@ -454,6 +452,11 @@
         "ThorVG",
         "pthread"
       ],
+      "linux": {
+        "additional_libraries": [
+          "gomp"
+        ]
+      },
       "windows": {
         "additional_libraries": [
           "dwrite",
@@ -701,8 +704,7 @@
         "pthread"
       ],
       "defines": [
-        "UTF8PROC_STATIC",
-        "JS_C_PRODUCTION"
+        "UTF8PROC_STATIC"
       ],
       "link": "static"
     },
@@ -1062,11 +1064,10 @@
         "std=c++17",
         "pedantic",
         "fdiagnostics-color=auto",
-        "fsanitize=address",
         "fno-omit-frame-pointer",
         "g3",
         "gline-tables-only",
-        "Og"
+        "O3"
       ],
       "linker_flags": [],
       "build_dir": "build_debug",
@@ -1075,18 +1076,20 @@
         "LAMBDA_JS_EXEC_PROFILE"
       ]
     },
-    "debug_profile": {
-      "output": "lambda-debug-profile.exe",
+    "debug_asan": {
+      "output": "lambda-debug-asan.exe",
       "flags": [
         "std=c++17",
         "pedantic",
         "fdiagnostics-color=auto",
-        "g3",
+        "fsanitize=address",
         "fno-omit-frame-pointer",
-        "O3"
+        "g3",
+        "gline-tables-only",
+        "Og"
       ],
       "linker_flags": [],
-      "build_dir": "build_debug_profile",
+      "build_dir": "build_debug_asan",
       "debug": true
     },
     "lambda-cst": {
@@ -3019,7 +3022,9 @@
             "additional_sources": [
               "radiant/animation.cpp",
               "radiant/css_animation.cpp",
+              "radiant/css_display.cpp",
               "radiant/css_cascade.cpp",
+              "radiant/css_display.cpp",
               "radiant/css_prop_table.cpp",
               "lambda/input/css/css_engine.cpp",
               "lambda/input/css/selector_matcher.cpp",
@@ -4756,9 +4761,6 @@
             "source": "test/test_js_parser_benchmark_gtest.cpp",
             "name": "JavaScript Parser Benchmark",
             "category": "extended",
-            "defines": [
-              "JS_C_PRODUCTION"
-            ],
             "dependencies": [
               "lambda-rt",
               "node-core",

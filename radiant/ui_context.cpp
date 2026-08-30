@@ -13,6 +13,7 @@
 #include "../lib/arena.h"
 #include "../lib/memtrack.h"
 #include "../lib/tagged.hpp"
+#include "../lambda/input/input.hpp"
 #include "../lambda/input/css/dom_element.hpp"  // For dom_document_destroy
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_runtime_state.hpp"
@@ -398,6 +399,8 @@ static void destroy_dom_owned_embed_images(DomNode* node) {
 void free_document(DomDocument* doc) {
     if (!doc) return;
 
+    Input* document_input = doc->input;
+
     // Module-owned DOM wrappers are non-owning; unroot wrappers before the
     // document arena destroys the native nodes they point at.
     radiant_dom_invalidate_document(doc);
@@ -489,6 +492,9 @@ void free_document(DomDocument* doc) {
 
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
+    // The DOM does not own the Input object, but its loader-created name and
+    // shape registries are external to the caller's Input pool.
+    input_release_auxiliary_resources(document_input);
 }
 
 void ui_context_cleanup(UiContext* uicon) {

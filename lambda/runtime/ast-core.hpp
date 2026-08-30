@@ -1251,6 +1251,7 @@ typedef struct FnAnalysis {
     struct hashmap* js_cached_all_locals;
     struct hashmap* js_cached_direct_lexicals;
     struct hashmap* js_cached_annexb_suppressed;
+    struct hashmap* js_cached_scope_slot_collisions;
     bool js_cached_annexb_suppressed_ready;
     int await_point_count;
     int async_fault_handler_count;

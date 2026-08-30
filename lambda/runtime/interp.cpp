@@ -5750,6 +5750,9 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
                                   bool run_main) {
     AstScript* root = (AstScript*)script->ast_root;
     if (!root) return ItemNull;
+    RuntimeCurrentFileScope current_file(runner ? runner->context : NULL,
+        script->reference);
+    RuntimeModuleStateScope module_state(runner ? runner->context : NULL);
     if (!lambda_module_state_prepare(script->module_state_id,
             script->interp_slab_count)) {
         log_error("interp: could not prepare module slab for '%s'", script->reference);
@@ -5766,6 +5769,10 @@ static Item interp_execute_module(Runner* runner, InterpState* st, Script* scrip
             script->reference ? script->reference : "<none>");
         return ItemError;
     }
+    if (!module_state.activate(script->module_state_id)) {
+        log_error("interp: could not activate module slab for '%s'", script->reference);
+        return ItemError;
+    }
     runner->context->consts = script->const_list ? script->const_list->data : NULL;
     runner->context->type_list = script->type_list;
     interp_register_view_templates(script);
@@ -5776,6 +5783,7 @@ static Item interp_execute_repl_fragment(Runner* runner, InterpState* st,
         AstNode* fragment) {
     Script* script = runner ? runner->script : NULL;
     if (!script || !fragment) return ItemError;
+    RuntimeModuleStateScope module_state(runner->context);
     if (!lambda_module_state_prepare(script->module_state_id,
             script->interp_slab_count)) {
         log_error("interp: could not prepare REPL module slab for '%s'", script->reference);
@@ -5785,6 +5793,10 @@ static Item interp_execute_repl_fragment(Runner* runner, InterpState* st,
             script->const_list ? script->const_list->data : NULL,
             script->type_list)) {
         log_error("interp: could not bind static REPL module image");
+        return ItemError;
+    }
+    if (!module_state.activate(script->module_state_id)) {
+        log_error("interp: could not activate REPL module slab");
         return ItemError;
     }
     runner->context->consts = script->const_list ? script->const_list->data : NULL;
@@ -5864,6 +5876,7 @@ static Item interp_run_nodes(Runner* runner, bool run_main, AstNode* repl_fragme
         runner->context->cwd = get_current_dir();
     }
     List* saved_vargs = runner->context->current_vargs;
+    RuntimeExecutionScope execution_scope(runner->context);
 
     InterpState st = {};
     st.ctx = runner->context;
@@ -5916,8 +5929,7 @@ static Item interp_run_nodes(Runner* runner, bool run_main, AstNode* repl_fragme
     // binding unconditionally so a later REPL/history execution cannot see
     // an abandoned callee's rest list.
     runner->context->current_vargs = saved_vargs;
-    runner->context->result = result;
-    if (runner->context->heap) runner->context->heap->result_root = result.item;
+    result = runtime_publish_result(runner->context, result);
     if (runner->context->cwd) {
         url_destroy(runner->context->cwd);
         runner->context->cwd = NULL;

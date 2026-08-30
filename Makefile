@@ -545,7 +545,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
-	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
+	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs tree-sitter-cst-libs tree-sitter-release-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
@@ -564,9 +564,9 @@ help:
 	@echo "  build         - Build lambda (core) using Premake build system (incremental, default)"
 	@echo "                  On Windows/MSYS2: Uses CLANG64 Clang (avoids Universal CRT)"
 	@echo "                  All platforms use Clang as the default compiler"
-	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
+	@echo "  debug         - Build optimized debug with symbols and JS execution profiling"
+	@echo "  build-debug-asan      - Build debug with AddressSanitizer using Premake"
 	@echo "  build-release - Build optimized release version using Premake"
-	@echo "  build-debug-profile   - Build optimized, symbolized debug profile with JS execution profiling"
 	@echo "  build-release-profile - Build optimized release with JS execution profiling enabled"
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
@@ -635,7 +635,7 @@ help:
 	@echo "  layout-snapshot       - Save page suite snapshot: make layout-snapshot suite=page"
 	@echo "  test-extended - Run EXTENDED test suites only (HTTP/HTTPS, ongoing features)"
 	@echo "  test-js262-prelim - Run the bounded Test262 runner preflight"
-	@echo "  test-js-opt   - Run JS optimization contract tests with the profile child"
+	@echo "  test-js-opt   - Run JS optimization contract tests with the debug host"
 	@echo "  test-library  - Run library tests only"
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
 	@echo "  test-validator- Run validator tests only"
@@ -696,7 +696,8 @@ help:
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build JOBS=4         # Build with 4 parallel jobs"
-	@echo "  make debug                # Debug build with AddressSanitizer"
+	@echo "  make debug                # Optimized debug build with JS profiling"
+	@echo "  make build-debug-asan     # Debug build with AddressSanitizer"
 	@echo "  make rebuild              # Force complete rebuild"
 
 # Environment debugging target
@@ -759,6 +760,7 @@ test-js-parser-diff:
 debug: tree-sitter-libs $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 	@echo "Building debug version using Premake build system..."
+	@echo "Optimizations: O3 with symbols, frame pointers, JS execution profiling"
 	$(call toolchain_verify)
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
@@ -824,21 +826,21 @@ build-release-profile: tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
 	@ls -lh lambda-profile.exe 2>/dev/null || true
 	$(call windows_dll_check,lambda-profile.exe)
 
-# Keep regular debug free of profiler hooks so its runtime cost reflects only
-# debugging and sanitizer instrumentation; use this target to collect JS profiles.
-build-debug-profile: tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
-	@echo "Building debug_profile version using Premake build system..."
-	@echo "Optimizations: O3 with symbols, frame pointers, JS execution profiling"
+# Explicit AddressSanitizer debug build. The output is separate from the normal
+# lambda.exe host so switching sanitizer coverage does not replace the fast host.
+build-debug-asan: tree-sitter-libs $(RE2_LIB) $(MIR_LIB)
+	@echo "Building debug_asan version using Premake build system..."
+	@echo "Optimizations: -Og with symbols, frame pointers, AddressSanitizer"
 	$(call toolchain_verify)
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
 	@echo "Generating makefiles..."
 	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
-	@echo "Building lambda executable (debug_profile) with $(JOBS) parallel jobs..."
-	$(call run_make_with_error_summary,lambda,debug_profile_native)
-	@echo "Debug profile build completed. Executable: lambda-debug-profile.exe"
-	@ls -lh lambda-debug-profile.exe 2>/dev/null || true
-	$(call windows_dll_check,lambda-debug-profile.exe)
+	@echo "Building lambda executable (debug_asan) with $(JOBS) parallel jobs..."
+	$(call run_make_with_error_summary,lambda,debug_asan_native)
+	@echo "Debug ASan build completed. Executable: lambda-debug-asan.exe"
+	@ls -lh lambda-debug-asan.exe 2>/dev/null || true
+	$(call windows_dll_check,lambda-debug-asan.exe)
 
 # Headless CLI build (no Radiant layout engine or GUI support)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
@@ -1534,18 +1536,21 @@ distclean: clean-all clean-grammar clean-test
 # Development targets
 test: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
+	@$(MAKE) --no-print-directory debug
 	@rm -rf temp/cache
 	@echo "Running lambda (core) test suites (excluding jube)..."
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --exclude-target=jube --exclude-test=test_radiant_online_view_gtest --parallel
 
 test-all: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
+	@$(MAKE) --no-print-directory debug
 	@rm -rf temp/cache
 	@echo "Running ALL test suites (baseline + extended)..."
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --parallel
 
 test-all-baseline: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
+	@$(MAKE) --no-print-directory debug
 	@rm -rf temp/cache
 	@echo "Running BASELINE test suites only..."
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --category=baseline --parallel
@@ -1592,11 +1597,11 @@ interp-bench:
 test-lambda-baseline: TEST_BUILD_QUIET := 1
 test-lambda-baseline: build-lambda-baseline test-input-baseline
 	@echo "Clearing HTTP cache for clean test runs..."
+	@$(MAKE) --no-print-directory debug
 	@rm -rf temp/cache
 	@echo "Running LAMBDA baseline test suite..."
-	# Pin the baseline's optimization contract to its ordinary debug host;
-	# otherwise a stale standalone profile binary could be selected implicitly.
-	@LAMBDA_TEST_HEAVY_LOAD=1 LAMBDA_JS_OPT_EXE=./lambda.exe node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
+	# ordinary debug is the non-ASan host and carries the JS trace hooks.
+	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --target=lambda --category=baseline --exclude-test=test_node_prelim_gtest --exclude-test=test_lambda_concurrency_gtest --parallel --input-results=test_output/input_baseline_results.json
 
 # Keep the runtime-global and Lambda-adjacent gates explicit in the full Lambda lane.
 test-lambda-full: test-lambda-baseline
@@ -1996,6 +2001,23 @@ format_duration() { \
 	};
 endef
 
+# Parse the checker's fail-closed runner summary and preserve its exit status.
+define CLASSIFY_LAYOUT_SNAPSHOT_RESULT
+snapshot_result_output="$${$(1)}"; \
+snapshot_passed=$$(echo "$$snapshot_result_output" | grep "^Runner:" | grep -oE "[0-9]+ successful" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+snapshot_failed=$$(echo "$$snapshot_result_output" | grep "^Runner:" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+snapshot_errors=$$(echo "$$snapshot_result_output" | grep "^Runner:" | grep -oE "[0-9]+ errors" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+snapshot_passed=$${snapshot_passed:-0}; snapshot_failed=$${snapshot_failed:-0}; snapshot_errors=$${snapshot_errors:-0}; \
+if [ $$snapshot_errors -gt $$snapshot_failed ]; then snapshot_failed=$$snapshot_errors; fi; \
+if [ $$snapshot_exit -ne 0 ]; then \
+	snapshot_status="❌ FAIL"; if [ $$snapshot_failed -eq 0 ]; then snapshot_failed=1; fi; any_failed=1; \
+elif echo "$$snapshot_result_output" | grep -q "Snapshot check passed"; then \
+	snapshot_status="✅ PASS"; \
+else \
+	snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
+fi;
+endef
+
 define COLLECT_LAYOUT_BASELINE_RESULTS
 layout_results=$$(cat $(LAYOUT_BASELINE_RESULTS)); \
 while IFS='|' read -r suite s_status s_passed s_partial s_failed s_skipped s_elapsed; do \
@@ -2115,20 +2137,13 @@ run-radiant-baseline:
 	if [ -f test/layout/snapshot/page.json ]; then \
 		echo ""; \
 		echo "📦 Layout Page Suite Regression:"; \
+		snapshot_exit=0; \
 		snapshot_start=$$(date +%s); \
 		snap_output=$$($(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
-			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || true; \
+			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || snapshot_exit=$$?; \
 		snapshot_elapsed=$$(($$(date +%s) - snapshot_start)); \
 		echo "$$snap_output" | tail -5; \
-		snapshot_passed=$$(echo "$$snap_output" | grep "Current:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		snapshot_passed=$${snapshot_passed:-0}; \
-		if echo "$$snap_output" | grep -q "REGRESSION\|regression detected"; then \
-			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
-		elif echo "$$snap_output" | grep -q "snapshot check passed\|No regressions\|No average regression"; then \
-			snapshot_status="✅ PASS"; \
-		else \
-			snapshot_status="✅ PASS"; \
-		fi; \
+		$(call CLASSIFY_LAYOUT_SNAPSHOT_RESULT,snap_output) \
 	fi; \
 	\
 	echo ""; \
@@ -2339,15 +2354,7 @@ test-layout-baseline: build-test
 			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || snapshot_exit=$$?; \
 		snapshot_elapsed=$$(($$(date +%s) - snapshot_start)); \
 		echo "$$snapshot_output" | tail -5; \
-		snapshot_passed=$$(echo "$$snapshot_output" | grep "Current:" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		snapshot_passed=$${snapshot_passed:-0}; \
-		if echo "$$snapshot_output" | grep -q "REGRESSION\|regression detected" || [ $$snapshot_exit -ne 0 ]; then \
-			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
-		elif echo "$$snapshot_output" | grep -q "snapshot check passed\|No regressions\|No average regression"; then \
-			snapshot_status="✅ PASS"; \
-		else \
-			snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
-		fi; \
+		$(call CLASSIFY_LAYOUT_SNAPSHOT_RESULT,snapshot_output) \
 	fi; \
 	\
 	total_passed=$$((layout_total_passed + snapshot_passed)); \
@@ -2677,11 +2684,11 @@ test-extended: build-test
 	@LAMBDA_TEST_HEAVY_LOAD=1 node test/test_run.js --category=extended --parallel
 	@$(MAKE) dom-ui-run
 
-# Runs against the debug lambda.exe from `build`: it defines
-# LAMBDA_JS_EXEC_PROFILE, and unlike lambda-debug-profile.exe it is rebuilt by
-# the ordinary flow, so the suite cannot bind to a stale non-profiling binary.
-test-js-opt: build build-test
+# run against the ordinary optimized debug host, which carries the contract
+# trace hooks without AddressSanitizer overhead.
+test-js-opt: build-test
 	@echo "Running JavaScript optimization contract tests..."
+	@$(MAKE) --no-print-directory debug
 	@./test/test_js_opt_gtest.exe --gtest_color=no
 
 test-library: build

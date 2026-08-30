@@ -138,8 +138,9 @@ For a release build:
 container exec lambda-linux-dev bash -lc 'make release'
 ```
 
-Use the release build for performance measurements. The debug build is for
-diagnostics and AddressSanitizer checks.
+Use the release build for performance measurements. The ordinary debug build
+is for fast diagnostics; use `make build-debug-asan` when AddressSanitizer
+coverage is required.
 
 ## Run tests
 
@@ -157,19 +158,10 @@ Run the full baseline:
 container exec lambda-linux-dev bash -lc 'make test-lambda-baseline'
 ```
 
-The Linux debug build uses AddressSanitizer. Lambda's batch tests launch child
-`lambda.exe` processes, and known teardown leaks or allocator-mismatch reports
-can make those child processes return nonzero before the batch protocol emits
-its result. To measure functional Linux coverage, use:
-
-```bash
-container exec lambda-linux-dev bash -lc \
-  'ASAN_OPTIONS=detect_leaks=0:alloc_dealloc_mismatch=0 make test-lambda-baseline'
-```
-
-These options do not fix or suppress a production issue; they only prevent
-known sanitizer teardown reports from aborting child-process test batches.
-Run the baseline without these options when auditing sanitizer findings.
+The ordinary Linux debug build does not use AddressSanitizer. The explicit
+`debug_asan` profile produces `lambda-debug-asan.exe`; keep sanitizer-specific
+runs separate from the normal `test-lambda-baseline` path so that the baseline
+continues to exercise the fast debug host.
 
 ## Current validation snapshot
 

@@ -327,7 +327,6 @@ struct MirValue {
     TypeId semantic_type;
     ValueRep rep;
     JitValueClass value_class;
-    uint32_t demand;
     const AstNode* provenance_node;
     int gc_home_id;
     int scalar_home_id;
@@ -347,6 +346,7 @@ enum MirPendingMaterializeReason {
     MIR_PENDING_REASON_SECOND_PAIR,
     // Pair-safe value discard is tracked separately; it emits no resolver.
     MIR_PENDING_REASON_DISCARD,
+    MIR_PENDING_REASON_BRANCH,
     MIR_PENDING_REASON_COUNT,
 };
 enum MirValueDemand {
@@ -546,6 +546,34 @@ struct MirEmitter {
     MIR_item_t bitcast_slot_func;
     MIR_reg_t bitcast_slot_addr;
 };
+
+// Shared structural lowering owns demand; profiles retain language semantics (D8.1.3v10).
+struct MirLoweringProfile {
+    MirEmitter* emitter;
+    void* owner;
+    MirValue (*lower_value)(void* owner, AstNode* node);
+    MIR_reg_t (*emit_condition)(void* owner, MirValue value);
+};
+
+// Profiles locate Item-only module slots; the common layer owns conversion.
+struct MirModuleSlotProfile {
+    MirEmitter* emitter;
+    void* owner;
+    MirValue (*load_item)(void* owner, uint32_t slot, TypeId semantic_type);
+    void (*store_item)(void* owner, uint32_t slot, MirValue item);
+};
+
+// Linked children share ordering while profiles retain semantic handling.
+typedef void (*MirLinkedNodeVisitor)(void* owner, AstNode* node, bool is_last);
+static inline void em_visit_linked_nodes(AstNode* first, void* owner,
+        MirLinkedNodeVisitor visit) {
+    if (!visit) return;
+    for (AstNode* node = first; node; node = node->next)
+        visit(owner, node, node->next == NULL);
+}
+
+template <typename Node>
+static inline int em_linked_node_count(const Node* first) { int count = 0; for (; first; first = (const Node*)first->next) count++; return count; }
 
 static inline void em_note_pending_materialize(MirEmitter* em,
         MirPendingMaterializeReason reason) {
@@ -985,7 +1013,7 @@ static inline int em_return_nres(FnCompanionTransport companion) {
 
 static inline MirValue em_value(MIR_reg_t reg, MIR_type_t mir_type,
         TypeId semantic_type, ValueRep rep, JitValueClass value_class,
-        Type* semantic_contract = NULL) {
+        Type* semantic_contract = NULL, const AstNode* provenance_node = NULL) {
     MirValue value = {};
     value.reg = reg;
     value.pending_companion = 0;
@@ -995,8 +1023,7 @@ static inline MirValue em_value(MIR_reg_t reg, MIR_type_t mir_type,
     value.semantic_type = semantic_type;
     value.rep = rep;
     value.value_class = value_class;
-    value.demand = MIR_VALUE_ANY;
-    value.provenance_node = NULL;
+    value.provenance_node = provenance_node;
     value.scalar_provenance = SCALAR_PROVENANCE_UNKNOWN;
     return value;
 }
@@ -1434,6 +1461,108 @@ static inline MirValue em_materialize_pending_value(MirEmitter* em,
             value.value_class, value.mir_type)) {
         em->root_call_value(em->call_owner, value.reg, value.value_class);
     }
+    return value;
+}
+
+// Structural consumers state demand without reinterpreting bare registers.
+static inline MirValue em_apply_value_demand(MirEmitter* em, MirValue value,
+        uint32_t demand, ValueRep required = VALUE_REP_NONE) {
+    if (demand & MIR_VALUE_DISCARD) {
+        if (value.maybe_pending) {
+            if (em && em->pending_live_companion &&
+                    (em->pending_live_item != value.reg ||
+                     em->pending_live_companion != value.pending_companion)) {
+                log_error("mir-value: discarded pending companion ownership mismatch");
+                abort();
+            }
+            em_note_pending_materialize(em, MIR_PENDING_REASON_DISCARD);
+            if (em) {
+                em->pending_live_item = 0;
+                em->pending_live_companion = 0;
+            }
+            value.pending_companion = 0;
+            value.maybe_pending = false;
+        }
+        return value;
+    }
+    if (demand & MIR_VALUE_REQUIRED_REP) {
+        if (required == VALUE_REP_NONE) {
+            log_error("mir-value: required representation demand has no target");
+            abort();
+        }
+        return em_require_rep(em, value, required);
+    }
+    return value;
+}
+
+static inline MirValue em_lower_profile_value(const MirLoweringProfile* profile,
+        AstNode* node, uint32_t demand) {
+    if (!profile || !profile->emitter || !profile->lower_value) {
+        log_error("mir-lowering: missing value profile");
+        abort();
+    }
+    return em_apply_value_demand(profile->emitter,
+        profile->lower_value(profile->owner, node), demand);
+}
+
+static inline MirValue em_load_module_slot(const MirModuleSlotProfile* profile,
+        uint32_t slot, TypeId semantic_type, uint32_t demand,
+        ValueRep required = VALUE_REP_NONE) {
+    if (!profile || !profile->emitter || !profile->load_item) {
+        log_error("mir-module-slot: missing load profile");
+        abort();
+    }
+    if (required != VALUE_REP_NONE) demand |= MIR_VALUE_REQUIRED_REP;
+    return em_apply_value_demand(profile->emitter,
+        profile->load_item(profile->owner, slot, semantic_type), demand, required);
+}
+
+static inline void em_store_module_slot(const MirModuleSlotProfile* profile,
+        uint32_t slot, MirValue value) {
+    if (!profile || !profile->emitter || !profile->store_item) {
+        log_error("mir-module-slot: missing store profile");
+        abort();
+    }
+    // A persisted slot is an Item root, never a frontend-native scalar lane.
+    value = em_apply_value_demand(profile->emitter, value,
+        MIR_VALUE_REQUIRED_REP, VALUE_REP_ITEM);
+    profile->store_item(profile->owner, slot, value);
+}
+
+static inline MIR_reg_t em_lower_profile_condition(
+        const MirLoweringProfile* profile, AstNode* node) {
+    if (!profile || !profile->emitter || !profile->emit_condition) {
+        log_error("mir-lowering: missing condition profile");
+        abort();
+    }
+    MirValue value = em_lower_profile_value(profile, node, MIR_VALUE_BRANCH);
+    value = em_materialize_pending_value(profile->emitter, value,
+        MIR_PENDING_REASON_BRANCH);
+    return profile->emit_condition(profile->owner, value);
+}
+
+// A join or completion consumes its pending result before writing its destination.
+static inline MirValue em_move_value_to_destination(MirEmitter* em,
+        MirValue value, MIR_reg_t destination,
+        ValueRep required = VALUE_REP_NONE) {
+    uint32_t demand = MIR_VALUE_DEST_REG;
+    if (required != VALUE_REP_NONE) demand |= MIR_VALUE_REQUIRED_REP;
+    value = em_apply_value_demand(em, value, demand, required);
+    if (!em || !destination || !value.reg) return value;
+    MIR_type_t destination_type = MIR_reg_type(em->ctx, destination, em->func);
+    // MIR_MOV preserves the legacy I64/P word carrier; reject other cross-class moves.
+    bool word_carrier_move = (destination_type == MIR_T_I64 &&
+            value.mir_type == MIR_T_P) || (destination_type == MIR_T_P &&
+            value.mir_type == MIR_T_I64);
+    if (destination_type != value.mir_type && !word_carrier_move) {
+        log_error("mir-value: destination type mismatch source=%d destination=%d",
+            (int)value.mir_type, (int)destination_type);
+        abort();
+    }
+    em_emit_insn(em, MIR_new_insn(em->ctx,
+        destination_type == MIR_T_D ? MIR_DMOV : MIR_MOV,
+        MIR_new_reg_op(em->ctx, destination),
+        MIR_new_reg_op(em->ctx, value.reg)));
     return value;
 }
 static inline int em_add_const(MirEmitter* em, void* ptr) {
@@ -4054,6 +4183,13 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
     if (physical_types) mem_free(physical_types);
     if (physical_ops) mem_free(physical_ops);
     return call_result;
+}
+
+// Resolve a direct-call pair before ordinary completion, root, or destination use (D5.2.1v3).
+static inline MirValue em_finish_direct_call_normal(MirEmitter* em,
+        MirCallResult call, MirPendingMaterializeReason reason) {
+    return call.normal.maybe_pending
+        ? em_materialize_pending_value(em, call.normal, reason) : call.normal;
 }
 
 static inline MIR_reg_t em_call_0(MirEmitter* em, const char* fn_name,

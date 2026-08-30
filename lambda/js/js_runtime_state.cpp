@@ -680,29 +680,14 @@ static Item js_eval_source_stack_string(Item error_name, Item message) {
     return result;
 }
 
-extern "C" Item* js_ensure_active_module_vars(void) {
-    if (context && context->active_module_state) {
-        return context->active_module_state->vars;
-    }
-    uint32_t module_id = 0;
-    if (!context || !lambda_module_state_reserve(
-            JS_MAX_MODULE_VARS, &module_id)) {
+static Item* js_ensure_active_module_vars(void) {
+    if (!context) return NULL;
+    if (!context->active_module_state &&
+            !lambda_module_state_reserve_and_activate(JS_MAX_MODULE_VARS)) {
         log_error("js-module-vars: failed to reserve fallback module state");
         return NULL;
     }
-    LambdaModuleState* state = context->module_states[module_id];
-    if (!state || !state->vars) {
-        log_error("js-module-vars: reserved module state has no variable slab");
-        return NULL;
-    }
-    context->active_module_state = state;
-    return state->vars;
-}
-
-extern "C" Item** js_active_module_vars_slot(void) {
-    if (!context || !context->active_module_state) js_ensure_active_module_vars();
-    if (!context || !context->active_module_state) return NULL;
-    return &context->active_module_state->vars;
+    return context->active_module_state->vars;
 }
 
 // Forward declaration for regex compilation cache reset (defined near JsRegexData)
@@ -837,114 +822,10 @@ extern "C" Item js_to_property_key(Item key) {
 // Transpiler now emits js_install_user_accessor directly which routes to
 // js_define_accessor_partial without ever materializing a __get_/__set_ marker key.
 
-extern "C" void js_set_module_var(int index, Item value) {
-    if (index >= 0 && context && context->active_module_state &&
-            index < (int)context->active_module_state->var_count) {
-        // D5.3: module variables outlive the current MIR frame, so a scalar
-        // home returned by a call must be copied into the module state's
-        // persistent payload instead of retaining the frame-owned pointer.
-        lambda_module_var_store(context->active_module_state,
-            (uint32_t)index, value);
-    }
-}
-
-extern "C" Item js_get_module_var(int index) {
-    if (index >= 0 && context && context->active_module_state &&
-            index < (int)context->active_module_state->var_count) {
-        return js_active_module_vars[index];
-    }
-    return ItemNull;
-}
-
-extern "C" void js_reset_module_vars() {
+static void js_reset_module_vars() {
     Item* vars = js_ensure_active_module_vars();
     if (!vars) return;
     memset(vars, 0, context->active_module_state->var_count * sizeof(Item));
-    js_module_var_count = 0;
-}
-
-// Allocate a sealed, context-owned slab before entering a JS compilation unit.
-extern "C" uint32_t js_alloc_module_state(uint32_t var_count) {
-    uint32_t module_id = 0;
-    if (var_count == 0) var_count = 1;
-    if (!context || !lambda_module_state_reserve(
-            var_count, &module_id)) return UINT32_MAX;
-    return module_id;
-}
-
-extern "C" bool js_activate_module_state(uint32_t var_count) {
-    uint32_t module_id = js_alloc_module_state(var_count);
-    return module_id != UINT32_MAX && js_set_active_module_state_id(module_id);
-}
-
-extern "C" bool js_ensure_active_module_var_capacity(uint32_t required_var_count) {
-    if (!context || !context->active_module_state) {
-        log_error("js-module-vars: no active slab while growing to %u",
-                  required_var_count);
-        return false;
-    }
-    if (!lambda_active_module_state_ensure_vars(required_var_count)) {
-        log_error("js-module-vars: failed to grow slab %u from %u to %u",
-                  context->active_module_state->module_id,
-                  context->active_module_state->var_count,
-                  required_var_count);
-        return false;
-    }
-    return true;
-}
-
-JS_FORWARD_EXPRESSION(uint32_t, js_get_active_module_state_id, (void),
-    context && context->active_module_state
-        ? context->active_module_state->module_id : UINT32_MAX)
-JS_FORWARD_EXPRESSION(uint32_t, js_active_module_var_count, (void),
-    context && context->active_module_state
-        ? context->active_module_state->var_count : 0)
-
-static LambdaModuleState* js_module_state_at(uint32_t module_state_id) {
-    if (!context || module_state_id == UINT32_MAX ||
-            module_state_id >= context->module_state_capacity) return NULL;
-    return context->module_states[module_state_id];
-}
-
-extern "C" bool js_set_active_module_state_id(uint32_t module_state_id) {
-    LambdaModuleState* state = js_module_state_at(module_state_id);
-    if (!state || !state->vars) return false;
-    context->active_module_state = state;
-    return true;
-}
-JS_FORWARD_EXPRESSION(bool, js_module_state_is_available, (uint32_t module_state_id), (context && module_state_id != UINT32_MAX && module_state_id < context->module_state_capacity && context->module_states[module_state_id] && context->module_states[module_state_id]->vars))
-
-JS_FORWARD_EXPRESSION(uint64_t, js_active_module_name_id, (uint32_t index),
-    !context || !context->active_module_state ||
-            index >= context->active_module_state->property_key_count ||
-            !context->active_module_state->property_keys ? NAME_ID_NONE
-        : context->active_module_state->property_keys[index])
-
-extern "C" Item js_active_module_name_item(uint32_t module_name_index,
-        NameId direct_name_id) {
-    // A generated NameId is already stable; other names must be resolved from
-    // the active module image so compiled MIR never retains a compiler-pool pointer.
-    NameId name_id = direct_name_id != NAME_ID_NONE ? direct_name_id
-        : (NameId)js_active_module_name_id(module_name_index);
-    return lambda_name_id_to_item(name_id);
-}
-
-JS_FORWARD_EXPRESSION(uint32_t, js_active_module_name_count, (void),
-    context && context->active_module_state
-        ? context->active_module_state->property_key_count : 0)
-JS_FORWARD_EXPRESSION(uint32_t, js_get_batch_preamble_var_count, (void),
-    js_runtime_state.batch_preamble_var_count)
-
-extern "C" bool js_copy_module_state_var_prefix(uint32_t source_module_state_id,
-        uint32_t destination_module_state_id, uint32_t count) {
-    LambdaModuleState* source = js_module_state_at(source_module_state_id);
-    LambdaModuleState* destination = js_module_state_at(destination_module_state_id);
-    if (!source || !destination || !source->vars || !destination->vars ||
-            count > source->var_count || count > destination->var_count) {
-        return false;
-    }
-    if (count > 0) memcpy(destination->vars, source->vars, (size_t)count * sizeof(Item));
-    return true;
 }
 
 // =============================================================================
@@ -1153,7 +1034,6 @@ extern "C" void js_prepare_compiled_preamble_vars(int declaration_count) {
     if (declaration_count > JS_MAX_MODULE_VARS) declaration_count = JS_MAX_MODULE_VARS;
     // Compile-only preambles retain declarations but no heap-backed values;
     // js_main initializes these fresh slots in the new document realm.
-    js_module_var_count = declaration_count;
 }
 
 // Partial batch reset: restore module vars to a checkpoint and clear test state,
@@ -1165,7 +1045,7 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     // path copied this prefix into a separate static test slab before each
     // script. Keep the same isolation using a reusable context-owned slab.
     LambdaModuleState* preamble_state = context ? context->active_module_state : NULL;
-    uint32_t preamble_state_id = js_get_active_module_state_id();
+    uint32_t preamble_state_id = lambda_active_module_state_id();
     if (!preamble_state || preamble_state_id == UINT32_MAX) return;
     if (checkpoint_var_count < 0) checkpoint_var_count = 0;
     if (checkpoint_var_count > (int)preamble_state->var_count) {
@@ -1176,15 +1056,15 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
 
     uint32_t test_state_id = js_runtime_state.batch_test_module_state_id;
     if (js_runtime_state.batch_preamble_module_state_id != preamble_state_id ||
-            !js_module_state_is_available(test_state_id)) {
-        if (!js_activate_module_state((uint32_t)checkpoint_var_count)) return;
-        test_state_id = js_get_active_module_state_id();
+            !lambda_module_state_activate(test_state_id)) {
+        if (!lambda_module_state_reserve_and_activate(
+                (uint32_t)checkpoint_var_count)) return;
+        test_state_id = lambda_active_module_state_id();
         js_runtime_state.batch_test_module_state_id = test_state_id;
         js_runtime_state.batch_preamble_module_state_id = preamble_state_id;
-    } else if (!js_set_active_module_state_id(test_state_id)) {
-        return;
     }
-    if (!js_ensure_active_module_var_capacity((uint32_t)checkpoint_var_count)) return;
+    if (!lambda_active_module_state_ensure_vars(
+            (uint32_t)checkpoint_var_count)) return;
 
     Item* vars = js_ensure_active_module_vars();
     if (!vars) return;
@@ -1196,7 +1076,6 @@ extern "C" void js_batch_reset_to(int checkpoint_var_count) {
     for (int i = checkpoint_var_count; i < active_count; i++) {
         vars[i] = (Item){0};
     }
-    js_module_var_count = checkpoint_var_count;
     // reset strict mode — prevents strict-mode test from poisoning subsequent non-strict tests
     js_strict_mode = false;
     // clear module registry (frees strdup/calloc per registered module)
