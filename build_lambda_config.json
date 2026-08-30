@@ -1062,7 +1062,6 @@
         "std=c++17",
         "pedantic",
         "fdiagnostics-color=auto",
-        "fsanitize=address",
         "fno-omit-frame-pointer",
         "g3",
         "gline-tables-only",
@@ -1074,6 +1073,22 @@
       "defines": [
         "LAMBDA_JS_EXEC_PROFILE"
       ]
+    },
+    "debug_asan": {
+      "output": "lambda-debug-asan.exe",
+      "flags": [
+        "std=c++17",
+        "pedantic",
+        "fdiagnostics-color=auto",
+        "fsanitize=address",
+        "fno-omit-frame-pointer",
+        "g3",
+        "gline-tables-only",
+        "Og"
+      ],
+      "linker_flags": [],
+      "build_dir": "build_debug_asan",
+      "debug": true
     },
     "debug_profile": {
       "output": "lambda-debug-profile.exe",
@@ -3019,6 +3034,7 @@
             "additional_sources": [
               "radiant/animation.cpp",
               "radiant/css_animation.cpp",
+              "radiant/css_display.cpp",
               "radiant/css_cascade.cpp",
               "radiant/css_prop_table.cpp",
               "lambda/input/css/css_engine.cpp",

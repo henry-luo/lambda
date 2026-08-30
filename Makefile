@@ -545,7 +545,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
-	    build-debug build-release build-debug-profile build-release-profile clean-all distclean \
+	    build-debug build-release build-debug-asan build-debug-profile build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-core-libs tree-sitter-cst-libs tree-sitter-release-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
@@ -564,7 +564,8 @@ help:
 	@echo "  build         - Build lambda (core) using Premake build system (incremental, default)"
 	@echo "                  On Windows/MSYS2: Uses CLANG64 Clang (avoids Universal CRT)"
 	@echo "                  All platforms use Clang as the default compiler"
-	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
+	@echo "  debug         - Build with debug symbols, profiling instrumentation, and no AddressSanitizer"
+	@echo "  build-debug-asan      - Build debug with AddressSanitizer using Premake"
 	@echo "  build-release - Build optimized release version using Premake"
 	@echo "  build-debug-profile   - Build optimized, symbolized debug profile with JS execution profiling"
 	@echo "  build-release-profile - Build optimized release with JS execution profiling enabled"
@@ -696,7 +697,8 @@ help:
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build JOBS=4         # Build with 4 parallel jobs"
-	@echo "  make debug                # Debug build with AddressSanitizer"
+	@echo "  make debug                # Fast debug build without AddressSanitizer"
+	@echo "  make build-debug-asan     # Debug build with AddressSanitizer"
 	@echo "  make rebuild              # Force complete rebuild"
 
 # Environment debugging target
@@ -824,8 +826,24 @@ build-release-profile: tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
 	@ls -lh lambda-profile.exe 2>/dev/null || true
 	$(call windows_dll_check,lambda-profile.exe)
 
-# Keep regular debug free of profiler hooks so its runtime cost reflects only
-# debugging and sanitizer instrumentation; use this target to collect JS profiles.
+# Explicit AddressSanitizer debug build. The output is separate from the normal
+# lambda.exe host so switching sanitizer coverage does not replace the fast host.
+build-debug-asan: tree-sitter-libs $(RE2_LIB) $(MIR_LIB)
+	@echo "Building debug_asan version using Premake build system..."
+	@echo "Optimizations: -Og with symbols, frame pointers, AddressSanitizer"
+	$(call toolchain_verify)
+	@echo "Generating Premake configuration..."
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	@echo "Generating makefiles..."
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	@echo "Building lambda executable (debug_asan) with $(JOBS) parallel jobs..."
+	$(call run_make_with_error_summary,lambda,debug_asan_native)
+	@echo "Debug ASan build completed. Executable: lambda-debug-asan.exe"
+	@ls -lh lambda-debug-asan.exe 2>/dev/null || true
+	$(call windows_dll_check,lambda-debug-asan.exe)
+
+# Optimized debug profile for sampled runs that still need DEBUG checks and
+# source-level symbols.
 build-debug-profile: tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 	@echo "Building debug_profile version using Premake build system..."
 	@echo "Optimizations: O3 with symbols, frame pointers, JS execution profiling"

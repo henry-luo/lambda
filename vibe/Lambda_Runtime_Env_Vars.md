@@ -11,16 +11,21 @@ test-only switches are deliberately excluded from the main tables.
 
 | Profile | Build configuration | Meaning |
 |---|---|---|
-| debug | `debug_native` | `DEBUG`, symbols, `-Og`, frame pointers, and AddressSanitizer for the main executable. |
+| debug | `debug_native` | `DEBUG`, symbols, `-Og`, frame pointers, `LAMBDA_JS_EXEC_PROFILE`, and other runtime profiling controls; no AddressSanitizer. |
+| debug_asan | `debug_asan_native` | `DEBUG`, symbols, `-Og`, frame pointers, and AddressSanitizer for the separate `lambda-debug-asan.exe` host. |
 | debug_profile | `debug_profile_native` | `DEBUG`, symbols, optimized code, frame pointers, and `LAMBDA_JS_EXEC_PROFILE`. |
 | release | `release_native` | `NDEBUG`, `LAMBDA_HOME_RELEASE`, `-O3`, ThinLTO, section stripping, and native CPU tuning. |
 | release_profile | `release_profile_native` | The release profile plus `LAMBDA_JS_EXEC_PROFILE`. |
 
 The generator is authoritative: `utils/generate_premake.py`; `make debug`,
-`make build-debug-profile`, `make build-release`, and
-`make build-release-profile` select the four configurations.  Release builds
+`make build-debug-asan`, `make build-debug-profile`, `make build-release`, and
+`make build-release-profile` select the five configurations.  Release builds
 compile `log_debug()` and `log_info()` out, so log-only diagnostics are not
 functional there.
+
+The detailed variable matrix below retains one `Debug` column: `debug_asan`
+follows the common debug/runtime availability but deliberately omits the
+`LAMBDA_JS_EXEC_PROFILE` compile-time hooks.
 
 In the tables, **✓** means the variable can affect that build when the relevant
 runtime path is exercised; **✗** means the code is compiled out.  A check is
@@ -37,7 +42,7 @@ several optimization controls are enabled by default and use `=0` to disable.
 | `LAMBDA_DISABLE_MIR_CACHE` | `1` or `true`: disable retained Lambda MIR-import cache. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_MIR_DUMP_PATH` | Write finalized MIR to this path. `--no-log` and disabled default log category suppress it. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_MIR_LOG_FRAME_SLOTS` | Emit MIR frame-slot telemetry; also gated by normal logging / `--no-log`. | ✓ | ✓ | ✓ | ✓ |
-| `LAMBDA_C2MIR_DEBUG` | `1` or `true`: capture legacy C2MIR debug messages. It is behind the separate `LAMBDA_C2MIR` compile flag, which none of these four profiles defines. | ✗ | ✗ | ✗ | ✗ |
+| `LAMBDA_C2MIR_DEBUG` | `1` or `true`: capture legacy C2MIR debug messages. It is behind the separate `LAMBDA_C2MIR` compile flag, which none of these five profiles defines. | ✗ | ✗ | ✗ | ✗ |
 | `LAMBDA_LOG_LEVEL` | Overrides configured log severity. | ✓ | ✓ | ✓ | ✓ |
 | `LAMBDA_LOG_FILE` | Overrides `log.txt` destination for file logging. | ✓ | ✓ | ✓ | ✓ |
 
@@ -195,8 +200,8 @@ The recommended policy has four classes:
 1. **Runtime (30):** documented public configuration or environment values
    required to implement a public runtime feature. These remain in all builds.
 2. **Debug/test (34):** diagnostics, fault injection, validation, trace output,
-   legacy ordering, and test automation. Compile only in `debug` and
-   `debug_profile`.
+   legacy ordering, and test automation. Compile only in `debug`,
+   `debug_asan`, and `debug_profile`.
 3. **Profiling (15):** timers, counters, reports, and output destinations.
    Compile only in `debug_profile` and `release_profile`.
 4. **Experimental/A-B (11):** temporary optimization and resource-strategy
@@ -205,7 +210,7 @@ The recommended policy has four classes:
    but compile them out of `release`. Retire each switch after its optimized
    path becomes unconditional.
 
-`LAMBDA_C2MIR_DEBUG` is outside all four classes: none of the four builds
+`LAMBDA_C2MIR_DEBUG` is outside all four classes: none of the five builds
 defines `LAMBDA_C2MIR`, and the legacy C2MIR path is frozen. Remove the
 environment hook rather than carrying it into a new profile.
 
@@ -214,6 +219,7 @@ environment hook rather than carrying it into a new profile.
 | Profile | Truly needed after cleanup | Composition |
 |---|---:|---|
 | debug | **69** | 30 runtime + 28 debug/test + 11 experimental |
+| debug_asan | **69** | 30 runtime + 28 debug/test + 11 experimental |
 | debug_profile | **84** | 30 runtime + 28 debug/test + 15 profiling + 11 experimental |
 | release | **30** | 30 runtime only |
 | release_profile | **56** | 30 runtime + 15 profiling + 11 experimental |
@@ -366,7 +372,7 @@ strings lambda_release.exe |
 
 The production gate should use a checked-in exact denylist generated from the
 classification above, not only the illustrative regular expression. Also
-compile and smoke-test all four profiles so an accidentally over-broad guard
+compile and smoke-test all five profiles so an accidentally over-broad guard
 cannot leave profile-only code unbuilt.
 
 ## Audit commands
@@ -378,6 +384,7 @@ rg -n 'configurations:|LAMBDA_JS_EXEC_PROFILE|LAMBDA_HOME_RELEASE|sanitize' prem
 
 # Rebuild each behaviorally distinct profile.
 make debug
+make build-debug-asan
 make build-debug-profile
 make build-release
 make build-release-profile
