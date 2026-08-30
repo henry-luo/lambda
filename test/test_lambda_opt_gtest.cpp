@@ -3,8 +3,8 @@
 // Each fixture runs one small Lambda script in a child process with
 // COW_EXEC_PROFILE=1 and asserts the admission path taken — counters the .ls
 // golden suite cannot observe — in addition to the semantic output. The
-// profile is env-gated (no dedicated build flag), so the ordinary debug
-// lambda.exe that `make build` maintains is the host under test.
+// profile is env-gated (no dedicated build flag), so lambda.exe is the default
+// host; callers may override it through LAMBDA_JS_OPT_EXE.
 //
 // What the counters pin (Tune19 §11.5 recursive-record adoption, D2.2.2):
 //  - a self-referential record contract passes the adoption gate
@@ -106,8 +106,8 @@ static bool parse_profile(const std::string& path, AdmitProfile* out) {
     return !out->counters.empty();
 }
 
-// Run against the ordinary debug lambda.exe, which `make build` keeps current
-// (same rationale as test_js_opt_gtest's opt_executable()).
+// run against lambda.exe by default; callers may select another compatible
+// host through LAMBDA_JS_OPT_EXE.
 static const char* opt_executable() {
     const char* configured = getenv("LAMBDA_JS_OPT_EXE");
     if (configured && configured[0]) return configured;

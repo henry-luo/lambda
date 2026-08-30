@@ -655,7 +655,7 @@ class PremakeGenerator:
 
         self.premake_content.extend([
             f'workspace "{workspace_name}"',
-            '    configurations { "debug", "debug_asan", "debug_profile", "release", "release_profile" }',
+            '    configurations { "debug", "debug_asan", "release", "release_profile" }',
             f'    platforms {{ {platform_str} }}',
             f'    location "{location}"',
             f'    startproject "{startup_project}"',
@@ -675,23 +675,17 @@ class PremakeGenerator:
         self.premake_content.extend([
             '    filter "configurations:debug"',
             f'        defines {{ {debug_defines_lua} }}',
+            '        symbols "On"',
+            '        optimize "Speed"   -- -O3 for the ordinary debug build',
+            '        buildoptions { "-fno-omit-frame-pointer" }',
             '    filter "configurations:debug_asan"',
             '        defines { "DEBUG" }',
-            f'    filter "{debug_configurations_filter}"',
             '        symbols "On"',
-            '        -- -Og keeps debugging practical while avoiding the O0 runtime penalty.',
+            '        -- -Og keeps sanitizer debugging practical while avoiding the O0 runtime penalty.',
             '        buildoptions { "-Og", "-fno-omit-frame-pointer" }',
-            '    ',
-            '    filter "configurations:debug_profile"',
-            '        -- Preserve debugger symbols while profiling optimized JS execution.',
-            '        defines { "DEBUG", "LAMBDA_JS_EXEC_PROFILE" }',
-            '        symbols "On"',
-            '        optimize "Speed"',
-            '        buildoptions { "-fno-omit-frame-pointer" }',
         ])
 
         # apply the configured Windows stack reserve to the default debug binary;
-        # leaving this filter on debug_profile made recursive scripts start with the PE 1 MB default.
         if self.use_windows_config:
             self.premake_content.append(f'    filter "{debug_configurations_filter}"')
 
@@ -737,11 +731,11 @@ class PremakeGenerator:
         vlog(f"DEBUG: linux_config: {linux_config}")
         vlog(f"DEBUG: disable_sanitizer: {disable_sanitizer}")
 
-        # AddressSanitizer is applied to the explicit debug_asan host via
-        # enable_sanitizer_main. Test executables default to the fast debug
-        # build and can opt in separately with enable_sanitizer_tests.
+        # AddressSanitizer is applied to the debug_asan host via
+        # enable_sanitizer_main. Test executables opt in separately with
+        # enable_sanitizer_tests.
         if not disable_sanitizer:
-            vlog("DEBUG: AddressSanitizer is available for opt-in debug targets")
+            vlog("DEBUG: AddressSanitizer is enabled for the debug_asan host")
         else:
             self.premake_content.extend([
                 '    -- AddressSanitizer disabled for Linux platform',
@@ -2840,8 +2834,9 @@ class PremakeGenerator:
                 ])
 
             if self.use_macos_config and internal_project_links:
-                # Apple ld scans archives once; make explicitly declared
-                # conditional providers visible without loading host-only code.
+                # apple ld scans archives once; keep conditionally compiled
+                # providers visible in profile builds without forcing absent
+                # symbols in non-profile builds.
                 required_symbols = []
                 for project_name in internal_project_links:
                     target_name = project_name[:-4] if project_name.endswith('-cpp') else project_name
@@ -2851,7 +2846,7 @@ class PremakeGenerator:
                     required_symbols.extend(target.get('required_symbols_macos', []))
                 if required_symbols:
                     self.premake_content.extend([
-                        '    filter "configurations:debug or debug_asan"',
+                        '    filter "configurations:debug or release_profile"',
                         '    linkoptions {',
                     ])
                     for symbol in required_symbols:
@@ -3361,8 +3356,6 @@ class PremakeGenerator:
             f'        targetname "{target_name}-profile"',
             '    filter "configurations:debug_asan"',
             f'        targetname "{target_name}-debug-asan"',
-            '    filter "configurations:debug_profile"',
-            f'        targetname "{target_name}-debug-profile"',
             '    filter {}',
             '    ',
             '    files {',
@@ -3529,9 +3522,9 @@ class PremakeGenerator:
 
         # Keep any explicitly configured debug-only archives out of optimized
         # host configurations. The Lambda Tree-sitter archive is retained by
-        # debug, debug_asan, and debug_profile; lambda-cst adds it separately.
+        # debug and debug_asan; lambda-cst adds it separately.
         if debug_only_static_libs:
-            for configuration in ('debug', 'debug_asan', 'debug_profile'):
+            for configuration in ('debug', 'debug_asan'):
                 self.premake_content.extend([
                     f'    filter "configurations:{configuration}"',
                     '        linkoptions {',
@@ -3739,8 +3732,7 @@ class PremakeGenerator:
                 '    ',
             ])
 
-        # AddressSanitizer for the explicit lambda-debug-asan.exe profile.
-        # Keep ordinary debug fast enough for the default edit/test loop.
+        # AddressSanitizer is reserved for the explicit debug_asan host.
         if self.config.get('enable_sanitizer_main', False):
             platforms_config = self.config.get('platforms', {})
             disable_sanitizer = False
