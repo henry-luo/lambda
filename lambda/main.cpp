@@ -4994,6 +4994,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         const char* dump_path = argv[2];
         log_debug("Emitting canonical Lambda AST dump for '%s'", dump_path);
         int result = emit_ast_dump_file(dump_path);
+        // AST dump owns a separate parse Runtime; release the dispatch Runtime too.
+        runtime_cleanup(&runtime);
         return lambda_main_finish(result);
     }
 
@@ -5001,6 +5003,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
         const char* dump_path = argv[2];
         log_debug("Emitting canonical JS AST dump for '%s'", dump_path);
         int result = emit_js_ast_dump_file(dump_path);
+        // JS AST dump owns a separate parse Runtime; release the dispatch Runtime too.
+        runtime_cleanup(&runtime);
         return lambda_main_finish(result);
     }
 

@@ -157,10 +157,17 @@ static char* canonicalize_mir(const char* input) {
             for (size_t j = start; j < i; j++) {
                 value = value * 10u + (unsigned long long)(input[j] - '0');
             }
-            // MIR's linked runtime addresses are printed as ten decimal
-            // digits. Canonicalize those process-local values while retaining
-            // language constants (including tagged 64-bit numeric literals).
-            if (digits == 10 && value >= 4300000000ULL) {
+            size_t line_start = start;
+            while (line_start > 0 && input[line_start - 1] != '\n') line_start--;
+            const char* line_end = strchr(input + line_start, '\n');
+            const char* stack_guard = strstr(input + line_start,
+                "lambda_stack_overflow_error,");
+            bool is_stack_guard_pointer = stack_guard &&
+                (!line_end || stack_guard < line_end);
+            // MIR pointer operands have host-dependent decimal widths. Normalize
+            // the known stack-guard pointer and legacy ten-digit form while
+            // retaining language constants (including tagged 64-bit literals).
+            if (is_stack_guard_pointer || (digits == 10 && value >= 4300000000ULL)) {
                 const char* token = "<ptr>";
                 memcpy(output + out, token, 5);
                 out += 5;

@@ -732,10 +732,12 @@ void layout_bidi_line(LayoutContext* lycon) {
         &lycon->scratch, sizeof(int) * counts.chars);
     int* levels = (int*)scratch_alloc(
         &lycon->scratch, sizeof(int) * counts.chars);
+    signed char* bidi_classes = (signed char*)scratch_alloc(
+        &lycon->scratch, sizeof(signed char) * counts.chars);
     // A block's anonymous inline content can have no inline-span records;
     // zero-count scratch storage is valid and must not suppress bidi placement.
     if (!chars || !rects || (counts.spans > 0 && !spans) ||
-        !visual_to_logical || !levels) return;
+        !visual_to_logical || !levels || !bidi_classes) return;
 
     int char_cursor = 0;
     int rect_cursor = 0;
@@ -782,7 +784,9 @@ void layout_bidi_line(LayoutContext* lycon) {
     max_level = current_level;
     for (int i = 0; i < counts.chars; i++) {
         uint32_t cp = chars[i].codepoint;
+        bidi_classes[i] = 0;
         levels[i] = current_level;
+        if (bidi_codepoint_is_format_control(cp)) bidi_classes[i] = 2;
         if (cp == 0x202A || cp == 0x202D) {
             if (embedding_depth < 64) embedding_stack[embedding_depth++] = current_level;
             current_level++;
@@ -797,6 +801,10 @@ void layout_bidi_line(LayoutContext* lycon) {
             if (embedding_depth > 0) current_level = embedding_stack[--embedding_depth];
         } else {
             int strong_class = utf_bidi_strong_class(cp);
+            // CSS Text treats a tab as a bidi segmentation point; resolving it
+            // into the surrounding RTL run would reverse the tab-separated
+            // fragments as one run.
+            bidi_classes[i] = cp == 0x0009 ? 2 : (signed char)strong_class;
             // Implicit levels keep an LTR run in source order inside an RTL
             // paragraph; assigning every character the paragraph level would
             // reverse Latin words one codepoint at a time.
@@ -807,6 +815,31 @@ void layout_bidi_line(LayoutContext* lycon) {
             }
         }
         visual_to_logical[i] = i;
+    }
+    // UAX #9 N1/N2 resolves a neutral run from the surrounding strong types
+    // before L2 reorders the line. Without this, a space between two RTL
+    // characters keeps the paragraph level and splits the RTL run in two.
+    for (int begin = 0; begin < counts.chars;) {
+        if (bidi_classes[begin] != 0) {
+            begin++;
+            continue;
+        }
+        int end = begin + 1;
+        while (end < counts.chars && bidi_classes[end] == 0) end++;
+        int before = begin - 1;
+        while (before >= 0 && bidi_classes[before] == 0) before--;
+        int after = end;
+        while (after < counts.chars && bidi_classes[after] == 0) after++;
+        int resolved_level = levels[begin];
+        if (before >= 0 && after < counts.chars &&
+                bidi_classes[before] != 0 &&
+                bidi_classes[before] == bidi_classes[after]) {
+            resolved_level = levels[before];
+        }
+        for (int index = begin; index < end; index++) {
+            levels[index] = resolved_level;
+        }
+        begin = end;
     }
     // UAX #9 L2 applies to the complete inline line. Reversing each span in
     // isolation leaves bidi fragments from one decorated span trapped before

@@ -1469,8 +1469,17 @@ void runner_setup_context(Runner* runner) {
     // Store stack_limit in context for fast access from JIT-compiled code
     ctx->stack_limit = _lambda_stack_limit;
 
+    ArrayList* next_type_list = runner->script->type_list;
+    if (runner->runtime->type_list && runner->runtime->type_list != next_type_list &&
+            !runtime_type_list_is_script_owned(runner->runtime)) {
+        // A Lambda package can replace the active JS registry on a reused
+        // heap. Release the old Runtime-owned registry before publishing the
+        // package's Script-owned list, or final teardown loses that pointer.
+        arraylist_free(runner->runtime->type_list);
+    }
+    runner->runtime->type_list = next_type_list;
     ctx->pool = runner->script->pool;
-    ctx->type_list = runner->script->type_list;
+    ctx->type_list = next_type_list;
 
     ctx->type_info = type_info;
     ctx->consts = runner->script->const_list->data;
@@ -1854,6 +1863,17 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
     }
     decimal_constants_release(script->decimal_constants);
     script->decimal_constants = NULL;
+    if (script->type_list) {
+        // Script teardown owns this registry; clear every active alias before
+        // releasing it so a later Runtime cleanup cannot free it twice.
+        if (runtime && runtime->type_list == script->type_list) {
+            runtime->type_list = NULL;
+        }
+        if (runtime && runtime->eval_context &&
+                runtime->eval_context->type_list == script->type_list) {
+            runtime->eval_context->type_list = NULL;
+        }
+    }
     input_release_auxiliary_resources((Input*)script);
     if (runtime && runtime->eval_context && runtime->eval_context->validator &&
             runtime->eval_context->validator->get_pool() == script->pool) {
@@ -2111,6 +2131,9 @@ void runtime_cleanup(Runtime* runtime) {
             // bindings, so keep both the JS realm and its slabs alive until it
             // has completed while the owning heap is still valid.
             if (!js_runtime_state_thread_matches(cleanup_context)) return;
+            // One-shot teardown has no later heap calls; finish eval-generated
+            // MIR while its deferred-context list still belongs to this realm.
+            jm_cleanup_deferred_mir();
             js_runtime_state_destroy_context();
         }
         // DOM and JS cleanup can dispose callbacks that still activate their

@@ -25,6 +25,7 @@
 #include "../lambda/lambda.h"         // Context (input_context)
 #include "../lambda/lambda-data.hpp"  // EvalContext
 #include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/input/input.hpp"
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"   // Runtime (heap and name_pool)
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/io/mark_builder.hpp" // MarkBuilder for event object construction
@@ -2618,7 +2619,14 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     // registering as author templates
     template_registry_set_behavior_mode(g_template_registry, true);
     const char* source = "import dom: lambda.package.dom.dom\nnull\n";
-    run_script_mir(rt, source, (char*)"<dom-package>", false);
+    Input* package_result = run_script_mir(rt, source, (char*)"<dom-package>", false);
+    // The package result is only a compile/evaluation carrier; its returned
+    // value is retained by the runtime, so release the carrier's registries
+    // and pool immediately instead of leaking one per document.
+    if (package_result && package_result->pool) {
+        input_release_auxiliary_resources(package_result);
+        pool_destroy(package_result->pool);
+    }
     template_registry_set_behavior_mode(g_template_registry, false);
 
     bool ok = template_registry_has_behavior(g_template_registry);

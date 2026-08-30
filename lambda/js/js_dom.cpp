@@ -6950,7 +6950,6 @@ static Item js_dom_text_split_method(DomText* text_node, Item offset_arg) {
     if (offset < 0) {
         return js_dom_throw_index_size_error("The offset is negative.");
     }
-
     uint32_t length = dom_text_utf16_length(text_node);
     if ((uint64_t)offset > length) {
         return js_dom_throw_index_size_error("The offset is larger than the CharacterData length.");

@@ -385,6 +385,11 @@ extern "C" bool js_prepare_eval_context(Runtime* runtime,
             context->type_list = runtime && runtime->type_list
                 ? runtime->type_list
                 : arraylist_new(64);
+            if (runtime && !runtime->type_list) {
+                // Reused heaps still need the newly allocated type registry
+                // published so Runtime teardown can release its owner.
+                runtime->type_list = (ArrayList*)context->type_list;
+            }
         }
     } else {
         js_context = runtime_get_eval_context(runtime);

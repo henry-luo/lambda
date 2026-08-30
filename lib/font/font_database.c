@@ -193,6 +193,13 @@ static int ps_name_compare(const void* a, const void* b, void* udata) {
     return strcmp(ea->postscript_name, eb->postscript_name);
 }
 
+static void font_family_release(void* item) {
+    FontFamily* family = (FontFamily*)item;
+    if (!family) return;
+    if (family->aliases) arraylist_free(family->aliases);
+    if (family->fonts) arraylist_free(family->fonts);
+}
+
 // ============================================================================
 // Database lifecycle
 // ============================================================================
@@ -207,10 +214,10 @@ FontDatabase* font_database_create_internal(Pool* pool, Arena* arena) {
     db->organized_up_to = 0;
 
     // create hashmaps
-    db->families        = hashmap_new(sizeof(FontFamily), 64, 0, 0, family_hash, family_compare, NULL, NULL);
+    db->families        = hashmap_new(sizeof(FontFamily), 64, 0, 0, family_hash, family_compare, font_family_release, NULL);
     db->postscript_names = hashmap_new(sizeof(FontEntry), 64, 0, 0, ps_name_hash, ps_name_compare, NULL, NULL);
     db->file_paths      = hashmap_new(sizeof(FontEntry), 256, 0, 0, file_path_hash, file_path_compare, NULL, NULL);
-    db->missing_families = hashmap_new(sizeof(FontFamily), 32, 0, 0, family_hash, family_compare, NULL, NULL);
+    db->missing_families = hashmap_new(sizeof(FontFamily), 32, 0, 0, family_hash, family_compare, font_family_release, NULL);
 
     // create arraylists
     db->all_fonts        = arraylist_new(0);

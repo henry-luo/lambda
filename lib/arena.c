@@ -291,21 +291,27 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
 
     ArenaChunk* chunk = arena->current;
 
-    // Calculate aligned position within the chunk
-    // The chunk->data array is already aligned to 256 bytes (see ArenaChunk definition)
-    uintptr_t data_start = (uintptr_t)&chunk->data[0];
-    uintptr_t current_pos = data_start + chunk->used;
-    uintptr_t aligned_pos = ALIGN_UP(current_pos, alignment);
-    size_t aligned_offset = aligned_pos - data_start;
+    // Resettable arenas retain their grown chunk chain. Walk that chain before
+    // appending: restarting at the first chunk must not orphan its successors.
+    for (;;) {
+        // Calculate aligned position within the chunk.
+        uintptr_t data_start = (uintptr_t)&chunk->data[0];
+        uintptr_t current_pos = data_start + chunk->used;
+        uintptr_t aligned_pos = ALIGN_UP(current_pos, alignment);
+        size_t aligned_offset = aligned_pos - data_start;
 
-    // Check if current chunk has enough space
-    if (aligned_offset + aligned_size <= chunk->capacity) {
-        void* ptr = &chunk->data[aligned_offset];
-        chunk->used = aligned_offset + aligned_size;
-        arena->total_used += aligned_size;
-        arena->allocation_count++;
-        _arena_update_high_water(arena);
-        return ptr;
+        if (aligned_offset + aligned_size <= chunk->capacity) {
+            void* ptr = &chunk->data[aligned_offset];
+            chunk->used = aligned_offset + aligned_size;
+            arena->current = chunk;
+            arena->total_used += aligned_size;
+            arena->allocation_count++;
+            _arena_update_high_water(arena);
+            return ptr;
+        }
+
+        if (!chunk->next) break;
+        chunk = chunk->next;
     }
 
     // Need a new chunk - grow adaptively

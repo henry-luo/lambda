@@ -97,6 +97,7 @@ struct JsInterpFrame {
     JsAstNode* async_resume_statement;
     JsAstNode** async_suspended_statement;
     bool* async_skip_completed_statements;
+    struct JsInterpGeneratorLoopContinuation** async_loop_continuations;
     JsGeneratorStateRecord* generator_state;
 };
 
@@ -164,6 +165,7 @@ struct JsInterpGeneratorLoopContinuation {
     Item iterator;
     Item for_in_object;
     bool is_for_of;
+    bool async_roots_registered;
     struct JsInterpGeneratorLoopContinuation* next;
 };
 
@@ -318,8 +320,14 @@ static void js_interp_generator_clear_array_binding(JsInterpFrame* frame,
 static JsInterpGeneratorLoopContinuation* js_interp_generator_find_loop(
         JsInterpFrame* frame, JsAstNode* loop) {
     JsGeneratorStateRecord* state = frame ? frame->generator_state : NULL;
-    if (!state || !state->ast_resumable_loop_active) return NULL;
-    for (JsInterpGeneratorLoopContinuation* current = state->ast_loop_continuations;
+    JsInterpGeneratorLoopContinuation* list = NULL;
+    if (state) {
+        if (!state->ast_resumable_loop_active) return NULL;
+        list = state->ast_loop_continuations;
+    } else if (frame && frame->async_loop_continuations) {
+        list = *frame->async_loop_continuations;
+    }
+    for (JsInterpGeneratorLoopContinuation* current = list;
             current; current = current->next) {
         if (current->loop == loop) return current;
     }
@@ -370,12 +378,19 @@ static bool js_interp_generator_list_throw_requires_replay(
 static void js_interp_generator_remove_loop(JsInterpFrame* frame,
         JsAstNode* loop) {
     JsGeneratorStateRecord* state = frame ? frame->generator_state : NULL;
-    if (!state) return;
-    JsInterpGeneratorLoopContinuation** link = &state->ast_loop_continuations;
+    JsInterpGeneratorLoopContinuation** link = state
+        ? &state->ast_loop_continuations
+        : (frame ? frame->async_loop_continuations : NULL);
+    if (!link) return;
     while (*link) {
         if ((*link)->loop == loop) {
             JsInterpGeneratorLoopContinuation* removed = *link;
             *link = removed->next;
+            if (removed->async_roots_registered) {
+                heap_unregister_gc_root(&removed->iterator.item);
+                heap_unregister_gc_root(&removed->for_in_object.item);
+                heap_unregister_gc_object_root(removed->env);
+            }
             mem_free(removed);
             return;
         }
@@ -404,6 +419,58 @@ static bool js_interp_generator_suspend_loop(JsInterpFrame* frame,
     state->ast_loop_continuations = continuation;
     state->ast_resumable_loop_active = true;
     return true;
+}
+
+static bool js_interp_async_suspend_loop(JsInterpFrame* frame,
+        JsAstNode* loop, JsInterpEnv* env, Item iterator, Item for_in_object,
+        bool is_for_of) {
+    if (!frame || !frame->async_loop_continuations) return false;
+    if (js_interp_generator_find_loop(frame, loop)) return true;
+    JsInterpGeneratorLoopContinuation* continuation =
+        (JsInterpGeneratorLoopContinuation*)mem_calloc(1, sizeof(*continuation),
+            MEM_CAT_JS_RUNTIME);
+    if (!continuation) return false;
+    continuation->loop = loop;
+    continuation->env = env;
+    continuation->iterator = iterator;
+    continuation->for_in_object = for_in_object;
+    continuation->is_for_of = is_for_of;
+    bool iterator_rooted = heap_try_register_gc_root(&continuation->iterator.item);
+    bool for_in_rooted = heap_try_register_gc_root(&continuation->for_in_object.item);
+    bool env_rooted = heap_try_register_gc_object_root(continuation->env);
+    if (!iterator_rooted || !for_in_rooted || !env_rooted) {
+        if (iterator_rooted) heap_unregister_gc_root(&continuation->iterator.item);
+        if (for_in_rooted) heap_unregister_gc_root(&continuation->for_in_object.item);
+        if (env_rooted) heap_unregister_gc_object_root(continuation->env);
+        mem_free(continuation);
+        return false;
+    }
+    continuation->async_roots_registered = true;
+    continuation->next = *frame->async_loop_continuations;
+    *frame->async_loop_continuations = continuation;
+    return true;
+}
+
+static void js_interp_async_clear_loops(
+        JsInterpGeneratorLoopContinuation** continuations) {
+    if (!continuations) return;
+    JsInterpGeneratorLoopContinuation* current = *continuations;
+    while (current) {
+        JsInterpGeneratorLoopContinuation* next = current->next;
+        if (current->async_roots_registered) {
+            heap_unregister_gc_root(&current->iterator.item);
+            heap_unregister_gc_root(&current->for_in_object.item);
+            heap_unregister_gc_object_root(current->env);
+        }
+        mem_free(current);
+        current = next;
+    }
+    *continuations = NULL;
+}
+
+void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state) {
+    if (!state) return;
+    js_interp_async_clear_loops(&state->ast_loop_continuations);
 }
 
 static JsInterpCompletion js_interp_normal(Item value) {
@@ -4388,6 +4455,13 @@ static JsInterpCompletion js_interp_exec_for_of(JsInterpFrame* frame,
                         for_in_object_root.get(), true)) {
                 return js_interp_throw(ItemError);
             }
+            if (completion.kind == JS_INTERP_AWAIT && frame &&
+                    frame->async_loop_continuations &&
+                    !js_interp_async_suspend_loop(frame, (JsAstNode*)loop,
+                        env_root.env, iterator_root.get(),
+                        for_in_object_root.get(), true)) {
+                return js_interp_throw(ItemError);
+            }
             return completion;
         }
         if (completion.kind == JS_INTERP_NORMAL ||
@@ -5713,6 +5787,7 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
     frame.async_resume_statement = (JsAstNode*)state->ast_resume_statement;
     frame.async_suspended_statement = &suspended_statement;
     frame.async_skip_completed_statements = &skip_completed_statements;
+    frame.async_loop_continuations = &state->ast_loop_continuations;
     JsInterpEvalLocalFrame eval_local(state->ast_body_env ? state->ast_body_env
         : state->ast_function_env,
         function->ast_has_direct_eval);
@@ -5724,6 +5799,7 @@ extern "C" Item js_interp_resume_async(JsAsyncContextStateRecord* state,
         state->ast_await_skip++;
         return js_interp_async_state_result(result.value, state->ast_await_skip);
     }
+    js_interp_async_clear_loops(&state->ast_loop_continuations);
     if (result.kind == JS_INTERP_RETURN) return js_interp_async_state_result(result.value, -1);
     if (result.kind == JS_INTERP_NORMAL) {
         return js_interp_async_state_result(make_js_undefined(), -1);
