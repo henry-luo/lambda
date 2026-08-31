@@ -4729,6 +4729,15 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             st->depth_limit, fn->name ? fn->name : "<anonymous>");
         LambdaError* error = err_create_heap(ERR_STACK_OVERFLOW,
             "Stack overflow", NULL);
+        if (error && st->ctx) {
+            // recursion-budget errors are ordinary rich completions; publish
+            // the diagnostic mirror before the handler can inspect .code/.message
+            // (S7.6.1, REH-D3).
+            if (st->ctx->last_error && st->ctx->last_error != error) {
+                err_free(st->ctx->last_error);
+            }
+            st->ctx->last_error = error;
+        }
         return error ? err2it(error) : ItemError;
     }
 
