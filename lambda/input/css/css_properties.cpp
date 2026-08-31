@@ -314,6 +314,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_WORD_BREAK, "word-break", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_LINE_BREAK, "line-break", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_HYPHENS, "hyphens", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "manual", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_HYPHENATE_CHARACTER, "hyphenate-character", PROP_TYPE_STRING, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_OVERFLOW_WRAP, "overflow-wrap", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_WORD_WRAP, "word-wrap", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TAB_SIZE, "tab-size", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "8", true, false, NULL, 0, validate_length, NULL},

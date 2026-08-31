@@ -1756,6 +1756,8 @@ typedef struct BlockProp {
     CssEnum text_wrap_style;  // CSS Text 4 text-wrap-style
     CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL
     CssEnum overflow_wrap;  // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_WORD, CSS_VALUE_ANYWHERE
+    CssEnum hyphens;  // CSS_VALUE_MANUAL or CSS_VALUE_AUTO
+    char* hyphenate_character;  // CSS Text 4: null means the UA default ('auto')
     CssEnum line_break;    // CSS_VALUE_AUTO, CSS_VALUE_LOOSE, CSS_VALUE_NORMAL, CSS_VALUE_STRICT, CSS_VALUE_ANYWHERE
     CssEnum text_spacing_trim;  // CSS Text 4 text-spacing-trim
     uint8_t text_autospace;  // CSS Text 4 text-autospace feature flags
@@ -1846,7 +1848,8 @@ typedef struct TextRect {
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
     int start_index, length;  // start and length of the text in the style node
     int line_number;  // block-local line index assigned when this rect enters inline flow
-    bool has_trailing_hyphen;  // CSS Text 3 §5.2: soft hyphen (U+00AD) broke here; render visible '-' at end
+    bool has_trailing_hyphen;  // CSS Text 3 §5.2: a hyphenation break generated a trailing mark
+    const char* trailing_hyphenate_character;  // computed CSS Text 4 mark; null uses the UA default
     bool has_trailing_ellipsis; // -webkit-line-clamp: render '…' after text on this rect
     TextRect* next;
 } TextRect;
