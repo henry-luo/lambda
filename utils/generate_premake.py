@@ -1297,15 +1297,6 @@ class PremakeGenerator:
         if 'include' in lib:
             all_includes.append(lib['include'])
 
-        # Add the shared Tree-sitter runtime include. Lambda's Tree-sitter
-        # grammar is isolated to the lambda-cst variant and is not a normal
-        # library-project dependency.
-        for lib_name in ['tree-sitter']:
-            if lib_name in self.external_libraries:
-                include_path = self.external_libraries[lib_name]['include']
-                if include_path:
-                    all_includes.append(include_path)
-
         # Add other external library includes
         for lib_name in dependencies:
             if lib_name in self.external_libraries:
@@ -2428,6 +2419,8 @@ class PremakeGenerator:
 
         # Add external library include paths from parsed definitions
         for lib_name, lib_info in self.external_libraries.items():
+            if lib_name.startswith('tree-sitter') and lib_name not in libraries:
+                continue
             # Skip libraries with link type "none"
             if lib_info.get('link') == 'none':
                 continue
@@ -2940,7 +2933,6 @@ class PremakeGenerator:
 
                 # Windows: use the same explicit paths as the main lambda program
                 windows_lib_paths = [
-                    "../../lambda/tree-sitter/libtree-sitter.a",
                     "../../win-native-deps/lib/libmir.a",
                     "/clang64/lib/libmpdec.a",
                     "../../win-native-deps/lib/libutf8proc.a",
@@ -3120,9 +3112,11 @@ class PremakeGenerator:
                     '    ',
                 ])
 
-        # Add tree-sitter libraries as linker options for tests with lambda-data dependencies
-        # Use platform-specific flags to force inclusion of all symbols from tree-sitter libraries
-        if any(dep == 'lambda-data' for dep in dependencies):
+        # Force only Tree-sitter libraries explicitly requested by a test.
+        # Lambda-data no longer references a production Tree-sitter parser, so
+        # implicit grammar archives would keep the retired runtime dependency alive.
+        requested_tree_sitter = [lib for lib in libraries if lib.startswith('tree-sitter')]
+        if any(dep == 'lambda-data' for dep in dependencies) and requested_tree_sitter:
             self.premake_content.extend([
                 '    filter {}',
                 '    linkoptions {',
@@ -3131,11 +3125,9 @@ class PremakeGenerator:
             if self.use_linux_config:
                 # Linux: use --whole-archive
                 self.premake_content.append('        "-Wl,--whole-archive",')
-                # lambda-data references the LaTeX parser entry points from
-                # its archive, so these archives must remain live after the
-                # data library is placed on the link line.
-                for lib_name in ['tree-sitter',
-                                 'tree-sitter-latex', 'tree-sitter-latex-math']:
+                # Explicit reference-parser tests need their requested
+                # archives kept live after the data library is linked.
+                for lib_name in requested_tree_sitter:
                     if lib_name in self.external_libraries:
                         lib_path = self.external_libraries[lib_name]['lib']
                         if not lib_path.startswith('/'):
@@ -3144,7 +3136,7 @@ class PremakeGenerator:
                 self.premake_content.append('        "-Wl,--no-whole-archive",')
             elif self.use_macos_config:
                 # macOS: use -force_load for each library
-                for lib_name in ['tree-sitter']:
+                for lib_name in requested_tree_sitter:
                     if lib_name in self.external_libraries:
                         lib_path = self.external_libraries[lib_name]['lib']
                         if not lib_path.startswith('/'):
@@ -3152,7 +3144,7 @@ class PremakeGenerator:
                         self.premake_content.append(f'        "-Wl,-force_load,{lib_path}",')
             else:
                 # Default: just link normally without forcing symbol inclusion
-                for lib_name in ['tree-sitter']:
+                for lib_name in requested_tree_sitter:
                     if lib_name in self.external_libraries:
                         lib_path = self.external_libraries[lib_name]['lib']
                         if not lib_path.startswith('/'):
@@ -3204,11 +3196,13 @@ class PremakeGenerator:
             # Handle both string and object formats
             if isinstance(lib, str):
                 # String format: just library name
-                if lib not in ['criterion']:  # Exclude test-only libraries
+                if lib not in ['criterion'] and not lib.startswith('tree-sitter'):
                     dependencies.append(lib)
             elif isinstance(lib, dict):
                 lib_name = lib.get('name', '')
-                if lib_name not in ['criterion']:  # Exclude test-only libraries
+                if lib_name not in ['criterion'] and not lib_name.startswith('tree-sitter'):
+                    # Tree-sitter grammars are reference-only or Jube-module
+                    # dependencies; the static Lambda host must not absorb them.
                     dependencies.append(lib_name)
 
         # Add platform-specific libraries for Windows
@@ -3218,7 +3212,7 @@ class PremakeGenerator:
             windows_config = platforms_config.get('windows', {})
             for lib in windows_config.get('libraries', []):
                 lib_name = lib.get('name', '')
-                if lib_name and lib_name not in ['criterion']:
+                if lib_name and lib_name not in ['criterion'] and not lib_name.startswith('tree-sitter'):
                     # Remove from current position if it exists (to respect platform ordering)
                     if lib_name in dependencies:
                         dependencies.remove(lib_name)
@@ -3243,7 +3237,7 @@ class PremakeGenerator:
             macos_config = platforms_config.get('macos', {})
             for lib in macos_config.get('libraries', []):
                 lib_name = lib.get('name', '')
-                if lib_name and lib_name not in dependencies:
+                if lib_name and lib_name not in dependencies and not lib_name.startswith('tree-sitter'):
                     dependencies.append(lib_name)
 
         # Filter out libraries excluded by variant (e.g., cli headless build)
@@ -3380,7 +3374,6 @@ class PremakeGenerator:
         # Add default main program includes
         all_includes.extend([
             ".",
-            "lambda/tree-sitter/lib/include",
             "lib/mem-pool/include",
         ])
         # Add external library include paths (excluding dev_libraries)
@@ -3388,6 +3381,8 @@ class PremakeGenerator:
                         for lib in self.config.get('dev_libraries', [])}
 
         for lib_name, lib_info in self.external_libraries.items():
+            if lib_name.startswith('tree-sitter'):
+                continue
             # Skip libraries with link type "none"
             if lib_info.get('link') == 'none':
                 continue

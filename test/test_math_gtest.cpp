@@ -477,7 +477,7 @@ TEST_F(MathRoundtripTest, BlockMathRoundtrip) {
 // Test roundtrip for pure math expressions
 TEST_F(MathRoundtripTest, PureMathRoundtrip) {
     // Test cases for pure math (without markdown delimiters)
-    // Note: \begin{...}\end{...} environments are not yet supported by the tree-sitter parser
+    // Math environments are covered separately below; keep this list focused on expressions.
     const char* test_cases[] = {
         "E = mc^2",
         "x^2 + y^2 = z^2",

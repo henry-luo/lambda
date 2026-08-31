@@ -1,6 +1,6 @@
 # LaTeX and Math C Parser Proposal
 
-> **Status:** proposal (2026-08-31)
+> **Status:** proposal with direct-parser implementation in worktree (2026-08-31)
 >
 > **Scope:** replace the production Tree-sitter LaTeX and LaTeX-math input
 > parsers with direct C parsers.  Reuse the existing Input parsing, diagnostics,
@@ -79,8 +79,8 @@ runtime target is a direct C parser, not a smaller Tree-sitter grammar.
 The current runtime has a good integration seam even though its parser is
 expensive:
 
-- `input.cpp` dispatches `latex` input to `parse_latex_ts()` and `math` input
-  to `parse_math()`.
+- `input.cpp` dispatches `latex` input to `parse_latex_direct()` and `math`
+  input to the small `parse_math()` flavor dispatcher.
 - `InputContext` already owns an input copy of the source, UTF-8-aware source
   tracking, bounded diagnostics, and a `MarkBuilder`.
 - `MarkBuilder` creates arena-owned strings, elements, maps, and arrays.  The
@@ -110,19 +110,23 @@ thin avoids duplicating `MarkBuilder` in C or adding a second allocation API.
 
 ### Source layout
 
-Use a small, purpose-specific layout under `lambda/input/latex/`:
+The implemented slice uses a small, purpose-specific layout under
+`lambda/input/`:
 
 ```text
-latex_scan.h / latex_scan.c       shared cursor, control sequence, comment,
-                                   UTF-8, balanced-delimiter helpers
-latex_parser.h / latex_parser.c   document-mode recursive-descent parser
-math_parser.c                     LaTeX and ASCII math recursive-descent parser
+input-latex-scanner.h / .c        shared control-sequence, prefix, and
+                                   balanced-delimiter cursor helpers
+input-latex-c.cpp                 direct document/math recursive-descent parser
+                                   and the thin MarkBuilder/InputContext bridge
+input-math.cpp                    flavor dispatcher to the direct math entry
 ```
 
-`input-latex.cpp` is the one C++ adapter.  It creates an `InputContext`, owns
-the Mark sink stack, maps byte offsets to `SourceTracker` diagnostics, and
-sets `input->root`.  It contains no grammar decisions.  `input-math.cpp`
-becomes a small flavor dispatcher to the same adapter.
+The scanner is C.  The parser translation unit deliberately uses C-style
+cursor state and fixed-size command buffers, but is C++ because the existing
+`InputContext`/`MarkBuilder` APIs are C++ types.  It creates the context,
+constructs the Input-arena Mark values directly, maps byte offsets to
+`SourceTracker` diagnostics, and sets `input->root`; no CST or private AST is
+retained.  `input-math.cpp` is only a flavor dispatcher.
 
 Keep and extend `input-latex-tables` only when a command category changes
 structure.  Unknown commands must use the existing generic-command Mark form;
@@ -290,8 +294,8 @@ without importing Tree-sitter's error-node heuristics.
 ### 4. Retire runtime Tree-sitter dependencies
 
 - Delete `input-latex-ts.cpp` and its Tree-sitter-specific declarations;
-  rename the production entry points to `parse_latex()` and
-  `parse_math_to_ast()`.
+  use the direct production entry points `parse_latex_direct()` and
+  `parse_math_direct_to_ast()`.
 - Add the C source files explicitly to `build_lambda_config.json` (the current
   input source pattern selects `*.cpp`), then regenerate build files with
   `make`; never edit generated Lua files.

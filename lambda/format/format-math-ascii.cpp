@@ -1,12 +1,12 @@
-// format-math-ascii.cpp - ASCII Math formatter for tree-sitter Mark AST
+// format-math-ascii.cpp - ASCII Math formatter for direct-parser Mark AST
 //
-// Converts the tree-sitter-latex-math Mark Element AST back to ASCII math text.
+// Converts the direct math Mark Element AST back to ASCII math text.
 // The AST has element tags like: math, subsup, operator, relation, group,
 // radical, command, fraction, frac_like, delimiter_group, etc.
 // Variables and numbers appear as plain String children.
 //
 // This formatter handles both LaTeX-parsed and ASCII-parsed math since
-// both go through the same unified tree-sitter grammar.
+// both go through the same direct parser.
 
 #include "format-math-shared.hpp"
 
