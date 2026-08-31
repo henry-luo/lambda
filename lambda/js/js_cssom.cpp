@@ -20,11 +20,13 @@
 #include "../input/css/dom_element.hpp"
 #include "../input/css/dom_node.hpp"
 #include "../input/css/style_epoch.hpp"
+#include "../input/css/css_engine.hpp"
 #include "../input/css/css_parser.hpp"
 #include "../input/css/css_style.hpp"
 #include "../input/css/css_formatter.hpp"
 
 #include <cstring>
+#include "../../lib/mem_grow.hpp"
 
 extern String* heap_create_name(const char* name, size_t len);
 extern "C" Item vmap_new(void);
@@ -912,6 +914,41 @@ extern "C" Item js_cssom_get_document_stylesheets(void) {
 // HTMLStyleElement .sheet
 // =============================================================================
 
+static CssStylesheet* js_cssom_create_inline_stylesheet(DomElement* elem) {
+    if (!elem || !elem->doc || !elem->doc->document_pool) return nullptr;
+
+    Pool* pool = elem->doc->document_pool;
+    StrBuf* css_text = strbuf_new_cap(32);
+    if (!css_text) return nullptr;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (!child->is_text()) continue;
+        DomText* text = child->as_text();
+        if (text && text->text && text->length > 0) {
+            strbuf_append_str_n(css_text, text->text, text->length);
+        }
+    }
+
+    // CSSOM exposes the sheet immediately after a style node is connected;
+    // the post-script stylesheet rescan happens too late for libraries that
+    // insert rules during the same script turn.
+    CssEngine* engine = css_engine_create(pool);
+    CssStylesheet* sheet = engine
+        ? css_parse_stylesheet(engine, css_text->str ? css_text->str : "", "<inline-style>")
+        : nullptr;
+    if (engine) css_engine_destroy(engine);
+    strbuf_free(css_text);
+    if (!sheet) return nullptr;
+
+    sheet->owner_style_element = elem;
+    if (!lam::pool_grow_array(pool, &elem->doc->stylesheets,
+                              &elem->doc->stylesheet_capacity,
+                              elem->doc->stylesheet_count + 1, 4)) {
+        return nullptr;
+    }
+    elem->doc->stylesheets[elem->doc->stylesheet_count++] = sheet;
+    return sheet;
+}
+
 extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
     DomElement* elem = (DomElement*)js_dom_unwrap_element(elem_item);
     if (!elem) return ItemNull;
@@ -930,7 +967,9 @@ extern "C" Item js_cssom_get_style_element_sheet(Item elem_item) {
             return js_cssom_wrap_stylesheet(sheet);
         }
     }
-    return ItemNull;
+
+    CssStylesheet* sheet = js_cssom_create_inline_stylesheet(elem);
+    return sheet ? js_cssom_wrap_stylesheet(sheet) : ItemNull;
 }
 
 // =============================================================================
