@@ -206,20 +206,16 @@ represented exactly by the target type. All sized numerics also match `number`:
 
 Ranges represent a contiguous sequence of consecutive values with inclusive start and end bounds. Bounds are either **exact integers** or **single-codepoint strings** (a character range).
 
-```lambda
-// Range type keyword
-range              // Any range value
-
-// Integer range literal type (specific bounds)
-1 to 10            // Range from 1 to 10 inclusive
-0 to 255           // Byte range
--100 to 100        // Negative to positive
-
-// Character range literal type
-"a" to "z"         // Lowercase letters
-"0" to "9"         // Digit characters
-"α" to "ω"         // Any Unicode codepoint interval
-```
+<!-- code-fence: lambda type -->
+| Form | Meaning |
+|------|---------|
+| `range` | Any range value |
+| `1 to 10` | Range from 1 to 10 inclusive |
+| `0 to 255` | Byte range |
+| `-100 to 100` | Negative to positive |
+| `"a" to "z"` | Lowercase letters |
+| `"0" to "9"` | Digit characters |
+| `"α" to "ω"` | Any Unicode codepoint interval |
 
 Range bounds of mixed domains, or strings longer than one codepoint, are errors rather than coercions:
 
@@ -241,10 +237,10 @@ type Hex = \("0" to "9")    // pattern: character class [0-9]
 
 ```lambda
 // As a parameter type
-fn sum_range(r: range) => ...
+fn sum_range(r: range) => ...;
 
 // Type checking
-(1 to 10) is range          // true
+(1 to 10) is range; // true
 42 is range                 // false
 
 // Range literal types in match expressions
@@ -279,7 +275,7 @@ Ranges are iterable and can be used in `for` expressions:
 
 ```lambda
 for i in 1 to 5 { print(i) }   // 1 2 3 4 5
-let squares = for (i in 1 to 5) i ^ 2   // [1, 4, 9, 16, 25]
+let squares = for (i in 1 to 5) i ** 2  // [1, 4, 9, 16, 25]
 ```
 
 ### Array Types
@@ -288,32 +284,35 @@ Lambda has two forms for array types:
 
 **Form 1: Bracket notation** — a type with an occurrence modifier inside `[ ]`:
 
-```lambda
-[int*]             // Array of zero or more ints
-[int+]             // Array of one or more ints (non-empty)
-[string*]          // Array of zero or more strings
-[bool+]            // Non-empty array of booleans
-```
+<!-- code-fence: lambda type -->
+| Form | Meaning |
+|------|---------|
+| `[int*]` | Array of zero or more ints |
+| `[int+]` | Array of one or more ints (non-empty) |
+| `[string*]` | Array of zero or more strings |
+| `[bool+]` | Non-empty array of booleans |
 
 > **Note:** `[int]` (without `*` or `+`) means a tuple of exactly 1 int, not an array of ints.
 
 **Form 2: Occurrence suffix** — a type followed by `[]` or `[n]`:
 
-```lambda
-int[]              // Array of zero or more ints (same as [int*])
-string[]           // Array of zero or more strings
-float[]            // Array of zero or more floats
-int[5]             // Array of exactly 5 ints
-int[3+]            // Array of 3 or more ints
-int[2, 10]         // Array of 2 to 10 ints
-```
+<!-- code-fence: lambda type -->
+| Form | Meaning |
+|------|---------|
+| `int[]` | Array of zero or more ints (same as `[int*]`) |
+| `string[]` | Array of zero or more strings |
+| `float[]` | Array of zero or more floats |
+| `int[5]` | Array of exactly 5 ints |
+| `int[3+]` | Array of 3 or more ints |
+| `int[2, 10]` | Array of 2 to 10 ints |
 
 Nested arrays:
 
-```lambda
-int[][]            // Array of int arrays
-string[][]         // 2D array of strings
-```
+<!-- code-fence: lambda type -->
+| Form | Meaning |
+|------|---------|
+| `int[][]` | Array of int arrays |
+| `string[][]` | 2D array of strings |
 
 Examples:
 
@@ -325,31 +324,32 @@ let names: [string+] = ["Alice", "Bob"]
 
 ### Map Types
 
+<!-- code-fence: lambda type -->
+| Form | Meaning |
+|------|---------|
+| `{name: string, age: int}` | Required fields |
+| `{name: string, age?: int}` | Optional `age` field |
+| `{name: string, ...}` | Open map (allows extra fields) |
+| `{user: {name: string, email: string}}` | Nested maps |
+
+Example:
+
 ```lambda
-// Structural map types
-{name: string, age: int}           // Required fields
-{name: string, age?: int}          // Optional age field
-{name: string, ...}                // Open map (allows extra fields)
-
-// Nested maps
-{
-    user: {name: string, email: string},
-    settings: {theme: string, notifications: bool}
-}
-
-// Examples
 let person: {name: string, age: int} = {name: "Bob", age: 25}
 ```
 
 ### Element Types
 
-```lambda
-// Element type syntax
-<tag>                              // Element with tag
-<tag attr: type>                   // With attribute types
-<tag attr: type; content_type>     // With content type
+<!-- code-fence: lambda type -->
+| Form | Meaning |
+|------|---------|
+| `<tag>` | Element with tag |
+| `<tag attr: type>` | With attribute types |
+| `<tag attr: type; content_type>` | With content type — element *types* keep `;` (S16.9.3) |
 
-// Examples
+Examples:
+
+```lambda
 type Paragraph = <p; string>
 type Link = <a href: string; string>
 type Article = <article title: string, author: string;
@@ -424,20 +424,20 @@ Object types are **nominally-typed maps** with optional methods, inheritance, de
 ```lambda
 // Object type with fields and methods
 type Point {
-    x: float, y: float;
+    x: float, y: float,
     fn distance(other: Point) => math.sqrt((x - other.x)**2 + (y - other.y)**2)
     fn magnitude() => math.sqrt(x**2 + y**2)
 }
 
 // Inheritance
 type Circle : Point {
-    radius: float;
+    radius: float,
     fn area() => 3.14159 * radius ** 2
 }
 
 // Default values
 type Counter {
-    value: int = 0;
+    value: int = 0,
     fn double() => value * 2
     pn increment() { value = value + 1 }   // Mutation method
 }
@@ -445,14 +445,14 @@ type Counter {
 // Field and object constraints
 type User {
     name: string that (len(~) > 0),
-    age: int that (0 <= ~ and ~ <= 150);
+    age: int that (0 <= ~ and ~ <= 150),
     that (~.name != "admin")               // Object-level constraint
 }
 
 // In 'that' clauses, bare identifiers resolve to ~.name implicitly:
 type User2 {
     name: string that (len(~) > 0),        // ~ needed for scalar field value
-    age: int that (~ > 0);
+    age: int that (~ > 0),
     that (name != "admin")                  // 'name' resolves to ~.name
 }
 
@@ -479,16 +479,18 @@ Type occurrences specify cardinality and optionality:
 
 ### Optional Types
 
-```lambda
-// Optional (nullable) types
-int?               // int | null
-string?            // string | null
-int[]?             // Array or null
+<!-- code-fence: lambda type -->
+| Form | Meaning |
+|------|---------|
+| `int?` | `int \| null` |
+| `string?` | `string \| null` |
+| `int[]?` | Array or null |
 
-// In function parameters
+In function parameters and map fields:
+
+```lambda
 fn greet(name: string, title?: string) => ...
 
-// In map fields
 type User = {
     name: string,      // Required
     nickname?: string  // Optional
@@ -497,31 +499,30 @@ type User = {
 
 ### Type Occurrence Modifiers
 
+<!-- code-fence: lambda type -->
+| Form | Meaning |
+|------|---------|
+| `int*` | Same as `int[]` — array of zero or more |
+| `string*` | Array of zero or more strings |
+| `int+` | Array of at least one int |
+| `string+` | Non-empty string array |
+| `int[]` | Array of zero or more ints (same as `int*`) |
+| `float[]` | Array of zero or more floats |
+| `int[5]` | Array of exactly 5 ints |
+| `int[3+]` | Array of 3 or more ints |
+| `int[2, 10]` | Array of 2 to 10 ints |
+
+In declarations, variables, parameters and signatures:
+
 ```lambda
-// Zero or more (array)
-int*               // Same as int[] — array of zero or more
-string*            // Array of zero or more strings
-
-// One or more (non-empty array)
-int+               // Array of at least one int
-string+            // Non-empty string array
-
-// Occurrence suffix forms
-int[]              // Array of zero or more ints (same as int*)
-float[]            // Array of zero or more floats
-int[5]             // Array of exactly 5 ints
-int[3+]            // Array of 3 or more ints
-int[2, 10]         // Array of 2 to 10 ints
-
-// Examples
 type Args = string*        // Zero or more arguments
 type Names = string+       // At least one name required
 
-// In variables and parameters
-var positions: float[] = [0.0, 1.0, 2.0]
+pn demo() {
+    var positions: float[] = [0.0, 1.0, 2.0]
+}
 pn update(arr: int[], n: int) { arr[0] = n }
 
-// In function signatures
 fn concat(parts: string+) => ...   // Requires at least one
 ```
 
@@ -548,14 +549,14 @@ Type patterns enable matching and destructuring based on type structure.
 
 ```lambda
 // Type check with 'is'
-42 is int                  // true
-"hello" is string          // true
-[1, 2] is int[]            // true
+42 is int; // true
+"hello" is string; // true
+[1, 2] is int[]; // true
 
-// Negated type check with '!'
-!(42 is string)            // true
-!(null is int)             // true
-!("hello" is int)          // true
+// Negated type check — 'not' in expression position
+not (42 is string); // true
+not (null is int); // true
+not ("hello" is int); // true
 
 // Type equality
 type(42) == int            // true
@@ -589,19 +590,19 @@ obj is {email: string}     // false (missing required field)
 
 The union operator `|` combines types so a value can be one of several types:
 
+<!-- code-fence: lambda type -->
+| Form | Meaning |
+|------|---------|
+| `int \| string` | Either int or string |
+| `int \| float \| string` | One of three types |
+| `int?` | Same as `int \| null` |
+| `string?` | Same as `string \| null` |
+
+In parameters and collections:
+
 ```lambda
-// Basic union
-int | string           // Either int or string
-int | float | string   // One of three types
-
-// Nullable types (shorthand for union with null)
-int?                   // Same as: int | null
-string?                // Same as: string | null
-
-// Union in function parameters
 fn process(value: int | string) => ...
 
-// Union in collections
 let mixed: (int | string)[] = [1, "two", 3, "four"]
 ```
 
@@ -678,16 +679,12 @@ fn classify(x) => match x {
 
 The prefix `!` operator negates a type — `!T` matches any value that does **not** match `T`:
 
-```lambda
-// Not null — any non-null value
-!null
-
-// Not string — anything except string
-!string
-
-// Not bool — anything except bool
-!bool
-```
+<!-- code-fence: lambda type -->
+| Form | Meaning |
+|------|---------|
+| `!null` | Not null — any non-null value |
+| `!string` | Not string — anything except string |
+| `!bool` | Not bool — anything except bool |
 
 Negation differs from exclusion in that it has no base type — `!T` is equivalent to `any ! T`:
 
@@ -747,13 +744,13 @@ type NonEmpty = string that (len(~) > 0)
 type Between5And10 = int that (5 < ~ < 10)
 
 // Type checking
-1 is Positive          // true
--1 is Positive         // false
-50 is Percentage       // true
-110 is Percentage      // false
-"hi" is NonEmpty       // true
-"" is NonEmpty         // false (empty string has len 0)
-7 is Between5And10     // true
+1 is Positive; // true
+-1 is Positive; // false
+50 is Percentage; // true
+110 is Percentage; // false
+"hi" is NonEmpty; // true
+"" is NonEmpty; // false (empty string has len 0)
+7 is Between5And10; // true
 5 is Between5And10     // false (not > 5)
 ```
 
@@ -787,11 +784,11 @@ Object type fields can each carry their own `that` constraint:
 type User {
     name: string that (len(~) > 0),
     age: int that (0 <= ~ and ~ <= 150),
-    email: string;
+    email: string
 }
 
-<User name: "Alice", age: 30, email: "a@x.com"> is User   // true
-<User name: "", age: 30, email: "a@x.com"> is User         // false (empty name)
+<User name: "Alice", age: 30, email: "a@x.com"> is User; // true
+<User name: "", age: 30, email: "a@x.com"> is User; // false (empty name)
 <User name: "Bob", age: -5, email: "b@x.com"> is User      // false (negative age)
 ```
 
@@ -802,11 +799,11 @@ A `that` clause after the semicolon constrains the **entire object**, with `~` r
 ```lambda
 type DateRange {
     start: int,
-    end: int;
+    end: int,
     that (~.end > ~.start)
 }
 
-<DateRange start: 1, end: 10> is DateRange    // true
+<DateRange start: 1, end: 10> is DateRange; // true
 <DateRange start: 10, end: 1> is DateRange    // false
 ```
 
@@ -815,7 +812,7 @@ Field-level and object-level constraints can be combined:
 ```lambda
 type Config {
     min: int that (~ >= 0),
-    max: int that (~ >= 0);
+    max: int that (~ >= 0),
     that (~.max > ~.min)
 }
 ```
@@ -825,7 +822,7 @@ In object-level `that` clauses, bare identifiers that are not in scope resolve t
 ```lambda
 type User2 {
     name: string that (len(~) > 0),     // ~ = field value (scalar)
-    age: int that (~ > 0);
+    age: int that (~ > 0),
     that (name != "admin")               // name resolves to ~.name
 }
 ```
@@ -889,20 +886,18 @@ type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH"
 
 ### Character Classes
 
+| Class | Matches |
+|-------|---------|
+| `d` | digit `[0-9]` |
+| `w` | word character `[a-zA-Z0-9_]` |
+| `s` | whitespace |
+| `a` | alphabetic `[a-zA-Z]` |
+| `.` | any single character |
+| `...` | any characters (zero or more) |
+
+A character class is only meaningful inside a pattern island `\(…)`:
+
 ```lambda
-// Built-in character classes
-d    // digit [0-9]
-w    // word character [a-zA-Z0-9_]
-s    // whitespace
-a    // alphabetic [a-zA-Z]
-
-// Any single character
-.
-
-// Any characters (zero or more)
-...
-
-// Examples
 type Digit = \(d)                    // single digit
 type Word = \(w+)                    // one or more word characters
 type Anything = \(...)                // any string
@@ -940,20 +935,19 @@ type HexDigit = \("0" to "9" | "a" to "f" | "A" to "F")
 
 ### Occurrence Modifiers
 
+| Quantifier | Meaning |
+|------------|---------|
+| `?` | zero or one (optional) |
+| `+` | one or more |
+| `*` | zero or more |
+| `[n]` | exactly n occurrences |
+| `[n+]` | n or more occurrences |
+| `[n, m]` | between n and m occurrences (inclusive) |
+
+A quantifier is a pattern fragment, not a type on its own; it attaches to the
+element it repeats:
+
 ```lambda
-// Standard quantifiers
-?       // zero or one (optional)
-+       // one or more
-*       // zero or more
-
-// Exact count
-[n]     // exactly n occurrences
-
-// Bounded ranges
-[n+]    // n or more occurrences
-[n, m]  // between n and m occurrences (inclusive)
-
-// Examples
 type OptionalPrefix = \("pre"? w+)           // optional "pre" prefix
 type Identifier = \(a w*)                    // letter followed by word chars
 type ThreeDigits = \(d[3])                    // exactly 3 digits
@@ -1152,10 +1146,10 @@ fn safe_process(value: any) => {
 
 ```lambda
 // Assert type (unsafe - runtime error if wrong)
-let num = value as int         // Asserts value is int
+let asserted = value as int    // Asserts value is int
 
 // Safe assertion with check
-let num = if (value is int) value else error("Expected int")
+let checked = if (value is int) value else error("Expected int")
 ```
 
 ---

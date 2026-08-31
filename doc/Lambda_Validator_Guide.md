@@ -141,19 +141,19 @@ The validator automatically detects input formats and unwraps document wrappers:
 ```lambda
 // XML validation with auto-detection
 let xml_data = input("article.xml", 'xml')
-let result = validate_with_format(schema, xml_data, 'xml')
+let xml_result = validate_with_format(schema, xml_data, 'xml')
 
 // HTML validation
 let html_data = input("page.html", 'html')
-let result = validate_with_format(schema, html_data, 'html')
+let html_result = validate_with_format(schema, html_data, 'html')
 
 // JSON validation
 let json_data = input("data.json", 'json')
-let result = validate_with_format(schema, json_data, 'json')
+let json_result = validate_with_format(schema, json_data, 'json')
 
 // auto-detect format (validator inspects structure)
 let data = input("document", 'auto')
-let result = validate_with_format(schema, data, null)
+let auto_result = validate_with_format(schema, data, null)
 ```
 
 ### Validation Options
@@ -165,18 +165,18 @@ Configure validation behavior with options:
 let strict_result = validate_strict(schema, data)
 
 // limit maximum errors reported
-let result = validate_with_options(schema, data, {
+let limited_result = validate_with_options(schema, data, {
     max_errors: 5,
     strict_mode: true
 })
 
 // limit validation depth for nested structures
-let result = validate_with_options(schema, data, {
+let depth_result = validate_with_options(schema, data, {
     max_depth: 10
 })
 
 // allow unknown fields (not in schema)
-let result = validate_with_options(schema, data, {
+let unknown_result = validate_with_options(schema, data, {
     allow_unknown_fields: true
 })
 ```
@@ -206,7 +206,7 @@ type ValidationResult = {
 ```lambda
 // handle type mismatches
 let result = validate(schema, data)
-if (!result.valid) {
+if (not result.valid) {
     for (err in result.errors) {
         if (contains(err.message, "type mismatch")) {
             print("Type error at " + err.path + ": expected " +
@@ -217,8 +217,8 @@ if (!result.valid) {
 
 // handle missing required fields
 let result = validate(schema, data)
-if (!result.valid) {
-    let missing = filter(result.errors, fn(e) contains(e.message, "required"))
+if (not result.valid) {
+    let missing = filter(result.errors, (e) => contains(e.message, "required"))
     if (length(missing) > 0) {
         print("Missing required fields:")
         for (err in missing) {
@@ -229,7 +229,7 @@ if (!result.valid) {
 
 // handle array occurrence violations
 let result = validate(schema, data)
-if (!result.valid) {
+if (not result.valid) {
     for (err in result.errors) {
         if (contains(err.message, "one or more")) {
             print("Array at " + error.path + " must have at least one element")
@@ -283,11 +283,11 @@ JSON validation works on maps and arrays:
 ```lambda
 // validate JSON object
 let json_obj = {name: "Alice", age: 30}
-let result = validate(schema, json_obj)
+let obj_result = validate(schema, json_obj)
 
 // validate JSON array
 let json_arr = [1, 2, 3, 4, 5]
-let result = validate(array_schema, json_arr)
+let arr_result = validate(array_schema, json_arr)
 ```
 
 ## Best Practices
@@ -373,7 +373,7 @@ Always handle validation errors gracefully:
 fn validate_and_process(data) {
     let result = validate(schema, data)
 
-    if (!result.valid) {
+    if (not result.valid) {
         // log errors
         log("Validation failed:", result.errors)
 
@@ -393,11 +393,11 @@ Let the validator auto-detect format when possible:
 ```lambda
 // good: let validator detect format
 let data = input("document", 'auto')
-let result = validate_with_format(schema, data, null)
+let detected_result = validate_with_format(schema, data, null)
 
 // also good: explicit format when known
 let xml_data = input("article.xml", 'xml')
-let result = validate_with_format(schema, xml_data, 'xml')
+let explicit_result = validate_with_format(schema, xml_data, 'xml')
 ```
 
 ### 6. Performance Considerations
@@ -406,12 +406,12 @@ For large or deeply nested documents:
 
 ```lambda
 // limit validation depth
-let result = validate_with_options(schema, data, {
+let depth_limited = validate_with_options(schema, data, {
     max_depth: 20  // prevent excessive recursion
 })
 
 // limit error reporting (stop after N errors)
-let result = validate_with_options(schema, data, {
+let error_limited = validate_with_options(schema, data, {
     max_errors: 10  // faster for documents with many errors
 })
 ```
@@ -473,7 +473,7 @@ type User = {
 
 ### Core Functions
 
-```lambda
+```text
 // load schema from file
 load_schema(path: string, type_name: string) -> Schema
 

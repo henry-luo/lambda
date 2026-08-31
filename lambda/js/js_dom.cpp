@@ -6545,7 +6545,8 @@ extern "C" Item js_document_get_property(Item prop_name) {
 //   .setSelectionRange(start, end [, direction])
 //   .select()
 //   .defaultValue
-// The state lives on `FormControlProp` (radiant/form_control.hpp).
+// The value allocation lives in `ViewState.data.form`; `FormControlProp`
+// caches that buffer for native IDL and rendering access.
 // `document.activeElement` and the "last focused text control" are tracked
 // via the focus tracker in radiant/text_control.{hpp,cpp}; the helpers
 // `tc_is_text_control`, `tc_get_or_create_form`, `tc_ensure_init`,
@@ -6653,15 +6654,15 @@ static bool js_text_control_set_raw_value(DomElement* elem, const char* new_val,
     FormControlProp* f = tc_get_or_create_form(elem);
     if (!f) return false;
 
-    char* buf = (char*)mem_alloc((size_t)new_len + 1, MEM_CAT_DOM);
-    if (!buf) return false;
-    if (new_val && new_len > 0) memcpy(buf, new_val, new_len);
-    buf[new_len] = '\0';
-
-    if (f->current_value) mem_free(f->current_value);
-    f->current_value = buf;
-    f->current_value_len = new_len;
-    f->current_value_u16_len = tc_utf8_to_utf16_length(buf, new_len);
+    DocState* state = elem->doc ? elem->doc->state : js_dom_current_state();
+    if (!state && elem->doc) {
+        state = radiant_document_ensure_state(elem->doc, "js_text_control_set_raw_value");
+    }
+    uint32_t new_u16_len = tc_utf8_to_utf16_length(new_val ? new_val : "", new_len);
+    if (!form_control_store_text_value(state, (View*)elem, new_val,
+                                       new_len, new_u16_len)) {
+        return false;
+    }
     if (f->selection_start > f->current_value_u16_len)
         f->selection_start = f->current_value_u16_len;
     if (f->selection_end > f->current_value_u16_len)
@@ -6669,9 +6670,7 @@ static bool js_text_control_set_raw_value(DomElement* elem, const char* new_val,
     if (f->selection_start > f->selection_end)
         f->selection_start = f->selection_end;
     f->tc_initialized = 1;
-    f->value = buf;
 
-    DocState* state = js_dom_current_state();
     f->state_ref = state;
     form_control_sync_text_control_state(state, (View*)elem);
     form_control_sync_text_control_focus_state(state, (View*)elem);

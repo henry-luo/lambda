@@ -446,15 +446,15 @@ The following built-in functions perform I/O and may fail. They enforce the same
 
 ### Example: Handling System Function Errors
 
-```lambda
+```lambda error=E228
 // ❌ Compile error: unhandled error from 'input'
-let data = input("file.json")
+let unhandled = input("file.json")
 
 // ✅ Propagate error
-let data = input("file.json")^
+let propagated = input("file.json")^
 
 // ✅ Handle error explicitly
-let data = input("file.json") ^ { log_warn(^.message); {} }
+let handled = input("file.json") ^ { log_warn(^.message); {} }
 
 // ❌ Compile error: unhandled error from 'io.mkdir'
 io.mkdir("output")
@@ -621,7 +621,7 @@ compute(5)^   // 20
 fn process_file(path: string) ProcessedData^ {
     let content = input(path, 'text')^
     let lines = split(content, "\n")
-    let parsed = (for line in lines parse_line(line)^)
+    let parsed = (for (line in lines) parse_line(line)^)
     aggregate(parsed)
 }
 ```

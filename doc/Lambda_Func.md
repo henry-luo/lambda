@@ -342,7 +342,7 @@ Method syntax enables fluent operations:
 
 ```lambda
 // Chained method calls
-let result = data
+let chained = data
     .filter((x) => x > 0)
     .map((x) => x * 2)
     .sort()
@@ -350,7 +350,7 @@ let result = data
     .sum()
 
 // Equivalent nested calls (harder to read)
-let result = sum(take(sort(map(filter(data, (x) => x > 0), (x) => x * 2)), 10))
+let nested = sum(take(sort(map(filter(data, (x) => x > 0), (x) => x * 2)), 10))
 ```
 
 ### Mutating Object Methods

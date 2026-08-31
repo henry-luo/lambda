@@ -117,6 +117,39 @@ TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsLiveStateMapEntriesOnly) 
     EXPECT_FALSE(state_get_bool(doc_state, orphan, "mutation-orphan-state"));
 }
 
+TEST_F(StateStoreDomMutationTest, TextControlValueIsViewStateOwnedAcrossPropRebuild) {
+    DocState* doc_state = state();
+    ASSERT_NE(doc_state, nullptr);
+
+    FormControlProp* original_prop = new FormControlProp{};
+    ASSERT_NE(original_prop, nullptr);
+    original_prop->control_type = FORM_CONTROL_TEXT;
+    live->form = original_prop;
+    ASSERT_TRUE(form_control_store_text_value(doc_state, static_cast<View*>(live),
+                                              "state-owned", 11, 11));
+
+    ViewState* view_state = view_state_get(doc_state, static_cast<View*>(live));
+    ASSERT_NE(view_state, nullptr);
+    ASSERT_TRUE(view_state->data.form.has_current_value);
+    ASSERT_NE(live->form, nullptr);
+    EXPECT_EQ(live->form->current_value, view_state->data.form.current_value);
+    EXPECT_STREQ(live->form->current_value, "state-owned");
+
+    FormControlProp* rebuilt_prop = new FormControlProp{};
+    ASSERT_NE(rebuilt_prop, nullptr);
+    rebuilt_prop->control_type = FORM_CONTROL_TEXT;
+    live->form = rebuilt_prop;
+
+    // Reflow must rebind the newly pooled prop without allocating a second value.
+    state_store_prune_after_reflow(doc_state);
+    EXPECT_EQ(live->form->current_value, view_state->data.form.current_value);
+    EXPECT_STREQ(live->form->current_value, "state-owned");
+
+    live->form = nullptr;
+    delete rebuilt_prop;
+    delete original_prop;
+}
+
 TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsDragWhenOnlyDropTargetRemoved) {
     DocState* doc_state = state();
     ASSERT_NE(doc_state, nullptr);

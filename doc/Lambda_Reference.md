@@ -380,10 +380,10 @@ fn divide(a, b) int^ {
 }
 
 // Propagate error with ^
-let result = divide(10, x)^
+let propagated = divide(10, x)^
 
 // Or handle it locally — `~` is the error
-let result = divide(10, x) ^ {
+let handled = divide(10, x) ^ {
     print("error: " ++ ^.message)
     0
 }

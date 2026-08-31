@@ -1275,7 +1275,7 @@ pn api_operations() {
     // POST request
     let result = io.fetch(https.'api.example.com'.users, {
         method: 'POST',
-        headers: {Content-Type: "application/json"},
+        headers: {'Content-Type': "application/json"},
         body: format({name: "Alice", email: "alice@example.com"}, 'json')
     })
 }

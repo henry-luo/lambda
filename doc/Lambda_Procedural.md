@@ -436,7 +436,7 @@ pn process_items(items) {
             i = i + 1
             continue        // skip nulls
         }
-        if (items[i] == 'stop') break   // stop sentinel
+        if (items[i] == 'stop') { break }   // stop sentinel
         process(items[i])
         i = i + 1
     }
@@ -657,7 +657,7 @@ Object types can define `pn` methods that mutate the object's fields in-place. I
 
 ```lambda
 type Counter {
-    count: int = 0;
+    count: int = 0,
 
     fn value() => count                    // Pure — reads field
     pn increment() { count = count + 1 }   // Mutates field in-place
@@ -680,7 +680,7 @@ Inside `pn` methods, bare field names resolve to the object's fields (same as in
 ```lambda
 type Account {
     balance: float,
-    name: string;
+    name: string,
 
     pn deposit(amount: float) {
         balance = balance + amount       // unambiguous: balance is a field

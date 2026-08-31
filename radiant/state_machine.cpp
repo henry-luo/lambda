@@ -465,13 +465,6 @@ static void validate_transient_ui_target(View* view, const char* name,
     }
 }
 
-static View* find_doc_live_view_by_id(DocState* state, uint32_t view_id) {
-    if (!state || !state->owner_store || !state->owner_store->document || view_id == 0) return NULL;
-    DomDocument* doc = state->owner_store->document;
-    DomNode* root = doc->root ? static_cast<DomNode*>(doc->root) : NULL;
-    return view_tree_find_live_id(root, view_id);
-}
-
 static void validate_focus_node(DocState* state, View* node, View* focused,
                                 StateValidationReport* report,
                                 uint32_t* focus_count) {
@@ -867,7 +860,7 @@ static void validate_view_state_registry(DocState* state,
         if (entry->view_id == 0 || view_state->view_id == 0 || entry->view_id != view_state->view_id) {
             report_fail(report, "view state registry id is inconsistent");
         }
-        View* live_view = find_doc_live_view_by_id(state, view_state->view_id);
+        View* live_view = view_state_entry_resolve_view(state, entry);
         if (state->owner_store && state->owner_store->document) {
             if (!live_view) {
                 report_fail(report, "view state registry id has no live view");
@@ -908,6 +901,15 @@ static void validate_view_state_registry(DocState* state,
                         FormControlProp* form = live_element->form;
                         if (form->form_state_ref && form->form_state_ref != view_state) {
                             report_fail(report, "form control cached ViewState ref is stale");
+                        }
+                        if (tc_is_text_control(live_element)) {
+                            tc_ensure_init(live_element);
+                            if (view_state->data.form.has_current_value &&
+                                (form->current_value != view_state->data.form.current_value ||
+                                 form->current_value_len != view_state->data.form.current_value_len ||
+                                 form->current_value_u16_len != view_state->data.form.current_value_u16_len)) {
+                                report_fail(report, "text control cache does not alias canonical ViewState value");
+                            }
                         }
                         if (form->option_count >= 0) {
                             if (view_state->data.form.selected_index >= form->option_count) {
