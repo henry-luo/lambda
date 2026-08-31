@@ -95,41 +95,33 @@ Lambda treats empty strings as real `string` values. The empty symbol literal
 
 ### Numeric Literals
 
-```lambda
-// Integers
-42
--123
-0
-
-// Floats
-3.14
--2.5
-1.5e-10
-1e6
-inf
-nan
--inf
-
-// Decimals (exact decimal)
-123.456m       // decimal
--789.012m      // decimal
-100m           // integer-valued decimal (the money literal)
-
-// Sized integers (postfix suffix)
-42i8           // 8-bit signed  [-128, 127]
-1000i16        // 16-bit signed [-32768, 32767]
-100000i32      // 32-bit signed [-2^31, 2^31-1]
-100i64         // 64-bit signed (alias for int64)
-255u8          // 8-bit unsigned [0, 255]
-60000u16       // 16-bit unsigned [0, 65535]
-3000000000u32  // 32-bit unsigned [0, 2^32-1]
-1000u64        // 64-bit unsigned [0, 2^64-1]
-
-// Sized floats (postfix suffix)
-0.5f16         // 16-bit float (half precision)
-3.14f32        // 32-bit float (single precision)
-2.7f64         // 64-bit float (alias for float)
-```
+<!-- code-fence: lambda expr -->
+| Literal | Kind | Notes |
+|---------|------|-------|
+| `42` | Integer | |
+| `-123` | Integer | |
+| `0` | Integer | |
+| `3.14` | Float | |
+| `-2.5` | Float | |
+| `1.5e-10` | Float | exponent form |
+| `1e6` | Float | exponent form |
+| `inf` | Float | positive infinity |
+| `nan` | Float | not-a-number |
+| `-inf` | Float | negative infinity |
+| `123.456m` | Decimal | exact decimal |
+| `-789.012m` | Decimal | exact decimal |
+| `100m` | Decimal | integer-valued — the money literal |
+| `42i8` | Sized int | 8-bit signed, `[-128, 127]` |
+| `1000i16` | Sized int | 16-bit signed, `[-32768, 32767]` |
+| `100000i32` | Sized int | 32-bit signed, `[-2^31, 2^31-1]` |
+| `100i64` | Sized int | 64-bit signed — alias for `int64` |
+| `255u8` | Sized int | 8-bit unsigned, `[0, 255]` |
+| `60000u16` | Sized int | 16-bit unsigned, `[0, 65535]` |
+| `3000000000u32` | Sized int | 32-bit unsigned, `[0, 2^32-1]` |
+| `1000u64` | Sized int | 64-bit unsigned, `[0, 2^64-1]` |
+| `0.5f16` | Sized float | 16-bit, half precision |
+| `3.14f32` | Sized float | 32-bit, single precision |
+| `2.7f64` | Sized float | 64-bit — alias for `float` |
 
 **Sized numeric types** use a postfix suffix on numeric literals. Types `i8` through `u32` and `f16`/`f32` are packed inline in the 64-bit `Item` representation (zero heap allocation). Types `i64`, `u64`, and `f64` are heap-allocated.
 
@@ -267,12 +259,12 @@ Binary element operations are byte-oriented:
 
 ```lambda
 let bytes = b'\x00ADFF'
-bytes[1]                         // 173u8 (prints as 173)
-bytes[1] is u8                   // true
-bytes[1 to 2]                    // b'\xADFF'
-173 in bytes                     // true
-[for (byte in bytes) byte]       // [0, 173, 255], retaining u8 values
-b'\xDEAD' ++ b'\xBEEF'           // b'\xDEADBEEF'
+bytes[1];                        // 173u8 (prints as 173)
+bytes[1] is u8;                  // true
+bytes[1 to 2];                   // b'\xADFF'
+173 in bytes;                    // true
+[for (byte in bytes) byte];      // [0, 173, 255], retaining u8 values
+b'\xDEAD' ++ b'\xBEEF';          // b'\xDEADBEEF'
 b'\xDEAD' ++ "tail"             // "b'\xDEAD'tail"
 ```
 
@@ -500,45 +492,35 @@ The `path` type represents file system paths and URLs in a unified, platform-ind
 
 ### Path Syntax
 
-```lambda
-// Rooted logical paths (start with /.)
-/.etc.hosts                   // /etc/hosts
-/.home.user.documents         // /home/user/documents
-/.usr.local.bin.lambda        // /usr/local/bin/lambda
-
-// Relative paths (start with .; .~~ is the parent step)
-.config.json                  // ./config.json
-.src.main.ls                  // ./src/main.ls
-.~~.parent.file               // ../parent/file
-
-// Quoted segments (for names containing dots or special chars)
-/.var.log.'app.log'           // /var/log/app.log
-.data.'my-file.json'          // ./data/my-file.json
-/.home.user.'Documents and Settings' // Spaces in names
-
-// HTTP/HTTPS URLs
-http.api.github.com.users     // http://api.github.com/users
-https.example.com.data        // https://example.com/data
-https.httpbin.org.json        // https://httpbin.org/json
-
-// System paths
-sys.env.HOME                  // Environment variable $HOME
-sys.env.PATH                  // Environment variable $PATH
-sys.platform                  // Operating system platform
-
-// Wildcards in paths
-.src.*                        // Single-level: all in ./src
-.test.**                      // Recursive: all under ./test
-/.var.log.'*.log'             // Pattern in filename
-```
+<!-- code-fence: lambda expr -->
+| Form | Kind | Resolves to |
+|------|------|-------------|
+| `/.etc.hosts` | Rooted logical (starts `/.`) | `/etc/hosts` |
+| `/.home.user.documents` | Rooted logical | `/home/user/documents` |
+| `/.usr.local.bin.lambda` | Rooted logical | `/usr/local/bin/lambda` |
+| `\.config.json` | Relative (starts `\.`) | `./config.json` |
+| `\.src.main.ls` | Relative | `./src/main.ls` |
+| `\.~~.parent.file` | Relative, parent step `\.~~` | `../parent/file` |
+| `/.var.log.'app.log'` | Quoted segment | `/var/log/app.log` |
+| `\.data.'my-file.json'` | Quoted segment | `./data/my-file.json` |
+| `/.home.user.'Documents and Settings'` | Quoted segment | spaces in names |
+| `http.api.github.com.users` | HTTP URL | `http://api.github.com/users` |
+| `https.example.com.data` | HTTPS URL | `https://example.com/data` |
+| `https.httpbin.org.json` | HTTPS URL | `https://httpbin.org/json` |
+| `sys.env.HOME` | System | environment variable `$HOME` |
+| `sys.env.PATH` | System | environment variable `$PATH` |
+| `sys.platform` | System | operating system platform |
+| `\.src.*` | Wildcard, single-level | all items in `./src` |
+| `\.test.**` | Wildcard, recursive | all under `./test` |
+| `/.var.log.'*.log'` | Wildcard in filename | pattern match on the name |
 
 ### Path Schemes
 
 | Scheme             | Root Syntax | Example                  | Resolves To                 |
 | ------------------ | ----------- | ------------------------ | --------------------------- |
 | Rooted logical     | `/.`        | `/.etc.hosts`            | `/etc/hosts`                |
-| Relative (current) | `.`         | `.src.main`              | `./src/main`                |
-| Relative (parent)  | `.~~`       | `.~~.shared.lib`         | `../shared/lib`             |
+| Relative (current) | `\.`        | `\.src.main`             | `./src/main`                |
+| Relative (parent)  | `\.~~`      | `\.~~.shared.lib`        | `../shared/lib`             |
 | HTTP               | `http`      | `http.'api.example.com'` | `http://api.example.com`    |
 | HTTPS              | `https`     | `https.'secure.api'`     | `https://secure.api`        |
 | System             | `sys`       | `sys.env.PATH`           | System environment variable |
@@ -547,15 +529,13 @@ sys.platform                  // Operating system platform
 
 Paths support glob-style wildcards for pattern matching:
 
-```lambda
-// Single-level wildcard (*)
-.src.*                        // All items directly in ./src
-/.var.log.*                   // All items in /var/log
-
-// Recursive wildcard (**)
-.test.**                      // All items recursively under ./test
-/.home.user.documents.**      // All files recursively
-```
+<!-- code-fence: lambda expr -->
+| Form | Meaning |
+|------|---------|
+| `\.src.*` | Single-level `*` — all items directly in `./src` |
+| `/.var.log.*` | Single-level `*` — all items in `/var/log` |
+| `\.test.**` | Recursive `**` — all items under `./test` |
+| `/.home.user.documents.**` | Recursive `**` — all files under the directory |
 
 ### Path Concatenation
 
@@ -566,7 +546,7 @@ let base = /.home.user
 let config = base ++ "config" ++ "settings.json"
 // Result: /.home.user.config.'settings.json'
 
-let project = .src
+let project = \.src
 let file = project ++ "main.ls"
 // Result: .src.'main.ls'
 ```
@@ -599,7 +579,7 @@ let data2 = input(s, 'json')
 ```lambda
 // Check existence
 exists(/.etc.hosts)           // true or false
-exists(.config.json)          // true or false
+exists(\.config.json)         // true or false
 
 // Load content
 let content = input(/.etc.hosts, 'text')   // Load file content
@@ -733,21 +713,15 @@ let path_dirs = split(sys.proc.self.env.PATH, ":")
 
 Ordered collections:
 
-```lambda
-// Array creation
-[1, 2, 3]
-["a", "b", "c"]
-[true, false, null]
-
-// Empty array
-[]
-
-// Mixed-type arrays
-[42, "hello", 3.14, true, null]
-
-// Nested arrays
-[[1, 2], [3, 4], [5, 6]]
-```
+<!-- code-fence: lambda expr -->
+| Literal | Meaning |
+|---------|---------|
+| `[1, 2, 3]` | Array of ints |
+| `["a", "b", "c"]` | Array of strings |
+| `[true, false, null]` | Array of bools and null |
+| `[]` | Empty array |
+| `[42, "hello", 3.14, true, null]` | Mixed-type array |
+| `[[1, 2], [3, 4], [5, 6]]` | Nested arrays |
 
 #### Array Access
 
@@ -780,10 +754,11 @@ unique([1,1,2,2])  // [1, 2]
 Use `++` for list/array concatenation. The `+` operator is numeric vector
 arithmetic on arrays/lists, not append:
 
-```lambda
-[1, 2] + [3, 4]    // [4, 6]
-[1, 2] ++ [3, 4]   // [1, 2, 3, 4]
-```
+<!-- code-fence: lambda expr -->
+| Expression | Result |
+|------------|--------|
+| `[1, 2] + [3, 4]` | `[4, 6]` — element-wise arithmetic |
+| `[1, 2] ++ [3, 4]` | `[1, 2, 3, 4]` — concatenation |
 
 ### Maps
 
@@ -890,27 +865,19 @@ let rebuilt = <node *:attrs, "new content">
 
 Sequences of consecutive values for iteration. Bounds are either exact integers or single-codepoint strings:
 
-```lambda
-// Integer ranges
-1 to 10        // [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-0 to 5         // [0, 1, 2, 3, 4, 5]
--2 to 2        // [-2, -1, 0, 1, 2]
-
-// Character ranges — each member is a one-character string
-"a" to "e"     // ["a", "b", "c", "d", "e"]
-"α" to "ε"     // ["α", "β", "γ", "δ", "ε"] — steps by Unicode codepoint
-
-// Range operations
-len(1 to 10)   // 10
-(1 to 5)[2]    // 3
-("a" to "e")[0]  // "a"
-
-// Range in for loops
-(for (i in 1 to 5) i * i)  // [1, 4, 9, 16, 25]
-
-// A start past the end yields an empty range
-"z" to "a"     // []
-```
+<!-- code-fence: lambda expr -->
+| Expression | Result |
+|------------|--------|
+| `1 to 10` | `[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]` |
+| `0 to 5` | `[0, 1, 2, 3, 4, 5]` |
+| `-2 to 2` | `[-2, -1, 0, 1, 2]` |
+| `"a" to "e"` | `["a", "b", "c", "d", "e"]` — each member is a one-character string |
+| `"α" to "ε"` | `["α", "β", "γ", "δ", "ε"]` — steps by Unicode codepoint |
+| `len(1 to 10)` | `10` |
+| `(1 to 5)[2]` | `3` |
+| `("a" to "e")[0]` | `"a"` |
+| `(for (i in 1 to 5) i * i)` | `[1, 4, 9, 16, 25]` — range in a for loop |
+| `"z" to "a"` | `[]` — a start past the end yields an empty range |
 
 Bounds must share a domain, and string bounds must be exactly one codepoint — `"ab" to "z"` and `1 to "z"` are errors, not coercions.
 
@@ -924,10 +891,10 @@ For expressions iterate over collections and return new collections:
 
 ```lambda
 // Array iteration
-(for (x in [1, 2, 3]) x * 2)  // [2, 4, 6]
+(for (x in [1, 2, 3]) x * 2);  // [2, 4, 6]
 
 // Range iteration
-(for (i in 1 to 5) i * i)     // [1, 4, 9, 16, 25]
+(for (i in 1 to 5) i * i);     // [1, 4, 9, 16, 25]
 
 // Conditional iteration
 (for (num in [1, 2, 3, 4, 5])
@@ -971,15 +938,15 @@ The pipe operator enables fluent data transformation:
 
 ```lambda
 // Map over collection
-[1, 2, 3] |> ~ * 2          // [2, 4, 6]
+[1, 2, 3] |> ~ * 2;         // [2, 4, 6]
 
 // Extract field from each item
-users |> ~.name             // ["Alice", "Bob", ...]
+users |> ~.name;            // ["Alice", "Bob", ...]
 
 // Chained transformations
 [1, 2, 3, 4, 5]
     |> ~ ** 2                // square each
-    |> ~ + 1                 // add 1
+    |> ~ + 1;                // add 1
 // Result: [2, 5, 10, 17, 26]
 
 // Filter with that
@@ -1021,19 +988,13 @@ state updates.
 
 ### Concatenation
 
-```lambda
-// Array concatenation
-[1, 2] ++ [3, 4]            // [1, 2, 3, 4]
-
-// String concatenation
-"hello" ++ " world"   // "hello world"
-
-// Binary concatenation
-b'\xDEAD' ++ b'\xBEEF'     // b'\xDEADBEEF'
-
-// Path concatenation
-/.home.user ++ "config"     // /.home.user.config
-```
+<!-- code-fence: lambda expr -->
+| Expression | Result |
+|------------|--------|
+| `[1, 2] ++ [3, 4]` | `[1, 2, 3, 4]` — array |
+| `"hello" ++ " world"` | `"hello world"` — string |
+| `b'\xDEAD' ++ b'\xBEEF'` | `b'\xDEADBEEF'` — binary |
+| `/.home.user ++ "config"` | `/.home.user.config` — path |
 
 For arrays/lists, `+` remains element-wise numeric addition. Use `++` when
 the result should grow the collection.
@@ -1053,7 +1014,7 @@ let items = [
 let config = {
     name: "app",
     debug: if (dev_mode) true else false,
-    ...if (has_extra) extra_config else {}
+    *: if (has_extra) extra_config else {}
 }
 ```
 

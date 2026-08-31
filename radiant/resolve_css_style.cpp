@@ -1165,9 +1165,10 @@ static void resolve_flex_grid_container_alignment(LayoutContext* lycon,
 static void css_store_self_alignment(LayoutContext* lycon, ViewSpan* span,
                                      bool justify, CssSelfAlignment value);
 
-static CssEnum css_parse_legacy_justify_items(const CssValue* value) {
+static CssSelfAlignment css_parse_legacy_justify_items(const CssValue* value) {
+    CssSelfAlignment result = {};
     if (!value || value->type != CSS_VALUE_TYPE_LIST || value->data.list.count != 2) {
-        return CSS_VALUE__UNDEF;
+        return result;
     }
 
     bool has_legacy = false;
@@ -1178,7 +1179,7 @@ static CssEnum css_parse_legacy_justify_items(const CssValue* value) {
             part->data.custom_property.name &&
             str_ieq_const(part->data.custom_property.name,
                           strlen(part->data.custom_property.name), "legacy")) {
-            if (has_legacy) return CSS_VALUE__UNDEF;
+            if (has_legacy) return result;
             has_legacy = true;
             continue;
         }
@@ -1186,13 +1187,16 @@ static CssEnum css_parse_legacy_justify_items(const CssValue* value) {
             (part->data.keyword == CSS_VALUE_LEFT ||
              part->data.keyword == CSS_VALUE_RIGHT ||
              part->data.keyword == CSS_VALUE_CENTER)) {
-            if (position != CSS_VALUE__UNDEF) return CSS_VALUE__UNDEF;
+            if (position != CSS_VALUE__UNDEF) return result;
             position = part->data.keyword;
             continue;
         }
-        return CSS_VALUE__UNDEF;
+        return result;
     }
-    return has_legacy ? position : CSS_VALUE__UNDEF;
+    if (!has_legacy) return result;
+    result.value = position;
+    result.legacy = true;
+    return result;
 }
 
 static CssSelfAlignment css_parse_justify_items(const CssValue* value) {
@@ -1200,8 +1204,7 @@ static CssSelfAlignment css_parse_justify_items(const CssValue* value) {
     if (result.value != CSS_VALUE__UNDEF) return result;
 
     // CSS Align 3 §7.1: legacy is a separate grammar branch for this property.
-    result.value = css_parse_legacy_justify_items(value);
-    return result;
+    return css_parse_legacy_justify_items(value);
 }
 
 static void css_store_grid_justify_items(LayoutContext* lycon, ViewBlock* block,
@@ -4900,6 +4903,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_TEXT_TRANSFORM,
         CSS_PROPERTY_TEXT_INDENT,
         CSS_PROPERTY_TEXT_SPACING_TRIM,
+        CSS_PROPERTY_HYPHENATE_CHARACTER,
         CSS_PROPERTY_DOMINANT_BASELINE,
         CSS_PROPERTY_LETTER_SPACING,
         CSS_PROPERTY_WORD_SPACING,
@@ -5506,6 +5510,14 @@ static void css_store_list_style_type_string(LayoutContext* lycon, ViewSpan* spa
     span->blk->list_style_type = CSS_VALUE_NONE;
 }
 
+static void css_store_hyphenate_character(LayoutContext* lycon, ViewSpan* span,
+                                          const char* character) {
+    if (!lycon || !span || !character) return;
+    size_t length = strlen(character);
+    span->blk->hyphenate_character = (char*)alloc_prop(lycon, length + 1);
+    str_copy(span->blk->hyphenate_character, length + 1, character, length);
+}
+
 static const char* css_list_style_image_url(const CssValue* value) {
     if (!value) return nullptr;
     if (value->type == CSS_VALUE_TYPE_URL) return value->data.url;
@@ -5989,6 +6001,8 @@ static const CssSimpleKeywordSpec* css_simple_keyword_spec(CssPropertyCode prope
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, overflow_wrap)},
         {CSS_PROPERTY_OVERFLOW_WRAP, CSS_SIMPLE_KEYWORD_BLOCK,
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, overflow_wrap)},
+        {CSS_PROPERTY_HYPHENS, CSS_SIMPLE_KEYWORD_BLOCK,
+         CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, hyphens)},
         {CSS_PROPERTY_WHITE_SPACE, CSS_SIMPLE_KEYWORD_BLOCK,
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, white_space)},
         {CSS_PROPERTY_TEXT_SPACING_TRIM, CSS_SIMPLE_KEYWORD_BLOCK,
@@ -7787,6 +7801,26 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_WORD_SPACING:
             resolve_font_spacing_property(lycon, span, prop_id, value);
             break;
+        case CSS_PROPERTY_HYPHENATE_CHARACTER: {
+            span->ensure_block(lycon);
+            const CssValue* resolved = resolve_var_function(lycon, value);
+            if (!resolved) break;
+            if (resolved->type == CSS_VALUE_TYPE_STRING) {
+                css_store_hyphenate_character(lycon, span, resolved->data.string);
+            } else if (resolved->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum keyword = resolved->data.keyword;
+                if (keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_INITIAL ||
+                    keyword == CSS_VALUE_UNSET || keyword == CSS_VALUE_REVERT) {
+                    span->blk->hyphenate_character = nullptr;
+                } else if (keyword == CSS_VALUE_INHERIT) {
+                    DomElement* parent = dom_parent_element(
+                        lam::dom_require<DOM_NODE_ELEMENT>(lycon->view));
+                    span->blk->hyphenate_character = parent && parent->blk
+                        ? parent->block()->hyphenate_character : nullptr;
+                }
+            }
+            break;
+        }
         case CSS_PROPERTY_TEXT_SHADOW: {
             if (!span->font) {
                 break;

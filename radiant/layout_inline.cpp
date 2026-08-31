@@ -115,6 +115,34 @@ static bool span_has_direct_visible_text(ViewSpan* span) {
     return false;
 }
 
+static bool inline_span_single_replaced_baseline_y(ViewSpan* span, float* baseline_y) {
+    if (!span || !baseline_y) return false;
+    bool found_replaced_child = false;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child)) {
+            continue;
+        }
+        if (child->view_type == RDT_VIEW_TEXT) {
+            if (child->width <= 0.0f || child->height <= 0.0f ||
+                text_is_all_collapsible_space(
+                    lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child)), span)) {
+                continue;
+            }
+            return false;
+        }
+        ViewBlock* block = lam::view_as_block(child);
+        if (block && block->display.inner == RDT_DISPLAY_REPLACED) {
+            if (found_replaced_child) return false;
+            // CSS 2.1 §10.8.1: a replaced inline's baseline is its bottom content edge.
+            *baseline_y = child->y + child->height;
+            found_replaced_child = true;
+            continue;
+        }
+        return false;
+    }
+    return found_replaced_child;
+}
+
 static bool inline_contents_text_bounds(ViewSpan* span, float* min_x, float* max_x,
                                         float* min_y, float* max_y) {
     if (!span || !min_x || !max_x || !min_y || !max_y) return false;
@@ -403,6 +431,39 @@ static bool ruby_annotation_is_outside_base_bounds(ViewSpan* span, View* child) 
 
 static bool ruby_annotation_node(DomNode* node) {
     return node && node->is_element() && node->tag() == MARKUP_NAME_RT;
+}
+
+static bool ruby_annotation_display_is_misparented(DomNode* node,
+                                                   DisplayValue display) {
+    if (!node || !node->is_element() ||
+        (display.inner != CSS_VALUE_RUBY_TEXT &&
+         display.inner != CSS_VALUE_RUBY_TEXT_CONTAINER)) {
+        return false;
+    }
+    if (!node->parent || !node->parent->is_element()) return true;
+    DisplayValue parent_display = resolve_display_value(node->parent);
+    return parent_display.inner != CSS_VALUE_RUBY &&
+        parent_display.inner != CSS_VALUE_RUBY_TEXT_CONTAINER;
+}
+
+static void contribute_misparented_ruby_annotation_line_height(
+        LayoutContext* lycon, ViewSpan* annotation,
+        const Linebox* base_line_before_annotation) {
+    if (!lycon || !annotation || !base_line_before_annotation) return;
+    float annotation_extent = max(annotation->height, annotation->content_height);
+    if (annotation_extent <= 0.0f) return;
+
+    float base_line_extent = max(
+        base_line_before_annotation->max_atomic_inline_height,
+        base_line_before_annotation->max_ascender +
+            base_line_before_annotation->max_descender);
+    // css-ruby §2.2/§3.6: a misparented annotation gets an anonymous empty
+    // base, whose line still contributes the containing block's line-height.
+    base_line_extent = max(base_line_extent, lycon->block.line_height);
+    if (base_line_extent <= 0.0f) return;
+    lycon->line.ruby_annotation_min_line_height = max(
+        lycon->line.ruby_annotation_min_line_height,
+        base_line_extent + annotation_extent);
 }
 
 static bool ruby_has_visible_base_content(ViewSpan* ruby) {
@@ -2277,6 +2338,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     float inline_fragment_start_x = lycon->line.advance_x;
     float inline_fragment_start_y = lycon->block.advance_y;
     bool is_ruby_container = display.inner == CSS_VALUE_RUBY;
+    bool misparented_ruby_annotation =
+        ruby_annotation_display_is_misparented(elmt, display);
+    Linebox base_line_before_ruby_annotation = lycon->line;
     bool empty_ruby_base = false;
     float empty_ruby_inline_advance = 0.0f;
     if (is_ruby_container) {
@@ -2519,6 +2583,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         span->set_has_fragment_union(FRAGMENT_UNION_SPLIT_INLINE, false);
     }
     compute_span_bounding_box(span, span_is_multi_line, font_box_handle(&lycon->font));
+    if (misparented_ruby_annotation) {
+        contribute_misparented_ruby_annotation_line_height(
+            lycon, span, &base_line_before_ruby_annotation);
+    }
     if (!had_children && has_inline_axis_decoration) {
         float border_left = 0.0f;
         float padding_left = 0.0f;
@@ -2574,9 +2642,22 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     layout_inline_span_has_direct_text_on_both_sides_of_anonymous_table(span);
                 if (!preserve_anonymous_table_line_origin) {
                     float baseline_pos = line_baseline_position(lycon, nullptr);
-                    span->y = layout_inline_font_box_y(
-                        lycon, span, span_resolved_line_height,
-                        span_asc, span_desc, baseline_pos, bt, pt_val);
+                    float replaced_baseline_y = 0.0f;
+                    ViewBlock* inline_parent = layout_nearest_block_ancestor(
+                        span->parent_view());
+                    bool completed_replaced_line = !span_is_multi_line &&
+                        !span_has_direct_visible_text(span) &&
+                        inline_start_line_number < lycon->block.line_number &&
+                        inline_parent && layout_block_is_out_of_flow_positioned(inline_parent) &&
+                        inline_span_single_replaced_baseline_y(span, &replaced_baseline_y);
+                    if (completed_replaced_line) {
+                        // The positioned block has advanced to its next strut; retain this line's baseline.
+                        span->y = replaced_baseline_y - span_asc - bt - pt_val;
+                    } else {
+                        span->y = layout_inline_font_box_y(
+                            lycon, span, span_resolved_line_height,
+                            span_asc, span_desc, baseline_pos, bt, pt_val);
+                    }
                 }
                 span->height = expected_height;
             }

@@ -1497,6 +1497,7 @@ typedef struct CssSelfAlignment {
     bool safe;
     bool overflow_explicit;
     bool last_baseline;
+    bool legacy;
 } CssSelfAlignment;
 
 static inline int css_self_alignment_value_count(const CssValue* value) {
@@ -1755,6 +1756,8 @@ typedef struct BlockProp {
     CssEnum text_wrap_style;  // CSS Text 4 text-wrap-style
     CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL
     CssEnum overflow_wrap;  // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_WORD, CSS_VALUE_ANYWHERE
+    CssEnum hyphens;  // CSS_VALUE_MANUAL or CSS_VALUE_AUTO
+    char* hyphenate_character;  // CSS Text 4: null means the UA default ('auto')
     CssEnum line_break;    // CSS_VALUE_AUTO, CSS_VALUE_LOOSE, CSS_VALUE_NORMAL, CSS_VALUE_STRICT, CSS_VALUE_ANYWHERE
     CssEnum text_spacing_trim;  // CSS Text 4 text-spacing-trim
     uint8_t text_autospace;  // CSS Text 4 text-autospace feature flags
@@ -1845,7 +1848,8 @@ typedef struct TextRect {
     float hanging_trim;  // preserved hanging space width excluded from line advance, not from CSSOM rects
     int start_index, length;  // start and length of the text in the style node
     int line_number;  // block-local line index assigned when this rect enters inline flow
-    bool has_trailing_hyphen;  // CSS Text 3 §5.2: soft hyphen (U+00AD) broke here; render visible '-' at end
+    bool has_trailing_hyphen;  // CSS Text 3 §5.2: a hyphenation break generated a trailing mark
+    const char* trailing_hyphenate_character;  // computed CSS Text 4 mark; null uses the UA default
     bool has_trailing_ellipsis; // -webkit-line-clamp: render '…' after text on this rect
     TextRect* next;
 } TextRect;
@@ -2865,10 +2869,10 @@ struct FormControlProp {
 
     // ------------------------------------------------------------------
     // Text-control selection state (input text-types and textarea only)
-    //   - current_value:  mutable user-edited value (UTF-8). When non-null
-    //     this is the live `.value` IDL attribute. nullptr ⇒ fall back to
-    //     `value` HTML attribute (for input) or text content (for textarea).
-    //     Heap-allocated via malloc/realloc; freed in destructor.
+    //   - current_value: borrowed cache of ViewState.form.current_value, the
+    //     live UTF-8 `.value` IDL attribute. nullptr ⇒ fall back to the HTML
+    //     default while initialization creates the canonical ViewState buffer.
+    //     This prop never allocates or frees the buffer.
     //   - selection_start/end:  UTF-16 code-unit offsets into the value.
     //   - selection_direction:  0=none, 1=forward, 2=backward.
     //   - tc_initialized: lazy-init flag (selection set to (len,len) on
@@ -2935,8 +2939,8 @@ inline float form_select_dropdown_row_height(const FormControlProp* form) {
 // scratch — this function only assigns the non-zero defaults.
 void form_control_prop_init(FormControlProp* f);
 
-// Release owned heap pointers (current_value, custom_validity_msg,
-// value_at_focus). Does NOT free `f` itself.
+// Release owned heap pointers (custom_validity_msg, value_at_focus). Clears
+// the borrowed current_value cache but does not free it or `f` itself.
 void form_control_prop_release(FormControlProp* f);
 
 // Release a form-control property attached to a DOM element. This is used by
@@ -3462,6 +3466,7 @@ typedef struct UiContext {
     Arena* font_glyph_arena; // factory-registered arena for glyph bitmap caches
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
+    float minimum_logical_font_size;  // UA minimum for relative font sizes; zero disables
     char** fallback_fonts;  // fallback fonts
 
     // @font-face support

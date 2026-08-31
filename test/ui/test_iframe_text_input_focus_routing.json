@@ -1,0 +1,14 @@
+{
+  "name": "Iframe text input overrides an earlier parent focus",
+  "html": "test/ui/test_iframe_text_input_focus_routing.html",
+  "viewport": { "width": 480, "height": 320 },
+  "events": [
+    { "type": "click", "target": { "selector": "#parent-focus" } },
+    { "type": "click", "x": 42, "y": 88 },
+    { "type": "type", "text": "child" },
+    { "type": "render_pending" },
+    { "type": "assert_pixel", "target": { "selector": "#frame", "offset_x": 18, "offset_y": 78 }, "force_render": false, "max_r": 20, "max_g": 20, "max_b": 20 },
+    { "type": "switch_frame", "selector": "#frame" },
+    { "type": "assert_value", "target": { "selector": "#name" }, "equals": "child" }
+  ]
+}

@@ -499,6 +499,7 @@ struct LayoutCache {
     CacheEntry measure_entries[LAYOUT_CACHE_SIZE];
     float intrinsic_min_content_width;
     float intrinsic_max_content_width;
+    uint32_t intrinsic_measurement_generation;
     bool is_empty;
     uint32_t generation;
 };
@@ -508,6 +509,7 @@ inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
     for (int i = 0; i < LAYOUT_CACHE_SIZE; i++) {
         cache->measure_entries[i].valid = false;
     }
+    cache->intrinsic_measurement_generation = 0;
     cache->is_empty = true;
     cache->generation = generation;
 }
@@ -1854,6 +1856,7 @@ typedef enum BreakKind {
     // Break opportunities (CSS Text 3 §5)
     BRK_ZERO_WIDTH_BREAK,       // ZWSP U+200B (invisible, breakable)
     BRK_SOFT_HYPHEN,            // SHY U+00AD (invisible unless broken, then visible '-')
+    BRK_AUTO_HYPHEN,             // automatic language-resource hyphenation opportunity
     BRK_HYPHEN,                 // explicit hyphen U+002D, U+2010 (break after, includes width)
     // UAX #14 line break classes (CSS Text 3 §5.2)
     BRK_CJK,                    // CJK ideograph (break after, unless word-break: keep-all)
@@ -3629,6 +3632,8 @@ struct LayoutFontSizeResult {
     bool from_medium;
 };
 
+static inline bool layout_font_size_value_is_relative(const CssValue* value);
+
 inline LayoutFontSizeResult layout_resolve_font_size_value(
     LayoutContext* lycon, const CssValue* raw_value, FontProp* base_font,
     bool resolve_vars) {
@@ -3668,6 +3673,11 @@ inline LayoutFontSizeResult layout_resolve_font_size_value(
         if (value->data.number.value == 0.0) result.value = 0.0f;
     } else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
         result.value = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, value);
+    }
+    if (result.value > 0.0f &&
+        layout_font_size_value_is_relative(value) && lycon->ui_context &&
+        lycon->ui_context->minimum_logical_font_size > result.value) {
+        result.value = lycon->ui_context->minimum_logical_font_size;
     }
     return result;
 }
@@ -4081,6 +4091,22 @@ static inline bool layout_css_value_any(const CssValue* value, Predicate predica
         }
     }
     return false;
+}
+
+static inline bool layout_font_size_relative_leaf(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
+    if (value->type == CSS_VALUE_TYPE_LENGTH &&
+        value->data.length.unit == CSS_UNIT_EM) return true;
+    return value->type == CSS_VALUE_TYPE_KEYWORD &&
+        (value->data.keyword == CSS_VALUE_LARGER ||
+         value->data.keyword == CSS_VALUE_SMALLER);
+}
+
+static inline bool layout_font_size_value_is_relative(const CssValue* value) {
+    // Chromium applies its minimum logical font size to direct relative
+    // values, but preserves authored calc() results such as diagnostic scales.
+    return layout_font_size_relative_leaf(value);
 }
 
 static inline bool layout_element_is_floated(const DomElement* element) {

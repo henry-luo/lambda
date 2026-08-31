@@ -1687,6 +1687,15 @@ TEST_F(UtfClassifyTest, EmojiForZwjNonMatches) {
 
 // ── utf_is_zwj_composition_base ──────────────────────────────────────
 
+TEST_F(UtfClassifyTest, EmojiPresentationDefaultFollowsUnicodeProperty) {
+    EXPECT_TRUE(utf_is_emoji_presentation_default(0x2705));   // ✅
+    EXPECT_TRUE(utf_is_emoji_presentation_default(0x1F600));  // 😀
+    EXPECT_TRUE(utf_is_emoji_presentation_default(0x2B50));   // ⭐
+    EXPECT_FALSE(utf_is_emoji_presentation_default(0x2702));  // ✂ needs VS16
+    EXPECT_FALSE(utf_is_emoji_presentation_default(0x2744));  // ❄ needs VS16
+    EXPECT_FALSE(utf_is_emoji_presentation_default(0x1F170)); // 🅰 needs VS16
+}
+
 TEST_F(UtfClassifyTest, ZwjCompBasePersonEmoji) {
     EXPECT_TRUE(utf_is_zwj_composition_base(0x1F466));  // Boy
     EXPECT_TRUE(utf_is_zwj_composition_base(0x1F469));  // Woman

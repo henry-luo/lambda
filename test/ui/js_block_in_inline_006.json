@@ -1,6 +1,6 @@
 {
   "name": "block-in-inline-006: onclick toggles display inline↔block",
-  "html": "test/layout/data/css2.1/html4/block-in-inline-006.htm",
+  "html": "test/layout/data/baseline/block-in-inline-006.htm",
   "description": "Click on body toggles #test between display:inline and display:block. Text should split into three separate lines when #test becomes block.",
   "events": [
     {"type": "log", "message": "=== block-in-inline-006: onclick toggles display ==="},

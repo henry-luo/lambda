@@ -80,7 +80,7 @@ const char* latex_environments[] = {
 // Math environments
 const char* math_environments[] = {
     "equation", "eqnarray", "align", "alignat", "aligned", "gather", "multline", "split",
-    "cases", "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "smallmatrix", NULL
+    "cases", "array", "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "smallmatrix", NULL
 };
 
 // Raw text environments

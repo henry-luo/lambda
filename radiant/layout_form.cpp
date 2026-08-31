@@ -23,6 +23,15 @@ struct FixedInputIntrinsicSize {
     float height;
 };
 
+static bool form_input_uses_editable_line_baseline(const FormControlProp* form) {
+    if (!form || !form->input_type || !*form->input_type) return true;
+    const char* type = form->input_type;
+    return strcmp(type, "text") == 0 || strcmp(type, "password") == 0 ||
+        strcmp(type, "email") == 0 || strcmp(type, "url") == 0 ||
+        strcmp(type, "search") == 0 || strcmp(type, "tel") == 0 ||
+        strcmp(type, "number") == 0;
+}
+
 static bool apply_fixed_input_intrinsic_size(FormControlProp* form) {
     static const FixedInputIntrinsicSize sizes[] = {
         // Chromium's native date/time editors retain fractional CSS-pixel
@@ -905,13 +914,35 @@ void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
             select_baseline_offset = max(0.0f,
                 (block->content_height - natural_line_height) * 0.5f);
         }
+        form->first_text_baseline = 0.0f;
+        form->last_text_baseline = 0.0f;
+        form->last_text_baseline_overflow = 0.0f;
         if (form->control_type == FORM_CONTROL_TEXT) {
-            float native_vertical_reserve = 2.0f *
-                (FormDefaults::TEXT_BORDER + FormDefaults::TEXT_PADDING_V);
-            // Native text inputs expose a baseline inside their fixed control
-            // box; retain the UA vertical reserve when the box height varies.
-            lycon->block.last_line_ascender = max(
-                block->height - native_vertical_reserve, 0.0f);
+            float normal_ascender = 0.0f;
+            float normal_descender = 0.0f;
+            if (font && font->font_handle) {
+                font_get_normal_lh_split(font->font_handle,
+                    &normal_ascender, &normal_descender);
+            }
+            // CSS Inline: a single-line text control exports its internal line
+            // baseline, so Grid does not synthesize it from the border edge.
+            float internal_baseline = border_top + pad_top + normal_ascender;
+            if (normal_ascender <= 0.0f) {
+                internal_baseline = border_top + pad_top + font_ascender;
+            }
+            internal_baseline = min(internal_baseline, block->height);
+            if (form_input_uses_editable_line_baseline(form)) {
+                form->first_text_baseline = internal_baseline;
+                form->last_text_baseline = internal_baseline;
+                // CSS Inline: editable text controls export their internal line
+                // baseline to both ordinary inline flow and baseline-aware Grid.
+                lycon->block.last_line_ascender = internal_baseline;
+            } else {
+                float native_vertical_reserve = 2.0f *
+                    (FormDefaults::TEXT_BORDER + FormDefaults::TEXT_PADDING_V);
+                lycon->block.last_line_ascender = max(
+                    block->height - native_vertical_reserve, 0.0f);
+            }
         } else {
             lycon->block.last_line_ascender = border_top + pad_top + font_ascender +
                 select_baseline_offset;

@@ -47,6 +47,8 @@ HASHMAP_DEFINE_FIELD2_KEY(view_state_entry, ViewStateEntry, view_id, kind)
 static void view_state_release_payload(ViewState* view_state);
 static ViewState* view_state_get_for_kind(DocState* state, View* view, ViewStateKind kind);
 static FormControlProp* form_prop_for_view(View* view);
+static void form_control_bind_text_value_cache(FormControlProp* form, ViewState* view_state);
+static void form_control_clear_text_value_cache(View* view, ViewState* view_state);
 static bool view_element_has_attr(View* view, const char* attr_name);
 static bool form_element_supports_disabled_state(DomElement* element);
 static bool form_control_is_disabled_by_fieldset(DomElement* element);
@@ -1740,10 +1742,10 @@ extern "C" void selection_refresh_presentation(DocState* state) {
     if (!state || !state_store_ensure_selection_presentation(state)) return;
     SelectionPresentation* presentation = state->selection_presentation;
 
-    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL && state->sel.control &&
+        tc_is_text_control(state->sel.control)) {
         EditingSelection* current = &state->sel;
         DomElement* control = current->control;
-        if (!control || !tc_is_text_control(control)) return;
         tc_ensure_init(control);
         FormControlProp* form = control->form;
         if (!form) return;
@@ -2412,6 +2414,25 @@ static uint32_t view_state_resolve_id(View* view) {
     return 0;
 }
 
+View* view_state_entry_resolve_view(DocState* state, const ViewStateEntry* entry) {
+    if (!state || !entry || !state->owner_store ||
+        !state->owner_store->document || entry->view_id == 0) {
+        return NULL;
+    }
+    DomDocument* doc = state->owner_store->document;
+    DomNode* root = doc->root ? static_cast<DomNode*>(doc->root) : NULL;
+    View* rooted = view_tree_find_live_id(root, entry->view_id);
+    if (rooted) return rooted;
+
+    // A document-owned detached node has no rendered-root path, but its DOM
+    // lifetime record still proves it is a valid owner for ViewState.
+    if (entry->owner_id != entry->view_id || !entry->owner_address) return NULL;
+    DomNodeRef owner_ref = { static_cast<DomNode*>(entry->owner_address), entry->owner_id };
+    DomNode* detached = dom_node_ref_validate(doc, owner_ref);
+    if (!detached || detached->id != entry->view_id) return NULL;
+    return static_cast<View*>(detached);
+}
+
 static void doc_state_log_dropdown_owner_transition(DocState* state,
                                                     View* old_view,
                                                     View* new_view);
@@ -2540,7 +2561,12 @@ static uint32_t view_state_detach_node(DocState* state, DomNode* node) {
             ViewStateKind kind = (ViewStateKind)kind_int;
             ViewStateEntry query = { .view_id = view_id, .kind = kind, .state = NULL };
             const ViewStateEntry* found = (const ViewStateEntry*)hashmap_get(state->view_state_map, &query);
-            if (found) view_state_release_payload(found->state);
+            if (found) {
+                if (kind == VIEW_STATE_FORM_CONTROL) {
+                    form_control_clear_text_value_cache(view, found->state);
+                }
+                view_state_release_payload(found->state);
+            }
             if (hashmap_delete(state->view_state_map, &query)) {
                 removed++;
             }
@@ -2851,8 +2877,13 @@ uint32_t view_state_prune_orphans(DocState* state) {
         while (hashmap_iter(state->view_state_map, &iter, &item)) {
             ViewStateEntry* entry = (ViewStateEntry*)item;
             uint32_t state_view_id = entry->state ? entry->state->view_id : 0;
-            View* key_live = view_tree_find_live_id(root, entry->view_id);
-            View* state_live = view_tree_find_live_id(root, state_view_id);
+            View* key_live = view_state_entry_resolve_view(state, entry);
+            View* state_live = key_live;
+            if (state_view_id != entry->view_id) {
+                ViewStateEntry state_query = { .view_id = state_view_id,
+                    .kind = entry->kind, .state = entry->state };
+                state_live = view_state_entry_resolve_view(state, &state_query);
+            }
             bool invalid_live_kind = false;
             if (entry->state && key_live && entry->kind == VIEW_STATE_FORM_CONTROL) {
                 DomElement* elem = key_live->is_element() ? lam::dom_require_element(key_live) : NULL;
@@ -2860,6 +2891,9 @@ uint32_t view_state_prune_orphans(DocState* state) {
             }
             if (!entry->state || !key_live || !state_live || invalid_live_kind) {
                 ViewStateEntry query = { .view_id = entry->view_id, .kind = entry->kind, .state = NULL };
+                if (entry->kind == VIEW_STATE_FORM_CONTROL) {
+                    form_control_clear_text_value_cache(key_live, entry->state);
+                }
                 view_state_release_payload(entry->state);
                 hashmap_delete(state->view_state_map, &query);
                 removed++;
@@ -2872,7 +2906,7 @@ uint32_t view_state_prune_orphans(DocState* state) {
                 DomElement* elem = lam::dom_require_element(key_live);
                 if (elem && elem->form) {
                     if (entry->kind == VIEW_STATE_FORM_CONTROL) {
-                        elem->form->form_state_ref = entry->state;
+                        form_control_bind_text_value_cache(elem->form, entry->state);
                     } else if (entry->kind == VIEW_STATE_SCROLL) {
                         elem->form->scroll_state_ref = entry->state;
                     }
@@ -2981,7 +3015,8 @@ static ViewState* view_state_get_or_create(DocState* state, View* view, ViewStat
         created->data.form.range_value = 0.5f;
     }
 
-    ViewStateEntry entry = { .view_id = view_id, .kind = kind, .state = created };
+    ViewStateEntry entry = { .view_id = view_id, .kind = kind, .state = created,
+        .owner_address = static_cast<DomNode*>(view), .owner_id = view_id };
     hashmap_set(state->view_state_map, &entry);
     return view_state_primary_cache(view, created);
 }
@@ -3333,7 +3368,9 @@ static ViewState* form_view_state_get(DocState* state, View* view) {
     ViewState* view_state = view_state_get_for_kind(state, view, VIEW_STATE_FORM_CONTROL);
     if (view_state && view && view->is_element()) {
         DomElement* elem = lam::dom_require_element(view);
-        if (elem && elem->form) elem->form->form_state_ref = view_state;
+        if (elem && elem->form) {
+            form_control_bind_text_value_cache(elem->form, view_state);
+        }
     }
     return view_state;
 }
@@ -3447,12 +3484,6 @@ void form_control_invalidate_behavior_init(DocState* state, View* view) {
     if (elem && elem->doc) elem->doc->behavior_init_pending = true;
 }
 
-static bool form_view_is_text_control(View* view) {
-    if (!view || !view->is_element()) return false;
-    DomElement* elem = lam::dom_require_element(view);
-    return elem && tc_is_text_control(elem);
-}
-
 static SmFamily form_control_schema_family_for_view(View* view) {
     FormControlProp* form = form_prop_for_view(view);
     if (!form) return SM_FAMILY__COUNT;
@@ -3477,23 +3508,61 @@ static SmFamily form_control_schema_family_for_readonly(View* view) {
     return family == SM_FAMILY_FORM_TEXT ? family : SM_FAMILY__COUNT;
 }
 
-static void form_view_state_store_text_value(ViewState* view_state,
-                                             FormControlProp* form) {
-    if (!view_state || !form || !form->current_value) return;
-    char* copy = (char*)mem_alloc((size_t)form->current_value_len + 1,
-                                  MEM_CAT_DOM);
-    if (!copy) return;
-    if (form->current_value_len > 0) {
-        memcpy(copy, form->current_value, form->current_value_len);
+static bool form_view_state_replace_text_value(ViewState* view_state,
+                                                const char* value,
+                                                uint32_t value_len,
+                                                uint32_t value_u16_len) {
+    if (!view_state) return false;
+    char* copy = (char*)mem_alloc((size_t)value_len + 1, MEM_CAT_DOM);
+    if (!copy) return false;
+    if (value && value_len > 0) {
+        memcpy(copy, value, value_len);
     }
-    copy[form->current_value_len] = '\0';
+    copy[value_len] = '\0';
     if (view_state->data.form.current_value) {
         mem_free(view_state->data.form.current_value);
     }
     view_state->data.form.current_value = copy;
-    view_state->data.form.current_value_len = form->current_value_len;
-    view_state->data.form.current_value_u16_len = form->current_value_u16_len;
+    view_state->data.form.current_value_len = value_len;
+    view_state->data.form.current_value_u16_len = value_u16_len;
     view_state->data.form.has_current_value = 1;
+    // A value write can shorten the text before its caller publishes the new
+    // selection. Keep the canonical record valid throughout that hand-off.
+    if (view_state->data.form.selection_start > value_u16_len) {
+        view_state->data.form.selection_start = value_u16_len;
+    }
+    if (view_state->data.form.selection_end > value_u16_len) {
+        view_state->data.form.selection_end = value_u16_len;
+    }
+    if (view_state->data.form.selection_end < view_state->data.form.selection_start) {
+        view_state->data.form.selection_end = view_state->data.form.selection_start;
+    }
+    return true;
+}
+
+static void form_control_bind_text_value_cache(FormControlProp* form,
+                                                ViewState* view_state) {
+    if (!form) return;
+    const char* old_cache = form->current_value;
+    form->form_state_ref = view_state;
+    if (!view_state || !view_state->data.form.has_current_value) {
+        form->current_value = NULL;
+        form->current_value_len = 0;
+        form->current_value_u16_len = 0;
+        if (form->value == old_cache) form->value = NULL;
+        return;
+    }
+    form->current_value = view_state->data.form.current_value;
+    form->current_value_len = view_state->data.form.current_value_len;
+    form->current_value_u16_len = view_state->data.form.current_value_u16_len;
+    form->value = form->current_value;
+}
+
+static void form_control_clear_text_value_cache(View* view, ViewState* view_state) {
+    if (!view || !view->is_element() || !view_state) return;
+    DomElement* elem = lam::dom_require_element(view);
+    if (!elem || !elem->form || elem->form->form_state_ref != view_state) return;
+    form_control_bind_text_value_cache(elem->form, NULL);
 }
 
 static ViewState* form_view_state_get_or_create(DocState* state, View* view, FormControlProp* form) {
@@ -3522,9 +3591,6 @@ static ViewState* form_view_state_get_or_create(DocState* state, View* view, For
         view_state->data.form.selection_start = form->selection_start;
         view_state->data.form.selection_end = form->selection_end;
         view_state->data.form.selection_direction = form->selection_direction;
-        if (form_view_is_text_control(view) && form->current_value) {
-            form_view_state_store_text_value(view_state, form);
-        }
     }
     return view_state;
 }
@@ -3712,6 +3778,17 @@ DragDropState* doc_state_begin_drag_drop(DocState* state, View* source,
     state->version++;
     state_assert_after_mutation(state, "doc_state_begin_drag_drop");
     return drag_drop;
+}
+
+void doc_state_set_drag_source_range(DocState* state, uint32_t start, uint32_t end,
+                                    uint32_t press_offset) {
+    if (!state || !state->drag_drop) return;
+    state->drag_drop->has_source_range = true;
+    state->drag_drop->source_start = start;
+    state->drag_drop->source_end = end;
+    state->drag_drop->press_offset = press_offset;
+    state->version++;
+    state_assert_after_mutation(state, "doc_state_set_drag_source_range");
 }
 
 void doc_state_update_drag_drop_motion(DocState* state, float x, float y) {
@@ -4352,6 +4429,29 @@ const char* form_control_get_value(DocState* state, View* view, uint32_t* out_le
     return form->current_value;
 }
 
+bool form_control_store_text_value(DocState* state, View* view,
+                                   const char* value, uint32_t value_len,
+                                   uint32_t value_u16_len) {
+    if (!state || !view || !view->is_element()) return false;
+    // JS may write a detached createElement() control before layout gives it
+    // block geometry; its ViewState remains the same canonical value owner.
+    DomElement* element = lam::dom_require_element(view);
+    FormControlProp* form = element ? element->form : NULL;
+    if (!form) return false;
+
+    ViewState* view_state = form_view_state_get_or_create(state, view, form);
+    if (!view_state || !form_view_state_replace_text_value(
+            view_state, value, value_len, value_u16_len)) {
+        return false;
+    }
+
+    form->state_ref = state;
+    // The prop is rebuilt during relayout; it only borrows the StateStore's
+    // durable allocation so text never needs a restore copy.
+    form_control_bind_text_value_cache(form, view_state);
+    return true;
+}
+
 bool form_control_restore_text_control_state(DocState* state, View* view) {
     if (!state || !view || !view->is_element()) return false;
     ViewState* view_state = form_view_state_get(state, view);
@@ -4362,29 +4462,10 @@ bool form_control_restore_text_control_state(DocState* state, View* view) {
     FormControlProp* form = elem->form;
     if (!form) return false;
 
-    char* copy = (char*)mem_alloc((size_t)view_state->data.form.current_value_len + 1,
-                                  MEM_CAT_DOM);
-    if (!copy) return false;
-    if (view_state->data.form.current_value_len > 0) {
-        memcpy(copy, view_state->data.form.current_value,
-               view_state->data.form.current_value_len);
-    }
-    copy[view_state->data.form.current_value_len] = '\0';
-
-    if (form->current_value) mem_free(form->current_value);
-    form->current_value = copy;
-    form->current_value_len = view_state->data.form.current_value_len;
-    form->current_value_u16_len = view_state->data.form.current_value_u16_len;
-    if (form->current_value_u16_len == 0 && form->current_value_len > 0) {
-        form->current_value_u16_len = tc_utf8_to_utf16_length(
-            form->current_value, form->current_value_len);
-    }
-    // The ViewState is the durable copy and no longer needs to be second-guessed
-    // against DocState::sel. Both are written by one publish
-    // (state_store_set_text_control_selection), so a caret newer than the cached
-    // ViewState is no longer reachable — the special case that used to prefer
-    // DocState::sel here existed only because the two were fanned out
-    // separately and could disagree (ESO22).
+    form_control_bind_text_value_cache(form, view_state);
+    // The canonical ViewState value and selection are written by one publish
+    // (state_store_set_text_control_selection), so relayout only rebinds the
+    // prop cache instead of reconstructing independent text state (ESO22).
     uint32_t restore_start = view_state->data.form.selection_start;
     uint32_t restore_end = view_state->data.form.selection_end;
     uint8_t restore_direction = view_state->data.form.selection_direction;
@@ -4403,8 +4484,6 @@ bool form_control_restore_text_control_state(DocState* state, View* view) {
     if (form->selection_direction > 2) form->selection_direction = 0;
     form->tc_initialized = 1;
     form->state_ref = state;
-    form->form_state_ref = view_state;
-    form->value = form->current_value;
     view->view_state_ref = view_state;
     return true;
 }
@@ -4484,9 +4563,7 @@ void form_control_set_selection(DocState* state, View* view,
             ViewState* view_state = form_view_state_get_or_create(state, view, form);
             if (view_state) {
                 form_view_state_store_selection(view_state, form);
-                if (form->current_value) {
-                    form_view_state_store_text_value(view_state, form);
-                }
+                form_control_bind_text_value_cache(form, view_state);
             }
             sm_guard.commit();
             form_state_mark_dirty(state);
@@ -4526,18 +4603,18 @@ void form_control_set_selection(DocState* state, View* view,
 }
 
 void form_control_sync_text_control_state(DocState* state, View* view) {
-    if (!state || !view || !view->is_block()) return;
-    ViewBlock* block = lam::view_require_block(view);
-    FormControlProp* form = block->form;
+    if (!state || !view || !view->is_element()) return;
+    // Detached JS controls have no block geometry yet, but selection must
+    // still publish alongside their ViewState-owned value.
+    DomElement* element = lam::dom_require_element(view);
+    FormControlProp* form = element ? element->form : NULL;
     if (!form) return;
 
     form->state_ref = state;
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
     if (!view_state) return;
     form_view_state_store_selection(view_state, form);
-    if (form->current_value) {
-        form_view_state_store_text_value(view_state, form);
-    }
+    form_control_bind_text_value_cache(form, view_state);
 }
 
 void form_control_sync_text_control_focus_state(DocState* state, View* view) {

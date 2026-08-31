@@ -10,7 +10,7 @@ Templates are top-level constructs that transform source data into presentation 
 
 ```lambda
 view <todo_item> state toggled: false {
-  let done = if (toggled) (!~.done) else ~.done
+  let done = if (toggled) (not ~.done) else ~.done
   <li class:(if (done) "todo-item done" else "todo-item"),
     <span class:"checkbox", if (done) "✓" else "○">
     <span class:"todo-text", ~.text>

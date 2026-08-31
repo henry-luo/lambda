@@ -247,7 +247,8 @@ static bool format_self_alignment(char* out, size_t out_size,
 static bool self_alignment_equal(CssSelfAlignment left, CssSelfAlignment right) {
     return left.value == right.value && left.safe == right.safe &&
         left.overflow_explicit == right.overflow_explicit &&
-        left.last_baseline == right.last_baseline;
+        left.last_baseline == right.last_baseline &&
+        left.legacy == right.legacy;
 }
 
 static bool resolve_place_self_component(CssDeclaration* shorthand,

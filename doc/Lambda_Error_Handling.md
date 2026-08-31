@@ -124,7 +124,7 @@ fn divide(a, b) int^ {
 - Using `raise` in a function with a plain `T` or `T | error` return type is a
   compile error; the union form returns its error value normally.
 
-```lambda
+```lambda error=E208
 // ❌ Compile error: function does not declare error return
 fn pure_add(a, b) int {
     raise error("oops")
@@ -390,7 +390,7 @@ Go's lack of enforcement is widely criticized — ignored errors cause productio
    ```
 
 2. **Functions without a declared `^E` return cannot contain `raise`**
-   ```lambda
+```lambda error=E208
    fn pure_add(a, b) int {
        raise error("oops")  // ❌ compile error
    }
@@ -446,15 +446,15 @@ The following built-in functions perform I/O and may fail. They enforce the same
 
 ### Example: Handling System Function Errors
 
-```lambda
+```lambda error=E228
 // ❌ Compile error: unhandled error from 'input'
-let data = input("file.json")
+let unhandled = input("file.json")
 
 // ✅ Propagate error
-let data = input("file.json")^
+let propagated = input("file.json")^
 
 // ✅ Handle error explicitly
-let data = input("file.json") ^ { log_warn(^.message); {} }
+let handled = input("file.json") ^ { log_warn(^.message); {} }
 
 // ❌ Compile error: unhandled error from 'io.mkdir'
 io.mkdir("output")
@@ -621,7 +621,7 @@ compute(5)^   // 20
 fn process_file(path: string) ProcessedData^ {
     let content = input(path, 'text')^
     let lines = split(content, "\n")
-    let parsed = (for line in lines parse_line(line)^)
+    let parsed = (for (line in lines) parse_line(line)^)
     aggregate(parsed)
 }
 ```

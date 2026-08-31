@@ -1,5 +1,6 @@
 {
   "name": "async class methods preserve parameter and this across await",
+  "html": "test/html/js_async_class_method_receiver.html",
   "events": [
     { "type": "assert_text", "target": { "selector": "#result" }, "equals": "true|true" }
   ]
