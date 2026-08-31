@@ -1856,6 +1856,7 @@ typedef enum BreakKind {
     // Break opportunities (CSS Text 3 §5)
     BRK_ZERO_WIDTH_BREAK,       // ZWSP U+200B (invisible, breakable)
     BRK_SOFT_HYPHEN,            // SHY U+00AD (invisible unless broken, then visible '-')
+    BRK_AUTO_HYPHEN,             // automatic language-resource hyphenation opportunity
     BRK_HYPHEN,                 // explicit hyphen U+002D, U+2010 (break after, includes width)
     // UAX #14 line break classes (CSS Text 3 §5.2)
     BRK_CJK,                    // CJK ideograph (break after, unless word-break: keep-all)

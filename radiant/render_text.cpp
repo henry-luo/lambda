@@ -69,8 +69,13 @@ char* render_text_create_export_segment(const unsigned char* text,
                                         bool include_ellipsis) {
     if (!text || !text_rect) return nullptr;
 
-    // An ellipsis needs three UTF-8 bytes plus the terminator beyond transformed text.
-    char* content = (char*)mem_alloc(text_rect->length * 4 + 4, MEM_CAT_RENDER);
+    const char* trailing_character = text_rect->trailing_hyphenate_character;
+    if (text_rect->has_trailing_hyphen && !trailing_character) trailing_character = "-";
+    size_t trailing_length = trailing_character ? strlen(trailing_character) : 0;
+    // Transforms can expand each source byte to one four-byte codepoint; reserve
+    // the computed hyphenation string separately because it is not source text.
+    size_t content_size = (size_t)text_rect->length * 4 + trailing_length + 4;
+    char* content = (char*)mem_alloc(content_size, MEM_CAT_RENDER);
     unsigned char* src = (unsigned char*)text + text_rect->start_index;
     unsigned char* src_end = src + text_rect->length;
     char* dst = content;
@@ -116,7 +121,10 @@ char* render_text_create_export_segment(const unsigned char* text,
         }
     }
 
-    if (text_rect->has_trailing_hyphen) *dst++ = '-';
+    if (text_rect->has_trailing_hyphen && trailing_character) {
+        memcpy(dst, trailing_character, trailing_length);
+        dst += trailing_length;
+    }
     if (include_ellipsis && text_rect->has_trailing_ellipsis) {
         *dst++ = (char)0xE2;
         *dst++ = (char)0x80;
@@ -814,14 +822,29 @@ static float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rec
     }
 
     if (text_rect->has_trailing_hyphen) {
+        const char* trailing_character = text_rect->trailing_hyphenate_character;
+        if (!trailing_character) trailing_character = "-";
         FontStyleDesc sd_h = font_style_desc_from_prop(rdcon->font.style);
-        LoadedGlyph* h_glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd_h, '-', true);
-        if (h_glyph) {
-            float ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
-            draw_glyph(rdcon, &h_glyph->bitmap,
-                       lroundf(x + h_glyph->bitmap.bearing_x),
-                       lroundf(y + ascend - h_glyph->bitmap.bearing_y));
-            x += h_glyph->advance_x;
+        const unsigned char* cursor = (const unsigned char*)trailing_character;
+        const unsigned char* end = cursor + strlen(trailing_character);
+        while (cursor < end) {
+            uint32_t codepoint = *cursor;
+            int bytes = 1;
+            if (codepoint >= 128) {
+                bytes = str_utf8_decode((const char*)cursor,
+                    (size_t)(end - cursor), &codepoint);
+                if (bytes <= 0) bytes = 1;
+            }
+            LoadedGlyph* h_glyph = font_load_glyph(
+                font_box_handle(&rdcon->font), &sd_h, codepoint, true);
+            if (h_glyph) {
+                float ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * rdcon->raster_scale;
+                draw_glyph(rdcon, &h_glyph->bitmap,
+                           lroundf(x + h_glyph->bitmap.bearing_x),
+                           lroundf(y + ascend - h_glyph->bitmap.bearing_y));
+                x += h_glyph->advance_x + rdcon->font.style->letter_spacing * rdcon->raster_scale;
+            }
+            cursor += bytes;
         }
     }
 
