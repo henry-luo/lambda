@@ -3780,6 +3780,17 @@ DragDropState* doc_state_begin_drag_drop(DocState* state, View* source,
     return drag_drop;
 }
 
+void doc_state_set_drag_source_range(DocState* state, uint32_t start, uint32_t end,
+                                    uint32_t press_offset) {
+    if (!state || !state->drag_drop) return;
+    state->drag_drop->has_source_range = true;
+    state->drag_drop->source_start = start;
+    state->drag_drop->source_end = end;
+    state->drag_drop->press_offset = press_offset;
+    state->version++;
+    state_assert_after_mutation(state, "doc_state_set_drag_source_range");
+}
+
 void doc_state_update_drag_drop_motion(DocState* state, float x, float y) {
     if (!state || !state->drag_drop) return;
     DragDropState* drag_drop = state->drag_drop;
