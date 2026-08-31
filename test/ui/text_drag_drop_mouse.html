@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>text drag and drop by mouse</title>
+<style>
+  body { font: 16px/1.4 monospace; margin: 10px; }
+  input, textarea { font: inherit; display: block; margin-bottom: 10px; }
+  #src { width: 300px; }
+  #dst { width: 300px; }
+  #ta  { width: 300px; height: 60px; }
+</style>
+</head>
+<body>
+  <!-- No draggable= and no dropzone= anywhere: text drag-and-drop is UA
+       behavior, not an author opt-in, so it must work on plain markup. -->
+  <input id="src" type="text" value="HELLO world">
+  <input id="dst" type="text" value="">
+  <textarea id="ta"></textarea>
+</body>
+</html>

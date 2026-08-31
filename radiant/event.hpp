@@ -2288,6 +2288,14 @@ typedef struct DragDropState {
     DomBoundary drop_start;        // target range captured during live dragover
     DomBoundary drop_end;
     const char* drag_data;         // application-defined drag data type
+    // Text drag-and-drop (ES21). A drag begun inside a text control's selection
+    // carries that selection, which is what lets the drop perform the delete
+    // half of a move without guessing at what to remove. An element drag leaves
+    // this clear, so its presence is also how the drop path tells the two apart.
+    bool has_source_range;
+    uint32_t source_start;         // codepoint offsets into source_view's value
+    uint32_t source_end;
+    uint32_t press_offset;         // where the press landed inside the selection
 } DragDropState;
 
 typedef enum EditingDragMode {
@@ -3009,6 +3017,10 @@ void doc_state_set_drag_state(DocState* state, View* target, bool dragging);
 DragDropState* doc_state_begin_drag_drop(DocState* state, View* source,
                                          float start_x, float start_y,
                                          const char* drag_data);
+// ES21: record the text-control selection a text drag is moving. Separate from
+// begin_drag_drop so the element-drag callers keep their existing signature.
+void doc_state_set_drag_source_range(DocState* state, uint32_t start, uint32_t end,
+                                    uint32_t press_offset);
 void doc_state_update_drag_drop_motion(DocState* state, float x, float y);
 void doc_state_set_drag_drop_active(DocState* state, bool active);
 void doc_state_set_drag_drop_target(DocState* state, View* drop_target,
@@ -3618,6 +3630,10 @@ typedef struct DragTransitionArgs {
     DomBoundary drop_start;
     DomBoundary drop_end;
     const char* drag_data;
+    bool has_source_range;         // ES21 text drag: source selection to move
+    uint32_t source_start;
+    uint32_t source_end;
+    uint32_t press_offset;
 } DragTransitionArgs;
 
 bool focus_transition(DocState* state,
