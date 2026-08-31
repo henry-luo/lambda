@@ -17,6 +17,7 @@ extern "C" {
 #include "../lambda-data.hpp"
 #include "../core/print.h"
 #include "sys_func_registry.h"
+#include "compiler_timing.hpp"
 
 typedef struct JubeModuleImport {
     String* module;
@@ -859,6 +860,9 @@ typedef struct Transpiler : Script {
     // Mark the full-image POC lowering so non-admitted local callees stay on
     // the normal dynamic tier boundary while admitted recursion remains direct.
     bool whole_script_poc;
+
+    // Compiler unit resumes indexing into MIR; retained ASTs restart it.
+    CompilerPassManager pass_manager;
 
     // Error tracking for accumulated type errors
     int error_count;           // accumulated error count

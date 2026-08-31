@@ -38,7 +38,6 @@
 #include "../../lib/file_utils.h"
 #include "../../lib/shell.h"
 #include "../../lib/uv_loop.h"
-#include "compiler_timing.hpp"
 
 extern "C" Item js_get_key_default(Item object, Item key);
 extern "C" void js_dom_shutdown(void);
@@ -802,23 +801,37 @@ static bool interp_force_jit_import_cone(Transpiler* tp) {
     return true;
 }
 
-static bool initialize_script_ast_storage(Transpiler* tp) {
-    Input* input_base = Input::create(
-        mem_pool_create(NULL, MEM_ROLE_AST, "script.pool"), nullptr);
-    if (!input_base) {
-        log_error("Error: Failed to initialize Input base");
-        return false;
+typedef struct LambdaDirectFrontendPassContext {
+    Transpiler* tp;
+    const char* script_path;
+    LambdaParseError parse_error;
+} LambdaDirectFrontendPassContext;
+
+static int lambda_parse_build_bind_compiler_pass(void* opaque) {
+    LambdaDirectFrontendPassContext* pass =
+        (LambdaDirectFrontendPassContext*)opaque;
+    AstScript* root = NULL;
+    if (!pass || !pass->tp || lambda_rd_reduce_ast(pass->tp, pass->tp->source,
+                strlen(pass->tp->source), &root, &pass->parse_error) !=
+                LAMBDA_PARSE_OK || !root) {
+        if (pass && pass->tp) {
+            record_direct_parse_diagnostics(pass->tp, pass->script_path,
+                &pass->parse_error);
+            log_error("C parser rejected %s: %s", pass->script_path,
+                pass->parse_error.message ? pass->parse_error.message :
+                "direct AST reduction failed");
+        }
+        return 0;
     }
-    tp->pool = input_base->pool;
-    tp->arena = input_base->arena;
-    tp->name_pool = input_base->name_pool;
-    tp->shape_pool = input_base->shape_pool;
-    tp->type_list = input_base->type_list;
-    tp->url = input_base->url;
-    tp->path = input_base->path;
-    tp->root = input_base->root;
-    tp->const_list = arraylist_new(16);
-    return tp->const_list != NULL;
+    pass->tp->ast_root = (AstNode*)root;
+    return 1;
+}
+
+static int lambda_validate_compiler_pass(void* opaque) {
+    LambdaDirectFrontendPassContext* pass =
+        (LambdaDirectFrontendPassContext*)opaque;
+    return pass && lambda_ast_finalize_script(pass->tp,
+        (AstScript*)pass->tp->ast_root);
 }
 
 void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
@@ -838,39 +851,37 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     get_time(&start);
     tp->source = script->source;
-    AstScript* direct_root = NULL;
-    LambdaParseError parse_error = {};
-    if (!initialize_script_ast_storage(tp) ||
-            lambda_rd_build_ast(tp, tp->source, strlen(tp->source),
-                &direct_root, &parse_error) != LAMBDA_PARSE_OK || !direct_root) {
-        // A direct-parser failure must enter the structured diagnostic lane so
-        // callers receive the same source-aware error contract as other inputs.
-        record_direct_parse_diagnostics(tp, script_path, &parse_error);
-        log_error("C parser rejected %s: %s", script_path,
-            parse_error.message ? parse_error.message : "direct AST reduction failed");
+    LambdaDirectFrontendPassContext front_end = {tp, script_path, {}};
+    compiler_pass_manager_init(&tp->pass_manager, COMPILER_FACT_NONE);
+    CompilerPassSpec build_bind_pass = {"parse-build-bind", COMPILER_FACT_NONE,
+        COMPILER_FACT_AST | COMPILER_FACT_BOUND,
+        lambda_parse_build_bind_compiler_pass, &front_end};
+    if (!compiler_pass_manager_add(&tp->pass_manager, &build_bind_pass) ||
+            !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
         return;
     }
-    tp->ast_root = (AstNode*)direct_root;
     get_time(&end);
     print_elapsed_time("parsing", start, end);
 
     if (profiling || compiler_timing) profile_get_time(&p1);
 
+    CompilerPassSpec validate_pass = {"validate", COMPILER_FACT_AST |
+        COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED,
+        lambda_validate_compiler_pass, &front_end};
+    if (!compiler_pass_manager_add(&tp->pass_manager, &validate_pass) ||
+            !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
+        log_error("compiler validation rejected '%s'", script_path);
+        return;
+    }
     if (profiling || compiler_timing) profile_get_time(&p2);
-    // Publish the first production pass contract now: all later Lambda work
-    // consumes the indexed identity table rather than rediscovering children
-    // or owners. The remaining legacy passes are added to this schedule as
-    // their inputs/outputs become explicit.
-    CompilerPassManager pass_manager;
-    compiler_pass_manager_init(&pass_manager,
-        COMPILER_FACT_AST | COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED);
+
     AstIndexPassContext index_context = {
         &tp->ast_index, tp->ast_root, tp->profile};
     CompilerPassSpec index_pass = {"index",
-        COMPILER_FACT_AST | COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED,
+        COMPILER_FACT_FRONTEND,
         COMPILER_FACT_INDEXED, ast_index_compiler_pass, &index_context};
-    if (!compiler_pass_manager_add(&pass_manager, &index_pass) ||
-            !compiler_pass_manager_run(&pass_manager, NULL)) {
+    if (!compiler_pass_manager_add(&tp->pass_manager, &index_pass) ||
+            !compiler_pass_manager_run(&tp->pass_manager, NULL)) {
         log_error("failed to run indexed AST pass for '%s'", script_path);
         return;
     }
@@ -897,12 +908,6 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                 strbuf_free(census);
             }
         }
-    }
-
-    // Check for errors during AST building
-    if (tp->error_count > 0) {
-        log_error("compiled '%s' with error!!", script_path);
-        return;
     }
 
     // T0 (D8.1.1v2): stop after the AST passes and interpret. A script whose
@@ -1332,7 +1337,7 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
     AstScript* parsed_root = NULL;
     LambdaParseError parse_error = {};
     const char* fragment_source = script->source + prefix_length;
-    LambdaParseStatus parse_status = lambda_rd_build_ast(&tp, fragment_source,
+    LambdaParseStatus parse_status = lambda_rd_reduce_ast(&tp, fragment_source,
         strlen(source), &parsed_root, &parse_error);
     if (parse_status != LAMBDA_PARSE_OK || !parsed_root) {
         record_direct_parse_diagnostics(&tp, "<repl>", &parse_error);
@@ -1346,6 +1351,7 @@ Item interp_repl_session_eval(InterpReplSession* session, const char* source) {
         log_error("interp-repl: direct parser rejected completed input");
         return (session->last_input_rejected = true), ItemError;
     }
+    lambda_ast_finalize_script(&tp, parsed_root);
 
     AstNode* fragment = parsed_root->child;
     if (tp.error_count != 0 || !fragment) {

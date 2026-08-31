@@ -690,7 +690,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
 
     // Parse JavaScript source
     long phase_start = js_mir_phase_now_us();
-    if (!js_transpiler_parse(tp, js_source, js_source_len)) {
+    if (!js_transpiler_parse_c(tp, js_source, js_source_len, JS_PARSE_AUTO)) {
         log_error("js-mir: parse failed");
         return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
             runtime, NULL, true);
@@ -700,7 +700,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
 
     // Build JavaScript AST
     phase_start = js_mir_phase_now_us();
-    JsAstNode* js_ast = js_transpiler_build_ast(tp);
+    JsAstNode* js_ast = (JsAstNode*)tp->ast_root;
     if (!js_ast) {
         log_error("js-mir: AST build failed");
         return js_mir_compile_unit_fail(NULL, NULL, tp, owned_source,
@@ -796,21 +796,12 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
 
     // Transpile AST to MIR
     phase_start = js_mir_phase_now_us();
-    bool transpile_ok = transpile_js_mir_ast(mt, js_ast);
+    bool transpile_ok = transpile_js_mir_ast(mt);
     g_last_js_mir_phase_timing.mir_us = js_mir_phase_now_us() - phase_start;
     log_mem_stage("js-core: ast_to_mir");
     if (!transpile_ok) {
         log_error("js-mir: collection/allocation failed for '%s'",
             filename ? filename : "<string>");
-        return js_mir_compile_unit_fail(ctx, mt, tp, owned_source,
-            runtime, js_context, reusing_context);
-    }
-
-    // Complete static discovery before any realm or module initializer can
-    // create a runtime name. The main module has now contributed its sealed
-    // property-key image; imported modules contribute theirs in precompile.
-    if (!js_prelink_compiled_name_table(mt)) {
-        log_error("js-mir: failed to prelink main property-name table");
         return js_mir_compile_unit_fail(ctx, mt, tp, owned_source,
             runtime, js_context, reusing_context);
     }

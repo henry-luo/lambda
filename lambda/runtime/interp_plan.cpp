@@ -1062,12 +1062,8 @@ static void plan_assign_entry(PlanCtx* pc, NameEntry* entry) {
     entry->storage_assigned = true;
 }
 
-// Back-links a declaration node to its NameEntry so the walker can store an
-// initializer without re-searching the scope. push_name leaves these unset for
-// `let` and for every function/loop node whose AstNamedNode alias overlaps a
-// real field; this pass is build-time, so filling them mutates no runtime state.
-// build_ast leaves `analysis` NULL for definitions no lowering pass touched;
-// T0 still needs somewhere to hang the plan and the declaration binding.
+// A definition may have no prior lowering analysis (notably an anonymous
+// function evaluated only by T0), so frame planning owns its plan allocation.
 static FnAnalysis* plan_ensure_analysis(PlanCtx* pc, AstFuncNode* fn) {
     if (!fn) return NULL;
     if (!fn->analysis) {
@@ -1075,37 +1071,6 @@ static FnAnalysis* plan_ensure_analysis(PlanCtx* pc, AstFuncNode* fn) {
         if (!fn->analysis) pc->failed = true;
     }
     return fn->analysis;
-}
-
-static void plan_backlink_entry(PlanCtx* pc, NameEntry* entry) {
-    AstNode* decl = entry ? entry->node : NULL;
-    if (!decl) return;
-    switch (decl->node_type) {
-    case AST_NODE_VARIABLE_DECLARATOR: {
-        AstDeclaratorNode* declarator = (AstDeclaratorNode*)decl;
-        if (!declarator->entry) declarator->entry = entry;
-        if (declarator->id && declarator->id->node_type == AST_NODE_IDENT &&
-                !((AstIdentNode*)declarator->id)->entry) {
-            ((AstIdentNode*)declarator->id)->entry = entry;
-        }
-        break;
-    }
-    case AST_NODE_PARAM:
-    case AST_NODE_KEY_EXPR: {
-        AstNamedNode* named = (AstNamedNode*)decl;
-        if (!named->entry) named->entry = entry;
-        break;
-    }
-    case AST_NODE_FUNC:
-    case AST_NODE_FUNC_EXPR:
-    case AST_NODE_PROC: {
-        FnAnalysis* analysis = plan_ensure_analysis(pc, (AstFuncNode*)decl);
-        if (analysis && !analysis->decl_entry) analysis->decl_entry = entry;
-        break;
-    }
-    default:
-        break;
-    }
 }
 
 // An imported name is a view onto another module's binding: resolve it to the
@@ -1149,7 +1114,6 @@ static void plan_assign_scope(PlanCtx* pc, NameScope* scope) {
             continue;
         }
         plan_assign_entry(pc, e);
-        plan_backlink_entry(pc, e);
     }
 }
 

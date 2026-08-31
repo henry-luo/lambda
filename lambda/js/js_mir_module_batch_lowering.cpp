@@ -200,17 +200,6 @@ static bool jm_emit_undefined_module_var_batch(JsMirTranspiler* mt,
     return true;
 }
 
-static JsClassEntry* jm_find_class_entry_by_ast_node(JsMirTranspiler* mt,
-        JsAstNode* class_node) {
-    if (!mt || !class_node) return NULL;
-    for (int ci = 0; ci < mt->class_count; ci++) {
-        if ((JsAstNode*)mt->class_entries[ci].node == class_node) {
-            return &mt->class_entries[ci];
-        }
-    }
-    return NULL;
-}
-
 static JsClassEntry* jm_find_class_for_superclass_binding(JsMirTranspiler* mt,
         JsIdentifierNode* identifier, int depth) {
     if (!mt || !identifier || !identifier->entry || !identifier->entry->node || depth > 8) {
@@ -219,7 +208,7 @@ static JsClassEntry* jm_find_class_for_superclass_binding(JsMirTranspiler* mt,
     JsAstNode* binding = (JsAstNode*)identifier->entry->node;
     if (binding->node_type == JS_AST_NODE_CLASS_DECLARATION ||
         binding->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
-        return jm_find_class_entry_by_ast_node(mt, binding);
+        return jm_find_collected_class(mt, (JsClassNode*)binding);
     }
     if (binding->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
         JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)binding;
@@ -244,7 +233,7 @@ static JsClassEntry* jm_find_class_for_superclass_binding(JsMirTranspiler* mt,
     if (!declarator->init) return NULL;
     if (declarator->init->node_type == JS_AST_NODE_CLASS_DECLARATION ||
         declarator->init->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
-        return jm_find_class_entry_by_ast_node(mt, declarator->init);
+        return jm_find_collected_class(mt, (JsClassNode*)declarator->init);
     }
     if (declarator->init->node_type == JS_AST_NODE_IDENTIFIER) {
         return jm_find_class_for_superclass_binding(mt,
@@ -329,7 +318,7 @@ void* jm_build_js_debug_info(JsMirTranspiler* mt, const char* filename) {
         char* display_name = js_debug_display_name(fc);
         if (!display_name) continue;
         js_debug_map_set(name_map, fc->name, display_name);
-        if (fc->has_native_version) {
+        if (JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE) {
             char native_name[160];
             snprintf(native_name, sizeof(native_name), "%s_n", fc->name);
             js_debug_map_set(name_map, native_name, display_name);
@@ -604,8 +593,8 @@ static void jm_mark_mixed_loop_parent_link(JsFuncCollected* child, JsFuncCollect
     if (!has_loop_private || !has_shared_parent) {
         return;
     }
-    child->closure_env_has_parent_link = true;
-    child->closure_env_parent_link_slot =
+    JM_JS_FACT(child, closure_env_has_parent_link) = true;
+    JM_JS_FACT(child, closure_env_parent_link_slot) =
         jm_parent_link_slot_after_captures(child, parent->scope_env_count);
     for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
         FnCapture* cap = &JM_CAPTURE_ARRAY(child)[k];
@@ -615,7 +604,7 @@ static void jm_mark_mixed_loop_parent_link(JsFuncCollected* child, JsFuncCollect
         }
     }
     log_debug("js-mir: mixed loop closure '%s' keeps shared parent captures via env slot %d",
-        child->name, child->closure_env_parent_link_slot);
+        child->name, JM_JS_FACT(child, closure_env_parent_link_slot));
 }
 
 static bool jm_entry_requires_distinct_lexical_slot(NameEntry* entry) {
@@ -796,7 +785,7 @@ static const char* jm_capture_scope_env_slot_key(JsMirTranspiler* mt,
     // IIFE lexical from its promoted same-named module binding; keying every
     // forced capture disconnects ordinary closures from their parent writes.
     bool needs_binding_key = jm_parent_has_slot_identity_collision(mt, parent, cap) ||
-        (cap->force_env_capture && child && child->is_class_method);
+        (cap->force_env_capture && child && JM_JS_FACT(child, is_class_method));
     if (needs_binding_key) {
         if (!cap->scope_env_key || !cap->scope_env_key[0] ||
                 strcmp(cap->scope_env_key, cap->name) == 0) {
@@ -1421,10 +1410,10 @@ void jm_callsite_propagate(JsMirTranspiler* mt, JsAstNode* program_body) {
                     arg->node_type != JS_AST_NODE_ARROW_FUNCTION) continue;
             JsFuncCollected* callback = jm_find_collected_func(mt,
                 (JsFunctionNode*)arg);
-            if (callback && callback->has_native_version) {
+            if (callback && JM_JS_FACT(callback, native_return_kind) != NATIVE_RETURN_NONE) {
                 log_debug("js-mir P3.5 callsite: callback '%s' stays boxed for dynamic receiver context",
                     callback->name);
-                callback->has_native_version = false;
+                JM_JS_FACT(callback, native_return_kind) = NATIVE_RETURN_NONE;
             }
         }
     }
@@ -1604,13 +1593,13 @@ static bool jm_is_plain_script_module_var_decl_without_init(JsMirTranspiler* mt,
     return true;
 }
 
-static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
+static int js_mir_analyze_and_plan(void* opaque) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)opaque;
+    JsAstNode* root = mt && mt->tp ? (JsAstNode*)mt->tp->ast_root : NULL;
     if (!root || root->node_type != JS_AST_NODE_PROGRAM) {
         log_error("js-mir: expected program node");
-        return false;
+        return 0;
     }
-    mt->root_node = root;
-
     JsProgramNode* program = (JsProgramNode*)root;
 
     // v20: Detect program-level "use strict" directive
@@ -1649,19 +1638,6 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             mt->func_count, mt->func_capacity, mt->class_count, mt->class_capacity);
         mt->collection_failed = true;
         return false;
-    }
-    // Publish every collected callable through its shared function analysis;
-    // synthetic class-field initializers were appended during collection.
-    for (int fi = 0; fi < mt->func_count; fi++) {
-        JsFuncCollected* e = &mt->func_entries[fi];
-        if (!e->node->analysis) e->node->analysis = (FnAnalysis*)pool_calloc(
-            mt->tp->pool, sizeof(FnAnalysis));
-        if (!e->node->analysis) {
-            log_error("js-mir: failed to allocate shared function analysis");
-            return false;
-        }
-        memset(e->node->analysis, 0, sizeof(FnAnalysis));
-        e->node->analysis->js_mir_backend = e;
     }
     log_debug("js-mir: collected %d functions, %d classes", mt->func_count, mt->class_count);
 
@@ -1857,7 +1833,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             jm_name_hash, jm_name_cmp, NULL, NULL);
 
         // Build per-function declaration sets for ancestor checking
-        // func_decl_sets[fi] = set of names declared (var/let/const/param) in function fi
+        // func_decl_sets[FunctionId] = names declared (var/let/const/param).
         // IMPORTANT: build ALL decl sets first, then do ancestor checks in a second pass.
         // Functions are collected in post-order (children before parents), so children have
         // lower indices than parents. A single-pass approach would check ancestors before
@@ -1866,9 +1842,10 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
 
         // Pass 1: build declaration sets for all functions
         for (int fi = 0; fi < mt->func_count; fi++) {
-            JsFunctionNode* fn = mt->func_entries[fi].node;
+            JsFuncCollected* function = &mt->func_entries[fi];
+            JsFunctionNode* fn = function->node;
             if (!fn || !fn->body) {
-                func_decl_sets[fi] = NULL;
+                func_decl_sets[function->function_id] = NULL;
                 continue;
             }
 
@@ -1876,12 +1853,13 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                 jm_name_hash, jm_name_cmp, NULL, NULL);
             jm_collect_function_param_names(fn, func_declared, NULL);
             jm_collect_indexed_body_locals(mt, fn->body, func_declared);
-            func_decl_sets[fi] = func_declared;
+            func_decl_sets[function->function_id] = func_declared;
         }
 
         // Pass 2: check each function's assignments against ancestors
         for (int fi = 0; fi < mt->func_count; fi++) {
-            JsFunctionNode* fn = mt->func_entries[fi].node;
+            JsFuncCollected* function = &mt->func_entries[fi];
+            JsFunctionNode* fn = function->node;
             if (!fn || !fn->body) continue;
 
             // Collect assignment targets within this function
@@ -1894,17 +1872,17 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             size_t iter = 0; void* item;
             while (hashmap_iter(func_assigned, &iter, &item)) {
                 JsNameSetEntry* e = (JsNameSetEntry*)item;
-                if (jm_name_set_has(func_decl_sets[fi], e->name)) continue;  // declared locally
+                if (jm_name_set_has(func_decl_sets[function->function_id], e->name)) continue;
 
                 // Check ancestor chain: if declared in any ancestor, it's a capture
                 bool in_ancestor = false;
-                int anc_idx = mt->func_entries[fi].parent_index;
-                while (anc_idx >= 0 && anc_idx < mt->func_count) {
-                    if (func_decl_sets[anc_idx] && jm_name_set_has(func_decl_sets[anc_idx], e->name)) {
+                for (JsFuncCollected* ancestor = jm_parent_collected_func(mt, function);
+                        ancestor; ancestor = jm_parent_collected_func(mt, ancestor)) {
+                    if (func_decl_sets[ancestor->function_id] &&
+                            jm_name_set_has(func_decl_sets[ancestor->function_id], e->name)) {
                         in_ancestor = true;
                         break;
                     }
-                    anc_idx = mt->func_entries[anc_idx].parent_index;
                 }
                 if (!in_ancestor) {
                     jm_name_set_add(implicit_globals, e->name);
@@ -2008,21 +1986,21 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
     {
         struct JsFunctionDeclScopeEntry {
             const char* name;
-            int parent_index;
-            int function_index;
+            AstFunctionId parent_function_id;
+            AstFunctionId function_id;
         };
         auto decl_hash = [](const void* item, uint64_t seed0, uint64_t seed1) -> uint64_t {
             const JsFunctionDeclScopeEntry* entry =
                 (const JsFunctionDeclScopeEntry*)item;
             uint64_t hash = hashmap_sip(entry->name, strlen(entry->name), seed0, seed1);
-            return hash ^ ((uint64_t)(uint32_t)entry->parent_index * 0x9e3779b97f4a7c15ULL);
+            return hash ^ ((uint64_t)entry->parent_function_id * 0x9e3779b97f4a7c15ULL);
         };
         auto decl_compare = [](const void* lhs, const void* rhs, void*) -> int {
             const JsFunctionDeclScopeEntry* a =
                 (const JsFunctionDeclScopeEntry*)lhs;
             const JsFunctionDeclScopeEntry* b =
                 (const JsFunctionDeclScopeEntry*)rhs;
-            return a->parent_index == b->parent_index &&
+            return a->parent_function_id == b->parent_function_id &&
                 strcmp(a->name, b->name) == 0 ? 0 : 1;
         };
         struct hashmap* declarations = hashmap_new(
@@ -2038,12 +2016,15 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                     fn->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
             JsFunctionDeclScopeEntry key = {
                 jm_persist_name(fn->name->chars),
-                mt->func_entries[fi].parent_index, fi};
+                jm_parent_function_id(mt, &mt->func_entries[fi]),
+                mt->func_entries[fi].function_id};
             JsFunctionDeclScopeEntry* prior =
                 (JsFunctionDeclScopeEntry*)hashmap_get(declarations, &key);
             if (prior) {
                 JM_JS_FACT(&mt->func_entries[fi], is_reassigned) = true;
-                JM_JS_FACT(&mt->func_entries[prior->function_index], is_reassigned) = true;
+                JsFuncCollected* prior_function = jm_collected_func_by_id(mt,
+                    prior->function_id);
+                if (prior_function) JM_JS_FACT(prior_function, is_reassigned) = true;
                 log_debug("js-mir: function '%.*s' has duplicate decl in same scope — skipping direct call optimization",
                     (int)fn->name->len, fn->name->chars);
             } else {
@@ -2239,7 +2220,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                 // wrapper frame; capture analysis must not mistake the original
                 // wrapper-local declaration for a normal ancestor capture.
                 mce.is_iife_func_decl = true;
-                fc->is_iife_func_decl = true;
+                JM_JS_FACT(fc, is_iife_func_decl) = true;
                 mce.int_val = mt->module_var_count++;
                 hashmap_set(mt->module_consts, &mce);
                 log_debug("js-mir: iife func '%s' → module_var[%d]", mce.name, (int)mce.int_val);
@@ -2254,7 +2235,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
 
             // Mark this IIFE body function so its var decls use module vars
             JsFuncCollected* iife_fc = jm_find_collected_func(mt, iife_fn);
-            if (iife_fc) iife_fc->is_iife_body = true;
+            if (iife_fc) JM_JS_FACT(iife_fc, is_iife_body) = true;
 
             // Scan IIFE body for function declarations and var declarations
             if (iife_fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) {
@@ -2297,7 +2278,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                 struct hashmap* iife_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                     jm_name_hash, jm_name_cmp, NULL, NULL);
                 bool iife_effective_strict = mt->is_global_strict || mt->is_module ||
-                    (iife_fc && iife_fc->is_strict) || jm_has_use_strict_directive(iife_fn);
+                    (iife_fc && JM_JS_FACT(iife_fc, is_strict));
                 jm_collect_all_let_const_names_recursive(iife_fn->body, iife_lex_collisions);
             jm_collect_indexed_body_locals(mt, iife_fn->body, iife_func_hoists, true);
                 size_t fh_iter = 0; void* fh_item;
@@ -2526,7 +2507,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
         // Analyze each collected function for captures
         // Instead of passing the flat all_names (which causes false captures from
         // unrelated scopes), build per-function ancestor scope names by walking
-        // the parent_index chain. This implements proper lexical scoping.
+        // the FunctionId parent chain. This implements proper lexical scoping.
         for (int i = 0; i < mt->func_count; i++) {
             JsFuncCollected* fc = &mt->func_entries[i];
 
@@ -2564,9 +2545,8 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                 }
             }
             hashmap_free(program_lexicals);
-            int ancestor_idx = fc->parent_index;
-            while (ancestor_idx >= 0 && ancestor_idx < mt->func_count) {
-                JsFuncCollected* anc = &mt->func_entries[ancestor_idx];
+            for (JsFuncCollected* anc = jm_parent_collected_func(mt, fc);
+                    anc; anc = jm_parent_collected_func(mt, anc)) {
                 if (!anc->node) break;
                 JsFunctionNode* afn = anc->node;
                 // Add ancestor's params
@@ -2582,7 +2562,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                 if (afn->body) {
                     struct hashmap* anc_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                         jm_name_hash, jm_name_cmp, NULL, NULL);
-                    jm_copy_cached_function_locals(mt, anc, true, anc->is_strict,
+                    jm_copy_cached_function_locals(mt, anc, true, JM_JS_FACT(anc, is_strict),
                         anc_locals, true);
                     jm_collect_enclosing_lexicals_for_target(afn->body,
                         (JsAstNode*)fc->node, anc_locals);
@@ -2594,7 +2574,8 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                         if (mt->module_consts) {
                             JsModuleConstEntry* mc = jm_find_module_const(mt, e->name);
                             is_iife_promoted_module_var =
-                                jm_modvar_is_iife_scope_binding(mc) && anc->is_iife_body;
+                                jm_modvar_is_iife_scope_binding(mc) &&
+                                JM_JS_FACT(anc, is_iife_body);
                         }
                         if (!is_iife_promoted_module_var) {
                             jm_name_set_add(ancestor_func_locals, e->name);
@@ -2602,7 +2583,6 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                     }
                     hashmap_free(anc_locals);
                 }
-                ancestor_idx = anc->parent_index;
             }
 
             bool captures_with_scope = jm_ast_node_has_with_ancestor(root,
@@ -2643,16 +2623,14 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                         (JsAstNode*)fc->node, let_const_names);
                 }
                 // Collect from ancestor function bodies
-                int anc_idx = fc->parent_index;
-                while (anc_idx >= 0 && anc_idx < mt->func_count) {
-                    JsFuncCollected* anc = &mt->func_entries[anc_idx];
+                for (JsFuncCollected* anc = jm_parent_collected_func(mt, fc);
+                        anc; anc = jm_parent_collected_func(mt, anc)) {
                     if (anc->node && anc->node->body) {
                         jm_copy_cached_names(jm_cached_function_direct_lexicals(anc),
                             let_const_names);
                         jm_collect_enclosing_lexicals_for_target(anc->node->body,
                             (JsAstNode*)fc->node, let_const_names);
                     }
-                    anc_idx = anc->parent_index;
                 }
                 // Mark captures
                 for (int ci = 0; ci < JM_CAPTURE_COUNT(fc); ci++) {
@@ -2670,9 +2648,8 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                     // Resolve the nearest function-scope lexical first. A
                     // minified outer const and inner let commonly share a name;
                     // merging all ancestors into one set lets the outer kind win.
-                    int capture_parent = fc->parent_index;
-                    while (capture_parent >= 0 && capture_parent < mt->func_count) {
-                        JsFuncCollected* parent_fc = &mt->func_entries[capture_parent];
+                    for (JsFuncCollected* parent_fc = jm_parent_collected_func(mt, fc);
+                            parent_fc; parent_fc = jm_parent_collected_func(mt, parent_fc)) {
                         struct hashmap* direct_lexicals = hashmap_new(
                             sizeof(JsNameSetEntry), 16, 0, 0,
                             jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -2685,7 +2662,6 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                         if (direct) nearest_var_kind = direct->var_kind;
                         hashmap_free(direct_lexicals);
                         if (nearest_var_kind != 0) break;
-                        capture_parent = parent_fc->parent_index;
                     }
                     JsNameSetEntry* lce = nearest_var_kind == 0 ?
                         (JsNameSetEntry*)hashmap_get(let_const_names, &lookup) : NULL;
@@ -2720,20 +2696,18 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                 if (worklist) arraylist_free(worklist);
                 mem_free(queued);
                 log_error("js-mir: capture propagation worklist allocation failed");
-                return false;
+                return 0;
             }
             for (int i = 0; i < mt->func_count; i++) {
                 arraylist_append(worklist, &mt->func_entries[i]);
-                queued[i] = true;
+                queued[mt->func_entries[i].function_id] = true;
             }
             for (int work = 0; work < worklist->length; work++) {
                 JsFuncCollected* child = (JsFuncCollected*)arraylist_get(worklist, work);
-                int child_index = (int)(child - mt->func_entries);
-                if (child_index >= 0 && child_index < mt->func_count) queued[child_index] = false;
-                    if (JM_CAPTURE_COUNT(child) == 0) continue;
-                    int parent_idx = child->parent_index;
-                    if (parent_idx < 0 || parent_idx >= mt->func_count) continue;
-                    JsFuncCollected* parent = &mt->func_entries[parent_idx];
+                queued[child->function_id] = false;
+                if (JM_CAPTURE_COUNT(child) == 0) continue;
+                JsFuncCollected* parent = jm_parent_collected_func(mt, child);
+                if (!parent) continue;
 
                     // Build set of parent's params + locals for quick lookup
                     struct hashmap* parent_own = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
@@ -2746,7 +2720,8 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                         // module constants and must stop capture propagation.
                         struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                             jm_name_hash, jm_name_cmp, NULL, NULL);
-                        jm_copy_cached_function_locals(mt, parent, true, parent->is_strict,
+                        jm_copy_cached_function_locals(mt, parent, true,
+                            JM_JS_FACT(parent, is_strict),
                             body_locals, true);
                         size_t bl_iter = 0;
                         void* bl_item;
@@ -2755,7 +2730,8 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                             bool skip_local_binding = false;
                             if (mt->module_consts) {
                                 JsModuleConstEntry* mc = jm_find_module_const(mt, bl_entry->name);
-                                if (jm_modvar_is_iife_scope_binding(mc) && parent->is_iife_body) {
+                                if (jm_modvar_is_iife_scope_binding(mc) &&
+                                        JM_JS_FACT(parent, is_iife_body)) {
                                     skip_local_binding = true;
                                 }
                             }
@@ -2812,9 +2788,8 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                                 // If shadowed, keep the capture — the local binding takes
                                 // precedence over the module constant.
                                 bool shadowed_by_ancestor = false;
-                                for (int ai = parent_idx; ai >= 0 && ai < mt->func_count;
-                                     ai = mt->func_entries[ai].parent_index) {
-                                    JsFuncCollected* anc = &mt->func_entries[ai];
+                                for (JsFuncCollected* anc = parent; anc;
+                                        anc = jm_parent_collected_func(mt, anc)) {
                                     if (!anc->node) break;
                                     // Check ancestor's function name (NFE self-reference)
                                     if (anc->node->name) {
@@ -2842,7 +2817,8 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                                             jm_cached_function_locals(mt, anc, false);
                                         if (anc_locals && jm_name_set_has(anc_locals, cap_name)) {
                                             bool is_iife_promoted_module_var =
-                                                jm_modvar_is_iife_scope_binding(mc_prop) && anc->is_iife_body;
+                                                jm_modvar_is_iife_scope_binding(mc_prop) &&
+                                                JM_JS_FACT(anc, is_iife_body);
                                             if (!is_iife_promoted_module_var) {
                                                 shadowed_by_ancestor = true;
                                             }
@@ -2905,10 +2881,9 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                             JM_CAPTURE_ARRAY(child)[ci].is_nfe_binding || cap_is_parent_nfe;
                         JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent)].force_env_capture = JM_CAPTURE_ARRAY(child)[ci].force_env_capture;
                         JM_CAPTURE_COUNT(parent)++;
-                        int parent_offset = (int)(parent - mt->func_entries);
-                        if (parent_offset >= 0 && parent_offset < mt->func_count && !queued[parent_offset]) {
+                        if (!queued[parent->function_id]) {
                             arraylist_append(worklist, parent);
-                            queued[parent_offset] = true;
+                            queued[parent->function_id] = true;
                         }
                         log_debug("js-mir: propagated capture '%s' [%s] from '%s' to parent '%s'",
                             cap_name, JM_CAPTURE_ARRAY(parent)[JM_CAPTURE_COUNT(parent) - 1].scope_env_key,
@@ -2969,7 +2944,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             int nfe_extra_count = 0;
             for (int ci = 0; ci < mt->func_count; ci++) {
                 JsFuncCollected* child = &mt->func_entries[ci];
-                if (child->parent_index != fi) continue;
+                if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
                 if (JM_CAPTURE_COUNT(child) == 0) continue;
                 // Determine child's NFE self-name (if any)
                 const char* child_self_name = child->node && child->node->name
@@ -3007,7 +2982,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                     hashmap_clear(scope_vars, false);
                     for (int ci = 0; ci < mt->func_count; ci++) {
                         JsFuncCollected* child = &mt->func_entries[ci];
-                        if (child->parent_index != fi) continue;
+                        if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
                         if (JM_CAPTURE_COUNT(child) == 0) continue;
                         const char* child_self_name2 = child->node && child->node->name
                             ? jm_var_name(child->node->name) : NULL;
@@ -3037,7 +3012,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                 int extra_slot = normal_slot_count;
                 for (int ci = 0; ci < mt->func_count; ci++) {
                     JsFuncCollected* child = &mt->func_entries[ci];
-                    if (child->parent_index != fi) continue;
+                    if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
                     if (!child->node || !child->node->name) continue;
                     const char* csn = jm_var_name(child->node->name);
                     // Only true NFEs (not function declarations) get extra slots
@@ -3070,7 +3045,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                     // Remap child capture indices to scope env slots
                     for (int ci = 0; ci < mt->func_count; ci++) {
                         JsFuncCollected* child = &mt->func_entries[ci];
-                        if (child->parent_index != fi) continue;
+                        if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
                         if (JM_CAPTURE_COUNT(child) == 0) continue;
                         // Build child's NFE self-name to skip during remap
                         const char* child_self_remap = child->node && child->node->name
@@ -3104,15 +3079,14 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
 
     for (int ci = 0; ci < mt->func_count; ci++) {
         JsFuncCollected* child = &mt->func_entries[ci];
-        int parent_index = child->parent_index;
-        if (parent_index < 0 || parent_index >= mt->func_count) continue;
-        JsFuncCollected* parent_fc = &mt->func_entries[parent_index];
+        JsFuncCollected* parent_fc = jm_parent_collected_func(mt, child);
+        if (!parent_fc) continue;
         if (!parent_fc->has_scope_env || parent_fc->scope_env_count <= 0) continue;
         jm_mark_mixed_loop_parent_link(child, parent_fc);
     }
 
     // Phase 1.7.5: Js57 Track A — module-level scope env.
-    // Top-level closures (parent_index == -1) can share captured block-lets via a
+    // Top-level closures with no parent FunctionId can share captured block-lets via a
     // synthetic scope env allocated at js_main entry. Without this, each top-level
     // closure gets a per-closure env snapshot and mutations don't propagate between
     // siblings (regression: built_ins/ArrayBuffer/.../coerced-new-length-detach.js).
@@ -3133,7 +3107,9 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
     // fall back to per-closure env) protects loop-body block-lets even if they
     // pass these filters.
     memset(&mt->module_fc, 0, sizeof(mt->module_fc));
-    mt->module_scope_env_active = false;
+    // The module carrier is never an AST function. Keep its sentinel identity
+    // valid even when the program needs no shared module environment.
+    mt->module_fc.function_id = AST_FUNCTION_ID_INVALID;
     {
         struct hashmap* for_init_lets = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -3230,20 +3206,21 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
 
         for (int ci = 0; ci < mt->func_count; ci++) {
             JsFuncCollected* child = &mt->func_entries[ci];
-            if (child->parent_index != -1) continue;
+            if (jm_parent_function_id(mt, child) != AST_FUNCTION_ID_INVALID) continue;
             if (JM_CAPTURE_COUNT(child) == 0) continue;
-                for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
-                    if (!capture_qualifies(child, &JM_CAPTURE_ARRAY(child)[k])) continue;
-                    jm_name_set_add(scope_vars, capture_slot_key(&JM_CAPTURE_ARRAY(child)[k]));
-                }
+            for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
+                if (!capture_qualifies(child, &JM_CAPTURE_ARRAY(child)[k])) continue;
+                jm_name_set_add(scope_vars, capture_slot_key(&JM_CAPTURE_ARRAY(child)[k]));
             }
+        }
 
         int total = (int)hashmap_count(scope_vars);
         if (total > 0) {
             int scope_env_capacity = total + 2;
             for (int ci = 0; ci < mt->func_count; ci++) {
                 JsFuncCollected* child = &mt->func_entries[ci];
-                if (child->parent_index != -1 || !closure_needs_mixed_module_env(child)) continue;
+                if (jm_parent_function_id(mt, child) != AST_FUNCTION_ID_INVALID ||
+                        !closure_needs_mixed_module_env(child)) continue;
                 int private_count = 0;
                 for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                     if (capture_needs_private_module_slot(child, &JM_CAPTURE_ARRAY(child)[k])) {
@@ -3257,7 +3234,6 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             mt->module_fc.has_scope_env = true;
             mt->module_fc.scope_env_count = total;
             mt->module_fc.scope_env_normal_count = total;
-            mt->module_fc.parent_index = -2;  // sentinel: module body
             mt->module_fc.scope_env_names = (const char**)mem_calloc(
                 scope_env_capacity, sizeof(const char*), MEM_CAT_JS_RUNTIME);
 
@@ -3266,7 +3242,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             int fill_idx = 0;
             for (int ci = 0; ci < mt->func_count; ci++) {
                 JsFuncCollected* child = &mt->func_entries[ci];
-                if (child->parent_index != -1) continue;
+                if (jm_parent_function_id(mt, child) != AST_FUNCTION_ID_INVALID) continue;
                 for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                     if (!capture_qualifies(child, &JM_CAPTURE_ARRAY(child)[k])) continue;
                     const char* key = capture_slot_key(&JM_CAPTURE_ARRAY(child)[k]);
@@ -3284,7 +3260,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             // per-closure-env fallback handles them.
             for (int ci = 0; ci < mt->func_count; ci++) {
                 JsFuncCollected* child = &mt->func_entries[ci];
-                if (child->parent_index != -1) continue;
+                if (jm_parent_function_id(mt, child) != AST_FUNCTION_ID_INVALID) continue;
                 for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                     if (!capture_qualifies(child, &JM_CAPTURE_ARRAY(child)[k])) continue;
                     const char* key = capture_slot_key(&JM_CAPTURE_ARRAY(child)[k]);
@@ -3306,17 +3282,17 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                             cap->private_env_slot = private_slot++;
                         }
                     }
-                    child->closure_env_has_parent_link = true;
-                    child->closure_env_parent_link_slot =
+                    JM_JS_FACT(child, closure_env_has_parent_link) = true;
+                    JM_JS_FACT(child, closure_env_parent_link_slot) =
                         jm_parent_link_slot_after_captures(child, total);
-                    if (child->closure_env_parent_link_slot >= mt->module_fc.scope_env_count) {
+                    if (JM_JS_FACT(child, closure_env_parent_link_slot) >= mt->module_fc.scope_env_count) {
                         // Generated transitive loads address the parent-link tail
                         // by layout, so reserve that tail in the module env too.
                         mt->module_fc.has_parent_env_link = true;
                         mt->module_fc.scope_env_count =
-                            child->closure_env_parent_link_slot + 1;
+                            JM_JS_FACT(child, closure_env_parent_link_slot) + 1;
                         mt->module_fc.scope_env_names[
-                            child->closure_env_parent_link_slot] = jm_persist_name("__parent_env__");
+                            JM_JS_FACT(child, closure_env_parent_link_slot)] = jm_persist_name("__parent_env__");
                     }
                     for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                         FnCapture* cap = &JM_CAPTURE_ARRAY(child)[k];
@@ -3327,7 +3303,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                         }
                     }
                     log_debug("js-mir: module mixed closure '%s' uses parent env slot %d",
-                        child->name, child->closure_env_parent_link_slot);
+                        child->name, JM_JS_FACT(child, closure_env_parent_link_slot));
                 }
             }
 
@@ -3357,8 +3333,8 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
     // try to use them as "grandparent" slots for their own grandchildren.
     for (int fi = mt->func_count - 1; fi >= 0; fi--) {
         JsFuncCollected* parent_fc = &mt->func_entries[fi];
-        parent_fc->reuse_parent_env = false;
-        parent_fc->reuse_env_slot_count = 0;
+        JM_JS_FACT(parent_fc, reuse_parent_env) = false;
+        JM_JS_FACT(parent_fc, reuse_env_slot_count) = 0;
         if (!parent_fc->has_scope_env || parent_fc->scope_env_count == 0) continue;
         if (JM_CAPTURE_COUNT(parent_fc) == 0) continue;  // not a closure, can't reuse
 
@@ -3382,7 +3358,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
 
         // All scope_env vars are transitive captures. Remap children's captures
         // to use the grandparent env slots instead of this function's local scope_env slots.
-        parent_fc->reuse_parent_env = true;
+        JM_JS_FACT(parent_fc, reuse_parent_env) = true;
         int max_slot = 0;
         for (int s = 0; s < parent_fc->scope_env_count; s++) {
             const char* sname = parent_fc->scope_env_names[s];
@@ -3396,7 +3372,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                         &JM_CAPTURE_ARRAY(parent_fc)[c], c);
                     if (grandparent_slot < 0) {
                         // Can't remap — grandparent doesn't use scope_env for this var
-                        parent_fc->reuse_parent_env = false;
+                        JM_JS_FACT(parent_fc, reuse_parent_env) = false;
                         break;
                     }
                     if (grandparent_slot + 1 > max_slot) max_slot = grandparent_slot + 1;
@@ -3404,7 +3380,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                     // Remap all children's captures of this var
                     for (int ci = 0; ci < mt->func_count; ci++) {
                         JsFuncCollected* child = &mt->func_entries[ci];
-                        if (child->parent_index != fi) continue;
+                        if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
                         for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                             if (strcmp(JM_CAPTURE_ARRAY(child)[k].name, sname) == 0) {
                                 JM_CAPTURE_ARRAY(child)[k].scope_env_slot = grandparent_slot;
@@ -3421,11 +3397,11 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                     break;
                 }
             }
-            if (!parent_fc->reuse_parent_env) break;  // aborted
+            if (!JM_JS_FACT(parent_fc, reuse_parent_env)) break;  // aborted
         }
 
-        if (parent_fc->reuse_parent_env) {
-            parent_fc->reuse_env_slot_count = max_slot;
+        if (JM_JS_FACT(parent_fc, reuse_parent_env)) {
+            JM_JS_FACT(parent_fc, reuse_env_slot_count) = max_slot;
             log_debug("js-mir: Phase 1.7b: '%s' will reuse parent env (all %d scope_env vars are transitive captures, slot_count=%d)",
                 parent_fc->name, parent_fc->scope_env_count, max_slot);
         }
@@ -3440,11 +3416,11 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
     for (int fi = mt->func_count - 1; fi >= 0; fi--) {
         JsFuncCollected* parent_fc = &mt->func_entries[fi];
         parent_fc->has_parent_env_link = false;
-        parent_fc->parent_env_link_uses_grandparent = false;
-        parent_fc->has_immediate_parent_env_link = false;
-        parent_fc->immediate_parent_env_link_slot = -1;
+        JM_JS_FACT(parent_fc, parent_env_link_uses_grandparent) = false;
+        JM_JS_FACT(parent_fc, has_immediate_parent_env_link) = false;
+        JM_JS_FACT(parent_fc, immediate_parent_env_link_slot) = -1;
         if (!parent_fc->has_scope_env || parent_fc->scope_env_count == 0) continue;
-        if (parent_fc->reuse_parent_env) continue;  // Phase 1.7b already handles pure-transitive
+        if (JM_JS_FACT(parent_fc, reuse_parent_env)) continue;  // Phase 1.7b already handles pure-transitive
         if (JM_CAPTURE_COUNT(parent_fc) == 0) continue; // no captures = no transitive vars possible
 
         // Collect body locals for this function to distinguish locals from transitive captures
@@ -3513,7 +3489,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
         if (parent_link_uses_grandparent) {
             for (int ci = 0; ci < mt->func_count && !needs_immediate_parent_link; ci++) {
                 JsFuncCollected* child = &mt->func_entries[ci];
-                if (child->parent_index != fi) continue;
+                if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
                 for (int k = 0; k < JM_CAPTURE_COUNT(child) && !needs_immediate_parent_link; k++) {
                     for (int pc = 0; pc < JM_CAPTURE_COUNT(parent_fc); pc++) {
                         FnCapture* parent_cap = &JM_CAPTURE_ARRAY(parent_fc)[pc];
@@ -3531,12 +3507,12 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
 
         // Mixed scope env: add parent env link at the LAST slot (no shifting needed).
         parent_fc->has_parent_env_link = true;
-        parent_fc->parent_env_link_uses_grandparent = parent_link_uses_grandparent;
+        JM_JS_FACT(parent_fc, parent_env_link_uses_grandparent) = parent_link_uses_grandparent;
         int immediate_parent_env_link_slot = -1;
         if (needs_immediate_parent_link) {
-            parent_fc->has_immediate_parent_env_link = true;
+            JM_JS_FACT(parent_fc, has_immediate_parent_env_link) = true;
             immediate_parent_env_link_slot = parent_fc->scope_env_count;
-            parent_fc->immediate_parent_env_link_slot = immediate_parent_env_link_slot;
+            JM_JS_FACT(parent_fc, immediate_parent_env_link_slot) = immediate_parent_env_link_slot;
             parent_fc->scope_env_names[parent_fc->scope_env_count] =
                 jm_persist_name("__immediate_parent_env__");
             parent_fc->scope_env_count++;
@@ -3571,13 +3547,13 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
         // NO slot shifting needed — existing slots remain unchanged
         for (int ci = 0; ci < mt->func_count; ci++) {
             JsFuncCollected* child = &mt->func_entries[ci];
-            if (child->parent_index != fi) continue;
+            if (jm_parent_function_id(mt, child) != parent_fc->function_id) continue;
             if (JM_CAPTURE_COUNT(child) == 0) continue;
 
             for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                 bool field_initializer_arrow = false;
                 if (child->node && child->node->is_arrow &&
-                    mt->func_entries[fi].is_class_field_initializer) {
+                    JM_JS_FACT(parent_fc, is_class_field_initializer)) {
                     field_initializer_arrow = true;
                 }
                 if (field_initializer_arrow &&
@@ -3648,21 +3624,20 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
     // unrelated slots for later-initialized lexical captures.
     for (int fi = 0; fi < mt->func_count; fi++) {
         JsFuncCollected* fc = &mt->func_entries[fi];
-        if (!fc->reuse_parent_env) continue;
-        int parent_index = fc->parent_index;
-        if (parent_index < 0 || parent_index >= mt->func_count) continue;
-        JsFuncCollected* parent_fc = &mt->func_entries[parent_index];
+        if (!JM_JS_FACT(fc, reuse_parent_env)) continue;
+        JsFuncCollected* parent_fc = jm_parent_collected_func(mt, fc);
+        if (!parent_fc) continue;
         if (!parent_fc->has_parent_env_link) continue;
 
-        fc->reuse_parent_env = false;
-        fc->reuse_env_slot_count = 0;
+        JM_JS_FACT(fc, reuse_parent_env) = false;
+        JM_JS_FACT(fc, reuse_env_slot_count) = 0;
         fc->has_parent_env_link = true;
-        fc->parent_env_link_uses_grandparent = true;
+        JM_JS_FACT(fc, parent_env_link_uses_grandparent) = true;
         // A mixed parent needs two distinct links: the inherited link preserves
         // transitive captures, while this direct link keeps parent-local cells
         // shared with sibling closures instead of copying stale values.
-        fc->has_immediate_parent_env_link = true;
-        fc->immediate_parent_env_link_slot = fc->scope_env_count;
+        JM_JS_FACT(fc, has_immediate_parent_env_link) = true;
+        JM_JS_FACT(fc, immediate_parent_env_link_slot) = fc->scope_env_count;
         fc->scope_env_names[fc->scope_env_count] = jm_persist_name(
             "__immediate_parent_env__");
         fc->scope_env_count++;
@@ -3671,7 +3646,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
         fc->scope_env_count++;
         for (int ci = 0; ci < mt->func_count; ci++) {
             JsFuncCollected* child = &mt->func_entries[ci];
-            if (child->parent_index != fi) continue;
+            if (jm_parent_function_id(mt, child) != fc->function_id) continue;
             for (int k = 0; k < JM_CAPTURE_COUNT(child); k++) {
                 for (int s = 0; s < fc->scope_env_count; s++) {
                     if (strcmp(JM_CAPTURE_ARRAY(child)[k].name, fc->scope_env_names[s]) == 0) {
@@ -3690,7 +3665,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                                 JM_CAPTURE_ARRAY(child)[k].grandparent_slot =
                                     JM_CAPTURE_ARRAY(fc)[c].scope_env_slot;
                                 JM_CAPTURE_ARRAY(child)[k].parent_env_link_slot_override =
-                                    fc->immediate_parent_env_link_slot;
+                                    JM_JS_FACT(fc, immediate_parent_env_link_slot);
                             }
                             break;
                         }
@@ -3707,10 +3682,10 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                 // layout: its children must follow this newly owned environment.
                 // Remapping them through the child's pre-reuse layout aliases
                 // unrelated siblings when the slot orders differ.
-                JsFuncCollected* capture_env_owner = child->reuse_parent_env ? fc : child;
+                JsFuncCollected* capture_env_owner = JM_JS_FACT(child, reuse_parent_env) ? fc : child;
                 for (int gi = 0; gi < mt->func_count; gi++) {
                     JsFuncCollected* grandchild = &mt->func_entries[gi];
-                    if (grandchild->parent_index != ci) continue;
+                    if (jm_parent_function_id(mt, grandchild) != child->function_id) continue;
                     for (int gk = 0; gk < JM_CAPTURE_COUNT(grandchild); gk++) {
                         for (int s = 0; s < capture_env_owner->scope_env_count; s++) {
                             if (strcmp(JM_CAPTURE_ARRAY(grandchild)[gk].name,
@@ -3731,7 +3706,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                                             JM_CAPTURE_ARRAY(grandchild)[gk].grandparent_slot =
                                                 JM_CAPTURE_ARRAY(child)[c].scope_env_slot;
                                             JM_CAPTURE_ARRAY(grandchild)[gk].parent_env_link_slot_override =
-                                                child->immediate_parent_env_link_slot;
+                                                JM_JS_FACT(child, immediate_parent_env_link_slot);
                                             break;
                                         }
                                     }
@@ -3753,7 +3728,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
         jm_infer_param_types(mt, fc);
         jm_infer_return_type(mt, fc);
         // P1: Compute native eligibility here (Phase 1.75) rather than lazily in jm_define_function.
-        // This allows jm_resolve_native_call() (which checks has_native_version) to see the flag
+        // This lets jm_resolve_native_call() see the selected native ABI
         // when transpiling earlier functions that call later-defined native functions, enabling
         // `let x = f(...)` to propagate f's return type into x's variable type.
         // Native specialization cannot use duplicate MIR param names, and arrow
@@ -3778,8 +3753,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             }
         }
         if (!has_native_param) eligible = false;
-        fc->has_native_version = eligible;
-        fc->native_return_kind = !eligible ? NATIVE_RETURN_NONE :
+        JM_JS_FACT(fc, native_return_kind) = !eligible ? NATIVE_RETURN_NONE :
             JM_JS_FACT(fc, return_type) == LMD_TYPE_FLOAT ? NATIVE_RETURN_FLOAT : NATIVE_RETURN_INT;
         if (eligible) {
             log_debug("js-mir P1/P4: %s eligible for native version (params: %d, ret: %s)",
@@ -3789,7 +3763,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
 
         // Mixed native/Item entries keep the Item formal stable across every
         // tail iteration. Retain TCO for all-native signatures only.
-        fc->is_tco_eligible = false;
+        JM_JS_FACT(fc, is_tco_eligible) = false;
         if (eligible && has_native_param) {
             for (int j = 0; j < JM_PARAM_COUNT(fc); j++) {
                 if (jm_param_type(fc, j) == LMD_TYPE_ANY) {
@@ -3799,7 +3773,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             }
         }
         if (eligible && has_native_param && jm_has_tail_call(mt, fc)) {
-            fc->is_tco_eligible = true;
+            JM_JS_FACT(fc, is_tco_eligible) = true;
             log_debug("js-mir TCO: %s eligible for tail-call optimization", fc->name);
         }
     }
@@ -3880,14 +3854,14 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             }
         }
 
-        if (fc->has_native_version) {
+        if (JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE) {
             FnVariantAnalysis* native =
                 &analysis->variants[analysis->variant_count++];
             memset(native, 0, sizeof(*native));
             native->entry = {FN_ENTRY_NATIVE_BODY, true, false, false, false};
             native->effects = body->effects;
             native->result.normal = {JM_JS_FACT(fc, return_type),
-                fc->native_return_kind == NATIVE_RETURN_FLOAT
+                JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_FLOAT
                     ? VALUE_REP_F64 : VALUE_REP_I64,
                 SCALAR_RETURN_NONE};
             native->param_count = JM_PARAM_COUNT(fc);
@@ -3927,7 +3901,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
         // P1: Also pre-declare native function version so call sites emitted before
         // a function is defined can use fc->native_func_item.  The actual native
         // function replaces this forward reference when jm_define_function runs.
-        if (fc->has_native_version && !fc->native_func_item) {
+        if (JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE && !fc->native_func_item) {
             char native_fwd_name[140];
             snprintf(native_fwd_name, sizeof(native_fwd_name), "%s_n", fc->name);
             MIR_item_t fwd_native = MIR_new_forward(mt->ctx, native_fwd_name);
@@ -3935,6 +3909,15 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             jm_register_local_func(mt, native_fwd_name, fwd_native);
         }
     }
+
+    return 1;
+}
+
+static int js_mir_lower(void* opaque) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)opaque;
+    JsAstNode* root = mt && mt->tp ? (JsAstNode*)mt->tp->ast_root : NULL;
+    if (!root || root->node_type != JS_AST_NODE_PROGRAM) return 0;
+    JsProgramNode* program = (JsProgramNode*)root;
 
     // Phase 2: Define all collected functions (innermost first)
     for (int i = 0; i < mt->func_count; i++) {
@@ -3948,7 +3931,6 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
     MIR_func_t main_func = MIR_get_item_func(mt->ctx, main_item);
     mt->em.func_item = main_item;
     mt->em.func = main_func;
-    mt->current_func_index = -1;
     mt->current_fc = NULL;
     mt->current_class = NULL;
     mt->scope_env_reg = 0;
@@ -3983,7 +3965,6 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
         jm_register_owned_env(mt, mt->scope_env_reg);
         mt->scope_env_slot_count = mt->module_fc.scope_env_count;
         mt->current_fc = &mt->module_fc;
-        mt->module_scope_env_active = true;
 
         // Pre-fill all slots with TDZ sentinel so unobserved captures hit the
         // ReferenceError path rather than picking up a stale undefined.
@@ -4713,6 +4694,12 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
         jm_emit_ret(mt, exc_ret);
     }
 
+    return 1;
+}
+
+static int js_mir_finalize(void* opaque) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)opaque;
+    if (!mt || !mt->ctx || !mt->module) return 0;
     jm_pop_scope(mt);
     jm_finish_function_frame(mt, "js_main");
     MIR_finish_func(mt->ctx);
@@ -4720,26 +4707,35 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
 
     // Load module for linking
     MIR_load_module(mt->ctx, mt->module);
-    return true;
+    return 1;
 }
 
-static int js_mir_compile_pass(void* opaque) {
+static int js_mir_prelink(void* opaque) {
     JsMirTranspiler* mt = (JsMirTranspiler*)opaque;
-    return mt && transpile_js_mir_ast_impl(mt, mt->root_node);
+    if (mt && js_prelink_compiled_name_table(mt)) return 1;
+    log_error("js-mir: failed to prelink compiled property-name table");
+    return 0;
 }
 
-bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root) {
-    if (!mt || !root) return false;
-    mt->root_node = root;
-    CompilerPassManager pass_manager;
-    compiler_pass_manager_init(&pass_manager, COMPILER_FACT_AST |
-        COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED | COMPILER_FACT_INDEXED);
-    CompilerPassSpec compile_pass = {"analysis-lower-finalize", COMPILER_FACT_INDEXED,
-        COMPILER_FACT_ANALYZED | COMPILER_FACT_PLANNED |
-        COMPILER_FACT_MIR_LOWERED | COMPILER_FACT_FINALIZED,
-        js_mir_compile_pass, mt};
-    return compiler_pass_manager_add(&pass_manager, &compile_pass) &&
-        compiler_pass_manager_run(&pass_manager, NULL);
+bool transpile_js_mir_ast(JsMirTranspiler* mt) {
+    if (!mt || !mt->tp || !mt->tp->ast_root) return false;
+    CompilerPassManager* pass_manager = &mt->tp->pass_manager;
+    uint32_t indexed_facts = COMPILER_FACT_FRONTEND | COMPILER_FACT_INDEXED;
+    if ((pass_manager->facts & indexed_facts) != indexed_facts ||
+            pass_manager->next_pass != pass_manager->pass_count) return false;
+    CompilerPassSpec analyze_plan_pass = {"analyze-plan", COMPILER_FACT_INDEXED,
+        COMPILER_FACT_ANALYZED | COMPILER_FACT_PLANNED, js_mir_analyze_and_plan, mt};
+    CompilerPassSpec lower_pass = {"mir-lower", COMPILER_FACT_ANALYZED |
+        COMPILER_FACT_PLANNED, COMPILER_FACT_MIR_LOWERED, js_mir_lower, mt};
+    CompilerPassSpec finalize_pass = {"mir-finalize-load", COMPILER_FACT_MIR_LOWERED,
+        COMPILER_FACT_FINALIZED, js_mir_finalize, mt};
+    CompilerPassSpec prelink_pass = {"prelink", COMPILER_FACT_FINALIZED,
+        COMPILER_FACT_PRELINKED, js_mir_prelink, mt};
+    return compiler_pass_manager_add(pass_manager, &analyze_plan_pass) &&
+        compiler_pass_manager_add(pass_manager, &lower_pass) &&
+        compiler_pass_manager_add(pass_manager, &finalize_pass) &&
+        compiler_pass_manager_add(pass_manager, &prelink_pass) &&
+        compiler_pass_manager_run(pass_manager, NULL);
 }
 
 // Pre-link validation: scan all MIR instructions for NULL label operands.
@@ -4840,7 +4836,8 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     jm_track_active_js_transpile(tp, NULL, NULL);
 
 
-    if (!js_transpiler_parse_module(tp, js_source, strlen(js_source))) {
+    if (!js_transpiler_parse_c(tp, js_source, strlen(js_source),
+            (JsParseMode)(JS_PARSE_SCRIPT | JS_PARSE_MODULE))) {
         // Js57 P7b: parse failure is a SyntaxError. Return ITEM_ERROR (not
         // ItemNull) so the batch driver short-circuits its post-test global
         // probes (async_required check), which SEGV when the heap was never
@@ -4852,7 +4849,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return (Item){.item = ITEM_ERROR};
     }
 
-    JsAstNode* js_ast = js_transpiler_build_ast(tp);
+    JsAstNode* js_ast = (JsAstNode*)tp->ast_root;
     if (!js_ast) {
         log_error("js-mir: module: AST build failed for '%s'", filename);
         (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
@@ -4902,7 +4899,7 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
             log_debug("P7d-A: module '%s' has TLA (top-level await detected)", filename);
         }
     }
-    if (!transpile_js_mir_ast(mt, js_ast)) {
+    if (!transpile_js_mir_ast(mt)) {
         log_error("js-mir: module: collection/allocation failed for '%s'", filename);
         (void)js_mir_compile_unit_fail(ctx, mt, tp, NULL,
             runtime, context, true);

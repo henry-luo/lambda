@@ -201,6 +201,7 @@ typedef enum JsParseMode {
     JS_PARSE_MODULE = 1u << 0,
     JS_PARSE_TYPESCRIPT = 1u << 1,
     JS_PARSE_JSX = 1u << 2,
+    JS_PARSE_AUTO = 1u << 3,
 } JsParseMode;
 
 typedef enum JsParseStatus {

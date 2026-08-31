@@ -44,14 +44,6 @@ struct JsClassEntry;
 typedef MirRootBinding JsMirRootBinding;
 typedef MirEnvBinding JsMirEnvBinding;
 
-// Native bodies state their ABI result independently of the JS-inferred
-// return type. The current direct-call contract admits only numeric lanes;
-// all other results remain on the boxed entry.
-enum NativeReturnKind : uint8_t {
-    NATIVE_RETURN_NONE = 0,
-    NATIVE_RETURN_INT,
-    NATIVE_RETURN_FLOAT,
-};
 // ============================================================================
 
 // Module-scope constants: variables, functions, classes declared at top level.
@@ -144,40 +136,20 @@ struct JsMirIteratorFrame {
 // Function entry for pre-pass collection
 struct JsFuncCollected {
     JsFunctionNode* node;
+    AstFunctionId function_id;       // sealed AST identity; storage stays post-order
     const char* name;       // NamePool-owned semantic/function identity
     const char* body_name;  // NamePool-owned backend body symbol
     MIR_item_t func_item;        // public checked wrapper
     MIR_item_t body_func_item;   // internal boxed implementation body
-    int parent_index;       // index of parent function in func_entries (-1 = top level)
     // Scope env: shared closure environment for all child closures
     bool has_scope_env;              // true if this func allocates a scope env
     int scope_env_count;             // number of vars in scope env
     int scope_env_normal_count;      // number of normal vars (excluding NFE extra slots and parent env link)
     const char** scope_env_names;    // NamePool-owned scope binding keys
-    bool reuse_parent_env;           // v16: true if scope_env reuses parent env (all vars transitive captures)
-    int reuse_env_slot_count;        // v16: slot count when reusing parent env
     bool has_parent_env_link;        // v29: scope env slot 0 stores parent env pointer (for mixed transitive)
-    bool parent_env_link_uses_grandparent; // parent link should store parent's parent env
-    bool has_immediate_parent_env_link; // compact env also links direct parent-local cells
-    int immediate_parent_env_link_slot;
-    bool closure_env_has_parent_link; // copied closure env carries direct parent scope_env for mixed loop captures
-    int closure_env_parent_link_slot; // slot in copied closure env holding direct parent scope_env
     // phase 4: type inference results. Per-formal type records live in the
     // shared FnAnalysis metadata and are sized from the JS AST parameter list.
     MIR_item_t native_func_item;    // native version (NULL if not generated)
-    bool has_native_version;        // whether native version was generated
-    NativeReturnKind native_return_kind; // ABI result for the native entry
-    // TCO:
-    bool is_tco_eligible;           // has tail-recursive calls → loop transform
-    bool is_iife_body;              // true if this function is a top-level IIFE body
-    bool is_iife_func_decl;         // true if declared directly inside a promoted IIFE body
-    // P3: Constructor flag (set for class constructor methods only)
-    bool is_constructor;            // true if this function is a class constructor
-    bool is_derived_constructor;    // true if class constructor has [[ConstructorKind]] derived
-    bool is_class_method;           // true for any class method/accessor/constructor
-    bool is_class_field_initializer; // synthetic per-instance field capability
-    JsClassEntry* owner_class;       // innermost class whose lexical body contains this function
-    bool is_strict;                  // v30: true if function is strict mode (own directive, inherits, or class method)
 };
 
 static inline FnAnalysis* jm_function_analysis(JsFuncCollected* fc) {
@@ -394,15 +366,9 @@ struct JsMirTranspiler {
     int pending_label_len;
 
     // Collected functions (pre-pass)
-    JsAstNode* root_node;
     JsFuncCollected* func_entries;      // exact-sized from shared indexed identity
     int func_capacity;
     int func_count;
-    // JS compilation only: exact indexed-subtree links avoid repeated parent
-    // walks while keeping the shared AstIndex lightweight for Lambda clients.
-    AstNodeId* indexed_subtree_storage;
-    uint32_t indexed_traversal_count;
-
     // Collected classes
     JsClassEntry* class_entries;        // exact-sized from shared indexed identity
     int class_capacity;
@@ -483,7 +449,6 @@ struct JsMirTranspiler {
     // Scope env: shared closure environment for all child closures in current function
     MIR_reg_t scope_env_reg;         // register holding current func's scope env (0 if none)
     int scope_env_slot_count;        // number of slots in current scope env
-    int current_func_index;          // index of current func in func_entries (-1 if not set)
 
     // ES module support
     bool is_module;                  // true when compiling an ES module (not main script)
@@ -549,13 +514,50 @@ struct JsMirTranspiler {
     bool destructure_assignment_mode;         // true for assignment-pattern destructuring targets
 
     // Js57 Track A: synthetic module-level scope env. Captures of top-level closures
-    // (parent_index == -1) that reference block-lets at module scope land here. The
+    // (whose indexed parent FunctionId is invalid) that reference block-lets
+    // at module scope land here. The
     // env is allocated at js_main entry and shared across all top-level child closures
     // so mutations propagate (matches spec lexical-env semantics). For-init lets are
     // excluded so per-iteration semantics still works.
     JsFuncCollected module_fc;
-    bool module_scope_env_active;             // true if module_fc has been initialised and scope_env is live
 };
+
+static inline JsFuncCollected* jm_collected_func_by_id(JsMirTranspiler* mt,
+        AstFunctionId function_id) {
+    if (!mt || !mt->tp || function_id == AST_FUNCTION_ID_INVALID) return NULL;
+    AstIndex* index = &mt->tp->ast_index;
+    if (function_id >= index->function_count) return NULL;
+    JsFunctionNode* function = (JsFunctionNode*)index->functions[function_id].node;
+    return function && function->analysis
+        ? (JsFuncCollected*)function->analysis->js_mir_backend : NULL;
+}
+
+static inline AstFunctionId jm_parent_function_id(const JsMirTranspiler* mt,
+        const JsFuncCollected* function) {
+    return mt && mt->tp && function
+        ? ast_index_function_parent(&mt->tp->ast_index, function->function_id)
+        : AST_FUNCTION_ID_INVALID;
+}
+
+static inline JsFuncCollected* jm_parent_collected_func(JsMirTranspiler* mt,
+        JsFuncCollected* function) {
+    return jm_collected_func_by_id(mt, jm_parent_function_id(mt, function));
+}
+
+static inline bool jm_has_current_source_function(const JsMirTranspiler* mt) {
+    return mt && mt->current_fc && mt->current_fc->node;
+}
+
+static inline JsClassEntry* jm_function_owner_class(JsMirTranspiler* mt, JsFuncCollected* fc) {
+    if (!mt || !fc || !fc->node) return NULL;
+    AstClassId class_id = JM_JS_FACT(fc, owner_class_id);
+    return class_id < (AstClassId)mt->class_count ? &mt->class_entries[class_id] : NULL;
+}
+
+static inline bool jm_current_function_is_iife_body(JsMirTranspiler* mt) {
+    return jm_has_current_source_function(mt) &&
+        JM_JS_FACT(mt->current_fc, is_iife_body);
+}
 
 static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspiler* mt) {
     if (!mt) return;
@@ -615,9 +617,6 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         arraylist_free(mt->module_name_specs);
         mt->module_name_specs = NULL;
     }
-    if (mt->indexed_subtree_storage) mem_free(mt->indexed_subtree_storage);
-    mt->indexed_subtree_storage = NULL;
-    mt->indexed_traversal_count = 0;
     if (mt->func_entries) jm_free_scope_env_names(mt->func_entries, mt->func_count);
     mt->func_entries = NULL;
     mt->class_entries = NULL;

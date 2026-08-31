@@ -795,12 +795,12 @@ void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
         flags |= JS_FUNC_INIT_ASYNC;
     }
     if (fn_node->is_arrow) flags |= JS_FUNC_INIT_ARROW;
-    if (fc->is_strict) flags |= JS_FUNC_INIT_STRICT;
+    if (JM_JS_FACT(fc, is_strict)) flags |= JS_FUNC_INIT_STRICT;
     if (JM_JS_FACT(fc, uses_with)) flags |= JS_FUNC_INIT_USES_WITH;
     flags |= JS_FUNC_INIT_ANALYSIS_KNOWN;
     if (JM_JS_FACT(fc, observes_this)) flags |= JS_FUNC_INIT_READS_THIS;
     if (JM_JS_FACT(fc, observes_new_target)) flags |= JS_FUNC_INIT_READS_NEW_TARGET;
-    if (fc->is_class_field_initializer) {
+    if (JM_JS_FACT(fc, is_class_field_initializer)) {
         flags |= JS_FUNC_INIT_CLASS_FIELD_INITIALIZER;
     }
     // Compiled public wrappers take Context and publish a wide return payload
@@ -1293,13 +1293,8 @@ static bool jm_has_outer_binding_before_depth(JsMirTranspiler* mt, const char* n
 
 static JsFuncCollected* jm_current_scope_env_func(JsMirTranspiler* mt) {
     if (!mt) return NULL;
-    int fi = mt->current_func_index;
-    if (fi < 0) {
-        if (!mt->module_scope_env_active) return NULL;
-        return &mt->module_fc;
-    }
-    if (fi >= mt->func_count) return NULL;
-    return &mt->func_entries[fi];
+    if (jm_has_current_source_function(mt)) return mt->current_fc;
+    return mt->module_fc.has_scope_env ? &mt->module_fc : NULL;
 }
 
 // Helper: if a variable is in the current function's scope env, mark it and write-back.
@@ -1316,7 +1311,7 @@ void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_
         return;
     }
     // Check if this var name is in the current function's scope env.
-    // Js57 Track A: in module body (current_func_index == -1), use the synthetic
+    // Js57 Track A: in module body, use the synthetic
     // module_fc set up at js_main entry so top-level closures share lexical state.
     JsFuncCollected* fc = jm_current_scope_env_func(mt);
     if (!fc) return;
@@ -1335,7 +1330,7 @@ void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_
             // Determine the actual slot: when reusing parent env, use the
             // remapped slot (from the var's env_slot), not the local index.
             int slot = s;
-            if (fc->reuse_parent_env) {
+            if (JM_JS_FACT(fc, reuse_parent_env)) {
                 JsMirVarEntry* var = jm_find_var(mt, name);
                 if (var && var->in_scope_env) {
                     // Use preserved scope_env_slot (set during scope env setup)

@@ -581,8 +581,9 @@ TEST(AstBuildAllocationTest, SizedLiteralCopyFailureDoesNotCrash) {
     AstScript* root = nullptr;
     LambdaParseError parse_error = {};
     memtrack_fault_inject(0);
-    LambdaParseStatus status = lambda_rd_build_ast(&tp, source,
+    LambdaParseStatus status = lambda_rd_reduce_ast(&tp, source,
         sizeof(source) - 1, &root, &parse_error);
+    if (status == LAMBDA_PARSE_OK && root) lambda_ast_finalize_script(&tp, root);
     memtrack_fault_clear();
 
     EXPECT_EQ(status, LAMBDA_PARSE_OK);

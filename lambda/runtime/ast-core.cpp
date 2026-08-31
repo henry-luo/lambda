@@ -47,9 +47,11 @@ static unsigned long ast_ptr_hash(const AstNode* node) {
 }
 
 static void ast_index_free_buffers(AstNode** nodes, AstNode** parents,
-        AstFunctionId* owners, AstBindingId* node_bindings, NameScope** scopes,
-        NameEntry** bindings, AstNode** classes, AstNodeFacts* facts) {
-    free(nodes); free(parents); free(owners); free(node_bindings); free(scopes);
+        AstFunctionId* owners, AstBindingId* node_bindings, AstNodeId* first_children,
+        AstNodeId* next_siblings, NameScope** scopes, NameEntry** bindings,
+        AstNode** classes, AstNodeFacts* facts) {
+    free(nodes); free(parents); free(owners); free(node_bindings); free(first_children);
+    free(next_siblings); free(scopes);
     free(bindings); free(classes); free(facts);
 }
 
@@ -64,14 +66,17 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
     AstNode** parents = (AstNode**)malloc(sizeof(AstNode*) * capacity);
     AstFunctionId* owners = (AstFunctionId*)malloc(sizeof(AstFunctionId) * capacity);
     AstBindingId* node_bindings = (AstBindingId*)malloc(sizeof(AstBindingId) * capacity);
+    AstNodeId* first_children = (AstNodeId*)malloc(sizeof(AstNodeId) * capacity);
+    AstNodeId* next_siblings = (AstNodeId*)malloc(sizeof(AstNodeId) * capacity);
     NameScope** scopes = (NameScope**)malloc(sizeof(NameScope*) * capacity);
     NameEntry** bindings = (NameEntry**)malloc(sizeof(NameEntry*) * capacity);
     AstNode** classes = (AstNode**)malloc(sizeof(AstNode*) * capacity);
     AstNodeFacts* facts = (AstNodeFacts*)malloc(sizeof(AstNodeFacts) * capacity);
-    if (!nodes || !parents || !owners || !node_bindings || !scopes ||
+    if (!nodes || !parents || !owners || !node_bindings || !first_children ||
+            !next_siblings || !scopes ||
             !bindings || !classes || !facts) {
-        ast_index_free_buffers(nodes, parents, owners, node_bindings, scopes,
-            bindings, classes, facts);
+        ast_index_free_buffers(nodes, parents, owners, node_bindings, first_children,
+            next_siblings, scopes, bindings, classes, facts);
         return false;
     }
     if (index->count) {
@@ -80,18 +85,24 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
         memcpy(owners, index->owner_functions, sizeof(AstFunctionId) * index->count);
         memcpy(node_bindings, index->node_bindings,
             sizeof(AstBindingId) * index->count);
+        memcpy(first_children, index->first_children,
+            sizeof(AstNodeId) * index->count);
+        memcpy(next_siblings, index->next_siblings,
+            sizeof(AstNodeId) * index->count);
         memcpy(scopes, index->scopes, sizeof(NameScope*) * index->scope_count);
         memcpy(bindings, index->bindings, sizeof(NameEntry*) * index->binding_count);
         memcpy(classes, index->classes, sizeof(AstNode*) * index->class_count);
         memcpy(facts, index->facts, sizeof(AstNodeFacts) * index->count);
     }
     ast_index_free_buffers(index->nodes, index->parents, index->owner_functions,
-        index->node_bindings, index->scopes, index->bindings, index->classes,
-        index->facts);
+        index->node_bindings, index->first_children, index->next_siblings,
+        index->scopes, index->bindings, index->classes, index->facts);
     index->nodes = nodes;
     index->parents = parents;
     index->owner_functions = owners;
     index->node_bindings = node_bindings;
+    index->first_children = first_children;
+    index->next_siblings = next_siblings;
     index->scopes = scopes;
     index->bindings = bindings;
     index->classes = classes;
@@ -100,23 +111,25 @@ static bool ast_index_reserve(AstIndex* index, uint32_t needed) {
     return true;
 }
 
-static AstFunctionId ast_index_add_function(AstIndex* index, AstNode* node) {
+static AstFunctionId ast_index_add_function(AstIndex* index, AstNode* node,
+        AstFunctionId parent_function) {
     if (!index || !node) return AST_FUNCTION_ID_INVALID;
     if (index->function_count == index->function_capacity) {
         uint32_t capacity = index->function_capacity ? index->function_capacity * 2 : 32;
         if (capacity < index->function_count + 1) capacity = index->function_count + 1;
-        AstNode** functions = (AstNode**)malloc(sizeof(AstNode*) * capacity);
+        AstFunctionIndexEntry* functions = (AstFunctionIndexEntry*)malloc(
+            sizeof(AstFunctionIndexEntry) * capacity);
         if (!functions) return AST_FUNCTION_ID_INVALID;
         if (index->function_count) {
             memcpy(functions, index->functions,
-                sizeof(AstNode*) * index->function_count);
+                sizeof(AstFunctionIndexEntry) * index->function_count);
         }
         free(index->functions);
         index->functions = functions;
         index->function_capacity = capacity;
     }
     AstFunctionId id = index->function_count++;
-    index->functions[id] = node;
+    index->functions[id] = {node, parent_function};
     return id;
 }
 
@@ -222,6 +235,13 @@ static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
     index->parents[id] = parent;
     index->owner_functions[id] = owner;
     index->node_bindings[id] = AST_BINDING_ID_INVALID;
+    index->first_children[id] = AST_NODE_ID_INVALID;
+    index->next_siblings[id] = AST_NODE_ID_INVALID;
+    AstNodeId parent_id = ast_index_find(index, parent);
+    if (parent_id != AST_NODE_ID_INVALID) {
+        index->next_siblings[id] = index->first_children[parent_id];
+        index->first_children[parent_id] = id;
+    }
     index->facts[id].declared_contract = node->type;
     index->facts[id].inferred_type = NULL;
     index->facts[id].representation = VALUE_REP_NONE;
@@ -231,6 +251,28 @@ static AstNodeId ast_index_add(AstIndex* index, AstNode* node, AstNode* parent,
     index->slots[slot] = node;
     index->slot_ids[slot] = id;
     return id;
+}
+
+bool ast_index_node_is_function(const AstNode* node) {
+    return node && (node->node_type == AST_NODE_FUNC ||
+        node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC ||
+        node->node_type == AST_NODE_ARROW_FUNC || node->node_type == AST_NODE_METHOD);
+}
+
+static AstFunctionId ast_index_parent_function(const AstIndex* index,
+        const AstNode* parent) {
+    // A node's ownership label may come from source-span recovery, which is
+    // not a lexical edge for sibling class members. Publish the nearest
+    // structural function ancestor instead.
+    for (const AstNode* current = parent; current;) {
+        AstNodeId current_id = ast_index_find(index, current);
+        if (current_id == AST_NODE_ID_INVALID) return AST_FUNCTION_ID_INVALID;
+        if (ast_index_node_is_function(current)) {
+            return index->owner_functions[current_id];
+        }
+        current = index->parents[current_id];
+    }
+    return AST_FUNCTION_ID_INVALID;
 }
 
 typedef struct AstIndexWalk {
@@ -259,9 +301,7 @@ static void ast_index_visit(AstNode* child, AstNode* parent, void* opaque) {
     // new owner so identifier facts are projected into that callable as well.
     AstNodeId existing_id = ast_index_find(walk->index, child);
     if (existing_id != AST_NODE_ID_INVALID) {
-        bool is_function = child->node_type == AST_NODE_FUNC ||
-            child->node_type == AST_NODE_FUNC_EXPR || child->node_type == AST_NODE_PROC ||
-            child->node_type == AST_NODE_ARROW_FUNC || child->node_type == AST_NODE_METHOD;
+        bool is_function = ast_index_node_is_function(child);
         AstFunctionId child_owner = is_function
             ? walk->index->owner_functions[existing_id] : walk->owner_function;
         if ((!is_function && walk->index->owner_functions[existing_id] == child_owner) ||
@@ -282,7 +322,7 @@ static void ast_index_visit(AstNode* child, AstNode* parent, void* opaque) {
     uint32_t best_span = UINT32_MAX;
     if (child->source_span.end_byte > child->source_span.start_byte) {
         for (AstFunctionId i = 0; i < walk->index->function_count; i++) {
-            AstNode* function = walk->index->functions[i];
+            AstNode* function = walk->index->functions[i].node;
             if (!function || function->source_span.start_byte > child->source_span.start_byte ||
                     function->source_span.end_byte < child->source_span.end_byte) continue;
             uint32_t span = function->source_span.end_byte - function->source_span.start_byte;
@@ -302,14 +342,11 @@ static void ast_index_visit(AstNode* child, AstNode* parent, void* opaque) {
         walk->failed = true;
         return;
     }
-    bool is_function = child->node_type == AST_NODE_FUNC ||
-        child->node_type == AST_NODE_FUNC_EXPR ||
-        child->node_type == AST_NODE_PROC ||
-        child->node_type == AST_NODE_ARROW_FUNC ||
-        child->node_type == AST_NODE_METHOD;
+    bool is_function = ast_index_node_is_function(child);
     AstFunctionId previous = walk->owner_function;
     if (is_function) {
-        owner = ast_index_add_function(walk->index, child);
+        owner = ast_index_add_function(walk->index, child,
+            ast_index_parent_function(walk->index, parent));
         if (owner == AST_FUNCTION_ID_INVALID) {
             walk->failed = true;
             return;
@@ -327,16 +364,16 @@ static void ast_index_visit(AstNode* child, AstNode* parent, void* opaque) {
 static bool ast_index_walk_root(AstIndex* index, AstNode* root, AstNode* parent,
         const LangProfile* profile) {
     if (!root) return true;
-    AstIndexWalk walk = {index, AST_FUNCTION_ID_INVALID, profile, false};
+    AstFunctionId parent_function = ast_index_parent_function(index, parent);
+    AstIndexWalk walk = {index, parent_function, profile, false};
     AstNodeId id = ast_index_add(index, root, parent, walk.owner_function);
     if (id == AST_NODE_ID_INVALID) return false;
     if (profile && profile->publish_ext_facts &&
             !profile->publish_ext_facts(root, index)) return false;
-    bool is_function = root->node_type == AST_NODE_FUNC ||
-        root->node_type == AST_NODE_FUNC_EXPR || root->node_type == AST_NODE_PROC ||
-        root->node_type == AST_NODE_ARROW_FUNC || root->node_type == AST_NODE_METHOD;
+    bool is_function = ast_index_node_is_function(root);
     if (is_function) {
-        AstFunctionId function_id = ast_index_add_function(index, root);
+        AstFunctionId function_id = ast_index_add_function(index, root,
+            parent_function);
         if (function_id == AST_FUNCTION_ID_INVALID) return false;
         index->owner_functions[id] = function_id;
         walk.owner_function = function_id;
@@ -487,8 +524,8 @@ bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
 void ast_index_destroy(AstIndex* index) {
     if (!index) return;
     ast_index_free_buffers(index->nodes, index->parents, index->owner_functions,
-        index->node_bindings, index->scopes, index->bindings, index->classes,
-        index->facts);
+        index->node_bindings, index->first_children, index->next_siblings,
+        index->scopes, index->bindings, index->classes, index->facts);
     free(index->functions);
     free(index->slots); free(index->slot_ids);
     memset(index, 0, sizeof(*index));
@@ -504,6 +541,65 @@ AstNodeId ast_index_find(const AstIndex* index, const AstNode* node) {
         slot = (slot + 1) & (index->slot_capacity - 1);
     }
     return AST_NODE_ID_INVALID;
+}
+
+AstNodeId ast_index_parent_id(const AstIndex* index, AstNodeId node_id) {
+    if (!index || node_id >= index->count) return AST_NODE_ID_INVALID;
+    AstNode* parent = index->parents[node_id];
+    return parent ? ast_index_find(index, parent) : AST_NODE_ID_INVALID;
+}
+
+bool ast_index_visit_subtree(const AstIndex* index, AstNodeId root_id,
+        AstIndexSubtreeVisitor visitor, void* context) {
+    if (!index || !visitor || root_id == AST_NODE_ID_INVALID ||
+            root_id >= index->count) return false;
+    AstNodeId* stack = (AstNodeId*)malloc(sizeof(AstNodeId) * index->count);
+    if (!stack) return false;
+    uint32_t count = 0;
+    stack[count++] = root_id;
+    while (count) {
+        AstNodeId node_id = stack[--count];
+        if (!visitor(index, node_id, context)) {
+            free(stack);
+            return false;
+        }
+        for (AstNodeId child = index->first_children[node_id];
+                child != AST_NODE_ID_INVALID; child = index->next_siblings[child]) {
+            if (count >= index->count) {
+                free(stack);
+                return false;
+            }
+            stack[count++] = child;
+        }
+    }
+    free(stack);
+    return true;
+}
+
+bool ast_index_node_descends(const AstIndex* index, AstNodeId node_id,
+        AstNodeId ancestor_id) {
+    // Parent IDs are the indexed structural edges, unlike owner labels which
+    // may be recovered from source spans for shared AST fragments.
+    while (index && node_id < index->count) {
+        if (node_id == ancestor_id) return true;
+        node_id = ast_index_parent_id(index, node_id);
+    }
+    return false;
+}
+
+AstClassId ast_index_nearest_class(const AstIndex* index, AstNodeId node_id,
+        bool include_node) {
+    if (!include_node) node_id = ast_index_parent_id(index, node_id);
+    while (index && node_id < index->count) {
+        AstNode* node = index->nodes[node_id];
+        if (node && (node->node_type == AST_NODE_CLASS ||
+                node->node_type == AST_NODE_CLASS_EXPR)) {
+            AstClassId class_id = ((AstClassNode*)node)->class_id;
+            return class_id < index->class_count ? class_id : AST_CLASS_ID_INVALID;
+        }
+        node_id = ast_index_parent_id(index, node_id);
+    }
+    return AST_CLASS_ID_INVALID;
 }
 
 AstBindingId ast_index_binding_id(const AstIndex* index, const AstNode* node) {
