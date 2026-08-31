@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>details exclusive accordion</title>
+</head>
+<body>
+  <!-- one group: at most one of these may be open -->
+  <details class="a" name="grp"><summary class="sa">A</summary><p class="ba">a</p></details>
+  <section>
+    <!-- the group is the node tree, not a common parent: b is nested deeper
+         than a and still belongs to the same group -->
+    <details class="b" name="grp"><summary class="sb">B</summary><p class="bb">b</p></details>
+  </section>
+
+  <!-- a different name is a different group -->
+  <details class="c" name="other"><summary class="sc">C</summary><p class="bc">c</p></details>
+
+  <!-- an empty name forms no group, so these two may both be open -->
+  <details class="d" name=""><summary class="sd">D</summary><p class="bd">d</p></details>
+  <details class="e" name=""><summary class="se">E</summary><p class="be">e</p></details>
+
+  <p id="log">toggles:0</p>
+
+  <script>
+    // Counts toggle events across every details, so a peer closed by the
+    // accordion has to report its own toggle, not just the clicked element.
+    var count = 0;
+    var all = document.querySelectorAll('details');
+    for (var i = 0; i < all.length; i++) {
+      all[i].addEventListener('toggle', function () {
+        count = count + 1;
+        document.getElementById('log').textContent = 'toggles:' + count;
+      });
+    }
+  </script>
+</body>
+</html>

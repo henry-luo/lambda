@@ -470,7 +470,6 @@ python3 temp/al2.py test/layout/reference/baseline_809_text_align.json
 
 | Phase | HTML | Event JSON (test/ui/) | Key assertions |
 |-------|------|-----------------------|----------------|
-| 1a | `baseline_201_font_sizes.html` | `ui_phase1a_font_sizes.json` | `assert_visible`, `assert_text` on font-size paragraphs — no mouse |
 | 1b | `baseline_809_text_align.html` | `ui_phase1b_text_align.json` | `click` by text, `assert_caret` on block paragraphs |
 | 1c | `test_click_text.html` | `ui_phase1c_click_positions.json` | `click` by coordinates, `assert_caret` on specific positions |
 | 1d | `test_click_elements.html` | `ui_phase1d_interactive_elements.json` | `click` on `<a>`, `<button>` by selector |
@@ -554,7 +553,6 @@ state changes are reflected in the view tree.
 
 | File | Description |
 |------|-------------|
-| `test/ui/ui_phase1a_font_sizes.json` | No mouse — pure `assert_visible` + `assert_text` on `baseline_201_font_sizes.html` |
 | `test/ui/ui_phase1b_text_align.json` | `click` by text, `assert_caret` on `baseline_809_text_align.html` |
 | `test/ui/test_click_elements.html` + `.json` | Click on `<a>` and `<button>` elements by CSS selector (pending layout verification) |
 | `test/ui/test_hover.html` + `.json` | Mouse-move over boxes; assert hover target (pending layout verification) |
@@ -950,4 +948,3 @@ Tracking implementation status across all phases. Updated 2026-03-30.
   correctly without requiring `="true"`.
 - **Checkbox/radio click miss**: Selector-based clicks on small form controls
   now reliably hit the target.
-

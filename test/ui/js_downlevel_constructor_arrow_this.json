@@ -1,5 +1,6 @@
 {
   "name": "downlevel constructor arrow retains lexical this during DOM dispatch",
+  "html": "test/html/js_downlevel_constructor_arrow_this.html",
   "events": [
     {"type": "click", "target": {"selector": "#run"}},
     {"type": "assert_text", "target": {"selector": "#result"}, "equals": "7"}

@@ -3,6 +3,7 @@
 **Date:** 2026-05-05
 **Status:** Proposal
 **Builds on:** [Radiant_Rich_Text_Editing.md](Radiant_Rich_Text_Editing.md) (Stage 1 design)
+**Formal anchor:** S12.1.3 — reactive template bodies are pure transformations; mutation occurs only in `on` handlers.
 
 ---
 
@@ -40,7 +41,6 @@ The prototype reuses the existing HTML DOM / Radiant text‑control / `state_sto
 | High‑level commands (insert text, split block, toggle mark, list indent, paste text/html, insert image/link/code/table, …) | [mod_commands.ls](../lambda/package/editor/mod_commands.ls) | shipped |
 | `beforeinput`‑style intent mapper | [mod_input_intent.ls](../lambda/package/editor/mod_input_intent.ls) | shipped |
 | Public façade (`edit_open` / `edit_exec` / `edit_dispatch` / `edit_set_decorations` / `edit_can_*`) | [mod_editor.ls](../lambda/package/editor/mod_editor.ls) | shipped |
-| Smoke UI fixture (toolbar + textarea, selection‑aware bold) | [test/ui/test_rich_text_editor.html](../test/ui/test_rich_text_editor.html), [test/ui/test_rich_text_editor.json](../test/ui/test_rich_text_editor.json) | shipped (passes `27/27` assertions) |
 | JS‑backed text control runtime context fix | [lambda/js/js_dom_selection.cpp](../lambda/js/js_dom_selection.cpp) | shipped |
 
 What is **missing for a real prototype**:

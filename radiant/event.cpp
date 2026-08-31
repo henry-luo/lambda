@@ -2521,6 +2521,26 @@ static bool event_is_hot_path(const char* event_name) {
 // Loading requires a runtime: a `.ls` page and a script-bearing HTML page both
 // have one, but a script-less HTML page owns none yet (ESO25) and is skipped
 // until runtime-creation ownership is settled.
+// A target inside the disclosure control of a <details>: the nearest <summary>
+// ancestor-or-self whose parent is a <details>. Mirrors the `details > summary`
+// guard in details.ls exactly, so the evaluator is created for precisely the
+// targets that template claims and for nothing else.
+static bool radiant_target_is_details_summary(View* target) {
+    for (DomNode* n = static_cast<DomNode*>(target); n; n = n->parent) {
+        if (n->node_type != DOM_NODE_ELEMENT) continue;
+        DomElement* elem = n->as_element();
+        if (!elem) continue;
+        // stop at the nearest summary: that is the one behavior dispatch will
+        // match, so it alone decides whether the package governs this click
+        if (elem->tag() != MARKUP_NAME_SUMMARY) continue;
+        DomNode* parent = elem->parent;
+        DomElement* details = parent && parent->node_type == DOM_NODE_ELEMENT
+            ? parent->as_element() : nullptr;
+        return details && details->tag() == MARKUP_NAME_DETAILS;
+    }
+    return false;
+}
+
 static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr) {
     if (!doc) return false;
     if (doc->dom_package_loaded) {
@@ -2587,6 +2607,15 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
             EditingSurface governed_surface;
             package_governs = editing_surface_from_target(target, &governed_surface) &&
                               editing_surface_is_rich(&governed_surface);
+        }
+        // F15 widens it once more, for the same reason F9 did: a <details> in a
+        // static document — a markdown README is the common case — has no form
+        // control and no script anywhere on the page, so it would never load the
+        // package, and there is no native toggle to fall back to. The predicate
+        // is as narrow as the editing one: an ordinary link click still creates
+        // nothing, which is what keeps the PDF and Lambda-report iframes safe.
+        if (!package_governs && target) {
+            package_governs = radiant_target_is_details_summary(target);
         }
         if (package_governs) {
             radiant_document_ensure_evaluator(doc);
