@@ -712,7 +712,8 @@ pub let data = input("f") ^ { {} }    // Export, handling err
 ```
 
 **Module Usage:**
-```lambda
+```lambda no-run
+// no-run: shows two files in one block
 // In math_utils.ls:
 pub let PI = 3.14159
 pub type Vec2 { x: float, y: float, fn len() =>

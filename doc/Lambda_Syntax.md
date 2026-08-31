@@ -265,7 +265,7 @@ Bare URI imports register a namespace prefix without loading any code. They use 
 
 Once declared, namespace prefixes are **reserved** — no variable, function, type, or field name may use the same name:
 
-```lambda
+```lambda error=E209
 import svg: 'http://www.w3.org/2000/svg'
 
 let svg = 123       // ERROR: 'svg' conflicts with namespace prefix
@@ -383,7 +383,8 @@ type(s)            // symbol
 
 Namespaces are **file-local** — they cannot be imported or exported. Each file declares its own namespace prefixes independently:
 
-```lambda
+```lambda no-run
+// no-run: shows two files in one block
 // file_a.ls
 import svg: 'http://www.w3.org/2000/svg'
 pub elem = <svg.rect svg.width: 100>

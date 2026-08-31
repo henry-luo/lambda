@@ -1735,7 +1735,9 @@ spellings.** The doctrine:
 - **`*` is the unit family** (Kleene/glob heritage): one unit, or as a
   suffix, repetition of a unit. Path `a.*.b` matches exactly one segment;
   `{*: T}` matches any one key; type-suffix `T*` is zero-or-more
-  repetition; value `*x` is spread.
+  repetition; value spread is `*x` positionally and `*: x` in a keyed slot
+  — the same any-key `*`, so `{*: T}` (type) and `{*: m}` (value) are one
+  idea in two positions.
 - **`...` is the elided-run family** (ellipsis/rest heritage): a
   contiguous sequence of any length, never a single item.
   `[a, ..., b]` is a gap; `fn f(a, ...)` is a rest of arguments.
@@ -1745,7 +1747,8 @@ spellings.** The doctrine:
 | paths | `*` | `**` |
 | sequence/type patterns | `any` | `...` (≡ `any*`) |
 | parameters | — | `...` (rest) |
-| values | `*x` spread | — |
+| values, positional | `*x` spread | — |
+| values, keyed | `*: x` spread | — |
 
 **Normative equivalence: pattern `...` ≡ `any*`** — the two families meet
 by definition, not by accident, and `[a, ..., b]` stays the preferred

@@ -932,11 +932,11 @@ Lambda uses `Path` literals with unified syntax for both local files and remote 
 ```lambda
 // Local paths
 let local = /.data.'config.json'         // Relative path
-let absolute = /Users.name.project       // Absolute path
+let absolute = /.Users.name.project      // Absolute path
 
 // Remote URLs
 let api = https.'api.example.com'.data   // HTTPS URL
-let file_url = /path.to.file             // File URL
+let file_url = /.path.to.file            // File URL
 
 // input() raises on failure; propagate with ^
 let data = input(local)^

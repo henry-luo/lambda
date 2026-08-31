@@ -124,7 +124,7 @@ fn divide(a, b) int^ {
 - Using `raise` in a function with a plain `T` or `T | error` return type is a
   compile error; the union form returns its error value normally.
 
-```lambda
+```lambda error=E208
 // ❌ Compile error: function does not declare error return
 fn pure_add(a, b) int {
     raise error("oops")
@@ -390,7 +390,7 @@ Go's lack of enforcement is widely criticized — ignored errors cause productio
    ```
 
 2. **Functions without a declared `^E` return cannot contain `raise`**
-   ```lambda
+```lambda error=E208
    fn pure_add(a, b) int {
        raise error("oops")  // ❌ compile error
    }

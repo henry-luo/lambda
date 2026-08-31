@@ -168,7 +168,7 @@ let name: string = "Alice"
 let pi: float = 3.14159
 let active: bool = true
 let created: datetime = t'2025-01-01'
-let config_path: path = .config.json
+let config_path: path = \.config.json
 
 // Sized numeric type annotations
 let a: i8 = 42i8
@@ -364,22 +364,18 @@ type Article = <article title: string, author: string;
 
 ### Function Type Syntax
 
-```lambda
-// Function type declaration
-fn (int) int                    // Takes int, returns int
-fn (int, int) int               // Takes two ints, returns int
-fn (string, bool) string        // Takes string and bool, returns string
-fn int                          // No params, returns int (shorthand for fn () int)
-fn ()                           // No params, no meaningful return
-
-// With parameter names (documentation only)
-fn (a: int, b: int) int         // Named parameters
-fn (name: string) string        // Named parameter
-
-// Higher-order function types
-fn (fn (int) int) int           // Takes a function, returns int
-fn (int) fn (int) int           // Returns a function
-```
+<!-- code-fence: lambda type -->
+| Form | Meaning |
+|------|---------|
+| `fn (int) int` | Takes int, returns int |
+| `fn (int, int) int` | Takes two ints, returns int |
+| `fn (string, bool) string` | Takes string and bool, returns string |
+| `fn int` | No params, returns int (shorthand for `fn () int`) |
+| `fn ()` | No params, no meaningful return |
+| `fn (a: int, b: int) int` | Named parameters (documentation only) |
+| `fn (name: string) string` | Named parameter (documentation only) |
+| `fn (fn (int) int) int` | Takes a function, returns int |
+| `fn (int) fn (int) int` | Returns a function |
 
 ### Function Type Examples
 
@@ -919,7 +915,7 @@ The letters `d`, `w`, `s`, and `a` are **reserved as character classes inside
 type or variable may still be called `d`; it simply cannot be referenced from
 inside a pattern:
 
-```lambda
+```lambda error=E200
 type d = "binding"       // fine — ordinary type alias
 type bad = \(d)          // error: pattern class 'd' is reserved inside
                          // pattern islands; rename the surrounding binding
@@ -1042,7 +1038,7 @@ Quoted literals inside a pattern body are always **string content**, whatever
 the tag. A symbol literal in a pattern body is an error, since the domain
 belongs to the tag:
 
-```lambda
+```lambda error=E103
 type bad = \('abc')      // error: pattern bodies are content-only; use
                          // \symbol(...) for the symbol domain and string
                          // literals for content
@@ -1127,7 +1123,7 @@ All three functions also accept plain strings as the match argument (see [Lambda
 
 Lambda performs type checking at compile time:
 
-```lambda
+```lambda error=E201
 // Type errors caught at compile time
 let x: int = "hello"           // Error: string not assignable to int
 let y: int[] = [1, "two", 3]   // Error: mixed types in int[]

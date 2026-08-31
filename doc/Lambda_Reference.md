@@ -255,7 +255,8 @@ a Promise-returning function. `toPromise(handle)` is the explicit handle adapter
 
 ### Import Statements
 
-```lambda
+```lambda no-run
+// no-run: catalogue of import forms; the modules do not exist
 // Relative import — resolved relative to the importing script's directory
 import .relative_module
 import .path.to.module
@@ -309,7 +310,8 @@ type Internal = {a: int, b: int}
 
 ### Using Imported Modules
 
-```lambda
+```lambda no-run
+// no-run: shows two files in one block
 // main.ls
 import .math_utils
 
