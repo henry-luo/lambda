@@ -788,14 +788,14 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         return ItemNull;
     }
 
-    if (!js_transpiler_parse(tp, source, source_len)) {
+    if (!js_transpiler_parse_c(tp, source, source_len, JS_PARSE_AUTO)) {
         log_error("js-new-function: parse failed for '%s'", source);
         (void)js_mir_compile_unit_fail(NULL, NULL, tp, source,
             js_current_runtime(), context, true);
         return js_dynamic_function_throw_syntax_error("Invalid function source");
     }
 
-    JsAstNode* js_ast = js_transpiler_build_ast(tp);
+    JsAstNode* js_ast = (JsAstNode*)tp->ast_root;
     if (!js_ast) {
         log_error("js-new-function: AST build failed");
         (void)js_mir_compile_unit_fail(NULL, NULL, tp, source,
@@ -838,7 +838,7 @@ static Item js_new_function_from_string_kind(Item* args, int argc, const char* p
         js_install_realm_global_preamble(mt, tp);
     }
 
-    if (!transpile_js_mir_ast(mt, js_ast)) {
+    if (!transpile_js_mir_ast(mt)) {
         log_error("js-new-function: collection/allocation failed");
         (void)js_mir_compile_unit_fail(ctx, mt, tp, source,
             js_current_runtime(), context, true);
@@ -1799,7 +1799,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
         }
         tp->strict_mode = inherited_strict;
 
-        if (!js_transpiler_parse(tp, source, source_len)) {
+        if (!js_transpiler_parse_c(tp, source, source_len, JS_PARSE_AUTO)) {
             log_error("js-eval: parse failed for direct script");
             Item syntax_message = js_eval_parse_error_message(tp);
             (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
@@ -1809,7 +1809,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             return js_throw_syntax_error(syntax_message);
         }
 
-        JsAstNode* js_ast = js_transpiler_build_ast(tp);
+        JsAstNode* js_ast = (JsAstNode*)tp->ast_root;
         if (!js_ast) {
             log_error("js-eval: AST build failed for direct script");
             (void)js_mir_compile_unit_fail(NULL, NULL, tp, NULL,
@@ -1879,7 +1879,7 @@ extern "C" Item js_builtin_eval_execute(Item code_item, int64_t eval_flags,
             }
         }
 
-        if (!transpile_js_mir_ast(mt, js_ast)) {
+        if (!transpile_js_mir_ast(mt)) {
             log_error("js-eval: collection/allocation failed");
             (void)js_mir_compile_unit_fail(eval_ctx, mt, tp, NULL,
                 js_current_runtime(), context, true);

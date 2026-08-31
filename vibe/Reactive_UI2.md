@@ -171,7 +171,7 @@ Five critical bugs were discovered and fixed while bringing the reactive loop en
 **Fix:** Intern `template_ref` strings via `name_pool_create_len()` in three locations in `transpile-mir.cpp`:
 1. Body function: `tmpl_ref = name_pool_create_len(mt->name_pool, name_buf, strlen(name_buf))->chars`
 2. Handler call site: intern `vname` before passing to `transpile_handler_def`
-3. Added `NamePool* name_pool` field to `MirTranspiler` struct, threaded through from `transpile_mir_ast()`
+3. Added `NamePool* name_pool` field to `MirTranspiler` struct, threaded through the direct MIR plan/lower pipeline
 
 ### Bug #2 — Stale EvalContext After Script Execution (event.cpp)
 

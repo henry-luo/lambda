@@ -60,7 +60,7 @@ JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call) {
     if (fn->is_async) return NULL;
 
     JsFuncCollected* fc = jm_find_collected_func(mt, fn);
-    if (!fc || !fc->has_native_version || !fc->native_func_item) return NULL;
+    if (!fc || JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_NONE || !fc->native_func_item) return NULL;
 
     // Check if all argument types at this call site match the inferred param types
     JsAstNode* arg = call->arguments;
@@ -106,7 +106,7 @@ bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, 
     // through the boxed entry, whose slow lane can return any JavaScript value.
     // Reporting the inferred raw return here would make its caller unbox an
     // already boxed string/object result.
-    return fc->has_native_version && fc->native_func_item &&
+    return JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE && fc->native_func_item &&
         jm_resolve_native_call(mt, call) == fc;
 }
 
@@ -278,52 +278,17 @@ int jm_indexed_synthetic_field_initializer_count(const AstIndex* index) {
     return count;
 }
 
-static bool jm_is_indexed_function(AstNode* node) {
-    if (!node) return false;
-    return node->node_type == JS_AST_NODE_FUNCTION_DECLARATION ||
-        node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION ||
-        node->node_type == JS_AST_NODE_ARROW_FUNCTION ||
-        node->node_type == JS_AST_NODE_METHOD_DEFINITION;
-}
-
-static AstNode* jm_indexed_parent(AstIndex* index, AstNode* node) {
-    AstNodeId node_id = ast_index_find(index, node);
-    return node_id == AST_NODE_ID_INVALID ? NULL : index->parents[node_id];
-}
-
-static JsFuncCollected* jm_find_indexed_collected_func(JsMirTranspiler* mt,
-        JsFunctionNode* function);
-
-static int jm_indexed_parent_function_index(JsMirTranspiler* mt, AstNode* node) {
-    AstIndex* index = &mt->tp->ast_index;
-    for (AstNode* parent = jm_indexed_parent(index, node); parent;
-            parent = jm_indexed_parent(index, parent)) {
-        if (!jm_is_indexed_function(parent)) continue;
-        JsFuncCollected* collected = jm_find_indexed_collected_func(mt,
-            (JsFunctionNode*)parent);
-        return collected ? (int)(collected - mt->func_entries) : -1;
-    }
-    return -1;
-}
-
 static bool jm_indexed_function_is_strict(JsMirTranspiler* mt,
         JsFunctionNode* function) {
     if (mt->is_global_strict || mt->is_module) return true;
     AstIndex* index = &mt->tp->ast_index;
-    for (AstNode* node = (AstNode*)function; node;
-            node = jm_indexed_parent(index, node)) {
-        if (!jm_is_indexed_function(node)) continue;
+    AstNodeId node_id = ast_index_find(index, (AstNode*)function);
+    if (node_id == AST_NODE_ID_INVALID) return false;
+    for (AstFunctionId id = index->owner_functions[node_id];
+            id != AST_FUNCTION_ID_INVALID; id = index->functions[id].parent) {
+        JsFunctionNode* node = (JsFunctionNode*)index->functions[id].node;
         if (node->node_type == JS_AST_NODE_METHOD_DEFINITION ||
-                jm_has_use_strict_directive((JsFunctionNode*)node)) return true;
-    }
-    return false;
-}
-
-static bool jm_indexed_node_is_descendant(AstIndex* index, AstNode* node,
-        AstNode* ancestor) {
-    for (AstNode* current = node; current;
-            current = jm_indexed_parent(index, current)) {
-        if (current == ancestor) return true;
+                jm_has_use_strict_directive(node)) return true;
     }
     return false;
 }
@@ -331,41 +296,36 @@ static bool jm_indexed_node_is_descendant(AstIndex* index, AstNode* node,
 static bool jm_indexed_function_is_direct_field_child(JsMirTranspiler* mt,
         JsFunctionNode* function, JsFieldDefinitionNode* field) {
     AstIndex* index = &mt->tp->ast_index;
-    for (AstNode* parent = jm_indexed_parent(index, (AstNode*)function); parent;
-            parent = jm_indexed_parent(index, parent)) {
+    for (AstNode* parent = ast_index_parent(index, (AstNode*)function); parent;
+            parent = ast_index_parent(index, parent)) {
         if (parent == (AstNode*)field) return true;
-        if (jm_is_indexed_function(parent)) return false;
+        if (ast_index_node_is_function(parent)) return false;
     }
     return false;
 }
 
-static JsFuncCollected* jm_find_indexed_collected_func(JsMirTranspiler* mt,
-        JsFunctionNode* function) {
-    for (int i = 0; i < mt->func_count; i++) {
-        if (mt->func_entries[i].node == function) return &mt->func_entries[i];
-    }
-    return NULL;
-}
-
-static JsClassEntry* jm_find_indexed_class(JsMirTranspiler* mt,
+JsClassEntry* jm_find_collected_class(JsMirTranspiler* mt,
         JsClassNode* class_node) {
-    for (int i = 0; i < mt->class_count; i++) {
-        if (mt->class_entries[i].node == class_node) return &mt->class_entries[i];
-    }
-    return NULL;
+    if (!mt || !class_node || class_node->class_id == AST_CLASS_ID_INVALID ||
+            class_node->class_id >= (AstClassId)mt->class_count) return NULL;
+    JsClassEntry* entry = &mt->class_entries[class_node->class_id];
+    return entry->node == class_node ? entry : NULL;
 }
 
-static JsClassEntry* jm_indexed_nearest_class(JsMirTranspiler* mt,
-        AstNode* node) {
-    AstIndex* index = &mt->tp->ast_index;
-    for (AstNode* parent = jm_indexed_parent(index, node); parent;
-            parent = jm_indexed_parent(index, parent)) {
-        if (parent->node_type == JS_AST_NODE_CLASS_DECLARATION ||
-                parent->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
-            return jm_find_indexed_class(mt, (JsClassNode*)parent);
-        }
+static bool jm_publish_collected_backend(JsMirTranspiler* mt,
+        JsFuncCollected* collected) {
+    // Parent/class collection needs this identity before backend lowering (D8.2.4).
+    if (!collected || !collected->node) return false;
+    if (!collected->node->analysis) collected->node->analysis =
+        (FnAnalysis*)pool_calloc(mt->tp->pool, sizeof(FnAnalysis));
+    if (!collected->node->analysis) {
+        log_error("js-mir: failed to allocate shared function analysis");
+        mt->collection_failed = true;
+        return false;
     }
-    return NULL;
+    memset(collected->node->analysis, 0, sizeof(FnAnalysis));
+    collected->node->analysis->js_mir_backend = collected;
+    return true;
 }
 
 static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
@@ -414,22 +374,29 @@ static JsFuncCollected* jm_collect_class_field_initializer(JsMirTranspiler* mt,
     int function_index = mt->func_count;
     JsFuncCollected* collected = &mt->func_entries[function_index];
     memset(collected, 0, sizeof(JsFuncCollected));
+    AstNodeId node_id = ast_index_find(&mt->tp->ast_index, (AstNode*)function);
+    collected->function_id = node_id == AST_NODE_ID_INVALID ? AST_FUNCTION_ID_INVALID :
+        mt->tp->ast_index.owner_functions[node_id];
+    if (collected->function_id == AST_FUNCTION_ID_INVALID) {
+        log_error("js-mir: synthetic class field initializer has no function identity");
+        mt->collection_failed = true;
+        return NULL;
+    }
     collected->node = function;
     collected->name = jm_format_name("class_field_initializer_%d_%u",
         function_index, field->source_span.start_byte);
-    collected->parent_index = jm_indexed_parent_function_index(mt, (AstNode*)field);
-    collected->is_strict = true;
-    collected->is_class_field_initializer = true;
+    if (!jm_publish_collected_backend(mt, collected)) return NULL;
+    JM_JS_FACT(collected, is_class_field_initializer) = true;
+    JM_JS_FACT(collected, is_strict) = true;
     mt->func_count++;
 
-    // The synthetic callable owns every source function rooted directly in
-    // the initializer expression, including nested-class methods. An inner
-    // source function keeps its nearer lexical callable as parent.
+    // Class-field source descendants adopt the synthetic callable parent.
     for (int i = 0; i < function_index; i++) {
         JsFuncCollected* child = &mt->func_entries[i];
         if (!jm_indexed_function_is_direct_field_child(mt, child->node, field)) continue;
-        child->parent_index = function_index;
-        child->is_strict = true;
+        mt->tp->ast_index.functions[child->function_id].parent =
+            collected->function_id;
+        JM_JS_FACT(child, is_strict) = true;
     }
     return collected;
 }
@@ -563,7 +530,7 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
         if (member->node_type != JS_AST_NODE_METHOD_DEFINITION) continue;
         JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)member;
         if (!method->body || entry->method_count >= entry->method_capacity) continue;
-        JsFuncCollected* collected = jm_find_indexed_collected_func(mt,
+        JsFuncCollected* collected = jm_find_collected_func(mt,
             (JsFunctionNode*)method);
         if (!collected) {
             log_error("js-mir: indexed class method has no callable entry");
@@ -573,8 +540,7 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
         String* method_name = jm_class_method_source_name(mt, entry, method);
         collected->name = jm_class_method_backend_name(mt, entry, method,
             method_name, function_index);
-        collected->is_class_method = true;
-        collected->is_strict = true;
+        JM_JS_FACT(collected, is_class_method) = true;
 
         JsClassMethodEntry* method_entry = &entry->methods[entry->method_count++];
         method_entry->name = method_name;
@@ -597,8 +563,8 @@ static bool jm_collect_indexed_class_members(JsMirTranspiler* mt,
             strncmp(method_name->chars, "constructor", 11) == 0;
         if (method_entry->is_constructor) {
             entry->constructor = method_entry;
-            collected->is_constructor = true;
-            collected->is_derived_constructor = class_node->superclass != NULL;
+            JM_JS_FACT(collected, is_constructor) = true;
+            JM_JS_FACT(collected, is_derived_constructor) = class_node->superclass != NULL;
         }
     }
     return true;
@@ -616,7 +582,7 @@ static void jm_collect_indexed_class_aliases(JsMirTranspiler* mt) {
             if (!binding->name) continue;
             if (decl->init->node_type == JS_AST_NODE_CLASS_DECLARATION ||
                     decl->init->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
-                JsClassEntry* entry = jm_find_indexed_class(mt, (JsClassNode*)decl->init);
+                JsClassEntry* entry = jm_find_collected_class(mt, (JsClassNode*)decl->init);
                 if (!entry) continue;
                 if (!entry->name) entry->name = binding->name;
                 else if (entry->name->len != binding->name->len ||
@@ -638,7 +604,7 @@ static void jm_collect_indexed_class_aliases(JsMirTranspiler* mt) {
                     JS_AST_NODE_CLASS_EXPRESSION)) continue;
             JsIdentifierNode* binding = (JsIdentifierNode*)assignment->left;
             JsClassEntry* entry = binding->name
-                ? jm_find_indexed_class(mt, (JsClassNode*)assignment->right) : NULL;
+                ? jm_find_collected_class(mt, (JsClassNode*)assignment->right) : NULL;
             if (entry && !entry->alias_name) entry->alias_name = binding->name;
         }
     }
@@ -648,7 +614,8 @@ static void jm_assign_indexed_class_facts(JsMirTranspiler* mt) {
     AstIndex* index = &mt->tp->ast_index;
     for (int function_index = 0; function_index < mt->func_count; function_index++) {
         JsFuncCollected* function = &mt->func_entries[function_index];
-        function->owner_class = jm_indexed_nearest_class(mt, (AstNode*)function->node);
+        JM_JS_FACT(function, owner_class_id) = ast_index_nearest_class(index,
+            ast_index_find(index, (AstNode*)function->node), false);
     }
     for (int class_index = 0; class_index < mt->class_count; class_index++) {
         JsClassEntry* entry = &mt->class_entries[class_index];
@@ -656,9 +623,12 @@ static void jm_assign_indexed_class_facts(JsMirTranspiler* mt) {
         if (!class_node->superclass) continue;
         // Class heritage expressions execute in the class's strict realm.
         for (int function_index = 0; function_index < mt->func_count; function_index++) {
-            JsFuncCollected* function = &mt->func_entries[function_index];
-            if (jm_indexed_node_is_descendant(index, (AstNode*)function->node,
-                    class_node->superclass)) function->is_strict = true;
+        JsFuncCollected* function = &mt->func_entries[function_index];
+        if (ast_index_node_descends(index,
+                ast_index_find(index, (AstNode*)function->node),
+                ast_index_find(index, class_node->superclass))) {
+            JM_JS_FACT(function, is_strict) = true;
+        }
         }
     }
 }
@@ -668,8 +638,8 @@ static int jm_indexed_function_postorder_cmp(const void* left, const void* right
     AstIndex* index = (AstIndex*)opaque;
     uint32_t left_id = *(const uint32_t*)left;
     uint32_t right_id = *(const uint32_t*)right;
-    AstNode* left_node = index->functions[left_id];
-    AstNode* right_node = index->functions[right_id];
+    AstNode* left_node = index->functions[left_id].node;
+    AstNode* right_node = index->functions[right_id].node;
     if (left_node->source_span.end_byte != right_node->source_span.end_byte) {
         return left_node->source_span.end_byte < right_node->source_span.end_byte ? -1 : 1;
     }
@@ -707,19 +677,20 @@ void jm_collect_indexed_functions(JsMirTranspiler* mt) {
     sort_qsort_r(source_order, source_function_count, sizeof(uint32_t),
         jm_indexed_function_postorder_cmp, index);
     for (uint32_t order_index = 0; order_index < source_function_count; order_index++) {
-        JsFunctionNode* function = (JsFunctionNode*)index->functions[source_order[order_index]];
+        JsFunctionNode* function = (JsFunctionNode*)
+            index->functions[source_order[order_index]].node;
         JsFuncCollected* collected = &mt->func_entries[mt->func_count++];
         memset(collected, 0, sizeof(JsFuncCollected));
         collected->node = function;
+        collected->function_id = source_order[order_index];
         collected->name = jm_make_fn_name(function, mt);
-        collected->is_strict = jm_indexed_function_is_strict(mt, function);
     }
     for (int function_index = 0; function_index < mt->func_count; function_index++) {
         JsFuncCollected* function = &mt->func_entries[function_index];
-        function->parent_index = jm_indexed_parent_function_index(mt,
-            (AstNode*)function->node);
+        if (!jm_publish_collected_backend(mt, function)) return;
+        JM_JS_FACT(function, is_strict) = jm_indexed_function_is_strict(mt,
+            function->node);
     }
-
     mt->class_count = mt->class_capacity;
     for (int class_index = 0; class_index < mt->class_count; class_index++) {
         JsClassEntry* entry = &mt->class_entries[class_index];
@@ -1535,7 +1506,7 @@ ScalarReturnClass jm_infer_boxed_return_scalar_class(JsMirTranspiler* mt,
         AstNode* node = index->nodes[i];
         if (!node || index->owner_functions[i] != owner ||
                 node->node_type != JS_AST_NODE_RETURN_STATEMENT ||
-                !jm_index_node_descends(index, i, fn_id)) continue;
+                !ast_index_node_descends(index, i, fn_id)) continue;
         if (jm_return_expr_needs_scalar_home(((JsReturnNode*)node)->argument)) {
             needs_home = true;
             break;
@@ -1569,9 +1540,8 @@ static bool jm_prescan_expression_path_is_numeric(AstIndex* index,
     if (!index || node_id == AST_NODE_ID_INVALID || root_id == AST_NODE_ID_INVALID ||
             index->owner_functions[node_id] != owner) return false;
     while (node_id != root_id) {
-        AstNode* parent = index->parents[node_id];
-        AstNodeId parent_id = parent ? ast_index_find(index, parent) :
-            AST_NODE_ID_INVALID;
+        AstNodeId parent_id = ast_index_parent_id(index, node_id);
+        AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
         if (parent_id == AST_NODE_ID_INVALID ||
                 (parent->node_type != JS_AST_NODE_BINARY_EXPRESSION &&
                  parent->node_type != JS_AST_NODE_UNARY_EXPRESSION)) return false;
@@ -1642,9 +1612,8 @@ static bool jm_prescan_body_path_is_reachable(AstIndex* index,
             index->owner_functions[node_id] != owner) return false;
     while (node_id != root_id) {
         AstNode* child = index->nodes[node_id];
-        AstNode* parent = index->parents[node_id];
-        AstNodeId parent_id = parent ? ast_index_find(index, parent) :
-            AST_NODE_ID_INVALID;
+        AstNodeId parent_id = ast_index_parent_id(index, node_id);
+        AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
         if (parent_id == AST_NODE_ID_INVALID) return false;
         if (parent_id == root_id) return true;
         bool reaches_child = parent->node_type == JS_AST_NODE_BLOCK_STATEMENT ||
@@ -1705,7 +1674,7 @@ void jm_prescan_float_widening(JsMirTranspiler* mt, JsAstNode* body) {
     for (uint32_t i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
         if (!node || index->owner_functions[i] != owner ||
-                index->parents[i] != (AstNode*)body ||
+                ast_index_parent_id(index, i) != root_id ||
                 node->node_type != JS_AST_NODE_VARIABLE_DECLARATION) continue;
         for (JsAstNode* item = ((JsVariableDeclarationNode*)node)->declarations;
                 item; item = item->next) {

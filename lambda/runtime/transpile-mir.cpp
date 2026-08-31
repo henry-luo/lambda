@@ -5512,18 +5512,26 @@ static TypeId mir_inferred_numeric_array_literal_element(AstNode* node) {
 // Expression transpilation
 // ============================================================================
 
-static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
+static MirValue mir_emit_primary_error_value(MirTranspiler* mt, AstNode* node,
+        const char* name) {
+    MIR_reg_t value = new_reg(mt, name, MIR_T_I64);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, value), MIR_new_int_op(mt->ctx, 0)));
+    return mir_value_from_reg(mt, node, value, VALUE_REP_ITEM);
+}
+
+// Literal primaries select their carrier at the source.  Do not make their
+// consumers reconstruct the lane from the primary's inferred type (D2.4.1).
+static MirValue transpile_primary_value(MirTranspiler* mt,
+        AstPrimaryNode* pri) {
     if (pri->expr) {
-        return transpile_expr_reg_legacy(mt, pri->expr);
+        return transpile_expr_value(mt, pri->expr);
     }
 
     AstNode* node = (AstNode*)pri;
     if (!node->type) {
         log_error("mir: primary node has null type");
-        MIR_reg_t r = new_reg(mt, "null", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-            MIR_new_int_op(mt->ctx, 0)));
-        return r;
+        return mir_emit_primary_error_value(mt, node, "null");
     }
 
     TypeId tid = node->type->type_id;
@@ -5541,14 +5549,15 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
                 MIR_reg_t r = new_reg(mt, "int", MIR_T_I64);
                 emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                     MIR_new_int_op(mt->ctx, val)));
-                return r;
+                return mir_value_from_reg(mt, node, r, VALUE_REP_INT_LANE,
+                    node->type);
             }
             TypeConst* tc = (TypeConst*)node->type;
             MIR_reg_t ptr = emit_load_const(mt, tc->const_index, MIR_T_P);
             MIR_reg_t raw = new_reg(mt, "intc", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ptr, 0, 1)));
-            return raw;
+            return mir_value_from_reg(mt, node, raw, VALUE_REP_INT_LANE);
         }
         case LMD_TYPE_FLOAT: {
             // CP1 values are immutable MIR data, not context-owned pointers;
@@ -5559,36 +5568,40 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
             MIR_reg_t r = new_reg(mt, "flt", MIR_T_D);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_double_op(mt->ctx, value->double_val)));
-            return r;
+            return mir_value_from_reg(mt, node, r, VALUE_REP_F64, node->type);
         }
         case LMD_TYPE_COMPLEX: {
             TypeComplex* value = (TypeComplex*)node->type;
             MIR_reg_t boxed = emit_call_2(mt, "complex_new", MIR_T_I64,
                 MIR_T_D, MIR_new_double_op(mt->ctx, value->real),
                 MIR_T_D, MIR_new_double_op(mt->ctx, value->imag));
-            return emit_unbox_container(mt, boxed);
+            return mir_value_from_reg(mt, node, emit_unbox_container(mt, boxed),
+                VALUE_REP_RAW_GC_POINTER);
         }
         case LMD_TYPE_BOOL: {
             bool val = parse_bool_literal_span(mt->source, node->source_span);
             MIR_reg_t r = new_reg(mt, "bool", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_int_op(mt->ctx, val ? 1 : 0)));
-            return r;
+            return mir_value_from_reg(mt, node, r, VALUE_REP_I64, node->type);
         }
         case LMD_TYPE_NULL: {
             MIR_reg_t r = new_reg(mt, "null", MIR_T_I64);
             uint64_t NULL_VAL = (uint64_t)LMD_TYPE_NULL << 56;
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_int_op(mt->ctx, (int64_t)NULL_VAL)));
-            return r;
+            return mir_value_from_reg(mt, node, r, VALUE_REP_ITEM, node->type);
         }
-        case LMD_TYPE_STRING: {
+        case LMD_TYPE_STRING:
+        case LMD_TYPE_SYMBOL:
+        case LMD_TYPE_DTIME:
+        case LMD_TYPE_DECIMAL:
+        case LMD_TYPE_BINARY: {
+            // Const-backed pointer literals share one rooted pointer carrier.
             TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const(mt, tc->const_index, MIR_T_P);
-        }
-        case LMD_TYPE_SYMBOL: {
-            TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const(mt, tc->const_index, MIR_T_P);
+            return mir_value_from_reg(mt, node,
+                emit_load_const(mt, tc->const_index, MIR_T_P),
+                VALUE_REP_RAW_GC_POINTER, node->type);
         }
         case LMD_TYPE_INT64: {
             TypeConst* tc = (TypeConst*)node->type;
@@ -5597,23 +5610,7 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
             MIR_reg_t r = new_reg(mt, "i64", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_mem_op(mt->ctx, MIR_T_I64, 0, ptr, 0, 1)));
-            return r;
-        }
-        case LMD_TYPE_DTIME: {
-            // Native DateTime variables use the GC-managed pointer lane. Keep
-            // that established raw path here; the Item literal path below
-            // materializes a packable value immediate before push_k
-            // (D4.7.1, D5.4.3).
-            TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const(mt, tc->const_index, MIR_T_P);
-        }
-        case LMD_TYPE_DECIMAL: {
-            TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const(mt, tc->const_index, MIR_T_P);
-        }
-        case LMD_TYPE_BINARY: {
-            TypeConst* tc = (TypeConst*)node->type;
-            return emit_load_const(mt, tc->const_index, MIR_T_P);
+            return mir_value_from_reg(mt, node, r, VALUE_REP_I64, node->type);
         }
         case LMD_TYPE_NUM_SIZED: {
             // sized numeric: pack inline as a 64-bit immediate
@@ -5622,7 +5619,7 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
             MIR_reg_t r = new_reg(mt, "nsz", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
                 MIR_new_int_op(mt->ctx, (int64_t)packed)));
-            return r;
+            return mir_value_from_reg(mt, node, r, VALUE_REP_ITEM, node->type);
         }
         case LMD_TYPE_UINT64: {
             TypeConst* tc = (TypeConst*)node->type;
@@ -5632,24 +5629,17 @@ static MIR_reg_t transpile_primary(MirTranspiler* mt, AstPrimaryNode* pri) {
             MIR_reg_t raw = new_reg(mt, "u64", MIR_T_I64);
             emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, raw),
                 MIR_new_mem_op(mt->ctx, MIR_T_U64, 0, ptr, 0, 1)));
-            return raw;
+            return mir_value_from_reg(mt, node, raw, VALUE_REP_U64, node->type);
         }
         default: {
             log_error("mir: unhandled literal type %d", tid);
-            MIR_reg_t r = new_reg(mt, "unk", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-                MIR_new_int_op(mt->ctx, 0)));
-            return r;
+            return mir_emit_primary_error_value(mt, node, "unk");
         }
         }
     }
 
-    // Non-literal primary (shouldn't happen - primaries are either literal or have expr)
     log_error("mir: non-literal primary without expr, type %d", tid);
-    MIR_reg_t r = new_reg(mt, "unk", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
-        MIR_new_int_op(mt->ctx, 0)));
-    return r;
+    return mir_emit_primary_error_value(mt, node, "unk");
 }
 
 static bool import_is_js(const AstImportNode* import) {
@@ -5931,7 +5921,6 @@ static MIR_reg_t transpile_ident(MirTranspiler* mt, AstIdentNode* ident) {
             StrBuf* nm_buf = strbuf_new_cap(64);
             write_fn_name(nm_buf, fn_node, ident->entry->import);
             MIR_item_t func_item = find_local_func(mt, nm_buf->str);
-            if (!func_item) func_item = find_local_func(mt, name_buf);
 
             StrBuf* wrapper_buf = strbuf_new_cap(64);
             write_fn_name_ex(wrapper_buf, fn_node, ident->entry->import, "_b");
@@ -15261,7 +15250,7 @@ static void emit_mir_direct_field_write(MirTranspiler* mt, AstNode* object,
 static MIR_reg_t transpile_member(MirTranspiler* mt, AstFieldNode* field_node) {
     // Use transpile_box_item for the object to ensure proper boxing.
     // This is critical for types like DTIME/INT64/DECIMAL where transpile_expr_reg_legacy
-    // returns raw unboxed values from transpile_primary, but variables may hold
+    // returns raw unboxed values from transpile_primary_value, but variables may hold
     // values that were previously boxed via transpile_box_item. Using
     // transpile_box_item here ensures consistent boxing at the call site.
     MIR_reg_t boxed_obj = transpile_box_item(mt, field_node->object);
@@ -18020,7 +18009,9 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             return result;
         }
 
-        // Try entry-based lookup first, then raw name fallback
+        // Direct calls are selected solely by the builder's binding identity.
+        // A spelling lookup could bind an unresolved name to an unrelated nested
+        // function predeclared by MIR (D8.2.4).
         const char* fn_mangled = nullptr;
         StrBuf* name_buf = nullptr;
         MIR_item_t local_func = nullptr;
@@ -18055,16 +18046,6 @@ static MIR_reg_t transpile_call_raw(MirTranspiler* mt, AstCallNode* call_node,
             write_fn_name(name_buf, fn_node, ident->entry->import);
             fn_mangled = name_buf->str;
             local_func = find_local_func(mt, fn_mangled);
-        }
-
-        // Fallback: try raw name lookup ONLY when entry is NULL (unresolved) or mangled name not found
-        // Do NOT use raw name fallback when entry_node exists but is not a function —
-        // that means it's a variable (e.g. "let adder = ...") which should go through dynamic call
-        char raw_name[128];
-        if (!local_func && !entry_node) {
-            snprintf(raw_name, sizeof(raw_name), "%.*s", (int)ident->name->len, ident->name->chars);
-            local_func = find_local_func(mt, raw_name);
-            if (local_func) fn_mangled = raw_name;
         }
 
         if (!satellite_dynamic_target && fn_mangled && (local_func || entry_node)) {
@@ -21339,8 +21320,6 @@ static MIR_reg_t transpile_expr_value_legacy_impl(MirTranspiler* mt,
     }
 
     switch (node->node_type) {
-    case AST_NODE_PRIMARY:
-        return transpile_primary(mt, (AstPrimaryNode*)node);
     case AST_NODE_IDENT:
         return transpile_ident(mt, (AstIdentNode*)node);
     case AST_NODE_BINARY:
@@ -23308,6 +23287,9 @@ static MIR_reg_t transpile_expr_value_legacy_impl(MirTranspiler* mt,
 // the established MIR register, while this adapter records the semantic
 // contract and planned carrier without consulting MIR_reg_type (D2.4.1–D2.4.3).
 static MirValue transpile_expr_value(MirTranspiler* mt, AstNode* node) {
+    if (node && node->node_type == AST_NODE_PRIMARY) {
+        return transpile_primary_value(mt, (AstPrimaryNode*)node);
+    }
     MIR_reg_t reg = transpile_expr_value_legacy_impl(mt, node);
     TypeId carrier_type = mir_expr_carrier_type(mt, node);
     ValueRep rep = carrier_type == LMD_TYPE_ANY ? VALUE_REP_ITEM
@@ -25592,15 +25574,6 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Register as local function early (before body transpilation for recursion)
     register_local_func_contract(mt, name_buf->str, func_item, body_variant);
 
-    // Also register by raw name for fallback lookup when ident->entry is NULL
-    if (fn_node->name) {
-        char raw_name[128];
-        snprintf(raw_name, sizeof(raw_name), "%.*s", (int)fn_node->name->len, fn_node->name->chars);
-        if (!find_local_func(mt, raw_name)) {
-            register_local_func_contract(mt, raw_name, func_item, body_variant);
-        }
-    }
-
     // Set up parameter scope
     push_scope(mt);
 
@@ -27159,16 +27132,6 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
             MIR_item_t fwd = MIR_new_forward(mt->ctx, name_buf->str);
             register_local_func(mt, name_buf->str, fwd);
 
-            // Also register by raw name for fallback lookup
-            if (fn_node->name) {
-                char raw_name[128];
-                snprintf(raw_name, sizeof(raw_name), "%.*s",
-                    (int)fn_node->name->len, fn_node->name->chars);
-                if (!find_local_func(mt, raw_name)) {
-                    register_local_func(mt, raw_name, fwd);
-                }
-            }
-
             // Pre-register native call facts so direct callers compiled before
             // their target can select its raw ABI without creating a wrapper.
             {
@@ -27282,16 +27245,6 @@ static void prepass_forward_declare(MirTranspiler* mt, AstNode* node) {
                 FnVariantAnalysis* variant = analyze_lambda_mir_variants(
                     mt, fn_node, fwd_nfi, scalar_mode);
                 register_local_func_contract(mt, name_buf->str, fwd, variant);
-                if (fn_node->name) {
-                    char raw_name[128];
-                    snprintf(raw_name, sizeof(raw_name), "%.*s",
-                        (int)fn_node->name->len, fn_node->name->chars);
-                    LocalFuncEntry* raw_entry = find_local_func_entry(mt,
-                        raw_name);
-                    if (raw_entry && raw_entry->func_item == fwd) {
-                        register_local_func_contract(mt, raw_name, fwd, variant);
-                    }
-                }
             }
 
             strbuf_free(name_buf);
@@ -28287,7 +28240,14 @@ static const MirModuleNames MIR_DEFAULT_MODULE_NAMES = {
     "_mod_type_list_ptr", "_mod_property_specs",
 };
 
-static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
+// A compilation unit keeps the lowering state alive across the explicit plan,
+// lower, and finalization passes (D8.2.5) without changing direct callers.
+typedef struct MirModuleBuild {
+    MirTranspiler mt;
+    const MirModuleNames* names;
+} MirModuleBuild;
+
+static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, AstScript *script,
                                     const char* source, ArrayList* type_list,
                                     ArrayList* const_list, Pool* script_pool,
                                     NamePool* name_pool,
@@ -28300,11 +28260,12 @@ static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
                                     const AstIndex* ast_index) {
     log_notice("transpile AST to MIR (direct)");
 
-    const MirModuleNames* names = module_names ? module_names :
+    build->names = module_names ? module_names :
         &MIR_DEFAULT_MODULE_NAMES;
+    const MirModuleNames* names = build->names;
     if (out_artifacts) memset(out_artifacts, 0, sizeof(*out_artifacts));
 
-    MirTranspiler mt;
+    MirTranspiler& mt = build->mt;
     memset(&mt, 0, sizeof(mt));
     mt.ctx = ctx;
     mt.em.ctx = ctx;  // emitter caches the immutable MIR context handle
@@ -28375,6 +28336,12 @@ static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
 
     // Forward-declare ALL functions first (handles forward references between functions)
     prepass_forward_declare(&mt, script->child);
+}
+
+static void transpile_mir_ast_lower(MirModuleBuild* build) {
+    MirTranspiler& mt = build->mt;
+    MIR_context_t ctx = mt.ctx;
+    AstScript* script = mt.script;
 
     // Define ALL functions at module level (transpiles bodies)
     prepass_define_functions(&mt, script->child);
@@ -28566,9 +28533,15 @@ static void transpile_mir_ast_named(MIR_context_t ctx, AstScript *script,
         if (bytes_size > UINT32_MAX) {
             log_error("module-key-link: property key image is too large");
         } else {
-            MIR_new_bss(ctx, names->property_specs_bss, bytes_size);
+            MIR_new_bss(ctx, build->names->property_specs_bss, bytes_size);
         }
     }
+}
+
+static void transpile_mir_ast_finalize(MirModuleBuild* build,
+        ArrayList** out_property_keys, MirModuleArtifacts* out_artifacts) {
+    MirTranspiler& mt = build->mt;
+    MIR_context_t ctx = mt.ctx;
 
     MIR_finish_func(ctx);
     MIR_finish_module(ctx);
@@ -28608,7 +28581,7 @@ static int lambda_const_fold_compiler_pass(void* opaque) {
     return interp_const_fold_script((Transpiler*)opaque) ? 1 : 0;
 }
 
-typedef struct LambdaMirLowerPassContext {
+typedef struct LambdaMirPipelinePassContext {
     MIR_context_t ctx;
     Transpiler* tp;
     Script* script;
@@ -28617,32 +28590,38 @@ typedef struct LambdaMirLowerPassContext {
     uint64_t mir_module_count;
     uint64_t mir_function_count;
     uint64_t mir_instruction_count;
-} LambdaMirLowerPassContext;
+    MirModuleBuild build;
+} LambdaMirPipelinePassContext;
 
-static int lambda_mir_lower_compiler_pass(void* opaque) {
-    LambdaMirLowerPassContext* pass = (LambdaMirLowerPassContext*)opaque;
+static int lambda_mir_plan_compiler_pass(void* opaque) {
+    LambdaMirPipelinePassContext* pass = (LambdaMirPipelinePassContext*)opaque;
     if (!pass || !pass->ctx || !pass->tp || !pass->tp->ast_root) return 0;
-    transpile_mir_ast_named(pass->ctx, (AstScript*)pass->tp->ast_root,
+    transpile_mir_ast_begin(&pass->build, pass->ctx, (AstScript*)pass->tp->ast_root,
         pass->tp->source, pass->tp->type_list, pass->tp->const_list,
         pass->tp->pool, pass->tp->name_pool, &MIR_DEFAULT_MODULE_NAMES,
         pass->property_keys, NULL,
         pass->tp->compile_against_interp_slab ? pass->script : NULL,
         NULL, pass->tp->whole_script_poc, &pass->tp->ast_index);
+    return 1;
+}
+
+static int lambda_mir_lower_compiler_pass(void* opaque) {
+    LambdaMirPipelinePassContext* pass = (LambdaMirPipelinePassContext*)opaque;
+    if (!pass || !pass->build.mt.module) return 0;
+    transpile_mir_ast_lower(&pass->build);
+    return 1;
+}
+
+static int lambda_mir_finalize_compiler_pass(void* opaque) {
+    LambdaMirPipelinePassContext* pass = (LambdaMirPipelinePassContext*)opaque;
+    if (!pass || !pass->build.mt.module) return 0;
+    transpile_mir_ast_finalize(&pass->build, pass->property_keys, NULL);
     mir_count_module_volume(pass->ctx, &pass->mir_module_count,
         &pass->mir_function_count, &pass->mir_instruction_count);
     if (pass->link_instruction_count) {
         *pass->link_instruction_count = pass->mir_instruction_count;
     }
     return 1;
-}
-
-void transpile_mir_ast(MIR_context_t ctx, AstScript *script, const char* source,
-                       ArrayList* type_list, ArrayList* const_list,
-                       Pool* script_pool, NamePool* name_pool,
-                       ArrayList** out_property_keys) {
-    transpile_mir_ast_named(ctx, script, source, type_list, const_list,
-        script_pool, name_pool, &MIR_DEFAULT_MODULE_NAMES,
-        out_property_keys, NULL, NULL, NULL, false, NULL);
 }
 
 // P2's satellite has its own BSS symbols even though it shares the Script's
@@ -28764,10 +28743,13 @@ bool compile_ast_function_satellite(Runtime* runtime, Script* script,
 
     MirModuleArtifacts artifacts = {};
     ArrayList* property_keys = NULL;
-    transpile_mir_ast_named(script->jit_context, &satellite_root, script->source,
+    MirModuleBuild build = {};
+    transpile_mir_ast_begin(&build, script->jit_context, &satellite_root, script->source,
         script->type_list, script->const_list, script->pool, script->name_pool,
         &names, &property_keys, &artifacts, script, (AstFuncNode*)fn,
         false, &script->ast_index);
+    transpile_mir_ast_lower(&build);
+    transpile_mir_ast_finalize(&build, &property_keys, &artifacts);
     if (property_keys && property_keys->length != 0) {
         uint64_t capacity = (uint64_t)property_keys->length * sizeof(PropertyKeySpec);
         for (int index = 0; index < property_keys->length; index++) {
@@ -29184,38 +29166,47 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
 
     ArrayList* property_keys = NULL;
     LambdaMirLinkPassContext link_context = {ctx, tp, 0, false, NULL};
-    LambdaMirLowerPassContext lower_context = {ctx, tp, script, &property_keys,
-        &link_context.mir_instruction_count, 0, 0, 0};
-    // Every MIR Direct module now advances through one authoritative schedule:
-    // const-fold, lower, and finalize all run under the pass manager.
-    CompilerPassManager pass_manager;
-    uint32_t initial_facts = COMPILER_FACT_AST |
-        COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED;
+    LambdaMirPipelinePassContext mir_context = {};
+    mir_context.ctx = ctx;
+    mir_context.tp = tp;
+    mir_context.script = script;
+    mir_context.property_keys = &property_keys;
+    mir_context.link_instruction_count = &link_context.mir_instruction_count;
+    // Direct MIR resumes parser work; retained ASTs begin a fresh unit.
+    CompilerPassManager* pass_manager = &tp->pass_manager;
     AstIndexPassContext index_context = {&tp->ast_index, tp->ast_root, tp->profile};
-    compiler_pass_manager_init(&pass_manager, initial_facts |
-        (tp->ast_index.count ? COMPILER_FACT_INDEXED : 0));
-    CompilerPassSpec index_pass = {"index", initial_facts,
+    if (pass_manager->pass_count == 0) {
+        compiler_pass_manager_init(pass_manager, COMPILER_FACT_FRONTEND |
+            (tp->ast_index.count ? COMPILER_FACT_INDEXED : 0));
+    }
+    CompilerPassSpec index_pass = {"index", COMPILER_FACT_FRONTEND,
         COMPILER_FACT_INDEXED, ast_index_compiler_pass, &index_context};
     CompilerPassSpec const_fold_pass = {"const-fold", COMPILER_FACT_INDEXED,
         COMPILER_FACT_ANALYZED, lambda_const_fold_compiler_pass, tp};
-    CompilerPassSpec lower_pass = {"mir-lower-finalize", COMPILER_FACT_ANALYZED,
-        COMPILER_FACT_PLANNED | COMPILER_FACT_MIR_LOWERED |
-        COMPILER_FACT_FINALIZED, lambda_mir_lower_compiler_pass, &lower_context};
+    CompilerPassSpec plan_pass = {"mir-plan", COMPILER_FACT_ANALYZED,
+        COMPILER_FACT_PLANNED, lambda_mir_plan_compiler_pass, &mir_context};
+    CompilerPassSpec lower_pass = {"mir-lower",
+        COMPILER_FACT_ANALYZED | COMPILER_FACT_PLANNED,
+        COMPILER_FACT_MIR_LOWERED, lambda_mir_lower_compiler_pass, &mir_context};
+    CompilerPassSpec finalize_pass = {"mir-finalize-load", COMPILER_FACT_MIR_LOWERED,
+        COMPILER_FACT_FINALIZED, lambda_mir_finalize_compiler_pass, &mir_context};
     CompilerPassSpec link_pass = {"mir-link-entry", COMPILER_FACT_FINALIZED,
         COMPILER_FACT_FINALIZED, lambda_mir_link_compiler_pass, &link_context};
-    if ((!tp->ast_index.count && !compiler_pass_manager_add(&pass_manager, &index_pass)) ||
-            !compiler_pass_manager_add(&pass_manager, &const_fold_pass) ||
-            !compiler_pass_manager_add(&pass_manager, &lower_pass) ||
-            !compiler_pass_manager_add(&pass_manager, &link_pass) ||
-            !compiler_pass_manager_run(&pass_manager, NULL)) {
+    if ((!tp->ast_index.count && !compiler_pass_manager_add(pass_manager, &index_pass)) ||
+            !compiler_pass_manager_add(pass_manager, &const_fold_pass) ||
+            !compiler_pass_manager_add(pass_manager, &plan_pass) ||
+            !compiler_pass_manager_add(pass_manager, &lower_pass) ||
+            !compiler_pass_manager_add(pass_manager, &finalize_pass) ||
+            !compiler_pass_manager_add(pass_manager, &link_pass) ||
+            !compiler_pass_manager_run(pass_manager, NULL)) {
         log_error("mir-driver: pass manager rejected module '%s'",
             script_path ? script_path : "<unknown>");
         jit_cleanup_mode(ctx, mir_gen_initialized ? 1 : 0);
         return;
     }
-    uint64_t mir_module_count = lower_context.mir_module_count;
-    uint64_t mir_function_count = lower_context.mir_function_count;
-    uint64_t mir_instruction_count = lower_context.mir_instruction_count;
+    uint64_t mir_module_count = mir_context.mir_module_count;
+    uint64_t mir_function_count = mir_context.mir_function_count;
+    uint64_t mir_instruction_count = mir_context.mir_instruction_count;
 
     bool use_mir_interp_for_script = link_context.use_mir_interp_for_script;
 

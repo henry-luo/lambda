@@ -233,7 +233,6 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->loop_scope_depth = -1;
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
-    mt->current_func_index = -1;
     return mt;
 }
 

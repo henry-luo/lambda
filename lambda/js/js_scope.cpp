@@ -350,14 +350,3 @@ JsScript* js_script_adopt_transpiler(JsTranspiler* tp, Runtime* runtime,
     if (runtime) runtime_register_script(runtime, (Script*)script);
     return script;
 }
-
-bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length) {
-    return js_transpiler_parse_c_auto(tp, source, length);
-}
-
-bool js_transpiler_parse_module(JsTranspiler* tp, const char* source,
-        size_t length) {
-    if (!tp || !source) return false;
-    return js_transpiler_parse_c(tp, source, length,
-        (JsParseMode)(JS_PARSE_SCRIPT | JS_PARSE_MODULE));
-}

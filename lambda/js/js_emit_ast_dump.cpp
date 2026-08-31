@@ -455,14 +455,14 @@ extern "C" int emit_js_ast_dump_file(const char* script_path) {
     }
 
     size_t length = strlen(source);
-    if (!js_transpiler_parse(tp, source, length)) {
+    if (!js_transpiler_parse_c(tp, source, length, JS_PARSE_AUTO)) {
         fprintf(stderr, "Error: Failed to parse '%s'\n", script_path);
         js_transpiler_destroy(tp);
         mem_free(source);
         return 1;
     }
 
-    JsAstNode* ast = js_transpiler_build_ast(tp);
+    JsAstNode* ast = (JsAstNode*)tp->ast_root;
     if (!ast) {
         fprintf(stderr, "Error: Failed to build JS AST for '%s'\n", script_path);
         js_transpiler_destroy(tp);
