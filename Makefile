@@ -2327,13 +2327,12 @@ run-radiant-baseline:
 	rm -f $(LAYOUT_BASELINE_RESULTS); \
 	if [ $$any_failed -gt 0 ]; then exit 1; fi
 
-# Keep the runner's suite records through the page snapshot so the final
-# layout-only report cannot lose the results it needs to aggregate.
+# Run only the shared layout baseline inventory; page snapshots belong to the
+# full Radiant baseline target.
 test-layout-baseline: build-test
 	@any_failed=0; \
 	layout_total_passed=0; layout_total_partial=0; layout_total_failed=0; layout_total_skipped=0; \
 	layout_elapsed=0; layout_overall_status="✅ PASS"; \
-	snapshot_passed=0; snapshot_failed=0; snapshot_status="⏭️  SKIP"; snapshot_elapsed=0; \
 	mkdir -p temp; \
 	$(DEFINE_TEST_DURATION_FORMATTER) \
 	echo ""; \
@@ -2345,20 +2344,8 @@ test-layout-baseline: build-test
 	$(MAKE) --no-print-directory run-layout-baseline-suites || layout_run_exit=$$?; \
 	layout_elapsed=$$(($$(date +%s) - layout_start)); \
 	$(COLLECT_LAYOUT_BASELINE_RESULTS) \
-	if [ -f test/layout/snapshot/page.json ]; then \
-		echo ""; \
-		echo "📦 Layout Page Suite Regression:"; \
-		snapshot_exit=0; \
-		snapshot_start=$$(date +%s); \
-		snapshot_output=$$($(LAYOUT_TEST_ENV) node test/layout/test_radiant_layout.js --engine lambda-css -c page --json -j 5 2>/dev/null \
-			| node test/layout/layout_suite_snapshot.js --check page 2>&1) || snapshot_exit=$$?; \
-		snapshot_elapsed=$$(($$(date +%s) - snapshot_start)); \
-		echo "$$snapshot_output" | tail -5; \
-		$(call CLASSIFY_LAYOUT_SNAPSHOT_RESULT,snapshot_output) \
-	fi; \
-	\
-	total_passed=$$((layout_total_passed + snapshot_passed)); \
-	total_failed=$$((layout_total_failed + snapshot_failed)); \
+	total_passed=$$layout_total_passed; \
+	total_failed=$$layout_total_failed; \
 	total_tests=$$((total_passed + layout_total_partial + total_failed)); \
 	\
 	echo ""; \
@@ -2367,9 +2354,8 @@ test-layout-baseline: build-test
 	echo "=============================================================="; \
 	echo ""; \
 	echo "📊 Test Results by Suite:"; \
-	echo "   ├── Layout Baseline     $$layout_overall_status  ($$(format_duration "$$layout_elapsed"), $$layout_total_passed passed, $$layout_total_partial partially passing, $$layout_total_failed failed, $$layout_total_skipped skipped)"; \
+	echo "   └── Layout Baseline     $$layout_overall_status  ($$(format_duration "$$layout_elapsed"), $$layout_total_passed passed, $$layout_total_partial partially passing, $$layout_total_failed failed, $$layout_total_skipped skipped)"; \
 	$(PRINT_LAYOUT_BASELINE_SUITE_RESULTS) \
-	echo "   └── Layout Page Suite   $$snapshot_status  ($$(format_duration "$$snapshot_elapsed"), $$snapshot_passed passed, $$snapshot_failed failed) (layout_suite_snapshot.js --check page)"; \
 	echo ""; \
 	echo "📊 Overall Results:"; \
 	echo "   Total Tests: $$total_tests"; \
