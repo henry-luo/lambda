@@ -98,7 +98,12 @@ void form_control_prop_release(FormControlProp* f) {
             doc_state_close_dropdown(f->state_ref, owner);
         }
     }
-    if (f->current_value) { mem_free(f->current_value); f->current_value = nullptr; }
+    // current_value is borrowed from ViewState; the StateStore releases it.
+    const char* cached_value = f->current_value;
+    f->current_value = nullptr;
+    f->current_value_len = 0;
+    f->current_value_u16_len = 0;
+    if (f->value == cached_value) f->value = nullptr;
     if (f->custom_validity_msg) { mem_free(f->custom_validity_msg); f->custom_validity_msg = nullptr; }
     if (f->value_at_focus) { mem_free(f->value_at_focus); f->value_at_focus = nullptr; }
 }
@@ -171,13 +176,28 @@ static char* tc_initial_value(DomElement* elem, uint32_t* out_len) {
     return out;
 }
 
-static void tc_materialize_current_value(DomElement* elem, FormControlProp* f) {
-    if (!elem || !f || f->current_value) return;
+static DocState* tc_value_state(DomElement* elem, FormControlProp* f) {
+    DocState* state = f ? f->state_ref : nullptr;
+    if (!state && elem && elem->doc) {
+        state = (DocState*)elem->doc->state;
+        if (!state) state = radiant_document_ensure_state(elem->doc, "tc_value_state");
+    }
+    if (f) f->state_ref = state;
+    return state;
+}
+
+static bool tc_materialize_current_value(DomElement* elem, FormControlProp* f) {
+    if (!elem || !f) return false;
+    if (f->current_value) return true;
+    DocState* state = tc_value_state(elem, f);
+    if (!state) return false;
     uint32_t len = 0;
-    f->current_value = tc_initial_value(elem, &len);
-    f->current_value_len = len;
-    f->current_value_u16_len = tc_utf8_to_utf16_length(f->current_value, len);
-    f->value = f->current_value;
+    char* initial = tc_initial_value(elem, &len);
+    uint32_t u16_len = tc_utf8_to_utf16_length(initial ? initial : "", len);
+    bool stored = form_control_store_text_value(state, (View*)elem,
+                                                 initial, len, u16_len);
+    if (initial) mem_free(initial);
+    return stored;
 }
 
 static void tc_clamp_selection_to_current_value(FormControlProp* f) {
@@ -199,26 +219,22 @@ static void tc_clamp_selection_to_current_value(FormControlProp* f) {
 void tc_ensure_init(DomElement* elem) {
     if (!tc_is_text_control(elem)) return;
     FormControlProp* f = tc_get_or_create_form(elem);
+    if (!f) return;
+    DocState* state = tc_value_state(elem, f);
+    if (!state) return;
     if (f->tc_initialized) {
-        tc_materialize_current_value(elem, f);
+        if (!form_control_restore_text_control_state(state, (View*)elem)) {
+            tc_materialize_current_value(elem, f);
+        }
         tc_clamp_selection_to_current_value(f);
         if (!f->value || f->value != f->current_value) {
             f->value = f->current_value;
         }
         return;
     }
-    DocState* state = f->state_ref
-        ? f->state_ref
-        : (elem && elem->doc ? (DocState*)elem->doc->state : nullptr);
-    f->state_ref = state;
     bool restored = form_control_restore_text_control_state(state, (View*)elem);
     if (!restored) {
-        if (!f->current_value) {
-            tc_materialize_current_value(elem, f);
-        } else {
-            f->current_value_u16_len = tc_utf8_to_utf16_length(
-                f->current_value, f->current_value_len);
-        }
+        if (!tc_materialize_current_value(elem, f)) return;
         f->selection_start = f->current_value_u16_len;
         f->selection_end = f->current_value_u16_len;
         f->selection_direction = 0;
@@ -257,7 +273,9 @@ extern "C" void tc_history_guard_exit(DocState* state) {
 void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     if (!tc_is_text_control(elem)) return;
     FormControlProp* f = tc_get_or_create_form(elem);
-    DocState* state = f->state_ref ? f->state_ref : (elem && elem->doc ? (DocState*)elem->doc->state : nullptr);
+    if (!f) return;
+    DocState* state = tc_value_state(elem, f);
+    if (!state) return;
 
     // F4: enforce HTML `maxlength` on every value mutation. The attribute
     // counts UTF-16 code units in the spec; we approximate with codepoints
@@ -287,18 +305,16 @@ void tc_set_value(DomElement* elem, const char* new_val, size_t new_len) {
     uint32_t old_end = f->selection_end;
     uint8_t  old_dir = f->selection_direction;
     bool was_initialized = f->tc_initialized;
-    if (f->current_value) mem_free(f->current_value);
-    char* buf = (char*)mem_alloc(new_len + 1, MEM_CAT_DOM);
-    if (new_val && new_len) memcpy(buf, new_val, new_len);
-    buf[new_len] = '\0';
-    f->current_value = buf;
-    f->current_value_len = (uint32_t)new_len;
-    f->current_value_u16_len = tc_utf8_to_utf16_length(buf, (uint32_t)new_len);
+    uint32_t new_u16_len = tc_utf8_to_utf16_length(new_val ? new_val : "",
+                                                     (uint32_t)new_len);
+    if (!form_control_store_text_value(state, (View*)elem, new_val,
+                                       (uint32_t)new_len, new_u16_len)) {
+        return;
+    }
     f->selection_start = f->current_value_u16_len;
     f->selection_end = f->current_value_u16_len;
     f->selection_direction = 0;
     f->tc_initialized = 1;
-    f->value = buf;
     // One publish, not two. state_store_set_text_control_selection is the
     // single fan-out: it writes the prop's selection, pushes value+selection
     // into the ViewState (via form_control_sync_text_control_state) and writes
@@ -380,18 +396,10 @@ void tc_sync_selection_to_form(DomElement* elem, DocState* state) {
     if (!tc_is_text_control(elem)) return;
     tc_ensure_init(elem);
     FormControlProp* f = elem->form;
-    if (!f->current_value) {
-        const char* val = f->value ? f->value : "";
-        uint32_t blen = (uint32_t)strlen(val);
-        f->current_value = (char*)mem_alloc(blen + 1, MEM_CAT_DOM);
-        if (!f->current_value) return;
-        memcpy(f->current_value, val, blen);
-        f->current_value[blen] = '\0';
-        f->current_value_len = blen;
-    }
+    if (!f || !f->current_value) return;
     uint32_t blen = f->current_value_len;
     f->value = f->current_value;
-    f->current_value_u16_len = tc_utf8_to_utf16_length(f->current_value, blen);
+    // ViewState owns both value lengths; this prop only reads its bound cache.
 
     if (state->sel.kind == EDIT_SEL_TEXT_CONTROL &&
         state->sel.control == elem) {

@@ -65,7 +65,7 @@ The `main()` procedure serves as the entry point for procedural scripts.
 
 `var` declares a mutable variable. Unlike `let` (which is immutable), `var` bindings can be reassigned.
 
-```lambda
+```lambda error=E211
 pn example() {
     var x = 0
     x = x + 1      // OK: var is mutable
@@ -96,7 +96,7 @@ Variables with explicit type annotations (`var x: int`) enforce the declared typ
 
 `var` is only valid inside a `pn` body (or a `view` event handler). **Lambda has no global mutable state** — a `var` at script/module scope is a compile error, and this is true for `lambda script.ls`, `lambda run script.ls`, and the REPL alike. `pn main()` does not change it: `main` is an ordinary `pn` inside an otherwise functional module.
 
-```lambda
+```lambda error=E224
 var count = 0        // ERROR: 'var' statement is only allowed in procedural functions (pn)
 
 let base = 10        // OK — module bindings are immutable
@@ -110,7 +110,7 @@ pn main() {
 
 Module-level `let` bindings cannot be mutated indirectly either — E211 rejects writes through an immutable binding, so a module-scope container or object instance is read-only for the whole program:
 
-```lambda
+```lambda error=E211
 let arr = [1, 2, 3]
 
 pn main() {
@@ -142,7 +142,8 @@ let hits = 0;                      // module-level mutable state — legal in JS
 export function bump() { return ++hits; }
 ```
 
-```lambda
+```lambda no-run
+// no-run: needs the companion guest module
 import .guest_counter
 
 pn main() {
@@ -184,7 +185,7 @@ Assignment (`=`) is only available inside `pn` functions. The left-hand side can
 - **`fn` parameters** are immutable — reassignment produces error E211
 - **`var` variables** are mutable — reassignment is allowed
 
-```lambda
+```lambda error=E211
 pn countdown(n) {
     while (n > 0) {   // OK: pn parameters are mutable
         n = n - 1
@@ -435,7 +436,7 @@ pn process_items(items) {
             i = i + 1
             continue        // skip nulls
         }
-        if (items[i] == 'stop') break   // stop sentinel
+        if (items[i] == 'stop') { break }   // stop sentinel
         process(items[i])
         i = i + 1
     }
@@ -515,7 +516,7 @@ let data = input("config.json", 'json')
 let html = input(https.example.com.page, 'html')
 
 // Check existence
-if exists(.config.json) { ... }
+if exists(\.config.json) { ... }
 ```
 
 ### Procedural I/O Functions
@@ -656,7 +657,7 @@ Object types can define `pn` methods that mutate the object's fields in-place. I
 
 ```lambda
 type Counter {
-    count: int = 0;
+    count: int = 0,
 
     fn value() => count                    // Pure — reads field
     pn increment() { count = count + 1 }   // Mutates field in-place
@@ -679,7 +680,7 @@ Inside `pn` methods, bare field names resolve to the object's fields (same as in
 ```lambda
 type Account {
     balance: float,
-    name: string;
+    name: string,
 
     pn deposit(amount: float) {
         balance = balance + amount       // unambiguous: balance is a field

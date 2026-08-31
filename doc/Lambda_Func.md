@@ -102,7 +102,7 @@ let twice = (x) => x * 2
 
 Parameters with type annotations are required:
 
-```lambda
+```lambda error=E206
 fn greet(name: string) => "Hello, " ++ name
 fn add(a: int, b: int) => a + b
 
@@ -342,7 +342,7 @@ Method syntax enables fluent operations:
 
 ```lambda
 // Chained method calls
-let result = data
+let chained = data
     .filter((x) => x > 0)
     .map((x) => x * 2)
     .sort()
@@ -350,7 +350,7 @@ let result = data
     .sum()
 
 // Equivalent nested calls (harder to read)
-let result = sum(take(sort(map(filter(data, (x) => x > 0), (x) => x * 2)), 10))
+let nested = sum(take(sort(map(filter(data, (x) => x > 0), (x) => x * 2)), 10))
 ```
 
 ### Mutating Object Methods
@@ -501,8 +501,11 @@ add1_then_double(5)   // 12 (double(add1(5)))
 ### Common Higher-Order Patterns
 
 ```lambda
-// Filter -- `where` is a for-header clause, not a standalone operator
-fn filter(arr, pred) => [for (x in arr where pred(x)) x]
+// Filter -- `that` is the filter operator (S10.1.5)
+fn filter(arr, pred) => arr that pred(~)
+
+// Filter and transform in one pass -- the `for` body does what `that` alone cannot
+fn filter_shift(arr, pred) => [for (x in arr where pred(x)) x + 2]
 
 // Map -- the free `~` makes this a mapping pipe (S10.1.2)
 fn map_array(arr, f) => arr |> f(~)
@@ -517,9 +520,10 @@ pn fold(arr, init, f) {
 }
 
 // Usage
-filter([1, 2, 3, 4, 5], (x) => x > 2)      // [3, 4, 5]
-map_array([1, 2, 3], (x) => x * 2)         // [2, 4, 6]
-fold([1, 2, 3, 4], 0, (a, b) => a + b)     // 10
+filter([1, 2, 3, 4, 5], (x) => x > 2)        // [3, 4, 5]
+filter_shift([1, 2, 3, 4, 5], (x) => x > 2)  // [5, 6, 7]
+map_array([1, 2, 3], (x) => x * 2)           // [2, 4, 6]
+fold([1, 2, 3, 4], 0, (a, b) => a + b)       // 10
 ```
 
 ---

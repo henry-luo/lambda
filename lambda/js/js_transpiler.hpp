@@ -77,7 +77,6 @@ struct JsScript : Script {
     // evaluation so circular imports observe hoisted function exports.
     bool es_module_scope_initialized;
     bool strict_js;                 // true = reject TS syntax (pure JS mode)
-    bool emit_runtime_checks;       // TS development-mode assertion emission
     struct hashmap* type_registry; // TS name → Type* facts for this JS/TS unit
     JsInterpImportBinding* interp_imports;
     JsInterpExportBinding* interp_exports;
@@ -88,13 +87,6 @@ struct JsScript : Script {
 // moves the prefix into a runtime-owned JsScript before destroying this tail.
 struct JsTranspiler : JsScript {
     // Current-build state
-    int function_counter;           // Counter for anonymous functions
-    int temp_var_counter;           // Counter for temporary variables
-    int label_counter;              // Counter for labels
-    bool in_expression;             // True when transpiling inside an expression (for function expressions)
-    bool in_async_function;         // True while building an async function body/parameters
-    bool in_generator_function;     // True while building a generator body/parameters
-    
     // ANY-census [Type_Infer TI3]: per-reason counts of expressions whose
     // static type fell back to `any`. Diagnostic only — shares the Lambda
     // reason catalog so both lanes report against one vocabulary.

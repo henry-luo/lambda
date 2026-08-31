@@ -1,0 +1,29 @@
+{
+  "name": "dom package details/summary toggle (ESO56)",
+  "html": "test/ui/details_toggle.html",
+  "viewport": {"width": 500, "height": 400},
+  "events": [
+    {"type": "log", "message": "=== closed at load: no open attribute, contents not laid out ==="},
+    {"type": "assert_attr", "target": {"selector": ".d"}, "attribute": "open", "present": false},
+    {"type": "assert_visible", "target": {"selector": ".s"}, "visible": true},
+    {"type": "assert_visible", "target": {"selector": ".body"}, "visible": false},
+    {"type": "assert_text", "target": {"selector": "#log"}, "text": "toggles:0"},
+
+    {"type": "log", "message": "--- click the summary: package writes open, fires toggle on the details ---"},
+    {"type": "click", "target": {"selector": ".s"}},
+    {"type": "assert_attr", "target": {"selector": ".d"}, "attribute": "open", "present": true},
+    {"type": "assert_visible", "target": {"selector": ".body"}, "visible": true},
+    {"type": "assert_text", "target": {"selector": "#log"}, "text": "toggles:1"},
+
+    {"type": "log", "message": "--- a summary that is not a direct details child is inert ---"},
+    {"type": "click", "target": {"selector": ".nested"}},
+    {"type": "assert_attr", "target": {"selector": ".d"}, "attribute": "open", "present": true},
+    {"type": "assert_text", "target": {"selector": "#log"}, "text": "toggles:1"},
+
+    {"type": "log", "message": "--- click again: closes, and the contents leave layout ---"},
+    {"type": "click", "target": {"selector": ".s"}},
+    {"type": "assert_attr", "target": {"selector": ".d"}, "attribute": "open", "present": false},
+    {"type": "assert_visible", "target": {"selector": ".body"}, "visible": false},
+    {"type": "assert_text", "target": {"selector": "#log"}, "text": "toggles:2"}
+  ]
+}

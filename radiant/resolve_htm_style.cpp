@@ -1189,13 +1189,26 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         *radiant_spacing_value(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = 40;
         *radiant_spacing_specificity(&block->boundary_mut()->margin, CSS_BOX_SIDE_LEFT) = -1;
         break;
-    case MARKUP_NAME_SUMMARY:
-        // UA default: list-style: inside disclosure-closed
+    case MARKUP_NAME_SUMMARY: {
+        // UA default: list-style: inside disclosure-closed/-open.
         // summary elements use inside marker position (disclosure triangle before text)
         block->ensure_block(lycon);
         block->blk->list_style_position = (CssEnum)1;  // 1 = inside
-        block->blk->list_style_type = CSS_VALUE_DISCLOSURE_CLOSED;
+        // The marker direction is the parent details' `open` attribute, which
+        // is the entire open/close state (HTML 4.11.1 defines no separate
+        // internal openness). Pinning it to `closed` left the triangle facing
+        // right after a toggle: layout re-runs on the attribute mutation, but
+        // a constant cannot follow it.
+        DomNode* summary_parent = elmt->parent;
+        DomElement* summary_details = summary_parent && summary_parent->is_element()
+            ? summary_parent->as_element() : nullptr;
+        bool details_open = summary_details &&
+            summary_details->tag() == MARKUP_NAME_DETAILS &&
+            summary_details->has_attribute(MARKUP_NAME_OPEN);
+        block->blk->list_style_type = details_open
+            ? CSS_VALUE_DISCLOSURE_OPEN : CSS_VALUE_DISCLOSURE_CLOSED;
         break;
+    }
     // ========== Table elements ==========
     case MARKUP_NAME_TABLE: {
         // HTML UA default: border-spacing: 2px (CSS spec default is 0, but HTML tables use 2px)

@@ -182,6 +182,73 @@ language reference set (`Lambda_Reference.md`, `Lambda_Data.md`,
 - Keep examples runnable and outputs current; prefer small examples that a
   regression test also covers.
 
+### 8.1 Code-fence markers
+
+`lambda` fences are a **test corpus, not decoration**: the doc-example gate
+extracts every one and compiles it. The fence info string declares how the
+block is meant to be checked. The first token stays `lambda`, so syntax
+highlighting and GitHub rendering are unaffected — everything after it is a
+space-separated directive.
+
+| Fence | Contract |
+|-------|----------|
+| ````` ```lambda ````` | Runs as a Lambda script and compiles clean. **This is the default**: any unmarked block is held to it. |
+| ````` ```lambda error=E211 ````` | Must **fail**, with exactly that diagnostic code. For blocks that illustrate an error. |
+| ````` ```lambda expr ````` | The whole block is one **expression**; the gate compiles it as `(…)`. |
+| ````` ```lambda type ````` | The whole block is one **type pattern**; the gate compiles it as `type x = …`. |
+| ````` ```lambda no-run ````` | Cannot be checked standalone. Skipped by the gate. |
+
+- **Opt-out, never opt-in.** An unmarked block must compile. A newly written
+  block is therefore covered the moment it lands, which is the only
+  arrangement under which rot stays visible; an opt-in marker would leave
+  every unmarked block silently unchecked — the state §8 already forbids.
+- **`error=` is a positive test, not a suppression.** The block asserts that
+  the diagnostic is still produced *and* still carries that code, so a
+  reworded or renumbered error surfaces here instead of rotting. Prefer it
+  over `no-run` whenever the block is meant to fail.
+- **Every marker compiles the block whole.** A marker says what the block
+  *is*, never how much of it to check: the gate wraps the entire block once
+  and compiles that. `expr` exists because some expressions are not legal at
+  statement level — a bare `1 < 2` is rejected (*"comparison requires
+  parentheses at statement level"*) but `(1 < 2)` compiles. `type` exists
+  because a type pattern is not a statement — `fn (int) int` is rejected but
+  `type x = fn (int) int` compiles.
+- **`no-run` carries a reason.** Write it as a comment on the first line of
+  the block (`// no-run: needs a companion module`). The legitimate cases are
+  narrow — multi-file examples that show two files in one fence, and syntax
+  catalogues that name modules which deliberately do not exist. A block that
+  merely fails is rot, not a `no-run`.
+- **Deliberate errors are marked, not left bare.** `add(5) // Error: missing
+  required parameter` is a claim the gate can check; without `error=` it is
+  indistinguishable from a broken example.
+
+**Annotated tables.** Reference tables carry code too, and a table cell cannot
+hold a fence — GFM cells take inline content only. A table opts in with an
+HTML comment on the line above it, carrying the same info string a fence would:
+
+    <!-- code-fence: lambda type -->
+    | Form | Meaning |
+    |------|---------|
+    | `fn (int) int` | Takes int, returns int |
+
+- The gate reads **each row, first column only**. A cell that is a single
+  inline code span (`` `…` ``) is code, and is run under the annotated fence
+  type; every other cell — prose, two spans, an empty cell — is skipped, so
+  a table may mix checked and unchecked rows freely.
+- **Escape `|` inside a cell as `\|`**, even within a code span; an
+  unescaped pipe ends the cell. The gate unescapes it before compiling, so
+  `` `int \| string` `` is checked as `int | string`.
+- The comment is invisible in every renderer and leaves table syntax
+  untouched. `code-fence:` prefixes it so the marker is greppable and cannot
+  collide with an ordinary comment.
+- **Comment and table both start at column 0.** An indented line is an
+  indented *code block* in GFM, never a table — which is why the illustration
+  above, indented, is inert rather than a live annotation on this page.
+
+*Census 2026-08-30: 416 `lambda` blocks across `doc/`, 104 of which do not
+compile. Only 28 are legitimately unrunnable — the rest are rot that no test
+was watching, the same failure mode as O4.*
+
 ## 9. Cross-cutting rules
 
 - **CLAUDE.md ↔ AGENTS.md mirroring**: any documentation-convention change

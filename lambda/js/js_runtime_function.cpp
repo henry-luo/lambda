@@ -1318,15 +1318,6 @@ extern "C" void js_set_default_constructor_property(Item proto_item, Item cls_it
     js_attr_set_enumerable(proto_item, "constructor", 11, false);
 }
 
-extern "C" Item js_prepare_class_prototype_property(Item cls_item) {
-    if (get_type_id(cls_item) != LMD_TYPE_MAP) return js_status_ok();
-    ShapeEntry* existing = js_find_shape_entry(cls_item, "prototype", 9);
-    if (existing && !jspd_is_deleted(existing)) {
-        return js_throw_type_error("Cannot redefine property: prototype");
-    }
-    return js_status_ok();
-}
-
 extern "C" Item js_check_class_static_field_key(Item key_item) {
     if (get_type_id(key_item) != LMD_TYPE_STRING) return js_status_ok();
     String* key = it2s(key_item);

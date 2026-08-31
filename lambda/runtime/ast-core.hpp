@@ -1251,6 +1251,9 @@ typedef struct FnAnalysis {
     struct hashmap* js_cached_annexb_suppressed;
     struct hashmap* js_cached_scope_slot_collisions;
     bool js_cached_annexb_suppressed_ready;
+    // The active JS MIR compilation's backend artifact; reset with all other
+    // profile facts before the next compilation of this AST.
+    void* js_mir_backend;
     int await_point_count;
     int async_fault_handler_count;
     const char* may_await_cause;

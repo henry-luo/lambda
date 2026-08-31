@@ -21,7 +21,7 @@ Every fact the engine tracks falls into exactly one of three classes. The class 
 
 ### 1.1 Durable state — serialize (the implementor's checklist)
 
-- Form control **dirty values**: `FormControlProp::current_value` (the live `.value`, distinct from the `value` attribute), `checked`, `selected_index`, `range_value`.
+- Form control **dirty values**: `ViewState.data.form.current_value` (the live `.value`, distinct from the `value` attribute), `checked`, `selected_index`, `range_value`. `FormControlProp::current_value` is a non-owning cache alias and is rebuilt from ViewState after prop churn.
 - Text-control and DOM **selection/caret**: the canonical `DomSelection`/`EditingSelection` boundary points, text-control `selection_start/end/direction`.
 - **Focus** target.
 - **Scroll positions**: document `scroll_x/scroll_y`, `zoom_level`, and per-view `ViewState.scroll.x/y`.

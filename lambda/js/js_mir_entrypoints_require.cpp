@@ -788,7 +788,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     }
     g_active_mir_ctx = ctx;  // track for batch timeout recovery
 
-    mt->preamble_mode = g_jm_preamble_mode;
     if (g_jm_preamble_in) {
         mt->preamble_entries = g_jm_preamble_in->entries;
         mt->preamble_entry_count = g_jm_preamble_in->entry_count;

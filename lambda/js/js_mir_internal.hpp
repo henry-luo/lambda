@@ -539,7 +539,6 @@ MIR_reg_t jm_link_static_super_prototype(JsMirTranspiler* mt,
         MIR_reg_t cls_obj, MIR_reg_t proto_obj, JsClassEntry* static_superclass);
 MIR_reg_t jm_emit_current_class_prototype(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         MIR_reg_t fallback_proto);
-void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_class_instance_field_metadata(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_class_instance_computed_field_metadata_keys(JsMirTranspiler* mt,
     MIR_reg_t cls_obj, JsClassEntry* ce);
@@ -557,6 +556,11 @@ MIR_reg_t jm_emit_class_prototype_chain(JsMirTranspiler* mt, JsClassEntry* ce,
     MIR_reg_t checked_heritage_val, bool* heritage_is_null_out);
 void jm_emit_class_length_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     JsClassEntry* ce);
+void jm_emit_class_static_methods(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+    MIR_reg_t class_proto_obj, JsClassEntry* ce, JsClassEntry* static_superclass,
+    JsMirComputedKeyOrder own_key_order);
+void jm_emit_class_instance_methods(JsMirTranspiler* mt, MIR_reg_t proto_obj,
+    MIR_reg_t cls_obj, JsClassEntry* ce);
 void jm_emit_begin_lexical_this_rebind(JsMirTranspiler* mt, MIR_reg_t value,
     JsMirLexicalThisRebind* state, bool restore_binding);
 void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,
@@ -623,11 +627,10 @@ static inline const String* jm_param_binding_name(JsAstNode* param_node) {
     JsIdentifierNode* identifier = jm_get_param_identifier(param_node);
     return identifier ? identifier->name : NULL;
 }
-void jm_collect_functions(JsMirTranspiler* mt, JsAstNode* node);
+void jm_collect_indexed_functions(JsMirTranspiler* mt);
+int jm_indexed_synthetic_field_initializer_count(const AstIndex* index);
 JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn);
 bool jm_func_has_param_named(JsFunctionNode* fn, const char* name, int name_len);
-TypeId jm_detect_ctor_field_type(JsAstNode* rhs);
-void jm_scan_ctor_props(JsMirTranspiler* mt, JsFuncCollected* fc);
 JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len);
 void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc);
 bool jm_add_chain_has_string(JsAstNode* expr);
@@ -636,11 +639,6 @@ ScalarReturnClass jm_infer_boxed_return_scalar_class(JsMirTranspiler* mt,
     JsFuncCollected* fc);
 void jm_emit_finalize_function(JsMirTranspiler* mt, MIR_reg_t fn_reg,
     JsFuncCollected* fc, JsFunctionNode* fn_node);
-bool jm_expression_has_float_hint(JsAstNode* node);
-bool jm_prescan_is_float_array(struct hashmap* float_arrays, const char* name);
-bool jm_prescan_has_float_array_access(JsAstNode* node, struct hashmap* float_arrays);
-void jm_prescan_widen_walk(JsAstNode* node, struct hashmap* float_arrays,
-                                   struct hashmap* widen_vars);
 void jm_prescan_float_widening(JsMirTranspiler* mt, JsAstNode* body);
 bool jm_should_widen_to_float(JsMirTranspiler* mt, const char* vname);
 MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg_count);
@@ -678,6 +676,8 @@ int jm_capture_env_slot(FnCapture* capture, int dense_slot);
 MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn);
 void jm_emit_class_static_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     MIR_reg_t key, MIR_reg_t value, bool private_brand);
+void jm_emit_class_static_named_field(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+    JsStaticFieldEntry* sf, MIR_reg_t value);
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
 MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr);
@@ -695,8 +695,6 @@ void jm_emit_error_lane_propagate_check(JsMirTranspiler* mt);
 void jm_emit_class_static_field(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce, JsStaticFieldEntry* sf);
 void jm_emit_class_static_block(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     JsClassEntry* ce, JsAstNode* block);
-bool jm_emit_class_static_source_order(JsMirTranspiler* mt, MIR_reg_t cls_obj,
-    JsClassEntry* ce);
 void jm_emit_class_static_initializers(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce,
     MIR_reg_t ctor_super_val);
 typedef struct JsMirClassSetup {

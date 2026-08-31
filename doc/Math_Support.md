@@ -11,7 +11,7 @@ Lambda supports mathematical typesetting via a dedicated LaTeX math parser and a
 Pass a raw math expression string directly to `input()` with type `'math'` or `'math-latex'`:
 
 ```lambda
-let ast = input('\frac{a+b}{c}', 'math')
+let ast = input("\\frac{a+b}{c}", 'math')
 ```
 
 | Type string      | Meaning                                  |
@@ -59,10 +59,10 @@ Math is rendered to HTML using the `lambda.package.math` package. The package co
 ### 2.1 Lambda API
 
 ```lambda
-import math: lambda.package.math
+import math: lambda.package.math.math
 
 // Parse and render in one step
-let ast     = input('\sum_{k=1}^{n} k^2', 'math')
+let ast     = input("\\sum_{k=1}^{n} k^2", 'math')
 let inline  = math.render_inline(ast)        // inline (text) style
 let display = math.render_display(ast)       // display (block) style
 let alone   = math.render_standalone(ast)    // display + embedded CSS

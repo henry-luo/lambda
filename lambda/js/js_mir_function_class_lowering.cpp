@@ -58,12 +58,6 @@ static MIR_reg_t jm_emit_module_const_or_null(JsMirTranspiler* mt, const char* n
     if (entry && entry->const_type == MCONST_MODVAR) {
         return jm_load_module_var(mt, (uint32_t)entry->int_val);
     }
-    if (entry && entry->const_type == MCONST_FUNC) {
-        int fi = (int)entry->int_val;
-        if (fi >= 0 && fi < mt->func_count && mt->func_entries[fi].func_item) {
-            return jm_create_func_or_closure(mt, &mt->func_entries[fi]);
-        }
-    }
     return jm_emit_null(mt);
 }
 
@@ -311,22 +305,10 @@ MIR_reg_t jm_emit_class_object_for_entry(JsMirTranspiler* mt, JsClassEntry* ce) 
     return jm_transpile_box_item(mt, (JsAstNode*)&identifier);
 }
 
-void jm_emit_set_private_class_index(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce) {
-    if (!mt || !cls_obj || !ce || mt->class_count <= 0) return;
-    int class_index = (int)(ce - mt->class_entries);
-    jm_call_void_2(mt, "js_set_private_class_index",
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, cls_obj),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, class_index));
-}
-
 void jm_emit_set_function_home_class(JsMirTranspiler* mt, MIR_reg_t fn_item,
         MIR_reg_t cls_obj) {
     if (!mt || !fn_item || !cls_obj) return;
     jm_callr_void_2(mt, "js_set_function_home_class", fn_item, cls_obj);
-    // Preserve the legacy user-visible backing property while the dispatcher
-    // reads the dedicated field installed above.
-    MIR_reg_t home_key = jm_box_property_name_literal(mt, "__home_class__", 14);
-    jm_callr_3(mt, "js_set_key_default", MIR_T_I64, fn_item, home_key, cls_obj);
 }
 
 static bool jm_private_static_method_brand_seen(JsClassEntry* ce, int method_index) {
@@ -1300,9 +1282,6 @@ static void jm_begin_resumable_state_machine(JsMirTranspiler* mt,
     mt->in_async = is_async;
     mt->gen_yield_index = 0;
     mt->gen_yield_count = state_count;
-    mt->gen_capture_offset = layout->capture_offset;
-    mt->gen_param_offset = layout->param_offset;
-    mt->gen_local_offset = layout->local_offset;
     mt->gen_local_slot_count = layout->dynamic_start;
     mt->gen_dynamic_slot_limit = layout->spill_start;
     mt->gen_spill_slot_next = layout->spill_start;
@@ -3030,18 +3009,6 @@ bool jm_try_eval_const_expr(JsMirTranspiler* mt, JsAstNode* node, double* result
     if (node->node_type == JS_AST_NODE_LITERAL) {
         JsLiteralNode* lit = (JsLiteralNode*)node;
         if (lit->literal_type == JS_LITERAL_NUMBER) { *result = lit->value.number_value; return true; }
-        return false;
-    }
-
-    // Identifier referencing a known module const
-    if (node->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* id = (JsIdentifierNode*)node;
-        const char* vname = jm_var_name(id->name);
-        JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
-        if (mc) {
-            if (mc->const_type == MCONST_INT) { *result = (double)mc->int_val; return true; }
-            if (mc->const_type == MCONST_FLOAT) { *result = mc->float_val; return true; }
-        }
         return false;
     }
 

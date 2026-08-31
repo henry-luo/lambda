@@ -39,44 +39,33 @@
 #include <unistd.h>  // getcwd
 #endif
 
-struct JsClassEntry;  // forward declaration for JsMirVarEntry.class_entry
+struct JsClassEntry;
 
 typedef MirRootBinding JsMirRootBinding;
 typedef MirEnvBinding JsMirEnvBinding;
 
 // Native bodies state their ABI result independently of the JS-inferred
-// return type. BOXED/VOID remain unavailable until their complete lowering and
-// direct-call contracts exist; treating either as an integer changes JS.
+// return type. The current direct-call contract admits only numeric lanes;
+// all other results remain on the boxed entry.
 enum NativeReturnKind : uint8_t {
     NATIVE_RETURN_NONE = 0,
     NATIVE_RETURN_INT,
     NATIVE_RETURN_FLOAT,
-    NATIVE_RETURN_BOXED,
-    NATIVE_RETURN_VOID,
 };
 // ============================================================================
 
 // Module-scope constants: variables, functions, classes declared at top level.
 enum JsModuleConstType {
-    MCONST_INT,
-    MCONST_FLOAT,
-    MCONST_NULL,
-    MCONST_UNDEFINED,
-    MCONST_BOOL,
     MCONST_CLASS,   // class name: int_val = module var index for the class object
-    MCONST_FUNC,    // function declaration: int_val = index into func_entries
     MCONST_MODVAR,  // runtime module variable: int_val = index into js_module_vars[]
 };
 
 struct JsModuleConstEntry {
     const char* name;   // NamePool-owned semantic binding name
     JsModuleConstType const_type;
-    int64_t int_val;    // for MCONST_INT and MCONST_BOOL (0/1)
-    double float_val;   // for MCONST_FLOAT
-    bool is_int;        // legacy compat: true for int, false for float
+    int64_t int_val;    // module variable index
     bool is_iife_var;   // true if promoted from IIFE scope (write-through always)
     TypeId modvar_type; // P5: for MCONST_MODVAR, the known initial type
-    JsClassEntry* class_entry;  // P7: non-NULL if module var is a known class instance
     int var_kind;       // v20 TDZ: 0=var, 1=let, 2=const (for MCONST_MODVAR)
     bool is_implicit_global; // true if registered as implicit global (not explicitly declared)
     bool is_nested_func_hoist; // true if from nested function decl name (Annex B candidate, not a real var)
@@ -186,17 +175,9 @@ struct JsFuncCollected {
     bool is_constructor;            // true if this function is a class constructor
     bool is_derived_constructor;    // true if class constructor has [[ConstructorKind]] derived
     bool is_class_method;           // true for any class method/accessor/constructor
-    bool is_class_static_method;    // true for static class methods/accessors
     bool is_class_field_initializer; // synthetic per-instance field capability
     JsClassEntry* owner_class;       // innermost class whose lexical body contains this function
     bool is_strict;                  // v30: true if function is strict mode (own directive, inherits, or class method)
-    // A5: Constructor shape pre-allocation
-    int ctor_prop_count;            // number of this.xxx = yyy properties found
-    bool ctor_shape_overflow;       // optimization disabled after exceeding shape metadata capacity
-    const char* ctor_prop_ptrs[16]; // pointers to pool-stable property name strings
-    int ctor_prop_lens[16];         // lengths of each property name
-    TypeId ctor_prop_types[16];     // P1: detected field type from constructor init (LMD_TYPE_NULL = unknown)
-    int ctor_prop_param_idx[16];    // P4b: maps property → constructor param index (-1 = not a param)
 };
 
 static inline FnAnalysis* jm_function_analysis(JsFuncCollected* fc) {
@@ -414,20 +395,18 @@ struct JsMirTranspiler {
 
     // Collected functions (pre-pass)
     JsAstNode* root_node;
-    JsFuncCollected* func_entries;      // exact-sized after the shared count pass
+    JsFuncCollected* func_entries;      // exact-sized from shared indexed identity
     int func_capacity;
     int func_count;
-    JsFuncCollected** func_by_id;       // shared AstIndex function identity -> collected entry
     // JS compilation only: exact indexed-subtree links avoid repeated parent
     // walks while keeping the shared AstIndex lightweight for Lambda clients.
     AstNodeId* indexed_subtree_storage;
     uint32_t indexed_traversal_count;
 
     // Collected classes
-    JsClassEntry* class_entries;        // exact-sized after the shared count pass
+    JsClassEntry* class_entries;        // exact-sized from shared indexed identity
     int class_capacity;
     int class_count;
-    bool collection_count_only;
     bool collection_failed;
     // Built once from AstIndex: each function's same-spelling binding cells.
     bool scope_slot_collisions_prepared;
@@ -469,7 +448,6 @@ struct JsMirTranspiler {
 
     // P9: Variable widening from INT→FLOAT (pre-scan)
     struct hashmap* widen_to_float;  // set of variable names that should be FLOAT
-    struct hashmap* force_boxed;     // set of variable names that must use boxed Item (non-numeric assignments)
 
     // Module-level constants: name -> value (for top-level const with literal init)
     struct hashmap* module_consts;   // name -> JsModuleConstEntry
@@ -497,15 +475,10 @@ struct JsMirTranspiler {
     // TDZ. Retain every such cell until that binding initializes.
     JsMirTdzClosureCapture tdz_closure_captures[JS_MIR_TDZ_CLOSURE_CAPTURE_MAX];
     int tdz_closure_capture_count;
-    bool allow_loop_let_scope_env_for_immediate_call;
-    bool preserve_last_closure_env_after_readback;
     bool force_closure_env_copy;    // class field initializers need a stable lexical this cell
 
     // Assignment target hint for closure self-capture detection in copy-env path
     const char* assign_target_vname;  // set before RHS eval, NULL otherwise
-
-    // Phase 1: parent function tracking during collection
-    int collect_parent_func_index;   // current parent func index (-1 = top level)
 
     // Scope env: shared closure environment for all child closures in current function
     MIR_reg_t scope_env_reg;         // register holding current func's scope env (0 if none)
@@ -517,8 +490,6 @@ struct JsMirTranspiler {
     bool is_global_strict;           // v20: true when top-level "use strict" directive present
     bool is_eval_direct;             // true when compiling eval code as direct script (sloppy-mode var export)
     uint64_t template_site_salt;      // non-zero for eval compilations; separates eval template sites
-    int cascade_debug_site_counter;  // compile-local diagnostic site IDs
-    int fallback_debug_site_counter;
     MIR_reg_t namespace_reg;         // register holding module namespace object (when is_module)
     const char* filename;            // path of current file being compiled
 
@@ -535,9 +506,6 @@ struct JsMirTranspiler {
     // Generator variable-to-env-slot mapping
     int gen_local_slot_count;        // total env slots (captures + params + locals)
     int gen_dynamic_slot_limit;      // first spill slot; lexical homes stay below it
-    int gen_capture_offset;          // start of captures in env
-    int gen_param_offset;            // start of params in env
-    int gen_local_offset;            // start of locals in env
     int gen_spill_slot_next;         // next available spill slot in env (for temporaries across yields)
     int gen_active_iterator_slot;    // iterator to close if generator.return interrupts destructuring
 
@@ -566,8 +534,6 @@ struct JsMirTranspiler {
     JsAstNode* arguments_params;     // simple formal parameters mapped to arguments, or NULL
     int arguments_param_scope_depth; // lexical scope containing those formal bindings
 
-    // Batch preamble mode: compile harness (sta.js + assert.js) so func decls persist as module vars
-    bool preamble_mode;
     // With-preamble mode: pre-seed module_consts from harness compilation
     JsModuleConstEntry* preamble_entries;   // array of entries to pre-seed (owned by caller)
     int preamble_entry_count;

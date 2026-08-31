@@ -1,6 +1,6 @@
 {
   "name": "block-in-inline-005: onclick toggles display block↔inline",
-  "html": "test/layout/data/js/block-in-inline-005.htm",
+  "html": "test/layout/data/baseline/block-in-inline-005.htm",
   "description": "Click on body toggles #test between display:block and display:inline. Text should collapse into one line when #test becomes inline.",
   "events": [
     {"type": "log", "message": "=== block-in-inline-005: onclick toggles display ==="},

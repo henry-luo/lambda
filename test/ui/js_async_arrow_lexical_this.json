@@ -1,5 +1,6 @@
 {
   "name": "async arrow callbacks retain constructor lexical this",
+  "html": "test/html/js_async_arrow_lexical_this.html",
   "events": [
     { "type": "assert_text", "target": { "selector": "#result" }, "equals": "2" }
   ]

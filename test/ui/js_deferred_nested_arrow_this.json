@@ -1,5 +1,6 @@
 {
   "name": "deferred nested command closure survives DOM listener dispatch",
+  "html": "test/html/js_deferred_nested_arrow_this.html",
   "events": [
     {"type": "click", "target": {"selector": "#open"}},
     {"type": "assert_count", "target": {"selector": "#swatch"}, "count": 1},

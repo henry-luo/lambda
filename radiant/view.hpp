@@ -2866,10 +2866,10 @@ struct FormControlProp {
 
     // ------------------------------------------------------------------
     // Text-control selection state (input text-types and textarea only)
-    //   - current_value:  mutable user-edited value (UTF-8). When non-null
-    //     this is the live `.value` IDL attribute. nullptr ⇒ fall back to
-    //     `value` HTML attribute (for input) or text content (for textarea).
-    //     Heap-allocated via malloc/realloc; freed in destructor.
+    //   - current_value: borrowed cache of ViewState.form.current_value, the
+    //     live UTF-8 `.value` IDL attribute. nullptr ⇒ fall back to the HTML
+    //     default while initialization creates the canonical ViewState buffer.
+    //     This prop never allocates or frees the buffer.
     //   - selection_start/end:  UTF-16 code-unit offsets into the value.
     //   - selection_direction:  0=none, 1=forward, 2=backward.
     //   - tc_initialized: lazy-init flag (selection set to (len,len) on
@@ -2936,8 +2936,8 @@ inline float form_select_dropdown_row_height(const FormControlProp* form) {
 // scratch — this function only assigns the non-zero defaults.
 void form_control_prop_init(FormControlProp* f);
 
-// Release owned heap pointers (current_value, custom_validity_msg,
-// value_at_focus). Does NOT free `f` itself.
+// Release owned heap pointers (custom_validity_msg, value_at_focus). Clears
+// the borrowed current_value cache but does not free it or `f` itself.
 void form_control_prop_release(FormControlProp* f);
 
 // Release a form-control property attached to a DOM element. This is used by

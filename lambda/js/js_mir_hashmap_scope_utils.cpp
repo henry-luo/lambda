@@ -212,7 +212,6 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->em.lookup_import_metadata = jit_import_get_metadata;
     mt->is_module = is_module;
     mt->filename = filename;
-    mt->cascade_debug_site_counter = 100;
     mt->em.import_cache = em_import_cache_new(import_capacity);
     mt->local_funcs = hashmap_new(sizeof(JsLocalFuncEntry), local_func_capacity, 0, 0,
         js_local_func_hash, js_local_func_cmp, NULL, NULL);
@@ -232,7 +231,6 @@ JsMirTranspiler* jm_create_mir_transpiler(
     mt->scope_depth = 0;
     mt->var_hoist_depth = -1;
     mt->loop_scope_depth = -1;
-    mt->collect_parent_func_index = -1;
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
     mt->current_func_index = -1;

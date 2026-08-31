@@ -13,6 +13,7 @@ import keymap: lambda.package.dom.keymap
 import dom_edit: lambda.package.dom.dom_edit
 import commands: lambda.package.dom.commands
 import submit: lambda.package.dom.submit
+import details: lambda.package.dom.details
 
 // Checkbox activation: a click flips checkedness unless the control is
 // disabled, and clears the indeterminate bit (HTML 4.10.5.1.15).

@@ -31,7 +31,7 @@ This proposal supersedes the text-editing portion of [Radiant_Form2.md](Radiant_
 |------|------|--------------|
 | DOM tagging | [lambda/input/css/dom_element.cpp](../../lambda/input/css/dom_element.cpp) | Recognizes `<input>`, `<textarea>`; sets `:checked`, `:disabled` |
 | Form model | [radiant/form_control.hpp](../../radiant/form_control.hpp) | `FormControlProp`, `FormControlType`, intrinsic-size constants |
-| Text-control API | [radiant/text_control.hpp](../../radiant/text_control.hpp), [text_control.cpp](../../radiant/text_control.cpp) | `tc_set_value`, `tc_set_selection_range`, UTF‑8↔UTF‑16, lazy init, focus tracking, legacy↔form sync |
+| Text-control API | [radiant/text_control.hpp](../../radiant/text_control.hpp), [text_control.cpp](../../radiant/text_control.cpp) | `tc_set_value`, `tc_set_selection_range`, UTF‑8↔UTF‑16, lazy init, focus tracking, ViewState ownership and prop-cache rebind |
 | Selection / caret | [radiant/dom_range.cpp](../../radiant/dom_range.cpp), [dom_range_resolver.cpp](../../radiant/dom_range_resolver.cpp), `state->caret` / `state->selection` in [radiant/event.cpp](../../radiant/event.cpp) | Cross-view selection, glyph-precise caret |
 | Layout | [radiant/layout_form.cpp](../../radiant/layout_form.cpp), [intrinsic_sizing.cpp](../../radiant/intrinsic_sizing.cpp) | Replaced-element sizing for inputs/textarea |
 | Render | [radiant/render_form.cpp](../../radiant/render_form.cpp) | Border, value text, placeholder, caret, selection highlight |
@@ -43,7 +43,7 @@ This proposal supersedes the text-editing portion of [Radiant_Form2.md](Radiant_
 ### 2.2 What Already Works
 
 - **Element identity & lazy init** — `tc_is_text_control()` recognises text-like inputs and `<textarea>`; `tc_ensure_init()` populates `current_value` from HTML defaults on first access.
-- **Value & selection state** — `FormControlProp::current_value` (UTF-8) plus `selection_start/end` (UTF-16 code units) with `selection_direction`. UTF-8↔UTF-16 conversion helpers exist.
+- **Value & selection state** — `ViewState.data.form.current_value` owns live UTF-8 `.value`; `FormControlProp::current_value` is its cache. Selection uses `selection_start/end` (UTF-16 code units) with `selection_direction`. UTF-8↔UTF-16 conversion helpers exist.
 - **Caret rendering & blink** — `render_form.cpp` draws a 1px caret inside the content box; selection highlight is glyph-precise and matches the caret math.
 - **Mouse** — click sets caret via `selection_start()`; drag extends via `selection_extend()` with glyph-precise X→offset; cross-view selection works.
 - **Keyboard navigation** — Left / Right walk UTF‑8 codepoints; Up / Down do line-aware caret movement in `<textarea>`; Home / End / Backspace / Delete; Shift+arrow extends selection.
@@ -141,14 +141,14 @@ struct FormControlProp {
 };
 ```
 
-**Rationale:** Reuse the canonical `current_value` + `selection_start/end` already shared with `js_dom.cpp`. The undo ring snapshots the *whole* value; for typical input sizes (< a few KB) memory is negligible and rollback is O(1) on the buffer side.
+**Rationale:** `ViewState.data.form.current_value` is canonical and shared with `js_dom.cpp`; the form prop only caches its pointer. The undo ring snapshots the *whole* value; for typical input sizes (< a few KB) memory is negligible and rollback is O(1) on the buffer side.
 
 ### 3.2 Editing Operations — `text_edit.{hpp,cpp}` (new)
 
 A thin operations layer that all mouse / keyboard / IME / JS paths call into. Every op:
 
 1. Pushes a history entry **iff** it changes the value (coalescing rules in §3.5).
-2. Mutates `current_value` via `tc_set_value` (so the legacy-bridge stays consistent).
+2. Mutates the canonical ViewState value through `tc_set_value` (which rebinds the legacy form cache).
 3. Updates selection via `tc_set_selection_range`.
 4. Dispatches `beforeinput` (cancellable), then `input`, then queues `selectionchange`.
 5. Schedules caret-into-view scroll on the next frame.
