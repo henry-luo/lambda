@@ -6519,7 +6519,19 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     // text-input formula is 0.7px short and distorts grid rows.
                     return view->form->intrinsic_height;
                 }
-                height = font_size + 2 * FormDefaults::TEXT_PADDING_V;
+                if (view->form) {
+                    // HTML form controls use their resolved normal line height
+                    // when author CSS scales the control's font; reuse the
+                    // layout path so intrinsic grid tracks see the same content
+                    // contribution as the final replaced box.
+                    IntrinsicSize measured = layout_measure_form_control(
+                        lycon, view, AvailableSpace::make_indefinite());
+                    height = measured.max_height > 0.0f
+                        ? measured.max_height
+                        : font_size + 2 * FormDefaults::TEXT_PADDING_V;
+                } else {
+                    height = font_size + 2 * FormDefaults::TEXT_PADDING_V;
+                }
             } else {
                 // select
                 bool is_listbox = view->form &&

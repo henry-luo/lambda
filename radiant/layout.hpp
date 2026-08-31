@@ -3629,6 +3629,8 @@ struct LayoutFontSizeResult {
     bool from_medium;
 };
 
+static inline bool layout_font_size_value_is_relative(const CssValue* value);
+
 inline LayoutFontSizeResult layout_resolve_font_size_value(
     LayoutContext* lycon, const CssValue* raw_value, FontProp* base_font,
     bool resolve_vars) {
@@ -3668,6 +3670,11 @@ inline LayoutFontSizeResult layout_resolve_font_size_value(
         if (value->data.number.value == 0.0) result.value = 0.0f;
     } else if (value->type == CSS_VALUE_TYPE_FUNCTION) {
         result.value = resolve_length_value(lycon, CSS_PROPERTY_FONT_SIZE, value);
+    }
+    if (result.value > 0.0f &&
+        layout_font_size_value_is_relative(value) && lycon->ui_context &&
+        lycon->ui_context->minimum_logical_font_size > result.value) {
+        result.value = lycon->ui_context->minimum_logical_font_size;
     }
     return result;
 }
@@ -4081,6 +4088,22 @@ static inline bool layout_css_value_any(const CssValue* value, Predicate predica
         }
     }
     return false;
+}
+
+static inline bool layout_font_size_relative_leaf(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
+    if (value->type == CSS_VALUE_TYPE_LENGTH &&
+        value->data.length.unit == CSS_UNIT_EM) return true;
+    return value->type == CSS_VALUE_TYPE_KEYWORD &&
+        (value->data.keyword == CSS_VALUE_LARGER ||
+         value->data.keyword == CSS_VALUE_SMALLER);
+}
+
+static inline bool layout_font_size_value_is_relative(const CssValue* value) {
+    // Chromium applies its minimum logical font size to direct relative
+    // values, but preserves authored calc() results such as diagnostic scales.
+    return layout_font_size_relative_leaf(value);
 }
 
 static inline bool layout_element_is_floated(const DomElement* element) {

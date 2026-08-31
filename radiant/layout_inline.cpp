@@ -405,6 +405,39 @@ static bool ruby_annotation_node(DomNode* node) {
     return node && node->is_element() && node->tag() == MARKUP_NAME_RT;
 }
 
+static bool ruby_annotation_display_is_misparented(DomNode* node,
+                                                   DisplayValue display) {
+    if (!node || !node->is_element() ||
+        (display.inner != CSS_VALUE_RUBY_TEXT &&
+         display.inner != CSS_VALUE_RUBY_TEXT_CONTAINER)) {
+        return false;
+    }
+    if (!node->parent || !node->parent->is_element()) return true;
+    DisplayValue parent_display = resolve_display_value(node->parent);
+    return parent_display.inner != CSS_VALUE_RUBY &&
+        parent_display.inner != CSS_VALUE_RUBY_TEXT_CONTAINER;
+}
+
+static void contribute_misparented_ruby_annotation_line_height(
+        LayoutContext* lycon, ViewSpan* annotation,
+        const Linebox* base_line_before_annotation) {
+    if (!lycon || !annotation || !base_line_before_annotation) return;
+    float annotation_extent = max(annotation->height, annotation->content_height);
+    if (annotation_extent <= 0.0f) return;
+
+    float base_line_extent = max(
+        base_line_before_annotation->max_atomic_inline_height,
+        base_line_before_annotation->max_ascender +
+            base_line_before_annotation->max_descender);
+    // css-ruby §2.2/§3.6: a misparented annotation gets an anonymous empty
+    // base, whose line still contributes the containing block's line-height.
+    base_line_extent = max(base_line_extent, lycon->block.line_height);
+    if (base_line_extent <= 0.0f) return;
+    lycon->line.ruby_annotation_min_line_height = max(
+        lycon->line.ruby_annotation_min_line_height,
+        base_line_extent + annotation_extent);
+}
+
 static bool ruby_has_visible_base_content(ViewSpan* ruby) {
     for (View* child = ruby ? ruby->first_child : nullptr; child; child = child->next()) {
         if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child)) {
@@ -2277,6 +2310,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     float inline_fragment_start_x = lycon->line.advance_x;
     float inline_fragment_start_y = lycon->block.advance_y;
     bool is_ruby_container = display.inner == CSS_VALUE_RUBY;
+    bool misparented_ruby_annotation =
+        ruby_annotation_display_is_misparented(elmt, display);
+    Linebox base_line_before_ruby_annotation = lycon->line;
     bool empty_ruby_base = false;
     float empty_ruby_inline_advance = 0.0f;
     if (is_ruby_container) {
@@ -2519,6 +2555,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         span->set_has_fragment_union(FRAGMENT_UNION_SPLIT_INLINE, false);
     }
     compute_span_bounding_box(span, span_is_multi_line, font_box_handle(&lycon->font));
+    if (misparented_ruby_annotation) {
+        contribute_misparented_ruby_annotation_line_height(
+            lycon, span, &base_line_before_ruby_annotation);
+    }
     if (!had_children && has_inline_axis_decoration) {
         float border_left = 0.0f;
         float padding_left = 0.0f;

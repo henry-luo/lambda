@@ -333,6 +333,8 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
         0.0f, // normal fonts must not inherit initial-letter computed-size state
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     legacy_default_font.font_size_from_medium = true;
+    // Chromium's desktop UA preference keeps relative text at or above 6 CSS px.
+    minimum_logical_font_size = 6.0f;
     fallback_fonts = ::fallback_fonts;
 
     // init vector rendering engine

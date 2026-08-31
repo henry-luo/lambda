@@ -1497,6 +1497,7 @@ typedef struct CssSelfAlignment {
     bool safe;
     bool overflow_explicit;
     bool last_baseline;
+    bool legacy;
 } CssSelfAlignment;
 
 static inline int css_self_alignment_value_count(const CssValue* value) {
@@ -3462,6 +3463,7 @@ typedef struct UiContext {
     Arena* font_glyph_arena; // factory-registered arena for glyph bitmap caches
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
+    float minimum_logical_font_size;  // UA minimum for relative font sizes; zero disables
     char** fallback_fonts;  // fallback fonts
 
     // @font-face support
