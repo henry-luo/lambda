@@ -64,13 +64,23 @@ void parse_jsx(Input* input, const char* jsx_string);
 
 void parse_math(Input* input, const char* math_string, const char* flavor);
 
-// ── Markup and LaTeX (C linkage — called from MIR JIT) ─────────────
+// Direct parsers used by the input dispatcher. They have no Tree-sitter dependency.
+void parse_latex_direct(Input* input, const char* latex_string);
+#ifdef __cplusplus
+extern "C" {
+#endif
+Item parse_math_direct_to_ast(Input* input, const char* math_source, size_t math_len,
+                              const char* flavor);
+#ifdef __cplusplus
+}
+#endif
+
+// ── Markup (C linkage — called from MIR JIT) ───────────────────────
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void parse_latex_ts(Input* input, const char* latex_string);
 Item input_markup_modular(Input* input, const char* content);
 Item input_markup_commonmark(Input* input, const char* content);
 

@@ -269,6 +269,26 @@ TEST_F(KeyframeParsingTest, TransformKeyframes) {
     EXPECT_FLOAT_EQ(tf->params.translate.x, -100.0f);
 }
 
+TEST_F(KeyframeParsingTest, TransformKeyframesResolveCssAngleAndPercentUnits) {
+    setupKeyframes("tail { from { transform: translateY(7%) rotate(1deg); } }");
+
+    KeyframeRegistry* registry = keyframe_registry_create(&doc, pool);
+    CssKeyframes* kf = keyframe_registry_find(registry, "tail");
+    ASSERT_NE(kf, nullptr);
+    ASSERT_EQ(kf->stop_count, 1);
+
+    TransformFunction* translate = kf->stops[0].properties[0].value.transform;
+    ASSERT_NE(translate, nullptr);
+    EXPECT_EQ(translate->type, TRANSFORM_TRANSLATEY);
+    EXPECT_FLOAT_EQ(translate->params.translate.y, 0.0f);
+    EXPECT_FLOAT_EQ(translate->translate_y_percent, 7.0f);
+
+    TransformFunction* rotate = translate->next;
+    ASSERT_NE(rotate, nullptr);
+    EXPECT_EQ(rotate->type, TRANSFORM_ROTATE);
+    EXPECT_NEAR(rotate->params.angle, acosf(-1.0f) / 180.0f, 0.00001f);
+}
+
 TEST_F(KeyframeParsingTest, ColorKeyframes) {
     setupKeyframes("colorShift { from { background-color: #ff0000; } to { background-color: #0000ff; } }");
 

@@ -187,6 +187,7 @@ Item js_mir_compile_unit_fail(MIR_context_t ctx, JsMirTranspiler* mt,
     EvalContext* js_context, bool reusing_context,
     int mir_gen_initialized = -1);
 bool js_link_compiled_name_table(const JsMirTranspiler* mt);
+bool js_prelink_compiled_name_table(const JsMirTranspiler* mt);
 bool js_append_compiled_name_table(const JsMirTranspiler* mt);
 bool js_capture_compiled_name_table(const JsMirTranspiler* mt, JsPreambleState* state);
 bool jm_build_property_key_image(const PropertyKeySpec* inherited,
@@ -197,7 +198,7 @@ bool jm_build_property_key_image(const PropertyKeySpec* inherited,
 // ES module (always strict), or the enclosing function's own directive.
 static inline bool jm_strict_put(JsMirTranspiler* mt) {
     return mt && (mt->is_global_strict || mt->is_module ||
-        (mt->current_fc && mt->current_fc->is_strict));
+        (mt->current_fc && JM_JS_FACT(mt->current_fc, is_strict)));
 }
 MIR_reg_t jm_new_reg(JsMirTranspiler* mt, const char* prefix, MIR_type_t type);
 MIR_label_t jm_new_label(JsMirTranspiler* mt);
@@ -343,8 +344,6 @@ void jm_collect_indexed_func_assignments(JsMirTranspiler* mt, JsAstNode* node,
     struct hashmap* names);
 void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
     struct hashmap* refs);
-bool jm_index_node_descends(AstIndex* index, AstNodeId node_id,
-    AstNodeId ancestor_id);
 void jm_collect_indexed_body_locals(JsMirTranspiler* mt, JsAstNode* node,
     struct hashmap* locals, bool var_only = false);
 void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names);
@@ -630,6 +629,7 @@ static inline const String* jm_param_binding_name(JsAstNode* param_node) {
 void jm_collect_indexed_functions(JsMirTranspiler* mt);
 int jm_indexed_synthetic_field_initializer_count(const AstIndex* index);
 JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn);
+JsClassEntry* jm_find_collected_class(JsMirTranspiler* mt, JsClassNode* class_node);
 bool jm_func_has_param_named(JsFunctionNode* fn, const char* name, int name_len);
 JsClassEntry* jm_find_class(JsMirTranspiler* mt, const char* name, int name_len);
 void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc);
@@ -739,7 +739,7 @@ void jm_emit_eval_local_ensure_frame(JsMirTranspiler* mt);
 void jm_emit_eval_local_pop_if_needed(JsMirTranspiler* mt);
 bool jm_scope_env_name_matches_binding(const char* scope_name, const char* name,
     JsAstNode* binding_node);
-bool transpile_js_mir_ast(JsMirTranspiler* mt, JsAstNode* root);
+bool transpile_js_mir_ast(JsMirTranspiler* mt);
 bool jm_validate_mir_labels(MIR_context_t ctx);
 bool js_activate_runtime_name_pool(void);
 bool js_prelink_compiled_name_table(const JsMirTranspiler* mt);

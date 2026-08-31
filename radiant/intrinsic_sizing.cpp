@@ -1658,7 +1658,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             kerning = font_get_kerning(font_box_handle(&lycon->font), prev_codepoint, codepoint);
         }
 
-        bool emoji_presentation = false;
+        bool emoji_presentation = utf_is_emoji_presentation_default(codepoint);
         size_t selector_pos = i + (size_t)bytes;
         if (selector_pos < length) {
             uint32_t selector = 0;
@@ -1667,9 +1667,8 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
             emoji_presentation = selector_bytes > 0 && selector == 0xFE0F;
         }
         bool glyph_loaded = false;
-        // VS16 selects the emoji face for both max-content measurement and
-        // final layout; measuring the base glyph in the text face undercounts
-        // dual-presentation clusters such as the warning sign.
+        // Emoji-default codepoints and VS16 select the emoji face for both
+        // max-content measurement and final layout.
         float advance = intrinsic_loaded_glyph_advance(
             lycon, codepoint, is_small_caps_lower, kerning,
             emoji_presentation, &glyph_loaded);
@@ -2902,8 +2901,12 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     IntrinsicSizes sizes = {0, 0};
 
     if (!element) return sizes;
+    uint32_t measurement_generation = lycon && lycon->doc && lycon->doc->view_tree
+        ? lycon->doc->view_tree->measurement_cache_generation : 0;
     if (!content_only && !intrinsic_percentage_width_is_indefinite(lycon) &&
-        element->styles_resolved() && element->has_cached_intrinsic_widths()) {
+        element->styles_resolved() && element->has_cached_intrinsic_widths() &&
+        element->layout_cache &&
+        element->layout_cache->intrinsic_measurement_generation == measurement_generation) {
         assert(element->layout_cache);
         return {element->layout_cache->intrinsic_min_content_width,
                 element->layout_cache->intrinsic_max_content_width};
@@ -5535,27 +5538,10 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         sizes.max_content += total_gap;
     }
 
-    // CSS Lists 3 §3: marker content contributes to the list item's intrinsic
-    // inline size when the list item participates in shrink-to-fit sizing.
+    // CSS Lists 3 §3: only an inside marker belongs to the principal box's
+    // intrinsic inline size; an outside marker is positioned externally.
     if (view_block->display.outer == CSS_VALUE_LIST_ITEM) {
         bool has_marker = true;  // default list-style-type is 'disc'
-
-        bool marker_has_shrink_to_fit_ancestor = false;
-        for (DomNode* anc = static_cast<DomNode*>(element); anc; anc = anc->parent) {
-            if (!anc->is_element()) continue;
-            DomElement* anc_elem = anc->as_element();
-            ViewBlock* anc_view = lam::unsafe_view_block_element_storage(anc_elem);
-            if (!anc_view) continue;
-            if (layout_element_is_floated(anc_elem)) {
-                bool auto_width = !anc_view->blk ||
-                    anc_view->block()->given_width_type == CSS_VALUE_AUTO ||
-                    anc_view->block()->given_width_type == CSS_VALUE__UNDEF;
-                if (auto_width) {
-                    marker_has_shrink_to_fit_ancestor = true;
-                    break;
-                }
-            }
-        }
 
         // Check list-style-type (if 'none', no marker) — also inherited
         if (view_block->blk && view_block->block_mut()->list_style_type == CSS_VALUE_NONE) {
@@ -5589,10 +5575,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         bool marker_has_table_ancestor = intrinsic_list_item_has_table_ancestor(element);
         if (has_marker &&
             ((marker_is_inside && !has_in_flow_block_child) ||
-             (marker_has_shrink_to_fit_ancestor && !has_in_flow_block_child) ||
              marker_has_table_ancestor)) {
             // CSS Tables sizes anonymous cells from all in-flow descendants;
-            // outside markers contribute only in the shrink-to-fit/table paths.
+            // a table fixup therefore retains its marker contribution.
             float marker_width = intrinsic_list_item_marker_width(lycon, view_block);
 
             // The marker participates in the list item's intrinsic inline size.
@@ -6016,6 +6001,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (cache) {
             cache->intrinsic_min_content_width = sizes.min_content;
             cache->intrinsic_max_content_width = sizes.max_content;
+            // Intrinsic contributions depend on this pass's computed style and font context.
+            cache->intrinsic_measurement_generation = measurement_generation;
             element->set_has_cached_intrinsic_widths(true);
         }
     }

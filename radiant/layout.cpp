@@ -2028,7 +2028,15 @@ bool layout_quirks_block_ignores_line_height(LayoutContext* lycon, ViewBlock* bl
         block = layout_nearest_block_ancestor(lycon->line.start_view->parent_view());
     }
     if (!block) return false;
+    bool table_cell = block->tag() == MARKUP_NAME_TD || block->tag() == MARKUP_NAME_TH;
     for (DomNode* child = block->first_child; child; child = child->next_sibling) {
+        DomElement* child_element = child->as_element();
+        // CSS 2.1 §9.5: floats are out of normal flow, so they cannot disable
+        // the quirks inline-only line-height rule for their containing cell.
+        if (table_cell && (layout_element_is_floated(child_element) ||
+            (child_element && layout_position_is_abs_fixed(child_element->position)))) {
+            continue;
+        }
         if (is_block_level_element(child)) return false;
     }
     return true;

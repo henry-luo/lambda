@@ -150,8 +150,10 @@ AstNode* build_while_from_parts(Transpiler* tp, SourceSpan span,
 AstNode* build_propagate_node_from_parts(Transpiler* tp, SourceSpan span,
     AstNode* operand);
 
-// Build one compilation unit directly from the recursive-descent/Pratt
-// reduction stream.  The caller owns the Transpiler/AST pool; on success the
-// returned root is safe to pass to the normal compiler pass manager.
-LambdaParseStatus lambda_rd_build_ast(Transpiler* tp, const char* source,
+// Reduce one compilation unit and construct its binding-bearing AST from the
+// recursive-descent/Pratt stream. Validation remains a later pass.
+LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,
         size_t length, AstScript** root_out, LambdaParseError* error);
+
+// Run post-reduction semantic validation and analysis for an already built AST.
+bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script);

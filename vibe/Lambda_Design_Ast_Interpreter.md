@@ -191,7 +191,7 @@ Each `AstFuncNode` (definition site) carries a promotion cell in its `FnAnalysis
 
 ### 5.2 The satellite module
 
-The promotion unit is a **satellite MIR module**: one Lambda function + its `_b` wrapper, emitted into the Script's existing `jit_context` (MIR supports many modules per context), linked with the existing `import_resolver`. The satellite lowering contract, item by item against what `transpile_mir_ast` does today:
+The promotion unit is a **satellite MIR module**: one Lambda function + its `_b` wrapper, emitted into the Script's existing `jit_context` (MIR supports many modules per context), linked with the existing `import_resolver`. The satellite lowering contract, item by item against the shared direct MIR schedule required by **D8.2.5**:
 
 | Whole-module step today | Satellite equivalent |
 |---|---|

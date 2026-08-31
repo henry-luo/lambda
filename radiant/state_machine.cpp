@@ -323,6 +323,13 @@ bool drag_transition(DocState* state,
                 if (!doc_state_begin_drag_drop(state, args->source, args->x, args->y, args->drag_data)) {
                     return false;
                 }
+                // ES21: a text drag carries the range it is moving from the
+                // moment it begins, so the drop half never has to infer it.
+                if (args->has_source_range) {
+                    doc_state_set_drag_source_range(state, args->source_start,
+                                                    args->source_end,
+                                                    args->press_offset);
+                }
                 break;
             case DRAG_TRANSITION_UPDATE_DROP_MOTION:
                 if (!args) return false;

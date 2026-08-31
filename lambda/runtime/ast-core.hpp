@@ -417,6 +417,11 @@ struct AstNode {
 // extension children, while core passes consume these dense IDs.
 typedef void (*AstChildVisitor)(AstNode* child, AstNode* parent, void* ctx);
 
+typedef struct AstFunctionIndexEntry {
+    AstNode* node;
+    AstFunctionId parent;
+} AstFunctionIndexEntry;
+
 typedef struct AstIndex {
     AstNode** nodes;
     AstNode** parents;
@@ -424,12 +429,14 @@ typedef struct AstIndex {
     // Each indexed node carries the binding edge resolved by the builder;
     // invalid means the node is not a name use or declaration.
     AstBindingId* node_bindings;
+    AstNodeId* first_children;
+    AstNodeId* next_siblings;
     NameScope** scopes;
     NameEntry** bindings;
     AstNode** classes;
     // Dense function roots make FunctionId the shared authority for Lambda
     // and JS lowering instead of requiring each frontend to rescan nodes.
-    AstNode** functions;
+    AstFunctionIndexEntry* functions;
     struct AstNodeFacts* facts;
     uint32_t count;
     uint32_t capacity;
@@ -442,6 +449,9 @@ typedef struct AstIndex {
     AstNodeId* slot_ids;
     uint32_t slot_capacity;
 } AstIndex;
+
+typedef bool (*AstIndexSubtreeVisitor)(const AstIndex* index,
+    AstNodeId node_id, void* context);
 
 typedef struct AstIndexPassContext { AstIndex* index; AstNode* root;
     const LangProfile* profile; } AstIndexPassContext;
@@ -475,12 +485,31 @@ bool ast_index_append_profile(AstIndex* index, AstNode* root, AstNode* parent,
 void ast_index_destroy(AstIndex* index);
 bool ast_index_publish_scope(AstIndex* index, NameScope* scope);
 AstNodeId ast_index_find(const AstIndex* index, const AstNode* node);
+AstNodeId ast_index_parent_id(const AstIndex* index, AstNodeId node_id);
+bool ast_index_visit_subtree(const AstIndex* index, AstNodeId root_id,
+                             AstIndexSubtreeVisitor visitor, void* context);
+bool ast_index_node_descends(const AstIndex* index, AstNodeId node_id,
+                             AstNodeId ancestor_id);
+AstClassId ast_index_nearest_class(const AstIndex* index, AstNodeId node_id,
+                                   bool include_node);
+bool ast_index_node_is_function(const AstNode* node);
 AstBindingId ast_index_binding_id(const AstIndex* index, const AstNode* node);
 NameEntry* ast_index_binding(const AstIndex* index, AstBindingId id);
 AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id);
 #ifdef __cplusplus
 }
 #endif
+
+static inline AstFunctionId ast_index_function_parent(const AstIndex* index,
+        AstFunctionId function_id) {
+    return index && index->functions && function_id < index->function_count
+        ? index->functions[function_id].parent : AST_FUNCTION_ID_INVALID;
+}
+
+static inline AstNode* ast_index_parent(const AstIndex* index, const AstNode* node) {
+    AstNodeId parent_id = ast_index_parent_id(index, ast_index_find(index, node));
+    return index && parent_id < index->count ? index->nodes[parent_id] : NULL;
+}
 
 typedef struct AstFieldNode : AstNode {
     AstNode *object;
@@ -1219,6 +1248,13 @@ typedef struct FnPromotionCell {
     void* boxed_entry;
 } FnPromotionCell;
 
+// Native JS bodies expose only numeric return lanes; other results stay boxed.
+enum NativeReturnKind : uint8_t {
+    NATIVE_RETURN_NONE = 0,
+    NATIVE_RETURN_INT,
+    NATIVE_RETURN_FLOAT,
+};
+
 typedef struct FnAnalysis {
     FnCapture* captures;
     int capture_capacity;
@@ -1239,7 +1275,26 @@ typedef struct FnAnalysis {
     bool js_observes_this;
     bool js_observes_new_target;
     bool js_uses_with;
+    bool js_is_strict;
     bool js_is_reassigned;
+    // JS collection/planning facts stay with the source function rather than
+    // the post-order MIR-emission entry (D8.2.4).
+    bool js_is_tco_eligible;
+    bool js_is_iife_body;
+    bool js_is_iife_func_decl;
+    bool js_is_constructor;
+    bool js_is_derived_constructor;
+    bool js_is_class_method;
+    bool js_is_class_field_initializer;
+    AstClassId js_owner_class_id;
+    bool js_closure_env_has_parent_link;
+    int js_closure_env_parent_link_slot;
+    bool js_reuse_parent_env;
+    int js_reuse_env_slot_count;
+    bool js_has_immediate_parent_env_link;
+    int js_immediate_parent_env_link_slot;
+    bool js_parent_env_link_uses_grandparent;
+    NativeReturnKind js_native_return_kind;
     TypeId js_return_type;
     ScalarReturnClass js_boxed_return_scalar_class;
     int js_formal_length;

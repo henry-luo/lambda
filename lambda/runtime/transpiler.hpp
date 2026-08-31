@@ -6,7 +6,6 @@
 #include "../lambda-data.hpp"
 
 #include "ast.hpp"
-#include "compiler_timing.hpp"
 
 // Shared range materialization helper for runtime sequence consumers.
 Item fn_chr(Item codepoint);

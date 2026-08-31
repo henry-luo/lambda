@@ -872,11 +872,9 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
     if (view->view_type == RDT_VIEW_INLINE) {
         ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(view);
         if (table_inline_span_is_phantom_for_cell_height(span)) return;
-        float descendant_line_height = cell_line_height;
-        if (span->content_height > descendant_line_height) {
-            // Nested inline struts participate independently of the cell's root strut.
-            descendant_line_height = span->content_height;
-        }
+        // CSS Inline 3 §2.3 supplies the cell's root inline strut on every
+        // line, including lines whose only in-flow content is a nested inline.
+        float descendant_line_height = max(cell_line_height, span->content_height);
         for (View* child = span->first_child; child; child = child->next_sibling) {
             table_collect_inline_line_box_extent(child, descendant_line_height,
                                                  line_height_is_normal,
@@ -1116,7 +1114,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     float flow_content_height = max(
         0.0f, tcell->content_height - ignored_quirky_margin_bottom);
     if (has_inline_formatting_content && flow_content_height > content_height) {
-        // table cell row sizing is based on line boxes; inline DOMRects only
+        // CSS Inline 3 §2.3 root struts enlarge lines with nested inline content too.
         content_height = flow_content_height;
     }
     if (!has_any && tcell->content_height > content_height) {

@@ -817,7 +817,7 @@ static void parse_html_input(Input* input, const char* source) {
 }
 
 static void parse_latex_input(Input* input, const char* source) {
-    parse_latex_ts(input, source);
+    parse_latex_direct(input, source);
 }
 
 static void parse_mdx_input(Input* input, const char* source) {
@@ -1089,7 +1089,7 @@ static Input* input_from_source_n_with_name_parent(const char* source,
         }
         else if (strcmp(effective_type, "math") == 0) {
             const char* math_flavor = (flavor) ? flavor->chars : "latex";
-            // Both ASCII and LaTeX math use the unified tree-sitter parser
+            // Both ASCII and LaTeX math use the direct cursor parser.
             parse_math(input, source, math_flavor);
         }
         else if (strncmp(effective_type, "math-", 5) == 0) {

@@ -87,12 +87,13 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
     transpiler->source = source;
     AstScript* ast_root = nullptr;
     LambdaParseError parse_error = {};
-    if (lambda_rd_build_ast(transpiler, source, strlen(source), &ast_root,
+    if (lambda_rd_reduce_ast(transpiler, source, strlen(source), &ast_root,
             &parse_error) != LAMBDA_PARSE_OK || !ast_root) {
         log_error("validator: direct parser rejected source: %s",
             parse_error.message ? parse_error.message : "syntax error");
         return nullptr;
     }
+    lambda_ast_finalize_script(transpiler, ast_root);
     transpiler->ast_root = (AstNode*)ast_root;
     return (AstNode*)ast_root;
 }

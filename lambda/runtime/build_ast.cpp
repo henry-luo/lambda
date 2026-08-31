@@ -2178,11 +2178,27 @@ NameEntry* lookup_name_in_current_scope(Transpiler* tp, String* name) {
 }
 
 static void binding_node_set_entry(AstNode* node, NameEntry* entry) {
-    if (!node || node->node_type != AST_NODE_VARIABLE_DECLARATOR) return;
-    AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
-    declarator->entry = entry;
-    if (declarator->id && declarator->id->node_type == AST_NODE_IDENT)
-        ((AstIdentNode*)declarator->id)->entry = entry;
+    if (!node || !entry) return;
+    if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
+        declarator->entry = entry;
+        if (declarator->id && declarator->id->node_type == AST_NODE_IDENT)
+            ((AstIdentNode*)declarator->id)->entry = entry;
+    } else if (node->node_type == AST_NODE_PARAM) {
+        ((AstNamedNode*)node)->entry = entry;
+    }
+}
+
+static void function_binding_set_entry(Transpiler* tp, AstNode* node,
+        NameEntry* entry) {
+    if (!tp || !node || !entry ||
+            (node->node_type != AST_NODE_FUNC &&
+             node->node_type != AST_NODE_FUNC_EXPR &&
+             node->node_type != AST_NODE_PROC)) return;
+    AstFuncNode* fn = (AstFuncNode*)node;
+    if (!fn->analysis) fn->analysis = (FnAnalysis*)pool_calloc(tp->pool,
+        sizeof(FnAnalysis));
+    if (fn->analysis) fn->analysis->decl_entry = entry;
 }
 
 static String* binding_node_name(AstNode* node) {
@@ -2232,11 +2248,13 @@ void push_name(Transpiler* tp, AstNode* node, AstImportNode* import) {
             ? ((AstDeclaratorNode*)node)->declared_type : ((AstNamedNode*)node)->declared_type;
         entry->has_type_annotation = entry->declared_type != NULL;
     }
-    // historical callers use layout-compatible names; only declarators receive entry back-links.
+    // The builder publishes the canonical declaration binding before any
+    // interpreter or MIR pass can consume the function definition (D8.2.4).
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
     binding_node_set_entry(node, entry);
+    function_binding_set_entry(tp, node, entry);
 }
 
 NameScope* lambda_ast_enter_scope_with_parent(Transpiler* tp,
@@ -6768,8 +6786,8 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script) {
     arraylist_free(functions);
 }
 
-static void finalize_lambda_script_ast(Transpiler* tp, AstScript* script) {
-    if (!tp || !script || tp->error_count != 0) return;
+bool lambda_ast_finalize_script(Transpiler* tp, AstScript* script) {
+    if (!tp || !script || tp->error_count != 0) return false;
     for (AstNode* item = script->child; item; item = item->next) {
         validate_top_level_enforcing_calls(tp, item);
         validate_top_level_cross_frame_binding_reads(tp, item);
@@ -6778,6 +6796,7 @@ static void finalize_lambda_script_ast(Transpiler* tp, AstScript* script) {
     // used to skip it, leaving suspend-capable procedures without their
     // resumable task state machine (D6.1.2).
     if (tp->error_count == 0) analyze_lambda_concurrency(tp, script);
+    return tp->error_count == 0;
 }
 
 
@@ -10371,7 +10390,7 @@ static LambdaParseValue direct_ast_reduce(void* context,
     return 0;
 }
 
-LambdaParseStatus lambda_rd_build_ast(Transpiler* tp, const char* source,
+LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,
         size_t length, AstScript** root_out, LambdaParseError* error) {
     if (root_out) *root_out = NULL;
     if (!tp || !source) return LAMBDA_PARSE_ERROR;
@@ -10382,6 +10401,7 @@ LambdaParseStatus lambda_rd_build_ast(Transpiler* tp, const char* source,
         tp->pool = input->pool;
         tp->arena = input->arena;
         tp->name_pool = input->name_pool;
+        tp->shape_pool = input->shape_pool;
         tp->type_list = input->type_list;
         tp->url = input->url;
         tp->path = input->path;
@@ -10409,7 +10429,6 @@ LambdaParseStatus lambda_rd_build_ast(Transpiler* tp, const char* source,
         if (error && !error->message) error->message = "direct AST reduction failed";
         return status == LAMBDA_PARSE_OK ? LAMBDA_PARSE_ERROR : status;
     }
-    finalize_lambda_script_ast(tp, sink.root);
     if (root_out) *root_out = sink.root;
     return LAMBDA_PARSE_OK;
 }

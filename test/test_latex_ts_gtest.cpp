@@ -1,6 +1,6 @@
 /**
  * @file test_latex_ts_gtest.cpp
- * @brief Unit tests for LaTeX Tree-sitter parser
+ * @brief Unit tests for the direct LaTeX parser
  * 
  * Tests focus on:
  * - Whitespace normalization
@@ -54,7 +54,7 @@ protected:
     // Helper to parse LaTeX and return the Input
     Input* parse_latex(const char* latex_content) {
         char* latex_copy = strdup(latex_content);
-        // NOTE: Pass nullptr for flavor to use default tree-sitter parser (same as test_latex_parser_gtest.cpp)
+        // The parser dispatches LaTeX directly when no flavor is supplied.
         Input* parsed_input = input_from_source(latex_copy, dummy_url, type_str, nullptr);
         free(latex_copy);
         return parsed_input;

@@ -2185,38 +2185,22 @@ static void js_c_set_parse_error(JsTranspiler* tp, const char* source,
     tp->parse_error_message[sizeof(tp->parse_error_message) - 1] = '\0';
 }
 
-JsAstNode* publish_js_ast_indexed(JsTranspiler* tp, JsAstNode* ast) {
-    if (!tp || !ast) return NULL;
-    // The shared Script owner is the AST lifetime authority after adoption.
-    // Publish the root before post-build passes attach indexed facts to it.
-    tp->ast_root = (AstNode*)ast;
-    js_report_any_census(tp);
-    JsAstIndexPassContext pass_context = {tp, ast, -1};
-    AstIndexPassContext index_context = {
-        &tp->ast_index, (AstNode*)ast, tp->profile};
-    CompilerPassManager pass_manager;
-    compiler_pass_manager_init(&pass_manager, COMPILER_FACT_AST |
-        COMPILER_FACT_BOUND);
-    CompilerPassSpec validate_pass = {"validate", COMPILER_FACT_AST |
-        COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED, js_validate_compiler_pass,
-        &pass_context};
-    CompilerPassSpec index_pass = {"index",
-        COMPILER_FACT_AST | COMPILER_FACT_BOUND | COMPILER_FACT_VALIDATED,
-        COMPILER_FACT_INDEXED, ast_index_compiler_pass, &index_context};
-    if (!compiler_pass_manager_add(&pass_manager, &validate_pass) ||
-            !compiler_pass_manager_add(&pass_manager, &index_pass) ||
-            !compiler_pass_manager_run(&pass_manager, NULL)) {
-        if (pass_context.validation_errors > 0) return ast;
-        log_error("js-ast: failed to run indexed AST pass");
-        tp->ast_root = NULL;
-        return NULL;
-    }
-    return ast;
-}
+typedef struct JsCCompilePassContext {
+    JsTranspiler* transpiler;
+    const char* source;
+    size_t source_length;
+    JsParseMode mode;
+    JsAstNode* root;
+    int validation_errors;
+} JsCCompilePassContext;
 
-bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
-        JsParseMode mode) {
-    if (!tp || !source || length > UINT32_MAX) return false;
+static int js_parse_build_compiler_pass(void* opaque) {
+    JsCCompilePassContext* pass = (JsCCompilePassContext*)opaque;
+    JsTranspiler* tp = pass ? pass->transpiler : NULL;
+    const char* source = pass ? pass->source : NULL;
+    size_t length = pass ? pass->source_length : 0;
+    JsParseMode mode = pass ? pass->mode : JS_PARSE_SCRIPT;
+    if (!tp || !source || length > UINT32_MAX) return 0;
     tp->source = source;
     tp->source_length = length;
     tp->parse_error_valid = false;
@@ -2267,41 +2251,83 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
                 sizeof(tp->parse_error_message) - 1);
             tp->parse_error_message[sizeof(tp->parse_error_message) - 1] = '\0';
         }
-        return false;
+        return 0;
     }
+    pass->root = sink_context.root;
+    return 1;
+}
+
+static int js_bind_compiler_pass(void* opaque) {
+    JsCCompilePassContext* pass = (JsCCompilePassContext*)opaque;
+    JsTranspiler* tp = pass ? pass->transpiler : NULL;
+    if (!tp || !pass->root || pass->root->node_type != JS_AST_NODE_PROGRAM) return 0;
     // Directive prologues determine strictness before declaration binding
     // instantiation; the rebuilt scope graph must see that mode when deciding
     // whether Annex-B block functions receive an outer var companion.
-    JsProgramNode* program = (JsProgramNode*)sink_context.root;
+    JsProgramNode* program = (JsProgramNode*)pass->root;
     if (program->has_use_strict_directive) {
         tp->strict_mode = true;
         if (tp->global_scope) tp->global_scope->strict = true;
     }
-    if (!js_rebuild_direct_scope_graph(tp, sink_context.root)) {
+    if (!js_rebuild_direct_scope_graph(tp, pass->root)) {
         tp->has_errors = true;
         tp->parse_error_valid = true;
         strncpy(tp->parse_error_message,
             "JavaScript C scope graph construction failed",
             sizeof(tp->parse_error_message) - 1);
         tp->parse_error_message[sizeof(tp->parse_error_message) - 1] = '\0';
-        return false;
+        return 0;
     }
-    if (!publish_js_ast_indexed(tp, sink_context.root)) {
-        tp->has_errors = true;
+    // The shared Script owner is the AST lifetime authority after adoption.
+    tp->ast_root = (AstNode*)pass->root;
+    js_report_any_census(tp);
+    return 1;
+}
+
+static int js_validate_compiler_pass(void* opaque) {
+    JsCCompilePassContext* pass = (JsCCompilePassContext*)opaque;
+    if (!pass || !pass->transpiler || !pass->root) return 0;
+    pass->validation_errors = js_check_early_errors(pass->transpiler, pass->root);
+    return pass->validation_errors == 0;
+}
+
+static int js_index_compiler_pass(void* opaque) {
+    JsCCompilePassContext* pass = (JsCCompilePassContext*)opaque;
+    if (!pass || !pass->transpiler || !pass->root) return 0;
+    AstIndexPassContext index_context = {
+        &pass->transpiler->ast_index, (AstNode*)pass->root,
+        pass->transpiler->profile};
+    return ast_index_compiler_pass(&index_context);
+}
+
+bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
+        JsParseMode mode) {
+    if (!tp || !source || length > UINT32_MAX) return false;
+    if (mode == JS_PARSE_AUTO) {
+        mode = tp->strict_js ? JS_PARSE_SCRIPT : JS_PARSE_TYPESCRIPT;
+        if (js_c_source_is_module(source, length)) mode = (JsParseMode)
+            (mode | JS_PARSE_MODULE);
+    }
+    JsCCompilePassContext pass_context = {tp, source, length, mode, NULL, -1};
+    CompilerPassManager* pass_manager = &tp->pass_manager;
+    compiler_pass_manager_init(pass_manager, COMPILER_FACT_NONE);
+    CompilerPassSpec passes[] = {
+        {"parse-build", COMPILER_FACT_NONE, COMPILER_FACT_AST, js_parse_build_compiler_pass, &pass_context},
+        {"bind", COMPILER_FACT_AST, COMPILER_FACT_BOUND, js_bind_compiler_pass, &pass_context},
+        {"validate", COMPILER_FACT_AST | COMPILER_FACT_BOUND, COMPILER_FACT_VALIDATED, js_validate_compiler_pass, &pass_context},
+        {"index", COMPILER_FACT_FRONTEND, COMPILER_FACT_INDEXED, js_index_compiler_pass, &pass_context},
+    };
+    for (uint32_t i = 0; i < 4; i++) {
+        if (!compiler_pass_manager_add(pass_manager, &passes[i])) break;
+    }
+    if (pass_manager->pass_count == 4 && compiler_pass_manager_run(pass_manager, NULL)) return true;
+    if (pass_context.validation_errors > 0) return true;
+    if (!tp->has_errors) {
+        tp->parse_error_valid = tp->has_errors = true;
         strncpy(tp->parse_error_message, "JavaScript C AST indexing failed",
             sizeof(tp->parse_error_message) - 1);
         tp->parse_error_message[sizeof(tp->parse_error_message) - 1] = '\0';
-        tp->parse_error_valid = true;
-        return false;
     }
-    return true;
-}
-
-bool js_transpiler_parse_c_auto(JsTranspiler* tp, const char* source,
-        size_t length) {
-    if (!tp) return false;
-    JsParseMode mode = tp->strict_js ? JS_PARSE_SCRIPT : JS_PARSE_TYPESCRIPT;
-    if (js_c_source_is_module(source, length)) mode = (JsParseMode)
-        (mode | JS_PARSE_MODULE);
-    return js_transpiler_parse_c(tp, source, length, mode);
+    tp->ast_root = NULL;
+    return false;
 }

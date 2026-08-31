@@ -170,7 +170,7 @@ static MIR_reg_t jm_initialize_resumable_env(JsMirTranspiler* mt,
     if (args_slot >= 0 && JM_JS_FACT(fc, uses_arguments)) {
         bool args_aliased = !JM_JS_FACT(fc, has_non_simple_params) &&
                             !mt->is_module && !mt->is_global_strict &&
-                            !fc->is_strict && !jm_has_use_strict_directive(fn);
+                            !JM_JS_FACT(fc, is_strict);
         jm_call_void_1(mt, "js_set_arguments_info", MIR_T_I64,
             MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
         MIR_reg_t args_obj = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
@@ -217,9 +217,8 @@ static void jm_initialize_resumable_scope_env(JsMirTranspiler* mt,
         JsFuncCollected* fc, const char* kind_name) {
     if (!fc->has_scope_env || fc->scope_env_count <= 0) return;
     int scope_env_alloc_count = fc->scope_env_count;
-    if (fc->reuse_parent_env && fc->reuse_env_slot_count > scope_env_alloc_count) {
-        scope_env_alloc_count = fc->reuse_env_slot_count;
-    }
+    int reuse_env_slot_count = JM_JS_FACT(fc, reuse_env_slot_count);
+    if (reuse_env_slot_count > scope_env_alloc_count) scope_env_alloc_count = reuse_env_slot_count;
     int scope_env_slot = mt->gen_local_slot_count++;
     mt->scope_env_reg = jm_call_1(mt, "js_alloc_env", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, scope_env_alloc_count));
@@ -248,7 +247,7 @@ static void jm_initialize_resumable_scope_env(JsMirTranspiler* mt,
             lookup_sname = jm_format_name("%.*s", (int)base_len, sname);
         }
         int target_slot = s;
-        if (fc->reuse_parent_env) {
+        if (JM_JS_FACT(fc, reuse_parent_env)) {
             for (int c = 0; c < JM_CAPTURE_COUNT(fc); c++) {
                 if (strcmp(sname, JM_CAPTURE_ARRAY(fc)[c].name) == 0 &&
                         JM_CAPTURE_ARRAY(fc)[c].scope_env_slot >= 0) {
@@ -513,11 +512,11 @@ static void jm_hoisted_func_modvar_write_through(JsMirTranspiler* mt, const char
     }
 }
 
-static bool jm_function_arguments_are_aliased(JsMirTranspiler* mt, JsFuncCollected* fc, JsFunctionNode* fn) {
+static bool jm_function_arguments_are_aliased(JsMirTranspiler* mt, JsFuncCollected* fc) {
     return !JM_JS_FACT(fc, has_non_simple_params) &&
            !mt->is_module &&
            !mt->is_global_strict &&
-           !jm_has_use_strict_directive(fn);
+           !JM_JS_FACT(fc, is_strict);
 }
 
 static bool jm_function_has_duplicate_param_names(JsFunctionNode* fn) {
@@ -542,7 +541,7 @@ static void jm_activate_arguments_aliasing(JsMirTranspiler* mt, JsFuncCollected*
     mt->arguments_reg = args_reg;
     // The AST already owns every formal.  Keeping its head avoids a second,
     // silently truncated name table for mapped `arguments` lowering.
-    mt->arguments_params = jm_function_arguments_are_aliased(mt, fc, fn)
+    mt->arguments_params = jm_function_arguments_are_aliased(mt, fc)
         ? fn->params : NULL;
     mt->arguments_param_scope_depth = mt->arguments_params ? mt->scope_depth : -1;
 }
@@ -613,7 +612,7 @@ static void jm_hoist_function_body_bindings(JsMirTranspiler* mt,
     struct hashmap* body_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
         jm_name_hash, jm_name_cmp, NULL, NULL);
     bool effective_strict = mt->is_global_strict || mt->is_module ||
-        (fc && fc->is_strict) || jm_has_use_strict_directive(fn);
+        (fc && JM_JS_FACT(fc, is_strict));
     struct hashmap* annexb_lex_collisions = NULL;
     if (!effective_strict) {
         annexb_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
@@ -646,7 +645,7 @@ static void jm_hoist_function_body_bindings(JsMirTranspiler* mt,
         // installed as from_env bindings.
         if (!current_binding || shadows_capture) {
             // Module vars in IIFE body functions are read through their live slots.
-            if (mt->current_fc && mt->current_fc->is_iife_body && mt->module_consts) {
+            if (jm_current_function_is_iife_body(mt) && mt->module_consts) {
                 JsModuleConstEntry mclookup;
                 mclookup.name = jm_persist_name(e->name);
                 JsModuleConstEntry* mc = (JsModuleConstEntry*)hashmap_get(
@@ -910,15 +909,13 @@ static void jm_collect_lexical_decl_names(JsAstNode* node, struct hashmap* names
 
 static bool jm_capture_is_nfe_binding(JsMirTranspiler* mt, JsFuncCollected* fc, const char* name) {
     if (!mt || !fc || !name) return false;
-    int idx = (int)(fc - mt->func_entries);
-    while (idx >= 0 && idx < mt->func_count) {
-        JsFuncCollected* cur = &mt->func_entries[idx];
+    for (JsFuncCollected* cur = fc; cur;
+            cur = jm_parent_collected_func(mt, cur)) {
         JsFunctionNode* fn = cur->node;
         if (fn && fn->node_type == JS_AST_NODE_FUNCTION_EXPRESSION && fn->name) {
             const char* self_name = jm_var_name(fn->name);
             if (strcmp(name, self_name) == 0) return true;
         }
-        idx = cur->parent_index;
     }
     return false;
 }
@@ -1260,7 +1257,6 @@ static void jm_begin_resumable_state_machine(JsMirTranspiler* mt,
         JsFunctionNode* fn, JsFuncCollected* fc,
         const JsMirResumableLayout* layout, int state_count, bool is_async,
         bool reset_eval_local_frame, MIR_item_t func_item, MIR_func_t func) {
-    if (jm_has_use_strict_directive(fn)) fc->is_strict = true;
     mt->em.func_item = func_item;
     mt->em.func = func;
     mt->loop_depth = 0;
@@ -1276,7 +1272,6 @@ static void jm_begin_resumable_state_machine(JsMirTranspiler* mt,
     mt->arguments_param_scope_depth = -1;
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
-    mt->current_func_index = (int)(fc - mt->func_entries);
     mt->func_error_lane_label = 0;
     mt->in_generator = true;
     mt->in_async = is_async;
@@ -1310,7 +1305,6 @@ typedef struct JsMirFunctionStateSnapshot {
     JsClassEntry* current_class;
     MIR_reg_t scope_env_reg;
     int scope_env_slot_count;
-    int current_func_index;
     bool in_generator;
     bool in_async;
     MIR_reg_t arguments_reg;
@@ -1325,7 +1319,7 @@ static JsMirFunctionStateSnapshot jm_capture_function_state(JsMirTranspiler* mt)
     JsMirFunctionStateSnapshot state = {
         mt->em.func_item, mt->em.func, mt->scope_depth, mt->loop_depth,
         mt->in_native_func, mt->in_main, mt->current_fc, mt->current_class,
-        mt->scope_env_reg, mt->scope_env_slot_count, mt->current_func_index,
+        mt->scope_env_reg, mt->scope_env_slot_count,
         mt->in_generator, mt->in_async, mt->arguments_reg, mt->arguments_params,
         mt->arguments_param_scope_depth
     };
@@ -1344,7 +1338,6 @@ static void jm_restore_function_state(JsMirTranspiler* mt,
     mt->current_class = state->current_class;
     mt->scope_env_reg = state->scope_env_reg;
     mt->scope_env_slot_count = state->scope_env_slot_count;
-    mt->current_func_index = state->current_func_index;
     mt->in_generator = state->in_generator;
     mt->in_async = state->in_async;
     mt->arguments_reg = state->arguments_reg;
@@ -1371,14 +1364,14 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     bool generate_native = false;
     // Native MIR params cannot represent sloppy duplicate formals, and arrow
     // block bodies still rely on boxed statement-completion return handling.
-    if (fc->has_native_version &&
+    if (JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE &&
         !has_captures && !JM_JS_FACT(fc, has_non_simple_params) &&
         !jm_function_has_duplicate_param_names(fn) &&
         !(fn->is_arrow && fn->body &&
           fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) &&
         param_count > 0 &&
-        (fc->native_return_kind == NATIVE_RETURN_INT ||
-         fc->native_return_kind == NATIVE_RETURN_FLOAT)) {
+        (JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_INT ||
+         JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_FLOAT)) {
         bool has_native_param = false;
         generate_native = true;
         for (int i = 0; i < param_count; i++) {
@@ -1415,14 +1408,13 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             param_node = param_node ? param_node->next : NULL;
         }
 
-        MIR_type_t native_ret_type = fc->native_return_kind == NATIVE_RETURN_FLOAT
+        MIR_type_t native_ret_type = JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_FLOAT
             ? MIR_T_D : MIR_T_I64;
         MIR_item_t native_item = MIR_new_func_arr(mt->ctx, native_name, 1, &native_ret_type,
             param_count + 1, n_params);
         MIR_func_t native_func = MIR_get_item_func(mt->ctx, native_item);
 
         fc->native_func_item = native_item;
-        fc->has_native_version = true;
         jm_register_local_func(mt, native_name, native_item);
 
         // Save transpiler state
@@ -1445,10 +1437,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         JsErrorLaneTrack saved_error_lane_track = mt->error_lane_track;
         MIR_reg_t saved_last_call_result = mt->last_call_result_reg;
         MIR_reg_t saved_func_error_lane_value = mt->func_error_lane_value_reg;
-
-        if (jm_has_use_strict_directive(fn)) {
-            fc->is_strict = true;
-        }
 
         mt->em.func_item = native_item;
         mt->em.func = native_func;
@@ -1486,7 +1474,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         }
 
         // TCO setup: wrap body in a loop if this function has tail-recursive calls
-        if (fc->is_tco_eligible) {
+        if (JM_JS_FACT(fc, is_tco_eligible)) {
             log_debug("js-mir TCO: enabling loop transform for %s", fc->name);
             mt->tco_func = fc;
 
@@ -1593,7 +1581,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         log_debug("js-mir P4: generated native version %s (params: %d, ret: %s%s)",
             native_name, param_count,
             JM_JS_FACT(fc, return_type) == LMD_TYPE_INT ? "INT" : "FLOAT",
-            fc->is_tco_eligible ? ", TCO" : "");
+            JM_JS_FACT(fc, is_tco_eligible) ? ", TCO" : "");
     }
 
     // --- v15: Generate generator state machine function if is_generator ---
@@ -2081,12 +2069,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     JsClassEntry* saved_class = mt->current_class;
     MIR_reg_t saved_scope_env_reg = mt->scope_env_reg;
     int saved_scope_env_slot_count = mt->scope_env_slot_count;
-    int saved_func_index = mt->current_func_index;
     MIR_reg_t saved_eval_completion_reg = mt->eval_completion_reg;
     MIR_reg_t saved_eval_local_frame_reg = mt->eval_local_frame_reg;
 
-    // Set current function index for scope env lookups
-    mt->current_func_index = (int)(fc - mt->func_entries);
     mt->scope_env_reg = 0;
     mt->scope_env_slot_count = 0;
     // A function's implicit bindings, including `arguments`, must not inherit
@@ -2096,14 +2081,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->eval_local_frame_reg = 0;
     mt->last_closure_has_env = false;  // clear stale closure env from previous function
 
-    // Collection assigns the lexical class to methods, nested functions, and
-    // synthetic field-initializer callables. Rescanning only method entries
-    // dropped the PrivateEnvironment for direct eval in field initializers.
-    mt->current_class = fc->owner_class;
-
-    if (jm_has_use_strict_directive(fn)) {
-        fc->is_strict = true;
-    }
+    // Collection assigns the source-owned class ID to methods, nested
+    // functions, and synthetic field initializers; resolving it here preserves
+    // their PrivateEnvironment without re-scanning method entries (D8.2.4).
+    mt->current_class = jm_function_owner_class(mt, fc);
 
     mt->em.func_item = func_item;
     mt->em.func = func;
@@ -2353,9 +2334,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             if (has_captures) {
             env_reg = MIR_reg(mt->ctx, closure_env_param_name, func);
             for (int i = 0; i < JM_CAPTURE_COUNT(fc); i++) {
-                if (!JM_CAPTURE_ARRAY(fc)[i].is_nfe_binding && JM_CAPTURE_ARRAY(fc)[i].scope_env_slot < 0 &&
-                    fc->parent_index >= 0 && fc->parent_index < mt->func_count) {
-                    JsFuncCollected* parent_fc = &mt->func_entries[fc->parent_index];
+                JsFuncCollected* parent_fc = jm_parent_collected_func(mt, fc);
+                if (!JM_CAPTURE_ARRAY(fc)[i].is_nfe_binding &&
+                        JM_CAPTURE_ARRAY(fc)[i].scope_env_slot < 0 && parent_fc) {
                     int parent_normal_limit = parent_fc->scope_env_normal_count > 0 ?
                         parent_fc->scope_env_normal_count : parent_fc->scope_env_count;
                     for (int ps = 0; ps < parent_normal_limit; ps++) {
@@ -2399,15 +2380,15 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 int gp_slot = JM_CAPTURE_ARRAY(fc)[i].grandparent_slot;
                 if (gp_slot >= 0) {
                     // Find the parent env link slot (last slot in parent's scope env)
-                    int pi = fc->parent_index;
+                    JsFuncCollected* parent_fc = jm_parent_collected_func(mt, fc);
                     int parent_env_link_slot =
                         JM_CAPTURE_ARRAY(fc)[i].parent_env_link_slot_override;
-                    if (parent_env_link_slot < 0 && pi >= 0 && pi < mt->func_count &&
-                        mt->func_entries[pi].has_parent_env_link) {
-                        parent_env_link_slot = mt->func_entries[pi].scope_env_count - 1;
+                    if (parent_env_link_slot < 0 && parent_fc &&
+                            parent_fc->has_parent_env_link) {
+                        parent_env_link_slot = parent_fc->scope_env_count - 1;
                     }
-                    if (parent_env_link_slot < 0 && fc->closure_env_has_parent_link) {
-                        parent_env_link_slot = fc->closure_env_parent_link_slot;
+                    if (parent_env_link_slot < 0 && JM_JS_FACT(fc, closure_env_has_parent_link)) {
+                        parent_env_link_slot = JM_JS_FACT(fc, closure_env_parent_link_slot);
                     }
                     if (parent_env_link_slot >= 0) {
                         // Load parent env pointer from env[last_slot]
@@ -2446,13 +2427,12 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 // v29: For grandparent reads, store the grandparent env info
                 // so scope_env_reload_vars and write-back use the correct env
                 if (gp_slot >= 0) {
-                    int pi2 = fc->parent_index;
+                    JsFuncCollected* parent_fc = jm_parent_collected_func(mt, fc);
                     int pel_slot = JM_CAPTURE_ARRAY(fc)[i].parent_env_link_slot_override;
-                    if (pel_slot < 0 && pi2 >= 0 && pi2 < mt->func_count &&
-                        mt->func_entries[pi2].has_parent_env_link)
-                        pel_slot = mt->func_entries[pi2].scope_env_count - 1;
-                    if (pel_slot < 0 && fc->closure_env_has_parent_link) {
-                        pel_slot = fc->closure_env_parent_link_slot;
+                    if (pel_slot < 0 && parent_fc && parent_fc->has_parent_env_link)
+                        pel_slot = parent_fc->scope_env_count - 1;
+                    if (pel_slot < 0 && JM_JS_FACT(fc, closure_env_has_parent_link)) {
+                        pel_slot = JM_JS_FACT(fc, closure_env_parent_link_slot);
                     }
                     if (pel_slot >= 0) {
                         // Load grandparent env reg for this var, with null guard.
@@ -2596,7 +2576,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             // v16 safety check: verify reuse_parent_env assumption at compile time.
             // If any scope_env var is locally declared (not from_env), the var shadows
             // a same-named capture and reuse is unsafe (would write to wrong parent slot).
-            bool reuse_valid = fc->reuse_parent_env && has_captures && env_reg != 0;
+            bool reuse_valid = JM_JS_FACT(fc, reuse_parent_env) &&
+                has_captures && env_reg != 0;
             if (reuse_valid) {
                 for (int s = 0; s < fc->scope_env_count; s++) {
                     const char* sname = fc->scope_env_names[s];
@@ -2615,7 +2596,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 // read/write directly from the grandparent's scope_env.
                 // Child captures were already remapped in Phase 1.7b.
                 mt->scope_env_reg = env_reg;
-                mt->scope_env_slot_count = fc->reuse_env_slot_count;
+                mt->scope_env_slot_count = JM_JS_FACT(fc, reuse_env_slot_count);
 
                 // Mark vars for scope_env write-back using parent env slots.
                 // Look up the correct slot from the captures array (not the var entry),
@@ -2648,12 +2629,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             if (fc->has_parent_env_link && has_captures && env_reg != 0) {
                 int parent_env_slot = fc->scope_env_count - 1; // last slot
                 MIR_reg_t parent_env_value = env_reg;
-                if (fc->parent_env_link_uses_grandparent) {
-                    int parent_index = fc->parent_index;
+                if (JM_JS_FACT(fc, parent_env_link_uses_grandparent)) {
+                    JsFuncCollected* parent_fc = jm_parent_collected_func(mt, fc);
                     int parent_link_slot = -1;
-                    if (parent_index >= 0 && parent_index < mt->func_count &&
-                        mt->func_entries[parent_index].has_parent_env_link) {
-                        parent_link_slot = mt->func_entries[parent_index].scope_env_count - 1;
+                    if (parent_fc && parent_fc->has_parent_env_link) {
+                        parent_link_slot = parent_fc->scope_env_count - 1;
                     }
                     if (parent_link_slot >= 0) {
                         MIR_reg_t linked_env = jm_new_reg(mt, "linked_parent_env", MIR_T_I64);
@@ -2671,13 +2651,13 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 jm_emit_store_i64(mt, parent_env_slot * (int)sizeof(uint64_t), mt->scope_env_reg, parent_env_value);
                 log_debug("js-mir: stored parent env link in scope_env[%d] for '%s'", parent_env_slot, fc->name);
             }
-            if (fc->has_immediate_parent_env_link && has_captures && env_reg != 0 &&
-                fc->immediate_parent_env_link_slot >= 0) {
+            if (JM_JS_FACT(fc, has_immediate_parent_env_link) && has_captures && env_reg != 0 &&
+                JM_JS_FACT(fc, immediate_parent_env_link_slot) >= 0) {
                 // The compact env's inherited link can skip a mixed parent; keep
                 // a separate direct link for mutable cells owned by that parent.
-                jm_emit_store_i64(mt, fc->immediate_parent_env_link_slot * (int)sizeof(uint64_t), mt->scope_env_reg, env_reg);
+                jm_emit_store_i64(mt, JM_JS_FACT(fc, immediate_parent_env_link_slot) * (int)sizeof(uint64_t), mt->scope_env_reg, env_reg);
                 log_debug("js-mir: stored immediate parent env link in scope_env[%d] for '%s'",
-                    fc->immediate_parent_env_link_slot, fc->name);
+                    JM_JS_FACT(fc, immediate_parent_env_link_slot), fc->name);
             }
 
             // Populate scope env with current values and mark vars for write-back
@@ -2731,8 +2711,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     bool args_aliased = !JM_JS_FACT(fc, has_non_simple_params) &&
                                         !mt->is_module &&
                                         !mt->is_global_strict &&
-                                        !fc->is_strict &&
-                                        !jm_has_use_strict_directive(fn);
+                                        !JM_JS_FACT(fc, is_strict);
                     jm_call_void_1(mt, "js_set_arguments_info",
                         MIR_T_I64, MIR_new_int_op(mt->ctx, args_aliased ? 0 : 1));
                     val = jm_call_0(mt, "js_build_arguments_object", MIR_T_I64);
@@ -2742,8 +2721,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                 } else {
                     // Variable not found locally. Try transitive capture from parent's scope env.
                     bool found_transitive = false;
-                    if (env_reg != 0 && fc->parent_index >= 0 && fc->parent_index < mt->func_count) {
-                        JsFuncCollected* parent_fc2 = &mt->func_entries[fc->parent_index];
+                    JsFuncCollected* parent_fc2 = jm_parent_collected_func(mt, fc);
+                    if (env_reg != 0 && parent_fc2) {
                         for (int ps2 = 0; ps2 < parent_fc2->scope_env_count; ps2++) {
                             if (parent_fc2->scope_env_names && strcmp(parent_fc2->scope_env_names[ps2], sname) == 0) {
                                 val = jm_new_reg(mt, "senv_trans", MIR_T_I64);
@@ -2819,8 +2798,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             bool args_aliased = !JM_JS_FACT(fc, has_non_simple_params) &&
                                 !mt->is_module &&
                                 !mt->is_global_strict &&
-                                !fc->is_strict &&
-                                !jm_has_use_strict_directive(fn);
+                                !JM_JS_FACT(fc, is_strict);
             JsMirVarEntry* existing_args = jm_find_var(mt, "_js_arguments");
             MIR_reg_t args_arr;
             if (arguments_object_materialized && existing_args) {
@@ -2988,7 +2966,6 @@ finish_boxed:
     mt->current_class = saved_class;
     mt->scope_env_reg = saved_scope_env_reg;
     mt->scope_env_slot_count = saved_scope_env_slot_count;
-    mt->current_func_index = saved_func_index;
     mt->eval_completion_reg = saved_eval_completion_reg;
     mt->eval_local_frame_reg = saved_eval_local_frame_reg;
     mt->arguments_reg = saved_arguments_reg_fn;

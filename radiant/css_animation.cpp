@@ -62,6 +62,53 @@ static float parse_float(const char** s) {
     return val;
 }
 
+static float parse_transform_angle(const char** source) {
+    const char* value = skip_ws(*source);
+    char* end = NULL;
+    float angle = strtof(value, &end);
+    if (end == value) return 0.0f;
+
+    const char* unit = end;
+    if (strncasecmp(unit, "rad", 3) == 0) {
+        *source = unit + 3;
+        return angle;
+    }
+    if (strncasecmp(unit, "grad", 4) == 0) {
+        *source = unit + 4;
+        return angle * (float)M_PI / 200.0f;
+    }
+    if (strncasecmp(unit, "turn", 4) == 0) {
+        *source = unit + 4;
+        return angle * 2.0f * (float)M_PI;
+    }
+    if (strncasecmp(unit, "deg", 3) == 0) {
+        *source = unit + 3;
+        return angle * (float)M_PI / 180.0f;
+    }
+
+    // Preserve the legacy unitless interpretation while normalizing it to radians.
+    *source = end;
+    return angle * (float)M_PI / 180.0f;
+}
+
+static void parse_transform_translate_component(const char** source, float* length,
+                                                float* percentage) {
+    const char* value = skip_ws(*source);
+    char* end = NULL;
+    float parsed = strtof(value, &end);
+    if (end == value) return;
+
+    *length = parsed;
+    if (*end == '%') {
+        *percentage = parsed;
+        *length = 0.0f;
+        end++;
+    } else {
+        while (isalpha((unsigned char)*end)) end++;
+    }
+    *source = end;
+}
+
 // Parse a CSS color value from string (supports: named colors, #hex, rgb())
 static bool parse_color_value(const char* val, Color* out) {
     val = skip_ws(val);
@@ -185,18 +232,25 @@ static TransformFunction* parse_transform_func(const char** s, Pool* pool) {
 
     if (name_len == 10 && strncmp(name_start, "translateX", 10) == 0) {
         tf->type = TRANSFORM_TRANSLATEX;
-        tf->params.translate.x = parse_float(&p);
+        parse_transform_translate_component(&p, &tf->params.translate.x,
+                                            &tf->translate_x_percent);
         // skip unit
         while (*p && *p != ')') p++;
     } else if (name_len == 10 && strncmp(name_start, "translateY", 10) == 0) {
         tf->type = TRANSFORM_TRANSLATEY;
-        tf->params.translate.y = parse_float(&p);
+        parse_transform_translate_component(&p, &tf->params.translate.y,
+                                            &tf->translate_y_percent);
         while (*p && *p != ')') p++;
     } else if (name_len == 9 && strncmp(name_start, "translate", 9) == 0) {
         tf->type = TRANSFORM_TRANSLATE;
-        tf->params.translate.x = parse_float(&p);
-        while (*p && *p != ',' && *p != ')') p++;
-        if (*p == ',') { p++; tf->params.translate.y = parse_float(&p); }
+        parse_transform_translate_component(&p, &tf->params.translate.x,
+                                            &tf->translate_x_percent);
+        p = skip_ws(p);
+        if (*p == ',') p++;
+        if (*p != ')') {
+            parse_transform_translate_component(&p, &tf->params.translate.y,
+                                                &tf->translate_y_percent);
+        }
         while (*p && *p != ')') p++;
     } else if (name_len == 6 && strncmp(name_start, "scaleX", 6) == 0) {
         tf->type = TRANSFORM_SCALEX;
@@ -215,18 +269,22 @@ static TransformFunction* parse_transform_func(const char** s, Pool* pool) {
         while (*p && *p != ')') p++;
     } else if (name_len == 6 && strncmp(name_start, "rotate", 6) == 0) {
         tf->type = TRANSFORM_ROTATE;
-        float angle = parse_float(&p);
-        // convert deg to radians if needed
-        while (isalpha((unsigned char)*p)) p++; // skip unit like "deg"
-        tf->params.angle = angle;
+        tf->params.angle = parse_transform_angle(&p);
+        while (*p && *p != ')') p++;
+    } else if (name_len == 4 && strncmp(name_start, "skew", 4) == 0) {
+        tf->type = TRANSFORM_SKEW;
+        tf->params.skew.x = parse_transform_angle(&p);
+        p = skip_ws(p);
+        if (*p == ',') p++;
+        if (*p != ')') tf->params.skew.y = parse_transform_angle(&p);
         while (*p && *p != ')') p++;
     } else if (name_len == 5 && strncmp(name_start, "skewX", 5) == 0) {
         tf->type = TRANSFORM_SKEWX;
-        tf->params.skew.x = parse_float(&p);
+        tf->params.skew.x = parse_transform_angle(&p);
         while (*p && *p != ')') p++;
     } else if (name_len == 5 && strncmp(name_start, "skewY", 5) == 0) {
         tf->type = TRANSFORM_SKEWY;
-        tf->params.skew.y = parse_float(&p);
+        tf->params.skew.y = parse_transform_angle(&p);
         while (*p && *p != ')') p++;
     } else {
         // unsupported transform function — skip

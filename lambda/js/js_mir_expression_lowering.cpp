@@ -469,17 +469,14 @@ bool js_ast_is_proto_literal_key(JsAstNode* key) {
     return false;
 }
 
-static JsFuncCollected* jm_find_direct_function_decl_by_vname(JsMirTranspiler* mt, const char* vname) {
-    if (!mt || !vname) return NULL;
-    for (int i = 0; i < mt->func_count; i++) {
-        JsFuncCollected* fc = &mt->func_entries[i];
-        JsFunctionNode* fn = fc->node;
-        if (!fn || !fn->name || fn->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
-        if (!jm_function_decl_is_direct_binding(fn, false)) continue;
-        const char* fname = jm_var_name(fn->name);
-        if (strcmp(fname, vname) == 0) return fc;
-    }
-    return NULL;
+static JsFuncCollected* jm_find_direct_function_decl_for_identifier(
+        JsMirTranspiler* mt, JsIdentifierNode* id) {
+    AstIndex* index = mt && mt->tp ? &mt->tp->ast_index : NULL;
+    AstNode* definition = ast_index_binding_definition(index,
+        ast_index_binding_id(index, (AstNode*)id));
+    if (!definition || definition->node_type != JS_AST_NODE_FUNCTION_DECLARATION ||
+            !jm_function_decl_is_direct_binding((JsFunctionNode*)definition, false)) return NULL;
+    return jm_find_collected_func(mt, (JsFunctionNode*)definition);
 }
 
 static bool jm_binding_statement_precedes_reference(JsMirTranspiler* mt,
@@ -557,17 +554,10 @@ static bool jm_current_function_captures_with_scope(JsMirTranspiler* mt) {
 
 static bool jm_current_scope_can_see_iife_modvar(JsMirTranspiler* mt) {
     if (!mt || !mt->current_fc) return false;
-    // Synthetic/native body lowering can leave current_func_index unset even
-    // though current_fc identifies a direct IIFE declaration. Keep its
-    // promoted lexical bindings visible; otherwise a retained function reads
-    // them as unresolved globals after the original IIFE has returned.
-    if (mt->current_fc->is_iife_func_decl || mt->current_fc->is_iife_body) return true;
-    if (mt->current_func_index < 0 || mt->func_count <= 0) return false;
-    int idx = mt->current_func_index;
-    while (idx >= 0 && idx < mt->func_count) {
-        JsFuncCollected* fc = &mt->func_entries[idx];
-        if (fc->is_iife_func_decl || fc->is_iife_body) return true;
-        idx = fc->parent_index;
+    // Follow the published backend identity, never its post-order position.
+    for (JsFuncCollected* fc = mt->current_fc; fc && fc->node;
+            fc = jm_parent_collected_func(mt, fc)) {
+        if (JM_JS_FACT(fc, is_iife_func_decl) || JM_JS_FACT(fc, is_iife_body)) return true;
     }
     return false;
 }
@@ -622,33 +612,30 @@ static bool jm_class_declares_private_name(JsClassEntry* ce, const char* suffix,
     return false;
 }
 
-static bool jm_class_contains_node(JsClassEntry* ce, JsAstNode* node, uint32_t* class_start, uint32_t* class_end) {
-    if (!ce || !ce->node || !node) return false;
-    uint32_t cs = ce->node->source_span.start_byte;
-    uint32_t ce_end = ce->node->source_span.end_byte;
-    uint32_t ns = node->source_span.start_byte;
-    uint32_t ne = node->source_span.end_byte;
-    if (ns < cs || ne > ce_end) return false;
-    if (class_start) *class_start = cs;
-    if (class_end) *class_end = ce_end;
-    return true;
+// Index ancestry remains correct when a synthetic callable shares source spans.
+static JsClassEntry* jm_find_indexed_class_ancestor(JsMirTranspiler* mt,
+        JsAstNode* node, bool include_node) {
+    if (!mt || !mt->tp || !node) return NULL;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId node_id = ast_index_find(index, (AstNode*)node);
+    AstClassId class_id = ast_index_nearest_class(index, node_id, include_node);
+    return class_id < index->class_count
+        ? jm_find_collected_class(mt, (JsClassNode*)index->classes[class_id]) : NULL;
 }
 
-static JsClassEntry* jm_find_innermost_class_for_node(JsMirTranspiler* mt, JsAstNode* node) {
-    if (!mt || !node) return NULL;
-    JsClassEntry* best = NULL;
-    uint32_t best_len = UINT32_MAX;
-    for (int i = 0; i < mt->class_count; i++) {
-        JsClassEntry* ce = &mt->class_entries[i];
-        uint32_t cs = 0, ce_end = 0;
-        if (!jm_class_contains_node(ce, node, &cs, &ce_end)) continue;
-        uint32_t len = ce_end - cs;
-        if (!best || len < best_len) {
-            best = ce;
-            best_len = len;
-        }
-    }
-    return best;
+static JsClassEntry* jm_find_innermost_class_for_node(JsMirTranspiler* mt,
+        JsAstNode* node) {
+    return jm_find_indexed_class_ancestor(mt, node, true);
+}
+
+static bool jm_indexed_class_contains_node(JsMirTranspiler* mt,
+        JsClassEntry* entry, JsAstNode* node) {
+    if (!mt || !mt->tp || !entry || !entry->node || !node) return false;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId node_id = ast_index_find(index, (AstNode*)node);
+    AstNodeId class_id = ast_index_find(index, (AstNode*)entry->node);
+    return node_id != AST_NODE_ID_INVALID && class_id != AST_NODE_ID_INVALID &&
+        ast_index_node_descends(index, node_id, class_id);
 }
 
 static bool jm_class_name_matches(JsClassEntry* ce, String* name) {
@@ -662,19 +649,19 @@ static JsClassEntry* jm_current_inner_class_binding(JsMirTranspiler* mt, String*
     // A named *class expression*'s name is an immutable binding scoped to the
     // class body only (it must not leak to the enclosing scope). So for an
     // expression, resolve to the inner binding only when the reference actually
-    // lies inside the class's source range. Class *declarations* bind their name
+    // lies inside the class's indexed subtree. Class *declarations* bind their name
     // in the enclosing function scope, so references outside the body still
     // resolve (e.g. `new C()` after a nested `class C {}`).
     if (jm_class_name_matches(mt->current_class, name) &&
         (mt->current_class->is_declaration || !ref_node ||
-         jm_class_contains_node(mt->current_class, ref_node, NULL, NULL))) {
+         jm_indexed_class_contains_node(mt, mt->current_class, ref_node))) {
         return mt->current_class;
     }
     if (mt->current_fc && mt->current_fc->node) {
         JsClassEntry* ce = jm_find_innermost_class_for_node(mt, (JsAstNode*)mt->current_fc->node);
         if (jm_class_name_matches(ce, name) &&
             (ce->is_declaration || !ref_node ||
-             jm_class_contains_node(ce, ref_node, NULL, NULL))) {
+             jm_indexed_class_contains_node(mt, ce, ref_node))) {
             return ce;
         }
     }
@@ -687,22 +674,12 @@ static JsClassEntry* jm_resolve_private_owner(JsMirTranspiler* mt, JsAstNode* ac
     jm_private_name_suffix(name, &suffix, &suffix_len);
     if (!suffix || suffix_len <= 0) return NULL;
 
-    JsClassEntry* best = NULL;
-    uint32_t best_start = 0;
-    uint32_t best_len = UINT32_MAX;
-    for (int i = 0; i < mt->class_count; i++) {
-        JsClassEntry* ce = &mt->class_entries[i];
-        uint32_t cs = 0, ce_end = 0;
-        if (!jm_class_contains_node(ce, access_node, &cs, &ce_end)) continue;
-        if (!jm_class_declares_private_name(ce, suffix, suffix_len)) continue;
-        uint32_t clen = ce_end - cs;
-        if (!best || cs >= best_start || clen < best_len) {
-            best = ce;
-            best_start = cs;
-            best_len = clen;
-        }
+    for (JsClassEntry* entry = jm_find_innermost_class_for_node(mt, access_node);
+            entry; entry = jm_find_indexed_class_ancestor(mt,
+            (JsAstNode*)entry->node, false)) {
+        if (jm_class_declares_private_name(entry, suffix, suffix_len)) return entry;
     }
-    return best;
+    return NULL;
 }
 
 static String* jm_resolve_private_name(JsMirTranspiler* mt, JsAstNode* access_node, String* name) {
@@ -749,10 +726,10 @@ MIR_reg_t jm_create_method_function(JsMirTranspiler* mt, JsFuncCollected* fc, in
     MIR_reg_t fn_item = jm_call_2(mt, "js_new_method_function_mir", MIR_T_I64,
         MIR_T_I64, MIR_new_ref_op(mt->ctx, fc->func_item),
         MIR_T_I64, MIR_new_int_op(mt->ctx, param_count));
-    if (fc->is_strict) {
+    if (JM_JS_FACT(fc, is_strict)) {
         jm_callr_void_1(mt, "js_mark_strict_func", fn_item);
     }
-    if (fc->is_derived_constructor) {
+    if (JM_JS_FACT(fc, is_derived_constructor)) {
         jm_callr_void_1(mt, "js_mark_derived_constructor_func", fn_item);
     }
     return fn_item;
@@ -1115,7 +1092,7 @@ static bool jm_ast_find_first_super_call(JsAstNode* node, uint32_t* first_start)
 
 static bool jm_super_reference_before_constructor_super_call(JsMirTranspiler* mt, JsAstNode* super_ref_node) {
     if (!mt || !super_ref_node || !mt->current_fc || !mt->current_class) return false;
-    if (!mt->current_fc->is_constructor) return false;
+    if (!JM_JS_FACT(mt->current_fc, is_constructor)) return false;
     if (!mt->current_class->node || !mt->current_class->node->superclass) return false;
     uint32_t ref_start = super_ref_node->source_span.start_byte;
     uint32_t first_super_start = UINT32_MAX;
@@ -1821,7 +1798,8 @@ MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id) {
                     return jm_apply_with_identifier_fallback(mt, id, live_val);
                 }
                 MIR_reg_t mv = jm_load_module_var(mt, (uint32_t)mc->int_val);
-                JsFuncCollected* direct_func = jm_find_direct_function_decl_by_vname(mt, mc->name);
+                JsFuncCollected* direct_func =
+                    jm_find_direct_function_decl_for_identifier(mt, id);
                 if (direct_func && direct_func->func_item &&
                         !JM_JS_FACT(direct_func, is_reassigned)) {
                     JsMirClosureTrackerSnapshot saved_closure_tracker;
@@ -3272,8 +3250,8 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
         module_var = NULL;
     }
 
-    if (!mt->destructure_assignment_mode && mt->current_func_index >= 0 &&
-        mt->current_fc && !mt->current_fc->is_iife_body) {
+    if (!mt->destructure_assignment_mode && jm_has_current_source_function(mt) &&
+            !jm_current_function_is_iife_body(mt)) {
         // A declaration pattern inside an ordinary function always creates a
         // local binding. Earlier browser script units may expose a same-named
         // module slot, but that slot must only participate in assignment
@@ -3336,7 +3314,8 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
 
     if (!var && mt->destructure_assignment_mode) {
             MIR_reg_t name_reg = jm_box_property_name_literal(mt, js_name, js_name_len);
-        bool strict_assign = mt->is_module || (mt->current_fc && mt->current_fc->is_strict);
+        bool strict_assign = mt->is_module || (mt->current_fc &&
+            JM_JS_FACT(mt->current_fc, is_strict));
         if (strict_assign) {
             jm_callr_1(mt, "js_get_global_property_strict", MIR_T_I64, name_reg);
             jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
@@ -3423,7 +3402,7 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
         existing_env_reg, existing_in_scope_env, existing_scope_env_slot,
         existing_scope_env_reg, val);
     jm_set_var(mt, vname, reg);
-    if (existing_from_env && mt->current_func_index >= 0 && mt->module_consts) {
+    if (existing_from_env && jm_has_current_source_function(mt) && mt->module_consts) {
         JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
         if (mc && mc->const_type == MCONST_MODVAR) {
             if (mc->var_kind == 2) {
@@ -3447,7 +3426,7 @@ void jm_bind_destructure_var(JsMirTranspiler* mt, const char* vname, MIR_reg_t v
     if (!is_local_let_const && mt->module_consts) {
         JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
         bool at_module_scope = mt->in_main ||
-            (mc && mc->is_iife_var && mt->current_fc && mt->current_fc->is_iife_body);
+            (mc && mc->is_iife_var && jm_current_function_is_iife_body(mt));
         if (mc && mc->const_type == MCONST_MODVAR) {
             if (at_module_scope) {
                 jm_store_module_var(mt, (uint32_t)mc->int_val, reg);
@@ -3613,8 +3592,7 @@ void jm_emit_array_destructure(JsMirTranspiler* mt, JsAstNode* pattern_node, MIR
     // that state across suspension before destructuring continues.
     bool has_yields = false;
     {
-        // Module destructuring uses current_func_index == -1; the former oversized
-        // collection table masked that invalid access, so use the active scope record.
+        // Module destructuring has no source function; use the active scope record.
         JsFuncCollected* fc = mt->current_fc;
         if (fc && fc->node && fc->node->is_generator) {
             JsAstNode* chk = pattern->elements;
@@ -5779,7 +5757,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
 
             if (fc && (fc->func_item || fc->native_func_item) && JM_CAPTURE_COUNT(fc) == 0) {
                 // Phase 4: Check if we can call the native version
-                if (fc->has_native_version && fc->native_func_item) {
+                if (JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE && fc->native_func_item) {
                     bool all_args_match = true;
                     int pi = 0;
                     JsAstNode* acheck = call->arguments;
@@ -5925,7 +5903,7 @@ MIR_reg_t jm_transpile_call(JsMirTranspiler* mt, JsCallNode* call) {
                     undef_this = jm_emit_undefined(mt);
                 }
                 if (JM_JS_FACT(fc, observes_this)) {
-                    if (!fc->is_strict) {
+                    if (!JM_JS_FACT(fc, is_strict)) {
                         MIR_reg_t global_this = jm_call_0(mt, "js_get_global_this", MIR_T_I64);
                         jm_callr_void_1(mt, "js_set_this", global_this);
                     } else {
@@ -6387,7 +6365,6 @@ struct JsMirBranchState {
     MIR_func_t current_func;
     JsFuncCollected* current_fc;
     JsClassEntry* current_class;
-    int current_func_index;
     MIR_reg_t scope_env_reg;
     int scope_env_slot_count;
     int scope_depth;
@@ -6428,7 +6405,6 @@ static void jm_save_branch_state(JsMirTranspiler* mt, JsMirBranchState* state) {
     state->current_func = mt->em.func;
     state->current_fc = mt->current_fc;
     state->current_class = mt->current_class;
-    state->current_func_index = mt->current_func_index;
     state->scope_env_reg = mt->scope_env_reg;
     state->scope_env_slot_count = mt->scope_env_slot_count;
     state->scope_depth = mt->scope_depth;
@@ -6502,7 +6478,6 @@ static void jm_restore_branch_state(JsMirTranspiler* mt, JsMirBranchState* state
     mt->em.func = state->current_func;
     mt->current_fc = state->current_fc;
     mt->current_class = state->current_class;
-    mt->current_func_index = state->current_func_index;
     mt->scope_env_reg = state->scope_env_reg;
     mt->scope_env_slot_count = state->scope_env_slot_count;
     mt->scope_depth = state->scope_depth;
@@ -6822,17 +6797,19 @@ int jm_closure_env_alloc_size(JsMirTranspiler* mt, JsFuncCollected* fc, bool has
         slot = JM_CAPTURE_ARRAY(fc)[ci].private_env_slot;
         if (slot >= 0 && slot + 1 > env_size) env_size = slot + 1;
     }
-    if (fc->closure_env_has_parent_link &&
-        fc->closure_env_parent_link_slot + 1 > env_size) {
-        env_size = fc->closure_env_parent_link_slot + 1;
+    if (JM_JS_FACT(fc, closure_env_has_parent_link) &&
+        JM_JS_FACT(fc, closure_env_parent_link_slot) + 1 > env_size) {
+        env_size = JM_JS_FACT(fc, closure_env_parent_link_slot) + 1;
     }
-    if (mt && fc->parent_index >= 0 && fc->parent_index < mt->func_count) {
-        JsFuncCollected* parent_fc = &mt->func_entries[fc->parent_index];
-        // A remapped copied env is consumed with the parent's scope-env layout.
-        // Reserve its trailing link slot too; otherwise generated transitive
-        // loads read one Item past the copied env and treat adjacent pool data as a pointer.
-        if (parent_fc->has_parent_env_link && parent_fc->scope_env_count > env_size) {
-            env_size = parent_fc->scope_env_count;
+    if (mt) {
+        JsFuncCollected* parent_fc = jm_parent_collected_func(mt, fc);
+        if (parent_fc) {
+            // A remapped copied env is consumed with the parent's scope-env layout.
+            // Reserve its trailing link slot too; otherwise generated transitive
+            // loads read one Item past the copied env and treat adjacent pool data as a pointer.
+            if (parent_fc->has_parent_env_link && parent_fc->scope_env_count > env_size) {
+                env_size = parent_fc->scope_env_count;
+            }
         }
     }
     return env_size;
@@ -6899,31 +6876,19 @@ static int jm_last_closure_track_count(JsFuncCollected* fc) {
 
 static void jm_collect_descendant_func_assignments(JsMirTranspiler* mt,
         JsFuncCollected* ancestor, struct hashmap* assigned) {
-    if (!mt || !ancestor || !assigned) return;
-    int ancestor_index = -1;
+    if (!mt || !mt->tp || !ancestor || !ancestor->node || !assigned) return;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId ancestor_id = ast_index_find(index, (AstNode*)ancestor->node);
+    if (ancestor_id == AST_NODE_ID_INVALID) return;
     for (int fi = 0; fi < mt->func_count; fi++) {
-        if (&mt->func_entries[fi] == ancestor) {
-            ancestor_index = fi;
-            break;
-        }
-    }
-    if (ancestor_index < 0) return;
-
-    for (int fi = 0; fi < mt->func_count; fi++) {
-        int parent_index = mt->func_entries[fi].parent_index;
-        while (parent_index >= 0 && parent_index < mt->func_count) {
-            if (parent_index == ancestor_index) {
-                JsFunctionNode* descendant = mt->func_entries[fi].node;
-                if (descendant && descendant->body) {
-                    // A synchronously invoked outer closure can run nested
-                    // callbacks that mutate its captures. Include descendant
-                    // writes so post-call readback observes those live cells.
-                    jm_collect_indexed_func_assignments(mt, descendant->body, assigned);
-                }
-                break;
-            }
-            parent_index = mt->func_entries[parent_index].parent_index;
-        }
+        JsFunctionNode* descendant = mt->func_entries[fi].node;
+        AstNodeId descendant_id = descendant ? ast_index_find(index,
+            (AstNode*)descendant) : AST_NODE_ID_INVALID;
+        if (!descendant || !descendant->body || descendant_id == ancestor_id ||
+                !ast_index_node_descends(index, descendant_id, ancestor_id)) continue;
+        // A synchronously invoked outer closure can run nested callbacks that
+        // mutate its captures. The indexed ancestry includes synthetic bodies.
+        jm_collect_indexed_func_assignments(mt, descendant->body, assigned);
     }
 }
 
@@ -6989,7 +6954,7 @@ static void jm_track_tdz_closure_captures(JsMirTranspiler* mt, MIR_reg_t env,
 static void jm_copy_parent_env_link_for_copied_closure(JsMirTranspiler* mt,
         JsFuncCollected* fc, MIR_reg_t env, int env_alloc_size, bool has_remapped) {
     if (!mt || !fc || env == 0 || mt->scope_env_reg == 0) return;
-    if (!has_remapped && !fc->closure_env_has_parent_link) return;
+    if (!has_remapped && !JM_JS_FACT(fc, closure_env_has_parent_link)) return;
     bool needs_parent_link = false;
     for (int ci = 0; ci < JM_CAPTURE_COUNT(fc); ci++) {
         if (JM_CAPTURE_ARRAY(fc)[ci].grandparent_slot >= 0) {
@@ -6998,9 +6963,8 @@ static void jm_copy_parent_env_link_for_copied_closure(JsMirTranspiler* mt,
         }
     }
     if (!needs_parent_link) return;
-    int parent_index = fc->parent_index;
-    if (parent_index < 0 || parent_index >= mt->func_count) return;
-    JsFuncCollected* parent_fc = &mt->func_entries[parent_index];
+    JsFuncCollected* parent_fc = jm_parent_collected_func(mt, fc);
+    if (!parent_fc) return;
     if (!parent_fc->has_parent_env_link || parent_fc->scope_env_count <= 0) return;
     int parent_env_link_slot = parent_fc->scope_env_count - 1;
     if (parent_env_link_slot < 0 || parent_env_link_slot >= env_alloc_size) return;
@@ -7035,7 +6999,7 @@ static bool jm_should_use_shared_scope_env(JsMirTranspiler* mt,
         JsFuncCollected* fc, bool immediate_call, bool* force_copy_out) {
     bool force_copy = jm_force_copied_env_for_field_initializer(mt, fc);
     if (force_copy_out) *force_copy_out = force_copy;
-    bool use_scope_env = (!force_copy && !fc->closure_env_has_parent_link &&
+    bool use_scope_env = (!force_copy && !JM_JS_FACT(fc, closure_env_has_parent_link) &&
         mt->scope_env_reg != 0 && JM_CAPTURE_ARRAY(fc)[0].scope_env_slot >= 0);
     if (use_scope_env) {
         // a named function expression can combine a private self slot with
@@ -7136,10 +7100,10 @@ MIR_reg_t jm_create_func_or_closure(JsMirTranspiler* mt, JsFuncCollected* fc) {
             // D5.2/D5.3.3: copied scalar captures initially point into this
             // activation; retain the unpublished env and rehome it at epilogue.
             jm_register_owned_env(mt, env);
-            if (fc->closure_env_has_parent_link && mt->scope_env_reg != 0) {
+            if (JM_JS_FACT(fc, closure_env_has_parent_link) && mt->scope_env_reg != 0) {
                 // Mixed closures keep private captures local while shared
                 // lexical captures read and write through the parent cell.
-                jm_emit_store_i64(mt, fc->closure_env_parent_link_slot * (int)sizeof(uint64_t), env, mt->scope_env_reg);
+                jm_emit_store_i64(mt, JM_JS_FACT(fc, closure_env_parent_link_slot) * (int)sizeof(uint64_t), env, mt->scope_env_reg);
             }
 
             for (int ci = 0; ci < JM_CAPTURE_COUNT(fc); ci++) {
@@ -7301,10 +7265,10 @@ MIR_reg_t jm_transpile_func_expr(JsMirTranspiler* mt, JsFunctionNode* fn) {
             // D5.2/D5.3.3: copied scalar captures initially point into this
             // activation; retain the unpublished env and rehome it at epilogue.
             jm_register_owned_env(mt, env);
-            if (fc->closure_env_has_parent_link && mt->scope_env_reg != 0) {
+            if (JM_JS_FACT(fc, closure_env_has_parent_link) && mt->scope_env_reg != 0) {
                 // Mixed closures keep private captures local while shared
                 // lexical captures read and write through the parent cell.
-                jm_emit_store_i64(mt, fc->closure_env_parent_link_slot * (int)sizeof(uint64_t), env, mt->scope_env_reg);
+                jm_emit_store_i64(mt, JM_JS_FACT(fc, closure_env_parent_link_slot) * (int)sizeof(uint64_t), env, mt->scope_env_reg);
             }
 
             for (int i = 0; i < JM_CAPTURE_COUNT(fc); i++) {
@@ -7983,7 +7947,7 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         bool is_dynamic_import_module = js_dynamic_import_suppress_module_drain > 0;
         bool is_p5_module_tla = (mt->is_module && mt->in_main &&
             !mt->in_generator && !mt->in_async && mt->filename &&
-            ((mt->current_func_index < 0 && js_tla_module_depth_get() >= 2) ||
+            ((!jm_has_current_source_function(mt) && js_tla_module_depth_get() >= 2) ||
              is_dynamic_import_module));
         if (is_p5_module_tla) {
             MIR_reg_t spec_reg = jm_box_string_literal(mt, mt->filename,
@@ -8004,18 +7968,11 @@ MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr) {
         // result, so keep the transient class object in the exact root frame.
         jm_create_gc_root_slot(mt, cls_obj);
         MIR_reg_t ctor_super_val = 0;
-        // For anonymous class expressions (var X = class {}), find the class entry
-        // by node pointer since cls_expr->name is NULL but the entry was named
-        // from the variable during collect phase.
+        // An anonymous class expression still has the index-published class ID;
+        // collection may have supplied its effective name from the assignment.
         String* effective_name = cls_expr->name;
-        JsClassEntry* ce = NULL;
-        for (int ci = 0; ci < mt->class_count; ci++) {
-            if (mt->class_entries[ci].node == cls_expr) {
-                ce = &mt->class_entries[ci];
-                effective_name = ce->name ? ce->name : effective_name;
-                break;
-            }
-        }
+        JsClassEntry* ce = jm_find_collected_class(mt, cls_expr);
+        if (ce) effective_name = ce->name ? ce->name : effective_name;
         if (!ce && effective_name) {
             ce = jm_find_class(mt, effective_name->chars, (int)effective_name->len);
         }

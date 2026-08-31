@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-29
 
-**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3j compile-unit migrations, P4a–P4l indexed function facts, P5 semantic-family MIR lowering, and P6 shared execution/runtime lifecycle are fully implemented and verified. The P5/P6 review base and candidate each governed 326,064 `lambda/runtime` + `lambda/js` lines; the post-P6 direct-frontend retirement reduces that scope to 318,980 (`-7,084`). Proposal-wide structural convergence and the historical 308,711-line project target remain open.
+**Status:** ACTIVE — P0a/P0b gates, P1a–P1e core-layout migrations, P2a–P2c shared identity publication/lowering, P3a–P3j compile-unit migrations, P4a–P4l indexed function facts, P5 structural MIR lowering, and P6 shared execution/runtime lifecycle are fully implemented and verified. The principal Lambda/JS raw-register expression boundaries remain open under P5. The P5/P6 review base and candidate each governed 326,064 `lambda/runtime` + `lambda/js` lines; the post-P6 direct-frontend retirement reduced that scope to 318,980 (`-7,084`), and the active binding/pass-schedule and structural-parent convergence phase measures 316,936. Proposal-wide structural convergence and the historical 308,711-line project target remain open.
 
 **Scope:** The Lambda and LambdaJS AST builders, binding/indexing, compiler pass process, MIR lowering, AST interpreters, and shared runtime substrate. This document does not change either language's semantics, does not extend C2MIR, and does not modify a vendored dependency.
 
@@ -162,15 +162,54 @@ This has four costs:
 
 The live `AstIndex` assigns dense node, function, scope, binding, and class IDs and records parent and owner-function links. Common AST scopes, JavaScript extension scopes, resolved `NameEntry` bindings, class nodes, and node-to-binding use edges are published through one table; binding definitions resolve through the same indexed identity. Function IDs are consumed by JS MIR; binding IDs are consumed by direct-call and Test262 assertion lowering.
 
-JavaScript separately counts functions/classes, walks again to populate exact-sized metadata, builds a pointer-keyed function index, and stores another `FnAnalysis` inside `JsFuncCollected`. The comment in `transpile_js_mir_ast()` explicitly treats the shared function count as only an upper-bound hint.
+JavaScript now allocates source function/class metadata from the index's exact
+counts and publishes each callable through its shared `FnAnalysis` before any
+parent or class consumer reads it. Strictness, IIFE/class/constructor/field
+status, TCO eligibility, and lexical class ownership use that source-owned
+record; `JsFuncCollected` retains only MIR items, environment layout, backend
+names, and post-order emission scheduling. Its native plan has one no-native
+state (`NATIVE_RETURN_NONE`), not a second boolean flag. Direct class-entry consumers map
+`AstClassNode::class_id` to their index-ordered backend entry rather than
+scanning by node pointer; nested/private class resolution follows the same
+indexed parent graph rather than source ranges. Descendant-capture tracking
+also follows that graph rather than recovering backend order. The remaining
+work is to retire any remaining duplicate backend-planning state without
+treating the required post-order MIR-emission schedule or MIR handles as source
+semantic facts; module function caching already uses the resolved
+binding-definition edge rather than a source-name scan.
 
-This is the duplication that the index should delete, not coexist with.
+Each `AstIndex` function entry now carries its source root and direct lexical
+parent `FunctionId`. This parent relation follows structural node parents;
+index-owned child adjacency provides the matching subtree direction:
+source-span ownership recovery remains available for node facts, but cannot
+identify lexical function ancestry. JavaScript consumes this relation for
+parent and strictness walks; shared structural-descendant and nearest-class
+queries use the same parent graph. Its only mutation is the explicit class-field
+synthetic-initializer policy for direct field descendants.
 
 ### 2.5 Pass facts are only partly authoritative
 
-`build_js_ast_indexed()` now runs a required validation pass before index publication. The pass manager marks `VALIDATED` only when `js_check_early_errors()` succeeds; validation failures retain the AST for the caller's existing error lane but do not publish an indexed unit.
+`js_transpiler_parse_c()` now owns a front-end pass manager which runs
+`parse-build` → `bind` → `validate` → `index`. The manager publishes `AST`,
+`BOUND`, `VALIDATED`, and `INDEXED` only after the physical operation succeeds.
+An early-error validation failure retains the AST and its existing diagnostic
+state, but never publishes an indexed unit. JavaScript/TypeScript mode and
+module selection both enter that same boundary.
 
-This is the first truthful **D8.2.5** slice, not yet the production schedule. Only JavaScript validation/indexing is registered; build/bind, Lambda validation/indexing, and the large numbered analysis/lowering sequence remain manually ordered.
+The same JS manager then resumes with analysis/plan, lowering,
+finalization/load, and static property-key prelink operations; it never
+re-seeds front-end facts in a second manager. Runtime module-state key linking
+remains after context activation because it publishes into the live module
+slab. Lambda's active `Transpiler` starts a single manager with
+`parse-build-bind` → `validate` → `index`, then continues through const-fold,
+planning, lowering, finalization/load, and link. Direct source reduction and
+lexical binding remain one synchronous `parse-build-bind` operation because
+the reducer requires each declaration and scope as it processes later syntax;
+post-reduction semantic validation is separately manager-owned and a rejected
+unit cannot publish `INDEXED`. Retained-AST fallback starts a new manager at an
+already indexed unit. This is not yet the complete **D8.2.5** production
+schedule: JS runtime linking and a possible future separation of Lambda
+parse/build/bind remain open.
 
 ### 2.6 `MirValue` exists around a bare-register core
 
@@ -1673,6 +1712,745 @@ JS MIR emission `21/21`; JS optimizer `19/19`; Lambda/Input baseline
 `git diff --check`.
 No formal-spec ruling or semver changed.
 
+#### Post-P6 implementation record — binding identity and truthful Lambda/JS MIR schedules, 2026-08-31
+
+**D8.2.4** requires lowering to consume the builder's resolved binding rather
+than recover a compiler name by spelling. `push_name()` now publishes the
+owning `NameEntry` to declarators, parameters, and named
+function/procedure analysis; the interpreter planner no longer repairs those
+links after assigning slots. `transpile_call_raw()` and first-class-function
+publication derive their sole local-function key from `AstIdentNode::entry`
+with `write_fn_name()`. The raw-name call probe, first-class-function probe,
+definition-time and forward-declaration aliases, and alias contract refresh
+are retired, so an unrelated nested MIR forward cannot become an authority.
+
+**D8.2.5** requires each published fact to represent a completed operation.
+JavaScript now schedules `analyze-plan`, `mir-lower`, and
+`mir-finalize-load`: collection/capture/type/variant plans and forward
+identities, then bodies plus `js_main`, then frame/module finalization and
+load. Lambda now has the matching operational boundaries: `mir-plan` creates
+the module, prepass artifacts, call facts, and forwards; `mir-lower` emits
+function bodies and `main`; `mir-finalize-load` seals, dumps, loads, and
+releases compiler-only registries before the existing `mir-link-entry` pass.
+The satellite compiler uses those same helpers, and its unused one-shot wrapper
+is retired. `MIR_link` remains in the established language entry lifecycles, so
+the broader build/bind/validate/link schedule convergence remains open.
+
+| Ledger field | Result |
+|---|---|
+| phase base | `9af2f005e288790d95cf92f43ea9d093841eebf1` |
+| governed LOC before/after/delta | `316,983 → 316,982 = -1` |
+| changed C/C++ additions/deletions/net | `+127/-128 = -1` |
+| changed source additions/deletions/net | `+127/-128 = -1` |
+| retired implementation | raw source-name alias paths, planner declaration back-link repair, JS composite `analysis-lower-finalize`, Lambda one-shot lowering wrapper |
+| new authority | builder-published `NameEntry` links; pass facts at plan, MIR lowering, and finalization/load boundaries in both MIR drivers |
+| focused gates | `make build-test`; forced-T0 forward-reference/nested-shadowing `2/2`; compiler-pass checks `2/2`; Lambda MIR emission `63/63`; JS MIR emission `21/21`; forced-GC stress `93/93`; JS script/runtime `104/104` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The project anchor remains open: the current governed scope is 6,271 lines
+above the 308,711 target. This is an implementation-status record only; no
+formal ruling or semver changed.
+
+#### Post-P6 implementation record — collection-time JS MIR backend identity, 2026-08-31
+
+**D8.2.4** requires consumers to use a published semantic identity rather
+than recover one by searching a parallel backend table. Parent-function and
+class-method collection need a callable's `JsFuncCollected` record before the
+MIR driver reaches its later analysis stage. The old private
+`jm_find_indexed_collected_func()` pointer scan hid that split authority.
+`jm_publish_collected_backend()` now clears and publishes each source
+callable's `FnAnalysis::js_mir_backend` immediately after collection and before
+parent/class consumers run; the same helper publishes a synthetic class-field
+initializer at its creation boundary. Those consumers now use the canonical
+`jm_find_collected_func()` lookup, and the driver's late duplicate publication
+loop is retired.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,982` |
+| governed LOC before/after/delta | `316,982 → 316,978 = -4` |
+| changed C/C++ additions/deletions/net | `+21/-25 = -4` |
+| changed source additions/deletions/net | `+21/-25 = -4` |
+| retired implementation | `jm_find_indexed_collected_func()` pointer scan and late JS-MIR backend publication loop |
+| new authority | collection-time `FnAnalysis::js_mir_backend`, available before parent/class metadata collection |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS MIR emission `21/21`; JS script `104/104`; JS interpreter `357/357` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The proposal's FunctionId-keyed fact-table convergence remains open: this
+record only removes one competing function-identity recovery path. No formal
+ruling or semver changed.
+
+#### Post-P6 implementation record — indexed class backend identity, 2026-08-31
+
+**D8.2.4** gives every indexed class a dense `AstClassId`, but its backend
+consumers still searched `class_entries` by AST-node pointer. That was a
+parallel identity recovery path and unnecessarily exposed direct identity
+lookup to the separate spelling fallback. `jm_find_collected_class()` now maps
+the class node's published ID directly to its exact-sized index-ordered entry
+and checks that the entry owns the same node. Class-heritage binding,
+nested-class ownership, declaration lowering, and class-expression lowering
+all use that mapping; spelling lookup remains only as the existing separate
+fallback when no indexed class identity is available.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,978` |
+| governed LOC before/after/delta | `316,978 → 316,955 = -23` |
+| changed C/C++ additions/deletions/net | `+16/-39 = -23` |
+| changed source additions/deletions/net | `+16/-39 = -23` |
+| retired implementation | `jm_find_indexed_class()`, the module node-pointer wrapper, and statement/expression class-entry pointer scans |
+| new authority | `AstClassNode::class_id` mapped to the matching index-ordered `JsClassEntry` |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS MIR emission `21/21`; JS script `104/104`; JS interpreter `357/357` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The proposal's FunctionId-keyed fact-table convergence remains open: class
+identity is now direct, while function artifacts still use collection order in
+some backend plans. No formal ruling or semver changed.
+
+#### Post-P6 implementation record — indexed class ancestry, 2026-08-31
+
+Private and nested-class lowering formerly inferred lexical containment by
+scanning every class entry and comparing source ranges. That was both a second
+class traversal and the wrong authority for synthetic field-initializer
+callables, whose source span can be shared. Under **D8.2.4**,
+`jm_find_indexed_class_ancestor()` now consumes the common nearest-class ID;
+`ast_index_node_descends()` proves
+class-subtree membership. Private-owner resolution walks the nearest indexed
+class outward, preserving lexical private-name shadowing without range ranking.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,955` |
+| governed LOC before/after/delta | `316,955 → 316,954 = -1` |
+| changed C/C++ additions/deletions/net | `+42/-43 = -1` |
+| changed source additions/deletions/net | `+42/-43 = -1` |
+| retired implementation | `jm_class_contains_node()` source-range containment and full `class_entries` range scans for innermost/private class resolution |
+| new authority | `AstIndex::parents`, `AstClassId`, and the shared `ast_index_node_descends()` / `ast_index_nearest_class()` predicates |
+| focused gates | `make build-test`; structural class/private regressions `5/5`; JS interpreter `357/357`; JS script `104/104` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The remaining FunctionId-keyed fact-table work is unaffected; this record
+removes class-range recovery only. No formal ruling or semver changed.
+
+#### Post-P6 implementation record — indexed descendant function identity, 2026-08-31
+
+Closure writeback needs assignment facts from nested callables. Its old helper
+first searched `func_entries` by backend-record address, then followed the
+post-order `parent_index` mirror to decide ancestry. Under **D8.2.4**, it now
+gets the ancestor's sealed `AstNodeId` and uses `jm_index_node_descends()` for
+each callable root. This includes synthetic field-initializer bodies without
+depending on collection position or an address-to-index recovery scan.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,954` |
+| governed LOC before/after/delta | `316,954 → 316,942 = -12` |
+| changed C/C++ additions/deletions/net | `+12/-24 = -12` |
+| changed source additions/deletions/net | `+12/-24 = -12` |
+| retired implementation | descendant helper's backend-address scan and post-order `parent_index` ancestry walk |
+| new authority | sealed `AstNodeId` roots and `jm_index_node_descends()` |
+| focused gates | `make build-test`; closure/capture regressions `6/6`, including nested callbacks, loop sharing, and a synthetic class-field initializer |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The remaining FunctionId-keyed fact-table work is broader: backend planning
+still preserves post-order storage for emission. No formal ruling or semver
+changed.
+
+#### Post-P6 implementation record — binding-identified module declaration cache, 2026-08-31
+
+The lazy module-function cache formerly searched every `JsFuncCollected` entry
+for a matching mangled source name. That was a second declaration resolver and
+could not distinguish a same-spelling binding by lexical identity. Under
+**D8.2.4**, `jm_find_direct_function_decl_for_identifier()` now follows the
+identifier's `AstBindingId` to its published definition, admits only a direct
+function declaration, and uses the callable's existing shared backend link.
+This matches direct-call lowering's authority without changing the separate
+module-variable cache policy.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,942` |
+| governed LOC before/after/delta | `316,942 → 316,940 = -2` |
+| changed C/C++ additions/deletions/net | `+10/-12 = -2` |
+| changed source additions/deletions/net | `+10/-12 = -2` |
+| retired implementation | `jm_find_direct_function_decl_by_vname()` and its full collected-function name scan |
+| new authority | identifier `AstBindingId` and indexed definition edge |
+| focused gates | `make build-test`; function/hoist/Annex-B/IIFE regressions `6/6` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The remaining FunctionId-keyed fact-table work is broader: backend planning
+still preserves post-order storage for emission. No formal ruling or semver
+changed.
+
+#### Post-P6 implementation record — FunctionId parent and active-function identity, 2026-08-31
+
+`JsFuncCollected::parent_index` made lexical ancestry depend on the temporary
+post-order storage used to emit children before parents. `current_func_index`
+repeated that storage identity through function lowering, scope-environment
+writeback, generator/boxed-function snapshots, conditional-expression state,
+and module-body checks. Those mirrors violated **D8.2.4** even after individual
+callers had begun using indexed identity.
+
+Each collected backend record now carries its sealed `function_id` and
+`parent_function_id`. `jm_parent_collected_func()` resolves the parent through
+the `AstIndex` function table and the collection-time
+`FnAnalysis::js_mir_backend` publication; it never derives semantics from a
+backend-table position. Active lowering uses `current_fc` directly, with the
+synthetic module carrier distinguished by its absent source node. The
+`func_entries` array remains post-order only as the required MIR-emission
+schedule, not as an identity authority.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,940` |
+| governed LOC before/after/delta | `316,940 → 316,940 = 0` |
+| changed C/C++ additions/deletions/net | `+150/-150 = 0` |
+| changed source additions/deletions/net | `+150/-150 = 0` |
+| retired implementation | `parent_index`, `current_func_index`, pointer-arithmetic current-function recovery, post-order parent offsets, and their saved-state mirrors |
+| new authority | sealed `AstFunctionId` parent chain plus the published current `JsFuncCollected` backend record |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS MIR emission `21/21`; closure/capture regressions `6/6`; JS interpreter `357/357`; JS script `104/104` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The broader FunctionId-keyed fact-table convergence remains open: post-order
+storage still drives body emission and some backend artifacts have not yet
+moved out of `JsFuncCollected`. This is an implementation-status record only;
+no formal ruling or semver changed.
+
+#### Post-P6 implementation record — AST-owned JavaScript function facts, 2026-08-31
+
+`JsFuncCollected` still needs post-order MIR-emission artifacts, but its
+strictness, IIFE-promotion, class/constructor, field-initializer, and TCO
+status were source-function facts stored beside that temporary table. That
+duplicated the `FnAnalysis` authority required by **D8.2.4** and let lowering
+repair strictness from directive syntax after collection.
+
+The source function's `FnAnalysis` now owns those facts. Collection publishes
+strictness only after `jm_publish_collected_backend()` resets and links the
+analysis record, and class-field initialization, class methods/constructors,
+IIFE promotion, and native-planning TCO eligibility write the same record.
+Lowering reads `JM_JS_FACT`; `jm_current_function_is_iife_body()` replaces the
+repeated module-versus-current-function condition. The retired backend fields
+cannot become a second fact table, while `func_entries` retains only source
+identity, MIR handles, scope-environment plans, names, and class backend links.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,940` |
+| governed LOC before/after/delta | `316,940 → 316,940 = 0` |
+| changed C/C++ additions/deletions/net | `+72/-72 = 0` |
+| changed source additions/deletions/net | `+72/-72 = 0` |
+| retired implementation | backend `is_strict`, IIFE, class/constructor/field-initializer, and TCO flags; late strict-directive repairs; repeated current-IIFE-body predicates |
+| new authority | collection/planning-owned `FnAnalysis::js_*` function facts, consumed through `JM_JS_FACT` |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS MIR emission `21/21`; JS optimization `19/19`; IIFE/class/derived-constructor regressions `11/11`; matching JS interpreter cases `5/5`; JS interpreter `357/357`; JS script `104/104` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The broader FunctionId-keyed fact-table convergence remains open: post-order
+storage remains the MIR-emission schedule, and MIR-handle, scope-environment,
+and class backend artifacts are intentionally not source semantic facts. This
+is an implementation-status record only; no formal ruling or semver changed.
+
+#### Post-P6 implementation record — AST-owned lexical class identity and native plan state, 2026-08-31
+
+The innermost lexical class was still held as
+`JsFuncCollected::owner_class`, a backend pointer. That makes a source
+class/home-object fact mutable with the post-order emission table, contrary to
+**D8.2.4** and §3.6. Collection now publishes the nearest indexed
+`AstClassId` on the source function's `FnAnalysis`, including synthetic
+field-initializer callables. Capture analysis and function lowering resolve the
+exact `JsClassEntry` only at their MIR backend boundary, so nested classes,
+private environments, and field-initializer direct `eval` retain the same
+lexical owner without retaining a second source fact.
+
+The same slice removes `has_native_version`: it exactly duplicated whether the
+native plan's `native_return_kind` was `NATIVE_RETURN_NONE`. Forward creation,
+direct-call eligibility, debug metadata, and the dynamic-receiver downgrade
+now use that single enum authority. A redundant class-method strictness write
+also disappears because indexed strictness already recognizes method syntax.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,940` |
+| governed LOC before/after/delta | `316,940 → 316,940 = 0` |
+| changed C/C++ additions/deletions/net | `+29/-29 = 0` |
+| changed source additions/deletions/net | `+29/-29 = 0` |
+| retired implementation | backend `owner_class` source-fact pointer, duplicate `has_native_version` flag, and redundant method strictness assignment |
+| new authority | `FnAnalysis::js_owner_class_id` plus the source-owned native-return plan's `NATIVE_RETURN_NONE` state |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS MIR emission `21/21`; JS optimization `19/19`; default-MIR nested private field/direct-`eval` probe (`42`); JS interpreter `357/357`; JS script `104/104` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The remaining convergence work must distinguish source facts from required MIR
+emission artifacts, rather than relocating backend handles merely to satisfy a
+table shape. This is an implementation-status record only; no formal ruling or
+semver changed.
+
+#### Post-P6 implementation record — AST-owned copied-closure parent-link facts, 2026-08-31
+
+Mixed loop and module closures need a copied-environment parent link when they
+combine private per-iteration captures with shared lexical cells. The link flag
+and slot previously lived in `JsFuncCollected`, even though capture planning
+derives them from the source callable's indexed identity and `FnCapture` facts.
+That made the post-order emission entry a duplicate source-plan authority under
+**D8.2.4**.
+
+`FnAnalysis` now owns the copied-closure parent-link flag and slot. Planning
+writes them before lowering, while closure sizing, shared-environment selection,
+capture reload, and environment construction read the same fact. The synthetic
+module carrier deliberately retains its own environment layout because it has
+no source function or `FunctionId`; this slice does not misclassify that backend
+artifact as a source fact.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,940` |
+| governed LOC before/after/delta | `316,940 → 316,940 = 0` |
+| changed C/C++ additions/deletions/net | `+24/-24 = 0` |
+| changed source additions/deletions/net | `+24/-24 = 0` |
+| retired implementation | `JsFuncCollected` copied-closure parent-link flag and slot |
+| new authority | `FnAnalysis::js_closure_env_*` source-function plan facts |
+| focused gates | `make build-test`; compiler-pass `2/2`; class-field MIR emission `1/1`; MIR closure/loop regressions `9/9`; matching JS interpreter cases `6/6`; default-MIR closure probe (`10,11,12`) |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The broader scope-environment layout still has a real split: source-callable
+plans may migrate by `FunctionId`, while the source-less module carrier stays a
+backend artifact. This is an implementation-status record only; no formal
+ruling or semver changed.
+
+#### Post-P6 implementation record — AST-owned reusable-parent environment plan, 2026-08-31
+
+The reusable-parent environment decision is a source-callable capture-plan
+fact: the indexed planner first clears it, then enables it only when every
+scope-environment binding is a transitive capture and records the remapped
+slot extent. Mixed-parent recovery clears the same pair. Keeping that plan on
+the post-order `JsFuncCollected` entry created a second authority contrary to
+**D8.2.4**.
+
+`FnAnalysis` now owns the reusable-parent flag and slot count. MIR lowering
+reads that pair through `JM_JS_FACT`; resumable allocation uses the slot count,
+which is zero whenever the plan is disabled. The source-less module carrier has
+no use of either fact and retains its required backend environment artifact.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,940` |
+| governed LOC before/after/delta | `316,940 → 316,940 = 0` |
+| changed C/C++ additions/deletions/net | `+21/-21 = 0` |
+| changed source additions/deletions/net | `+21/-21 = 0` |
+| retired implementation | `JsFuncCollected` reusable-parent flag and slot count |
+| new authority | `FnAnalysis::js_reuse_parent_env` and `js_reuse_env_slot_count` source-function plan facts |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS MIR emission `21/21`; JS optimization `19/19`; MIR closure/loop regressions `9/9`; matching JS interpreter cases `6/6`; default-MIR closure probe (`10,11,12`); JS MIR `357/357`; JS interpreter `104/104` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The broader scope-environment layout still has a real split: source-callable
+plans may migrate by `FunctionId`, while source-less module layout remains a
+backend artifact. This is an implementation-status record only; no formal
+ruling or semver changed.
+
+#### Post-P6 implementation record — AST-owned direct-parent environment plan, 2026-08-31
+
+When a mixed environment inherits the grandparent link but a child needs a
+late-initialized binding owned by its immediate parent, the indexed planner
+adds one direct-parent link and records its slot. That decision and slot were
+stored on `JsFuncCollected` despite being derived entirely from the source
+callable's capture ancestry, creating a second source-plan authority under
+**D8.2.4**.
+
+`FnAnalysis` now owns the direct-parent-link flag and slot. Planning resets and
+publishes the pair before child-capture remapping; lowering emits the direct
+link from the same fact. The ordinary parent-link layout remains a backend
+artifact because the source-less module carrier genuinely uses it; this slice
+moves only the source-callable direct-link plan.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,940` |
+| governed LOC before/after/delta | `316,940 → 316,940 = 0` |
+| changed C/C++ additions/deletions/net | `+14/-14 = 0` |
+| changed source additions/deletions/net | `+14/-14 = 0` |
+| retired implementation | `JsFuncCollected` direct-parent-link flag and slot |
+| new authority | `FnAnalysis::js_has_immediate_parent_env_link` and `js_immediate_parent_env_link_slot` source-function plan facts |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS MIR emission `21/21`; MIR closure/loop regressions `9/9`; matching JS interpreter cases `6/6`; default-MIR closure probe (`10,11,12`); JS MIR `357/357`; JS interpreter `104/104` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; clean Test262 rerun `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The broader scope-environment layout still has a real split: source-callable
+plans may migrate by `FunctionId`, while source-less module layout remains a
+backend artifact. This is an implementation-status record only; no formal
+ruling or semver changed.
+
+#### Post-P6 implementation record — AST-owned parent-link direction plan, 2026-08-31
+
+The parent-link direction—whether a mixed environment must follow the
+grandparent's link—is derived from the source callable's indexed captures and
+directly controls child remapping. It was a `JsFuncCollected` flag despite
+having no meaning for the source-less module carrier, so it was a second
+source-plan authority under **D8.2.4**.
+
+`FnAnalysis` now owns the direction fact. The mixed-environment planner resets
+and publishes it, including the reusable-parent fallback, and lowering follows
+the same fact when selecting the inherited environment. The physical
+`has_parent_env_link` flag remains backend-owned because module lowering
+genuinely allocates that layout; direction is the separable source decision.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,940` |
+| governed LOC before/after/delta | `316,940 → 316,940 = 0` |
+| changed C/C++ additions/deletions/net | `+5/-5 = 0` |
+| changed source additions/deletions/net | `+5/-5 = 0` |
+| retired implementation | `JsFuncCollected::parent_env_link_uses_grandparent` source-plan flag |
+| new authority | `FnAnalysis::js_parent_env_link_uses_grandparent` |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS MIR emission `21/21`; MIR closure/loop regressions `9/9`; matching JS interpreter cases `6/6`; default-MIR closure probe (`10,11,12`); JS MIR `357/357`; JS interpreter `104/104` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The broader scope-environment layout still has a real split: source-callable
+plans may migrate by `FunctionId`, while source-less module layout remains a
+backend artifact. This is an implementation-status record only; no formal
+ruling or semver changed.
+
+#### Post-P6 implementation record — AST-owned native return plan, 2026-08-31
+
+Native return classification is calculated from the source function's indexed
+parameter/return evidence and can be downgraded when an indexed dynamic
+receiver call requires the boxed entry. It has no module-carrier meaning, yet
+the `NativeReturnKind` enum lived on `JsFuncCollected` beside the MIR handle.
+That conflated a source plan with an emission artifact under **D8.2.4**.
+
+`FnAnalysis` now owns `js_native_return_kind`; the enum moves with the common
+function-analysis record while retaining its JavaScript-specific field. Direct
+call selection, native variant publication, debug mapping, and lowering read
+that one plan fact. `native_func_item` remains on `JsFuncCollected` because it
+is the generated MIR artifact, not a source semantic fact.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,940` |
+| governed LOC before/after/delta | `316,940 → 316,939 = -1` |
+| changed C/C++ additions/deletions/net | `+13/-14 = -1` |
+| changed source additions/deletions/net | `+13/-14 = -1` |
+| retired implementation | `JsFuncCollected::native_return_kind` source-plan field |
+| new authority | `FnAnalysis::js_native_return_kind`; `native_func_item` remains the MIR artifact |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS MIR emission `21/21`; JS optimization `19/19`; MIR closure/loop regressions `9/9`; matching JS interpreter cases `6/6`; JS MIR `357/357`; JS interpreter `104/104` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; clean Test262 rerun `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The remaining `JsFuncCollected` fields are now either post-order emission
+schedule, physical scope-environment layout, backend naming, or MIR handles.
+This is an implementation-status record only; no formal ruling or semver
+changed.
+
+#### Post-P6 implementation record — manager-owned JS front-end schedule, 2026-08-31
+
+**D8.2.5** requires pass facts to be published by the pass that actually
+produces them. JavaScript still directly reduced the C parser, rebuilt direct
+scope graphs, and published `ast_root` before constructing a manager that only
+validated and indexed. That left the declared build/bind/validate/index
+schedule non-authoritative.
+
+`js_transpiler_parse_c()` now owns one front-end `CompilerPassManager` with
+four explicit pass contexts: `parse-build` produces `AST`; `bind` produces
+`BOUND`; `validate` produces `VALIDATED`; and the shared index callback
+produces `INDEXED`. Parse or bind failure publishes no root. A validation
+failure preserves the prior diagnostic contract—callers retain the AST and
+`has_errors`—but cannot index it. The automatic JavaScript/TypeScript/module
+selector calls the same entry. The retired build accessor, parse aliases, and
+private index callback no longer form a competing schedule.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,939` |
+| governed LOC before/after/delta | `316,939 → 316,938 = -1` |
+| changed C/C++ additions/deletions/net | `+87/-88 = -1` |
+| changed source additions/deletions/net | `+87/-88 = -1` |
+| retired implementation | `publish_js_ast_indexed`, `JsAstIndexPassContext`, its private validation callback, automatic/module parse aliases, and `js_transpiler_build_ast` |
+| new authority | `JsCCompilePassContext` and the four `js_transpiler_parse_c()` pass specifications; `js_c_source_is_module()` remains the shared mode predicate |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS C parser `18/18`; TypeScript `19/19`; JS MIR emission `21/21`; JS optimization `19/19`; JS MIR `357/357`; JS interpreter `104/104` |
+| full regression gates | clean Lambda/Input baseline rerun `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+The first parallel baseline run lost the `async_v14` batch result. Its focused
+GTest and direct `js-test-batch` execution both passed, and the clean full
+baseline rerun passed without test-runner changes. This migration removes the
+front-end schedule bypass, not the then-remaining JS runtime link or the distinct
+Lambda front-end/link lifecycle. It is an implementation-status
+record only; no formal ruling or semver changed.
+
+#### Post-P6 implementation record — one JavaScript parse-to-finalize manager, 2026-08-31
+
+The prior front-end schedule still created a second `CompilerPassManager` for
+MIR work and pre-seeded `AST | BOUND | VALIDATED | INDEXED`. That made a
+complete JavaScript pass sequence appear managed while its facts crossed an
+untracked manager boundary, contrary to **D8.2.5**.
+
+`JsTranspiler::pass_manager` now survives the direct C-parser run. The common
+manager records its next unexecuted pass, so `transpile_js_mir_ast()` appends
+and runs `analyze-plan`, `mir-lower`, `mir-finalize-load`, and `prelink` without replaying
+the front end or inventing facts. The parser's automatic JS/TypeScript/module
+selection is now an explicit `JS_PARSE_AUTO` mode at that same boundary. MIR
+callbacks consume `tp->ast_root`, eliminating their duplicate root pointer;
+the module carrier's `has_scope_env` replaces its second active flag.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,938` |
+| governed LOC before/after/delta | `316,938 → 316,928 = -10` |
+| changed C/C++ additions/deletions/net | `+35/-39 = -4` |
+| changed source additions/deletions/net | `+35/-39 = -4` |
+| retired implementation | second JS MIR manager/fact seed, automatic parse wrapper, `CompilerPassManager` facts accessor, MIR root mirror, and module-scope-active mirror |
+| new authority | `JsTranspiler::pass_manager` with resumable `next_pass`; `JsTranspiler::ast_root` is the sole JS compilation root |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS C parser `18/18`; TypeScript `19/19`; JS MIR emission `21/21`; JS optimization `19/19`; JS MIR `357/357`; JS interpreter `104/104` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+This completes one JavaScript manager through MIR finalization. Prelink/link
+remain explicit entry-lifecycle operations. Lambda's direct source
+reduction/binding remains coupled inside its later manager-owned
+`parse-build-bind` operation; its manager-owned validation/index schedule is
+recorded below. This is an implementation-status record only; no formal ruling
+or semver changed.
+
+#### Post-P6 implementation record — continuous Lambda indexed-to-link manager, 2026-08-31
+
+The Lambda direct path formerly ran `index` in a stack-local manager in
+`transpile_script()`, then created another manager in
+`compile_script_as_mir_direct()` and re-seeded its already established facts.
+That made a normal Lambda compile cross an untracked manager boundary,
+contrary to **D8.2.5**.
+
+`Transpiler::pass_manager` now carries the direct AST index schedule into the
+MIR driver. The driver appends const-fold, plan, lower, finalization/load, and
+link operations and resumes at the first unexecuted pass. A retained AST that
+re-enters MIR without an active `Transpiler` schedule starts one new compiler
+unit from its existing indexed facts; it cannot reuse a parser-stack context.
+`COMPILER_FACT_FRONTEND` names the common AST/bound/validated prerequisite,
+retiring the repeated three-bit spelling from Lambda and JavaScript schedules.
+
+| Ledger field | Result |
+|---|---|
+| phase base | preceding candidate `316,928` |
+| governed LOC before/after/delta | `316,928 → 316,928 = 0` |
+| changed C/C++ additions/deletions/net | `+20/-20 = 0` |
+| changed source additions/deletions/net | `+20/-20 = 0` |
+| retired implementation | second normal-Lambda MIR manager/fact seed and repeated front-end fact masks |
+| new authority | `Transpiler::pass_manager` owns one active indexed-to-link compiler unit |
+| focused gates | `make build-test`; compiler-pass `2/2`; Lambda MIR emission `63/63`; JS C parser `18/18`; JS MIR emission `21/21`; JS interpreter/ownership `104/104`; forced-JIT Lambda closure |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; clean Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+This completes the manager continuity for normal direct Lambda compilation.
+It does not claim separate direct Lambda parse/build/bind passes: source
+reduction and lexical binding remain coupled in the parser. The subsequent
+manager-owned validation/index schedule is recorded below; JS runtime linking
+remains outside its manager. This is an implementation-status record only; no
+formal ruling or semver changed.
+
+#### Post-P6 implementation record — Lambda manager-owned validation and indexing, 2026-08-31
+
+The direct Lambda path previously performed post-reduction semantic validation
+inside `lambda_rd_build_ast()`, while `transpile_script()` began its manager at
+`index`. That published an apparently complete `AST | BOUND | VALIDATED`
+precondition without the manager running the validation operation, contrary to
+**D8.2.5**.
+
+`lambda_rd_reduce_ast()` now owns only source reduction and its synchronous
+scope/binding construction. `lambda_ast_finalize_script()` owns the
+post-reduction checks: enforcing-call validation, cross-frame reads, and
+concurrency analysis. The normal `Transpiler::pass_manager` runs
+`parse-build-bind` → `validate` → `index`, then resumes its established
+const-fold-to-link sequence. Parse/reduction failure publishes no AST; a
+semantic validation failure retains diagnostics internally but cannot publish
+`VALIDATED` or `INDEXED`. AST dumping, REPL fragments, validator expressions,
+and allocation-failure coverage now spell their intentional raw-reduce plus
+finalize lifecycle directly, so the retired wrapper cannot become a second
+schedule. The direct reducer is also the sole owner of its `Input` allocator
+setup, including `shape_pool`; the runner's duplicate setup is deleted.
+
+| Ledger field | Result |
+|---|---|
+| phase base | `9af2f005e288790d95cf92f43ea9d093841eebf1` |
+| governed LOC before/after/delta | `316,983 → 316,940 = -43` |
+| changed C/C++ additions/deletions/net | `+762/-797 = -35` |
+| changed source additions/deletions/net | `+762/-797 = -35` |
+| retired implementation | `lambda_rd_build_ast()` wrapper, runner-local AST `Input` initialization, and the pre-seeded Lambda validation fact |
+| new authority | `lambda_rd_reduce_ast()`, `lambda_ast_finalize_script()`, and `Transpiler::pass_manager` pass contexts in `runner.cpp` |
+| focused gates | `make build-test`; compiler-pass `2/2`; Lambda parser `34/34`; Lambda errors `126/126`; Lambda MIR emission `63/63`; Lambda runtime `793/793`; JS C parser `18/18`; JS MIR emission `21/21`; JS interpreter/ownership `104/104` |
+| full regression gates | Lambda/Input baseline `4,063/4,063`; fresh Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+This establishes the manager-owned Lambda validation/index boundary without
+pretending that source reduction and binding can be arbitrarily split. JS
+runtime linking and a future physical Lambda parse/build/bind separation remain
+open. This is an implementation-status record only; no formal ruling or
+semver changed.
+
+#### Post-P6 implementation record — structural FunctionId parents, 2026-08-31
+
+**D8.2.4** requires stable source identities to be consumed rather than
+reconstructed from backend storage. `JsFuncCollected::parent_index` and its
+JS-specific parent scan therefore duplicated a source lexical relation on a
+post-order MIR entry. `AstIndex::functions` now stores
+`AstFunctionIndexEntry {node, parent}`, and JS resolves a collected parent from
+that shared `FunctionId` relation. The post-order entry still owns names,
+environment layout, and MIR handles because those are backend artifacts.
+
+The first implementation incorrectly read the immediate structural parent's
+`owner_functions` label. Those labels may be recovered from source spans for
+shared or malformed edges; in an exact top-level-await Test262 class case that
+linked both class methods to an unrelated harness function. The index now
+walks its structural parents to the nearest function, which preserves the
+former lexical scan's meaning. Class-field source descendants retain their
+explicit direct-field policy and are the sole deliberate shared-parent rewrite.
+Strictness ancestry now consumes the same FunctionId chain and the old
+JS-private function-kind scan is deleted.
+
+| Ledger field | Result |
+|---|---|
+| active phase base | `9af2f005e288790d95cf92f43ea9d093841eebf1` |
+| active phase governed LOC before/current/delta | `316,983 → 316,944 = -39` |
+| active phase C/C++ additions/deletions/net | `+849/-854 = -5` |
+| active phase source additions/deletions/net | `+849/-854 = -5` |
+| retired implementation | `JsFuncCollected::parent_index`, `jm_indexed_parent_function_index()`, and the JS-private strictness function-kind scan |
+| new authority | `AstFunctionIndexEntry.parent`, `ast_index_function_parent()`, and structural-parent resolution in `ast-core.cpp` |
+| focused gates | `make build-test`; targeted ownership regression (also rejects the former immediate-owner implementation); affected JS MIR checks; JS GTest `357/357` |
+| full regression gates | Lambda/Input baseline `4,064/4,064`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+This is an implementation-only **D8.2.4** status update. It does not merge the
+JavaScript and Lambda semantic interpreters: both keep their profile-specific
+walkers and activation records under **D8.1.3v10**, while consuming the same
+indexed source identities and runtime substrate.
+
+#### Post-P6 implementation record — manager-owned JavaScript prelink, 2026-08-31
+
+Static property-key discovery depends only on the finalized MIR module and its
+sealed `module_name_specs`, yet `js_prelink_compiled_name_table()` previously
+ran as an untracked entrypoint operation immediately after the manager
+returned. The JS schedule now adds `prelink`, requiring `FINALIZED` and
+publishing `PRELINKED`, after `mir-finalize-load`. Its pass callback owns the
+same failure diagnostic, so no second direct entrypoint path remains.
+
+This deliberately does not move `js_link_compiled_name_table()` into the
+compiler manager: that operation writes the active runtime module-state slab,
+which does not exist until the execution boundary. The split is therefore
+**D8.2.5** pass ownership, not an attempt to make runtime publication a
+compile-time fact.
+
+| Ledger field | Result |
+|---|---|
+| active phase base | `9af2f005e288790d95cf92f43ea9d093841eebf1` |
+| active phase governed LOC before/after/delta | `316,983 → 316,947 = -36` |
+| active phase C/C++ additions/deletions/net | `+858/-860 = -2` |
+| active phase source additions/deletions/net | `+858/-860 = -2` |
+| retired implementation | direct `js_prelink_compiled_name_table()` entrypoint call after manager completion |
+| new authority | `js_mir_prelink` compiler pass and `COMPILER_FACT_PRELINKED` |
+| focused gates | compiler-pass `2/2`; JS MIR emission `21/21`; JS script/ownership `105/105` |
+| full regression gates | Lambda/Input baseline `4,064/4,064`; Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+This is an implementation-only **D8.2.5** status update; JS runtime linking
+and the broader `MirValue` legacy-boundary retirement remain open.
+
+#### Post-P6 implementation record — shared structural-descendant query, 2026-08-31
+
+The JavaScript-only `jm_index_node_descends()` was a generic walk over
+`AstIndex::parents`; class containment, suspension/assignment collection,
+return analysis, and descendant closure writes all depended solely on that
+common graph. Under **D8.2.4**, `ast_index_node_descends()` now publishes the
+walk beside the index lookup API. It validates its dense node ID before reading
+the parent table, so an absent lookup is non-descendant rather than an
+out-of-bounds assumption. The JS copy and declaration are retired, and every
+former consumer invokes the common primitive.
+
+| Ledger field | Result |
+|---|---|
+| active phase base | `9af2f005e288790d95cf92f43ea9d093841eebf1` |
+| active phase governed LOC before/current/delta | `316,983 → 316,949 = -34` |
+| active phase C/C++ additions/deletions/net | `+875/-875 = 0` |
+| active phase source additions/deletions/net | `+875/-875 = 0` |
+| retired implementation | JS-local structural descendant walk and private declaration |
+| new authority | bounds-checked `ast_index_node_descends()` over `AstIndex::parents` |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS MIR emission `21/21`; JS script/ownership `105/105` |
+| full regression gates | Lambda/Input baseline `4,064/4,064`; clean Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+This consumes no net lines in the active convergence phase. It is an
+implementation-only **D8.2.4** status update; JS runtime linking and the
+broader `MirValue` legacy-boundary retirement remain open.
+
+#### Post-P6 implementation record — shared nearest-class identity, 2026-08-31
+
+JavaScript collection independently walked parent pointers to find a function's
+enclosing `AstClassId`, while expression lowering repeated that walk before
+mapping the result back to a `JsClassEntry`. Both walks depended only on the
+common `AstIndex::parents`, core class node tags, and the class ID published by
+the index. Under **D8.2.4**, `ast_index_nearest_class()` now owns that query.
+It shares the common checked `ast_index_parent_id()` conversion with
+structural-descendant queries; JS keeps only its class-field policy and
+semantic conversion from the published class ID to the MIR backend entry.
+
+| Ledger field | Result |
+|---|---|
+| active phase base | `9af2f005e288790d95cf92f43ea9d093841eebf1` |
+| active phase governed LOC before/current/delta | `316,983 → 316,947 = -36` |
+| active phase C/C++ additions/deletions/net | `+900/-902 = -2` |
+| active phase source additions/deletions/net | `+900/-902 = -2` |
+| retired implementation | JS-local nearest-class-ID walk, parent accessor/recovery, and duplicated class-entry ancestor walk |
+| new authority | `ast_index_nearest_class()` with the common `AstClassId` fact |
+| focused gates | `make build-test`; JS MIR emission `21/21`; JS script/interpreter `105/105`, including class/private coverage |
+| full regression gates | Lambda/Input baseline `4,064/4,064`; clean Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+This is an implementation-only **D8.2.4** status update. It keeps class
+backend entries as MIR artifacts and does not change JS/Lambda interpreter
+separation under **D8.1.3v10**.
+
+#### Post-P6 implementation record — index-owned subtree adjacency, 2026-08-31
+
+JavaScript body-local collection built its own `first_children`/
+`next_siblings` cache from `AstIndex::parents`, then kept that cache and its
+teardown on `JsMirTranspiler`. The relation is structural rather than JS
+semantic, so this was a second graph representation beneath **D8.2.4**.
+`AstIndex` now publishes both adjacency rows with every indexed node and
+`ast_index_visit_subtree()` owns the iterative visit. The JavaScript collector
+retains its owner and declaration policy while consuming that common visitor;
+the JS storage, rebuild, and cleanup are deleted.
+
+| Ledger field | Result |
+|---|---|
+| active phase base | `9af2f005e288790d95cf92f43ea9d093841eebf1` |
+| active phase governed LOC before/current/delta | `316,983 → 316,936 = -47` |
+| active phase C/C++ additions/deletions/net | `+962/-975 = -13` |
+| active phase source additions/deletions/net | `+962/-975 = -13` |
+| retired implementation | `JsMirTranspiler` subtree storage/count, cache rebuild, local iterative visitor, and cleanup |
+| new authority | `AstIndex::first_children` / `next_siblings` and `ast_index_visit_subtree()` |
+| focused gates | `make build-test`; compiler-pass `2/2`; JS MIR emission `21/21`; JS script/interpreter `105/105` |
+| full regression gates | Lambda/Input baseline `4,064/4,064`; clean Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+This is an implementation-only **D8.2.4** status update. It shares index
+structure, not JavaScript declaration semantics or interpreter behavior, which
+remain profile-owned under **D8.1.3v10**.
+
+#### Post-P6 implementation record — direct Lambda primary `MirValue`, 2026-08-31
+
+Lambda literal primaries no longer return a bare `MIR_reg_t` for a later
+boundary wrapper to classify. `transpile_primary_value()` publishes the full
+`MirValue` at the producer: integer lane, `F64`, `I64`/`U64`, boxed `Item`, and
+raw-GC pointer literals each retain their actual representation and the AST
+`Type*` contract. Parenthesized primaries preserve their child descriptor.
+The shared const-backed pointer-literal path replaces five duplicated cases,
+and `AST_NODE_PRIMARY` is retired from the legacy raw dispatcher, so a primary
+cannot re-enter that compatibility path. This is the first literal/primary
+slice of P5 item 1, applying **D2.4.1–D2.4.3**, **D5.3.4**, and **D8.2.6**.
+
+Identifier, call, control-flow, and extension-node producers still use the
+remaining raw legacy boundary; JavaScript's `jm_transpile_expression()` also
+remains raw. They are not represented as complete merely because structural
+consumers already accept `MirValue`. The two interpreters and their activation
+records remain separate under **D8.1.3v10**.
+
+| Ledger field | Result |
+|---|---|
+| active phase base | `9af2f005e288790d95cf92f43ea9d093841eebf1` |
+| active phase governed LOC before/current/delta | `316,983 → 316,927 = -56` |
+| active phase C/C++ additions/deletions/net | `+1002/-1024 = -22` |
+| active phase source additions/deletions/net | `+1002/-1024 = -22` |
+| retired implementation | raw `transpile_primary()` result boundary, five duplicate const-pointer primary cases, and the legacy `AST_NODE_PRIMARY` dispatcher arm |
+| new authority | `transpile_primary_value()` with producer-owned `MirValue` representation and contract |
+| focused gates | `make build-test`; Lambda MIR emission `63/63`; MIR GC stress `93/93`; compiler-pass `2/2`; JS MIR emission `21/21`; JS script/interpreter `105/105` |
+| full regression gates | Lambda/Input baseline `4,064/4,064`; clean Test262 `40,261/40,261`, zero non-fully-passing, failed, regressions, and retries |
+
+This is an implementation-only P5 status update. It does not add an internal
+compatibility wrapper, alter JavaScript semantics, or change a formal ruling.
+
 ---
 
 ## 5. Phase Exit Gates
@@ -1837,7 +2615,7 @@ This appendix is a starting map, not a substitute for re-resolving symbols befor
 | Lambda AST builder/binding | `lambda/runtime/build_ast.cpp`, `lambda/runtime/ast_build.hpp` |
 | JS AST builder/binding | `lambda/js/build_js_ast.cpp`, `lambda/js/js_scope.cpp`, `lambda/js/js_early_errors.cpp` |
 | duplicate child descriptions | `lambda/runtime/interp_plan.cpp::interp_visit_children`, `lambda/js/js_ast_children.cpp` |
-| pass scaffold | `lambda/runtime/compiler_timing.hpp`, `lambda/runtime/compiler_pass.cpp`, `lambda/js/js_transpiler.hpp::build_js_ast_indexed` |
+| pass scaffold | `lambda/runtime/compiler_timing.hpp`, `lambda/runtime/compiler_pass.cpp`, `lambda/js/js_transpiler.hpp::JsTranspiler::pass_manager` |
 | Lambda MIR lowering | `lambda/runtime/transpile-mir.cpp` |
 | JS MIR phase driver | `lambda/js/js_mir_module_batch_lowering.cpp::transpile_js_mir_ast` |
 | JS function/class facts | `lambda/js/js_mir_context.hpp::JsFuncCollected`, `JsClassEntry` |

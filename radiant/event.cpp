@@ -2525,6 +2525,74 @@ static bool event_is_hot_path(const char* event_name) {
 // ancestor-or-self whose parent is a <details>. Mirrors the `details > summary`
 // guard in details.ls exactly, so the evaluator is created for precisely the
 // targets that template claims and for nothing else.
+// ES21 text drag-and-drop, source half. A mousedown that lands *inside* a text
+// control's existing selection begins a drag of that text rather than a new
+// selection — the rule every browser uses, and the one that keeps this additive:
+// a press anywhere else still starts a selection exactly as before.
+// Answers the control and the selection so the caller can arm the drag with the
+// range it will move.
+static bool radiant_text_drag_source_at(EventContext* evcon, DocState* state,
+                                        View* target, float x, float y,
+                                        DomElement** out_elem,
+                                        uint32_t* out_start, uint32_t* out_end,
+                                        uint32_t* out_press) {
+    if (!evcon || !evcon->ui_context || !state || !target) return false;
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_text_control(&surface) || !surface.owner) {
+        return false;
+    }
+    DomElement* elem = surface.owner;
+    // A read-only control still allows dragging text out; a disabled one is
+    // inert, and an empty selection has nothing to drag.
+    if (form_control_is_disabled(state, static_cast<View*>(elem))) return false;
+    uint32_t sel_start = 0, sel_end = 0;
+    form_control_get_selection(state, static_cast<View*>(elem), &sel_start, &sel_end, nullptr);
+    if (sel_end <= sel_start) return false;
+
+    uint32_t hit = 0;
+    if (!editing_geometry_text_control_offset_for_point(evcon->ui_context, elem,
+                                                        x, y, &hit)) {
+        return false;
+    }
+    // Half-open: pressing exactly at the selection end places a caret instead,
+    // matching the browsers and keeping click-past-selection responsive.
+    if (hit < sel_start || hit >= sel_end) return false;
+
+    if (out_elem) *out_elem = elem;
+    if (out_start) *out_start = sel_start;
+    if (out_end) *out_end = sel_end;
+    if (out_press) *out_press = hit;
+    return true;
+}
+
+// ES21, target half. A text control is an implicit drop target for a text drag:
+// unlike the element-DnD path it needs no `dropzone` attribute, because dropping
+// text into an editable field is UA behavior rather than an author opt-in.
+static bool radiant_text_drop_target_at(EventContext* evcon, DocState* state,
+                                        View* target, float x, float y,
+                                        DomElement** out_elem, uint32_t* out_offset) {
+    if (!evcon || !evcon->ui_context || !state || !target) return false;
+    EditingSurface surface;
+    if (!editing_surface_from_target(target, &surface) ||
+        !editing_surface_is_text_control(&surface) || !surface.owner) {
+        return false;
+    }
+    DomElement* elem = surface.owner;
+    if (form_control_is_disabled(state, static_cast<View*>(elem)) ||
+        form_control_is_readonly(state, static_cast<View*>(elem))) {
+        return false;
+    }
+    uint32_t offset = 0;
+    if (!editing_geometry_text_control_offset_for_point(evcon->ui_context, elem,
+                                                        x, y, &offset)) {
+        return false;
+    }
+    if (out_elem) *out_elem = elem;
+    if (out_offset) *out_offset = offset;
+    return true;
+}
+
 static bool radiant_target_is_details_summary(View* target) {
     for (DomNode* n = static_cast<DomNode*>(target); n; n = n->parent) {
         if (n->node_type != DOM_NODE_ELEMENT) continue;
@@ -8459,6 +8527,19 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                 }
 
+                // ES21: for a text drag the drop target is the text control
+                // under the cursor, with no `dropzone` opt-in — that attribute
+                // gates the element-DnD system, which this is not part of.
+                if (!new_drop_target && dd->has_source_range && evcon.target) {
+                    DomElement* text_drop_elem = nullptr;
+                    uint32_t text_drop_offset = 0;
+                    if (radiant_text_drop_target_at(&evcon, state, evcon.target,
+                                                    (float)motion->x, (float)motion->y,
+                                                    &text_drop_elem, &text_drop_offset)) {
+                        new_drop_target = static_cast<View*>(text_drop_elem);
+                    }
+                }
+
                 bool has_drop_range = false;
                 DomBoundary drop_start = {};
                 DomBoundary drop_end = {};
@@ -8989,6 +9070,40 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 }
             }
 
+            // ES21: a press inside a text control's selection arms a text drag.
+            // Checked before the `draggable` walk so a selection inside a draggable
+            // ancestor drags its text, as browsers do; the walk still wins for a
+            // press outside the selection.
+            // Single, unmodified press only — the same gate the document-text
+            // path uses. A double/triple click inside a selection must still
+            // reach word/line selection, and a shift-click must still extend.
+            bool text_drag_armed = false;
+            if (event->type == RDT_EVENT_MOUSE_DOWN &&
+                btn_event->button == GLFW_MOUSE_BUTTON_LEFT &&
+                event->mouse_button.clicks == 1 &&
+                !(event->mouse_button.mods & RDT_MOD_SHIFT) &&
+                state && evcon.target && !evcon.default_prevented) {
+                DomElement* drag_src_elem = nullptr;
+                uint32_t drag_sel_start = 0, drag_sel_end = 0, drag_press = 0;
+                if (radiant_text_drag_source_at(&evcon, state, evcon.target,
+                                                (float)btn_event->x, (float)btn_event->y,
+                                                &drag_src_elem, &drag_sel_start,
+                                                &drag_sel_end, &drag_press)) {
+                    DragTransitionArgs text_drag = {};
+                    text_drag.source = static_cast<View*>(drag_src_elem);
+                    text_drag.x = (float)btn_event->x;
+                    text_drag.y = (float)btn_event->y;
+                    text_drag.has_source_range = true;
+                    text_drag.source_start = drag_sel_start;
+                    text_drag.source_end = drag_sel_end;
+                    text_drag.press_offset = drag_press;
+                    drag_transition(state, DRAG_TRANSITION_BEGIN_DROP, &text_drag);
+                    text_drag_armed = true;
+                    log_debug("TEXT DRAG ARM: elem=%p sel=[%u..%u]",
+                              (void*)drag_src_elem, drag_sel_start, drag_sel_end);
+                }
+            }
+
             // Handle click in text - position caret or start selection.
             // This is a mousedown default action, so a canceled mousedown must
             // leave the existing text-control selection intact.
@@ -9143,7 +9258,13 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 DomElement* target_elem = lam::dom_require_element(evcon.target);
 
                 // Text input form controls: place caret inside the input
-                if (target_elem->form_control() &&
+                // An armed text drag must not also place a caret: the press is
+                // a drag, and starting a pointer selection here leaves an anchor
+                // at the press offset that the move then invalidates — dropping
+                // text out of the source shortens it below that offset and trips
+                // "editing drag anchor offset exceeds target length". Preserving
+                // the selection is also what the drag needs to move.
+                if (!text_drag_armed && target_elem->form_control() &&
                     target_elem->form->control_type == FORM_CONTROL_TEXT &&
                     !form_control_is_disabled(state, static_cast<View*>(target_elem))) {
 
@@ -9185,7 +9306,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                     evcon.need_repaint = true;
 
-                } else if (target_elem->form_control() &&
+                } else if (!text_drag_armed && target_elem->form_control() &&
                            target_elem->form->control_type == FORM_CONTROL_TEXTAREA &&
                            !form_control_is_disabled(state, static_cast<View*>(target_elem))) {
                     // Textarea form controls: click-to-position caret
@@ -9363,11 +9484,38 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         log_debug("DRAG DROP: source=%p target=%p", dd->source_view, dd->drop_target);
                         dispatch_lambda_handler(&evcon, dd->drop_target, "drop");
 
+                        // ES21: a text drag drops through the same entry point
+                        // the harness drives, so the applier, the maxlength and
+                        // newline policy in editing.ls, and the same-control
+                        // offset adjustment after the delete are shared rather
+                        // than reimplemented here. The source range recorded at
+                        // drag start is what closes the "guess at what to
+                        // remove" gap the rich path below still has.
+                        DomElement* text_drop_elem = nullptr;
+                        uint32_t text_drop_offset = 0;
+                        if (dd->has_source_range && dd->source_view &&
+                            radiant_text_drop_target_at(&evcon, state, dd->drop_target,
+                                                        (float)btn_event->x,
+                                                        (float)btn_event->y,
+                                                        &text_drop_elem,
+                                                        &text_drop_offset)) {
+                            // Ctrl/Cmd holds a copy; a plain drag moves, which is
+                            // the browser convention on both platforms.
+                            bool copy = event_mod_ctrl(btn_event->mods) ||
+                                        event_mod_super(btn_event->mods);
+                            radiant_dispatch_editing_text_drag_drop(
+                                evcon.ui_context, dd->source_view,
+                                dd->source_start, dd->source_end,
+                                static_cast<View*>(text_drop_elem),
+                                text_drop_offset, text_drop_offset,
+                                nullptr, nullptr, !copy);
+                            evcon.need_repaint = true;
+                        }
                         // CE-5 / ED2-2: lower drop-on-editable to
                         // beforeinput {insertFromDrop}. When dragover stored
                         // a DOM target range, run the same defaultable rich
                         // edit path used by simulated text drop.
-                        if (editing_host_lookup(static_cast<DomNode*>(dd->drop_target),
+                        else if (editing_host_lookup(static_cast<DomNode*>(dd->drop_target),
                                                 nullptr)) {
                             // Source deletion for element drag remains a
                             // consumer intent until live drag state carries a
@@ -9405,6 +9553,22 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         dispatch_lambda_handler(&evcon, dd->drop_target, "dragleave");
                     }
                     drag_handled = true;
+                    evcon.need_repaint = true;
+                }
+                else if (dd->pending && dd->has_source_range && dd->source_view &&
+                         dd->source_view->is_element()) {
+                    // ES21: the press armed a text drag that never crossed the
+                    // movement threshold, so it was a plain click inside the
+                    // selection. Browsers collapse to the press offset on
+                    // release, and suppressing the mousedown caret placement
+                    // without this leaves the old selection standing — which is
+                    // how rsc_scale_editing_geometry_matrix caught it.
+                    // Same pairing the document-text path makes with
+                    // selection_press_in_range_begin / _pending.
+                    DomElement* press_elem = lam::dom_require_element(dd->source_view);
+                    dispatch_form_selection_start(&evcon, press_elem, state,
+                                                  dd->source_view, dd->press_offset,
+                                                  "textDragClick");
                     evcon.need_repaint = true;
                 }
                 drag_transition(state, DRAG_TRANSITION_CLEAR_DROP, NULL);

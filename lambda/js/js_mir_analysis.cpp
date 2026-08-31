@@ -157,72 +157,6 @@ typedef enum JsSuspensionKind {
     JS_SUSPENSION_AWAIT,
 } JsSuspensionKind;
 
-bool jm_index_node_descends(AstIndex* index, AstNodeId node_id,
-        AstNodeId ancestor_id) {
-    while (index && node_id != AST_NODE_ID_INVALID) {
-        if (node_id == ancestor_id) return true;
-        AstNode* parent = index->parents[node_id];
-        node_id = parent ? ast_index_find(index, parent) : AST_NODE_ID_INVALID;
-    }
-    return false;
-}
-
-typedef bool (*JmIndexedSubtreeVisitor)(const AstIndex* index,
-    AstNodeId node_id, void* context);
-
-static bool jm_prepare_indexed_subtree_links(JsMirTranspiler* mt,
-        const AstIndex* index) {
-    if (!mt || !index) return false;
-    if (mt->indexed_traversal_count == index->count &&
-            (index->count == 0 || mt->indexed_subtree_storage)) {
-        return true;
-    }
-    if (mt->indexed_subtree_storage) mem_free(mt->indexed_subtree_storage);
-    mt->indexed_subtree_storage = NULL;
-    mt->indexed_traversal_count = 0;
-    if (!index->count) return true;
-    size_t bytes = (size_t)index->count * sizeof(AstNodeId);
-    mt->indexed_subtree_storage = (AstNodeId*)mem_alloc(bytes * 3, MEM_CAT_JS_RUNTIME);
-    if (!mt->indexed_subtree_storage) return false;
-    AstNodeId* first_children = mt->indexed_subtree_storage;
-    AstNodeId* next_siblings = first_children + index->count;
-    for (uint32_t i = 0; i < index->count; i++) {
-        first_children[i] = AST_NODE_ID_INVALID;
-        next_siblings[i] = AST_NODE_ID_INVALID;
-    }
-    for (uint32_t i = 0; i < index->count; i++) {
-        AstNode* parent = index->parents[i];
-        AstNodeId parent_id = parent ? ast_index_find(index, parent) : AST_NODE_ID_INVALID;
-        if (parent_id == AST_NODE_ID_INVALID || parent_id == i) continue;
-        next_siblings[i] = first_children[parent_id];
-        first_children[parent_id] = i;
-    }
-    mt->indexed_traversal_count = index->count;
-    return true;
-}
-
-static bool jm_visit_indexed_subtree(JsMirTranspiler* mt, AstNodeId root_id,
-        JmIndexedSubtreeVisitor visitor, void* context) {
-    AstIndex* index = mt && mt->tp ? &mt->tp->ast_index : NULL;
-    if (!index || !visitor || root_id == AST_NODE_ID_INVALID || root_id >= index->count ||
-            !jm_prepare_indexed_subtree_links(mt, index)) return false;
-    AstNodeId* first_children = mt->indexed_subtree_storage;
-    AstNodeId* next_siblings = first_children + index->count;
-    AstNodeId* visit_stack = next_siblings + index->count;
-    uint32_t pending_count = 0;
-    visit_stack[pending_count++] = root_id;
-    while (pending_count) {
-        AstNodeId node_id = visit_stack[--pending_count];
-        if (!visitor(index, node_id, context)) return false;
-        for (AstNodeId child = first_children[node_id];
-                child != AST_NODE_ID_INVALID; child = next_siblings[child]) {
-            if (pending_count >= index->count) return false;
-            visit_stack[pending_count++] = child;
-        }
-    }
-    return true;
-}
-
 static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
         JsSuspensionKind kind) {
     if (!mt || !mt->tp || !root) return 0;
@@ -234,7 +168,7 @@ static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
     for (uint32_t i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
         if (!node || index->owner_functions[i] != owner ||
-                !jm_index_node_descends(index, i, root_id)) continue;
+                !ast_index_node_descends(index, i, root_id)) continue;
         if (kind == JS_SUSPENSION_YIELD &&
                 node->node_type == JS_AST_NODE_YIELD_EXPRESSION) {
             count++;
@@ -242,8 +176,8 @@ static int jm_count_indexed_suspensions(JsMirTranspiler* mt, JsAstNode* root,
             // iterator-result branches for every enclosing pattern level.
             AstNodeId parent_id = i;
             while (parent_id != root_id && parent_id != AST_NODE_ID_INVALID) {
-                AstNode* parent = index->parents[parent_id];
-                parent_id = parent ? ast_index_find(index, parent) : AST_NODE_ID_INVALID;
+                parent_id = ast_index_parent_id(index, parent_id);
+                AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
                 if (parent && parent->node_type == JS_AST_NODE_ARRAY_PATTERN) count++;
             }
         } else if (kind == JS_SUSPENSION_AWAIT &&
@@ -317,12 +251,12 @@ void jm_collect_indexed_func_assignments(JsMirTranspiler* mt, JsAstNode* root,
     for (uint32_t i = 0; i < index->count; i++) {
         AstNode* node = index->nodes[i];
         if (!node || index->owner_functions[i] != owner ||
-                !jm_index_node_descends(index, i, root_id)) continue;
+                !ast_index_node_descends(index, i, root_id)) continue;
         bool in_with = false;
         AstNodeId parent_id = i;
         while (parent_id != root_id && parent_id != AST_NODE_ID_INVALID) {
-            AstNode* parent = index->parents[parent_id];
-            parent_id = parent ? ast_index_find(index, parent) : AST_NODE_ID_INVALID;
+            parent_id = ast_index_parent_id(index, parent_id);
+            AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
             if (parent && parent->node_type == JS_AST_NODE_WITH_STATEMENT) {
                 in_with = true;
                 break;
@@ -361,8 +295,7 @@ static bool jm_collect_indexed_body_local(const AstIndex* index, AstNodeId node_
     AstNode* current = index->nodes[node_id];
     if (!current) return true;
     bool same_owner = index->owner_functions[node_id] == context->owner;
-    AstNode* parent = index->parents[node_id];
-    AstNodeId parent_id = parent ? ast_index_find(index, parent) : AST_NODE_ID_INVALID;
+    AstNodeId parent_id = ast_index_parent_id(index, node_id);
     bool enclosing_owner = parent_id != AST_NODE_ID_INVALID &&
         index->owner_functions[parent_id] == context->owner;
     if (!same_owner && !(current->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
@@ -417,7 +350,7 @@ void jm_collect_indexed_body_locals(JsMirTranspiler* mt, JsAstNode* node,
     AstNodeId root_id = ast_index_find(index, (AstNode*)node);
     if (root_id == AST_NODE_ID_INVALID) return;
     JmIndexedBodyLocals context = {locals, index->owner_functions[root_id], var_only};
-    if (!jm_visit_indexed_subtree(mt, root_id, jm_collect_indexed_body_local, &context)) {
+    if (!ast_index_visit_subtree(index, root_id, jm_collect_indexed_body_local, &context)) {
         log_error("js-mir: unable to visit indexed body locals");
     }
 }
@@ -889,9 +822,10 @@ void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,
                 node->node_type != JS_AST_NODE_IDENTIFIER) continue;
         JsIdentifierNode* id = (JsIdentifierNode*)node;
         bool is_binding = jm_index_identifier_is_binding(index, i, id);
-        bool is_property_key = jm_index_identifier_is_property_key(index->parents[i], node);
+        AstNodeId parent_id = ast_index_parent_id(index, i);
+        AstNode* parent = parent_id < index->count ? index->nodes[parent_id] : NULL;
+        bool is_property_key = jm_index_identifier_is_property_key(parent, node);
         if (!id->name || is_binding || is_property_key) continue;
-        AstNode* parent = index->parents[i];
         if (parent && parent->node_type == JS_AST_NODE_MEMBER_EXPRESSION &&
                 ((JsMemberNode*)parent)->object == node && id->name->len == 5 &&
                 memcmp(id->name->chars, "super", 5) == 0) continue;
@@ -985,7 +919,7 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
         if (jm_name_set_has(params, ref->name)) continue;    // local param
         // The AST now resolves an NFE self name to its private function scope,
         // but MIR still represents recursion through the closure environment.
-        if (!fc->is_class_method && !is_method_syntax &&
+        if (!JM_JS_FACT(fc, is_class_method) && !is_method_syntax &&
             self_name && self_name[0] && strcmp(ref->name, self_name) == 0) {
             has_self_ref = true;
             continue;
@@ -999,11 +933,11 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
         // must not mask an earlier outer binding captured before that block.
         if (jm_ref_is_local_binding(locals, ref)) continue;  // local var
         if (strcmp(ref->name, "_js_new.target") == 0) continue; // handled by arrow lexical capture below
-        if (fc->owner_class && fc->owner_class->name &&
-            strlen(ref->name) == fc->owner_class->name->len + 4 &&
+        if (JsClassEntry* owner_class = jm_function_owner_class(mt, fc); owner_class &&
+            owner_class->name && strlen(ref->name) == owner_class->name->len + 4 &&
             strncmp(ref->name, "_js_", 4) == 0 &&
-            strncmp(ref->name + 4, fc->owner_class->name->chars,
-                fc->owner_class->name->len) == 0) {
+            strncmp(ref->name + 4, owner_class->name->chars,
+                owner_class->name->len) == 0) {
             // A named class's private self-name belongs to the class lexical
             // environment. Treating it as an outer capture makes propagation
             // demand a nonexistent binding from the enclosing expression scope.
@@ -1034,7 +968,7 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
         // Direct Program declarations never enter ancestor_func_locals. Any
         // matching entry is therefore a real enclosing block/catch/loop or
         // function binding that shadows the same-named module cell, including
-        // for a top-level closure whose parent_index is -1.
+        // for a top-level closure with no parent FunctionId.
         bool force_env_capture = ancestor_func_locals &&
             jm_name_set_has(ancestor_func_locals, ref->name);
         bool is_lexical_for_head = jm_entry_is_lexical_for_head(ref->entry);
@@ -1075,7 +1009,7 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     // itself so the reference resolves to the correct function at runtime.
     // This is critical when multiple IIFEs define functions with the same minified name
     // (e.g., 'r', 'K') — without self-capture, the module_consts table would conflate them.
-    // Only add self-capture for non-top-level functions (parent_index >= 0) — top-level
+    // Only add self-capture for non-top-level functions — top-level
     // function declarations are hoisted and uniquely resolve via module var table.
     // Keeping top-level functions capture-free preserves tail-call optimization.
     // Exception: function EXPRESSIONS always need self-capture for NFE name binding,
@@ -1083,7 +1017,8 @@ void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
     bool is_block_func_decl = fn->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
         !jm_function_decl_is_direct_binding(fn, false);
     if (has_self_ref && self_name && self_name[0] &&
-            (fc->parent_index >= 0 || is_func_expr || is_block_func_decl)) {
+            (jm_parent_function_id(mt, fc) != AST_FUNCTION_ID_INVALID || is_func_expr ||
+             is_block_func_decl)) {
         // Annex B exposes a separate outer var binding for a block function.
         // Its self-reference must stay in the private block closure cell;
         // resolving it through the same-named module var lets `f = 123` inside
