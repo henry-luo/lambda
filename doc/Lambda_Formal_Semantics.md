@@ -1294,12 +1294,15 @@ Full record: [`Lambda_Design_Type_Enforcement.md`](../vibe/Lambda_Design_Type_En
   resolved colour: an `fn`-coloured `call` **returns** an error value, a
   `pn`-coloured `call` **raises**. `args` must be an array; any other type is
   an error.
-- **S12.3.5*** **Spread does not expand into an argument list.** `*x`
-  splices where a **container** is being built — array, list, and map
-  literals (S16.8.6) — and nowhere else; in argument position it passes its
-  operand as one value. The expansion was considered and **rejected** —
-  argument in [LR02-R10](../vibe/Lambda_Issue_Ledger.md); `call` covers the
-  forwarding case generally.
+- **S12.3.5** **Spread splices into containers, never into an argument
+  list; the spelling follows the container's shape.** Positional containers
+  take the bare operator — `[*a, 3]`, `(*a, 3)`. **Keyed** containers take it
+  in key position — `{*: m, w: 5}` and `<div *: attrs, id: "x">` — since a key
+  slot needs a key, and `*` is S16.8.6's any-key of the unit family. In
+  argument position `*x` passes its operand as one value; the expansion was
+  considered and **rejected** — argument in
+  [LR02-R10](../vibe/Lambda_Issue_Ledger.md), `call` covers forwarding
+  generally.
 
 - **S12.3.6** **No arity overloading for user definitions.** Two definitions
   sharing a name in one scope are a duplicate-definition error regardless of

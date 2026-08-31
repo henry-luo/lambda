@@ -1,0 +1,20 @@
+{
+  "name": "dom package details toggle on a script-less, control-less page (F15)",
+  "html": "test/ui/details_noscript.html",
+  "viewport": {"width": 400, "height": 300},
+  "events": [
+    {"type": "log", "message": "=== a static document has no evaluator until the package gate creates one ==="},
+    {"type": "assert_attr", "target": {"selector": ".d"}, "attribute": "open", "present": false},
+    {"type": "assert_visible", "target": {"selector": ".b"}, "visible": false},
+
+    {"type": "log", "message": "--- click still toggles, with no script on the page ---"},
+    {"type": "click", "target": {"selector": ".s"}},
+    {"type": "assert_attr", "target": {"selector": ".d"}, "attribute": "open", "present": true},
+    {"type": "assert_visible", "target": {"selector": ".b"}, "visible": true},
+
+    {"type": "log", "message": "--- and closes again ---"},
+    {"type": "click", "target": {"selector": ".s"}},
+    {"type": "assert_attr", "target": {"selector": ".d"}, "attribute": "open", "present": false},
+    {"type": "assert_visible", "target": {"selector": ".b"}, "visible": false}
+  ]
+}

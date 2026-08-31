@@ -333,6 +333,8 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
         0.0f, // normal fonts must not inherit initial-letter computed-size state
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     legacy_default_font.font_size_from_medium = true;
+    // Chromium's desktop UA preference keeps relative text at or above 6 CSS px.
+    minimum_logical_font_size = 6.0f;
     fallback_fonts = ::fallback_fonts;
 
     // init vector rendering engine
@@ -490,11 +492,11 @@ void free_document(DomDocument* doc) {
         log_debug("free_document: released the document-owned script runtime");
     }
 
+    // Input registries are backed by the loader pool. Release their allocator
+    // nodes before document teardown can destroy an aliased pool (D4.2.1v3).
+    input_release_auxiliary_resources(document_input);
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
-    // The DOM does not own the Input object, but its loader-created name and
-    // shape registries are external to the caller's Input pool.
-    input_release_auxiliary_resources(document_input);
 }
 
 void ui_context_cleanup(UiContext* uicon) {

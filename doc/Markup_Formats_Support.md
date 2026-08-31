@@ -547,7 +547,7 @@ ttl  = 300
 ```lambda
 // app.properties:  app.name=MyApp\napp.version=2.0
 let cfg = input("app.properties", 'properties')
-cfg."app.name"    // "MyApp"
+cfg.'app.name'    // "MyApp"
 ```
 
 ### 2.8 Format Conversion
@@ -718,7 +718,7 @@ h1, h2 {
   {
     selector: "body",
     declarations: {
-      "font-family": "sans-serif",
+      'font-family': "sans-serif",
       margin: "0"
     }
   },
@@ -726,7 +726,7 @@ h1, h2 {
     selector: "h1, h2",
     declarations: {
       color: "#333",
-      "font-weight": "bold"
+      'font-weight': "bold"
     }
   }
 ]
@@ -755,8 +755,8 @@ Mathematical notation can be parsed standalone from LaTeX math or AsciiMath sour
 a `<math>` element tree:
 
 ```lambda
-let expr = input("formula.tex", 'math')   // math-only LaTeX
-let expr = input("formula.asc", 'math-ascii')
+let tex_expr = input("formula.tex", 'math')   // math-only LaTeX
+let ascii_expr = input("formula.asc", 'math-ascii')
 ```
 
 ### 3.11 Directory Listing
@@ -776,16 +776,16 @@ All formats are accessed through the same `input()` built-in:
 
 ```lambda
 // Explicit type
-let data = input("file.ext", 'format')
+let typed_data = input("file.ext", 'format')
 
 // Auto-detect from MIME / file extension
-let data = input("data.json")
+let auto_data = input("data.json")
 
 // From a URL (HTTP/HTTPS)
-let data = input("https://api.example.com/data.json")
+let url_data = input("https://api.example.com/data.json")
 
 // From a string in memory
-let data = input_str(raw_string, 'yaml')
+let str_data = input_str(raw_string, 'yaml')
 ```
 
 **CLI equivalent — `lambda convert`:**

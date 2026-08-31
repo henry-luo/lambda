@@ -844,7 +844,9 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
             *applied[i] = true;
             bool content_is_usable = i == 0
                 ? content[i] > 0.0f && content[i] < available[i]
-                : content[i] >= 0.0f && content[i] < available[i];
+                // An intrinsic block size equal to the track still occupies
+                // the track; rejecting it turns auto margins into a zero-size box.
+                : content[i] >= 0.0f && content[i] <= available[i];
             float actual = explicit_sizes[i] && refs.given ? *refs.given
                 : (content_is_usable ? content[i] : refs.get_size());
             float free_space = available[i] - actual;
@@ -959,6 +961,37 @@ void align_grid_item(ViewBlock* item, GridContainerLayout* grid_layout) {
 
     align_axis(LAYOUT_AXIS_Y, align_alignment, applied_vert_auto, has_explicit_height,
                available_height, actual_height, max_height);
+
+    bool has_block_flow_child = false;
+    for (View* child = lam::view_require_element(item)->first_placed_child();
+         child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_BLOCK ||
+            child->view_type == RDT_VIEW_LIST_ITEM ||
+            child->view_type == RDT_VIEW_TABLE ||
+            child->view_type == RDT_VIEW_TABLE_CELL) {
+            has_block_flow_child = true;
+            break;
+        }
+    }
+    if (!has_block_flow_child && (item->display.inner == CSS_VALUE_FLOW ||
+                                  item->display.inner == CSS_VALUE_FLOW_ROOT)) {
+        CssEnum text_align = item->blk ? item->block()->text_align : CSS_VALUE_START;
+        if (text_align == CSS_VALUE_START) {
+            text_align = item->blk && item->block()->direction == CSS_VALUE_RTL
+                ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
+        } else if (text_align == CSS_VALUE_END) {
+            text_align = item->blk && item->block()->direction == CSS_VALUE_RTL
+                ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
+        }
+        if (text_align == CSS_VALUE_CENTER || text_align == CSS_VALUE_RIGHT) {
+            // CSS Grid §11.7: auto margins can resolve an item's used width
+            // after its provisional content line was laid out; realign that
+            // deferred line in the final content box.
+            LayoutContentBox final_content = layout_content_box(item);
+            layout_align_deferred_inline_line_runs(
+                lam::view_require_element(item), final_content.width, text_align);
+        }
+    }
 
     layout_shift_static_positioned_abs_descendants(
         lam::view_require_element(item), item->x - old_x, item->y - old_y);

@@ -2228,6 +2228,10 @@ typedef struct ViewStateEntry {
     uint32_t view_id;
     ViewStateKind kind;
     ViewState* state;
+    // Weak identity for document-owned nodes that are live but temporarily
+    // detached from the rendered root (for example createElement()).
+    void* owner_address;
+    uint32_t owner_id;
 } ViewStateEntry;
 
 typedef struct StateStore {
@@ -2241,6 +2245,12 @@ typedef struct StateStore {
     void destroy();
     struct DocState* state() const;
 } StateStore;
+
+#ifndef RADIANT_EVENT_CORE_ONLY
+// Resolves a ViewState entry to its rendered node or a still-live detached
+// document node. Callers must not retain the returned pointer across mutation.
+View* view_state_entry_resolve_view(DocState* state, const ViewStateEntry* entry);
+#endif
 
 typedef struct SelectionPresentation SelectionPresentation;
 typedef struct FocusState FocusState;
@@ -3137,6 +3147,12 @@ bool scroll_state_is_dragging_for_view(DocState* state, View* view);
  * Returns the UTF-8 encoded string; may be nullptr if not yet set.
  */
 const char* form_control_get_value(DocState* state, View* view, uint32_t* out_len);
+
+// Replace the canonical ViewState-owned UTF-8 value, then rebind the
+// FormControlProp cache. The caller owns neither the prior nor new buffer.
+bool form_control_store_text_value(DocState* state, View* view,
+                                   const char* value, uint32_t value_len,
+                                   uint32_t value_u16_len);
 
 /**
  * Restore a recreated text control's live value/selection from ViewState.

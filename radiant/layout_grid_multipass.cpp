@@ -111,7 +111,13 @@ static void grid_store_inline_baseline(LayoutContext* lycon,
             item_baseline = prefer_last ? item->block()->last_line_baseline
                                         : item->block()->first_line_baseline;
         }
-        if (item_baseline <= 0.0f) {
+        float form_baseline = item->form
+            ? radiant::layout_form_control_baseline_for_source(item) : 0.0f;
+        if (form_baseline > 0.0f) {
+            // CSS Grid: the item baseline is measured from the grid area's
+            // border-box origin, while the control baseline is local to input.
+            item_baseline = item->y + form_baseline;
+        } else if (item_baseline <= 0.0f) {
             item_baseline = prefer_last ?
                 radiant::compute_element_last_baseline(lycon, item, true) :
                 radiant::compute_element_first_baseline(lycon, item, true);
@@ -119,10 +125,13 @@ static void grid_store_inline_baseline(LayoutContext* lycon,
         if (item_baseline >= 0.0f) {
             float vertical_baseline = layout_vertical_item_baseline_from_border_edges(
                 grid_container, static_cast<View*>(item));
+            // Grid baseline caches are consumed from the border-box origin.
             float grid_baseline = vertical_baseline >= 0.0f
-                // Grid baseline caches are consumed from the border-box origin.
                 ? layout_block_start_content_offset(grid_container) + vertical_baseline
-                : item_baseline + (prefer_last ? item->y : 0.0f);
+                : item_baseline;
+            if (vertical_baseline < 0.0f && form_baseline <= 0.0f && prefer_last) {
+                grid_baseline += item->y;
+            }
             if (prefer_last) {
                 // The last set comes from an item ending in the block-end-most row;
                 // using the first-row cache ignores baseline-source:last.
@@ -795,9 +804,11 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     lycon->block.advance_y = content_y_offset;  // Start after padding/border top
     lycon->block.max_width = 0;
     lycon->elmt = static_cast<DomNode*>(grid_item);
-    // Inherit text alignment from grid item if specified
+    // CSS 2.1 §9.2.1: grid-item content establishes its own block direction;
+    // final grid layout bypasses setup_inline, so copy it into this context.
     if (grid_item->blk) {
         lycon->block.text_align = grid_item->block()->text_align;
+        lycon->block.direction = grid_item->block()->direction;
     }
     // Set up line formatting context
     // Add a small subpixel tolerance to the right boundary to compensate for integer truncation
@@ -1082,8 +1093,16 @@ static void layout_grid_abs_after_child(LayoutContext* lycon, ViewBlock* contain
             : radiant::resolve_align_self(self_alignment[axis], container_alignment[axis]);
         float free_space = available[axis] - refs.get_size() -
             refs.margin_start() - refs.margin_end();
-        float offset = radiant::compute_alignment_offset_simple(alignment, free_space);
-        if (offset != 0.0f) refs.set_position(refs.get_position() + offset);
+        // CSS Align maps logical start/end through the grid container direction.
+        float offset = layout_self_alignment_offset(
+            static_cast<CssEnum>(alignment), false, container, axis, free_space);
+        float previous_position = refs.get_position();
+        // CSS Grid §9.1: the static-position rectangle starts at the grid
+        // padding edge; convert the initial static edge to that rectangle's
+        // physical start before applying the logical alignment offset.
+        float static_start = layout_logical_start_is_physical_start(container, axis)
+            ? previous_position : previous_position - free_space;
+        refs.set_position(static_start + offset);
     }
 }
 

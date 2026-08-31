@@ -1165,9 +1165,10 @@ static void resolve_flex_grid_container_alignment(LayoutContext* lycon,
 static void css_store_self_alignment(LayoutContext* lycon, ViewSpan* span,
                                      bool justify, CssSelfAlignment value);
 
-static CssEnum css_parse_legacy_justify_items(const CssValue* value) {
+static CssSelfAlignment css_parse_legacy_justify_items(const CssValue* value) {
+    CssSelfAlignment result = {};
     if (!value || value->type != CSS_VALUE_TYPE_LIST || value->data.list.count != 2) {
-        return CSS_VALUE__UNDEF;
+        return result;
     }
 
     bool has_legacy = false;
@@ -1178,7 +1179,7 @@ static CssEnum css_parse_legacy_justify_items(const CssValue* value) {
             part->data.custom_property.name &&
             str_ieq_const(part->data.custom_property.name,
                           strlen(part->data.custom_property.name), "legacy")) {
-            if (has_legacy) return CSS_VALUE__UNDEF;
+            if (has_legacy) return result;
             has_legacy = true;
             continue;
         }
@@ -1186,13 +1187,16 @@ static CssEnum css_parse_legacy_justify_items(const CssValue* value) {
             (part->data.keyword == CSS_VALUE_LEFT ||
              part->data.keyword == CSS_VALUE_RIGHT ||
              part->data.keyword == CSS_VALUE_CENTER)) {
-            if (position != CSS_VALUE__UNDEF) return CSS_VALUE__UNDEF;
+            if (position != CSS_VALUE__UNDEF) return result;
             position = part->data.keyword;
             continue;
         }
-        return CSS_VALUE__UNDEF;
+        return result;
     }
-    return has_legacy ? position : CSS_VALUE__UNDEF;
+    if (!has_legacy) return result;
+    result.value = position;
+    result.legacy = true;
+    return result;
 }
 
 static CssSelfAlignment css_parse_justify_items(const CssValue* value) {
@@ -1200,8 +1204,7 @@ static CssSelfAlignment css_parse_justify_items(const CssValue* value) {
     if (result.value != CSS_VALUE__UNDEF) return result;
 
     // CSS Align 3 §7.1: legacy is a separate grammar branch for this property.
-    result.value = css_parse_legacy_justify_items(value);
-    return result;
+    return css_parse_legacy_justify_items(value);
 }
 
 static void css_store_grid_justify_items(LayoutContext* lycon, ViewBlock* block,

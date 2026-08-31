@@ -685,10 +685,12 @@ static DocState* event_view_owner_state(View* view) {
 }
 
 static DomDocument* event_context_find_focused_document(DomDocument* doc,
-                                                        uint8_t depth);
+                                                        uint8_t depth,
+                                                        View** iframe_container);
 
 static DomDocument* event_context_find_focused_document_in_view(View* view,
-                                                                uint8_t depth) {
+                                                                uint8_t depth,
+                                                                View** iframe_container) {
     if (!view || depth > 8) return NULL;
     if ((view->view_type == RDT_VIEW_BLOCK ||
          view->view_type == RDT_VIEW_INLINE_BLOCK ||
@@ -697,27 +699,37 @@ static DomDocument* event_context_find_focused_document_in_view(View* view,
         ViewBlock* block = lam::view_require_block(view);
         if (block->embed && block->embedp()->doc) {
             DomDocument* found = event_context_find_focused_document(
-                block->embedp()->doc, (uint8_t)(depth + 1));
-            if (found) return found;
+                block->embedp()->doc, (uint8_t)(depth + 1), iframe_container);
+            if (found) {
+                // Keyboard events need the direct iframe viewport to reflow
+                // the focused document at its embedded size rather than the
+                // top-level viewport.
+                if (iframe_container && !*iframe_container) {
+                    *iframe_container = static_cast<View*>(block);
+                }
+                return found;
+            }
         }
     }
     if (!view->is_element()) return NULL;
     DomElement* elem = lam::dom_require_element(view);
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
         DomDocument* found = event_context_find_focused_document_in_view(
-            static_cast<View*>(child), depth);
+            static_cast<View*>(child), depth, iframe_container);
         if (found) return found;
     }
     return NULL;
 }
 
 static DomDocument* event_context_find_focused_document(DomDocument* doc,
-                                                        uint8_t depth) {
+                                                        uint8_t depth,
+                                                        View** iframe_container) {
     if (!doc) return NULL;
     DocState* state = doc->state;
     if (state && focus_get(state)) return doc;
     if (!doc->view_tree || !doc->view_tree->root) return NULL;
-    return event_context_find_focused_document_in_view(doc->view_tree->root, depth);
+    return event_context_find_focused_document_in_view(doc->view_tree->root,
+                                                       depth, iframe_container);
 }
 
 static Item call_template_event_handler(TemplateHandlerEntry* entry,
@@ -2509,6 +2521,26 @@ static bool event_is_hot_path(const char* event_name) {
 // Loading requires a runtime: a `.ls` page and a script-bearing HTML page both
 // have one, but a script-less HTML page owns none yet (ESO25) and is skipped
 // until runtime-creation ownership is settled.
+// A target inside the disclosure control of a <details>: the nearest <summary>
+// ancestor-or-self whose parent is a <details>. Mirrors the `details > summary`
+// guard in details.ls exactly, so the evaluator is created for precisely the
+// targets that template claims and for nothing else.
+static bool radiant_target_is_details_summary(View* target) {
+    for (DomNode* n = static_cast<DomNode*>(target); n; n = n->parent) {
+        if (n->node_type != DOM_NODE_ELEMENT) continue;
+        DomElement* elem = n->as_element();
+        if (!elem) continue;
+        // stop at the nearest summary: that is the one behavior dispatch will
+        // match, so it alone decides whether the package governs this click
+        if (elem->tag() != MARKUP_NAME_SUMMARY) continue;
+        DomNode* parent = elem->parent;
+        DomElement* details = parent && parent->node_type == DOM_NODE_ELEMENT
+            ? parent->as_element() : nullptr;
+        return details && details->tag() == MARKUP_NAME_DETAILS;
+    }
+    return false;
+}
+
 static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr) {
     if (!doc) return false;
     if (doc->dom_package_loaded) {
@@ -2575,6 +2607,15 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
             EditingSurface governed_surface;
             package_governs = editing_surface_from_target(target, &governed_surface) &&
                               editing_surface_is_rich(&governed_surface);
+        }
+        // F15 widens it once more, for the same reason F9 did: a <details> in a
+        // static document — a markdown README is the common case — has no form
+        // control and no script anywhere on the page, so it would never load the
+        // package, and there is no native toggle to fall back to. The predicate
+        // is as narrow as the editing one: an ordinary link click still creates
+        // nothing, which is what keeps the PDF and Lambda-report iframes safe.
+        if (!package_governs && target) {
+            package_governs = radiant_target_is_details_summary(target);
         }
         if (package_governs) {
             radiant_document_ensure_evaluator(doc);
@@ -6544,7 +6585,8 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     evcon->ui_context = uicon;
     evcon->event = *event;
     evcon->target_document = uicon
-        ? event_context_find_focused_document(uicon->document, 0)
+        ? event_context_find_focused_document(uicon->document, 0,
+                                              &evcon->iframe_container)
         : NULL;
     if (!evcon->target_document && uicon) evcon->target_document = uicon->document;
     // load default font Arial, size 16 px
@@ -7475,7 +7517,28 @@ static void dispatch_focus_blur_observed(EventContext* evcon,
  * Update focus state when an element gains/loses focus
  * @param from_keyboard true if focus change was triggered by keyboard (Tab key, etc.)
  */
+static void blur_parent_document_focus_for_iframe_target(EventContext* evcon) {
+    if (!evcon || !evcon->ui_context || !evcon->target_document ||
+        evcon->target_document == evcon->ui_context->document) {
+        return;
+    }
+
+    DomDocument* parent_doc = evcon->ui_context->document;
+    DocState* parent_state = parent_doc ? (DocState*)parent_doc->state : NULL;
+    if (!parent_state || !focus_get(parent_state)) return;
+
+    // An iframe click moves keyboard ownership into its child document; leaving
+    // the parent's old link focused would route later text input back to it.
+    DomDocument* target_doc = evcon->target_document;
+    evcon->target_document = parent_doc;
+    update_focus_state(evcon, NULL, false);
+    evcon->target_document = target_doc;
+}
+
 void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard) {
+    if (new_focus) {
+        blur_parent_document_focus_for_iframe_target(evcon);
+    }
     DocState* state = event_context_target_state(evcon);
     if (!state) return;
 

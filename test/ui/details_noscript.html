@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>details without script</title></head>
+<body>
+  <!-- No <script> and no form control anywhere on the page. Both of the other
+       details fixtures carry a script to count toggle events, which is enough
+       on its own to give the document an evaluator — so without this case the
+       suite would never exercise the path a static document actually takes.
+       The dom package loads only for a target it governs (EO4/F9/F15); if that
+       gate stops recognising a <details> disclosure, the toggle silently does
+       nothing here and nowhere else. -->
+  <details class="d">
+    <summary class="s">Disclosure</summary>
+    <p class="b">Hidden until opened.</p>
+  </details>
+</body>
+</html>

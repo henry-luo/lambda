@@ -1089,7 +1089,14 @@ RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item valu
     // mirrors are present-or-absent (aria-disabled), while aria-invalid is
     // deliberately written "false" rather than removed, because assistive tech
     // reads an explicit false as "validation ran and this control is OK" (F7).
-    if (!value) {
+    //
+    // Ask the Item, not the C string: fn_to_cstr maps every non-text Item —
+    // null included — to "", never to nullptr, so `!value` was unreachable and
+    // a clear wrote an empty attribute instead of removing one. Silent because
+    // the common case is clearing an attribute that is already absent, which
+    // aria.ls's set_if_changed elides before reaching here; it only showed on a
+    // real present -> absent transition.
+    if (radiant_item_is_missing(value_item)) {
         Item args1[1] = {name_item};
         radiant_dom_element_operation(node_item, JUBE_DOM_REMOVE_ATTRIBUTE, args1, 1);
         return node_item;
@@ -1281,24 +1288,59 @@ RADIANT_C_API Item fn_radiant_dispatch(Item node_item, Item name_item) {
 // Walk a subtree collecting radio controls that share `name`. The tree walk is
 // mechanism and stays native; which peers to clear, and when, is the behavior
 // template's policy (ES6).
-static void radiant_collect_radio_peers(DomNode* node, const char* name,
+// One document-order walk for every "elements in this scope sharing that
+// control name" question. Radio exclusivity and details exclusivity differ only
+// in which elements qualify, how far the scope reaches, and whether the subject
+// counts itself — so the walk and its count-then-fill pass are parameterised
+// rather than copied into a second near-identical collector.
+typedef bool (*RadiantNamedPeerMatch)(DomElement* elem, const char* name);
+
+static bool radiant_tag_ieq(const char* tag, const char* lower, const char* upper) {
+    return tag && (strcmp(tag, lower) == 0 || strcmp(tag, upper) == 0);
+}
+
+static bool radiant_named_peer_is_radio(DomElement* elem, const char* name) {
+    if (!radiant_tag_ieq(elem->tag_name, "input", "INPUT")) return false;
+    const char* type = elem->get_attribute("type");
+    const char* peer = elem->get_attribute("name");
+    return type && strcmp(type, "radio") == 0 && peer && strcmp(peer, name) == 0;
+}
+
+static bool radiant_named_peer_is_details(DomElement* elem, const char* name) {
+    if (!radiant_tag_ieq(elem->tag_name, "details", "DETAILS")) return false;
+    const char* peer = elem->get_attribute("name");
+    return peer && strcmp(peer, name) == 0;
+}
+
+static void radiant_collect_named_peers(DomNode* node, const char* name,
+                                        RadiantNamedPeerMatch match, DomElement* skip,
                                         Item out_array, int* count, bool count_only) {
     for (DomNode* n = node; n; n = n->next_sibling) {
         if (n->node_type == DOM_NODE_ELEMENT) {
             DomElement* elem = n->as_element();
             if (!elem) continue;
-            const char* tag = elem->tag_name;
-            if (tag && (strcmp(tag, "INPUT") == 0 || strcmp(tag, "input") == 0)) {
-                const char* type = elem->get_attribute("type");
-                const char* peer = elem->get_attribute("name");
-                if (type && strcmp(type, "radio") == 0 && peer && strcmp(peer, name) == 0) {
-                    if (count_only) { (*count)++; }
-                    else { radiant_array_push_item(out_array, radiant_dom_wrap_node(elem)); }
-                }
+            if (elem != skip && match(elem, name)) {
+                if (count_only) { (*count)++; }
+                else { radiant_array_push_item(out_array, radiant_dom_wrap_node(elem)); }
             }
-            radiant_collect_radio_peers(elem->first_child, name, out_array, count, count_only);
+            radiant_collect_named_peers(elem->first_child, name, match, skip,
+                                        out_array, count, count_only);
         }
     }
+}
+
+// Sized in one pass, filled in a second: the array is allocated exactly and the
+// GC root is held across the fill, which is why this is not a single push loop.
+static Item radiant_named_peer_array(DomNode* scope, const char* name,
+                                     RadiantNamedPeerMatch match, DomElement* skip) {
+    if (!scope) return radiant_array_new_item(0);
+    int count = 0;
+    radiant_collect_named_peers(scope, name, match, skip, ItemNull, &count, true);
+    RootFrame roots(1);
+    Rooted<Item> rooted(roots, radiant_array_new_item(count));
+    int unused = 0;
+    radiant_collect_named_peers(scope, name, match, skip, rooted.get(), &unused, false);
+    return rooted.get();
 }
 
 // Root to search from: the owning <form> when there is one, else the document.
@@ -1327,6 +1369,45 @@ RADIANT_C_API Item fn_radiant_form_of(Item node_item) {
         }
     }
     return ItemNull;
+}
+
+// Presence, not value. An HTML boolean attribute (`open`, `disabled`, `checked`
+// in markup) is written with an empty value, and `get_attribute` answers null
+// for it — so `attr(node, name) != null` reports *absent* for exactly the
+// attributes whose whole meaning is presence. This is the read half of the
+// removal half `set_attr` already has (F7), and the same split the DOM draws
+// between getAttribute and hasAttribute.
+RADIANT_C_API Item fn_radiant_has_attr(Item node_item, Item name_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "HAS_ATTR");
+    const char* name = fn_to_cstr(name_item);
+    if (!elem || !name || !name[0]) return (Item){.item = b2it(0)};
+    return (Item){.item = b2it(elem->has_attribute(name) ? 1 : 0)};
+}
+
+// Tree navigation at the waist. `form_of` already answers the one specialised
+// case ("nearest ancestor <form>"); templates need the general shape too — a
+// <summary> must reach its <details>. These cannot be read off `~` directly:
+// a wrapped element carries the `html_element` interface, whose member table
+// has no dom_node traversal members, and the free-function form is what the
+// rest of the package already speaks (`attr`, `get_state`, `radio_group`).
+// `closest` delegates to JUBE_DOM_CLOSEST rather than re-walking with its own
+// selector matcher, so there is exactly one implementation of the search.
+RADIANT_C_API Item fn_radiant_parent(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "PARENT");
+    if (!elem) return ItemNull;
+    DomNode* parent = ((DomNode*)elem)->parent;
+    // parentElement semantics: a non-element parent (the document) answers null
+    if (!parent || parent->node_type != DOM_NODE_ELEMENT) return ItemNull;
+    DomElement* parent_elem = parent->as_element();
+    return parent_elem ? radiant_dom_wrap_node(parent_elem) : ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_closest(Item node_item, Item selector_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "CLOSEST");
+    const char* selector = fn_to_cstr(selector_item);
+    if (!elem || !selector || !selector[0]) return ItemNull;
+    Item args[1] = {selector_item};
+    return radiant_dom_element_operation(node_item, JUBE_DOM_CLOSEST, args, 1);
 }
 
 static void* radiant_optional_dom_element(Item node_item) {
@@ -1431,16 +1512,28 @@ RADIANT_C_API Item fn_radiant_radio_group(Item node_item) {
     const char* name = elem->get_attribute("name");
     // an unnamed radio forms no group; it is its own sole member
     if (!name || !name[0]) return radiant_array_new_item(0);
-    DomNode* scope = radiant_radio_scope(elem);
-    if (!scope) return radiant_array_new_item(0);
+    // skip = nullptr: the group includes the subject, which is what form.ls
+    // relies on when it clears every member before checking the clicked one.
+    return radiant_named_peer_array(radiant_radio_scope(elem), name,
+                                    radiant_named_peer_is_radio, nullptr);
+}
 
-    int count = 0;
-    radiant_collect_radio_peers(scope, name, ItemNull, &count, true);
-    RootFrame roots(1);
-    Rooted<Item> rooted(roots, radiant_array_new_item(count));
-    int unused = 0;
-    radiant_collect_radio_peers(scope, name, rooted.get(), &unused, false);
-    return rooted.get();
+// HTML 4.11.1 exclusive accordion: <details> sharing a non-empty `name` in one
+// node tree form a group of which at most one member may be open. Two
+// deliberate differences from radio_group:
+//   * the scope is the node tree, never the form owner — details grouping has
+//     nothing to do with form ownership;
+//   * the subject is excluded, so the policy can close "the others" without
+//     needing node identity to recognise itself in its own group.
+RADIANT_C_API Item fn_radiant_details_group(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "DETAILS_GROUP");
+    if (!elem) return ItemNull;
+    const char* name = elem->get_attribute("name");
+    // an absent or empty name forms no group, so the subject stands alone
+    if (!name || !name[0]) return radiant_array_new_item(0);
+    DomDocument* doc = radiant_dom_document_from_node((DomNode*)elem);
+    return radiant_named_peer_array(doc ? (DomNode*)doc->root : nullptr, name,
+                                    radiant_named_peer_is_details, elem);
 }
 
 extern "C" bool radiant_select_dropdown_is_open(void* dom_node);
@@ -2450,6 +2543,12 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_dispatch(Item node, Item name)", (fn_ptr)fn_radiant_dispatch},
     {"form_of", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_form_of, JUBE_FN_NONE,
      "Item fn_radiant_form_of(Item node)", (fn_ptr)fn_radiant_form_of},
+    {"has_attr", "fn(node: dom_node, name: string) -> bool", (fn_ptr)fn_radiant_has_attr, JUBE_FN_NONE,
+     "Item fn_radiant_has_attr(Item node, Item name)", (fn_ptr)fn_radiant_has_attr},
+    {"parent", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_parent, JUBE_FN_NONE,
+     "Item fn_radiant_parent(Item node)", (fn_ptr)fn_radiant_parent},
+    {"closest", "fn(node: dom_node, selector: string) -> dom_node|null", (fn_ptr)fn_radiant_closest, JUBE_FN_NONE,
+     "Item fn_radiant_closest(Item node, Item selector)", (fn_ptr)fn_radiant_closest},
     {"form_entries", "fn(form: dom_node, submitter: dom_node|null) -> array", (fn_ptr)fn_radiant_form_entries, JUBE_FN_NONE,
      "Item fn_radiant_form_entries(Item form, Item submitter)", (fn_ptr)fn_radiant_form_entries},
     {"form_url", "fn(form: dom_node) -> string", (fn_ptr)fn_radiant_form_url, JUBE_FN_NONE,
@@ -2468,6 +2567,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_request_navigation(Item request)", (fn_ptr)fn_radiant_request_navigation},
     {"radio_group", "fn(node: dom_node) -> array", (fn_ptr)fn_radiant_radio_group, JUBE_FN_NONE,
      "Item fn_radiant_radio_group(Item node)", (fn_ptr)fn_radiant_radio_group},
+    {"details_group", "fn(node: dom_node) -> array", (fn_ptr)fn_radiant_details_group, JUBE_FN_NONE,
+     "Item fn_radiant_details_group(Item node)", (fn_ptr)fn_radiant_details_group},
     {"dropdown_open", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_dropdown_open, JUBE_FN_NONE,
      "Item fn_radiant_dropdown_open(Item node)", (fn_ptr)fn_radiant_dropdown_open},
     {"set_dropdown_open", "fn(node: dom_node, open: bool) -> bool", (fn_ptr)fn_radiant_set_dropdown_open, JUBE_FN_NONE,

@@ -55,12 +55,12 @@ static const RadiantViewCase g_radiant_view_cases[] = {
     {"RadiantViewTest.LoadsLambdaReportAsHeadlessView", "lambda_report", "test/lambda/complex_iot_report_html.ls", nullptr},
     {"RadiantViewTest.LoadsLambdaChartDashboardAsHeadlessView", "lambda_chart_dashboard", "test/lambda/chart/chart_dashboard.ls", nullptr},
     {"RadiantViewTest.LoadsPdfAsHeadlessView", "pdf", "test/input/raw_commands_test.pdf", nullptr},
-    {"RadiantViewTest.LoadsPdfIntoIframeAfterLinkClickWithNoLog", "pdf_iframe", "test/html/index.html", "test/ui/radiant_view_pdf_iframe.json"},
+    {"RadiantViewTest.LoadsPdfIntoIframeAfterLinkClickWithNoLog", "pdf_iframe", "test/html/index.html", "test/view/radiant_view_pdf_iframe.json"},
     {"RadiantViewTest.LoadsMarkdownIntoIframeAfterLinkClickWithNoLog", "markdown_iframe", "test/html/index.html", "test/ui/radiant_view_markdown_iframe.json"},
-    {"RadiantViewTest.LoadsPngIntoIframeAfterLinkClickWithNoLog", "png_iframe", "test/html/index.html", "test/ui/radiant_view_png_iframe.json"},
-    {"RadiantViewTest.KeepsIframeSizedAfterPdfThenSvgTargetNavigation", "iframe_pdf_svg_sequence", "test/html/index.html", "test/ui/radiant_view_iframe_pdf_svg_sequence.json"},
-    {"RadiantViewTest.RecascadesLambdaReportInIframeDuringScrollHover", "lambda_report_iframe_scroll_hover", "test/html/index.html", "test/ui/radiant_view_lambda_report_iframe_hover.json"},
-    {"RadiantViewTest.ResetsGlyphCacheAcrossIframeDocumentNavigation", "iframe_font_navigation", "test/html/index.html", "test/ui/radiant_view_iframe_font_navigation.json"},
+    {"RadiantViewTest.LoadsPngIntoIframeAfterLinkClickWithNoLog", "png_iframe", "test/html/index.html", "test/view/radiant_view_png_iframe.json"},
+    {"RadiantViewTest.KeepsIframeSizedAfterPdfThenSvgTargetNavigation", "iframe_pdf_svg_sequence", "test/html/index.html", "test/view/radiant_view_iframe_pdf_svg_sequence.json"},
+    {"RadiantViewTest.RecascadesLambdaReportInIframeDuringScrollHover", "lambda_report_iframe_scroll_hover", "test/html/index.html", "test/view/radiant_view_lambda_report_iframe_hover.json"},
+    {"RadiantViewTest.ResetsGlyphCacheAcrossIframeDocumentNavigation", "iframe_font_navigation", "test/html/index.html", "test/view/radiant_view_iframe_font_navigation.json"},
 };
 
 static const size_t g_radiant_view_case_count =

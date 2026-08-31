@@ -1,0 +1,44 @@
+{
+  "name": "dom package details name= exclusive accordion (HTML 4.11.1)",
+  "html": "test/ui/details_accordion.html",
+  "viewport": {"width": 500, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== all closed at load ==="},
+    {"type": "assert_attr", "target": {"selector": ".a"}, "attribute": "open", "present": false},
+    {"type": "assert_attr", "target": {"selector": ".b"}, "attribute": "open", "present": false},
+    {"type": "assert_text", "target": {"selector": "#log"}, "text": "toggles:0"},
+
+    {"type": "log", "message": "--- open A: one toggle, no peer to close ---"},
+    {"type": "click", "target": {"selector": ".sa"}},
+    {"type": "assert_attr", "target": {"selector": ".a"}, "attribute": "open", "present": true},
+    {"type": "assert_attr", "target": {"selector": ".b"}, "attribute": "open", "present": false},
+    {"type": "assert_text", "target": {"selector": "#log"}, "text": "toggles:1"},
+
+    {"type": "log", "message": "--- open B: A closes, and both report a toggle ---"},
+    {"type": "click", "target": {"selector": ".sb"}},
+    {"type": "assert_attr", "target": {"selector": ".b"}, "attribute": "open", "present": true},
+    {"type": "assert_attr", "target": {"selector": ".a"}, "attribute": "open", "present": false},
+    {"type": "assert_visible", "target": {"selector": ".ba"}, "visible": false},
+    {"type": "assert_visible", "target": {"selector": ".bb"}, "visible": true},
+    {"type": "assert_text", "target": {"selector": "#log"}, "text": "toggles:3"},
+
+    {"type": "log", "message": "--- a different name is a different group: C does not disturb B ---"},
+    {"type": "click", "target": {"selector": ".sc"}},
+    {"type": "assert_attr", "target": {"selector": ".c"}, "attribute": "open", "present": true},
+    {"type": "assert_attr", "target": {"selector": ".b"}, "attribute": "open", "present": true},
+    {"type": "assert_text", "target": {"selector": "#log"}, "text": "toggles:4"},
+
+    {"type": "log", "message": "--- name=\"\" forms no group: D and E open together ---"},
+    {"type": "click", "target": {"selector": ".sd"}},
+    {"type": "click", "target": {"selector": ".se"}},
+    {"type": "assert_attr", "target": {"selector": ".d"}, "attribute": "open", "present": true},
+    {"type": "assert_attr", "target": {"selector": ".e"}, "attribute": "open", "present": true},
+    {"type": "assert_text", "target": {"selector": "#log"}, "text": "toggles:6"},
+
+    {"type": "log", "message": "--- closing a member still just closes it ---"},
+    {"type": "click", "target": {"selector": ".sb"}},
+    {"type": "assert_attr", "target": {"selector": ".b"}, "attribute": "open", "present": false},
+    {"type": "assert_attr", "target": {"selector": ".c"}, "attribute": "open", "present": true},
+    {"type": "assert_text", "target": {"selector": "#log"}, "text": "toggles:7"}
+  ]
+}

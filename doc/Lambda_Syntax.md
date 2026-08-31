@@ -36,8 +36,8 @@ Lambda Script files contain expressions and statements:
 
 ```lambda
 // Expressions (return values)
-42
-"hello world"
+42;
+"hello world";
 [1, 2, 3]
 
 // Statements (declarations and control flow)
@@ -70,7 +70,7 @@ Several key constructs have both expression and statement forms:
 // Expression forms (return values)
 let result = if (x > 0) "positive" else "negative"
 let doubled = (for (n in nums) n * 2)
-let add = fn(a, b) => a + b
+let add = (a, b) => a + b
 
 // Statement forms (execute actions)
 if x > 0 { print("positive") }
@@ -114,12 +114,16 @@ This distinction enforces functional purity in `fn` functions while allowing con
 
 - Whitespace is generally ignored except in strings
 - Line breaks can separate statements
-- Semicolons (`;`) terminate statements but are optional when followed by a line break
+- Semicolons (`;`) **separate** statements on one line, and are unnecessary
+  when a line break already separates them; a trailing `;` is an error
+
+These two are equivalent:
 
 ```lambda
-// These are equivalent:
-let a = 1; let b = 2;
+let a = 1; let b = 2
+```
 
+```lambda
 let a = 1
 let b = 2
 ```
@@ -265,7 +269,7 @@ Bare URI imports register a namespace prefix without loading any code. They use 
 
 Once declared, namespace prefixes are **reserved** — no variable, function, type, or field name may use the same name:
 
-```lambda
+```lambda error=E209
 import svg: 'http://www.w3.org/2000/svg'
 
 let svg = 123       // ERROR: 'svg' conflicts with namespace prefix
@@ -383,7 +387,8 @@ type(s)            // symbol
 
 Namespaces are **file-local** — they cannot be imported or exported. Each file declares its own namespace prefixes independently:
 
-```lambda
+```lambda no-run
+// no-run: shows two files in one block
 // file_a.ls
 import svg: 'http://www.w3.org/2000/svg'
 pub elem = <svg.rect svg.width: 100>
