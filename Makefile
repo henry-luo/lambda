@@ -523,17 +523,9 @@ define run_make_with_error_summary
 	exit $$BUILD_RC
 endef
 
-# Combined Tree-sitter library targets. The shared runtime is absent from the
-# Lambda host; it remains available for separately built Jube modules.
-# Normal Lambda input/runtime builds have no Tree-sitter dependency.
-tree-sitter-core-libs:
-
 # All Tree-sitter grammars are reference-only and build exclusively for the
 # CST differential verifier, including Lambda/JS/TS and LaTeX/Math grammars.
 tree-sitter-cst-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB) $(TREE_SITTER_TYPESCRIPT_LIB) $(TREE_SITTER_LATEX_LIB) $(TREE_SITTER_LATEX_MATH_LIB)
-
-# Release frontends use the same direct parsers as debug builds.
-tree-sitter-release-libs:
 
 # Jube-only parser archives (Python, Bash, Ruby) are built outside the host.
 tree-sitter-jube-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PYTHON_LIB) $(TREE_SITTER_RUBY_LIB)
@@ -547,7 +539,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-radiant-online test-pdf-render test-extended test-input run help \
 	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
-	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-core-libs tree-sitter-cst-libs tree-sitter-release-libs generate-tree-sitter-python-parser \
+	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
@@ -711,7 +703,7 @@ env-debug:
 	@echo "IS_MSYS2: '$(IS_MSYS2)'"
 
 # Main build target (incremental)
-build: tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build: $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 ifeq ($(IS_MSYS2),yes)
 	@echo "Building $(PROJECT_NAME) using MSYS2 CLANG64 environment..."
@@ -760,7 +752,7 @@ test-js-parser-diff:
 
 
 # Debug build
-debug: tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+debug: $(RE2_LIB) $(MIR_LIB)
 	@rm -f .lambda_release_build 2>/dev/null || true
 	@echo "Building debug version using Premake build system..."
 	@echo "Optimizations: O3 with symbols, frame pointers, JS execution profiling"
@@ -793,7 +785,7 @@ build-release:
 	@$(MAKE) clean-all
 	@$(MAKE) build-release-compile
 
-build-release-compile: tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
+build-release-compile: $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, symbol visibility, stripped logging"
 	$(call toolchain_verify)
@@ -815,7 +807,7 @@ endif
 	@touch .lambda_release_build
 	$(call windows_dll_check)
 
-build-release-profile: tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
+build-release-profile: $(RE2_LIB) $(MIR_LIB)
 	@echo "Building release_profile version using Premake build system..."
 	@echo "Optimizations: LTO, dead code elimination, JS execution profiling enabled"
 	$(call toolchain_verify)
@@ -831,7 +823,7 @@ build-release-profile: tree-sitter-release-libs $(RE2_LIB) $(MIR_LIB)
 
 # Explicit AddressSanitizer debug build. The output is separate from the normal
 # lambda.exe host so switching sanitizer coverage does not replace the fast host.
-build-debug-asan: tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
+build-debug-asan: $(RE2_LIB) $(MIR_LIB)
 	@echo "Building debug_asan version using Premake build system..."
 	@echo "Optimizations: -Og with symbols, frame pointers, AddressSanitizer"
 	$(call toolchain_verify)
@@ -849,7 +841,7 @@ build-debug-asan: tree-sitter-core-libs $(RE2_LIB) $(MIR_LIB)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
 lambda-cli: build-cli
 
-build-cli: tree-sitter-core-libs
+build-cli:
 	@echo "Building Lambda CLI (headless, release) using Premake build system..."
 	@echo "Excluded: Radiant layout engine, GUI windowing, font rendering, image codecs"
 	$(PYTHON) utils/generate_premake.py --variant cli --output $(PREMAKE_CLI_FILE)
