@@ -257,7 +257,8 @@ static void format_ascii_script_part(StringBuf* sb, const ItemReader& script,
     const char* tag = script_elem.tagName();
     if (tag && strcmp(tag, "group") == 0) {
         stringbuf_append_str(sb, "(");
-        format_children(sb, script_elem, depth + 1, " ");
+        // Scripts are compact lexical units: spacing here breaks ASCII arrows.
+        format_children(sb, script_elem, depth + 1, "");
         stringbuf_append_str(sb, ")");
     } else if (tag && strcmp(tag, "paren_script") == 0) {
         format_children(sb, script_elem, depth + 1, paren_separator);
