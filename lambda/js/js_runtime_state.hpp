@@ -512,10 +512,6 @@ struct JsProcessState : JsRootedState {
     Item uncaught_listeners[JS_PROCESS_LISTENER_MAX] = {};
     Item listener_map = {};
     Item ipc_pending_messages = {};
-    const char** argv_raw = NULL;
-    const char** exec_argv_raw = NULL;
-    int argc_raw = 0;
-    int exec_argc_raw = 0;
     int exit_code = 0;
     bool exit_requested = false;
     int exit_listener_count = 0;
@@ -542,8 +538,6 @@ struct JsIteratorState : JsRootedState {
     Item map_iterator_prototype = {};
     Item set_iterator_prototype = {};
     Item regexp_string_iterator_prototype = {};
-    Item generator_proto_depth1 = {};
-    Item async_generator_proto_depth1 = {};
     Item generator_proto_depth2 = {};
     Item async_generator_proto_depth2 = {};
     Item async_iterator_prototype = {};
@@ -982,7 +976,6 @@ struct JsRuntimeState {
     // loads and stores with no lock or atomic operation.
     Item generator_callee_proto = {0};
     Item current_private_home_class = {0};
-    int current_private_home_class_index = -1;
     int call_depth = 0;
     int call_stack_limit = 4096;
     Item new_target = {0};

@@ -6,7 +6,6 @@
 // JsTranspiler struct contains all fields needed for both JS and TS:
 //   - strict_js: true = reject TS syntax (pure JS mode)
 //   - type_registry: TS type name → Type* mapping
-//   - emit_runtime_checks: emit assertion calls
 
 #include "ts_ast.hpp"
 #include "../js/js_transpiler.hpp"

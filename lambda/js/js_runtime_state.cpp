@@ -148,7 +148,6 @@ bool js_runtime_state_init(EvalContext* runtime_context) {
         runtime_async_deque_init(&runtime_context->js_state->promises.unhandled_deque,
             &runtime_context->js_state->promises.unhandled_storage, 1);
         runtime_context->js_state->timers.next_id = 1;
-        runtime_context->js_state->current_private_home_class_index = -1;
         runtime_context->js_state->call_stack_limit = js_initial_call_stack_limit();
         runtime_context->js_state->test262_agent.current_slot = -1;
         runtime_context->js_state->operations.next_symbol_id = 100;
@@ -331,7 +330,7 @@ static void js_runtime_state_prepare_root_ranges(JsRuntimeState* state) {
     M(&state->namespaces.roots, &state->namespaces.math, 8, "core JS namespace objects") \
     M(&state->test262_agent.roots, &state->test262_agent.object, 1 + JS_TEST262_AGENT_MAX + JS_TEST262_AGENT_REPORT_MAX, "Test262 agent state") \
     M(&state->process.roots, &state->process.argv, 3 + 2 * JS_PROCESS_LISTENER_MAX + 2, "process realm state") \
-    M(&state->iterators.roots, &state->iterators.generator_return_marker, 13, "generator and iterator prototype caches") \
+    M(&state->iterators.roots, &state->iterators.generator_return_marker, 11, "generator and iterator prototype caches") \
     M(&state->async_hooks.roots, &state->async_hooks.root_resource, 2 + JS_ASYNC_HOOK_STATE_MAX + JS_ASYNC_PENDING_DESTROY_STATE_MAX, "async hooks state") \
     M(&state->promises.roots, &state->promises.unhandled_storage, 3, "Promise unhandled queue and domain state") \
     M(&state->promises.domain_stack.roots, state->promises.domain_stack_slots, JS_DOMAIN_STACK_MAX, "domain stack") \
@@ -942,7 +941,7 @@ extern "C" Item js_check_tdz(Item value, NameId name_id, int name_len) {
         const char* name = name_ref ? name_ref->chars : "";
         if (name_ref) name_len = (int)name_ref->len;
         char buf[256];
-        int len = snprintf(buf, sizeof(buf), "Cannot access '%.*s' before initialization", name_len, name);
+        snprintf(buf, sizeof(buf), "Cannot access '%.*s' before initialization", name_len, name);
         return js_throw_named_error_text("ReferenceError", buf);
     }
     return value;
@@ -955,7 +954,7 @@ extern "C" Item js_throw_const_assign(NameId name_id, int name_len) {
     const char* name = name_ref ? name_ref->chars : "";
     if (name_ref) name_len = (int)name_ref->len;
     char buf[256];
-    int len = snprintf(buf, sizeof(buf), "Assignment to constant variable '%.*s'", name_len, name);
+    snprintf(buf, sizeof(buf), "Assignment to constant variable '%.*s'", name_len, name);
     return js_throw_named_error_text("TypeError", buf);
 }
 

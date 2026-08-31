@@ -8325,7 +8325,6 @@ static bool js_is_engine_internal_enumeration_key(const char* name, int name_len
         (name_len == 4 && strncmp(name, "__cd", 4) == 0) ||
         (name_len == 15 && strncmp(name, "__source_text__", 15) == 0) ||
         (name_len == 18 && strncmp(name, "__primitiveValue__", 18) == 0) ||
-        (name_len == 23 && strncmp(name, "__class_private_index__", 23) == 0) ||
         (name_len == 17 && strncmp(name, "__non_extensible__", 17) == 0) ||
         (name_len == 10 && strncmp(name, "__sealed__", 10) == 0) ||
         (name_len == 10 && strncmp(name, "__frozen__", 10) == 0) ||
@@ -12277,11 +12276,6 @@ static Item js_delete_function_property(Item obj, Item key) {
         if (sk && sk->len > 0) {
             js_shape_mark_deleted_own(fn->properties_map, sk->chars, (int)sk->len,
                                        /*create_if_missing=*/true);
-            if (sk->len == 14 && memcmp(sk->chars, "__home_class__", 14) == 0) {
-                // The dispatch cache mirrors the legacy property, so deletion
-                // must remove the private-home binding seen by later calls.
-                js_set_function_home_class(obj, ItemNull);
-            }
         }
     }
     return (Item){.item = b2it(true)};
@@ -15848,7 +15842,6 @@ static JsPrototypeSnapshotState* js_proto_snapshot_state() {
 
 #define js_ctor_snapshots (js_proto_snapshot_state()->ctor_snapshots)
 #define js_global_builtin_fn_snapshots (js_proto_snapshot_state()->global_builtin_fn_snapshots)
-#define js_intrinsic_function_snapshots (js_proto_snapshot_state()->intrinsic_function_snapshots)
 #define js_typed_array_base_proto_snap (js_proto_snapshot_state()->typed_array_base_proto_snap)
 #define js_typed_array_base_snap (js_proto_snapshot_state()->typed_array_base_snap)
 #define js_typed_array_base_proto_item_snap (js_proto_snapshot_state()->typed_array_base_proto_item_snap)

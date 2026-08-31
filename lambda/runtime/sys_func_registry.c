@@ -2445,7 +2445,6 @@ JitImport jit_runtime_imports[] = {
     {"js_set_class_superclass", FPTR(js_set_class_superclass), JIT_IMPORT_VOID_PRESERVES},
     {"js_get_class_superclass", FPTR(js_get_class_superclass)},
     {"js_set_default_constructor_property", FPTR(js_set_default_constructor_property), JIT_IMPORT_VOID_PRESERVES},
-    {"js_prepare_class_prototype_property", FPTR(js_prepare_class_prototype_property)},
     {"js_check_class_static_field_key", FPTR(js_check_class_static_field_key)},
     {"js_mark_non_configurable", FPTR(js_mark_non_configurable), JIT_IMPORT_VOID_PRESERVES},
     {"js_to_property_key", FPTR(js_to_property_key)},
@@ -2499,7 +2498,6 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_EFFECT(5, JIT_ARG_BORROWED)}},
     {"js_mark_method_func", FPTR(js_mark_method_func), JIT_IMPORT_VOID_PRESERVES},
     {"js_set_method_home_from_target", FPTR(js_set_method_home_from_target), JIT_IMPORT_VOID_PRESERVES},
-    {"js_refresh_prototype_method_homes", FPTR(js_refresh_prototype_method_homes), JIT_IMPORT_VOID_PRESERVES},
     // D5.3.3/D6.2.2v2: strict marking re-finalizes capabilities and may
     // allocate `.name`/`.length`; NO_GC would hide that safepoint from MIR.
     {"js_mark_strict_func", FPTR(js_mark_strict_func), JIT_IMPORT_VOID_PRESERVES},
@@ -2659,7 +2657,6 @@ JitImport jit_runtime_imports[] = {
     {"js_private_home_class_leave_result", FPTR(js_private_home_class_leave_result)},
     {"js_private_brand_add", FPTR(js_private_brand_add)},
     {"js_private_field_define", FPTR(js_private_field_define)},
-    {"js_set_private_class_index", FPTR(js_set_private_class_index), JIT_IMPORT_VOID_PRESERVES},
     {"js_define_global_property_v", FPTR(js_define_global_property_v), JIT_IMPORT_VOID_PRESERVES},
     {"js_global_lexical_declare", FPTR(js_global_lexical_declare), JIT_IMPORT_VOID_PRESERVES},
     {"js_evalscript_check_global_var_decl", FPTR(js_evalscript_check_global_var_decl)},

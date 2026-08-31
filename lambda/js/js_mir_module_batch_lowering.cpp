@@ -1,4 +1,6 @@
 #include "js_mir_internal.hpp"
+
+#include <limits.h>
 #include "../../lib/file.h"
 #include "../runtime/lambda-error.h"
 #include "../jube/jube_registry.h"
@@ -1614,17 +1616,18 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
     // v20: Detect program-level "use strict" directive
     mt->is_global_strict = (mt->tp && mt->tp->strict_mode) || program->has_use_strict_directive;
 
-    // collect exact function/class metadata before lowering.
-    mt->collection_count_only = true;
-    jm_collect_functions(mt, root);
-    if (mt->collection_failed) {
-        log_error("js-mir: failed to count function/class metadata");
+    // The shared index owns source function and class identity. Only instance
+    // field initializers add synthetic functions during collection.
+    int field_initializer_count = jm_indexed_synthetic_field_initializer_count(
+        &mt->tp->ast_index);
+    if (field_initializer_count < 0 ||
+            mt->tp->ast_index.function_count > (uint32_t)(INT_MAX - field_initializer_count) ||
+            mt->tp->ast_index.class_count > INT_MAX) {
+        log_error("js-mir: indexed function/class metadata exceeds collector capacity");
         return false;
     }
-    mt->func_capacity = mt->func_count;
-    mt->class_capacity = mt->class_count;
-    mt->func_count = 0;
-    mt->class_count = 0;
+    mt->func_capacity = (int)mt->tp->ast_index.function_count + field_initializer_count;
+    mt->class_capacity = (int)mt->tp->ast_index.class_count;
     // Collection records retain AST/name pointers and generated code can retain
     // metadata derived from them, so allocate them with the transpiler pools.
     mt->func_entries = (JsFuncCollected*)pool_calloc(
@@ -1637,28 +1640,18 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
         mt->collection_failed = true;
         return false;
     }
-    mt->collection_count_only = false;
-    jm_collect_functions(mt, root);
+    jm_collect_indexed_functions(mt);
     if (mt->collection_failed ||
             mt->func_count != mt->func_capacity ||
             mt->class_count != mt->class_capacity) {
-        // A mismatch means the shared traversal was state-dependent and exact
-        // storage is unsafe.
-        log_error("js-mir: collection mismatch functions=%d/%d classes=%d/%d",
+        // A mismatch means indexed identity and collection disagree.
+        log_error("js-mir: indexed collection mismatch functions=%d/%d classes=%d/%d",
             mt->func_count, mt->func_capacity, mt->class_count, mt->class_capacity);
         mt->collection_failed = true;
         return false;
     }
-    // Publish every collected callable through the shared AstIndex identity
-    // table; synthetic class-field initializers were appended during collection.
-    if (mt->tp->ast_index.function_count > 0) {
-        mt->func_by_id = (JsFuncCollected**)pool_calloc(mt->tp->pool,
-            (size_t)mt->tp->ast_index.function_count * sizeof(JsFuncCollected*));
-        if (!mt->func_by_id) {
-            log_error("js-mir: failed to allocate shared function identity table");
-            return false;
-        }
-    }
+    // Publish every collected callable through its shared function analysis;
+    // synthetic class-field initializers were appended during collection.
     for (int fi = 0; fi < mt->func_count; fi++) {
         JsFuncCollected* e = &mt->func_entries[fi];
         if (!e->node->analysis) e->node->analysis = (FnAnalysis*)pool_calloc(
@@ -1668,10 +1661,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
             return false;
         }
         memset(e->node->analysis, 0, sizeof(FnAnalysis));
-        AstNodeId node_id = ast_index_find(&mt->tp->ast_index, (AstNode*)e->node);
-        if (node_id == AST_NODE_ID_INVALID) continue;
-        AstFunctionId function_id = mt->tp->ast_index.owner_functions[node_id];
-        if (function_id < mt->tp->ast_index.function_count) mt->func_by_id[function_id] = e;
+        e->node->analysis->js_mir_backend = e;
     }
     log_debug("js-mir: collected %d functions, %d classes", mt->func_count, mt->class_count);
 
@@ -1767,7 +1757,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                 if (exp->declaration) actual = exp->declaration;
             }
             // Skip top-level variable declarations (already handled above)
-            // Also skip function/class declarations (handled below as MCONST_FUNC/MCONST_CLASS)
+            // Also skip function/class declarations (handled below as module bindings).
             if (actual->node_type != JS_AST_NODE_VARIABLE_DECLARATION &&
                 actual->node_type != JS_AST_NODE_FUNCTION_DECLARATION &&
                 actual->node_type != JS_AST_NODE_CLASS_DECLARATION) {
@@ -2419,10 +2409,6 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
         }
     }
 
-    // Tune11 P5 composes inherited constructor-shape metadata after type
-    // propagation below. Until then, keep parent/child constructor metadata
-    // intact so the composed shape can preserve base-first slot order.
-
     // Assign module variable indexes for static class fields
     for (int ci = 0; ci < mt->class_count; ci++) {
         JsClassEntry* ce = &mt->class_entries[ci];
@@ -2867,8 +2853,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                                 if (!shadowed_by_ancestor) {
                                     // No ancestor shadows this module_const — safe to remove
                                     // the capture. The identifier will be resolved at the use
-                                    // site via module_consts (MCONST_CLASS → js_get_module_var,
-                                    // MCONST_FUNC → js_new_function, etc.)
+                                    // site via the live module binding.
                                     if (ci < JM_CAPTURE_COUNT(child) - 1) {
                                         memmove(&JM_CAPTURE_ARRAY(child)[ci], &JM_CAPTURE_ARRAY(child)[ci + 1],
                                             (JM_CAPTURE_COUNT(child) - ci - 1) * sizeof(JM_CAPTURE_ARRAY(child)[0]));
@@ -3822,7 +3807,7 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
     // Phase 1.9: Create forward declarations for all functions.
     // This ensures func_item is set for all functions before any body is compiled,
     // so forward references (e.g., a class method calling a free function declared
-    // later in the source) resolve correctly via MCONST_FUNC and direct call paths.
+    // later in the source) resolve through live module bindings and direct calls.
 
     // Phase 1.76: Call-site propagation — scan all function bodies for call
     // expressions that pass literal arguments contradicting inferred param types.
@@ -4298,18 +4283,9 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
     // Transpile top-level statements in source order.
     // Function declarations with captures are bound at their source position.
 
-    // P9: Pre-scan top-level body for float widening (compound assignments like /=, +=)
-    if (program->body) {
-        JsAstNode wrapper;
-        memset(&wrapper, 0, sizeof(wrapper));
-        wrapper.node_type = JS_AST_NODE_BLOCK_STATEMENT;
-        // Temporarily wrap program body as a block for prescan
-        JsBlockNode blk_wrapper;
-        memset(&blk_wrapper, 0, sizeof(blk_wrapper));
-        blk_wrapper.node_type = JS_AST_NODE_BLOCK_STATEMENT;
-        blk_wrapper.statements = program->body;
-        jm_prescan_float_widening(mt, (JsAstNode*)&blk_wrapper);
-    }
+    // AstIndex owns the program body, so the widening prepass needs no
+    // synthetic block wrapper or unindexed traversal path.
+    jm_prescan_float_widening(mt, (JsAstNode*)program);
 
     // Js57 P7d-C: emit body-state dispatch right before user statements. On
     // re-entry (deferred drain calling js_main again with body_state == 1),
@@ -4344,12 +4320,6 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                         jm_emit_module_export_aliased(mt,
                             es->local_name->chars,  (int)es->local_name->len,
                             es->export_name->chars, (int)es->export_name->len);
-                    } else if (spec->node_type == JS_AST_NODE_IDENTIFIER) {
-                        // Back-compat path — kept for safety if any caller still
-                        // emits bare identifiers (current AST builder always emits
-                        // JsExportSpecifierNode).
-                        JsIdentifierNode* id = (JsIdentifierNode*)spec;
-                        jm_emit_module_export(mt, id->name->chars, (int)id->name->len, false);
                     }
                     spec = spec->next;
                 }
@@ -4455,7 +4425,6 @@ static bool transpile_js_mir_ast_impl(JsMirTranspiler* mt, JsAstNode* root) {
                     // Class initialization performs allocating metadata and
                     // method setup before its lexical binding is authoritative.
                     jm_create_gc_root_slot(mt, cls_obj);
-                    jm_emit_set_private_class_index(mt, cls_obj, ce);
                     jm_emit_set_class_source(mt, cls_obj, cls_node);
                     // Update local variable
                     const char* vname = jm_var_name(cls_node->name);

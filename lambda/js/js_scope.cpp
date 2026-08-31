@@ -266,10 +266,6 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     tp->global_scope = js_scope_create(tp, JS_SCOPE_GLOBAL, NULL);
     tp->current_scope = tp->global_scope;
     tp->strict_mode = false;
-    tp->function_counter = 0;
-    tp->temp_var_counter = 0;
-    tp->label_counter = 0;
-    tp->in_expression = false;
     tp->has_errors = false;
     tp->strict_js = true;  // default: pure JS mode (reject TS syntax)
     // The shared indexer owns core edges. Install JavaScript's extension-only

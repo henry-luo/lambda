@@ -1017,9 +1017,6 @@ MIR_reg_t jm_ensure_boxed(JsMirTranspiler* mt, MIR_reg_t reg) {
 // Forward declarations
 JsFuncCollected* jm_resolve_native_call(JsMirTranspiler* mt, JsCallNode* call);
 JsFuncCollected* jm_find_collected_func(JsMirTranspiler* mt, JsFunctionNode* fn);
-// A5 forward declaration
-void jm_scan_ctor_props(JsMirTranspiler* mt, JsFuncCollected* fc);
-
 // Returns the inferred TypeId for a JS AST expression node.
 // LMD_TYPE_INT, LMD_TYPE_FLOAT, LMD_TYPE_BOOL, LMD_TYPE_STRING → known type
 // LMD_TYPE_ANY → unknown (must use boxed path)
@@ -1511,32 +1508,14 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
                         MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
                     jm_emit_error_lane_propagate_check(mt);
                 }
-            } else if (mc && mc->const_type == MCONST_INT) {
-                // constant int: emit directly as native
-                MIR_reg_t r = jm_new_reg(mt, "mcint", MIR_T_I64);
-                jm_emit_reg_op(mt, MIR_MOV, r, MIR_new_int_op(mt->ctx, mc->int_val));
-                if (target_type == LMD_TYPE_FLOAT)
-                    return jm_ensure_native_float(mt, r, LMD_TYPE_INT);
-                return r;
-            } else if (mc && mc->const_type == MCONST_FLOAT) {
-                MIR_reg_t r = jm_new_reg(mt, "mcflt", MIR_T_D);
-                jm_emit_reg_op(mt, MIR_DMOV, r, MIR_new_double_op(mt->ctx, mc->float_val));
-                if (target_type == LMD_TYPE_INT)
-                    return jm_ensure_native_int(mt, r, LMD_TYPE_FLOAT);
-                return r;
             } else {
                 boxed = jm_emit_null(mt);
             }
         } else {
             boxed = jm_emit_null(mt);
         }
-        if (target_type == LMD_TYPE_FLOAT)
-            return jm_emit_unbox_float(mt, boxed);
-        else {
-            // Use it2d + D2I for robust int extraction (handles INT, FLOAT, any numeric)
-            MIR_reg_t as_dbl = jm_emit_unbox_float(mt, boxed);
-            return jm_emit_double_to_int(mt, as_dbl);
-        }
+        return jm_normalize_numeric_result(mt, boxed, target_type,
+            LMD_TYPE_ANY, false);
     }
 
     // Other expressions: determine if jm_transpile_expression returns native.
@@ -1591,13 +1570,9 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
             else
                 return jm_ensure_native_int(mt, result, assign_var_type);
         }
-        // Boxed result: unbox
-        if (target_type == LMD_TYPE_FLOAT)
-            return jm_emit_unbox_float(mt, result);
-        else {
-            MIR_reg_t as_dbl = jm_emit_unbox_float(mt, result);
-            return jm_emit_double_to_int(mt, as_dbl);
-        }
+        // Boxed result: use the shared representation conversion.
+        return jm_normalize_numeric_result(mt, result, target_type,
+            LMD_TYPE_ANY, false);
     }
 
     if (expr && expr->node_type == JS_AST_NODE_CONDITIONAL_EXPRESSION) {
@@ -1619,24 +1594,14 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
             else
                 return jm_ensure_native_int(mt, result, JM_JS_FACT(fc, return_type));
         }
-        // Non-native call: result is boxed → unbox
+        // Non-native call: result is boxed → shared conversion.
         MIR_reg_t boxed = jm_transpile_expression(mt, expr);
-        if (target_type == LMD_TYPE_FLOAT)
-            return jm_emit_unbox_float(mt, boxed);
-        else {
-            // Use it2d + D2I for robust int extraction (handles INT, FLOAT, any numeric)
-            MIR_reg_t as_dbl = jm_emit_unbox_float(mt, boxed);
-            return jm_emit_double_to_int(mt, as_dbl);
-        }
+        return jm_normalize_numeric_result(mt, boxed, target_type,
+            LMD_TYPE_ANY, false);
     }
 
     // All other expressions: get boxed value and unbox to target type
     MIR_reg_t boxed = jm_transpile_box_item(mt, expr);
-    if (target_type == LMD_TYPE_FLOAT)
-        return jm_emit_unbox_float(mt, boxed);
-    else {
-        // Use it2d + D2I for robust int extraction (handles INT, FLOAT, any numeric)
-        MIR_reg_t as_dbl = jm_emit_unbox_float(mt, boxed);
-        return jm_emit_double_to_int(mt, as_dbl);
-    }
+    return jm_normalize_numeric_result(mt, boxed, target_type,
+        LMD_TYPE_ANY, false);
 }

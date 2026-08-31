@@ -64,7 +64,6 @@ struct VarEntry {
     // Name matches alone are insufficient because a nested lexical declaration
     // can legally shadow the promoted variable.
     bool is_iife_module_var_binding;
-    JsClassEntry* class_entry;
     Type* full_type;
     bool is_let_const;
     bool is_const;

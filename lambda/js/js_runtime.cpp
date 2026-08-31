@@ -660,13 +660,6 @@ static void js_array_store_owned(Array* arr, int64_t index, Item value) {
 // Set by js_call_function before invoking a generator function, read by js_generator_create.
 #define js_generator_callee_proto (js_runtime_state.generator_callee_proto)
 #define js_current_private_home_class (js_runtime_state.current_private_home_class)
-#define js_current_private_home_class_index (js_runtime_state.current_private_home_class_index)
-
-static const char* JS_HOME_CLASS_KEY = "__home_class__";
-static const int JS_HOME_CLASS_KEY_LEN = 14;
-
-static const char* JS_PRIVATE_CLASS_INDEX_KEY = "__class_private_index__";
-static const int JS_PRIVATE_CLASS_INDEX_KEY_LEN = 23;
 
 
 static const char* JS_NATIVE_FUNCTION_SOURCE = "function () { [native code] }";
@@ -860,24 +853,6 @@ static Item js_class_internal_property(Item class_item, const char* name,
     return ItemNull;
 }
 
-static int js_class_private_index(Item class_item) {
-    if (get_type_id(class_item) != LMD_TYPE_MAP &&
-            get_type_id(class_item) != LMD_TYPE_FUNC) return -1;
-    bool found = false;
-    Item index_item = js_class_internal_property(class_item,
-        JS_PRIVATE_CLASS_INDEX_KEY, JS_PRIVATE_CLASS_INDEX_KEY_LEN, &found);
-    if (!found || get_type_id(index_item) != LMD_TYPE_INT) return -1;
-    return (int)it2i(index_item);
-}
-
-extern "C" void js_set_private_class_index(Item class_item, int index) {
-    if ((get_type_id(class_item) != LMD_TYPE_MAP &&
-            get_type_id(class_item) != LMD_TYPE_FUNC) || index < 0) return;
-    Item key = js_name_item(JS_PRIVATE_CLASS_INDEX_KEY, JS_PRIVATE_CLASS_INDEX_KEY_LEN);
-    Item val = (Item){.item = i2it(index)};
-    js_set_key_default(class_item, key, val);
-}
-
 static bool js_private_source_name(Item source_name) {
     if (get_type_id(source_name) != LMD_TYPE_STRING) return false;
     String* source = it2s(source_name);
@@ -981,13 +956,11 @@ extern "C" Item js_private_home_class_enter(Item class_item) {
     // Field initializer code is emitted at the construction site rather than
     // through a method wrapper, so establish its lexical class explicitly.
     js_current_private_home_class = class_item;
-    js_current_private_home_class_index = js_class_private_index(class_item);
     return previous;
 }
 
 extern "C" void js_private_home_class_leave(Item previous_class) {
     js_current_private_home_class = previous_class;
-    js_current_private_home_class_index = js_class_private_index(previous_class);
 }
 
 extern "C" Item js_private_home_class_leave_result(Item previous_class, Item result) {
@@ -1027,28 +1000,7 @@ extern "C" void js_set_method_home_from_target(Item target, Item fn_item) {
         home = ctor;
     }
     if (home.item == ItemNull.item || home.item == 0) return;
-    // Keep the legacy visible backing property coherent while dispatch reads
-    // the dedicated field, avoiding a per-call properties-map hash probe.
     js_set_function_home_class(fn_item, home);
-    Item home_key = js_name_item(JS_HOME_CLASS_KEY, JS_HOME_CLASS_KEY_LEN);
-    js_func_init_property(fn_item, home_key, home);
-}
-
-extern "C" void js_refresh_prototype_method_homes(Item prototype, Item class_item) {
-    if (get_type_id(prototype) != LMD_TYPE_MAP ||
-        (get_type_id(class_item) != LMD_TYPE_MAP && get_type_id(class_item) != LMD_TYPE_FUNC) ||
-        !prototype.map || !prototype.map->type || !prototype.map->data) return;
-    TypeMap* type = (TypeMap*)prototype.map->type;
-    for (ShapeEntry* entry = type->shape; entry; entry = entry->next) {
-        // Accessor slots use the FUNC tag for Item compatibility, but hold a
-        // smaller JsAccessorPair; writing JsFunction home metadata would run
-        // past that layout and corrupt a later accessor's getter pointer.
-        if (entry->type && entry->type->type_id == LMD_TYPE_FUNC &&
-                !jspd_is_accessor(entry)) {
-            Item method = map_shape_field_to_item(prototype.map->data, entry);
-            if (get_type_id(method) == LMD_TYPE_FUNC) js_set_function_home_class(method, class_item);
-        }
-    }
 }
 
 // v30: Helper to compute callback this value per ES spec OrdinaryCallBindThis.
@@ -7319,12 +7271,6 @@ static Item js_set_function_core(Item object, Item key, Item value,
         js_set_storage_mode(
             fn->properties_map, key, value, receiver, bypass_accessor_dispatch, strict);
     }
-    if (str_key && str_key->len == JS_HOME_CLASS_KEY_LEN &&
-        memcmp(str_key->chars, JS_HOME_CLASS_KEY, JS_HOME_CLASS_KEY_LEN) == 0) {
-        // __home_class__ was historically a writable backing-map field; keep
-        // its dedicated dispatch cache coherent for ordinary property writes.
-        js_set_function_home_class(object, value);
-    }
     return value;
 }
 
@@ -7779,13 +7725,6 @@ extern "C" void js_func_init_property(Item fn_item, Item key, Item value) {
                     key_string->chars, (int)key_string->len, false);
             }
             fn_map_set(fn->properties_map, key, value);
-        }
-    }
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* str_key = it2s(key);
-        if (str_key && str_key->len == JS_HOME_CLASS_KEY_LEN &&
-            memcmp(str_key->chars, JS_HOME_CLASS_KEY, JS_HOME_CLASS_KEY_LEN) == 0) {
-            js_set_function_home_class(function_root.get(), value_root.get());
         }
     }
 }
@@ -11847,7 +11786,6 @@ Item js_intrinsic_object_to_string_body(Item callee, Item this_value, Item* args
                 return js_throw_type_error("Cannot perform operation on a revoked proxy");
             }
             Item target = js_proxy_get_target(this_val);
-            TypeId target_type = get_type_id(target);
             const char* builtin_tag = "Object";
             int builtin_tag_len = 6;
             if (js_is_js_array(target)) {
@@ -14307,19 +14245,16 @@ static Item js_call_function_impl_mode(Item func_item, Item this_val, Item* args
         js_super_this_binding_push(this_val);
         js_current_this = (Item){.item = ITEM_JS_TDZ};
     }
-    int prev_private_home_class_index = js_current_private_home_class_index;
     Item method_home_class = fn->home_class;
     if (method_home_class.item != ItemNull.item && method_home_class.item != 0 &&
         get_type_id(method_home_class) != LMD_TYPE_UNDEFINED) {
         js_current_private_home_class = method_home_class;
-        js_current_private_home_class_index = js_class_private_index(method_home_class);
     }
     bool pushed_vm_stack_source = !common_lane && js_function_push_vm_stack_source(fn);
     Item result = js_invoke_fn_with_source(fn, args, arg_count, invoke_result_home,
         args_prerooted);
     if (pushed_vm_stack_source) js_eval_source_pop();
     js_current_private_home_class = saved_private_home_class_root.get();
-    js_current_private_home_class_index = prev_private_home_class_index;
     if (derived_ctor_call) {
         result = js_super_this_binding_finish(result);
     }
@@ -27792,8 +27727,6 @@ extern "C" Item js_gen_await_result(Item value, int64_t next_state) {
 //   gen → %GeneratorFunction%.prototype.prototype → %GeneratorPrototype% → %IteratorPrototype% → Object.prototype
 // The test262 test does Object.getPrototypeOf(Object.getPrototypeOf(gen)) to get %GeneratorPrototype%.
 // We implement two shared levels: a direct proto (depth 1) and the shared prototype (depth 2, has toStringTag).
-#define js_generator_proto_depth1_cache (js_runtime_state.iterators.generator_proto_depth1)
-#define js_async_generator_proto_depth1_cache (js_runtime_state.iterators.async_generator_proto_depth1)
 #define js_generator_proto_depth2_cache (js_runtime_state.iterators.generator_proto_depth2)
 #define js_async_generator_proto_depth2_cache (js_runtime_state.iterators.async_generator_proto_depth2)
 #define js_async_iterator_proto_cache (js_runtime_state.iterators.async_iterator_prototype)
@@ -28292,18 +28225,15 @@ extern "C" Item js_generator_next(Item generator, Item input) {
     // The state machine returns {value, next_state} as a 2-element array
     // If next_state == -1, the generator is done
     // If next_state == -3, this is yield* delegation: value is the iterable
-    int saved_private_home_index = js_current_private_home_class_index;
     Item generator_private_home = generator_private_home_root.get();
     if (generator_private_home.item != ItemNull.item &&
         generator_private_home.item != 0 &&
         get_type_id(generator_private_home) != LMD_TYPE_UNDEFINED) {
         js_current_private_home_class = generator_private_home;
-        js_current_private_home_class_index = js_class_private_index(generator_private_home);
     }
     result_root.set(js_invoke_mir_state(gen->state_fn,
         gen->env, input_root.get(), gen->state));
     js_current_private_home_class = saved_private_home_root.get();
-    js_current_private_home_class_index = saved_private_home_index;
     Item result = result_root.get();
     if (item_is_error(result)) {
         gen->done = true;
@@ -29393,7 +29323,6 @@ extern "C" Item js_iterable_to_array(Item iterable) {
 #define js_promise_unhandled_strict (js_runtime_state.promises.unhandled_strict)
 #define js_domain_current (js_runtime_state.promises.domain_current)
 #define js_domain_namespace (js_runtime_state.promises.domain_namespace)
-#define js_domain_stack_slots (js_runtime_state.promises.domain_stack_slots)
 #define js_domain_stack_state (js_runtime_state.promises.domain_stack)
 #define js_domain_stack (js_domain_stack_state.roots.slots)
 #define js_domain_stack_count (js_domain_stack_state.depth)
@@ -37409,13 +37338,10 @@ void js_deep_batch_reset() {
     js_async_resolved_value = (Item){0};
     js_reset_transient_call_state();
     // generator proto caches point into old heap — must reset
-    js_generator_proto_depth1_cache = (Item){0};
-    js_async_generator_proto_depth1_cache = (Item){0};
     js_generator_proto_depth2_cache = (Item){0};
     js_async_generator_proto_depth2_cache = (Item){0};
     js_async_iterator_proto_cache = (Item){0};
     js_generator_callee_proto = (Item){0};
     js_current_private_home_class = (Item){0};
-    js_current_private_home_class_index = -1;
     js_call_depth = 0;
 }

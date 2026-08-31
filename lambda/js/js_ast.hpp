@@ -68,7 +68,6 @@ static const JsAstNodeType JS_AST_NODE_LABELED_STATEMENT = (JsAstNodeType)1022;
 static const JsAstNodeType JS_AST_NODE_REGEX = (JsAstNodeType)1023;
 static const JsAstNodeType JS_AST_NODE_WITH_STATEMENT = (JsAstNodeType)1026;
 static const JsAstNodeType JS_AST_NODE_TAGGED_TEMPLATE = (JsAstNodeType)1027;
-static const JsAstNodeType JS_AST_NODE_TS_EXTENSION_SENTINEL = (JsAstNodeType)2000;
 
 typedef Operator JsOperator;
 static const JsOperator JS_OP_ADD = OPERATOR_ADD;
