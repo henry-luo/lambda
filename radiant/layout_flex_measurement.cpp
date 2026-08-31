@@ -701,7 +701,7 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
     }
     // Widget intrinsic sizes remain role data even though flex style and scratch
     // now live in the independent FlexItemProp parent-item slot.
-    if (item->role_kind() == DomElement::ROLE_FORM) {
+    if (item->form_control()) {
         return;
     }
 

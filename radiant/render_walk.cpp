@@ -57,7 +57,7 @@ static bool render_walk_block_effect_group(ViewBlock* block, float abs_x, float 
     CssEnum blend = (block->in_line &&
                      render_walk_blend_mode_effective(block->inl()->mix_blend_mode))
                     ? block->inl()->mix_blend_mode : (CssEnum)0;
-    bool has_filter = render_walk_filter_effective(block->filter);
+    bool has_filter = render_walk_filter_effective(block->filter_prop());
     bool has_backdrop_filter = render_walk_filter_effective(block->backdrop_filter_prop());
     bool has_shadow = block->bound && block->boundary_mut()->box_shadow;
     if (opacity >= 0.9995f && !blend && !has_filter &&
@@ -72,7 +72,7 @@ static bool render_walk_block_effect_group(ViewBlock* block, float abs_x, float 
     group->bounds.bottom = abs_y + block->height + visual_overflow;
     group->opacity = opacity;
     group->blend_mode = (int)blend; // INT_CAST_OK: CssEnum is serialized through PaintIR as an integer enum value.
-    group->filter = has_filter ? block->filter : NULL;
+    group->filter = has_filter ? block->filter_prop() : NULL;
     group->backdrop = has_backdrop_filter;
     group->backdrop_filter = has_backdrop_filter ? block->backdrop_filter_prop() : NULL;
     group->shadow = has_shadow;
@@ -86,7 +86,7 @@ static bool render_walk_inline_effect_group(ViewSpan* span, PaintEffectGroup* gr
     CssEnum blend = (span->in_line &&
                      render_walk_blend_mode_effective(span->inl()->mix_blend_mode))
                     ? span->inl()->mix_blend_mode : (CssEnum)0;
-    bool has_filter = render_walk_filter_effective(span->filter);
+    bool has_filter = render_walk_filter_effective(span->filter_prop());
     bool has_backdrop_filter = render_walk_filter_effective(span->backdrop_filter_prop());
     if (opacity >= 0.9995f && !blend && !has_filter && !has_backdrop_filter) {
         return false;
@@ -94,7 +94,7 @@ static bool render_walk_inline_effect_group(ViewSpan* span, PaintEffectGroup* gr
 
     group->opacity = opacity;
     group->blend_mode = (int)blend; // INT_CAST_OK: CssEnum is serialized through PaintIR as an integer enum value.
-    group->filter = has_filter ? span->filter : NULL;
+    group->filter = has_filter ? span->filter_prop() : NULL;
     group->backdrop = has_backdrop_filter;
     group->backdrop_filter = has_backdrop_filter ? span->backdrop_filter_prop() : NULL;
     return true;

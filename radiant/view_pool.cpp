@@ -195,11 +195,18 @@ DEFINE_VIEW_PROP_ACCESSORS(scroller)
 DEFINE_VIEW_PROP_ACCESSORS(embed)
 DEFINE_VIEW_PROP_ACCESSORS(position)
 DEFINE_VIEW_PROP_ACCESSORS(transform)
-DEFINE_VIEW_PROP_ACCESSORS(filter)
 DEFINE_VIEW_PROP_ACCESSORS(pseudo)
 DEFINE_VIEW_PROP_ACCESSORS(layout_cache)
 
 #undef DEFINE_VIEW_PROP_ACCESSORS
+
+static void* view_prop_get_filter(DomElement* elem) {
+    return elem ? (void*)elem->filter_prop() : nullptr;
+}
+
+static void view_prop_clear_filter(DomElement* elem, ViewTree*) {
+    if (elem) elem->set_filter_prop(nullptr);
+}
 
 static void* view_prop_get_backdrop_filter(DomElement* elem) {
     return elem ? (void*)elem->backdrop_filter_prop() : nullptr;
@@ -323,7 +330,7 @@ static void free_filter_chain(ViewTree* tree, FilterProp* filter) {
 }
 
 static void free_filter_payload(DomElement* elem, ViewTree* tree) {
-    free_filter_chain(tree, elem ? elem->filter : nullptr);
+    free_filter_chain(tree, elem ? elem->filter_prop() : nullptr);
 }
 
 static void free_backdrop_filter_payload(DomElement* elem, ViewTree* tree) {
@@ -426,7 +433,7 @@ static void free_scroll_payload(DomElement* elem, ViewTree* tree) {
 }
 
 static void release_form_prop(DomElement* elem, ViewTree*) {
-    if (!elem || elem->role_kind() != DomElement::ROLE_FORM || !elem->form) {
+    if (!elem || !elem->form) {
         return;
     }
 
@@ -445,7 +452,10 @@ static void release_form_prop(DomElement* elem, ViewTree*) {
 static void clear_item_prop(DomElement* elem, ViewTree*) {
     if (!elem) return;
     elem->fi = nullptr;
+    elem->gi = nullptr;
     elem->tb = nullptr;
+    elem->td = nullptr;
+    elem->form = nullptr;
     elem->set_parent_item_kind(DomElement::PARENT_ITEM_NONE);
     elem->set_role_kind(DomElement::ROLE_NONE);
 }
@@ -462,23 +472,20 @@ static void free_item_prop(DomElement* elem, ViewTree* tree) {
         default:
             break;
     }
-    switch (elem->role_kind()) {
-        case DomElement::ROLE_TABLE:
-            view_pool_free_ptr(tree, elem->tb);
-            break;
-        case DomElement::ROLE_CELL:
-            view_pool_free_ptr(tree, elem->td);
-            break;
-        case DomElement::ROLE_FORM:
-            if (elem->form && !elem->form->heap_allocated) {
-                view_pool_free_ptr(tree, elem->form);
-            }
-            break;
-        default:
-            break;
+    if (elem->tb) {
+        view_pool_free_ptr(tree, elem->tb);
+    }
+    if (elem->td) {
+        view_pool_free_ptr(tree, elem->td);
+    }
+    if (elem->form && !elem->form->heap_allocated) {
+        view_pool_free_ptr(tree, elem->form);
     }
     elem->fi = nullptr;
+    elem->gi = nullptr;
     elem->tb = nullptr;
+    elem->td = nullptr;
+    elem->form = nullptr;
     elem->set_parent_item_kind(DomElement::PARENT_ITEM_NONE);
     elem->set_role_kind(DomElement::ROLE_NONE);
 }

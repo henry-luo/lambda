@@ -3799,8 +3799,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             (view_block_replaced->form->intrinsic_width > 0 ||
              input_button_has_native_label);
         // Input buttons have no DOM text child, so their native label must be measured centrally.
-        if (replaced_width < 0 && view_block_replaced->role_kind() == DomElement::ROLE_FORM
-            && has_measurable_form_control) {
+        if (replaced_width < 0 && view_block_replaced->form_control() &&
+            has_measurable_form_control) {
             IntrinsicSize form_size = layout_measure_form_control(lycon, view_block_replaced,
                                                                   lycon->available_space);
             replaced_width = form_size.max_width;

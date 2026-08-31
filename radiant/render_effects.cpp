@@ -149,7 +149,7 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
     group.has_opacity_group = block->in_line &&
         block->inl()->opacity < 1.0f && block->inl()->opacity >= 0.0f;
     group.opacity = group.has_opacity_group ? block->inl()->opacity : 1.0f;
-    group.has_filter = block->filter && block->filterp()->functions;
+    group.has_filter = block->filter_prop() && block->filterp()->functions;
     group.has_backdrop_filter = block->backdrop_filter_prop() && block->backdrop_filter_prop()->functions;
 
     float scale = rdcon->raster_scale;
@@ -178,12 +178,12 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
     }
 
     if (group.has_filter) {
-        float filter_expand = render_geometry_filter_effect_expand(block->filter);
+        float filter_expand = render_geometry_filter_effect_expand(block->filter_prop());
         Rect border_rect = render_geometry_block_border_rect(parent_block, block, scale);
         group.filter_rect = render_geometry_expand_rect(border_rect, filter_expand);
 
         float backdrop_expand = 0;
-        render_effect_filter_backdrop_info(block->filter,
+        render_effect_filter_backdrop_info(block->filter_prop(),
                                            &group.has_filter_backdrop,
                                            &backdrop_expand);
         if (group.has_filter_backdrop) {
@@ -216,7 +216,7 @@ static bool render_effect_group_has_filter_rect(const RenderEffectGroup* group) 
 static bool render_effect_group_apply_filter(RenderEffectGroup* group,
                                              ViewBlock* block,
                                              Bound* clip) {
-    if (!group || !group->has_filter || !group->context || !block || !block->filter) {
+    if (!group || !group->has_filter || !group->context || !block || !block->filter_prop()) {
         return false;
     }
     RenderContext* rdcon = group->context;
@@ -225,7 +225,7 @@ static bool render_effect_group_apply_filter(RenderEffectGroup* group,
 
     rc_apply_filter(rdcon, filter_rect.x, filter_rect.y,
                     filter_rect.width, filter_rect.height,
-                    block->filter, clip);
+                    block->filter_prop(), clip);
     return true;
 }
 

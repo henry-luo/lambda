@@ -132,8 +132,8 @@ float render_geometry_block_visual_overflow(const ViewBlock* block) {
     if (!block) return 0.0f;
 
     float overflow = 0.0f;
-    if (block->filter) {
-        float filter_overflow = render_geometry_filter_effect_expand(block->filter);
+    if (block->filter_prop()) {
+        float filter_overflow = render_geometry_filter_effect_expand(block->filter_prop());
         if (filter_overflow > overflow) overflow = filter_overflow;
     }
     if (block->bound && block->boundary()->box_shadow) {

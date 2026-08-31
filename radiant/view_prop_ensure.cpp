@@ -84,7 +84,19 @@ ScrollProp* DomElement::ensure_scroll(ViewTree* tree) { return ensure_scroll_pro
 PositionProp* DomElement::ensure_position(ViewTree* tree) { return ensure_view_prop(prop_pool(tree), position, POSITION_PROP_DEFAULT); }
 EmbedProp* DomElement::ensure_embed(ViewTree* tree) { return ensure_view_prop(prop_pool(tree), embed, EMBED_PROP_DEFAULT); }
 TransformProp* DomElement::ensure_transform(ViewTree* tree) { return ensure_view_prop(prop_pool(tree), transform, TRANSFORM_PROP_DEFAULT); }
-FilterProp* DomElement::ensure_filter(ViewTree* tree) { return ensure_view_prop(prop_pool(tree), filter, FILTER_PROP_DEFAULT); }
+static FilterProp* ensure_filter_prop(DomElement* element, Pool* pool) {
+    FilterProp* value = element->filter_prop();
+    if (!value && pool) {
+        value = (FilterProp*)pool_calloc(pool, sizeof(FilterProp));
+        memcpy(value, &FILTER_PROP_DEFAULT, sizeof(FilterProp));
+        element->set_filter_prop(value);
+    }
+    return value;
+}
+
+FilterProp* DomElement::ensure_filter(ViewTree* tree) {
+    return ensure_filter_prop(this, prop_pool(tree));
+}
 
 static MultiColumnProp* ensure_multicol_prop(DomElement* element, Pool* pool) {
     MultiColumnProp* value = element->multicol_prop();
@@ -117,20 +129,23 @@ GridItemProp* DomElement::ensure_grid_item(ViewTree* tree) {
 }
 
 TableProp* DomElement::ensure_table(ViewTree* tree) {
-    if (role_kind() != ROLE_NONE && role_kind() != ROLE_TABLE) return nullptr;
+    if (role_kind() != ROLE_NONE && role_kind() != ROLE_TABLE &&
+        role_kind() != ROLE_FORM) return nullptr;
     if (role_kind() != ROLE_TABLE) { tb = nullptr; set_role_kind(ROLE_TABLE); }
     return ensure_view_prop(prop_pool(tree), tb, TABLE_PROP_DEFAULT);
 }
 
 TableCellProp* DomElement::ensure_cell(ViewTree* tree) {
-    if (role_kind() != ROLE_NONE && role_kind() != ROLE_CELL) return nullptr;
+    if (role_kind() != ROLE_NONE && role_kind() != ROLE_CELL &&
+        role_kind() != ROLE_FORM) return nullptr;
     if (role_kind() != ROLE_CELL) { td = nullptr; set_role_kind(ROLE_CELL); }
     return ensure_view_prop(prop_pool(tree), td, TABLE_CELL_PROP_DEFAULT);
 }
 
 FormControlProp* DomElement::ensure_form(ViewTree* tree) {
-    if (role_kind() != ROLE_NONE && role_kind() != ROLE_FORM) return nullptr;
-    if (role_kind() != ROLE_FORM) { form = nullptr; set_role_kind(ROLE_FORM); }
+    if (role_kind() != ROLE_NONE && role_kind() != ROLE_FORM &&
+        role_kind() != ROLE_TABLE && role_kind() != ROLE_CELL) return nullptr;
+    if (role_kind() == ROLE_NONE) set_role_kind(ROLE_FORM);
     return ensure_view_prop(prop_pool(tree), form, FORM_CONTROL_PROP_DEFAULT);
 }
 
@@ -141,7 +156,9 @@ InlineProp* DomElement::ensure_inline(LayoutContext* lycon) {
 PositionProp* DomElement::ensure_position(LayoutContext* lycon) { return ensure_view_prop(prop_pool(lycon), position, POSITION_PROP_DEFAULT); }
 EmbedProp* DomElement::ensure_embed(LayoutContext* lycon) { return ensure_view_prop(prop_pool(lycon), embed, EMBED_PROP_DEFAULT); }
 TransformProp* DomElement::ensure_transform(LayoutContext* lycon) { return ensure_view_prop(prop_pool(lycon), transform, TRANSFORM_PROP_DEFAULT); }
-FilterProp* DomElement::ensure_filter(LayoutContext* lycon) { return ensure_view_prop(prop_pool(lycon), filter, FILTER_PROP_DEFAULT); }
+FilterProp* DomElement::ensure_filter(LayoutContext* lycon) {
+    return ensure_filter_prop(this, prop_pool(lycon));
+}
 
 ScrollProp* DomElement::ensure_scroll(LayoutContext* lycon) { return ensure_scroll_prop(this, prop_pool(lycon)); }
 
