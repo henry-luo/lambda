@@ -3363,7 +3363,8 @@ check-module-boundary:
 	$(PYTHON) utils/check_module_boundary.py
 	@echo "✅ module-boundary validation completed (Class-F ratcheted deferment)"
 
-build-test: build-lambda-data build-windows-host-import generate-tree-sitter-python-parser
+# The aggregate test build includes hosted Python, which links the shared parser runtime.
+build-test: build-lambda-data build-windows-host-import $(TREE_SITTER_LIB) generate-tree-sitter-python-parser
 	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building tests using Premake5..."; fi
 	@if [ "$(TEST_BUILD_QUIET)" != "1" ]; then echo "Building configurations..."; fi
 	@mkdir -p build/premake
