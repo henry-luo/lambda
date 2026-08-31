@@ -4903,6 +4903,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         CSS_PROPERTY_TEXT_TRANSFORM,
         CSS_PROPERTY_TEXT_INDENT,
         CSS_PROPERTY_TEXT_SPACING_TRIM,
+        CSS_PROPERTY_HYPHENATE_CHARACTER,
         CSS_PROPERTY_DOMINANT_BASELINE,
         CSS_PROPERTY_LETTER_SPACING,
         CSS_PROPERTY_WORD_SPACING,
@@ -5509,6 +5510,14 @@ static void css_store_list_style_type_string(LayoutContext* lycon, ViewSpan* spa
     span->blk->list_style_type = CSS_VALUE_NONE;
 }
 
+static void css_store_hyphenate_character(LayoutContext* lycon, ViewSpan* span,
+                                          const char* character) {
+    if (!lycon || !span || !character) return;
+    size_t length = strlen(character);
+    span->blk->hyphenate_character = (char*)alloc_prop(lycon, length + 1);
+    str_copy(span->blk->hyphenate_character, length + 1, character, length);
+}
+
 static const char* css_list_style_image_url(const CssValue* value) {
     if (!value) return nullptr;
     if (value->type == CSS_VALUE_TYPE_URL) return value->data.url;
@@ -5992,6 +6001,8 @@ static const CssSimpleKeywordSpec* css_simple_keyword_spec(CssPropertyCode prope
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, overflow_wrap)},
         {CSS_PROPERTY_OVERFLOW_WRAP, CSS_SIMPLE_KEYWORD_BLOCK,
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, overflow_wrap)},
+        {CSS_PROPERTY_HYPHENS, CSS_SIMPLE_KEYWORD_BLOCK,
+         CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, hyphens)},
         {CSS_PROPERTY_WHITE_SPACE, CSS_SIMPLE_KEYWORD_BLOCK,
          CSS_SIMPLE_KEYWORD_POSITIVE, offsetof(BlockProp, white_space)},
         {CSS_PROPERTY_TEXT_SPACING_TRIM, CSS_SIMPLE_KEYWORD_BLOCK,
@@ -7790,6 +7801,26 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_WORD_SPACING:
             resolve_font_spacing_property(lycon, span, prop_id, value);
             break;
+        case CSS_PROPERTY_HYPHENATE_CHARACTER: {
+            span->ensure_block(lycon);
+            const CssValue* resolved = resolve_var_function(lycon, value);
+            if (!resolved) break;
+            if (resolved->type == CSS_VALUE_TYPE_STRING) {
+                css_store_hyphenate_character(lycon, span, resolved->data.string);
+            } else if (resolved->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum keyword = resolved->data.keyword;
+                if (keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_INITIAL ||
+                    keyword == CSS_VALUE_UNSET || keyword == CSS_VALUE_REVERT) {
+                    span->blk->hyphenate_character = nullptr;
+                } else if (keyword == CSS_VALUE_INHERIT) {
+                    DomElement* parent = dom_parent_element(
+                        lam::dom_require<DOM_NODE_ELEMENT>(lycon->view));
+                    span->blk->hyphenate_character = parent && parent->blk
+                        ? parent->block()->hyphenate_character : nullptr;
+                }
+            }
+            break;
+        }
         case CSS_PROPERTY_TEXT_SHADOW: {
             if (!span->font) {
                 break;

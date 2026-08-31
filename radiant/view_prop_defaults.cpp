@@ -15,6 +15,7 @@ static BlockProp make_block_prop_default() {
     value.unicode_bidi = CSS_VALUE_NORMAL;
     value.writing_mode = WM_HORIZONTAL_TB;
     value.zoom = 1.0f;
+    value.hyphens = CSS_VALUE_MANUAL;
     value.text_spacing_trim = CSS_VALUE_NORMAL;
     value.text_autospace = TEXT_AUTOSPACE_NORMAL;
     value.text_autospace_is_set = false;

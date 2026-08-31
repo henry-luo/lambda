@@ -1742,10 +1742,10 @@ extern "C" void selection_refresh_presentation(DocState* state) {
     if (!state || !state_store_ensure_selection_presentation(state)) return;
     SelectionPresentation* presentation = state->selection_presentation;
 
-    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL) {
+    if (state->sel.kind == EDIT_SEL_TEXT_CONTROL && state->sel.control &&
+        tc_is_text_control(state->sel.control)) {
         EditingSelection* current = &state->sel;
         DomElement* control = current->control;
-        if (!control || !tc_is_text_control(control)) return;
         tc_ensure_init(control);
         FormControlProp* form = control->form;
         if (!form) return;
