@@ -6672,7 +6672,14 @@ static bool js_text_control_set_raw_value(DomElement* elem, const char* new_val,
     f->tc_initialized = 1;
 
     f->state_ref = state;
-    form_control_sync_text_control_state(state, (View*)elem);
+    // A value write can clamp a focused control's selection; publish the
+    // clamped range so the editing shadow remains synchronized before reflow.
+    if (state) {
+        state_store_set_text_control_selection(state, elem,
+            f->selection_start, f->selection_end, f->selection_direction);
+    } else {
+        form_control_sync_text_control_state(state, (View*)elem);
+    }
     form_control_sync_text_control_focus_state(state, (View*)elem);
     bool show_placeholder = f->current_value_len == 0 && f->placeholder && f->placeholder[0];
     state_set_bool(state, elem, STATE_PLACEHOLDER, show_placeholder);

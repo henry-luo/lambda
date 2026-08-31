@@ -3966,7 +3966,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 wd = unicode_space_em * layout_font_em_size(lycon) * sc_scale;
             } else {
                 FontStyleDesc _sd = font_style_desc_from_prop(lycon->font.style);
-                bool emoji_presentation = false;
+                bool emoji_presentation = utf_is_emoji_presentation_default(codepoint);
                 if (next_ch) {
                     uint32_t peek_cp;
                     int peek_bytes = str_utf8_decode((const char*)next_ch, (size_t)(text_end - next_ch), &peek_cp);

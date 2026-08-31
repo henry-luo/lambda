@@ -499,6 +499,7 @@ struct LayoutCache {
     CacheEntry measure_entries[LAYOUT_CACHE_SIZE];
     float intrinsic_min_content_width;
     float intrinsic_max_content_width;
+    uint32_t intrinsic_measurement_generation;
     bool is_empty;
     uint32_t generation;
 };
@@ -508,6 +509,7 @@ inline void layout_cache_init(LayoutCache* cache, uint32_t generation = 0) {
     for (int i = 0; i < LAYOUT_CACHE_SIZE; i++) {
         cache->measure_entries[i].valid = false;
     }
+    cache->intrinsic_measurement_generation = 0;
     cache->is_empty = true;
     cache->generation = generation;
 }

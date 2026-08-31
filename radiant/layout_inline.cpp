@@ -115,6 +115,34 @@ static bool span_has_direct_visible_text(ViewSpan* span) {
     return false;
 }
 
+static bool inline_span_single_replaced_baseline_y(ViewSpan* span, float* baseline_y) {
+    if (!span || !baseline_y) return false;
+    bool found_replaced_child = false;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child)) {
+            continue;
+        }
+        if (child->view_type == RDT_VIEW_TEXT) {
+            if (child->width <= 0.0f || child->height <= 0.0f ||
+                text_is_all_collapsible_space(
+                    lam::dom_as<DOM_NODE_TEXT>(static_cast<DomNode*>(child)), span)) {
+                continue;
+            }
+            return false;
+        }
+        ViewBlock* block = lam::view_as_block(child);
+        if (block && block->display.inner == RDT_DISPLAY_REPLACED) {
+            if (found_replaced_child) return false;
+            // CSS 2.1 §10.8.1: a replaced inline's baseline is its bottom content edge.
+            *baseline_y = child->y + child->height;
+            found_replaced_child = true;
+            continue;
+        }
+        return false;
+    }
+    return found_replaced_child;
+}
+
 static bool inline_contents_text_bounds(ViewSpan* span, float* min_x, float* max_x,
                                         float* min_y, float* max_y) {
     if (!span || !min_x || !max_x || !min_y || !max_y) return false;
@@ -2614,9 +2642,22 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     layout_inline_span_has_direct_text_on_both_sides_of_anonymous_table(span);
                 if (!preserve_anonymous_table_line_origin) {
                     float baseline_pos = line_baseline_position(lycon, nullptr);
-                    span->y = layout_inline_font_box_y(
-                        lycon, span, span_resolved_line_height,
-                        span_asc, span_desc, baseline_pos, bt, pt_val);
+                    float replaced_baseline_y = 0.0f;
+                    ViewBlock* inline_parent = layout_nearest_block_ancestor(
+                        span->parent_view());
+                    bool completed_replaced_line = !span_is_multi_line &&
+                        !span_has_direct_visible_text(span) &&
+                        inline_start_line_number < lycon->block.line_number &&
+                        inline_parent && layout_block_is_out_of_flow_positioned(inline_parent) &&
+                        inline_span_single_replaced_baseline_y(span, &replaced_baseline_y);
+                    if (completed_replaced_line) {
+                        // The positioned block has advanced to its next strut; retain this line's baseline.
+                        span->y = replaced_baseline_y - span_asc - bt - pt_val;
+                    } else {
+                        span->y = layout_inline_font_box_y(
+                            lycon, span, span_resolved_line_height,
+                            span_asc, span_desc, baseline_pos, bt, pt_val);
+                    }
                 }
                 span->height = expected_height;
             }

@@ -20,6 +20,7 @@ struct LayoutViewSnapshot {
     float content_height;
     float cached_min_content_width;
     float cached_max_content_width;
+    uint32_t intrinsic_measurement_generation;
     bool has_cached_intrinsic_widths;
     bool measuring_intrinsic_width;
     bool has_form;
@@ -59,6 +60,8 @@ static void layout_measure_snapshot_append(::LayoutContext* lycon,
             ? element->layout_cache->intrinsic_min_content_width : 0.0f;
         snapshot->cached_max_content_width = element->layout_cache
             ? element->layout_cache->intrinsic_max_content_width : 0.0f;
+        snapshot->intrinsic_measurement_generation = element->layout_cache
+            ? element->layout_cache->intrinsic_measurement_generation : 0;
         snapshot->has_cached_intrinsic_widths = element->has_cached_intrinsic_widths();
         snapshot->measuring_intrinsic_width = element->measuring_intrinsic_width();
         snapshot->has_form = element->form_control();
@@ -115,6 +118,8 @@ static void layout_measure_snapshot_restore(::LayoutContext* lycon, ArrayList* s
             if (element->layout_cache) {
                 element->layout_cache->intrinsic_min_content_width = snapshot->cached_min_content_width;
                 element->layout_cache->intrinsic_max_content_width = snapshot->cached_max_content_width;
+                element->layout_cache->intrinsic_measurement_generation =
+                    snapshot->intrinsic_measurement_generation;
             }
             element->set_has_cached_intrinsic_widths(snapshot->has_cached_intrinsic_widths);
             element->set_measuring_intrinsic_width(snapshot->measuring_intrinsic_width);
