@@ -95,10 +95,11 @@ Input* input_from_target_with_name_parent(struct Target* target, String* type,
 
 // Math parsing functions (from input-math.cpp)
 void parse_math(Input* input, const char* math_string, const char* flavor_str);
-void cleanup_math_parser();  // Call at program exit to free resources
+void cleanup_math_parser();  // Compatibility no-op; direct parser owns per-call state
 
-// Parse LaTeX math string to AST using tree-sitter-latex-math (from input-latex-ts.cpp)
-Item parse_math_latex_to_ast(Input* input, const char* math_source, size_t math_len);
+// Parse LaTeX/ASCII math directly into Mark data (from input-latex-c.cpp).
+Item parse_math_direct_to_ast(Input* input, const char* math_source, size_t math_len,
+                              const char* flavor);
 
 #ifdef __cplusplus
 } // extern "C"

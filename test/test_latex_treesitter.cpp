@@ -1,6 +1,6 @@
 /**
- * Test tree-sitter LaTeX parser
- * Simple verification that parse_latex_ts() works correctly
+ * Test the direct LaTeX parser
+ * Simple verification that the parser produces a Mark tree
  */
 
 #include <gtest/gtest.h>
