@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>DOM event dispatch surface</title>
+<button id="double">double click</button>
+<input id="selection" value="alpha">
+<textarea id="menu">menu</textarea>
+<div id="log"></div>
+<script>
+  var log = document.getElementById('log');
+  function note(value) {
+    log.textContent += (log.textContent ? '|' : '') + value;
+  }
+  document.getElementById('double').addEventListener('dblclick', function(event) {
+    note('dblclick:' + event.detail);
+  });
+  document.getElementById('selection').addEventListener('select', function() {
+    note('select:' + this.selectionStart + '-' + this.selectionEnd);
+  });
+  document.getElementById('menu').addEventListener('contextmenu', function(event) {
+    note('contextmenu:' + event.button);
+    event.preventDefault();
+  });
+</script>

@@ -2113,6 +2113,15 @@ RADIANT_C_API Item fn_radiant_caret_operation(Item node_item, Item op_item,
     return (Item){.item = b2it(1)};
 }
 
+// ESO48: key choice stays in the package; native resolves the live scrollport,
+// range and geometry after this behavior-only request returns.
+RADIANT_C_API Item fn_radiant_scroll_operation(Item node_item, Item op_item) {
+    const char* op = fn_to_cstr(op_item);
+    if (!op || !*op) return (Item){.item = b2it(0)};
+    radiant_scroll_operation_request(op);
+    return (Item){.item = b2it(1)};
+}
+
 // F10: the context-menu waist. The template names the target and the enable
 // mask; the popup position comes from the right click native already resolved,
 // so physical pixels never reach policy.
@@ -2795,6 +2804,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_caret_surface(Item node)", (fn_ptr)fn_radiant_caret_surface},
     {"caret_operation", "fn(node: dom_node, operation: string, extend: bool) -> bool", (fn_ptr)fn_radiant_caret_operation, JUBE_FN_NONE,
      "Item fn_radiant_caret_operation(Item node, Item operation, Item extend)", (fn_ptr)fn_radiant_caret_operation},
+    {"scroll_operation", "fn(node: dom_node, operation: string) -> bool", (fn_ptr)fn_radiant_scroll_operation, JUBE_FN_NONE,
+     "Item fn_radiant_scroll_operation(Item node, Item operation)", (fn_ptr)fn_radiant_scroll_operation},
     {"open_context_menu", "fn(node: dom_node, enabled_mask: int) -> bool", (fn_ptr)fn_radiant_open_context_menu, JUBE_FN_NONE,
      "Item fn_radiant_open_context_menu(Item node, Item enabled_mask)", (fn_ptr)fn_radiant_open_context_menu},
     {"close_context_menu", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_close_context_menu, JUBE_FN_NONE,

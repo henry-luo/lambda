@@ -589,6 +589,18 @@ static DomDocument* event_context_target_document(EventContext* evcon) {
         : (evcon->ui_context ? evcon->ui_context->document : NULL);
 }
 
+DomElement* radiant_document_body_element(DomDocument* doc) {
+    DomElement* root = doc ? doc->root : nullptr;
+    if (!root) return nullptr;
+    if (root->tag() == MARKUP_NAME_BODY) return root;
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* elem = child->as_element();
+        if (elem && elem->tag() == MARKUP_NAME_BODY) return elem;
+    }
+    return nullptr;
+}
+
 static void restore_embedded_document_scroll_model(DomDocument* doc) {
     if (!doc || !doc->view_tree || !doc->view_tree->root ||
         doc->view_tree->root->view_type != RDT_VIEW_BLOCK) {
@@ -2751,8 +2763,12 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         // page with no form control anywhere would otherwise never load the
         // package and would lose caret navigation entirely once the native rich
         // handler was deleted.
+        // ESO48 uses that same body template for document scrolling. Unlike a
+        // focus target, the body remains available on an unfocused static page,
+        // which is exactly where PageDown needs to load package policy first.
         DomElement* te = target && target->is_element() ? target->as_element() : nullptr;
-        bool package_governs = te && te->form_control();
+        bool package_governs = te && (te->form_control() ||
+            te == radiant_document_body_element(doc));
         if (!package_governs && target) {
             EditingSurface governed_surface;
             package_governs = editing_surface_from_target(target, &governed_surface) &&
@@ -2774,8 +2790,10 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         }
     }
     if (!rt) {
-        log_debug("dom-package: document owns no evaluator; keeping native behavior");
-        doc->dom_package_loaded = true;
+        // This target did not need package policy, so evaluator creation was
+        // correctly deferred. Do not poison the document's load bit: a later
+        // body/form/link event may be the first target the package governs.
+        log_debug("dom-package: evaluator deferred for an ungoverned target");
         return false;
     }
     // No heap check here: a freshly created runtime gets its heap when the first
@@ -3137,6 +3155,11 @@ static __thread uint64_t s_caret_op_epoch = 0;
 static __thread char s_caret_op_name[32];
 static __thread bool s_caret_op_extend = false;
 
+// ESO48 follows the same request/resolve seam as caret navigation: policy
+// names an operation in Lambda, then native resolves the current scrollport.
+static __thread uint64_t s_scroll_op_epoch = 0;
+static __thread char s_scroll_op_name[32];
+
 extern "C" uint64_t radiant_caret_operation_epoch(void) { return s_caret_op_epoch; }
 
 // F11: the key-intent epoch, same pattern as the caret one.
@@ -3179,6 +3202,12 @@ extern "C" void radiant_caret_operation_request(const char* operation, bool exte
     snprintf(s_caret_op_name, sizeof(s_caret_op_name), "%s", operation);
     s_caret_op_extend = extend;
     s_caret_op_epoch++;
+}
+
+extern "C" void radiant_scroll_operation_request(const char* operation) {
+    if (!operation) return;
+    snprintf(s_scroll_op_name, sizeof(s_scroll_op_name), "%s", operation);
+    s_scroll_op_epoch++;
 }
 
 // Where each named operation lands in a text control. This is the whole of what
@@ -3286,8 +3315,98 @@ extern "C" bool radiant_dispatch_behavior_caret_key(EventContext* evcon, View* t
     return dispatch_behavior_handler(evcon, target, "caretkey", intent, nullptr);
 }
 
-// F10: behavior-only, like `commit`, `optioncommit` and the composition hooks —
-// no DOM `contextmenu` event has fired, so there are no JS listeners to preempt.
+extern "C" bool radiant_dispatch_behavior_scroll_key(EventContext* evcon,
+                                                     View* target,
+                                                     const InputIntent* intent) {
+    return dispatch_behavior_handler(evcon, target, "scrollkey", intent, nullptr);
+}
+
+static ViewBlock* keyboard_scrollport_from_view(DomDocument* doc, View* start) {
+    if (!doc || !doc->view_tree || !doc->view_tree->root) return nullptr;
+    DomElement* root = doc->root;
+    for (DomNode* node = static_cast<DomNode*>(start); node; node = node->parent) {
+        if (!node->is_block()) continue;
+        ViewBlock* block = lam::view_require_block(static_cast<View*>(node));
+        if (!block->scroller || !block->scroll()->pane) continue;
+        DomElement* elem = node->as_element();
+        // The body block is only the root scrolling-element's layout proxy.
+        // Reaching it here must continue to the html viewport block.
+        if (elem && elem->tag() == MARKUP_NAME_BODY && elem->parent == root) {
+            continue;
+        }
+        float min_x = 0.0f, max_x = 0.0f, min_y = 0.0f, max_y = 0.0f;
+        scroll_state_get_range_for_view((DocState*)doc->state,
+            static_cast<View*>(block), block->scroll()->pane,
+            &min_x, &max_x, &min_y, &max_y);
+        if (max_x > min_x || max_y > min_y) return block;
+    }
+    View* root_view = doc->view_tree->root;
+    if (!root_view->is_block()) return nullptr;
+    ViewBlock* root_block = lam::view_require_block(root_view);
+    return root_block->scroller && root_block->scroll()->pane ? root_block : nullptr;
+}
+
+// ESO48 mechanism half: resolve the package's named operation against the
+// current scrollport. The line/page metrics, range clamp, state write, event,
+// and paint stay native because they depend on the laid-out live view tree.
+static bool apply_keyboard_scroll_operation(EventContext* evcon, View* origin,
+                                            const char* operation) {
+    DomDocument* doc = event_context_target_document(evcon);
+    DocState* state = event_context_target_state(evcon);
+    if (!doc || !state || !operation) return false;
+
+    ViewBlock* block = keyboard_scrollport_from_view(doc, origin);
+    if (!block || !block->scroll()->pane) return false;
+
+    float x = 0.0f, y = 0.0f;
+    float min_x = 0.0f, max_x = 0.0f, min_y = 0.0f, max_y = 0.0f;
+    scroll_state_get_position_for_view(state, static_cast<View*>(block),
+        block->scroll()->pane, &x, &y, nullptr, nullptr);
+    scroll_state_get_range_for_view(state, static_cast<View*>(block),
+        block->scroll()->pane, &min_x, &max_x, &min_y, &max_y);
+
+    float line_step = block->height * 0.1f;
+    if (line_step < 40.0f) line_step = 40.0f;
+    float page_step = block->height * 0.85f;
+    if (page_step < line_step) page_step = line_step;
+
+    float next_x = x;
+    float next_y = y;
+    if (strcmp(operation, "lineBackward") == 0) {
+        next_y -= line_step;
+    } else if (strcmp(operation, "lineForward") == 0) {
+        next_y += line_step;
+    } else if (strcmp(operation, "lineLeft") == 0) {
+        next_x -= line_step;
+    } else if (strcmp(operation, "lineRight") == 0) {
+        next_x += line_step;
+    } else if (strcmp(operation, "pageBackward") == 0) {
+        next_y -= page_step;
+    } else if (strcmp(operation, "pageForward") == 0) {
+        next_y += page_step;
+    } else if (strcmp(operation, "documentStart") == 0) {
+        next_y = min_y;
+    } else if (strcmp(operation, "documentEnd") == 0) {
+        next_y = max_y;
+    } else {
+        return false;
+    }
+
+    scroll_state_set_position_for_view(state, static_cast<View*>(block),
+        block->scroll()->pane, next_x, next_y, false);
+    scroll_state_get_position_for_view(state, static_cast<View*>(block),
+        block->scroll()->pane, &next_x, &next_y, nullptr, nullptr);
+    if (next_x == x && next_y == y) return false;
+
+    bool viewport = doc->view_tree->root == static_cast<View*>(block);
+    radiant_dispatch_simple_event(evcon, static_cast<View*>(block), "scroll",
+                                  false, false);
+    if (!viewport) js_dom_observers_post_layout();
+    evcon->need_repaint = true;
+    return true;
+}
+
+// F10: behavior-only after the ordinary cancelable DOM `contextmenu` event.
 // The template decides whether this target gets a menu and computes the enable
 // mask; native supplies only the hit target and the popup position.
 extern "C" bool radiant_dispatch_behavior_context_menu(EventContext* evcon,
@@ -9385,20 +9504,25 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // continue with normal handling so the new click still works.
             context_menu_close(state);
         }
-        // F10: a right click asks the `<body>` behavior template whether a menu
-        // belongs here and which items are live. Native still resolves the hit
-        // target and the popup position — logical geometry is mechanism and does
-        // not cross into policy — and records both so `radiant.open_context_menu`
-        // can place the popup without the template ever handling coordinates.
+        // F10: a right click first emits the ordinary cancelable DOM event, so
+        // an author can install a custom menu. Only an unclaimed default reaches
+        // the behavior template, which computes the native popup's item policy.
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
             btn_event->button == GLFW_MOUSE_BUTTON_RIGHT &&
             state && evcon.target && evcon.target->is_element()) {
-            state->pending_context_menu_target = evcon.target;
-            state->pending_context_menu_x = (float)btn_event->x;
-            state->pending_context_menu_y = (float)btn_event->y;
-            bool opened = radiant_dispatch_behavior_context_menu(&evcon, evcon.target);
-            state->pending_context_menu_target = nullptr;
-            if (opened && state->context_menu_target) break;
+            bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
+                "contextmenu", btn_event->x, btn_event->y,
+                btn_event->button, 0,
+                event_mod_ctrl(btn_event->mods), event_mod_shift(btn_event->mods),
+                event_mod_alt(btn_event->mods), event_mod_super(btn_event->mods), 0);
+            if (!prevented) {
+                state->pending_context_menu_target = evcon.target;
+                state->pending_context_menu_x = (float)btn_event->x;
+                state->pending_context_menu_y = (float)btn_event->y;
+                bool opened = radiant_dispatch_behavior_context_menu(&evcon, evcon.target);
+                state->pending_context_menu_target = nullptr;
+                if (opened && state->context_menu_target) break;
+            }
         }
 
         // Update active and focus states
@@ -10102,6 +10226,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         1,
                         &js_click_dispatched);
                     if (prevented) evcon.default_prevented = true;
+                }
+                // The final primary click in a double-click carries the same
+                // target and coordinates as click, but is separately observable
+                // by `ondblclick` and EventTarget listeners. Word selection has
+                // already used the click count on mousedown; this dispatch adds
+                // no second selection policy.
+                if (evcon.target && btn_event->clicks == 2) {
+                    radiant_dispatch_mouse_event(&evcon, evcon.target,
+                        "dblclick", mouse_x, mouse_y,
+                        btn_event->button, 0,
+                        event_mod_ctrl(btn_event->mods), event_mod_shift(btn_event->mods),
+                        event_mod_alt(btn_event->mods), event_mod_super(btn_event->mods), 2);
                 }
                 // Handle checkbox/radio click toggle
                 log_debug("MOUSE_UP: evcon.target=%p", evcon.target);
@@ -10940,6 +11076,35 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 log_debug("event: rich key fallback fenced; key=%d", key_event->key);
             }
         }
+
+        // ESO48 runs after every higher-priority keyboard default has had its
+        // turn: author keydown cancellation, control activation, and caretkey.
+        // Dispatch from the live body so a missing focus/caret still receives
+        // document policy, and so a stale rendered focus node cannot bypass it.
+        if (!evcon.default_prevented) {
+            DomDocument* key_doc = event_context_target_document(&evcon);
+            DomElement* body = radiant_document_body_element(key_doc);
+            if (body) {
+                InputIntent scroll_key_intent;
+                scroll_key_intent.key = key_event->key;
+                scroll_key_intent.mods = key_event->mods;
+                uint64_t scroll_epoch_before = s_scroll_op_epoch;
+                radiant_dispatch_behavior_scroll_key(
+                    &evcon, static_cast<View*>(body), &scroll_key_intent);
+                if (s_scroll_op_epoch != scroll_epoch_before) {
+                    View* scroll_origin = focus_get(state);
+                    if (!scroll_origin) {
+                        scroll_origin = static_cast<View*>(
+                            radiant_document_body_element(key_doc));
+                    }
+                    if (apply_keyboard_scroll_operation(
+                            &evcon, scroll_origin, s_scroll_op_name)) {
+                        break;
+                    }
+                }
+            }
+        }
+
         // Mirror StateStore selection projection into form->selection_* so JS
         // reads (selectionStart/End/value) observe text edits immediately.
         {

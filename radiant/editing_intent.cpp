@@ -202,18 +202,7 @@ bool input_intent_from_key_event(DocState* state, const KeyEvent* key_event,
     // document sidesteps that entirely, and costs nothing in fidelity: this
     // mapping reads only the key and modifiers, never the target element.
     DomDocument* doc = state->owner_store ? state->owner_store->document : nullptr;
-    DomNode* root = doc && doc->root ? static_cast<DomNode*>(doc->root) : nullptr;
-    DomElement* body = nullptr;
-    for (DomNode* n = root; n && !body; n = n->next_sibling) {
-        if (n->node_type != DOM_NODE_ELEMENT) continue;
-        DomElement* e = static_cast<DomElement*>(n);
-        if (e->tag() == MARKUP_NAME_BODY) { body = e; break; }
-        for (DomNode* c = e->first_child; c; c = c->next_sibling) {
-            if (c->node_type != DOM_NODE_ELEMENT) continue;
-            DomElement* ce = static_cast<DomElement*>(c);
-            if (ce->tag() == MARKUP_NAME_BODY) { body = ce; break; }
-        }
-    }
+    DomElement* body = radiant_document_body_element(doc);
     if (!body) return false;
     View* dispatch_target = static_cast<View*>(body);
 

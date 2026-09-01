@@ -2602,7 +2602,6 @@ static const struct {
     {"onmousemove",  "mousemove"},
     {"onkeydown",    "keydown"},
     {"onkeyup",      "keyup"},
-    {"onkeypress",   "keypress"},
     {"onfocus",      "focus"},
     {"onblur",       "blur"},
     {"onchange",     "change"},

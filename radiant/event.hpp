@@ -500,6 +500,14 @@ bool input_intent_from_text_input(uint32_t codepoint, InputIntent* out,
 bool input_intent_from_composition_event(const CompositionEvent* comp_event,
                                          InputIntent* out);
 
+// The package's document-scoped keyboard policies must dispatch from the live
+// <body>, not a focus/caret node that an author render may already have replaced.
+DomElement* radiant_document_body_element(DomDocument* doc);
+extern "C" bool radiant_dispatch_behavior_scroll_key(struct EventContext* evcon,
+                                                       View* target,
+                                                       const InputIntent* intent);
+extern "C" void radiant_scroll_operation_request(const char* operation);
+
 
 // ===== editing surface =====
 

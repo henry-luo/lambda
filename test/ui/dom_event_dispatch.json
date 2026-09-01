@@ -1,0 +1,15 @@
+{
+  "name": "DOM dblclick, select, and cancelable contextmenu dispatch",
+  "html": "test/html/dom-event-dispatch.html",
+  "viewport": {"width": 640, "height": 240},
+  "events": [
+    {"type": "dblclick", "target": {"selector": "#double"}},
+    {"type": "assert_text", "target": {"selector": "#log"}, "contains": "dblclick:2"},
+    {"type": "set_editing_selection", "target": {"selector": "#selection"}, "start": 1, "end": 4},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_text", "target": {"selector": "#log"}, "contains": "select:1-4"},
+    {"type": "click", "target": {"selector": "#menu"}, "button": 1},
+    {"type": "assert_text", "target": {"selector": "#log"}, "contains": "contextmenu:1"},
+    {"type": "assert_state_store", "target": {"selector": "#menu"}, "context_menu_open": false}
+  ]
+}
