@@ -1998,6 +1998,7 @@ RADIANT_C_API Item fn_radiant_caret_surface(Item node_item) {
     int kind = editing_controller_caret_surface_kind(state);
     if (kind == 1) return radiant_string_item("text");
     if (kind == 2) return radiant_string_item("rich");
+    if (kind == 3) return radiant_string_item("textarea");
     return ItemNull;
 }
 

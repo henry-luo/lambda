@@ -1020,7 +1020,6 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
             return;
         }
     }
-    flex->needs_reflow = false;
 }
 
 void cleanup_flex_container(LayoutContext* lycon) {
@@ -1459,7 +1458,6 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             container, flex_layout, first_line, false);
         float computed_last_baseline = flex_container_line_baseline(
             container, flex_layout, last_line, true);
-        first_line->baseline = computed_first_baseline;
         container->embedp()->flex->first_baseline = computed_first_baseline;
         // CSS Flexbox §8.5 distinguishes the endmost item/line baseline.
         container->embedp()->flex->last_baseline = computed_last_baseline;
@@ -1497,7 +1495,6 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         }
     }
 
-    flex_layout->needs_reflow = false;
 }
 // Sort flex items by CSS order property
 static void sort_flex_items_by_order(View** items, int count) {
@@ -3134,18 +3131,6 @@ static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int
         line->main_size = main_size;
         line->free_space = container_main_size - main_size;
 
-        line->total_flex_grow = 0;
-        line->total_flex_shrink = 0;
-        for (int i = 0; i < line->item_count; i++) {
-            ViewElement* item_elmt = lam::view_as_element(line->items[i]);
-            if (item_elmt) {
-                line->total_flex_grow += get_item_flex_grow(item_elmt);
-                line->total_flex_shrink += get_item_flex_shrink(item_elmt);
-            } else {
-                line->total_flex_grow += 0;
-                line->total_flex_shrink += 1; // default shrink
-            }
-        }
         line_count++;
     }
 

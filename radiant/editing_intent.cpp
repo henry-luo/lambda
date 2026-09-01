@@ -84,151 +84,90 @@ static void input_intent_reset(InputIntent* intent) {
     intent->command = nullptr;
 }
 
+typedef struct InputIntentName {
+    InputIntentType type;
+    const char* name;
+} InputIntentName;
+
+static const InputIntentName s_input_intent_names[] = {
+    {INPUT_INTENT_INSERT_TEXT, "insertText"},
+    {INPUT_INTENT_INSERT_REPLACEMENT_TEXT, "insertReplacementText"},
+    {INPUT_INTENT_INSERT_PARAGRAPH, "insertParagraph"},
+    {INPUT_INTENT_INSERT_LINE_BREAK, "insertLineBreak"},
+    {INPUT_INTENT_INSERT_HORIZONTAL_RULE, "insertHorizontalRule"},
+    {INPUT_INTENT_INSERT_IMAGE, "insertImage"},
+    {INPUT_INTENT_INSERT_LINK, "insertLink"},
+    {INPUT_INTENT_INSERT_FROM_PASTE, "insertFromPaste"},
+    {INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION, "insertFromPasteAsQuotation"},
+    {INPUT_INTENT_INSERT_FROM_YANK, "insertFromYank"},
+    {INPUT_INTENT_INSERT_FROM_DROP, "insertFromDrop"},
+    {INPUT_INTENT_DELETE_CONTENT_BACKWARD, "deleteContentBackward"},
+    {INPUT_INTENT_DELETE_CONTENT_FORWARD, "deleteContentForward"},
+    {INPUT_INTENT_DELETE_WORD_BACKWARD, "deleteWordBackward"},
+    {INPUT_INTENT_DELETE_WORD_FORWARD, "deleteWordForward"},
+    {INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD, "deleteSoftLineBackward"},
+    {INPUT_INTENT_DELETE_SOFT_LINE_FORWARD, "deleteSoftLineForward"},
+    {INPUT_INTENT_DELETE_HARD_LINE_BACKWARD, "deleteHardLineBackward"},
+    {INPUT_INTENT_DELETE_HARD_LINE_FORWARD, "deleteHardLineForward"},
+    {INPUT_INTENT_DELETE_BY_CUT, "deleteByCut"},
+    {INPUT_INTENT_DELETE_BY_DRAG, "deleteByDrag"},
+    {INPUT_INTENT_COMPOSITION_START, "compositionStart"},
+    {INPUT_INTENT_INSERT_COMPOSITION_TEXT, "insertCompositionText"},
+    {INPUT_INTENT_INSERT_FROM_COMPOSITION, "insertFromComposition"},
+    {INPUT_INTENT_DELETE_COMPOSITION_TEXT, "deleteCompositionText"},
+    {INPUT_INTENT_FORMAT_UNLINK, "unlink"},
+    {INPUT_INTENT_FORMAT_BOLD, "formatBold"},
+    {INPUT_INTENT_FORMAT_ITALIC, "formatItalic"},
+    {INPUT_INTENT_FORMAT_UNDERLINE, "formatUnderline"},
+    {INPUT_INTENT_FORMAT_STRIKETHROUGH, "formatStrikeThrough"},
+    {INPUT_INTENT_FORMAT_SUBSCRIPT, "formatSubscript"},
+    {INPUT_INTENT_FORMAT_SUPERSCRIPT, "formatSuperscript"},
+    {INPUT_INTENT_FORMAT_FORE_COLOR, "formatForeColor"},
+    {INPUT_INTENT_FORMAT_BACK_COLOR, "formatBackColor"},
+    {INPUT_INTENT_FORMAT_HILITE_COLOR, "formatHiliteColor"},
+    {INPUT_INTENT_FORMAT_FONT_NAME, "formatFontName"},
+    {INPUT_INTENT_FORMAT_FONT_SIZE, "formatFontSize"},
+    {INPUT_INTENT_FORMAT_REMOVE, "formatRemove"},
+    {INPUT_INTENT_FORMAT_BLOCK, "formatBlock"},
+    {INPUT_INTENT_FORMAT_JUSTIFY_LEFT, "formatJustifyLeft"},
+    {INPUT_INTENT_FORMAT_JUSTIFY_CENTER, "formatJustifyCenter"},
+    {INPUT_INTENT_FORMAT_JUSTIFY_RIGHT, "formatJustifyRight"},
+    {INPUT_INTENT_FORMAT_JUSTIFY_FULL, "formatJustifyFull"},
+    {INPUT_INTENT_FORMAT_ORDERED_LIST, "insertOrderedList"},
+    {INPUT_INTENT_FORMAT_UNORDERED_LIST, "insertUnorderedList"},
+    {INPUT_INTENT_FORMAT_INDENT, "formatIndent"},
+    {INPUT_INTENT_FORMAT_OUTDENT, "formatOutdent"},
+    {INPUT_INTENT_SELECT_ALL, "selectAll"},
+    {INPUT_INTENT_HISTORY_UNDO, "historyUndo"},
+    {INPUT_INTENT_HISTORY_REDO, "historyRedo"},
+    {INPUT_INTENT_COPY, "copy"},
+};
+
 const char* input_intent_type_name(InputIntentType type) {
-    switch (type) {
-        case INPUT_INTENT_INSERT_TEXT:                  return "insertText";
-        case INPUT_INTENT_INSERT_REPLACEMENT_TEXT:      return "insertReplacementText";
-        case INPUT_INTENT_INSERT_PARAGRAPH:             return "insertParagraph";
-        case INPUT_INTENT_INSERT_LINE_BREAK:            return "insertLineBreak";
-        case INPUT_INTENT_INSERT_HORIZONTAL_RULE:       return "insertHorizontalRule";
-        case INPUT_INTENT_INSERT_IMAGE:                 return "insertImage";
-        case INPUT_INTENT_INSERT_LINK:                  return "insertLink";
-        case INPUT_INTENT_INSERT_FROM_PASTE:            return "insertFromPaste";
-        case INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION: return "insertFromPasteAsQuotation";
-        case INPUT_INTENT_INSERT_FROM_YANK:             return "insertFromYank";
-        case INPUT_INTENT_INSERT_FROM_DROP:             return "insertFromDrop";
-        case INPUT_INTENT_DELETE_CONTENT_BACKWARD:      return "deleteContentBackward";
-        case INPUT_INTENT_DELETE_CONTENT_FORWARD:       return "deleteContentForward";
-        case INPUT_INTENT_DELETE_WORD_BACKWARD:         return "deleteWordBackward";
-        case INPUT_INTENT_DELETE_WORD_FORWARD:          return "deleteWordForward";
-        case INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD:    return "deleteSoftLineBackward";
-        case INPUT_INTENT_DELETE_SOFT_LINE_FORWARD:     return "deleteSoftLineForward";
-        case INPUT_INTENT_DELETE_HARD_LINE_BACKWARD:    return "deleteHardLineBackward";
-        case INPUT_INTENT_DELETE_HARD_LINE_FORWARD:     return "deleteHardLineForward";
-        case INPUT_INTENT_DELETE_BY_CUT:                return "deleteByCut";
-        case INPUT_INTENT_DELETE_BY_DRAG:               return "deleteByDrag";
-        case INPUT_INTENT_COMPOSITION_START:            return "compositionStart";
-        case INPUT_INTENT_INSERT_COMPOSITION_TEXT:      return "insertCompositionText";
-        case INPUT_INTENT_INSERT_FROM_COMPOSITION:      return "insertFromComposition";
-        case INPUT_INTENT_DELETE_COMPOSITION_TEXT:      return "deleteCompositionText";
-        case INPUT_INTENT_FORMAT_UNLINK:                return "unlink";
-        case INPUT_INTENT_FORMAT_BOLD:                  return "formatBold";
-        case INPUT_INTENT_FORMAT_ITALIC:                return "formatItalic";
-        case INPUT_INTENT_FORMAT_UNDERLINE:             return "formatUnderline";
-        case INPUT_INTENT_FORMAT_STRIKETHROUGH:         return "formatStrikeThrough";
-        case INPUT_INTENT_FORMAT_SUBSCRIPT:             return "formatSubscript";
-        case INPUT_INTENT_FORMAT_SUPERSCRIPT:           return "formatSuperscript";
-        case INPUT_INTENT_FORMAT_FORE_COLOR:            return "formatForeColor";
-        case INPUT_INTENT_FORMAT_BACK_COLOR:            return "formatBackColor";
-        case INPUT_INTENT_FORMAT_HILITE_COLOR:          return "formatHiliteColor";
-        case INPUT_INTENT_FORMAT_FONT_NAME:             return "formatFontName";
-        case INPUT_INTENT_FORMAT_FONT_SIZE:             return "formatFontSize";
-        case INPUT_INTENT_FORMAT_REMOVE:                return "formatRemove";
-        case INPUT_INTENT_FORMAT_BLOCK:                 return "formatBlock";
-        case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:          return "formatJustifyLeft";
-        case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:        return "formatJustifyCenter";
-        case INPUT_INTENT_FORMAT_JUSTIFY_RIGHT:         return "formatJustifyRight";
-        case INPUT_INTENT_FORMAT_JUSTIFY_FULL:          return "formatJustifyFull";
-        case INPUT_INTENT_FORMAT_ORDERED_LIST:          return "insertOrderedList";
-        case INPUT_INTENT_FORMAT_UNORDERED_LIST:        return "insertUnorderedList";
-        case INPUT_INTENT_FORMAT_INDENT:                return "formatIndent";
-        case INPUT_INTENT_FORMAT_OUTDENT:               return "formatOutdent";
-        case INPUT_INTENT_SELECT_ALL:                   return "selectAll";
-        case INPUT_INTENT_HISTORY_UNDO:                 return "historyUndo";
-        case INPUT_INTENT_HISTORY_REDO:                 return "historyRedo";
-        default:                                        return "";
+    for (size_t i = 0; i < sizeof(s_input_intent_names) / sizeof(s_input_intent_names[0]); i++) {
+        if (s_input_intent_names[i].type == type) return s_input_intent_names[i].name;
     }
+    return "";
 }
 
 bool input_intent_is_dispatchable(InputIntentType type) {
-    switch (type) {
-        case INPUT_INTENT_COMPOSITION_START:
-        case INPUT_INTENT_INSERT_IMAGE:
-        case INPUT_INTENT_FORMAT_UNLINK:
-        case INPUT_INTENT_FORMAT_BOLD:
-        case INPUT_INTENT_FORMAT_ITALIC:
-        case INPUT_INTENT_FORMAT_UNDERLINE:
-        case INPUT_INTENT_FORMAT_STRIKETHROUGH:
-        case INPUT_INTENT_FORMAT_SUBSCRIPT:
-        case INPUT_INTENT_FORMAT_SUPERSCRIPT:
-        case INPUT_INTENT_FORMAT_FORE_COLOR:
-        case INPUT_INTENT_FORMAT_BACK_COLOR:
-        case INPUT_INTENT_FORMAT_HILITE_COLOR:
-        case INPUT_INTENT_FORMAT_FONT_NAME:
-        case INPUT_INTENT_FORMAT_FONT_SIZE:
-        case INPUT_INTENT_FORMAT_REMOVE:
-        case INPUT_INTENT_FORMAT_BLOCK:
-        case INPUT_INTENT_FORMAT_JUSTIFY_LEFT:
-        case INPUT_INTENT_FORMAT_JUSTIFY_CENTER:
-        case INPUT_INTENT_FORMAT_JUSTIFY_RIGHT:
-        case INPUT_INTENT_FORMAT_JUSTIFY_FULL:
-        case INPUT_INTENT_FORMAT_ORDERED_LIST:
-        case INPUT_INTENT_FORMAT_UNORDERED_LIST:
-        case INPUT_INTENT_FORMAT_INDENT:
-        case INPUT_INTENT_FORMAT_OUTDENT:
-        case INPUT_INTENT_SELECT_ALL:
-            return false;
-        default:
-            return true;
-    }
+    // Formatting intents occupy one contiguous non-beforeinput enum range.
+    return type != INPUT_INTENT_COMPOSITION_START &&
+        type != INPUT_INTENT_INSERT_IMAGE &&
+        type != INPUT_INTENT_SELECT_ALL &&
+        type != INPUT_INTENT_COPY &&
+        (type < INPUT_INTENT_FORMAT_UNLINK || type > INPUT_INTENT_FORMAT_OUTDENT);
 }
 
 
 
-// F11: the inverse of input_intent_type_name, generated from the same rows so
-// the two cannot drift.
+// F11: the inverse of input_intent_type_name uses the same table, so the two
+// cannot drift.
 InputIntentType input_intent_type_from_name(const char* name) {
     if (!name) return INPUT_INTENT_NONE;
-    if (strcmp(name, "insertText") == 0) return INPUT_INTENT_INSERT_TEXT;
-    if (strcmp(name, "insertReplacementText") == 0) return INPUT_INTENT_INSERT_REPLACEMENT_TEXT;
-    if (strcmp(name, "insertParagraph") == 0) return INPUT_INTENT_INSERT_PARAGRAPH;
-    if (strcmp(name, "insertLineBreak") == 0) return INPUT_INTENT_INSERT_LINE_BREAK;
-    if (strcmp(name, "insertHorizontalRule") == 0) return INPUT_INTENT_INSERT_HORIZONTAL_RULE;
-    if (strcmp(name, "insertImage") == 0) return INPUT_INTENT_INSERT_IMAGE;
-    if (strcmp(name, "insertLink") == 0) return INPUT_INTENT_INSERT_LINK;
-    if (strcmp(name, "insertFromPaste") == 0) return INPUT_INTENT_INSERT_FROM_PASTE;
-    if (strcmp(name, "insertFromPasteAsQuotation") == 0) return INPUT_INTENT_INSERT_FROM_PASTE_AS_QUOTATION;
-    if (strcmp(name, "insertFromYank") == 0) return INPUT_INTENT_INSERT_FROM_YANK;
-    if (strcmp(name, "insertFromDrop") == 0) return INPUT_INTENT_INSERT_FROM_DROP;
-    if (strcmp(name, "deleteContentBackward") == 0) return INPUT_INTENT_DELETE_CONTENT_BACKWARD;
-    if (strcmp(name, "deleteContentForward") == 0) return INPUT_INTENT_DELETE_CONTENT_FORWARD;
-    if (strcmp(name, "deleteWordBackward") == 0) return INPUT_INTENT_DELETE_WORD_BACKWARD;
-    if (strcmp(name, "deleteWordForward") == 0) return INPUT_INTENT_DELETE_WORD_FORWARD;
-    if (strcmp(name, "deleteSoftLineBackward") == 0) return INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD;
-    if (strcmp(name, "deleteSoftLineForward") == 0) return INPUT_INTENT_DELETE_SOFT_LINE_FORWARD;
-    if (strcmp(name, "deleteHardLineBackward") == 0) return INPUT_INTENT_DELETE_HARD_LINE_BACKWARD;
-    if (strcmp(name, "deleteHardLineForward") == 0) return INPUT_INTENT_DELETE_HARD_LINE_FORWARD;
-    if (strcmp(name, "deleteByCut") == 0) return INPUT_INTENT_DELETE_BY_CUT;
-    if (strcmp(name, "deleteByDrag") == 0) return INPUT_INTENT_DELETE_BY_DRAG;
-    if (strcmp(name, "compositionStart") == 0) return INPUT_INTENT_COMPOSITION_START;
-    if (strcmp(name, "insertCompositionText") == 0) return INPUT_INTENT_INSERT_COMPOSITION_TEXT;
-    if (strcmp(name, "insertFromComposition") == 0) return INPUT_INTENT_INSERT_FROM_COMPOSITION;
-    if (strcmp(name, "deleteCompositionText") == 0) return INPUT_INTENT_DELETE_COMPOSITION_TEXT;
-    if (strcmp(name, "unlink") == 0) return INPUT_INTENT_FORMAT_UNLINK;
-    if (strcmp(name, "formatBold") == 0) return INPUT_INTENT_FORMAT_BOLD;
-    if (strcmp(name, "formatItalic") == 0) return INPUT_INTENT_FORMAT_ITALIC;
-    if (strcmp(name, "formatUnderline") == 0) return INPUT_INTENT_FORMAT_UNDERLINE;
-    if (strcmp(name, "formatStrikeThrough") == 0) return INPUT_INTENT_FORMAT_STRIKETHROUGH;
-    if (strcmp(name, "formatSubscript") == 0) return INPUT_INTENT_FORMAT_SUBSCRIPT;
-    if (strcmp(name, "formatSuperscript") == 0) return INPUT_INTENT_FORMAT_SUPERSCRIPT;
-    if (strcmp(name, "formatForeColor") == 0) return INPUT_INTENT_FORMAT_FORE_COLOR;
-    if (strcmp(name, "formatBackColor") == 0) return INPUT_INTENT_FORMAT_BACK_COLOR;
-    if (strcmp(name, "formatHiliteColor") == 0) return INPUT_INTENT_FORMAT_HILITE_COLOR;
-    if (strcmp(name, "formatFontName") == 0) return INPUT_INTENT_FORMAT_FONT_NAME;
-    if (strcmp(name, "formatFontSize") == 0) return INPUT_INTENT_FORMAT_FONT_SIZE;
-    if (strcmp(name, "formatRemove") == 0) return INPUT_INTENT_FORMAT_REMOVE;
-    if (strcmp(name, "formatBlock") == 0) return INPUT_INTENT_FORMAT_BLOCK;
-    if (strcmp(name, "formatJustifyLeft") == 0) return INPUT_INTENT_FORMAT_JUSTIFY_LEFT;
-    if (strcmp(name, "formatJustifyCenter") == 0) return INPUT_INTENT_FORMAT_JUSTIFY_CENTER;
-    if (strcmp(name, "formatJustifyRight") == 0) return INPUT_INTENT_FORMAT_JUSTIFY_RIGHT;
-    if (strcmp(name, "formatJustifyFull") == 0) return INPUT_INTENT_FORMAT_JUSTIFY_FULL;
-    if (strcmp(name, "insertOrderedList") == 0) return INPUT_INTENT_FORMAT_ORDERED_LIST;
-    if (strcmp(name, "insertUnorderedList") == 0) return INPUT_INTENT_FORMAT_UNORDERED_LIST;
-    if (strcmp(name, "formatIndent") == 0) return INPUT_INTENT_FORMAT_INDENT;
-    if (strcmp(name, "formatOutdent") == 0) return INPUT_INTENT_FORMAT_OUTDENT;
-    if (strcmp(name, "selectAll") == 0) return INPUT_INTENT_SELECT_ALL;
-    if (strcmp(name, "historyUndo") == 0) return INPUT_INTENT_HISTORY_UNDO;
-    if (strcmp(name, "historyRedo") == 0) return INPUT_INTENT_HISTORY_REDO;
+    for (size_t i = 0; i < sizeof(s_input_intent_names) / sizeof(s_input_intent_names[0]); i++) {
+        if (strcmp(s_input_intent_names[i].name, name) == 0) return s_input_intent_names[i].type;
+    }
     return INPUT_INTENT_NONE;
 }
 

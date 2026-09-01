@@ -757,7 +757,10 @@ extern "C" int editing_controller_caret_surface_kind(DocState* state) {
     EditingSurface surface;
     if (editing_surface_from_target(caret_view, &surface) &&
         editing_surface_is_text_control(&surface)) {
-        return 1;   // text control
+        return surface.owner && surface.owner->form &&
+                surface.owner->form->control_type == FORM_CONTROL_TEXTAREA
+            ? 3     // textarea
+            : 1;    // single-line text control
     }
     return 2;       // contenteditable / rich
 }

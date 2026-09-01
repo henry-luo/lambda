@@ -429,6 +429,10 @@ typedef enum InputIntentType {
     INPUT_INTENT_SELECT_ALL,
     INPUT_INTENT_HISTORY_UNDO,
     INPUT_INTENT_HISTORY_REDO,
+    // Copy is a key-default command rather than a beforeinput edit. Keeping it
+    // in the shared intent carrier lets the package choose the shortcut while
+    // native remains the clipboard mechanism.
+    INPUT_INTENT_COPY,
 } InputIntentType;
 
 typedef struct InputIntent {
@@ -1326,9 +1330,9 @@ struct EditingControllerHooks {
 };
 
 // F9: the rich half of the caret waist. `_caret_surface_kind` reports which
-// surface the caret sits in (0 none, 1 text control, 2 rich) so the template can
-// decide what a key means there; `_apply_caret_operation` performs the named
-// operation it chose.
+// surface the caret sits in (0 none, 1 single-line text control, 2 rich,
+// 3 textarea) so the template can decide what a key means there;
+// `_apply_caret_operation` performs the named operation it chose.
 extern "C" int editing_controller_caret_surface_kind(DocState* state);
 bool editing_controller_apply_caret_operation(EventContext* evcon, DocState* state,
                                               const EditingControllerHooks* hooks,
@@ -2661,6 +2665,10 @@ bool state_get_bool(DocState* state, void* node, const char* name);
  * Read lazily-created per-view interaction state. Missing ViewState means defaults.
  */
 ViewState* view_state_get(DocState* state, View* view);
+// Retain view-scoped interaction state when an incremental template rebuild
+// replaces a structurally corresponding DOM subtree.
+void view_state_preserve_subtree_identity(DocState* state, DomNode* old_root,
+                                          DomNode* new_root);
 bool view_state_get_hovered(DocState* state, View* view);
 bool view_state_get_active(DocState* state, View* view);
 bool view_state_get_focused(DocState* state, View* view);
@@ -4221,6 +4229,10 @@ typedef struct EventContext {
     Item dom_event;
     void* dom_event_root_gc;
     bool dom_event_root_lifetime;
+    // The UA tier records its one allowed claimant on the current event so
+    // legacy native call sites cannot replay the author walk after JS returns.
+    bool dom_event_ua_handled;
+    bool dom_event_author_dirty;
 
     // paste text (set before dispatching "paste" event)
     const char* paste_text;

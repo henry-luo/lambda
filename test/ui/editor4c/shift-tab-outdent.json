@@ -1,6 +1,6 @@
 {
   "name": "editor4c: Shift+Tab outdents an indented list item",
-  "_note": "Phase B — companion to tab-indent-list. Tab indents (margin 1.75em), then Shift+Tab outdents back to no margin. Exercises the outdent branch of FullEditorDom.handleKeyDown via the keydown-first Tab routing fix.",
+  "_note": "Phase B — covers both Tab directions. Tab indents (margin 1.75em), then Shift+Tab outdents back to no margin. Exercises the outdent branch of FullEditorDom.handleKeyDown via the keydown-first Tab routing fix.",
   "html": "test/html/editor-dom.html",
   "viewport": {"width": 900, "height": 700},
   "events": [

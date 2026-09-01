@@ -1,0 +1,11 @@
+{
+  "name": "author template stop propagation",
+  "html": "test/lambda/ui/dom_author_stop_propagation.ls",
+  "viewport": {"width": 400, "height": 300},
+  "events": [
+    {"type": "log", "message": "=== template stopPropagation ends the author ancestor walk ==="},
+    {"type": "assert_text", "target": {"selector": ".author-calls"}, "text": "0"},
+    {"type": "click", "target": {"selector": ".author-target"}},
+    {"type": "assert_text", "target": {"selector": ".author-calls"}, "text": "1"}
+  ]
+}

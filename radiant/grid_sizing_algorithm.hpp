@@ -52,50 +52,6 @@ enum class IntrinsicContributionType {
     Maximum
 };
 
-/**
- * Context for the track sizing algorithm
- */
-struct TrackSizingContext {
-    /** Tracks in the axis being sized */
-    TrackArray* axis_tracks;
-
-    /** Tracks in the other axis (for content sizing estimates) */
-    TrackArray* other_axis_tracks;
-
-    /** Available space in the sizing axis (may be indefinite = -1) */
-    float axis_available_space;
-
-    /** Container inner size in the sizing axis (may be indefinite = -1) */
-    float axis_inner_size;
-
-    /** Container inner size in the other axis (may be indefinite = -1) */
-    float other_axis_inner_size;
-
-    /** Gap between tracks */
-    float gap;
-
-    /** Alignment in the sizing axis */
-    int axis_alignment; // CSS_ALIGN_* constants
-
-    /** Minimum size constraint for the axis (or -1 if none) */
-    float axis_min_size;
-
-    /** Maximum size constraint for the axis (or -1 if none) */
-    float axis_max_size;
-
-    TrackSizingContext()
-        : axis_tracks(nullptr)
-        , other_axis_tracks(nullptr)
-        , axis_available_space(-1)
-        , axis_inner_size(-1)
-        , other_axis_inner_size(-1)
-        , gap(0)
-        , axis_alignment(0)
-        , axis_min_size(-1)
-        , axis_max_size(-1)
-    {}
-};
-
 // --- 11.4 Initialize Track Sizes ---
 
 /**

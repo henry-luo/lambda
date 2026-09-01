@@ -3006,7 +3006,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                         temp_font_prop->font_size_from_medium = resolved_from_medium;
                     }
                     css_family = css_select_font_shorthand_family(
-                        lycon, fv, parts.group, parts.family_start, false);
+                        lycon, fv, parts.group, parts.family_start);
                     if (parts.weight) {
                         temp_font_prop->font_weight = map_font_weight(parts.weight);
                         temp_font_prop->font_weight_numeric = map_font_weight_numeric(parts.weight);
@@ -3027,7 +3027,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (font_family_decl && font_family_decl->value &&
             (!font_shorthand_decl || font_family_decl->source_order > font_shorthand_decl->source_order)) {
             const char* longhand_family = css_select_font_family(
-                lycon, font_family_decl->value, false);
+                lycon, font_family_decl->value);
 
             if (longhand_family) {
                 css_family = longhand_family;

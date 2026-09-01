@@ -123,7 +123,7 @@ Async-flagged tests rely on test262's `doneprintHandle.js` calling a host `$DONE
 | `test_js_gtest.cpp` | `lambda.exe js` (+ its own mini `js-test-batch` runner, `:339`) and `--document` | Parameterized `.js` fixture pass/fail (`JsFileTest`, `:532`), REPL/command-interface checks, fuzz-regression cases. |
 | `test_js_coerce_gtest.cpp` | subprocess `run_js` | The ToPrimitive/OrdinaryToPrimitive matrix for `js_coerce` — `@@toPrimitive` vs ordinary, each hint, primitive/object/non-callable/throws (`Coerce.*`, `:121`). |
 | `test_js_bt_regex_gtest.cpp` | **direct C API** (includes `js_bt_regex.cpp`, `:17`) | The backtracking matcher: groups, named groups, the anti-DoS step budget, malformed-pattern fallback, stress inputs — behaviours RE2 cannot do. See [JS_11 — RegExp](JS_11_RegExp.md). |
-| `test_jsx_roundtrip_gtest.cpp`, `test_jsx_roundtrip_new_gtest.cpp` | `input_from_source` + `format_data` | JSX parse→format round-trip equality after whitespace normalization (`JsxRoundtripTest`, `:29`). The two files are parallel parse→format harnesses over different fixture sets. |
+| `test_jsx_roundtrip_gtest.cpp` | `input_from_source` + `format_data` | JSX parse→format round-trip equality after whitespace normalization (`JsxRoundtripTest`, `:29`). |
 | `test_js_transpile_timing_gtest.cpp` | `lambda.exe js` with `JS_TRANSPILE_TIMING=1` | Phase-timing/AST-counter measurement (`JSTranspileTiming.Phases`, `:129`). **Correctness-only:** a fixture passes if it reached the MIR phase (`mir_ms > 0`); it never asserts on timing thresholds or child exit code. |
 
 ---

@@ -2357,6 +2357,10 @@ static Item event_context_dom_event(EventContext* evcon, const char* event_name)
 
 static void event_context_set_dom_event(EventContext* evcon, Item event) {
     if (!evcon || !radiant_dom_event_is(event)) return;
+    if (evcon->dom_event.item != event.item) {
+        evcon->dom_event_ua_handled = false;
+        evcon->dom_event_author_dirty = false;
+    }
     if (evcon->dom_event_root_lifetime && !evcon->dom_event_root_gc) {
         DomDocument* doc = event_context_target_document(evcon);
         Runtime* runtime = dom_document_script_runtime(doc);
@@ -2366,6 +2370,112 @@ static void event_context_set_dom_event(EventContext* evcon, Item event) {
         }
     }
     evcon->dom_event = event;
+}
+
+// F18 keeps reactive regeneration outside the author cascade. Rebuilding while
+// the path still holds ancestor nodes would turn a listener-like template
+// handler into a second, mutation-sensitive propagation walk.
+typedef struct AuthorTemplateCascade {
+    EventContext* evcon;
+    Item event;
+    bool dirty;
+} AuthorTemplateCascade;
+
+static thread_local EventContext* s_active_js_dispatch_event_context = nullptr;
+static thread_local AuthorTemplateCascade s_author_template_cascades[8];
+static thread_local int s_author_template_cascade_depth = 0;
+
+static AuthorTemplateCascade* author_template_cascade_current(EventContext* evcon) {
+    if (s_author_template_cascade_depth <= 0) return nullptr;
+    AuthorTemplateCascade* cascade =
+        &s_author_template_cascades[s_author_template_cascade_depth - 1];
+    return cascade->evcon == evcon ? cascade : nullptr;
+}
+
+static bool settle_template_retransform(EventContext* evcon,
+                                        bool* out_model_reconciled) {
+    if (!render_map_has_dirty()) return false;
+    RetransformResult results[16];
+    int count = render_map_retransform_with_results(results, 16);
+    bool any_changed = false;
+    int reported = count <= 16 ? count : 16;
+    for (int i = 0; i < reported; i++) {
+        if (!item_deep_equal(results[i].old_result, results[i].new_result)) {
+            any_changed = true;
+            break;
+        }
+    }
+    if (!any_changed) return false;
+    if (evcon) {
+        rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
+        evcon->need_repaint = true;
+    }
+    if (out_model_reconciled) *out_model_reconciled = true;
+    return true;
+}
+
+static bool settle_pending_author_templates(EventContext* evcon,
+                                            bool* out_model_reconciled = nullptr) {
+    if (!evcon || !evcon->dom_event_author_dirty) return false;
+    evcon->dom_event_author_dirty = false;
+    return settle_template_retransform(evcon, out_model_reconciled);
+}
+
+// An author handler may rebuild the template subtree that owns the hit-tested
+// target. The UA tier runs after author dispatch, so retain an all-node DOM
+// path and resolve it only after the author settle; a rebuilt checkbox must
+// receive its default action rather than leaving state on a retired wrapper.
+typedef struct EventTargetPath {
+    uint32_t child_indices[64];
+    int length;
+} EventTargetPath;
+
+static bool capture_event_target_path(DomDocument* doc, View* target,
+                                      EventTargetPath* out) {
+    if (!doc || !doc->root || !target || !out) return false;
+    DomNode* chain[65];
+    int depth = 0;
+    for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+        if (depth >= 65) return false;
+        chain[depth++] = node;
+        if (node == static_cast<DomNode*>(doc->root)) break;
+    }
+    if (depth == 0 || chain[depth - 1] != static_cast<DomNode*>(doc->root)) {
+        return false;
+    }
+    out->length = 0;
+    for (int i = depth - 1; i > 0; i--) {
+        uint32_t index = dom_node_child_index(chain[i - 1]);
+        if (index == UINT32_MAX || out->length >= 64) return false;
+        out->child_indices[out->length++] = index;
+    }
+    return true;
+}
+
+static View* resolve_event_target_path(DomDocument* doc,
+                                       const EventTargetPath* path) {
+    if (!doc || !doc->root || !path) return nullptr;
+    DomNode* node = static_cast<DomNode*>(doc->root);
+    for (int i = 0; i < path->length; i++) {
+        if (!node->is_element()) return nullptr;
+        DomNode* child = node->as_element()->first_child;
+        for (uint32_t index = 0; child && index < path->child_indices[i]; index++) {
+            child = child->next_sibling;
+        }
+        if (!child) return nullptr;
+        node = child;
+    }
+    return static_cast<View*>(node);
+}
+
+static View* settle_author_templates_for_ua(EventContext* evcon, View* target,
+                                             const EventTargetPath* target_path,
+                                             bool* out_model_reconciled) {
+    if (!settle_pending_author_templates(evcon, out_model_reconciled)) return target;
+    if (!target_path) return target;
+    DomDocument* doc = event_context_target_document(evcon);
+    View* rebuilt_target = resolve_event_target_path(doc, target_path);
+    return rebuilt_target;
 }
 
 // Bind the document's script runtime, build the event value, invoke one template
@@ -2379,9 +2489,6 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
                                     bool* out_model_reconciled) {
     log_debug("invoke_template_handler: invoking '%s' handler on tmpl=%s",
               event_name, tmpl->name ? tmpl->name : tmpl->template_ref);
-
-    using namespace std::chrono;
-    auto t_start = high_resolution_clock::now();
 
     // Retained handlers borrow the document Runtime's canonical
     // context; no heap-only stack context may outlive dispatch.
@@ -2467,8 +2574,6 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
         radiant_dom_event_prevent_default(event_root.get());
     }
 
-    auto t_handler = high_resolution_clock::now();
-
     // restore emit context
     g_emit_handler_ctx = saved_emit_ctx;
 
@@ -2481,40 +2586,11 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
         render_map_mark_dirty(model_item, template_ref);
     }
 
-    // after handler, check for dirty entries and retransform
-    if (render_map_has_dirty()) {
-        RetransformResult results[16];
-        int count = render_map_retransform_with_results(results, 16);
-        auto t_retransform = high_resolution_clock::now();
-
-        // Phase 14: No-op elision — skip rebuild if output unchanged
-        bool any_changed = false;
-        int reported = count <= 16 ? count : 16;
-        for (int i = 0; i < reported; i++) {
-            if (!item_deep_equal(results[i].old_result, results[i].new_result)) {
-                any_changed = true;
-                break;
-            }
-        }
-
-        if (any_changed) {
-            // incremental DOM rebuild (falls back to full if map not ready)
-            if (evcon) rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
-            if (out_model_reconciled) *out_model_reconciled = true;
-        }
-        auto t_rebuild = high_resolution_clock::now();
-
-        using std::chrono::duration;
-        using std::chrono::duration_cast;
-        log_info("[TIMING] event dispatch: handler=%.2fms retransform=%.2fms rebuild=%.2fms total=%.2fms%s",
-            duration<double, std::milli>(t_handler - t_start).count(),
-            duration<double, std::milli>(t_retransform - t_handler).count(),
-            duration<double, std::milli>(t_rebuild - t_retransform).count(),
-            duration<double, std::milli>(t_rebuild - t_start).count(),
-            any_changed ? "" : " (no-op elided)");
+    AuthorTemplateCascade* cascade = author_template_cascade_current(evcon);
+    if (cascade) {
+        cascade->dirty = cascade->dirty || render_map_has_dirty();
     } else {
-        log_info("[TIMING] event dispatch: handler=%.2fms (no dirty entries)",
-            duration<double, std::milli>(t_handler - t_start).count());
+        settle_template_retransform(evcon, out_model_reconciled);
     }
 
     if (emit_ctx.has_pending_selection) {
@@ -2585,6 +2661,88 @@ static bool event_is_hot_path(const char* event_name) {
            strcmp(event_name, "wheel") == 0 ||
            strcmp(event_name, "dragmove") == 0 ||
            strcmp(event_name, "dragover") == 0;
+}
+
+extern "C" bool radiant_author_template_event_live(const char* event_name) {
+    if (!s_active_js_dispatch_event_context || !context || !event_name ||
+        event_is_hot_path(event_name)) {
+        return false;
+    }
+    return template_registry_may_have_author_handler(g_template_registry,
+                                                     event_name);
+}
+
+static bool author_template_dispatch_begin(EventContext* evcon, Item event) {
+    if (!evcon || !radiant_dom_event_is(event) || event.item != evcon->dom_event.item ||
+        s_author_template_cascade_depth >= 8) {
+        return false;
+    }
+    AuthorTemplateCascade* cascade =
+        &s_author_template_cascades[s_author_template_cascade_depth++];
+    cascade->evcon = evcon;
+    cascade->event = event;
+    cascade->dirty = false;
+    return true;
+}
+
+extern "C" bool radiant_author_template_dispatch_begin(Item event) {
+    return author_template_dispatch_begin(s_active_js_dispatch_event_context, event);
+}
+
+extern "C" void radiant_author_template_dispatch_end(Item event) {
+    if (s_author_template_cascade_depth <= 0) return;
+    AuthorTemplateCascade* cascade =
+        &s_author_template_cascades[s_author_template_cascade_depth - 1];
+    if (cascade->event.item != event.item) return;
+    if (cascade->dirty) cascade->evcon->dom_event_author_dirty = true;
+    cascade->evcon = nullptr;
+    cascade->event = ItemNull;
+    cascade->dirty = false;
+    s_author_template_cascade_depth--;
+}
+
+static bool dispatch_author_template_participant(EventContext* evcon,
+                                                 void* dom_node, Item event,
+                                                 const char* event_name,
+                                                 const InputIntent* intent) {
+    if (!dom_node || !event_name || !radiant_dom_event_is(event) || !context ||
+        !g_template_registry ||
+        !author_template_cascade_current(evcon)) {
+        return false;
+    }
+    DomNode* node = static_cast<DomNode*>(dom_node);
+    if (!node->is_element()) return false;
+    DomElement* dom_elem = node->as_element();
+    if (!dom_elem || dom_elem->is_synthetic()) {
+        return false;
+    }
+
+    Item source_item;
+    source_item.element = dom_element_render_source(dom_elem);
+    RenderMapLookup lookup;
+    if (!render_map_reverse_lookup(source_item, &lookup)) return false;
+    TemplateEntry* tmpl = template_registry_find_ref(g_template_registry,
+                                                      lookup.template_ref);
+    if (!tmpl || tmpl->is_behavior ||
+        !template_entry_may_handle_event(tmpl, event_name)) {
+        return false;
+    }
+    TemplateHandlerEntry* handler = template_entry_find_handler(tmpl, event_name);
+    if (!handler) return false;
+    bool reconciled = false;
+    (void)invoke_template_handler(evcon, evcon->target, event_name, intent,
+                                  tmpl, handler, lookup.source_item,
+                                  lookup.template_ref, &reconciled);
+    if (reconciled) evcon->need_repaint = true;
+    return true;
+}
+
+extern "C" void radiant_dispatch_author_template_participant(void* dom_node,
+                                                               Item event,
+                                                               const char* event_name) {
+    (void)dispatch_author_template_participant(s_active_js_dispatch_event_context,
+                                               dom_node, event, event_name,
+                                               nullptr);
 }
 
 // Load the Lambda dom package into this document's script runtime, once, on the
@@ -2940,6 +3098,10 @@ bool radiant_behavior_claims_event(EventContext* evcon, View* target,
     // ensure() binds (and if needed creates) the document's evaluator, so a
     // script-less page must not be rejected for having no context yet
     if (!radiant_dom_package_ensure(doc, target)) return false;
+    if (!template_registry_may_have_behavior_handler(g_template_registry,
+                                                     event_name)) {
+        return false;
+    }
     return behavior_match_walk(target, event_name, nullptr, nullptr) != nullptr;
 }
 
@@ -2968,6 +3130,10 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
         if (!template_registry_has_behavior(g_template_registry)) return false;
     } else if (!radiant_dom_package_ensure(doc, target)) {
         // first discrete event on this document loads the UA behavior package
+        return false;
+    }
+    if (!template_registry_may_have_behavior_handler(g_template_registry,
+                                                     event_name)) {
         return false;
     }
 
@@ -3172,13 +3338,41 @@ extern "C" void radiant_caret_operation_request(const char* operation, bool exte
     s_caret_op_epoch++;
 }
 
-// Where each named operation lands in a single-line text control. This is the
-// whole of what stayed native: the *destination* is geometry over the live
-// buffer, while which key asks for which operation is policy and now lives in
-// the package. Up/Down collapse to line start/end because a single-line <input>
-// has no vertical motion — Chrome does the same.
+// Where each named operation lands in a text control. This is the whole of what
+// stayed native: the *destination* is geometry over the live buffer, while
+// which key asks for which operation is policy and now lives in the package.
+// A single-line <input> has no vertical motion and collapses Up/Down to its
+// ends; a textarea resolves line and page geometry over the live value.
+static int form_caret_line_start(const char* value, int cur) {
+    int start = cur;
+    while (start > 0 && value && value[start - 1] != '\n') start--;
+    return start;
+}
+
+static int form_caret_line_end(const char* value, int value_len, int cur) {
+    int end = cur;
+    while (end < value_len && value && value[end] != '\n') end++;
+    return end;
+}
+
+static int form_caret_move_line(const char* value, int value_len, int cur,
+                                int direction) {
+    int current_start = form_caret_line_start(value, cur);
+    int column = cur - current_start;
+    int target_start = current_start;
+    if (direction < 0 && current_start > 0) {
+        target_start = form_caret_line_start(value, current_start - 1);
+    } else if (direction > 0) {
+        int current_end = form_caret_line_end(value, value_len, cur);
+        if (current_end < value_len) target_start = current_end + 1;
+    }
+    int target_end = form_caret_line_end(value, value_len, target_start);
+    int target_len = target_end - target_start;
+    return target_start + (column < target_len ? column : target_len);
+}
+
 static bool form_caret_operation_destination(const char* op, const char* value,
-                                             int value_len, int cur,
+                                             int value_len, int cur, bool multiline,
                                              uint32_t* out_dest) {
     if (!op || !out_dest) return false;
     if (strcmp(op, "moveCharacterBackward") == 0) {
@@ -3194,9 +3388,28 @@ static bool form_caret_operation_destination(const char* op, const char* value,
     } else if (strcmp(op, "moveWordForward") == 0) {
         *out_dest = te_next_word_byte(value, (uint32_t)value_len, (uint32_t)cur);
     } else if (strcmp(op, "moveLineStart") == 0) {
-        *out_dest = 0;
+        *out_dest = (uint32_t)(multiline ? form_caret_line_start(value, cur) : 0);
     } else if (strcmp(op, "moveLineEnd") == 0) {
+        *out_dest = (uint32_t)(multiline
+            ? form_caret_line_end(value, value_len, cur) : value_len);
+    } else if (strcmp(op, "moveDocumentStart") == 0) {
+        *out_dest = 0;
+    } else if (strcmp(op, "moveDocumentEnd") == 0) {
         *out_dest = (uint32_t)value_len;
+    } else if (multiline && (strcmp(op, "moveLineBackward") == 0 ||
+                             strcmp(op, "moveLineForward") == 0)) {
+        *out_dest = (uint32_t)form_caret_move_line(value, value_len, cur,
+            strcmp(op, "moveLineBackward") == 0 ? -1 : 1);
+    } else if (multiline && (strcmp(op, "movePageBackward") == 0 ||
+                             strcmp(op, "movePageForward") == 0)) {
+        int direction = strcmp(op, "movePageBackward") == 0 ? -1 : 1;
+        int dest = cur;
+        for (int step = 0; step < 10; step++) {
+            int next = form_caret_move_line(value, value_len, dest, direction);
+            if (next == dest) break;
+            dest = next;
+        }
+        *out_dest = (uint32_t)dest;
     } else {
         return false;
     }
@@ -3210,7 +3423,10 @@ static bool form_apply_caret_operation(EventContext* evcon, DomElement* elem,
                                        DocState* state, View* target,
                                        const char* value, int value_len, int cur) {
     uint32_t dest = 0;
-    if (!form_caret_operation_destination(s_caret_op_name, value, value_len, cur, &dest)) {
+    bool multiline = elem && elem->form &&
+        elem->form->control_type == FORM_CONTROL_TEXTAREA;
+    if (!form_caret_operation_destination(s_caret_op_name, value, value_len,
+                                          cur, multiline, &dest)) {
         return false;
     }
     char extend_op[40];
@@ -3276,11 +3492,69 @@ extern "C" bool radiant_dispatch_behavior_beforeinput(EventContext* evcon,
     return prevented;
 }
 
+static bool dispatch_lambda_handler_legacy_author(EventContext* evcon, View* target,
+                                                   const char* event_name,
+                                                   const InputIntent* intent,
+                                                   bool* out_model_reconciled,
+                                                   bool allow_behavior) {
+    if (!context || !g_template_registry || g_template_registry->count == 0) {
+        return allow_behavior && dispatch_behavior_handler(evcon, target, event_name,
+                                                           intent, out_model_reconciled);
+    }
+
+    // F20 retains its established first-claim editor contract until the input,
+    // IME, and simulator entry families move to the shared author cascade.
+    for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* dom_elem = lam::dom_require_element(node);
+        if (dom_elem->is_synthetic()) continue;
+        Item result_item = {.element = dom_element_render_source(dom_elem)};
+        RenderMapLookup lookup;
+        if (!render_map_reverse_lookup(result_item, &lookup)) continue;
+        TemplateEntry* tmpl = template_registry_find_ref(g_template_registry,
+                                                         lookup.template_ref);
+        TemplateHandlerEntry* handler = template_entry_find_handler(tmpl, event_name);
+        if (tmpl && handler && invoke_template_handler(evcon, target, event_name, intent,
+                tmpl, handler, lookup.source_item, lookup.template_ref,
+                out_model_reconciled)) {
+            return true;
+        }
+    }
+    return allow_behavior && dispatch_behavior_handler(evcon, target, event_name,
+                                                       intent, out_model_reconciled);
+}
+
 static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name,
                                     const InputIntent* intent = nullptr,
                                     bool* out_model_reconciled = nullptr,
-                                    bool allow_behavior = true) {
+                                    bool allow_behavior = true,
+                                    bool legacy_author = false) {
     if (out_model_reconciled) *out_model_reconciled = false;
+    if (legacy_author) {
+        return dispatch_lambda_handler_legacy_author(evcon, target, event_name, intent,
+                                                     out_model_reconciled, allow_behavior);
+    }
+    // F18 already delivered author templates from the shared JS path. Native
+    // callers retained during F20 therefore see only the UA-tier result here,
+    // never a second target-to-root author walk for the same record.
+    if (event_context_dom_event(evcon, event_name).item != ITEM_NULL) {
+        EventTargetPath target_path = {};
+        DomDocument* doc = event_context_target_document(evcon);
+        bool target_path_valid = capture_event_target_path(doc, target, &target_path);
+        if (!allow_behavior || radiant_dom_event_default_prevented(evcon->dom_event)) {
+            settle_pending_author_templates(evcon, out_model_reconciled);
+            return false;
+        }
+        if (!evcon->dom_event_ua_handled) {
+            View* ua_target = settle_author_templates_for_ua(
+                evcon, target, target_path_valid ? &target_path : nullptr,
+                out_model_reconciled);
+            if (!ua_target) return false;
+            evcon->dom_event_ua_handled = dispatch_behavior_handler(
+                evcon, ua_target, event_name, intent, out_model_reconciled);
+        }
+        return evcon->dom_event_ua_handled;
+    }
     // Plain HTML documents have no Lambda template Runtime.  Native input must
     // skip template dispatch instead of reading the context-local registry with
     // no document owner bound.
@@ -3291,54 +3565,68 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                                            intent, out_model_reconciled);
     }
 
-    log_debug("dispatch_lambda_handler: searching for '%s' handler, registry has %d templates",
-             event_name, g_template_registry->count);
+    // Lambda-only documents have no JS dispatch, but their templates are still
+    // author participants. Build the same host record and walk every matching
+    // template target-to-root before the UA behavior tier; a handler verdict
+    // controls only cancellation, never whether an ancestor receives the event.
+    DomDocument* doc = event_context_target_document(evcon);
+    RootFrame roots(2);
+    Rooted<Item> event_root(roots,
+        build_dom_event_record(doc, target, event_name, evcon, intent));
+    Item event = event_root.get();
+    event_context_set_dom_event(evcon, event);
 
-    // walk up from target through DomNode ancestry
-    DomNode* node = static_cast<DomNode*>(target);
-#ifndef NDEBUG
-    int depth = 0;
-#endif
-    while (node) {
-        if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* dom_elem = lam::dom_require_element(node);
-            if (!dom_elem->is_synthetic()) {
-                // construct Item from native element pointer
-                Item result_item;
-                result_item.element = dom_element_render_source(dom_elem);
+    EventTargetPath target_path = {};
+    bool target_path_valid = capture_event_target_path(doc, target, &target_path);
 
-                // reverse lookup: which template produced this element?
-                RenderMapLookup lookup;
-                if (render_map_reverse_lookup(result_item, &lookup)) {
-                    log_debug("dispatch_lambda_handler: reverse lookup hit at depth=%d, tmpl_ref=%s",
-                             depth, lookup.template_ref ? lookup.template_ref : "(null)");
-                    // find the TemplateEntry by template_ref
-                    TemplateEntry* tmpl = template_registry_find_ref(
-                        g_template_registry, lookup.template_ref);
+    Item ignored = ItemNull;
+    Item target_item = radiant_dom_wrap_node(target);
+    radiant_dom_event_member_set(event, "target", target_item, &ignored);
+    radiant_dom_event_member_set(event, "srcElement", target_item, &ignored);
+    radiant_dom_event_member_set(event, "__dispatch_flag",
+                                 (Item){.item = ITEM_TRUE}, &ignored);
 
-                    TemplateHandlerEntry* h = template_entry_find_handler(tmpl, event_name);
-                    if (tmpl && h) {
-                        if (invoke_template_handler(evcon, target, event_name, intent,
-                                tmpl, h, lookup.source_item, lookup.template_ref,
-                                out_model_reconciled)) {
-                            return true;
-                        }
-                        // handler returned 'pass': keep walking ancestors
-                    } else {
-                        log_debug("dispatch_lambda_handler: tmpl found but no '%s' handler", event_name);
-                    }
-                }
-            }
+    bool author_dispatched = false;
+    bool author_live = !event_is_hot_path(event_name) &&
+        template_registry_may_have_author_handler(g_template_registry, event_name);
+    bool author_cascade = author_live && author_template_dispatch_begin(evcon, event);
+    if (author_cascade) {
+        for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+            if (!node->is_element()) continue;
+            int phase = node == static_cast<DomNode*>(target) ? 2 : 3;
+            radiant_dom_event_set_lambda_dispatch_position(
+                event, radiant_dom_wrap_node(node), phase);
+            author_dispatched = dispatch_author_template_participant(
+                evcon, node, event, event_name, intent) || author_dispatched;
+            if (radiant_dom_event_propagation_stopped(event)) break;
         }
-        node = node->parent;
-#ifndef NDEBUG
-        depth++;
-#endif
+        radiant_author_template_dispatch_end(event);
     }
 
-    log_debug("dispatch_lambda_handler: no handler found after walking %d levels", depth);
-    return allow_behavior && dispatch_behavior_handler(evcon, target, event_name, intent,
-                                                       out_model_reconciled);
+    // Mirror the DOM dispatch cleanup before default actions. Cancellation is
+    // deliberately retained, while propagation state cannot leak to the next
+    // native dispatch of this reusable host record.
+    radiant_dom_event_member_set(event, "eventPhase", ItemNull, &ignored);
+    radiant_dom_event_member_set(event, "currentTarget", ItemNull, &ignored);
+    radiant_dom_event_clear_lambda_dispatch_position(event);
+    radiant_dom_event_member_set(event, "__stop_prop", ItemNull, &ignored);
+    radiant_dom_event_member_set(event, "__stop_imm", ItemNull, &ignored);
+    radiant_dom_event_member_set(event, "__dispatch_flag", ItemNull, &ignored);
+
+    // The UA tier observes the DOM after all author participants have settled.
+    // Rebind through the structural path when regeneration replaced its target.
+    View* ua_target = settle_author_templates_for_ua(
+        evcon, target, target_path_valid ? &target_path : nullptr,
+        out_model_reconciled);
+    bool prevented = radiant_dom_event_default_prevented(event);
+    evcon->default_prevented = prevented;
+    bool ua_handled = false;
+    if (allow_behavior && !prevented && ua_target) {
+        ua_handled = dispatch_behavior_handler(evcon, ua_target, event_name, intent,
+                                               out_model_reconciled);
+        evcon->dom_event_ua_handled = ua_handled;
+    }
+    return author_dispatched || ua_handled;
 }
 
 // Forward declaration — CE-3 JS InputEvent dispatcher lives further down,
@@ -3370,6 +3658,20 @@ static bool event_document_has_js_runtime(EventContext* evcon) {
     // rather than the absence of a Lambda runtime: a document may host page JS
     // and Lambda code at once, so runtime presence cannot classify the page.
     return dom_document_has_js_realm(document);
+}
+
+// A Lambda-only document deliberately has no JS-facing EventTarget realm.
+// Its trusted native entries still join F18's author/UA pipeline through the
+// record-backed template path instead of disappearing at the JS gateway.
+static bool dispatch_lambda_handler_without_js(EventContext* evcon, View* target,
+                                               const char* event_name,
+                                               const InputIntent* intent = nullptr,
+                                               bool* out_model_reconciled = nullptr,
+                                               bool allow_behavior = true,
+                                               bool legacy_author = false) {
+    if (event_document_has_js_runtime(evcon)) return false;
+    return dispatch_lambda_handler(evcon, target, event_name, intent,
+                                   out_model_reconciled, allow_behavior, legacy_author);
 }
 
 static bool dispatch_contenteditable_event(EventContext* evcon, View* target,
@@ -3907,7 +4209,7 @@ static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
 }
 
 static void dispatch_form_keyboard_paste(EventContext* evcon, DocState* state,
-                                         View* focused, bool log_inserted) {
+                                         View* focused) {
     const char* clip = clipboard_get_text();
     if (clip && *clip) {
         evcon->paste_text = clip;
@@ -3917,124 +4219,9 @@ static void dispatch_form_keyboard_paste(EventContext* evcon, DocState* state,
         if (focused && focused->is_element()) {
             DomElement* elem = lam::dom_require_element(focused);
             if (tc_is_text_control(elem)) {
-                uint32_t inserted = dispatch_form_text_paste(
-                    evcon, elem, state, focused, clip, (uint32_t)strlen(clip));
-                if (log_inserted) {
-                    log_debug("Textarea paste: %u bytes inserted", inserted);
-                }
+                dispatch_form_text_paste(evcon, elem, state, focused,
+                                         clip, (uint32_t)strlen(clip));
             }
-        }
-    }
-    evcon->need_repaint = true;
-}
-
-static void dispatch_form_modified_delete(EventContext* evcon, DomElement* elem,
-                                          DocState* state, View* target,
-                                          const char* value, int value_len,
-                                          int caret, bool backward,
-                                          bool line_backward) {
-    // The boundary is the applier's to compute, not this function's: it owns
-    // deleteWord*/deleteSoftLine* and derives the span from its own scanners,
-    // so any range resolved here would be recomputed and discarded. Dispatch
-    // the collapsed caret and let the intent carry the meaning.
-    //
-    // Note this must dispatch even though the range is empty — the old
-    // `end > start` guard would suppress beforeinput entirely and the applier
-    // would never get the chance to decide.
-    (void)value; (void)value_len;
-    uint32_t caret_off = (uint32_t)caret;
-    InputIntentType intent;
-    if (backward) {
-        intent = line_backward ? INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD
-                               : INPUT_INTENT_DELETE_WORD_BACKWARD;
-    } else {
-        intent = INPUT_INTENT_DELETE_WORD_FORWARD;
-    }
-    dispatch_form_text_replace(evcon, elem, state, target, caret_off, caret_off,
-                               nullptr, 0, intent);
-    evcon->need_repaint = true;
-}
-
-static bool dispatch_form_modified_delete_key(EventContext* evcon,
-                                              DomElement* elem,
-                                              DocState* state,
-                                              View* target,
-                                              const char* value,
-                                              int value_len,
-                                              int caret,
-                                              int key,
-                                              bool alt,
-                                              bool cmd) {
-    if ((alt || cmd) && key == RDT_KEY_BACKSPACE) {
-        dispatch_form_modified_delete(
-            evcon, elem, state, target, value, value_len, caret, true, cmd);
-        return true;
-    }
-    if (alt && key == RDT_KEY_DELETE) {
-        dispatch_form_modified_delete(
-            evcon, elem, state, target, value, value_len, caret, false, false);
-        return true;
-    }
-    return false;
-}
-
-static void dispatch_form_delete_key(EventContext* evcon, DomElement* elem,
-                                     DocState* state, View* target,
-                                     const char* value, int value_len, int caret,
-                                     bool backward, bool had_lambda_keydown,
-                                     bool had_keydown_selection,
-                                     int keydown_sel_start,
-                                     int keydown_sel_end,
-                                     bool had_keydown_caret,
-                                     int keydown_caret_offset,
-                                     bool collapse_lambda_selection) {
-    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
-    if (backward && had_lambda_keydown) {
-        int base = had_keydown_caret ? keydown_caret_offset : caret;
-        const char* operation = "lambdaDeleteBackward";
-        if (collapse_lambda_selection && had_keydown_selection) {
-            base = keydown_sel_start;
-            operation = "lambdaDeleteSelection";
-        }
-        if (base < 0) base = 0;
-        if (base > value_len) base = value_len;
-        if ((collapse_lambda_selection && had_keydown_selection) ||
-            (base > 0 && value)) {
-            int new_len = form_control_live_value_len_int(elem);
-            uint32_t collapse = (uint32_t)(base <= new_len ? base : new_len);
-            dispatch_form_caret_collapse(evcon, elem, state, target,
-                                         collapse, operation);
-        }
-    } else if (!had_lambda_keydown && editable) {
-        uint32_t start = 0;
-        uint32_t end = 0;
-        if (had_keydown_selection) {
-            start = (uint32_t)keydown_sel_start;
-            end = (uint32_t)keydown_sel_end;
-        } else if (backward && caret > 0 && value) {
-            int previous = caret - 1;
-            while (previous > 0 &&
-                   ((unsigned char)value[previous] & 0xC0) == 0x80) {
-                previous--;
-            }
-            start = (uint32_t)previous;
-            end = (uint32_t)caret;
-        } else if (!backward && value && caret < value_len) {
-            int next = caret + 1;
-            while (next < value_len &&
-                   ((unsigned char)value[next] & 0xC0) == 0x80) {
-                next++;
-            }
-            start = (uint32_t)caret;
-            end = (uint32_t)next;
-        } else {
-            start = end = backward ? 0 : (uint32_t)caret;
-        }
-        if (end > start) {
-            dispatch_form_text_replace(
-                evcon, elem, state, target, start, end, nullptr, 0,
-                backward ? INPUT_INTENT_DELETE_CONTENT_BACKWARD
-                         : INPUT_INTENT_DELETE_CONTENT_FORWARD);
         }
     }
     evcon->need_repaint = true;
@@ -4334,6 +4521,61 @@ static bool dispatch_form_history_via_controller(EventContext* evcon,
         }
     }
     return dispatch_form_history(evcon, elem, state, target, input_type);
+}
+
+// F11: translate the package-owned key intent into the one native mechanism
+// that performs it. The package chooses every command; this helper retains
+// canonical selection, buffer ownership, beforeinput/input emission, history,
+// and clipboard access in the engine.
+static bool dispatch_form_key_intent(EventContext* evcon, DomElement* elem,
+                                     DocState* state, View* target,
+                                     const KeyEvent* key_event, int caret) {
+    InputIntent intent;
+    if (!input_intent_from_key_event(state, key_event, &intent)) return false;
+
+    bool handled = true;
+    switch (intent.type) {
+        case INPUT_INTENT_COPY:
+            dispatch_form_copy_selection(evcon, elem, state, target, "form input copy");
+            break;
+        case INPUT_INTENT_SELECT_ALL:
+            dispatch_form_select_all(evcon, elem, state, target);
+            break;
+        case INPUT_INTENT_DELETE_BY_CUT:
+            dispatch_form_cut_selection(evcon, elem, state, target);
+            break;
+        case INPUT_INTENT_INSERT_FROM_PASTE:
+            dispatch_form_keyboard_paste(evcon, state, target);
+            break;
+        case INPUT_INTENT_HISTORY_UNDO:
+        case INPUT_INTENT_HISTORY_REDO:
+            dispatch_form_history_via_controller(evcon, elem, state, target,
+                                                 intent.type);
+            break;
+        case INPUT_INTENT_INSERT_PARAGRAPH:
+        case INPUT_INTENT_INSERT_LINE_BREAK:
+            if (elem->form->control_type == FORM_CONTROL_TEXTAREA) {
+                dispatch_form_text_replace(evcon, elem, state, target,
+                                           (uint32_t)caret, (uint32_t)caret,
+                                           "\n", 1, intent.type);
+            }
+            break;
+        case INPUT_INTENT_DELETE_CONTENT_BACKWARD:
+        case INPUT_INTENT_DELETE_CONTENT_FORWARD:
+        case INPUT_INTENT_DELETE_WORD_BACKWARD:
+        case INPUT_INTENT_DELETE_WORD_FORWARD:
+        case INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD:
+        case INPUT_INTENT_DELETE_SOFT_LINE_FORWARD:
+            dispatch_form_text_replace(evcon, elem, state, target,
+                                       (uint32_t)caret, (uint32_t)caret,
+                                       nullptr, 0, intent.type);
+            break;
+        default:
+            handled = false;
+            break;
+    }
+    if (handled) evcon->need_repaint = true;
+    return handled;
 }
 
 static View* editing_text_drag_first_text_descendant(View* view) {
@@ -5865,6 +6107,7 @@ struct JsDispatchScope {
     bool no_js_passthrough;
     uint32_t previous_batch_depth;
     DomDocument* previous_batch_document;
+    EventContext* previous_active_event_context;
 
     JsDispatchScope(EventContext* event_context, bool allow_without_js = false) {
         evcon = event_context;
@@ -5874,6 +6117,7 @@ struct JsDispatchScope {
         no_js_passthrough = false;
         previous_batch_depth = js_dispatch_batch_depth;
         previous_batch_document = js_dispatch_batch_document;
+        previous_active_event_context = s_active_js_dispatch_event_context;
         DomDocument* target_document = event_context_target_document(evcon);
         if (js_dispatch_batch_depth != 0 &&
             js_dispatch_batch_document == target_document) {
@@ -5882,6 +6126,7 @@ struct JsDispatchScope {
             js_dispatch_batch_depth++;
             active = true;
             reuses_batch = true;
+            s_active_js_dispatch_event_context = evcon;
             return;
         }
         if (allow_without_js && !event_document_has_js_runtime(evcon)) {
@@ -5889,6 +6134,7 @@ struct JsDispatchScope {
             // still runs without opening a second evaluator scope.
             active = true;
             no_js_passthrough = true;
+            s_active_js_dispatch_event_context = evcon;
             return;
         }
         if (radiant_js_ctx_enter(&scope, evcon)) {
@@ -5897,6 +6143,7 @@ struct JsDispatchScope {
             owns_batch = true;
             js_dispatch_batch_depth = 1;
             js_dispatch_batch_document = target_document;
+            s_active_js_dispatch_event_context = evcon;
         }
     }
 
@@ -5904,9 +6151,13 @@ struct JsDispatchScope {
         if (!active) return;
         if (reuses_batch) {
             if (js_dispatch_batch_depth > 0) js_dispatch_batch_depth--;
+            s_active_js_dispatch_event_context = previous_active_event_context;
             return;
         }
-        if (no_js_passthrough) return;
+        if (no_js_passthrough) {
+            s_active_js_dispatch_event_context = previous_active_event_context;
+            return;
+        }
         radiant_js_ctx_exit(&scope, evcon, t_start);
         // A nested event can target an iframe/second document. Restore the
         // enclosing batch instead of clearing it, otherwise its remaining
@@ -5916,6 +6167,7 @@ struct JsDispatchScope {
         if (previous_batch_depth != 0 && previous_batch_document) {
             js_dom_set_document(previous_batch_document);
         }
+        s_active_js_dispatch_event_context = previous_active_event_context;
     }
 };
 
@@ -5951,7 +6203,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
             // being selected before the author handler has declined.
             author_handled = dispatch_lambda_handler(
                 evcon, target, "beforeinput", intent,
-                &author_model_reconciled, false);
+                &author_model_reconciled, false, true);
         }
     }
 
@@ -5970,7 +6222,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
             bool input_model_reconciled = false;
             dispatch_lambda_handler(
                 evcon, static_cast<View*>(canonical_host), "input", intent,
-                &input_model_reconciled, false);
+                &input_model_reconciled, false, true);
             evcon->need_repaint = true;
         }
         return true;
@@ -6073,7 +6325,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
                 bool input_model_reconciled = false;
                 dispatch_lambda_handler(
                     evcon, static_cast<View*>(canonical_host), "input", intent,
-                    &input_model_reconciled, false);
+                    &input_model_reconciled, false, true);
             }
         }
         evcon->need_repaint = true;
@@ -6191,7 +6443,8 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
                                          RadiantJsEventBuilder build_event,
                                          void* userdata,
                                          bool read_prevented,
-                                         bool* dispatched = nullptr) {
+                                         bool* dispatched = nullptr,
+                                         bool run_ua_tier = true) {
     if (dispatched) *dispatched = false;
     DomElement* dom_target = radiant_view_to_dom_element(target);
     if (!dom_target || !build_event) return false;
@@ -6207,9 +6460,24 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     RootFrame roots(2);
     Rooted<Item> event_root(roots, build_event(userdata));
     event_context_set_dom_event(evcon, event_root.get());
+    EventTargetPath target_path = {};
+    bool target_path_valid = capture_event_target_path(target_doc, target, &target_path);
     Rooted<Item> target_root(roots, js_dom_wrap_element(dom_target));
     js_dom_dispatch_event(target_root.get(), event_root.get());
-    return read_prevented ? radiant_dom_event_default_prevented(event_root.get()) : false;
+    bool prevented = radiant_dom_event_default_prevented(event_root.get());
+    evcon->default_prevented = prevented;
+    const char* event_name = fn_to_cstr(js_get_name_key(event_root.get(), "type"));
+    if (run_ua_tier) {
+        View* ua_target = settle_author_templates_for_ua(
+            evcon, target, target_path_valid ? &target_path : nullptr, nullptr);
+        if (!prevented && event_name && ua_target) {
+            evcon->dom_event_ua_handled = dispatch_behavior_handler(
+                evcon, ua_target, event_name, nullptr, nullptr);
+            prevented = radiant_dom_event_default_prevented(event_root.get());
+            evcon->default_prevented = prevented;
+        }
+    }
+    return read_prevented ? prevented : false;
 }
 
 /**
@@ -6266,7 +6534,7 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
     bool saved_click = s_native_click_dispatch_active;
     if (is_click) s_native_click_dispatch_active = true;
     bool prevented = radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
-        &args, true, dispatched);
+        &args, true, dispatched, !is_click);
     s_native_click_dispatch_active = saved_click;
     return prevented;
 }
@@ -6510,7 +6778,7 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
     bool has_surface = editing_surface_from_target(target, &surface);
     InputEventBuildArgs args = {evcon, target, type, intent, surface, has_surface};
     return radiant_dispatch_built_event(evcon, target, build_input_event_item,
-        &args, true);
+        &args, true, nullptr, false);
 }
 
 typedef struct {
@@ -6532,7 +6800,7 @@ static void radiant_dispatch_composition_event(EventContext* evcon,
     if (!evcon || !target || !type) return;
     CompositionEventBuildArgs args = {type, data};
     radiant_dispatch_built_event(evcon, target, build_composition_event_item,
-        &args, false);
+        &args, false, nullptr, false);
     // ESO45: composition events reached JS only. A behavior template owns the
     // session now (ES18/F7), and the ancestor walk from the focused control
     // reaches <body>, which is where that template matches. After the JS
@@ -7655,8 +7923,8 @@ static bool prepare_previous_focus_blur(EventContext* evcon,
 
 static void dispatch_focus_change_observed(EventContext* evcon, View* target) {
     if (!evcon || !target) return;
-    dispatch_lambda_handler(evcon, target, "change");
     radiant_dispatch_simple_event(evcon, target, "change", true, false);
+    dispatch_lambda_handler_without_js(evcon, target, "change");
     sm_observe_action(event_context_target_state(evcon),
                       SM_ACT_DISPATCH_CHANGE);
 }
@@ -7665,11 +7933,12 @@ static void dispatch_focus_blur_observed(EventContext* evcon,
                                          View* target,
                                          View* related_target) {
     if (!evcon || !target) return;
-    dispatch_lambda_handler(evcon, target, "blur");
     radiant_dispatch_focus_event(evcon, target, "blur", related_target);
+    dispatch_lambda_handler_without_js(evcon, target, "blur");
     sm_observe_action(event_context_target_state(evcon),
                       SM_ACT_DISPATCH_BLUR);
     radiant_dispatch_focus_event(evcon, target, "focusout", related_target);
+    dispatch_lambda_handler_without_js(evcon, target, "focusout");
 }
 
 /**
@@ -7725,7 +7994,9 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         }
 
         radiant_dispatch_focus_event(evcon, new_focus, "focus", prev_focus);
+        dispatch_lambda_handler_without_js(evcon, new_focus, "focus");
         radiant_dispatch_focus_event(evcon, new_focus, "focusin", prev_focus);
+        dispatch_lambda_handler_without_js(evcon, new_focus, "focusin");
 
         // F1 (Radiant_Design_Form_Input.md §3.1): snapshot the value at
         // focus time so a later blur can decide whether to fire `change`.
@@ -9069,7 +9340,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Set :active state
             update_active_state(&evcon, evcon.target, true);
 
-            dispatch_lambda_handler(&evcon, evcon.target, "mousedown");
+            if (dispatch_lambda_handler_without_js(&evcon, evcon.target,
+                                                   "mousedown")) {
+                evcon.need_repaint = true;
+            }
+
             bool pointer_prevented = radiant_dispatch_pointer_event(
                 &evcon, evcon.target, "pointerdown",
                 btn_event->x, btn_event->y, btn_event->button,
@@ -9538,6 +9813,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     event_mod_super(btn_event->mods),
                     1);
                 if (up_prevented) evcon.default_prevented = true;
+                if (dispatch_lambda_handler_without_js(&evcon, evcon.target,
+                                                       "mouseup")) {
+                    evcon.need_repaint = true;
+                }
             }
 
             // Stage 4C: JS drop + dragend for script editors, gated on the
@@ -9952,9 +10231,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         if (evcon.target) {
             log_debug("Target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
-            if (evcon.event.type == RDT_EVENT_MOUSE_UP) {
-                dispatch_lambda_handler(&evcon, evcon.target, "mouseup");
-            }
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 
@@ -10452,17 +10728,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // capture selection state before dispatch (needed for caret adjustment after)
-        bool had_keydown_selection = false;
-        int keydown_sel_start = 0;
-        int keydown_sel_end_capture = 0;
-        if (selection_has(state)) {
-            had_keydown_selection = true;
-            selection_get_range(state, &keydown_sel_start, &keydown_sel_end_capture);
-        }
-        int keydown_caret_offset = 0;
-        bool had_keydown_caret = caret_get_offset(state, &keydown_caret_offset);
-
         // Rich-text editing path (Phase R4): translate platform key events
         // into browser-like beforeinput intents for contenteditable
         // template output. Native form controls continue down the existing
@@ -10492,21 +10757,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // dispatch "keydown" event to Lambda handler for actionable keys
-        bool had_lambda_keydown = false;
-        if (!rich_keydown_dispatched && focused &&
-            (key_event->key == RDT_KEY_BACKSPACE ||
-                        key_event->key == RDT_KEY_DELETE ||
-                        key_event->key == RDT_KEY_ENTER ||
-                        key_event->key == RDT_KEY_ESCAPE)) {
-            if (dispatch_lambda_handler(&evcon, focused, "keydown")) {
-                evcon.need_repaint = true;
-                had_lambda_keydown = true;
-            }
-            // Re-fetch focused element (dispatch may have rebuilt the DOM)
-            focused = focus_get(state);
-        }
-
         // Dispatch keydown through JS EventTarget for inline, IDL, and
         // addEventListener handlers.
         if (focused && !rich_keydown_dispatched) {
@@ -10514,6 +10764,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 "keydown", key_event->key, key_event->mods, false);
             if (prevented) evcon.default_prevented = true;
             focused = focus_get(state);
+        }
+        if (!rich_keydown_dispatched && focused &&
+            (key_event->key == RDT_KEY_BACKSPACE ||
+             key_event->key == RDT_KEY_DELETE ||
+             key_event->key == RDT_KEY_ENTER ||
+             key_event->key == RDT_KEY_ESCAPE)) {
+            if (dispatch_lambda_handler_without_js(
+                    &evcon, focused, "keydown", nullptr, nullptr, true, true)) {
+                evcon.need_repaint = true;
+                focused = focus_get(state);
+            }
         }
 
         // F4: a single-line text control's Enter is implicit submission, not
@@ -10539,468 +10800,35 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // Handle arrow keys and caret adjustment for text input form controls
+        // The old input and textarea key tables drifted by modifier and by
+        // operation vocabulary. Keymap/caret now choose all commands once in
+        // the package; native receives only the named command to apply.
         int form_caret_offset = 0;
-        if (focused && focused->is_element() && caret_get_offset(state, &form_caret_offset)) {
+        if (!evcon.default_prevented && focused && focused->is_element() &&
+            caret_get_offset(state, &form_caret_offset)) {
             DomElement* focus_elem = lam::dom_require_element(focused);
-            if (focus_elem->form_control() &&
-                focus_elem->form->control_type == FORM_CONTROL_TEXT) {
-
+            if (tc_is_text_control(focus_elem)) {
                 uint32_t live_value_len = 0;
                 const char* value = form_control_live_value(focus_elem, &live_value_len);
                 int value_len = (int)live_value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
                 int cur = form_caret_offset;
                 if (cur < 0) cur = 0;
                 if (cur > value_len) cur = value_len;
-                bool alt = (key_event->mods & RDT_MOD_ALT)   != 0;
-                bool ctrl = (key_event->mods & RDT_MOD_CTRL)  != 0;
-                bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
-                bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
 
-                // F4: Cmd+Z = undo, Cmd+Shift+Z (or Ctrl+Y) = redo. Bypass
-                // the rest of the input-branch dispatch on consume.
-                if (cmd && key_event->key == RDT_KEY_Z) {
-                    InputIntentType history_type = (key_event->mods & RDT_MOD_SHIFT)
-                        ? INPUT_INTENT_HISTORY_REDO
-                        : INPUT_INTENT_HISTORY_UNDO;
-                    bool did = dispatch_form_history_via_controller(
-                        &evcon, focus_elem, state, focused, history_type);
-                    if (did) {
-                        // Restore caret to the snapshot's selection end.
-                        int vlen = form_control_live_value_len_int(focus_elem);
-                        int caret_offset = 0;
-                        if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)vlen, "historyClamp");
-                        }
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_Y) {
-                    if (dispatch_form_history_via_controller(
-                            &evcon, focus_elem, state, focused,
-                            INPUT_INTENT_HISTORY_REDO)) {
-                        int vlen = form_control_live_value_len_int(focus_elem);
-                        int caret_offset = 0;
-                        if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)vlen, "historyClamp");
-                        }
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-
-                if ((cmd || ctrl) && key_event->key == RDT_KEY_A) {
-                    if (dispatch_form_select_all(&evcon, focus_elem, state, focused)) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-                if ((cmd || ctrl) && key_event->key == RDT_KEY_C) {
-                    dispatch_form_copy_selection(&evcon, focus_elem, state,
-                                                 focused, "form input copy");
-                    break;
-                }
-                if ((cmd || ctrl) && key_event->key == RDT_KEY_X) {
-                    if (dispatch_form_cut_selection(&evcon, focus_elem, state,
-                                                    focused)) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-
-                // Cmd+V paste. The newline and maxlength policy is the dom
-                // package's now (F6) and is applied by the beforeinput applier;
-                // this path only resolves the replaced range and dispatches.
-                // Caret is positioned by the splice.
-                if ((cmd || ctrl) && key_event->key == RDT_KEY_V) {
-                    // Ctrl+V and Cmd+V are the same primary paste action; limiting
-                    // text controls to Cmd bypassed paste on non-macOS testdrivers.
-                    dispatch_form_keyboard_paste(&evcon, state, focused, false);
-                    break;
-                }
-
-                // F9: ask the <body> template which caret operation this key
-                // means. It answers by calling `radiant.caret_operation`, which
-                // bumps the epoch — a primitive has no EventContext, and
-                // performing the move needs one, so the answer comes back the
-                // way `request_change` reports its own (ESO-epoch pattern).
-                {
-                    uint64_t caret_epoch_before = radiant_caret_operation_epoch();
-                    InputIntent caret_key_intent;
-                    caret_key_intent.key = key_event->key;
-                    caret_key_intent.mods = key_event->mods;
-                    radiant_dispatch_behavior_caret_key(&evcon, focused, &caret_key_intent);
-                    if (radiant_caret_operation_epoch() != caret_epoch_before &&
-                        form_apply_caret_operation(&evcon, focus_elem, state, focused,
-                                                   value, value_len, cur)) {
-                        evcon.need_repaint = true;
-                        break;
-                    }
-                }
-
-                // F3: Alt+Backspace → delete previous word.
-                //     Cmd+Backspace → delete to start of value.
-                if (dispatch_form_modified_delete_key(
-                        &evcon, focus_elem, state, focused, value, value_len,
-                        cur, key_event->key, alt, cmd)) {
-                    break;
-                }
-
-                if (key_event->key == RDT_KEY_BACKSPACE) {
-                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, true, had_lambda_keydown,
-                        had_keydown_selection, keydown_sel_start,
-                        keydown_sel_end_capture, had_keydown_caret,
-                        keydown_caret_offset, false);
-                    break;
-                } else if (key_event->key == RDT_KEY_DELETE) {
-                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, false, had_lambda_keydown,
-                        had_keydown_selection, keydown_sel_start,
-                        keydown_sel_end_capture, had_keydown_caret,
-                        keydown_caret_offset, false);
-                    break;
-                }
-            }
-        }
-
-        // Handle arrow keys and caret adjustment for textarea form controls
-        int textarea_caret_offset = 0;
-        if (focused && focused->is_element() && caret_get_offset(state, &textarea_caret_offset)) {
-            DomElement* focus_elem = lam::dom_require_element(focused);
-            if (focus_elem->form_control() &&
-                focus_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
-
-                uint32_t live_value_len = 0;
-                const char* value = form_control_live_value(focus_elem, &live_value_len);
-                int value_len = (int)live_value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
-                int cur = textarea_caret_offset;
-                if (cur < 0) cur = 0;
-                if (cur > value_len) cur = value_len;
-
-                // helper: compute line start offset and line length for a given line
-                auto line_start_off = [&](int line) -> int {
-                    if (!value || line <= 0) return 0;
-                    int ln = 0;
-                    for (int i = 0; i < value_len; i++) {
-                        if (value[i] == '\n') {
-                            ln++;
-                            if (ln == line) return i + 1;
-                        }
-                    }
-                    return value_len;
-                };
-
-                auto line_len_from = [&](int off) -> int {
-                    int i = 0;
-                    while (off + i < value_len && value[off + i] != '\n') i++;
-                    return i;
-                };
-
-                // compute current line and column (byte offset within line)
-                int cur_line = 0, cur_col = 0;
-                if (value) {
-                    for (int i = 0; i < cur && i < value_len; i++) {
-                        if (value[i] == '\n') { cur_line++; cur_col = 0; }
-                        else cur_col++;
-                    }
-                }
-
-                // count total lines
-                int total_lines = 1;
-                if (value) {
-                    for (int i = 0; i < value_len; i++) {
-                        if (value[i] == '\n') total_lines++;
-                    }
-                }
-
-                bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
-                bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
-
-                // helper: begin or extend selection for shift-modified keys
-                // through the unified form editing surface.
-                auto sel_begin_or_extend = [&](int new_off, const char* operation) {
-                    dispatch_form_selection_extend(&evcon, focus_elem, state,
-                        focused, cur, new_off, operation);
-                };
-
-                // Cmd+C: copy selected textarea text to clipboard
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_C) {
-                    dispatch_form_copy_selection(&evcon, focus_elem, state,
-                                                 focused, "textarea copy");
-                    break;
-                }
-
-                // Cmd/Ctrl+X: cut selected textarea text through the same
-                // deleteByCut edit used by context-menu Cut.
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_X) {
-                    if (dispatch_form_cut_selection(&evcon, focus_elem, state,
-                                                    focused)) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-
-                // Cmd+V: paste clipboard text into textarea. F6 routes
-                // through the applier so newline normalization (\r\n → \n) and
-                // maxlength clamping happen in one place; caret + undo are
-                // handled by te_replace_byte_range.
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_V) {
-                    // Primary paste is platform-neutral even though the physical
-                    // modifier differs; both routes share the form edit.
-                    dispatch_form_keyboard_paste(&evcon, state, focused, true);
-                    break;
-                }
-
-                // Cmd/Ctrl+A: select all textarea text through the shared
-                // editing surface so keyboard and context-menu selection share
-                // one logging and projection path.
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_A) {
-                    if (dispatch_form_select_all(&evcon, focus_elem, state, focused)) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-
-                // F4: Cmd+Z = undo, Cmd+Shift+Z (or Ctrl+Y) = redo.
-                if (cmd && key_event->key == RDT_KEY_Z) {
-                    InputIntentType history_type = (key_event->mods & RDT_MOD_SHIFT)
-                        ? INPUT_INTENT_HISTORY_REDO
-                        : INPUT_INTENT_HISTORY_UNDO;
-                    bool did = dispatch_form_history_via_controller(
-                        &evcon, focus_elem, state, focused, history_type);
-                    if (did) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_Y) {
-                    if (dispatch_form_history_via_controller(
-                            &evcon, focus_elem, state, focused,
-                            INPUT_INTENT_HISTORY_REDO)) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-
-                bool alt = (key_event->mods & RDT_MOD_ALT) != 0;
-
-                // F3: Alt+Left/Right → word jump (with Shift = extend).
-                if (alt && key_event->key == RDT_KEY_LEFT) {
-                    int new_off = (int)te_prev_word_byte(
-                        value, (uint32_t)value_len, (uint32_t)cur);
-                    if (shift) sel_begin_or_extend(new_off, "extendWordBackward");
-                    else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state, focused,
-                            (uint32_t)new_off, "moveWordBackward");
-                    }
+                uint64_t caret_epoch_before = radiant_caret_operation_epoch();
+                InputIntent caret_key_intent;
+                caret_key_intent.key = key_event->key;
+                caret_key_intent.mods = key_event->mods;
+                radiant_dispatch_behavior_caret_key(&evcon, focused, &caret_key_intent);
+                if (radiant_caret_operation_epoch() != caret_epoch_before &&
+                    form_apply_caret_operation(&evcon, focus_elem, state, focused,
+                                               value, value_len, cur)) {
                     evcon.need_repaint = true;
                     break;
                 }
-                if (alt && key_event->key == RDT_KEY_RIGHT) {
-                    int new_off = (int)te_next_word_byte(
-                        value, (uint32_t)value_len, (uint32_t)cur);
-                    if (shift) sel_begin_or_extend(new_off, "extendWordForward");
-                    else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state, focused,
-                            (uint32_t)new_off, "moveWordForward");
-                    }
-                    evcon.need_repaint = true;
+                if (dispatch_form_key_intent(&evcon, focus_elem, state, focused,
+                                             key_event, cur)) {
                     break;
-                }
-
-                // F3: Alt+Backspace → delete previous word.
-                //     Cmd+Backspace → delete to start of current line.
-                if (dispatch_form_modified_delete_key(
-                        &evcon, focus_elem, state, focused, value, value_len,
-                        cur, key_event->key, alt, cmd)) {
-                    break;
-                }
-
-                // F3: PgUp / PgDn → move caret by ~10 logical lines (no
-                // viewport-aware metrics yet; matches the heuristic in the
-                // proposal §3.5).
-                if (key_event->key == RDT_KEY_PAGE_UP ||
-                    key_event->key == RDT_KEY_PAGE_DOWN) {
-                    int delta = (key_event->key == RDT_KEY_PAGE_UP) ? -10 : 10;
-                    int target_line = cur_line + delta;
-                    if (target_line < 0) target_line = 0;
-                    if (target_line > total_lines - 1) target_line = total_lines - 1;
-                    int loff = line_start_off(target_line);
-                    int llen = line_len_from(loff);
-                    int target_col = cur_col < llen ? cur_col : llen;
-                    int new_off = loff + target_col;
-                    if (shift) {
-                        sel_begin_or_extend(new_off,
-                            key_event->key == RDT_KEY_PAGE_UP
-                                ? "extendPageBackward" : "extendPageForward");
-                    }
-                    else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state, focused,
-                            (uint32_t)new_off,
-                            key_event->key == RDT_KEY_PAGE_UP
-                                ? "movePageBackward" : "movePageForward");
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                }
-
-                if (key_event->key == RDT_KEY_LEFT) {
-                    int new_off = cur;
-                    if (cur > 0 && value) {
-                        new_off = cur - 1;
-                        while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
-                            new_off--;
-                    }
-                    if (shift) {
-                        sel_begin_or_extend(new_off, "extendCharacterBackward");
-                    } else {
-                        // collapse selection if active, else move caret
-                        if (selection_has(state)) {
-                            int start = 0, end = 0;
-                            selection_get_range(state, &start, &end);
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)start, "collapseSelectionStart");
-                        } else {
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)new_off, "moveCharacterBackward");
-                        }
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_RIGHT) {
-                    int new_off = cur;
-                    if (cur < value_len && value) {
-                        uint32_t cp;
-                        int bytes = str_utf8_decode(value + cur, (size_t)(value_len - cur), &cp);
-                        if (bytes > 0) new_off = cur + bytes;
-                    }
-                    if (shift) {
-                        sel_begin_or_extend(new_off, "extendCharacterForward");
-                    } else {
-                        if (selection_has(state)) {
-                            int start = 0, end = 0;
-                            selection_get_range(state, &start, &end);
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)end, "collapseSelectionEnd");
-                        } else {
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)new_off, "moveCharacterForward");
-                        }
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_UP) {
-                    int new_off = cur;
-                    if (cur_line > 0) {
-                        int prev_line_off = line_start_off(cur_line - 1);
-                        int prev_line_len = line_len_from(prev_line_off);
-                        int target_col = cur_col < prev_line_len ? cur_col : prev_line_len;
-                        new_off = prev_line_off + target_col;
-                    }
-                    if (shift) {
-                        sel_begin_or_extend(new_off, "extendLineBackward");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, (uint32_t)new_off, "moveLineBackward");
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_DOWN) {
-                    int new_off = cur;
-                    if (cur_line < total_lines - 1) {
-                        int next_line_off = line_start_off(cur_line + 1);
-                        int next_line_len = line_len_from(next_line_off);
-                        int target_col = cur_col < next_line_len ? cur_col : next_line_len;
-                        new_off = next_line_off + target_col;
-                    }
-                    if (shift) {
-                        sel_begin_or_extend(new_off, "extendLineForward");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, (uint32_t)new_off, "moveLineForward");
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_HOME) {
-                    int new_off = shift && cmd ? 0 : line_start_off(cur_line);
-                    if (shift) {
-                        sel_begin_or_extend(new_off,
-                            cmd ? "extendDocumentStart" : "extendLineStart");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, (uint32_t)new_off,
-                            cmd ? "moveDocumentStart" : "moveLineStart");
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_END) {
-                    int loff = line_start_off(cur_line);
-                    int new_off = shift && cmd ? value_len : loff + line_len_from(loff);
-                    if (shift) {
-                        sel_begin_or_extend(new_off,
-                            cmd ? "extendDocumentEnd" : "extendLineEnd");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, (uint32_t)new_off,
-                            cmd ? "moveDocumentEnd" : "moveLineEnd");
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_BACKSPACE) {
-                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, true, had_lambda_keydown,
-                        had_keydown_selection, keydown_sel_start,
-                        keydown_sel_end_capture, had_keydown_caret,
-                        keydown_caret_offset, true);
-                } else if (key_event->key == RDT_KEY_DELETE) {
-                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, false, had_lambda_keydown,
-                        had_keydown_selection, keydown_sel_start,
-                        keydown_sel_end_capture, had_keydown_caret,
-                        keydown_caret_offset, true);
-                } else if (key_event->key == RDT_KEY_ENTER) {
-                    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(focus_elem));
-                    if (had_lambda_keydown) {
-                        // Lambda handler processed the enter; adjust caret
-                        if (had_keydown_selection) {
-                            // selection was replaced with '\n': caret goes to sel_start + 1
-                            int new_len = form_control_live_value_len_int(focus_elem);
-                            int new_off = keydown_sel_start + 1;
-                            uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, collapse_off, "lambdaInsertParagraph");
-                        } else {
-                            // normal enter: advance caret by 1 byte
-                            int new_len = form_control_live_value_len_int(focus_elem);
-                            int new_off = (had_keydown_caret ? keydown_caret_offset : cur) + 1;
-                            uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, collapse_off, "lambdaInsertParagraph");
-                        }
-                    } else if (editable) {
-                        // Plain HTML textarea: insert newline ourselves.
-                        uint32_t a, b;
-                        if (had_keydown_selection) {
-                            a = (uint32_t)keydown_sel_start;
-                            b = (uint32_t)keydown_sel_end_capture;
-                        } else {
-                            a = b = (uint32_t)cur;
-                        }
-                        dispatch_form_text_replace(&evcon, focus_elem, state, focused,
-                                                   a, b, "\n", 1,
-                                                   INPUT_INTENT_INSERT_PARAGRAPH);
-                    }
-                    evcon.need_repaint = true;
                 }
             }
         }
@@ -11280,7 +11108,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         // behavior must NOT see this one — it fires before the
                         // value exists, and claiming it would stop typing.
                         if (dispatch_lambda_handler(&evcon, focused, "input", nullptr,
-                                                    nullptr, /*allow_behavior=*/false)) {
+                                                    nullptr, /*allow_behavior=*/false,
+                                                    /*legacy_author=*/true)) {
                             evcon.need_repaint = true;
                             View* live_focus = focus_get(state);
                             if (live_focus && live_focus->is_element()) {
