@@ -4418,6 +4418,7 @@ extern "C" const JubeTypeBinding* jube_module_type_bindings(const JubeModuleDef*
 }
 
 extern "C" void radiant_jube_register_static(void);
+extern "C" void dom_jube_register_static(void);
 extern "C" void hostobj_demo_jube_register_static(void);
 
 static bool jube_module_name_equals(const char* a, const char* b) {
@@ -6233,6 +6234,10 @@ bool jube_node_core_module_enabled(void) {
 
 void jube_register_builtin_modules(void) {
     radiant_jube_register_static();
+    // The Lambda-facing face of the same DOM core the radiant module bridges
+    // to (ES36); registered after radiant so the dom_node wrappers its
+    // functions return are already a known host type.
+    dom_jube_register_static();
     // Phase-7 validation must let the dlopen copy win name registration over the static demo.
     if (!jube_env_flag_enabled("JUBE_HOSTOBJ_DEMO_DYNAMIC_ONLY")) {
         hostobj_demo_jube_register_static();

@@ -1,0 +1,7 @@
+{
+  count_at_query_time: 1,
+  snapshot_len_after_mutation: 1,
+  snapshot_tags: ["P"],
+  fresh_query_len: 2,
+  first_still_reachable: "P"
+}
