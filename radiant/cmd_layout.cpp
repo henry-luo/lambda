@@ -2988,6 +2988,15 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
     document->page_kind = page_kind;
     log_debug("[page-kind] %s document -> %s", document_kind,
               dom_page_kind_name(page_kind));
+    if (page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT) {
+        document->element_dom_map = element_dom_map_create();
+        if (!document->element_dom_map) {
+            log_error("[LAYOUT DOC INIT] failed to create Lambda element map");
+            dom_document_destroy(document);
+            release_layout_runtime(owned_runtime);
+            return nullptr;
+        }
+    }
     // Inline declarations are parsed while building DomElement nodes, so the
     // property table must exist before the tree is materialized.
     if (!css_property_system_init(document->document_pool)) {

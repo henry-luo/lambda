@@ -1891,37 +1891,12 @@ static inline LambdaError* it2err(Item item) {
 }
 #endif // !__cplusplus
 
-// ============================================================================
-// Per-type Ret* result structs (2-field: value + err)
-// Used by can_raise functions to return typed native values with error info.
-// Size: 16 bytes — fits in rax+rdx on x86-64, x0+x1 on ARM64.
-// err == NULL means success; err != NULL means error (check err->code).
-// ============================================================================
-
-typedef struct RetBool   { bool         value; LambdaError* err; } RetBool;
-typedef struct RetInt56  { int64_t      value; LambdaError* err; } RetInt56;   // Lambda int (name predates C16)
-typedef struct RetInt64  { int64_t      value; LambdaError* err; } RetInt64;   // int64 (heap-allocated)
-typedef struct RetFloat  { double       value; LambdaError* err; } RetFloat;
-typedef struct RetString { String*      value; LambdaError* err; } RetString;
-typedef struct RetSymbol { Symbol*      value; LambdaError* err; } RetSymbol;
-typedef struct RetMap    { Map*         value; LambdaError* err; } RetMap;
-typedef struct RetList   { List*        value; LambdaError* err; } RetList;
-typedef struct RetElmt   { Element*     value; LambdaError* err; } RetElmt;
-typedef struct RetObj    { Object*      value; LambdaError* err; } RetObj;
-typedef struct RetArray  { Array*       value; LambdaError* err; } RetArray;
-typedef struct RetRange  { Range*       value; LambdaError* err; } RetRange;
-typedef struct RetPath   { Path*        value; LambdaError* err; } RetPath;
 #ifndef __cplusplus
 typedef struct RetItem   { Item         value; LambdaError* err; } RetItem;
 #endif
 #ifdef __cplusplus
 struct RetItem;  // full definition in lambda.hpp
 #endif
-
-// ============================================================================
-// Ret* constructor helpers
-// Naming: r + type_abbreviation + _ok / _err
-// ============================================================================
 
 // RetItem (boxed, universal — used by _b trampolines)
 // In C++ mode, these are defined in lambda.hpp (after full Item struct definition).
@@ -1933,110 +1908,6 @@ static inline RetItem ri_err(LambdaError* error) {
     RetItem r; r.value = ITEM_ERROR; r.err = error; return r;
 }
 #endif
-
-// RetBool
-static inline RetBool rb_ok(bool value) {
-    RetBool r; r.value = value; r.err = null; return r;
-}
-static inline RetBool rb_err(LambdaError* error) {
-    RetBool r; r.value = false; r.err = error; return r;
-}
-
-// RetInt56 (Lambda int)
-static inline RetInt56 ri56_ok(int64_t value) {
-    RetInt56 r; r.value = value; r.err = null; return r;
-}
-static inline RetInt56 ri56_err(LambdaError* error) {
-    RetInt56 r; r.value = 0; r.err = error; return r;
-}
-
-// RetInt64
-static inline RetInt64 ri64_ok(int64_t value) {
-    RetInt64 r; r.value = value; r.err = null; return r;
-}
-static inline RetInt64 ri64_err(LambdaError* error) {
-    RetInt64 r; r.value = 0; r.err = error; return r;
-}
-
-// RetFloat
-static inline RetFloat rf_ok(double value) {
-    RetFloat r; r.value = value; r.err = null; return r;
-}
-static inline RetFloat rf_err(LambdaError* error) {
-    RetFloat r; r.value = 0.0; r.err = error; return r;
-}
-
-// RetString
-static inline RetString rs_ok(String* value) {
-    RetString r; r.value = value; r.err = null; return r;
-}
-static inline RetString rs_err(LambdaError* error) {
-    RetString r; r.value = null; r.err = error; return r;
-}
-
-// RetSymbol
-static inline RetSymbol rsy_ok(Symbol* value) {
-    RetSymbol r; r.value = value; r.err = null; return r;
-}
-static inline RetSymbol rsy_err(LambdaError* error) {
-    RetSymbol r; r.value = null; r.err = error; return r;
-}
-
-// RetMap
-static inline RetMap rm_ok(Map* value) {
-    RetMap r; r.value = value; r.err = null; return r;
-}
-static inline RetMap rm_err(LambdaError* error) {
-    RetMap r; r.value = null; r.err = error; return r;
-}
-
-// RetList
-static inline RetList rl_ok(List* value) {
-    RetList r; r.value = value; r.err = null; return r;
-}
-static inline RetList rl_err(LambdaError* error) {
-    RetList r; r.value = null; r.err = error; return r;
-}
-
-// RetElmt
-static inline RetElmt re_ok(Element* value) {
-    RetElmt r; r.value = value; r.err = null; return r;
-}
-static inline RetElmt re_err(LambdaError* error) {
-    RetElmt r; r.value = null; r.err = error; return r;
-}
-
-// RetObj
-static inline RetObj ro_ok(Object* value) {
-    RetObj r; r.value = value; r.err = null; return r;
-}
-static inline RetObj ro_err(LambdaError* error) {
-    RetObj r; r.value = null; r.err = error; return r;
-}
-
-// RetArray
-static inline RetArray ra_ok(Array* value) {
-    RetArray r; r.value = value; r.err = null; return r;
-}
-static inline RetArray ra_err(LambdaError* error) {
-    RetArray r; r.value = null; r.err = error; return r;
-}
-
-// RetRange
-static inline RetRange rr_ok(Range* value) {
-    RetRange r; r.value = value; r.err = null; return r;
-}
-static inline RetRange rr_err(LambdaError* error) {
-    RetRange r; r.value = null; r.err = error; return r;
-}
-
-// RetPath
-static inline RetPath rp_ok(Path* value) {
-    RetPath r; r.value = value; r.err = null; return r;
-}
-static inline RetPath rp_err(LambdaError* error) {
-    RetPath r; r.value = null; r.err = error; return r;
-}
 
 // ============================================================================
 // Compatibility shims for incremental migration

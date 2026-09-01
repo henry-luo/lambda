@@ -1,6 +1,6 @@
 # Lambda DOM Event Dispatch — three flows, one engine
 
-> **Status**: **RATIFIED — implementation in progress** (2026-09-01). §2–§3 are **descriptive** — the current state of the three dispatch flows, verified against the tree at 2026-09-01. §4.1's rulings **ES22–ES29 are ratified in full (2026-09-01, user)**, §4.3's resolution design is endorsed, and ESO63/ESO67/ESO69 are resolved (ESO68 narrowed to measurement). F17–F19 are implemented; F20–F21 remain.
+> **Status**: **RATIFIED — implementation in progress** (2026-09-01). §2–§3 are **descriptive** — the current state of the three dispatch flows, verified against the tree at 2026-09-01. §4.1's rulings **ES22–ES29 are ratified in full (2026-09-01, user)**, §4.3's resolution design is endorsed, and ESO63/ESO67/ESO69 are resolved (ESO68 narrowed to measurement). F17–F20 are implemented; F21 remains.
 > **Role**: the design home for the event **dispatch mechanism** — how an event reaches handlers across the three flows, what object the handlers receive, and how cancellation composes. Complements `vibe/Lambda_Design_DOM_Default.md`, which owns default-action **placement** (what runs after dispatch); the boundary between the two docs is the boundary between *delivering* an event and *acting* on it.
 > **Scope**: propagation, handler registration and addressing, the event object, cancellation/verdict semantics, synthetic dispatch, and the unification design. **Out of scope**: which default actions exist and their status (the DOM_Default ledger), state storage and the waist (DOM_State ES-series), and the JS property/binding architecture (Jube DOM3/DOM4).
 > **Companion docs**: `vibe/Lambda_Design_DOM_State.md` (ES5 pipeline, ES10 peers-over-one-state, ES15 verdicts), `vibe/Lambda_Design_DOM_Default.md` (§5.2 single-sourced activation, resolved ESO49), `vibe/Lambda_Design_DOM_Pkg.md` (placement policy), `vibe/Lambda_Jube_DOM3.md`/`DOM4.md` (declared interfaces, ordinal dispatch), `doc/dev/radiant/RAD_15_Events_Input.md`, `doc/dev/js/JS_13_Web_DOM.md` §5.
@@ -154,9 +154,10 @@ Author-template handlers are conceptually peers of JS listeners, but they run st
 
 ### 3.6 Duplication inventory
 
-The remaining duplication is the transitional event-simulator/editing entry
-families in F20 and the cleanup listed in F21. F19 removed the second activation
-implementation and its state-diff reconciler.
+The remaining duplication is the stale/comment and transitional cleanup listed
+in F21. F19 removed the second activation implementation and its state-diff
+reconciler; F20 removed the legacy editing-dispatch bridge and folded the
+remaining trusted entry families into the shared route.
 
 ---
 
@@ -231,7 +232,7 @@ Each stage is independently landable and behavior-neutral-verifiable against the
 | **F17 — one event record** | Native event record + Jube `type event { … }` declared interface; JS `Event` becomes a branded wrapper over it (constructors and native factories converge); Lambda handlers receive the same record (event-map fields preserved as declared members during migration); `preventDefault`/verdict write one flag | one `default_prevented`; `build_lambda_event_map` deleted; no behavior change in goldens |
 | **F18 — one propagation walk** | The engine owns path + phases + stop state; JS listeners and author-template handlers consulted per node in ES23's ratified order via the §4.3 resolution (per-store event-type masks, JS per-type listener counts, per-template event-name masks, ≤2 hashed probes per node); author-tier suppression narrowed per ES29 — claim no longer suppresses the UA tier (audit existing claiming templates; add explicit `'prevent-default'` where that intent was real); `build_path`/`build_view_stack`/author walk merge | a JS `stopPropagation()` stops author-template handlers on ancestors (pinned test); per-node interleaving pinned per ESO63; a claiming author template over a checkbox no longer suppresses the toggle without `'prevent-default'` (pinned test) |
 | **F19 — synthetic dispatch + activation single-sourcing (implemented 2026-09-01)** | `dispatchEvent`/`el.click()` route through `radiant_dispatch_synthetic_dom_event`; `form.ls` owns the popover claim; checkbox/radio/popover claims are shared by both entries; the embedded JS activation pass, `js_did_activation`, and cancel-revert block are deleted | `dom_synthetic_activation.json` proves load-time `click()`, both radio synthetic entries, cancellation, and popover visibility; DOM_Default §5.2 flips; ESO49 closes |
-| **F20 — remaining entry families** | `event_sim` (WebDriver substrate), editing/IME/composition dispatchers, and `radiant.dispatch()` re-entry fold onto the engine's one entry | no dispatcher constructs events outside the record factories |
+| **F20 — remaining entry families (implemented 2026-09-01)** | `event_sim` (WebDriver substrate), editing/IME/composition dispatchers, and `radiant.dispatch()` re-entry fold onto the engine's one entry | no dispatcher constructs events outside the record factories |
 | **F21 — cleanup** | Stale comments (`event.cpp:2625`); retire transitional stop-flag thread-locals (JS_13 known-issue 7); doc updates: JS_13 §5, RAD_15, DOM_Default §2.1 pipeline | grep-clean; docs verified-against stamps updated |
 
 Sequencing rationale: F17 before F18 because a shared walk needs a shared event to thread through it; F19 after both because deleting the JS activation pass is safe only when synthetic events can reach the behavior registry; F20/F21 are consolidation.
@@ -262,9 +263,8 @@ template-stop, checkbox, explicit-prevent-default, radio, and Todo text UI
 fixtures; JS Event gtests; and the JS click/mousedown/multi-event UI fixtures
 all pass. `editable_mixed_routes` could not be assessed in this worktree: its
 registered fixture source is absent while unrelated test-file deletions are
-already staged. F20 keeps editing/IME/composition and event-simulator entry
-points on their legacy first-author path until that phase moves them onto this
-cascade.
+already staged. F20 subsequently moves editing/IME/composition and
+event-simulator entry points onto this cascade.
 
 ### F19 implementation checkpoint (2026-09-01)
 
@@ -280,8 +280,26 @@ load-time script calls `click()` before layout has built a `FormControlProp`.
 
 Focused verification: `make build`; the Radiant no-int-cast rule;
 `test/ui/dom_synthetic_activation.json` (6/6); `dom_pkg_prevent_default.json`
-(4/4); and `dom_pkg_radio.json` (7/7). The final two legacy entry families are
-F20 and the stale comments/transitional cleanup remain F21.
+(4/4); and `dom_pkg_radio.json` (7/7). F20 removes the remaining legacy entry
+families; stale comments and transitional cleanup remain F21.
+
+### F20 implementation checkpoint (2026-09-01)
+
+Editing, IME/composition, automation, and package `radiant.dispatch()` now use
+the record-backed author-then-UA entry in `event.cpp`; the separate
+`editing_dispatch.cpp` callback bridge and its first-claim author walk are
+deleted. The Lambda-only route now creates a cancelable record for trusted
+event families that support cancellation, so ES24's one record retains a
+`'prevent-default'` verdict through the UA boundary; non-cancelable native
+families remain non-cancelable. Initial Lambda-document construction also
+creates the existing element-to-DOM index, so the first reactive nested event
+uses the S9.1.4 state-preserving incremental reconciliation route instead of a
+destructive fallback. This keeps handler effects and regeneration in the
+S12.1.3 settle stage while enforcing ES22 and ES29.
+
+Focused verification: `make build`; `dom_synthetic_activation` (6/6),
+`dom_pkg_prevent_default` (4/4), and `dom_pkg_radio` (7/7); plus the four
+contenteditable/composition/cancellation automation fixtures (18/18).
 
 ---
 

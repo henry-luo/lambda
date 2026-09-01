@@ -1,58 +1,6 @@
-/**
- * @file safety_analyzer.cpp
- * @brief Static safety analysis for stack overflow protection and TCO detection
- *
- * For now, we use a conservative approach: all user-defined functions
- * are considered potentially recursive and get stack checks.
- *
- * Tail Call Optimization: Detects tail-recursive functions that can be
- * transformed into loops to eliminate stack growth.
- */
-
 #include "safety_analyzer.hpp"
 #include "ast.hpp"
 #include "../../lib/log.h"
-#include "../../lib/memtrack.h"
-#include <new>
-
-// Global safety analyzer instance
-SafetyAnalyzer* g_safety_analyzer = nullptr;
-
-//------------------------------------------------------------------------------
-// Heap factory (audited boundary for `new SafetyAnalyzer`)
-// Process-lifetime singleton — intentionally leaked at shutdown, no destroy.
-//------------------------------------------------------------------------------
-
-SafetyAnalyzer* safety_analyzer_create() {
-    SafetyAnalyzer* analyzer = (SafetyAnalyzer*)mem_alloc(sizeof(SafetyAnalyzer), MEM_CAT_SYSTEM);
-    if (!analyzer) return nullptr;
-    new (analyzer) SafetyAnalyzer(); // NEW_DELETE_OK: single audited construction boundary for SafetyAnalyzer process-lifetime singleton.
-    return analyzer;
-}
-
-void init_safety_analyzer() {
-    if (!g_safety_analyzer) {
-        g_safety_analyzer = safety_analyzer_create();
-    }
-}
-
-void analyze_function_safety(AstNode* module) {
-    init_safety_analyzer();
-    // For now, we don't do sophisticated analysis
-    // All user functions are assumed potentially recursive
-    log_debug("Safety analyzer: using conservative approach (all functions get stack checks)");
-}
-
-bool function_needs_stack_check(const char* func_name) {
-    // Conservative: all user-defined functions need stack checks
-    // System functions don't need checks since they're not recursive
-    return true;
-}
-
-bool function_is_tail_recursive(const char* func_name) {
-    // Tail recursion optimization not yet implemented
-    return false;
-}
 
 // ==============================================================================
 // Tail Call Optimization Analysis
@@ -505,46 +453,4 @@ bool is_tco_function_safe(AstFuncNode* func_node) {
     log_debug("TCO: function '%.*s' is fully safe (all recursion is tail recursion)",
         (int)func_node->name->len, func_node->name->chars);
     return true;
-}
-
-void SafetyAnalyzer::init_system_functions() {
-    // In conservative mode, we don't need to track system functions
-    // The callback_sys_funcs_ static array is defined below
-    log_debug("Safety analyzer: using conservative approach (all functions get stack checks)");
-}
-
-// System functions that accept user callbacks - for future use
-const char* SafetyAnalyzer::callback_sys_funcs_[] = {
-    "map", "filter", "reduce", "fold", "foldl", "foldr",
-    "find", "find_index", "any", "all", "none",
-    "sort_by", "group_by", "partition",
-    "foreach", "transform", "scan",
-    "take_while", "drop_while",
-    nullptr
-};
-
-void SafetyAnalyzer::analyze_module(AstNode* module) {
-    // Simplified: no analysis needed with conservative approach
-    log_debug("Safety analysis complete (conservative mode)");
-}
-
-FunctionSafety SafetyAnalyzer::get_safety(const char* name) const {
-    // Conservative: all user functions are unsafe (may recurse)
-    (void)name;  // unused in conservative mode
-    return FunctionSafety::UNSAFE;
-}
-
-bool SafetyAnalyzer::is_safe(const char* name) const {
-    (void)name;  // unused in conservative mode
-    return false;  // Conservative: no function is provably safe
-}
-
-bool SafetyAnalyzer::is_tail_recursive(const char* name) const {
-    (void)name;  // unused in conservative mode
-    return false;  // TCO not yet implemented
-}
-
-void SafetyAnalyzer::dump() const {
-    log_info("=== Function Safety Analysis (Conservative Mode) ===");
-    log_info("All user-defined functions receive stack overflow checks");
 }

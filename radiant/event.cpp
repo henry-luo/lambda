@@ -1823,6 +1823,23 @@ private:
     Item event_;
 };
 
+static bool event_record_is_cancelable(const char* event_name) {
+    if (!event_name) return false;
+    // These are the trusted factories' non-cancelable families. Every other
+    // Lambda-only native event keeps the historical verdict-cancellation path.
+    return strcmp(event_name, "input") != 0 &&
+           strcmp(event_name, "change") != 0 &&
+           strcmp(event_name, "focus") != 0 &&
+           strcmp(event_name, "blur") != 0 &&
+           strcmp(event_name, "focusin") != 0 &&
+           strcmp(event_name, "focusout") != 0 &&
+           strcmp(event_name, "compositionstart") != 0 &&
+           strcmp(event_name, "compositionupdate") != 0 &&
+           strcmp(event_name, "compositionend") != 0 &&
+           strcmp(event_name, "scroll") != 0 &&
+           strcmp(event_name, "selectionchange") != 0;
+}
+
 static Item build_dom_event_record(DomDocument* doc, View* target,
                                    const char* event_name, EventContext* evcon,
                                    const InputIntent* intent = nullptr,
@@ -1831,7 +1848,8 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     Rooted<Item> event_root(roots, existing_event);
     if (!radiant_dom_event_is(event_root.get())) {
         event_root.set(radiant_dom_event_create(event_name ? event_name : "", true,
-                                                false, false, JS_CLASS_EVENT));
+                                                event_record_is_cancelable(event_name),
+                                                false, JS_CLASS_EVENT));
         radiant_dom_event_set_trusted(event_root.get(), evcon != nullptr);
     }
     if (!radiant_dom_event_is(event_root.get()) || !doc || !doc->input) {
@@ -3611,10 +3629,6 @@ extern "C" bool radiant_dispatch_behavior_context_menu(EventContext* evcon,
     return dispatch_behavior_handler(evcon, target, "contextmenu", nullptr, nullptr);
 }
 
-extern "C" bool radiant_dispatch_behavior_input(EventContext* evcon, View* target) {
-    return dispatch_behavior_handler(evcon, target, "input", nullptr, nullptr);
-}
-
 // F4: submit/reset activation has no separate DOM event to expose to Lambda.
 // Keep it behavior-only so the ordinary click dispatch remains available to
 // author handlers and cancellation reaches this default-action seam first.
@@ -3628,71 +3642,11 @@ extern "C" bool radiant_dispatch_behavior_reset_activation(EventContext* evcon,
     return dispatch_behavior_handler(evcon, target, "resetactivation", nullptr, nullptr);
 }
 
-// F5: the applier seam. A behavior template that handles this `beforeinput`
-// applies the edit itself (through replace_range) and returns 'prevent-default',
-// which is the signal for the native splice to stand down — the same protocol a
-// JS listener uses. A template that returns 'pass', or declares no handler for
-// the intent it was given, leaves the native applier in charge, so the flip can
-// land one input type at a time.
-//
-// The intent is passed through so the handler can read `input_type` and `data`
-// off the event map rather than re-deriving them from the key.
-extern "C" bool radiant_dispatch_behavior_beforeinput(EventContext* evcon,
-                                                      View* target,
-                                                      const InputIntent* intent) {
-    if (!evcon) return false;
-    bool prevented_before = evcon->default_prevented;
-    dispatch_behavior_handler(evcon, target, "beforeinput", intent, nullptr);
-    bool prevented = evcon->default_prevented && !prevented_before;
-    // Confine the verdict to this dispatch: `default_prevented` is the whole
-    // event's flag, and letting an applied edit set it would also suppress
-    // unrelated default actions later in the same event.
-    if (prevented) evcon->default_prevented = prevented_before;
-    return prevented;
-}
-
-static bool dispatch_lambda_handler_legacy_author(EventContext* evcon, View* target,
-                                                   const char* event_name,
-                                                   const InputIntent* intent,
-                                                   bool* out_model_reconciled,
-                                                   bool allow_behavior) {
-    if (!context || !g_template_registry || g_template_registry->count == 0) {
-        return allow_behavior && dispatch_behavior_handler(evcon, target, event_name,
-                                                           intent, out_model_reconciled);
-    }
-
-    // F20 retains its established first-claim editor contract until the input,
-    // IME, and simulator entry families move to the shared author cascade.
-    for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
-        if (!node->is_element()) continue;
-        DomElement* dom_elem = lam::dom_require_element(node);
-        if (dom_elem->is_synthetic()) continue;
-        Item result_item = {.element = dom_element_render_source(dom_elem)};
-        RenderMapLookup lookup;
-        if (!render_map_reverse_lookup(result_item, &lookup)) continue;
-        TemplateEntry* tmpl = template_registry_find_ref(g_template_registry,
-                                                         lookup.template_ref);
-        TemplateHandlerEntry* handler = template_entry_find_handler(tmpl, event_name);
-        if (tmpl && handler && invoke_template_handler(evcon, target, event_name, intent,
-                tmpl, handler, lookup.source_item, lookup.template_ref,
-                out_model_reconciled)) {
-            return true;
-        }
-    }
-    return allow_behavior && dispatch_behavior_handler(evcon, target, event_name,
-                                                       intent, out_model_reconciled);
-}
-
 static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name,
                                     const InputIntent* intent = nullptr,
                                     bool* out_model_reconciled = nullptr,
-                                    bool allow_behavior = true,
-                                    bool legacy_author = false) {
+                                    bool allow_behavior = true) {
     if (out_model_reconciled) *out_model_reconciled = false;
-    if (legacy_author) {
-        return dispatch_lambda_handler_legacy_author(evcon, target, event_name, intent,
-                                                     out_model_reconciled, allow_behavior);
-    }
     // F18 already delivered author templates from the shared JS path. Native
     // callers retained during F20 therefore see only the UA-tier result here,
     // never a second target-to-root author walk for the same record.
@@ -3792,7 +3746,8 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
 // alongside the other radiant_dispatch_* JS bridges.
 static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
                                          const char* type,
-                                         const InputIntent* intent);
+                                         const InputIntent* intent,
+                                         bool run_ua_tier = false);
 static void radiant_dispatch_composition_event(EventContext* evcon,
                                                View* target,
                                                const char* type,
@@ -3801,14 +3756,6 @@ extern "C" bool radiant_dispatch_editing_composition_event(UiContext* uicon,
                                                            EventType event_type,
                                                            const char* text,
                                                            uint32_t caret_cp);
-
-static bool dispatch_editing_input_event(EventContext* evcon, View* target,
-                                         const char* type,
-                                         const EditingIntent* intent,
-                                         void* user) {
-    (void)user;
-    return radiant_dispatch_input_event(evcon, target, type, intent);
-}
 
 bool radiant_focus_element(DomDocument* doc, View* target) {
     if (!doc || !target) return false;
@@ -3848,30 +3795,42 @@ static bool event_document_has_js_runtime(EventContext* evcon) {
     return dom_document_has_js_realm(document);
 }
 
-// A Lambda-only document deliberately has no JS-facing EventTarget realm.
-// Its trusted native entries still join F18's author/UA pipeline through the
-// record-backed template path instead of disappearing at the JS gateway.
-static bool dispatch_lambda_handler_without_js(EventContext* evcon, View* target,
-                                               const char* event_name,
-                                               const InputIntent* intent = nullptr,
-                                               bool* out_model_reconciled = nullptr,
-                                               bool allow_behavior = true,
-                                               bool legacy_author = false) {
-    if (event_document_has_js_runtime(evcon)) return false;
-    return dispatch_lambda_handler(evcon, target, event_name, intent,
-                                   out_model_reconciled, allow_behavior, legacy_author);
-}
-
 static bool dispatch_contenteditable_event(EventContext* evcon, View* target,
                                             const InputIntent* intent);
 static bool dispatch_contenteditable_composition_event(
         EventContext* evcon, const EditingSurface* surface,
         const EditingIntent* intent);
 
-static EditingFormNotificationHooks form_editing_notification_hooks() {
-    EditingFormNotificationHooks hooks = {};
-    hooks.dispatch_input_event = dispatch_editing_input_event;
-    return hooks;
+static bool dispatch_form_beforeinput(EventContext* evcon,
+                                      const EditingSurface* surface,
+                                      const InputIntent* intent,
+                                      bool* out_prevented,
+                                      bool* out_applied = nullptr) {
+    if (out_prevented) *out_prevented = false;
+    if (out_applied) *out_applied = false;
+    if (!evcon || !surface || !surface->view || !intent ||
+        !editing_surface_is_text_control(surface) ||
+        !input_intent_is_dispatchable(intent->type)) {
+        return false;
+    }
+
+    bool prevented = radiant_dispatch_input_event(evcon, surface->view,
+                                                  "beforeinput", intent, true);
+    bool applied = prevented && evcon->dom_event_ua_handled;
+    if (out_prevented) *out_prevented = prevented;
+    if (out_applied) *out_applied = applied;
+    return true;
+}
+
+static void dispatch_form_input(EventContext* evcon,
+                                const EditingSurface* surface,
+                                const InputIntent* intent) {
+    if (!evcon || !surface || !surface->view || !intent ||
+        !editing_surface_is_text_control(surface) ||
+        !input_intent_is_dispatchable(intent->type)) {
+        return;
+    }
+    radiant_dispatch_input_event(evcon, surface->view, "input", intent, true);
 }
 
 static void rich_select_all_sync_descendant_text_controls(DocState* state,
@@ -4037,8 +3996,6 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
     intent.type = input_type;
     intent.data = repl ? repl : "";
 
-    EditingFormNotificationHooks hooks = form_editing_notification_hooks();
-
     uint32_t saved_selection_start = 0;
     uint32_t saved_selection_end = 0;
     uint8_t saved_selection_direction = 0;
@@ -4050,8 +4007,8 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
     bool prevented = false;
     bool applied_by_template = false;
     uint64_t splice_epoch_before = radiant_splice_epoch();
-    editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
-                                      &prevented, &applied_by_template);
+    dispatch_form_beforeinput(evcon, &surface, &intent,
+                              &prevented, &applied_by_template);
     if (applied_by_template) {
         // F5: a behavior template already performed the splice and left the
         // caret after the text it inserted. Restoring the pre-edit selection
@@ -4066,7 +4023,7 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
                   "inputType=%s mutated=%d",
                   input_intent_type_name(input_type), mutated ? 1 : 0);
         if (mutated) {
-            editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
+            dispatch_form_input(evcon, &surface, &intent);
             doc_state_request_repaint(state);
         }
         return true;
@@ -4138,7 +4095,7 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
         event_log_editing_selection(state, &surface, &intent,
                                     "replaceCollapse",
                                     caret_offset, caret_offset);
-        editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
+        dispatch_form_input(evcon, &surface, &intent);
         sm_observe_action(state, SM_ACT_DISPATCH_INPUT);
         sm_guard.commit();
     }
@@ -4596,8 +4553,6 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
         intent.history_sel_end = (uint32_t)str_utf8_byte_to_char(hist_value, hist_len, eb);
     }
 
-    EditingFormNotificationHooks hooks = form_editing_notification_hooks();
-
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_TEXT,
                                SM_EV_FORM_HISTORY, target);
     bool prevented = false;
@@ -4606,8 +4561,8 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
     // every mutation, so bracket whatever the template does with the same
     // guard the ring's own restore used to use.
     tc_history_guard_enter(state);
-    editing_dispatch_form_beforeinput(evcon, &surface, &intent, &hooks,
-                                      &prevented, &applied_by_template);
+    dispatch_form_beforeinput(evcon, &surface, &intent,
+                              &prevented, &applied_by_template);
     tc_history_guard_exit(state);
     sm_observe_action(state, SM_ACT_DISPATCH_BEFOREINPUT);
     if (prevented && !applied_by_template) {
@@ -4642,7 +4597,7 @@ static bool dispatch_form_history(EventContext* evcon, DomElement* elem,
                                    selection_start, selection_end);
         dispatch_form_history_restore_selection(elem, state, target,
                                                 &surface, &intent);
-        editing_dispatch_form_input(evcon, &surface, &intent, &hooks);
+        dispatch_form_input(evcon, &surface, &intent);
         sm_observe_action(state, SM_ACT_DISPATCH_INPUT);
         sm_guard.commit();
     }
@@ -5098,16 +5053,14 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
     intent.composition_caret = caret_cp;
     intent.is_composing = true;
 
-    EditingFormNotificationHooks hooks = form_editing_notification_hooks();
-
     context.event.composition_caret_hint = caret_cp;
     radiant_dispatch_composition_event(&context.event, context.target,
                                        "compositionupdate",
                                        preedit ? preedit : "");
     context.event.composition_caret_hint = 0;
     bool prevented = false;
-    editing_dispatch_form_beforeinput(&context.event, &context.surface, &intent, &hooks,
-                                      &prevented);
+    dispatch_form_beforeinput(&context.event, &context.surface, &intent,
+                              &prevented);
     if (prevented) {
         log_debug("radiant_dispatch_form_text_ime_update: beforeinput prevented");
         event_log_editing_composition(context.state, context.surface_ptr, &intent,
@@ -5115,7 +5068,7 @@ extern "C" bool radiant_dispatch_form_text_ime_update(UiContext* uicon,
         return true;
     }
     editing_interaction_set_composing(context.state, context.surface_ptr, true);
-    editing_dispatch_form_input(&context.event, &context.surface, &intent, &hooks);
+    dispatch_form_input(&context.event, &context.surface, &intent);
     event_log_editing_composition(context.state, context.surface_ptr, &intent,
                                   "update", len, 0, caret_cp);
     doc_state_request_repaint(context.state);
@@ -5152,16 +5105,14 @@ extern "C" bool radiant_dispatch_form_text_ime_commit(UiContext* uicon,
                                    start, end, committed, len,
                                    INPUT_INTENT_INSERT_FROM_COMPOSITION);
     } else {
-        EditingFormNotificationHooks hooks = form_editing_notification_hooks();
-
         bool prevented = false;
         if (intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT && context.surface_ptr) {
-            editing_dispatch_form_beforeinput(&context.event, context.surface_ptr, &intent,
-                                              &hooks, &prevented);
+            dispatch_form_beforeinput(&context.event, context.surface_ptr, &intent,
+                                      &prevented);
         }
         if (!prevented && intent.type == INPUT_INTENT_DELETE_COMPOSITION_TEXT &&
             context.surface_ptr) {
-            editing_dispatch_form_input(&context.event, context.surface_ptr, &intent, &hooks);
+            dispatch_form_input(&context.event, context.surface_ptr, &intent);
         }
     }
     editing_interaction_set_composing(context.state, context.surface_ptr, false);
@@ -6272,21 +6223,20 @@ struct JsDispatchScope {
     bool active;
     bool owns_batch;
     bool reuses_batch;
-    bool no_js_passthrough;
     uint32_t previous_batch_depth;
     DomDocument* previous_batch_document;
     EventContext* previous_active_event_context;
 
-    JsDispatchScope(EventContext* event_context, bool allow_without_js = false) {
+    JsDispatchScope(EventContext* event_context) {
         evcon = event_context;
         active = false;
         owns_batch = false;
         reuses_batch = false;
-        no_js_passthrough = false;
         previous_batch_depth = js_dispatch_batch_depth;
         previous_batch_document = js_dispatch_batch_document;
         previous_active_event_context = s_active_js_dispatch_event_context;
         DomDocument* target_document = event_context_target_document(evcon);
+        if (!event_document_has_js_runtime(evcon)) return;
         if (js_dispatch_batch_depth != 0 &&
             js_dispatch_batch_document == target_document) {
             // nested ordinary events share the active document batch so
@@ -6294,14 +6244,6 @@ struct JsDispatchScope {
             js_dispatch_batch_depth++;
             active = true;
             reuses_batch = true;
-            s_active_js_dispatch_event_context = evcon;
-            return;
-        }
-        if (allow_without_js && !event_document_has_js_runtime(evcon)) {
-            // a Lambda page has no JS event realm; its ordinary author handler
-            // still runs without opening a second evaluator scope.
-            active = true;
-            no_js_passthrough = true;
             s_active_js_dispatch_event_context = evcon;
             return;
         }
@@ -6319,10 +6261,6 @@ struct JsDispatchScope {
         if (!active) return;
         if (reuses_batch) {
             if (js_dispatch_batch_depth > 0) js_dispatch_batch_depth--;
-            s_active_js_dispatch_event_context = previous_active_event_context;
-            return;
-        }
-        if (no_js_passthrough) {
             s_active_js_dispatch_event_context = previous_active_event_context;
             return;
         }
@@ -6353,26 +6291,14 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
     // All rich editors use the same synchronous ordering: an ordinary
     // beforeinput handler gets first refusal, the package supplies the
     // unclaimed default, and input follows a committed edit.
-    JsDispatchScope dispatch_scope(evcon, true);
-    if (!dispatch_scope.active) return false;
+    JsDispatchScope dispatch_scope(evcon);
+    if (event_document_has_js_runtime(evcon) && !dispatch_scope.active) return false;
     editing_interaction_set_active_surface(state, surface);
 
-    bool has_js_runtime = event_document_has_js_runtime(evcon);
     bool beforeinput_prevented = false;
-    bool author_handled = false;
-    bool author_model_reconciled = false;
     if (input_intent_is_dispatchable(intent->type)) {
-        if (has_js_runtime) {
-            beforeinput_prevented = radiant_dispatch_input_event(
-                evcon, target, "beforeinput", intent);
-        } else {
-            // Lambda edit templates are ordinary author handlers now. Keeping
-            // behavior dispatch disabled here prevents the UA default from
-            // being selected before the author handler has declined.
-            author_handled = dispatch_lambda_handler(
-                evcon, target, "beforeinput", intent,
-                &author_model_reconciled, false, true);
-        }
+        beforeinput_prevented = radiant_dispatch_input_event(
+            evcon, target, "beforeinput", intent);
     }
 
     // author code may replace the original host or move the selection. The
@@ -6385,17 +6311,6 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
     DomElement* canonical_host = canonical_surface.owner;
     editing_interaction_set_active_surface(state, &canonical_surface);
     if (beforeinput_prevented) return true;
-    if (author_handled) {
-        if (author_model_reconciled) {
-            bool input_model_reconciled = false;
-            dispatch_lambda_handler(
-                evcon, static_cast<View*>(canonical_host), "input", intent,
-                &input_model_reconciled, false, true);
-            evcon->need_repaint = true;
-        }
-        return true;
-    }
-
     EditingTargetRange target_ranges[4] = {};
     uint32_t target_range_count = editing_compute_target_ranges(
         state, &canonical_surface, intent, target_ranges, 4);
@@ -6486,15 +6401,8 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
         bool composition_cancel =
             intent->type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
         if (input_intent_is_dispatchable(intent->type) && !composition_cancel) {
-            if (has_js_runtime) {
-                radiant_dispatch_input_event(evcon, static_cast<View*>(canonical_host),
-                                             "input", intent);
-            } else {
-                bool input_model_reconciled = false;
-                dispatch_lambda_handler(
-                    evcon, static_cast<View*>(canonical_host), "input", intent,
-                    &input_model_reconciled, false, true);
-            }
+            radiant_dispatch_input_event(evcon, static_cast<View*>(canonical_host),
+                                         "input", intent);
         }
         evcon->need_repaint = true;
     }
@@ -6527,8 +6435,8 @@ static bool dispatch_contenteditable_composition_event(
     // Composition event listeners, beforeinput, the selected action, and input
     // share one JavaScript batch so an editor cannot observe a preedit event
     // without being able to synchronously handle its following edit.
-    JsDispatchScope dispatch_scope(evcon, true);
-    if (!dispatch_scope.active) return false;
+    JsDispatchScope dispatch_scope(evcon);
+    if (event_document_has_js_runtime(evcon) && !dispatch_scope.active) return false;
 
     const char* event_name = "compositionupdate";
     const char* phase = "update";
@@ -6548,9 +6456,7 @@ static bool dispatch_contenteditable_composition_event(
         phase = "cancel";
     }
 
-    if (event_document_has_js_runtime(evcon)) {
-        radiant_dispatch_composition_event(evcon, target, event_name, intent->data);
-    }
+    radiant_dispatch_composition_event(evcon, target, event_name, intent->data);
     DocState* state = event_context_target_state(evcon);
     event_log_editing_composition(state, surface, intent, phase, preedit_len,
                                   commit_len, intent->composition_caret);
@@ -6612,8 +6518,17 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
                                          void* userdata,
                                          bool read_prevented,
                                          bool* dispatched = nullptr,
-                                         bool run_ua_tier = true) {
+                                         bool run_ua_tier = true,
+                                         const char* event_name = nullptr,
+                                         const InputIntent* intent = nullptr) {
     if (dispatched) *dispatched = false;
+    if (!event_document_has_js_runtime(evcon)) {
+        if (!event_name) return false;
+        bool handled = dispatch_lambda_handler(evcon, target, event_name,
+                                               intent, nullptr, run_ua_tier);
+        if (dispatched) *dispatched = handled;
+        return read_prevented && evcon ? evcon->default_prevented : false;
+    }
     DomElement* dom_target = radiant_view_to_dom_element(target);
     if (!dom_target || !build_event) return false;
     JsDispatchScope dispatch_scope(evcon);
@@ -6634,13 +6549,14 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     js_dom_dispatch_event(target_root.get(), event_root.get());
     bool prevented = radiant_dom_event_default_prevented(event_root.get());
     evcon->default_prevented = prevented;
-    const char* event_name = fn_to_cstr(js_get_name_key(event_root.get(), "type"));
+    const char* resolved_event_name = fn_to_cstr(
+        js_get_name_key(event_root.get(), "type"));
     if (run_ua_tier) {
         View* ua_target = settle_author_templates_for_ua(
             evcon, target, target_path_valid ? &target_path : nullptr, nullptr);
-        if (!prevented && event_name && ua_target) {
+        if (!prevented && resolved_event_name && ua_target) {
             evcon->dom_event_ua_handled = dispatch_behavior_handler(
-                evcon, ua_target, event_name, nullptr, nullptr);
+                evcon, ua_target, resolved_event_name, intent, nullptr);
             prevented = radiant_dom_event_default_prevented(event_root.get());
             evcon->default_prevented = prevented;
         }
@@ -6683,15 +6599,16 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
                                          int button, int buttons,
                                          bool ctrl, bool shift, bool alt, bool meta,
                                          int detail,
-                                         bool* dispatched = nullptr)
+                                         bool* dispatched = nullptr,
+                                         double timestamp_ms = -1.0)
 {
     MouseEventBuildArgs args = {
         type, client_x, client_y, button, buttons,
-        ctrl, shift, alt, meta, detail, -1.0
+        ctrl, shift, alt, meta, detail, timestamp_ms
     };
     bool is_click = type && strcmp(type, "click") == 0;
     bool prevented = radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
-        &args, true, dispatched, !is_click);
+        &args, true, dispatched, !is_click, type);
     return prevented;
 }
 
@@ -6703,14 +6620,11 @@ extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = uicon->document;
-    MouseEventBuildArgs args = {
-        type, client_x, client_y, button, buttons,
+    return radiant_dispatch_mouse_event(&evcon, target, type,
+        client_x, client_y, button, buttons,
         (mods & RDT_MOD_CTRL) != 0, (mods & RDT_MOD_SHIFT) != 0,
         (mods & RDT_MOD_ALT) != 0, (mods & RDT_MOD_SUPER) != 0,
-        detail, timestamp_ms
-    };
-    return radiant_dispatch_built_event(&evcon, target, build_mouse_event_item,
-        &args, true);
+        detail, nullptr, timestamp_ms);
 }
 
 typedef struct {
@@ -6744,7 +6658,7 @@ static bool radiant_dispatch_pointer_event(EventContext* evcon, View* target,
         ctrl, shift, alt, meta, pointer_type ? pointer_type : "mouse"
     };
     return radiant_dispatch_built_event(evcon, target, build_pointer_event_item,
-        &args, true, dispatched);
+        &args, true, dispatched, true, type);
 }
 
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
@@ -6806,7 +6720,7 @@ static bool radiant_dispatch_keyboard_event(EventContext* evcon, View* target,
     // the physical key identity here so ordinary typing does not look like an
     // empty-key shortcut to script-owned editors.
     return radiant_dispatch_built_event(evcon, target, build_keyboard_event_item,
-        &args, true);
+        &args, true, nullptr, true, type);
 }
 
 // Build a JS StaticRange-shaped Map for one EditingTargetRange. Matches the
@@ -6927,14 +6841,15 @@ static Item build_input_event_item(void* userdata) {
 
 static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
                                          const char* type,
-                                         const InputIntent* intent)
+                                         const InputIntent* intent,
+                                         bool run_ua_tier)
 {
     if (!evcon || !target || !type || !intent) return false;
     EditingSurface surface;
     bool has_surface = editing_surface_from_target(target, &surface);
     InputEventBuildArgs args = {evcon, target, type, intent, surface, has_surface};
     return radiant_dispatch_built_event(evcon, target, build_input_event_item,
-        &args, true, nullptr, false);
+        &args, true, nullptr, run_ua_tier, type, intent);
 }
 
 typedef struct {
@@ -6955,22 +6870,15 @@ static void radiant_dispatch_composition_event(EventContext* evcon,
 {
     if (!evcon || !target || !type) return;
     CompositionEventBuildArgs args = {type, data};
-    radiant_dispatch_built_event(evcon, target, build_composition_event_item,
-        &args, false, nullptr, false);
-    // ESO45: composition events reached JS only. A behavior template owns the
-    // session now (ES18/F7), and the ancestor walk from the focused control
-    // reaches <body>, which is where that template matches. After the JS
-    // dispatch, as ES5 requires.
-    //
-    // The payload rides an InputIntent because that is what the behavior event
-    // map already knows how to expose — `data` and `composition_caret` — and
-    // the JS-side event object is not a Mark map a template can read.
     InputIntent comp_intent;
     comp_intent.type = INPUT_INTENT_INSERT_COMPOSITION_TEXT;
     comp_intent.data = data ? data : "";
     comp_intent.is_composing = true;
     comp_intent.composition_caret = evcon->composition_caret_hint;
-    dispatch_behavior_handler(evcon, target, type, &comp_intent, nullptr);
+    // F20: composition joins the same author-then-UA dispatch as every other
+    // trusted input, preserving its editing payload for the behavior action.
+    radiant_dispatch_built_event(evcon, target, build_composition_event_item,
+        &args, false, nullptr, true, type, &comp_intent);
 }
 
 /**
@@ -6998,7 +6906,7 @@ static void radiant_dispatch_focus_event(EventContext* evcon, View* target,
 {
     FocusEventBuildArgs args = {type, related};
     radiant_dispatch_built_event(evcon, target, build_focus_event_item,
-        &args, false);
+        &args, false, nullptr, true, type);
 }
 
 /**
@@ -7021,7 +6929,7 @@ static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
 {
     SimpleEventBuildArgs args = {type, bubbles, cancelable};
     return radiant_dispatch_built_event(evcon, target, build_simple_event_item,
-        &args, true);
+        &args, true, nullptr, true, type);
 }
 
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event);
@@ -7040,11 +6948,6 @@ extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
     EventContext evcon;
     event_context_init(&evcon, uicon, &event);
     evcon.target = target;
-    DomElement* dom_target = radiant_view_to_dom_element(target);
-    if (!dom_target) {
-        event_context_cleanup(&evcon);
-        return false;
-    }
     // F2c: the template commits, here as on the pointer and keyboard paths. The
     // sim used to write selectedness itself, which left a second copy of the
     // commit policy — including radio-style exclusivity concerns — that no test
@@ -7056,10 +6959,14 @@ extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
         commit_intent.option_index = selected_index;
         radiant_dispatch_behavior_option_commit(&evcon, target, &commit_intent);
     }
-    bool prevented = false;
-    {
-        JsDispatchScope dispatch_scope(&evcon);
+    JsDispatchScope dispatch_scope(&evcon);
+    if (event_document_has_js_runtime(&evcon)) {
         if (!dispatch_scope.active) {
+            event_context_cleanup(&evcon);
+            return false;
+        }
+        DomElement* dom_target = radiant_view_to_dom_element(target);
+        if (!dom_target) {
             event_context_cleanup(&evcon);
             return false;
         }
@@ -7067,13 +6974,9 @@ extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
         // before firing change so handlers reading target.value see it.
         js_dom_select_set_selected_index_bridge((void*)dom_target,
                                                 (Item){.item = i2it(selected_index)});
-        Item target_item = js_dom_wrap_element(dom_target);
-        Item input_ev = js_create_event("input", true, false);
-        js_dom_dispatch_event(target_item, input_ev);
-        Item change_ev = js_create_event("change", true, false);
-        js_dom_dispatch_event(target_item, change_ev);
-        prevented = radiant_dom_event_default_prevented(change_ev);
     }
+    radiant_dispatch_simple_event(&evcon, target, "input", true, false);
+    bool prevented = radiant_dispatch_simple_event(&evcon, target, "change", true, false);
     event_context_cleanup(&evcon);
     return prevented;
 }
@@ -7150,7 +7053,7 @@ static bool radiant_dispatch_wheel_event(EventContext* evcon, View* target,
 {
     WheelEventBuildArgs args = {client_x, client_y, delta_x, delta_y, mods};
     return radiant_dispatch_built_event(evcon, target, build_wheel_event_item,
-        &args, true);
+        &args, true, nullptr, true, "wheel");
 }
 
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) {
@@ -8308,7 +8211,6 @@ static bool prepare_previous_focus_blur(EventContext* evcon,
 static void dispatch_focus_change_observed(EventContext* evcon, View* target) {
     if (!evcon || !target) return;
     radiant_dispatch_simple_event(evcon, target, "change", true, false);
-    dispatch_lambda_handler_without_js(evcon, target, "change");
     sm_observe_action(event_context_target_state(evcon),
                       SM_ACT_DISPATCH_CHANGE);
 }
@@ -8318,11 +8220,9 @@ static void dispatch_focus_blur_observed(EventContext* evcon,
                                          View* related_target) {
     if (!evcon || !target) return;
     radiant_dispatch_focus_event(evcon, target, "blur", related_target);
-    dispatch_lambda_handler_without_js(evcon, target, "blur");
     sm_observe_action(event_context_target_state(evcon),
                       SM_ACT_DISPATCH_BLUR);
     radiant_dispatch_focus_event(evcon, target, "focusout", related_target);
-    dispatch_lambda_handler_without_js(evcon, target, "focusout");
 }
 
 /**
@@ -8378,9 +8278,7 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         }
 
         radiant_dispatch_focus_event(evcon, new_focus, "focus", prev_focus);
-        dispatch_lambda_handler_without_js(evcon, new_focus, "focus");
         radiant_dispatch_focus_event(evcon, new_focus, "focusin", prev_focus);
-        dispatch_lambda_handler_without_js(evcon, new_focus, "focusin");
 
         // F1 (Radiant_Design_Form_Input.md §3.1): snapshot the value at
         // focus time so a later blur can decide whether to fire `change`.
@@ -10065,11 +9963,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Set :active state
             update_active_state(&evcon, evcon.target, true);
 
-            if (dispatch_lambda_handler_without_js(&evcon, evcon.target,
-                                                   "mousedown")) {
-                evcon.need_repaint = true;
-            }
-
             bool pointer_prevented = radiant_dispatch_pointer_event(
                 &evcon, evcon.target, "pointerdown",
                 btn_event->x, btn_event->y, btn_event->button,
@@ -10538,10 +10431,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     event_mod_super(btn_event->mods),
                     1);
                 if (up_prevented) evcon.default_prevented = true;
-                if (dispatch_lambda_handler_without_js(&evcon, evcon.target,
-                                                       "mouseup")) {
-                    evcon.need_repaint = true;
-                }
             }
 
             // Stage 4C: JS drop + dragend for script editors, gated on the
@@ -11260,18 +11149,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (prevented) evcon.default_prevented = true;
             focused = focus_get(state);
         }
-        if (!rich_keydown_dispatched && focused &&
-            (key_event->key == RDT_KEY_BACKSPACE ||
-             key_event->key == RDT_KEY_DELETE ||
-             key_event->key == RDT_KEY_ENTER ||
-             key_event->key == RDT_KEY_ESCAPE)) {
-            if (dispatch_lambda_handler_without_js(
-                    &evcon, focused, "keydown", nullptr, nullptr, true, true)) {
-                evcon.need_repaint = true;
-                focused = focus_get(state);
-            }
-        }
-
         // Enter activates immediately, but Space only arms a pending click.
         // The identity pin lets a cancelable keydown reconcile the DOM without
         // turning keyup into a dangling View* access (D4.5.1v3).
@@ -11653,33 +11530,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     char utf8_buf[5];
                     size_t utf8_len = utf8_encode_z(text_event->codepoint, utf8_buf);
                     if (utf8_len > 0) {
-                        // Pre-mutation `input`: the Reactive_UI contract where an
-                        // app template owns the text and splices it itself, so
-                        // claiming it skips the engine's own insert below. UA
-                        // behavior must NOT see this one — it fires before the
-                        // value exists, and claiming it would stop typing.
-                        if (dispatch_lambda_handler(&evcon, focused, "input", nullptr,
-                                                    nullptr, /*allow_behavior=*/false,
-                                                    /*legacy_author=*/true)) {
-                            evcon.need_repaint = true;
-                            View* live_focus = focus_get(state);
-                            if (live_focus && live_focus->is_element()) {
-                                DomElement* live_elem = lam::dom_require_element(live_focus);
-                                if (tc_is_text_control(live_elem)) {
-                                    uint32_t next_offset = a + (uint32_t)utf8_len;
-                                    dispatch_form_caret_collapse(&evcon, live_elem, state,
-                                        live_focus, next_offset, "lambdaInsertText");
-                                }
-                            }
-                        } else {
-                            DomDocument* restore_doc = elem->doc;
-                            const char* restore_id = elem->id;
-                            bool replaced = dispatch_form_text_replace(&evcon, elem, state, focused,
-                                a, b, utf8_buf, (uint32_t)utf8_len,
-                                INPUT_INTENT_INSERT_TEXT);
-                            if (replaced) {
-                                restore_form_text_focus_after_input(state, restore_doc, restore_id);
-                            }
+                        // F20 makes beforeinput the sole pre-mutation author
+                        // entry. An author template must prevent default to
+                        // own the edit; a post-mutation input handler observes
+                        // the resulting value through the same record path.
+                        DomDocument* restore_doc = elem->doc;
+                        const char* restore_id = elem->id;
+                        bool replaced = dispatch_form_text_replace(&evcon, elem, state, focused,
+                            a, b, utf8_buf, (uint32_t)utf8_len,
+                            INPUT_INTENT_INSERT_TEXT);
+                        if (replaced) {
+                            restore_form_text_focus_after_input(state, restore_doc, restore_id);
                         }
                     }
                 }

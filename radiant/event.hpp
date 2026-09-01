@@ -1260,19 +1260,6 @@ bool editing_geometry_caret_rect(UiContext* uicon,
 struct EventContext;
 struct DocState;
 
-// Form controls retain this callback bridge because their value-store mutation
-// is owned by text_edit.cpp rather than the contenteditable action registry.
-typedef bool (*EditingDispatchInputEventFn)(EventContext* evcon, View* target,
-                                            const char* type,
-                                            const EditingIntent* intent,
-                                            void* user);
-struct EditingFormNotificationHooks {
-    EditingDispatchInputEventFn dispatch_input_event;
-    void* user;
-};
-
-struct EventContext;
-
 // Splices performed by the dom package's editing waist (radiant.replace_range).
 // Sampled either side of a beforeinput dispatch to tell an applier that edited
 // from one that claimed the intent and changed nothing (a maxlength-blocked
@@ -1281,26 +1268,6 @@ extern "C" uint64_t radiant_splice_epoch(void);
 // Change requests made by a behavior template's `commit` handler (ESO42),
 // sampled across the commit dispatch to read its answer.
 extern "C" uint64_t radiant_change_request_epoch(void);
-
-bool editing_dispatch_form_beforeinput(EventContext* evcon,
-                                       const EditingSurface* surface,
-                                       const EditingIntent* intent,
-                                       const EditingFormNotificationHooks* hooks,
-                                       bool* out_prevented,
-                                       // Set when a UA behavior template applied
-                                       // the edit itself (F5). Prevention then
-                                       // means "already done", not "cancelled",
-                                       // so the caller must skip its splice but
-                                       // must NOT restore the pre-edit selection
-                                       // — the applier has already moved the
-                                       // caret past the text it inserted.
-                                       bool* out_applied = nullptr);
-
-void editing_dispatch_form_input(EventContext* evcon,
-                                 const EditingSurface* surface,
-                                 const EditingIntent* intent,
-                                 const EditingFormNotificationHooks* hooks);
-
 
 // ===== editing controller =====
 
@@ -1678,7 +1645,7 @@ uint32_t te_next_word_byte(const char* buf, uint32_t buf_len, uint32_t byte_off)
 // places the caret at `start + repl_len`, clears any active selection, and
 // pushes a history entry. Legacy fallback only: dispatches "input" via the
 // legacy event bus. Cancellable beforeinput is owned by the unified dispatcher
-// in event.cpp/editing_dispatch.cpp.
+// in event.cpp.
 //
 // `repl` may be NULL with repl_len=0 to perform a pure deletion. Returns
 // false if `elem` is not a text control or the range is invalid.
