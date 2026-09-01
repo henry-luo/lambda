@@ -1809,6 +1809,24 @@ public:
         set(name, ItemNull);
     }
 
+    void put_element_class(const char* name, const DomElement* element) {
+        if (!element || element->class_count == 0 || !element->class_names) {
+            put(name, "");
+            return;
+        }
+        if (element->class_count == 1) {
+            put(name, element->class_names[0]);
+            return;
+        }
+        StrBuf* classes = strbuf_new_cap(64);
+        for (int i = 0; i < element->class_count; i++) {
+            if (i > 0) strbuf_append_char(classes, ' ');
+            strbuf_append_str(classes, element->class_names[i]);
+        }
+        put(name, classes->str);
+        strbuf_free(classes);
+    }
+
 private:
     void set(const char* name, Item value) {
         Item result = ItemNull;
@@ -1840,6 +1858,29 @@ static bool event_record_is_cancelable(const char* event_name) {
            strcmp(event_name, "selectionchange") != 0;
 }
 
+static bool event_record_bubbles(const char* event_name) {
+    if (!event_name) return false;
+    // Mirror the trusted event factories: these families have a target phase
+    // but do not continue into the ancestor author-template positions.
+    return strcmp(event_name, "focus") != 0 &&
+           strcmp(event_name, "blur") != 0 &&
+           strcmp(event_name, "mouseenter") != 0 &&
+           strcmp(event_name, "mouseleave") != 0 &&
+           strcmp(event_name, "pointerenter") != 0 &&
+           strcmp(event_name, "pointerleave") != 0 &&
+           strcmp(event_name, "scroll") != 0 &&
+           strcmp(event_name, "load") != 0 &&
+           strcmp(event_name, "error") != 0 &&
+           strcmp(event_name, "invalid") != 0 &&
+           strcmp(event_name, "selectionchange") != 0;
+}
+
+static bool dom_event_bubbles(Item event) {
+    Item bubbles = ItemNull;
+    return radiant_dom_event_member_get(event, "bubbles", &bubbles) &&
+           js_is_truthy(bubbles);
+}
+
 static Item build_dom_event_record(DomDocument* doc, View* target,
                                    const char* event_name, EventContext* evcon,
                                    const InputIntent* intent = nullptr,
@@ -1847,7 +1888,8 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     RootFrame roots(1);
     Rooted<Item> event_root(roots, existing_event);
     if (!radiant_dom_event_is(event_root.get())) {
-        event_root.set(radiant_dom_event_create(event_name ? event_name : "", true,
+        event_root.set(radiant_dom_event_create(event_name ? event_name : "",
+                                                event_record_bubbles(event_name),
                                                 event_record_is_cancelable(event_name),
                                                 false, JS_CLASS_EVENT));
         radiant_dom_event_set_trusted(event_root.get(), evcon != nullptr);
@@ -1948,24 +1990,29 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
             if (tgt_elem->tag_name) {
                 mb.put("target_tag", tgt_elem->tag_name);
             }
-            // build space-separated class string from class_names array
-            if (tgt_elem->class_count > 0 && tgt_elem->class_names) {
-                if (tgt_elem->class_count == 1) {
-                    mb.put("target_class", tgt_elem->class_names[0]);
-                } else {
-                    StrBuf* sb = strbuf_new_cap(64);
-                    for (int i = 0; i < tgt_elem->class_count; i++) {
-                        if (i > 0) strbuf_append_char(sb, ' ');
-                        strbuf_append_str(sb, tgt_elem->class_names[i]);
-                    }
-                    mb.put("target_class", sb->str);
-                    strbuf_free(sb);
-                }
-            } else {
-                mb.put("target_class", "");
+            mb.put_element_class("target_class", tgt_elem);
+
+            // The closest container identifies controls nested in a component
+            // when an ancestor template receives the bubbling event.
+            DomNode* parent_node = tgt_node->parent;
+            while (parent_node && parent_node->node_type != DOM_NODE_ELEMENT) {
+                parent_node = parent_node->parent;
             }
+            DomElement* parent_elem = parent_node
+                ? lam::dom_require_element(parent_node) : nullptr;
+            mb.put_element_class("target_parent_class", parent_elem);
         }
     }
+
+    // A text-node hit retains its label separately from the element class.
+    // Lambda templates use this to distinguish labelled controls sharing a
+    // container, and the field must be present even when the target is not text.
+    const char* target_text = "";
+    if (target && target->node_type == DOM_NODE_TEXT) {
+        DomText* text_target = lam::dom_require_text(static_cast<DomNode*>(target));
+        if (text_target && text_target->text) target_text = text_target->text;
+    }
+    mb.put("target_text", target_text);
 
     // mouse coordinates (from event context)
     if (evcon) {
@@ -1973,13 +2020,21 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
         mb.put("y", (double)evcon->event.mouse_button.y);
     }
 
-    // for "input" events: add typed character as UTF-8 string
+    // InputIntent owns an input event's data. The native RdtEvent union can
+    // still hold the preceding key code when a deletion emits `input`, so it
+    // must not be decoded as a character.
     if (evcon && strcmp(event_name, "input") == 0) {
-        uint32_t cp = evcon->event.text_input.codepoint;
-        if (cp > 0) {
-            char utf8_buf[5];
-            utf8_encode_z(cp, utf8_buf);
-            mb.put("char", utf8_buf);
+        if (intent) {
+            mb.put("char", intent->data ? intent->data : "");
+        } else {
+            uint32_t cp = evcon->event.text_input.codepoint;
+            if (cp > 0) {
+                char utf8_buf[5];
+                utf8_encode_z(cp, utf8_buf);
+                mb.put("char", utf8_buf);
+            } else {
+                mb.put("char", "");
+            }
         }
     }
 
@@ -2409,9 +2464,19 @@ typedef struct AuthorTemplateCascade {
     EventContext* evcon;
     Item event;
     bool dirty;
+    // A template owns a rendered component subtree, not each DOM node inside
+    // it. Record component deliveries so bubbling reaches parent templates
+    // without replaying one handler for every wrapper around the hit node.
+    const char* delivered_template_refs[64];
+    Item delivered_source_items[64];
+    int delivered_count;
 } AuthorTemplateCascade;
 
 static thread_local EventContext* s_active_js_dispatch_event_context = nullptr;
+// Native input already owns its author/UA dispatch sequencing. Keep its exact
+// record out of the script-created-event bridge, which would otherwise settle
+// the same default action once before the native caller reaches its seam.
+static thread_local Item s_synthetic_dom_dispatch_raw_event = ItemNull;
 static thread_local AuthorTemplateCascade s_author_template_cascades[8];
 static thread_local int s_author_template_cascade_depth = 0;
 
@@ -2505,6 +2570,11 @@ static View* settle_author_templates_for_ua(EventContext* evcon, View* target,
     if (!target_path) return target;
     DomDocument* doc = event_context_target_document(evcon);
     View* rebuilt_target = resolve_event_target_path(doc, target_path);
+    if (rebuilt_target && evcon) {
+        // The physical default-action seam follows this call. Keep its target
+        // on the replacement node after author reactivity retired the old one.
+        evcon->target = rebuilt_target;
+    }
     return rebuilt_target;
 }
 
@@ -2717,6 +2787,24 @@ static bool author_template_dispatch_begin(EventContext* evcon, Item event) {
     cascade->evcon = evcon;
     cascade->event = event;
     cascade->dirty = false;
+    cascade->delivered_count = 0;
+    return true;
+}
+
+static bool author_template_cascade_claim_participant(EventContext* evcon,
+                                                       RenderMapLookup lookup) {
+    AuthorTemplateCascade* cascade = author_template_cascade_current(evcon);
+    if (!cascade) return false;
+    for (int i = 0; i < cascade->delivered_count; i++) {
+        if (cascade->delivered_template_refs[i] == lookup.template_ref &&
+            cascade->delivered_source_items[i].item == lookup.source_item.item) {
+            return false;
+        }
+    }
+    if (cascade->delivered_count >= 64) return true;
+    int index = cascade->delivered_count++;
+    cascade->delivered_template_refs[index] = lookup.template_ref;
+    cascade->delivered_source_items[index] = lookup.source_item;
     return true;
 }
 
@@ -2764,6 +2852,7 @@ static bool dispatch_author_template_participant(EventContext* evcon,
     }
     TemplateHandlerEntry* handler = template_entry_find_handler(tmpl, event_name);
     if (!handler) return false;
+    if (!author_template_cascade_claim_participant(evcon, lookup)) return false;
     bool reconciled = false;
     (void)invoke_template_handler(evcon, evcon->target, event_name, intent,
                                   tmpl, handler, lookup.source_item,
@@ -3704,7 +3793,9 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
         template_registry_may_have_author_handler(g_template_registry, event_name);
     bool author_cascade = author_live && author_template_dispatch_begin(evcon, event);
     if (author_cascade) {
-        for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+        bool bubbles = dom_event_bubbles(event);
+        for (DomNode* node = static_cast<DomNode*>(target); node;
+             node = bubbles ? node->parent : nullptr) {
             if (!node->is_element()) continue;
             int phase = node == static_cast<DomNode*>(target) ? 2 : 3;
             radiant_dom_event_set_lambda_dispatch_position(
@@ -6198,7 +6289,12 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     }
     input_context = nullptr;
     js_dom_set_document(s->doc);
-    dom_js_mutation_reset_records(s->doc);
+    // A queued callback may change the DOM immediately before dispatching a
+    // custom event. Its records belong to that callback turn and must survive
+    // until the nested dispatch scope reconciles them.
+    if (!js_runtime_state.event_loop.callback_running) {
+        dom_js_mutation_reset_records(s->doc);
+    }
     s->active = true;
     return true;
 }
@@ -6546,7 +6642,10 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     EventTargetPath target_path = {};
     bool target_path_valid = capture_event_target_path(target_doc, target, &target_path);
     Rooted<Item> target_root(roots, js_dom_wrap_element(dom_target));
+    Item previous_raw_event = s_synthetic_dom_dispatch_raw_event;
+    s_synthetic_dom_dispatch_raw_event = event_root.get();
     js_dom_dispatch_event(target_root.get(), event_root.get());
+    s_synthetic_dom_dispatch_raw_event = previous_raw_event;
     bool prevented = radiant_dom_event_default_prevented(event_root.get());
     evcon->default_prevented = prevented;
     const char* resolved_event_name = fn_to_cstr(
@@ -7710,7 +7809,6 @@ static bool run_keyboard_click_default(EventContext* evcon, View* target) {
 // Only the exact bridge re-entry bypasses the wrapper below. A synthetic event
 // raised from a trusted listener is a distinct logical dispatch and must enter
 // the shared tier too.
-static thread_local Item s_synthetic_dom_dispatch_raw_event = ItemNull;
 
 extern "C" bool radiant_synthetic_dom_dispatch_is_reentry(Item event_item) {
     return event_item.item != ITEM_NULL &&
@@ -7720,16 +7818,21 @@ extern "C" bool radiant_synthetic_dom_dispatch_is_reentry(Item event_item) {
 extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
                                                       Item event_item) {
     if (!radiant_dom_event_is(event_item)) return ItemNull;
+    // A swap can retire a prior event target before queued library events run.
+    // Resolve the wrapper through its generation token before reading node data.
+    DomDocument* target_document = radiant_dom_item_document(target_item);
+    if (!target_document) return ItemNull;
     DomElement* target = (DomElement*)js_dom_unwrap_element(target_item);
-    if (!target || !target->doc) return ItemNull;
+    if (!target) return ItemNull;
+    DomNodeRef target_ref = dom_node_ref((DomNode*)target);
 
     EventContext evcon = {};
     evcon.target = static_cast<View*>(target);
-    evcon.target_document = target->doc;
-    evcon.ui_context = static_cast<UiContext*>(target->doc->js.host_ui_context);
+    evcon.target_document = target_document;
+    evcon.ui_context = static_cast<UiContext*>(target_document->js.host_ui_context);
     JsDispatchScope dispatch_scope(&evcon);
     bool borrows_script_context = !dispatch_scope.active && context &&
-        js_dom_get_document() == target->doc;
+        js_dom_get_document() == target_document;
     if (!dispatch_scope.active && !borrows_script_context) return ItemNull;
     EventContext* previous_active_event_context = s_active_js_dispatch_event_context;
     if (borrows_script_context) {
@@ -7748,6 +7851,14 @@ extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
     Item result = js_dom_dispatch_event(target_root.get(), event_root.get());
     s_synthetic_dom_dispatch_raw_event = previous_raw_event;
     if (!item_is_error(result)) {
+        // Listener code may have replaced the target subtree. The JS dispatch
+        // is complete, but native default behavior must not touch retired bytes.
+        if (!dom_node_ref_validate(target_document, target_ref)) {
+            if (borrows_script_context) {
+                s_active_js_dispatch_event_context = previous_active_event_context;
+            }
+            return result;
+        }
         const char* event_name = fn_to_cstr(js_get_name_key(event_root.get(), "type"));
         if (event_name && !radiant_dom_event_default_prevented(event_root.get())) {
             if (strcmp(event_name, "click") == 0) {
@@ -8602,6 +8713,28 @@ static bool navigation_apply_fragment(DomDocument* document,
     return true;
 }
 
+static bool navigation_release_evaluator_for_document_load(void) {
+    if (!context) return true;
+    EvalContext* previous = context;
+    if (previous->execution_depth != 0) {
+        log_error("navigation-exec: document load attempted during active evaluation");
+        return false;
+    }
+    // Link policy has returned, so a new document may claim the thread rather
+    // than nesting a second Runtime under the source document's evaluator.
+    if (js_runtime_state_thread_matches(previous) &&
+        !js_runtime_state_shutdown(previous)) {
+        log_error("navigation-exec: could not release source JS evaluator");
+        return false;
+    }
+    if (input_context == (Context*)previous) input_context = nullptr;
+    if (!eval_context_shutdown(previous)) {
+        log_error("navigation-exec: could not release source evaluator");
+        return false;
+    }
+    return true;
+}
+
 static bool navigation_execute_iframe_target(UiContext* uicon,
                                              DomElement* iframe,
                                              const char* url) {
@@ -8617,6 +8750,7 @@ static bool navigation_execute_iframe_target(UiContext* uicon,
     }
     ViewBlock* block = lam::view_require_block(iframe_view);
     if (!block || !block->embed) return false;
+    if (!navigation_release_evaluator_for_document_load()) return false;
     if (!iframe->set_attribute("src", url)) return false;
     if (block->scroller && block->scroll_mut()->pane) {
         block->scroll()->pane->reset();
@@ -8677,6 +8811,7 @@ static bool navigation_execute_top_target(UiContext* uicon, DomDocument* documen
     }
     int css_vw = (int)uicon->viewport_width; // INT_CAST_OK: loader viewport is integer CSS pixels.
     int css_vh = (int)uicon->viewport_height; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    if (!navigation_release_evaluator_for_document_load()) return false;
     BrowsingSession* session = uicon->browsing_session;
     DomDocument* new_doc = nullptr;
     if (session) {

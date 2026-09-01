@@ -1381,19 +1381,20 @@ static MIR_reg_t jm_emit_compound_assign(JsMirTranspiler* mt, JsOperator op,
     return jm_callr_2(mt, jm_compound_assign_fn(op), MIR_T_I64, left, right);
 }
 
+static MIR_reg_t jm_emit_to_int32_operand(JsMirTranspiler* mt,
+        JsAstNode* operand, TypeId operand_type) {
+    return operand_type == LMD_TYPE_INT
+        ? jm_transpile_as_native(mt, operand, LMD_TYPE_INT)
+        : jm_call_1(mt, "js_double_to_int32", MIR_T_I64,
+            MIR_T_D, MIR_new_reg_op(mt->ctx,
+                jm_transpile_as_native(mt, operand, LMD_TYPE_FLOAT)));
+}
+
 static MIR_reg_t jm_emit_int32_bitwise_binary(JsMirTranspiler* mt,
         JsAstNode* left, JsAstNode* right, TypeId left_type, TypeId right_type,
         MIR_insn_code_t op, const char* name) {
-    MIR_reg_t li = (left_type == LMD_TYPE_INT)
-        ? jm_transpile_as_native(mt, left, LMD_TYPE_INT)
-        : jm_call_1(mt, "js_double_to_int32", MIR_T_I64,
-            MIR_T_D, MIR_new_reg_op(mt->ctx,
-                jm_transpile_as_native(mt, left, LMD_TYPE_FLOAT)));
-    MIR_reg_t ri = (right_type == LMD_TYPE_INT)
-        ? jm_transpile_as_native(mt, right, LMD_TYPE_INT)
-        : jm_call_1(mt, "js_double_to_int32", MIR_T_I64,
-            MIR_T_D, MIR_new_reg_op(mt->ctx,
-                jm_transpile_as_native(mt, right, LMD_TYPE_FLOAT)));
+    MIR_reg_t li = jm_emit_to_int32_operand(mt, left, left_type);
+    MIR_reg_t ri = jm_emit_to_int32_operand(mt, right, right_type);
     MIR_reg_t result = jm_new_reg(mt, name, MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, op,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, li),
@@ -2351,8 +2352,8 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
             return publish(jm_emit_int32_bitwise_binary(mt, bin->left, bin->right,
                 left_type, right_type, MIR_XOR, "bxor"), VALUE_REP_F64);
         case JS_OP_BIT_LSHIFT: {
-            MIR_reg_t li = jm_transpile_as_native(mt, bin->left, LMD_TYPE_INT);
-            MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, LMD_TYPE_INT);
+            MIR_reg_t li = jm_emit_to_int32_operand(mt, bin->left, left_type);
+            MIR_reg_t ri = jm_emit_to_int32_operand(mt, bin->right, right_type);
             MIR_reg_t rcount = jm_new_reg(mt, "lsh_count", MIR_T_I64);
             jm_emit_reg_binary_op(mt, MIR_AND, rcount, ri, MIR_new_int_op(mt->ctx, 0x1F));
             // JS: ToInt32(li) << (ToUint32(ri) & 0x1F), result is signed 32-bit
@@ -2365,8 +2366,8 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
             return publish(jm_emit_int_to_double(mt, r32), VALUE_REP_F64);
         }
         case JS_OP_BIT_RSHIFT: {
-            MIR_reg_t li = jm_transpile_as_native(mt, bin->left, LMD_TYPE_INT);
-            MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, LMD_TYPE_INT);
+            MIR_reg_t li = jm_emit_to_int32_operand(mt, bin->left, left_type);
+            MIR_reg_t ri = jm_emit_to_int32_operand(mt, bin->right, right_type);
             MIR_reg_t rcount = jm_new_reg(mt, "rsh_count", MIR_T_I64);
             jm_emit_reg_binary_op(mt, MIR_AND, rcount, ri, MIR_new_int_op(mt->ctx, 0x1F));
             // JS: ToInt32(li) >> (ToUint32(ri) & 0x1F) — sign-extend li to 32-bit first
@@ -2378,8 +2379,8 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
             return publish(jm_emit_int_to_double(mt, r), VALUE_REP_F64);
         }
         case JS_OP_BIT_URSHIFT: {
-            MIR_reg_t li = jm_transpile_as_native(mt, bin->left, LMD_TYPE_INT);
-            MIR_reg_t ri = jm_transpile_as_native(mt, bin->right, LMD_TYPE_INT);
+            MIR_reg_t li = jm_emit_to_int32_operand(mt, bin->left, left_type);
+            MIR_reg_t ri = jm_emit_to_int32_operand(mt, bin->right, right_type);
             MIR_reg_t rcount = jm_new_reg(mt, "ursh_count", MIR_T_I64);
             jm_emit_reg_binary_op(mt, MIR_AND, rcount, ri, MIR_new_int_op(mt->ctx, 0x1F));
             // JS: ToUint32(li) >>> (ToUint32(ri) & 0x1F) — mask to 32-bit unsigned first

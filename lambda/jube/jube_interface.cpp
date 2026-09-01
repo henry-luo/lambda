@@ -681,6 +681,13 @@ int jube_member_get(Item receiver, Item key, Item* out) {
             return 1;
         }
     }
+    if (!js_active_runtime_state || !js_input || !js_input->pool) {
+        // Lambda event handlers can probe optional DOM fields. They have no JS
+        // input arena, so a miss must stay undefined instead of building a JS
+        // prototype and native method wrappers in an absent JS realm.
+        *out = jube_undefined_item();
+        return 1;
+    }
     // prototype-chain fallthrough: patched prototype members and inherited
     // Object.prototype methods must stay reachable on declared types
     Item proto = jube_type_prototype_for(trec);

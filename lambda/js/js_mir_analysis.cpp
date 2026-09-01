@@ -695,6 +695,14 @@ static bool jm_capture_binding_is_lexical_ancestor(JsMirTranspiler* mt,
     AstNodeId binding_id = ast_index_find(index, (AstNode*)entry->node);
     if (binding_id == AST_NODE_ID_INVALID || binding_id >= index->count) return true;
     AstFunctionId binding_owner = index->owner_functions[binding_id];
+    if (((JsAstNode*)entry->node)->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
+        // A declaration node starts a new indexed function owner, but its name
+        // binds in the enclosing lexical function.
+        AstNodeId parent_id = ast_index_parent_id(index, binding_id);
+        if (parent_id != AST_NODE_ID_INVALID && parent_id < index->count) {
+            binding_owner = index->owner_functions[parent_id];
+        }
+    }
     if (binding_owner == AST_FUNCTION_ID_INVALID) return true;
     for (JsFuncCollected* ancestor = jm_parent_collected_func(mt, fc);
             ancestor; ancestor = jm_parent_collected_func(mt, ancestor)) {

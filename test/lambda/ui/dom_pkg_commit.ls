@@ -13,11 +13,17 @@ view <page> state changes: 0, seq: 0 {
   >
 }
 on change(evt) {
-  changes = changes + 1
-  seq = seq * 10 + 1
+  // F18 dispatches the producing template at target and bubble positions.
+  // Count the target delivery so this fixture tests one committed DOM event.
+  if (evt.event_phase == 2) {
+    changes = changes + 1
+    seq = seq * 10 + 1
+  }
 }
 on blur(evt) {
-  seq = seq * 10 + 2
+  if (evt.event_phase == 2) {
+    seq = seq * 10 + 2
+  }
 }
 
 let doc = <page>

@@ -1101,6 +1101,25 @@ RADIANT_C_API void* radiant_dom_unwrap_node(Item item) {
     return js_dom_unwrap_element_impl(item);
 }
 
+RADIANT_C_API DomDocument* radiant_dom_item_document(Item item) {
+    if (get_type_id(item) != LMD_TYPE_VMAP || !item.vmap ||
+            !radiant_dom_is_node_host_type(item.vmap->host_type)) {
+        return nullptr;
+    }
+    DomNode* node = (DomNode*)item.vmap->host_data;
+    if (!node || !s_radiant_dom_wrapper_index) return nullptr;
+    RadiantDomWrapperCacheIndexEntry probe = {.node = node, .entry = nullptr};
+    const RadiantDomWrapperCacheIndexEntry* found =
+        (const RadiantDomWrapperCacheIndexEntry*)hashmap_get(
+            s_radiant_dom_wrapper_index, &probe);
+    RadiantDomWrapperCacheEntry* entry = found ? found->entry : nullptr;
+    if (!entry || !entry->owner_doc ||
+            dom_node_ref_validate(entry->owner_doc, entry->node_ref) != node) {
+        return nullptr;
+    }
+    return entry->owner_doc;
+}
+
 // ES24/F17: this is the only native state for an in-flight DOM Event. Payload
 // values stay in the owning VMap backing store, so values retained by script
 // remain traced without a retired conservative native-stack scan.

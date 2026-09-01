@@ -27065,6 +27065,7 @@ static void transpile_view_def(MirTranspiler* mt, AstViewNode* view) {
 
         // bind as state variable (boxed Item, type ANY)
         set_state_var(mt, state_name, state_val, MIR_T_I64, LMD_TYPE_ANY, state_name);
+        publish_var_binding(mt, state_name, se->entry);
     }
 
     // transpile the body expression
@@ -27197,6 +27198,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
             MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)sname));
 
         set_state_var(mt, sname, state_val, MIR_T_I64, LMD_TYPE_ANY, sname);
+        publish_var_binding(mt, sname, se->entry);
     }
 
     // re-emit view body let declarations so handlers can reference them

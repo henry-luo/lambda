@@ -7235,7 +7235,11 @@ static bool direct_view_add_state(LambdaDirectAstSink* sink,
         ? state->value->type : &TYPE_ANY;
     lambda_ast_register_name(tp, binding);
     NameEntry* entry = lookup_name_in_current_scope(tp, binding->name);
-    if (entry) entry->is_mutable = true;
+    if (entry) {
+        entry->is_mutable = true;
+        // Preserve the resolved declaration identity for both execution tiers.
+        state->entry = entry;
+    }
     return true;
 }
 

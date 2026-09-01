@@ -643,7 +643,7 @@ edit <todo_app> state active_file: "", creating_file: false, new_file_name: "", 
 }
 on click(evt) {
   if (evt.target_class == "new-file-btn" or
-      (evt.target_class == "add-icon" and creating_file == false) or
+      (evt.target_class == "add-icon" and evt.target_parent_class == "new-file-btn" and creating_file == false) or
       evt.target_text == "New file") {
     creating_file = true
     new_file_name = ""

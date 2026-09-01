@@ -561,6 +561,7 @@ typedef struct AstViewNode : AstNode {
 typedef struct AstStateEntry : AstNode {
     String* name;               // state variable name
     AstNode* value;             // initial value expression
+    NameEntry* entry;           // canonical lexical binding for state reads/writes
     struct AstStateEntry* next_state; // next state entry in list
 } AstStateEntry;
 
