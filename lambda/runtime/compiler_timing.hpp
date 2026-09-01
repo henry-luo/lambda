@@ -39,6 +39,7 @@ typedef enum CompilerFactBits {
     COMPILER_FACT_MIR_LOWERED = 1u << 6,
     COMPILER_FACT_FINALIZED = 1u << 7,
     COMPILER_FACT_PRELINKED = 1u << 8,
+    COMPILER_FACT_LINKED = 1u << 9,
 } CompilerFactBits;
 
 typedef int (*CompilerPassRun)(void* context);

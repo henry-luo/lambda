@@ -310,6 +310,10 @@ typedef struct AstJoinKey : AstNode {
 typedef struct AstLoopNode : AstNode {
     String* name;               // primary loop variable (v in 'for v in expr')
     String* index_name;         // optional index variable (k in 'for k, v in expr'), NULL if not present
+    // Builder-resolved binding identities consumed directly by both backends.
+    // The spelling remains syntax only; lowering must not recreate this edge.
+    NameEntry* entry;
+    NameEntry* index_entry;
     AstNode *as;                // collection expression
     AstNode *on;                // optional join condition (`on a.k == b.k`)
     AstJoinKey* join_keys;      // linked list of equi-join key pairs

@@ -1,47 +1,5 @@
 #include "js_mir_internal.hpp"
 
-static MIR_reg_t jm_normalize_numeric_result(JsMirTranspiler* mt, MIR_reg_t result,
-        TypeId target_type, TypeId result_type, bool native_result) {
-    if (native_result) {
-        if (target_type == LMD_TYPE_FLOAT)
-            return jm_ensure_native_float(mt, result, result_type);
-        return jm_ensure_native_int(mt, result, result_type);
-    }
-    if (target_type == LMD_TYPE_FLOAT) return jm_emit_unbox_float(mt, result);
-    MIR_reg_t as_dbl = jm_emit_unbox_float(mt, result);
-    return jm_emit_double_to_int(mt, as_dbl);
-}
-
-bool jm_is_native_binary_expression(JsMirTranspiler* mt, JsBinaryNode* bin) {
-    if (!bin) return false;
-    TypeId lt = jm_get_effective_type(mt, bin->left);
-    TypeId rt = jm_get_effective_type(mt, bin->right);
-    bool both_numeric = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT) &&
-        (rt == LMD_TYPE_INT || rt == LMD_TYPE_FLOAT);
-    return both_numeric && bin->op != JS_OP_EXP &&
-        bin->op != JS_OP_AND && bin->op != JS_OP_OR;
-}
-
-bool jm_is_native_unary_expression(JsMirTranspiler* mt, JsUnaryNode* un) {
-    if (!un || !un->operand) return false;
-    TypeId op_type = jm_get_effective_type(mt, un->operand);
-    bool op_numeric = op_type == LMD_TYPE_INT || op_type == LMD_TYPE_FLOAT;
-    switch (un->op) {
-    case JS_OP_MINUS: case JS_OP_SUB:
-        return op_numeric;
-    case JS_OP_INCREMENT: case JS_OP_DECREMENT:
-        if (un->operand->node_type != JS_AST_NODE_IDENTIFIER) return false;
-        {
-            JsIdentifierNode* uid = (JsIdentifierNode*)un->operand;
-            const char* uvname = jm_var_name(uid->name);
-            JsMirVarEntry* uvar = jm_find_var(mt, uvname);
-            return uvar && (uvar->type_id == LMD_TYPE_INT ||
-                uvar->type_id == LMD_TYPE_FLOAT) && !uvar->from_env;
-        }
-    default:
-        return false;
-    }
-}
 #include "js_exec_profile.h"
 #include "../../lib/lambda_alloca.h"
 
@@ -272,7 +230,7 @@ MIR_reg_t jm_call_direct_native(JsMirTranspiler* mt, JsFuncCollected* callee,
     direct.normal = em_finish_direct_call_normal(&mt->em, direct,
         MIR_PENDING_REASON_UNKNOWN_CALL);
     MIR_reg_t result = direct.normal.reg;
-    mt->last_call_result_reg = 0;
+    mt->last_call_result = {};
     return result;
 }
 
@@ -896,62 +854,15 @@ MIR_reg_t jm_emit_double_to_int(JsMirTranspiler* mt, MIR_reg_t d_reg) {
     return result;
 }
 
-// Ensure a register is native int64_t, converting from boxed if needed
-MIR_reg_t jm_ensure_native_int(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_type) {
-    MIR_type_t rt = MIR_reg_type(mt->ctx, reg, mt->em.func);
-    if (rt == MIR_T_I64 && src_type == LMD_TYPE_INT) return reg;
-    if (rt == MIR_T_D) return jm_emit_double_to_int(mt, reg);
-    if (rt == MIR_T_F) {
-        MIR_reg_t d = jm_new_reg(mt, "f2d_i", MIR_T_D);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_F2D,
-            MIR_new_reg_op(mt->ctx, d), MIR_new_reg_op(mt->ctx, reg)));
-        return jm_emit_double_to_int(mt, d);
-    }
-    if (src_type == LMD_TYPE_INT) return reg;  // already native int
-    if (src_type == LMD_TYPE_FLOAT) {
-        // Boxed JS Number values also live in I64 lanes; unbox before integer conversion.
-        MIR_reg_t as_dbl = jm_emit_unbox_float(mt, reg);
-        return jm_emit_double_to_int(mt, as_dbl);
-    }
-    // boxed Item of unknown type → call it2i for safe conversion
-    // (handles INT, FLOAT, INT64, BOOL items correctly)
-    return jm_callr_1(mt, "it2i", MIR_T_I64, reg);
-}
-
-// Ensure a register is native double, converting from int or boxed if needed
-MIR_reg_t jm_ensure_native_float(JsMirTranspiler* mt, MIR_reg_t reg, TypeId src_type) {
-    MIR_type_t rt = MIR_reg_type(mt->ctx, reg, mt->em.func);
-    if (rt == MIR_T_D) return reg;
-    if (rt == MIR_T_F) {
-        MIR_reg_t d = jm_new_reg(mt, "f2d_f", MIR_T_D);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_F2D,
-            MIR_new_reg_op(mt->ctx, d), MIR_new_reg_op(mt->ctx, reg)));
-        return d;
-    }
-    if (rt == MIR_T_I64 && src_type == LMD_TYPE_INT)
-        return jm_emit_int_to_double(mt, reg);
-    if (rt == MIR_T_I64 && src_type == LMD_TYPE_FLOAT) {
-        // Boxed JS Number values also live in I64 lanes; converting the tagged
-        // Item bits as an integer corrupts nested native-call arithmetic.
-        return jm_emit_unbox_float(mt, reg);
-    }
-    if (src_type == LMD_TYPE_FLOAT) return reg;  // already native double
-    if (src_type == LMD_TYPE_INT) return jm_emit_int_to_double(mt, reg);
-    // boxed Item → unbox
-    return jm_emit_unbox_float(mt, reg);
-}
-
 // Box a native value into an Item based on its type
 static MIR_reg_t jm_box_native_impl(JsMirTranspiler* mt, MIR_reg_t reg,
         TypeId type_id) {
     switch (type_id) {
     case LMD_TYPE_INT:   return jm_box_int_reg(mt, reg);
-    case LMD_TYPE_FLOAT: {
-        // P6 inlining can preserve a widened FLOAT semantic type while the
-        // emitted native value is still an integer register; push_d requires D.
-        MIR_reg_t d = jm_ensure_native_float(mt, reg, type_id);
-        return jm_box_float(mt, d);
-    }
+    case LMD_TYPE_FLOAT:
+        // MirValue records the physical lane; the caller handles F64 before
+        // this semantic fallback so no register-type probe is needed here.
+        return jm_box_float(mt, reg);
     case LMD_TYPE_BOOL: {
         MIR_reg_t result = jm_new_reg(mt, "boxb", MIR_T_I64);
         uint64_t BOOL_TAG = (uint64_t)LMD_TYPE_BOOL << 56;
@@ -970,17 +881,26 @@ MirValue jm_convert_rep(void* owner, MirValue value,
         reg = value.rep == VALUE_REP_RAW_NON_GC_POINTER &&
             value.semantic_type == LMD_TYPE_STRING
             ? jm_box_string(mt, value.reg)
+            // A structural node can widen its source contract to ANY while
+            // retaining an F64 carrier. This conversion follows the physical
+            // representation rather than re-inferring a scalar kind.
+            : value.rep == VALUE_REP_F64 ? jm_box_float(mt, value.reg)
             : jm_box_native_impl(mt, value.reg, value.semantic_type);
     } else if (value.rep == VALUE_REP_ITEM) {
-        reg = required == VALUE_REP_F64
-            ? jm_emit_unbox_float(mt, value.reg)
-            : jm_emit_unbox_int(mt, value.reg);
+        if (required == VALUE_REP_F64) {
+            reg = jm_emit_unbox_float(mt, value.reg);
+        } else if (required == VALUE_REP_I64 &&
+                value.semantic_type != LMD_TYPE_INT &&
+                value.semantic_type != LMD_TYPE_BOOL) {
+            // JS Number Items carry a double payload.  An int demand is a
+            // numeric conversion, not a tagged-word reinterpretation.
+            reg = jm_emit_double_to_int(mt, jm_emit_unbox_float(mt, value.reg));
+        } else {
+            reg = jm_emit_unbox_int(mt, value.reg);
+        }
     }
     if (!reg) return value;
-    MIR_type_t mir_type = required == VALUE_REP_F64 ? MIR_T_D : MIR_T_I64;
-    MirValue converted = em_value(reg, mir_type, value.semantic_type,
-        required, required == VALUE_REP_ITEM ? JIT_VALUE_BOXED_ITEM
-            : JIT_VALUE_NON_GC_SCALAR);
+    MirValue converted = em_value_for_rep(reg, value.semantic_type, required);
     converted.scalar_home_id = em_scalar_home_for_reg(&mt->em, reg);
     converted.scalar_provenance = converted.scalar_home_id
         ? SCALAR_PROVENANCE_ACTIVATION_HOME : SCALAR_PROVENANCE_NONE;
@@ -992,25 +912,8 @@ MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg,
     ValueRep actual = type_id == LMD_TYPE_FLOAT ? VALUE_REP_F64
         : type_id == LMD_TYPE_INT || type_id == LMD_TYPE_BOOL
             ? VALUE_REP_I64 : VALUE_REP_ITEM;
-    MIR_type_t mir_type = actual == VALUE_REP_F64 ? MIR_T_D : MIR_T_I64;
-    MirValue value = em_value(reg, mir_type, type_id, actual,
-        actual == VALUE_REP_ITEM ? JIT_VALUE_BOXED_ITEM
-            : JIT_VALUE_NON_GC_SCALAR);
+    MirValue value = em_value_for_rep(reg, type_id, actual);
     return em_require_rep(&mt->em, value, VALUE_REP_ITEM).reg;
-}
-
-// Safety net: ensure a register holds a boxed Item (I64).
-// If it's a native double/float, box it; otherwise return as-is.
-MIR_reg_t jm_ensure_boxed(JsMirTranspiler* mt, MIR_reg_t reg) {
-    MIR_type_t rtype = MIR_reg_type(mt->ctx, reg, mt->em.func);
-    if (rtype == MIR_T_D) return jm_box_float(mt, reg);
-    if (rtype == MIR_T_F) {
-        MIR_reg_t d = jm_new_reg(mt, "f2d_box", MIR_T_D);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_F2D,
-            MIR_new_reg_op(mt->ctx, d), MIR_new_reg_op(mt->ctx, reg)));
-        return jm_box_float(mt, d);
-    }
-    return reg;
 }
 
 // ============================================================================
@@ -1047,14 +950,14 @@ TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node) {
 
     case JS_AST_NODE_IDENTIFIER: {
         JsIdentifierNode* id = (JsIdentifierNode*)node;
-        const char* vname = jm_var_name(id->name);
-        JsMirVarEntry* var = jm_find_var(mt, vname);
+        JsMirVarEntry* var = jm_find_var_by_binding(mt, id->entry);
         if (var) return var->type_id;
         // P5: Check module-level variable type for arithmetic type inference.
         // When a MODVAR was initialized with a numeric literal, modvar_type is set
         // to LMD_TYPE_INT or LMD_TYPE_FLOAT; this enables native arithmetic paths.
         if (mt->module_consts) {
-            JsModuleConstEntry* mv_mc = jm_find_module_const(mt, vname);
+            JsModuleConstEntry* mv_mc = jm_find_module_const_by_binding(mt,
+                id->entry);
             if (mv_mc && mv_mc->const_type == MCONST_MODVAR &&
                 (mv_mc->modvar_type == LMD_TYPE_INT || mv_mc->modvar_type == LMD_TYPE_FLOAT))
                 return mv_mc->modvar_type;
@@ -1255,8 +1158,7 @@ Type* jm_get_full_type(JsMirTranspiler* mt, JsAstNode* node) {
     if (!node) return NULL;
     if (node->node_type == JS_AST_NODE_IDENTIFIER) {
         JsIdentifierNode* id = (JsIdentifierNode*)node;
-        const char* vname = jm_var_name(id->name);
-        JsMirVarEntry* var = jm_find_var(mt, vname);
+        JsMirVarEntry* var = jm_find_var_by_binding(mt, id->entry);
         if (var) return var->full_type;
     }
     return NULL;
@@ -1291,7 +1193,8 @@ static JsFuncCollected* jm_current_scope_env_func(JsMirTranspiler* mt) {
 
 // Helper: if a variable is in the current function's scope env, mark it and write-back.
 // Called after jm_set_var or assignment to propagate value to shared scope env.
-void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_reg_t val_reg, TypeId type_id) {
+void jm_scope_env_mark_and_writeback_generated(JsMirTranspiler* mt,
+        const char* name, MIR_reg_t val_reg, TypeId type_id) {
     if (mt->scope_env_reg == 0) return;
     JsMirVarEntry* active_var = jm_find_var(mt, name);
     if (active_var && active_var->in_scope_env && active_var->scope_env_reg == mt->scope_env_reg &&
@@ -1357,20 +1260,50 @@ void jm_scope_env_mark_and_writeback(JsMirTranspiler* mt, const char* name, MIR_
     }
 }
 
-void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* name,
-        JsAstNode* binding_node, MIR_reg_t val_reg, TypeId type_id) {
+static NameEntry* jm_scope_env_binding_for_node(JsAstNode* node) {
+    if (!node) return NULL;
+    switch (node->node_type) {
+    case JS_AST_NODE_IDENTIFIER:
+        return ((JsIdentifierNode*)node)->entry;
+    case JS_AST_NODE_VARIABLE_DECLARATOR: {
+        JsAstNode* id = ((JsVariableDeclaratorNode*)node)->id;
+        return id && id->node_type == JS_AST_NODE_IDENTIFIER
+            ? ((JsIdentifierNode*)id)->entry : NULL;
+    }
+    case JS_AST_NODE_FUNCTION_DECLARATION:
+    case JS_AST_NODE_FUNCTION_EXPRESSION:
+    case JS_AST_NODE_ARROW_FUNCTION:
+        return ((JsFunctionNode*)node)->entry;
+    case JS_AST_NODE_CLASS_DECLARATION:
+    case JS_AST_NODE_CLASS_EXPRESSION: {
+        JsClassNode* class_node = (JsClassNode*)node;
+        return class_node->outer_entry ? class_node->outer_entry : class_node->entry;
+    }
+    default:
+        return NULL;
+    }
+}
+
+void jm_scope_env_mark_and_writeback_entry(JsMirTranspiler* mt,
+        const char* name, NameEntry* binding, MIR_reg_t val_reg, TypeId type_id) {
     if (!mt || mt->scope_env_reg == 0) return;
-    JsMirVarEntry* active_var = jm_find_var(mt, name);
+    // Source writeback is keyed by the compiler binding, never an equally
+    // spelled outer lexical. Generated runtime names use the separate helper.
+    if (!binding) return;
+    JsMirVarEntry* active_var = jm_find_var_by_binding(mt, binding);
     if (active_var && active_var->in_scope_env && active_var->scope_env_reg == mt->scope_env_reg &&
         active_var->scope_env_slot >= 0) {
-        jm_scope_env_mark_and_writeback(mt, name, val_reg, type_id);
+        MIR_reg_t val = jm_is_native_type(type_id)
+            ? jm_box_native(mt, val_reg, type_id) : val_reg;
+        jm_emit_store_i64(mt, active_var->scope_env_slot * (int)sizeof(uint64_t),
+            active_var->scope_env_reg, val);
         return;
     }
     JsFuncCollected* fc = jm_current_scope_env_func(mt);
     if (!fc || !fc->has_scope_env) return;
     for (int s = 0; s < fc->scope_env_count; s++) {
-        if (!jm_scope_env_name_matches_binding(fc->scope_env_names[s], name, binding_node)) continue;
-        JsMirVarEntry* var = jm_find_var(mt, name);
+        if (jm_scope_env_binding_at(fc, s) != binding) continue;
+        JsMirVarEntry* var = jm_find_var_by_binding(mt, binding);
         if (var) {
             var->in_scope_env = true;
             var->scope_env_slot = s;
@@ -1382,7 +1315,12 @@ void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* na
         jm_emit_store_i64(mt, s * (int)sizeof(uint64_t), mt->scope_env_reg, val);
         return;
     }
-    jm_scope_env_mark_and_writeback(mt, name, val_reg, type_id);
+}
+
+void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* name,
+        JsAstNode* binding_node, MIR_reg_t val_reg, TypeId type_id) {
+    NameEntry* binding = jm_scope_env_binding_for_node(binding_node);
+    jm_scope_env_mark_and_writeback_entry(mt, name, binding, val_reg, type_id);
 }
 
 // v23: truthiness check with inline fast-path for known boolean Items.
@@ -1438,8 +1376,7 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
     if (value.rep == VALUE_REP_RAW_NON_GC_POINTER) {
         value = em_require_rep(&mt->em, value, VALUE_REP_ITEM);
     }
-    bool native_result = value.rep == VALUE_REP_I64 || value.rep == VALUE_REP_F64;
-    TypeId result_type = native_result ? value.semantic_type : LMD_TYPE_ANY;
-    return jm_normalize_numeric_result(mt, value.reg, target_type, result_type,
-        native_result);
+    ValueRep target_rep = target_type == LMD_TYPE_FLOAT
+        ? VALUE_REP_F64 : VALUE_REP_I64;
+    return em_require_rep(&mt->em, value, target_rep).reg;
 }

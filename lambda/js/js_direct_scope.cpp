@@ -28,6 +28,45 @@ static void direct_walk_block(JsTranspiler* tp, JsBlockNode* block,
 static void direct_predeclare_vars(JsTranspiler* tp, JsAstNode* node);
 static void direct_predeclare_scope(JsTranspiler* tp, JsAstNode* node);
 
+static void direct_link_interp_import_binding(JsTranspiler* tp,
+        String* source, String* local_name, NameEntry* entry) {
+    if (!tp || !source || !local_name || !entry) return;
+    for (JsInterpImportBinding* binding = tp->interp_imports; binding;
+            binding = binding->next) {
+        // Both fields are parser-owned name-pool identities, not spellings.
+        if (binding->source == source && binding->local_name == local_name) {
+            binding->entry = entry;
+        }
+    }
+}
+
+static void direct_define_import_bindings(JsTranspiler* tp,
+        JsImportNode* import_node) {
+    if (!tp || !import_node) return;
+    if (import_node->default_name) {
+        import_node->default_entry = js_scope_define(tp,
+            import_node->default_name, (JsAstNode*)import_node, JS_VAR_CONST);
+        direct_link_interp_import_binding(tp, import_node->source,
+            import_node->default_name, import_node->default_entry);
+    }
+    if (import_node->namespace_name) {
+        import_node->namespace_entry = js_scope_define(tp,
+            import_node->namespace_name, (JsAstNode*)import_node, JS_VAR_CONST);
+        direct_link_interp_import_binding(tp, import_node->source,
+            import_node->namespace_name, import_node->namespace_entry);
+    }
+    for (JsAstNode* spec = import_node->specifiers; spec; spec = spec->next) {
+        if (spec->node_type != JS_AST_NODE_IMPORT_SPECIFIER) continue;
+        JsImportSpecifierNode* import_spec = (JsImportSpecifierNode*)spec;
+        if (import_spec->local_name) {
+            import_spec->local_entry = js_scope_define(tp,
+                import_spec->local_name, spec, JS_VAR_CONST);
+            direct_link_interp_import_binding(tp, import_node->source,
+                import_spec->local_name, import_spec->local_entry);
+        }
+    }
+}
+
 static void direct_walk_child(JsAstNode* child, void* opaque) {
     direct_walk_node((JsTranspiler*)opaque, child);
 }
@@ -108,7 +147,10 @@ static void direct_walk_pattern(DirectPatternWalk walk, JsAstNode* pattern) {
             }
             NameEntry* entry = js_scope_define(walk.tp, id->name, binding_node,
                 walk.kind);
-            if (walk.rest_binding) id->entry = entry;
+            // Every declaration pattern publishes its resolved binding. Later
+            // MIR module/local registration must use this identity rather than
+            // recovering a same-spelled name from a scope map.
+            id->entry = entry;
         }
         break;
     }
@@ -226,6 +268,15 @@ static void direct_define_function(JsTranspiler* tp, JsFunctionNode* function,
         ? JS_VAR_LET : JS_VAR_VAR;
     NameEntry* lexical = js_scope_define(tp, function->name,
         (JsAstNode*)function, kind);
+    // The declaration node is the stable source owner for every later
+    // collection and lowering pass. A later lookup runs inside the child
+    // function scope and cannot recover this enclosing binding (D8.2.4).
+    function->entry = lexical;
+    if (lexical && !lexical->is_lexical) {
+        // GlobalDeclarationInstantiation selects the final same-named function
+        // declaration; keep the shared var binding's owner on that declaration.
+        lexical->node = (AstNode*)function;
+    }
     if (tp->current_scope && tp->current_scope->is_function_body &&
             lexical && !lexical->is_lexical) {
         // FunctionDeclarationInstantiation replaces an existing parameter or
@@ -283,7 +334,9 @@ static void direct_define_function(JsTranspiler* tp, JsFunctionNode* function,
     placeholder->type = &TYPE_FUNC;
     NameEntry* outer = js_scope_define_in_scope(tp, var_scope,
         function->name, (JsAstNode*)placeholder, JS_VAR_VAR);
-    if (outer && !outer->is_parameter) lexical->annex_b_outer_binding = outer;
+    if (outer && !outer->is_parameter) {
+        lexical->annex_b_outer_binding = outer;
+    }
 }
 
 static void direct_predeclare_one(JsTranspiler* tp, JsAstNode* node) {
@@ -299,6 +352,10 @@ static void direct_predeclare_one(JsTranspiler* tp, JsAstNode* node) {
             declaration);
         return;
     }
+    if (node->node_type == JS_AST_NODE_IMPORT_DECLARATION) {
+        direct_define_import_bindings(tp, (JsImportNode*)node);
+        return;
+    }
     if (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION) {
         direct_define_function(tp, (JsFunctionNode*)node,
             tp->current_scope && tp->current_scope->kind == SCOPE_KIND_BLOCK
@@ -307,8 +364,10 @@ static void direct_predeclare_one(JsTranspiler* tp, JsAstNode* node) {
     }
     if (node->node_type == JS_AST_NODE_CLASS_DECLARATION) {
         JsClassNode* class_node = (JsClassNode*)node;
-        if (class_node->name) js_scope_define(tp, class_node->name,
-            (JsAstNode*)class_node, JS_VAR_LET);
+        if (class_node->name) {
+            class_node->outer_entry = js_scope_define(tp, class_node->name,
+                (JsAstNode*)class_node, JS_VAR_LET);
+        }
     }
 }
 
@@ -390,21 +449,13 @@ static void direct_walk_function(JsTranspiler* tp, JsFunctionNode* function,
         }
         self->is_mutable = false;
         self->is_function_name_binding = true;
+        function->entry = self;
         parent = name_scope;
     }
         JsScope* scope = js_scope_create(tp, JS_SCOPE_FUNCTION, parent);
     if (!scope) {
         if (name_scope) js_scope_pop(tp);
         return;
-    }
-    if (!method && function->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
-            function->name) {
-        // Duplicate function declarations replace the earlier hoisted value;
-        // the predeclaration pass only installs the first binding carrier.
-        NameEntry* declaration = js_scope_lookup_current(tp, function->name);
-        if (declaration && !declaration->is_parameter) {
-            declaration->node = (AstNode*)function;
-        }
     }
     scope->strict = parent ? parent->strict : tp->strict_mode;
     if (function->has_use_strict_directive) scope->strict = true;
@@ -570,7 +621,10 @@ static void direct_walk_class(JsTranspiler* tp, JsClassNode* class_node) {
         js_scope_define(tp, class_node->name, (JsAstNode*)class_node,
             JS_VAR_CONST);
         NameEntry* self = js_scope_lookup_current(tp, class_node->name);
-        if (self) self->is_mutable = false;
+        if (self) {
+            self->is_mutable = false;
+            class_node->entry = self;
+        }
     }
     direct_walk_node(tp, class_node->superclass);
     if (class_node->body &&
@@ -760,13 +814,27 @@ static void direct_walk_node(JsTranspiler* tp, JsAstNode* node) {
         direct_walk_node(tp, tried->finalizer);
         break;
     }
-    case JS_AST_NODE_IMPORT_DECLARATION:
+    case JS_AST_NODE_IMPORT_DECLARATION: {
+        direct_define_import_bindings(tp, (JsImportNode*)node);
+        break;
+    }
     case JS_AST_NODE_EXPORT_SPECIFIER:
     case JS_AST_NODE_IMPORT_SPECIFIER:
         break;
     case JS_AST_NODE_EXPORT_DECLARATION: {
         JsExportNode* export_node = (JsExportNode*)node;
         direct_walk_node(tp, export_node->declaration);
+        // Export specifiers retain the resolved declaration edge because MIR
+        // publication must not reconstruct a local binding from its spelling.
+        for (JsAstNode* spec = export_node->specifiers; spec;
+                spec = spec->next) {
+            if (spec->node_type == JS_AST_NODE_EXPORT_SPECIFIER) {
+                JsExportSpecifierNode* export_spec =
+                    (JsExportSpecifierNode*)spec;
+                export_spec->local_entry = js_scope_lookup(tp,
+                    export_spec->local_name);
+            }
+        }
         break;
     }
     case TS_AST_NODE_PARAMETER: {

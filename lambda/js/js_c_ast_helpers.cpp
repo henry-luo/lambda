@@ -2003,6 +2003,8 @@ JsAstNode* build_js_import_specifier_from_children(JsTranspiler* tp,
         tp, JS_AST_NODE_IMPORT_SPECIFIER, span, sizeof(JsImportSpecifierNode));
     specifier->remote_name = remote_name;
     specifier->local_name = local_name;
+    specifier->local_entry = local && local->node_type == JS_AST_NODE_IDENTIFIER
+        ? ((JsIdentifierNode*)local)->entry : NULL;
     specifier->type = NULL;
     return (JsAstNode*)specifier;
 }
@@ -2017,6 +2019,12 @@ JsAstNode* build_js_import_from_children(JsTranspiler* tp, SourceSpan span,
     node->source = js_module_source_from_literal(source);
     node->default_name = js_name_from_binding_node(default_name);
     node->namespace_name = js_name_from_binding_node(namespace_name);
+    node->default_entry = default_name &&
+            default_name->node_type == JS_AST_NODE_IDENTIFIER
+        ? ((JsIdentifierNode*)default_name)->entry : NULL;
+    node->namespace_entry = namespace_name &&
+            namespace_name->node_type == JS_AST_NODE_IDENTIFIER
+        ? ((JsIdentifierNode*)namespace_name)->entry : NULL;
     node->specifiers = specifiers;
     js_record_interp_import(tp, node->default_name, node->source,
         name_pool_create_len(tp->name_pool, "default", 7), false);
