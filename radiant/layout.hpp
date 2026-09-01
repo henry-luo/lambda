@@ -275,6 +275,7 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
                              bool break_anywhere,
                              bool break_word,
                              bool hyphenation,
+                             uint8_t text_autospace,
                              LayoutBidiRun* result);
 // Intrinsic measurements may temporarily replace the active font and allocate
 // pooled font props. One scope owns both restorations so early exits cannot

@@ -1204,7 +1204,8 @@ uint8_t layout_text_autospace_flags(LayoutContext* lycon,
                 ? style_tree_get_declaration(
                     element->specified_style, CSS_PROPERTY_TEXT_AUTOSPACE)
                 : nullptr;
-            if (element->blk && declaration) {
+            if (element->blk &&
+                (element->block()->text_autospace_is_set || declaration)) {
                 return element->block()->text_autospace;
             }
         }
@@ -1367,13 +1368,14 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
                              bool break_anywhere,
                              bool break_word,
                              bool hyphenation,
+                             uint8_t text_autospace,
                              LayoutBidiRun* result) {
     if (!lycon || !str || remaining == 0 || !result || !lycon->font.style ||
         (!font_box_handle(&lycon->font) && !lycon->font.style->font_handle) ||
         text_transform != CSS_VALUE_NONE ||
         font_variant == CSS_VALUE_SMALL_CAPS || break_anywhere || break_word ||
         hyphenation || lycon->font.style->letter_spacing != 0.0f ||
-        layout_text_autospace_flags(lycon) != 0) {
+        text_autospace != 0) {
         return false;
     }
 
@@ -1457,7 +1459,8 @@ static bool measure_shaped_bidi_run(LayoutContext* lycon,
     if (!layout_measure_bidi_run(
             lycon, str, (size_t)(text_end - str), text_transform,
             has_small_caps(lycon) ? CSS_VALUE_SMALL_CAPS : CSS_VALUE_NONE,
-            break_all, break_word, hyphenation, &result)) {
+            break_all, break_word, hyphenation,
+            layout_text_autospace_flags(lycon, text_node), &result)) {
         return false;
     }
     *out_bytes = (int)result.bytes; // INT_CAST_OK: bounded text run length

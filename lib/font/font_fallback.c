@@ -409,8 +409,14 @@ FontHandle* font_find_codepoint_fallback(FontContext* ctx, const FontStyleDesc* 
         void* platform_base_ref = NULL;
 #ifdef __APPLE__
         if (source_handle) {
-            base_font_ref = source_handle->ct_font_ref
-                ? source_handle->ct_font_ref : source_handle->ct_raster_ref;
+            // @font-face handles own an exact raw-data face; a CoreText name
+            // lookup may substitute an installed font and change fallback metrics.
+            if (source_handle->is_document_font && source_handle->ct_raster_ref) {
+                base_font_ref = source_handle->ct_raster_ref;
+            } else {
+                base_font_ref = source_handle->ct_font_ref
+                    ? source_handle->ct_font_ref : source_handle->ct_raster_ref;
+            }
         }
         if (style->platform_fallback_family && style->platform_fallback_family[0] &&
             utf_is_control(codepoint)) {

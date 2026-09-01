@@ -946,6 +946,7 @@ static bool intrinsic_measure_shaped_bidi_run(LayoutContext* lycon,
                                                CssEnum font_variant,
                                                bool break_anywhere,
                                                bool break_word,
+                                               uint8_t text_autospace,
                                                size_t* out_bytes,
                                                float* out_width,
                                                uint32_t* out_first_codepoint,
@@ -957,7 +958,7 @@ static bool intrinsic_measure_shaped_bidi_run(LayoutContext* lycon,
     LayoutBidiRun result = {};
     if (!layout_measure_bidi_run(
             lycon, str, remaining, text_transform, font_variant,
-            break_anywhere, break_word, false, &result)) {
+            break_anywhere, break_word, false, text_autospace, &result)) {
         return false;
     }
     *out_bytes = result.bytes;
@@ -1653,7 +1654,7 @@ TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                 uint32_t shaped_bidi_last = 0;
                 if (intrinsic_measure_shaped_bidi_run(
                         lycon, &str[i], length - i, text_transform,
-                        font_variant, break_anywhere, break_word,
+                        font_variant, break_anywhere, break_word, text_autospace,
                         &shaped_bidi_bytes, &shaped_bidi_width,
                         &shaped_bidi_first, &shaped_bidi_last)) {
                     float kerning = 0.0f;
