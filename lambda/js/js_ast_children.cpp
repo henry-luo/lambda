@@ -116,6 +116,16 @@ struct VisitContext {
     void* ctx;
 };
 
+static void visit_binding_child(AstNode* child, AstNode*, void* opaque) {
+    VisitContext* context = (VisitContext*)opaque;
+    context->visit((JsAstNode*)child, context->ctx);
+}
+
+static bool predicate_binding_child(AstNode* child, void* opaque) {
+    CoreVisitContext* context = (CoreVisitContext*)opaque;
+    return context->predicate((JsAstNode*)child, context->ctx);
+}
+
 static bool visit_child(JsAstNode* child, void* opaque) {
     VisitContext* context = (VisitContext*)opaque;
     context->visit(child, context->ctx);
@@ -123,10 +133,6 @@ static bool visit_child(JsAstNode* child, void* opaque) {
 }
 
 }  // namespace
-
-static bool js_ast_direct_eval_child(JsAstNode* child, void*) {
-    return js_ast_has_direct_eval_call(child);
-}
 
 static bool js_ast_function_boundary(JsAstNode* node, JsAstNode* root) {
     return node != root && (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION || node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION || node->node_type == JS_AST_NODE_ARROW_FUNCTION || node->node_type == JS_AST_NODE_METHOD_DEFINITION || node->node_type == JS_AST_NODE_CLASS_DECLARATION || node->node_type == JS_AST_NODE_CLASS_EXPRESSION);
@@ -136,40 +142,15 @@ static bool js_ast_lexical_function_boundary(JsAstNode* node, JsAstNode* root) {
     return node != root && (node->node_type == JS_AST_NODE_FUNCTION_DECLARATION || node->node_type == JS_AST_NODE_FUNCTION_EXPRESSION || node->node_type == JS_AST_NODE_METHOD_DEFINITION || node->node_type == JS_AST_NODE_CLASS_DECLARATION || node->node_type == JS_AST_NODE_CLASS_EXPRESSION);
 }
 
-bool js_ast_has_direct_eval_call(JsAstNode* node) {
-    if (!node) return false;
-    if (js_ast_function_boundary(node, NULL)) return false;
-    if (node->node_type == JS_AST_NODE_CALL_EXPRESSION) {
-        JsCallNode* call = (JsCallNode*)node;
-        if (!call->optional && call->callee &&
-                call->callee->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
-            // `eval?.()` is always indirect eval; only the bare call is direct.
-            if (id->name && id->name->len == 4 &&
-                    strncmp(id->name->chars, "eval", 4) == 0) return true;
-        }
-    }
-    return js_ast_any_child(node, js_ast_direct_eval_child, NULL);
-}
-
-bool js_ast_function_has_direct_eval(JsFunctionNode* function) {
-    if (!function) return false;
-    for (JsAstNode* param = (JsAstNode*)function->params; param;
-            param = (JsAstNode*)param->next) {
-        if (js_ast_has_direct_eval_call(param)) return true;
-    }
-    return js_ast_has_direct_eval_call((JsAstNode*)function->body);
-}
-
-struct JsAstObservationContext {
-    uint8_t mask;
-};
-
-static uint8_t js_ast_observation_node(JsAstNode* node, JsAstNode* root);
-
-static void js_ast_observation_child(JsAstNode* child, void* opaque) {
-    JsAstObservationContext* context = (JsAstObservationContext*)opaque;
-    context->mask |= js_ast_observation_node(child, NULL);
+static bool js_ast_call_is_direct_eval(JsAstNode* node) {
+    if (!node || node->node_type != JS_AST_NODE_CALL_EXPRESSION) return false;
+    JsCallNode* call = (JsCallNode*)node;
+    if (call->optional || !call->callee ||
+            call->callee->node_type != JS_AST_NODE_IDENTIFIER) return false;
+    JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
+    // `eval?.()` is always indirect eval; only the bare call is direct.
+    return id->name && id->name->len == 4 &&
+        strncmp(id->name->chars, "eval", 4) == 0;
 }
 
 static bool js_ast_identifier_named(JsAstNode* node, const char* name,
@@ -179,79 +160,94 @@ static bool js_ast_identifier_named(JsAstNode* node, const char* name,
     return value && value->len == length && strncmp(value->chars, name, length) == 0;
 }
 
-static uint8_t js_ast_observation_node(JsAstNode* node, JsAstNode* root) {
-    if (!node || js_ast_lexical_function_boundary(node, root)) return 0;
-    uint8_t mask = 0;
-    if (js_ast_identifier_named(node, "arguments", 9)) {
-        mask |= JS_AST_OBSERVES_ARGUMENTS;
-    } else if (js_ast_identifier_named(node, "this", 4)) {
-        mask |= JS_AST_OBSERVES_THIS;
-    } else if (js_ast_identifier_named(node, "new.target", 10)) {
-        mask |= JS_AST_OBSERVES_NEW_TARGET;
+struct JsAstFunctionFactWalk {
+    JsAstFunctionFacts* facts;
+    bool direct_eval_active;
+    bool observations_active;
+    bool with_active;
+    bool tail_active;
+    bool direct_body_active;
+};
+
+static void js_ast_collect_function_facts_node(JsAstNode* node,
+        JsAstFunctionFactWalk walk);
+
+static void js_ast_collect_function_facts_child(JsAstNode* child, void* opaque) {
+    js_ast_collect_function_facts_node(child,
+        *(JsAstFunctionFactWalk*)opaque);
+}
+
+static void js_ast_collect_function_facts_node(JsAstNode* node,
+        JsAstFunctionFactWalk walk) {
+    if (!node || !walk.facts) return;
+    if (js_ast_function_boundary(node, NULL)) {
+        if (walk.tail_active) walk.facts->tail_reuse_safe = false;
+        walk.direct_eval_active = false;
+        walk.with_active = false;
+        if (js_ast_lexical_function_boundary(node, NULL)) {
+            walk.observations_active = false;
+        }
     }
-    if (node->node_type == JS_AST_NODE_CALL_EXPRESSION ||
-            node->node_type == JS_AST_NODE_NEW_EXPRESSION) {
+    if (!walk.direct_eval_active && !walk.observations_active &&
+            !walk.with_active && !walk.tail_active) return;
+    if (walk.direct_eval_active && js_ast_call_is_direct_eval(node)) {
+        walk.facts->has_direct_eval = true;
+    }
+    if (walk.direct_body_active && walk.direct_eval_active &&
+            node->node_type == JS_AST_NODE_CALL_EXPRESSION) {
         JsCallNode* call = (JsCallNode*)node;
-        if (js_ast_identifier_named(call->callee, "super", 5)) {
-            mask |= JS_AST_OBSERVES_THIS;
-        }
-    } else if (node->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
-        JsMemberNode* member = (JsMemberNode*)node;
-        if (js_ast_identifier_named(member->object, "super", 5)) {
-            mask |= JS_AST_OBSERVES_THIS;
+        if (js_ast_identifier_named(call->callee, "super", 5) &&
+                (!walk.facts->has_direct_super_call ||
+                 node->source_span.start_byte < walk.facts->first_direct_super_call_start)) {
+            walk.facts->has_direct_super_call = true;
+            walk.facts->first_direct_super_call_start = node->source_span.start_byte;
         }
     }
-    JsAstObservationContext context = {mask};
-    js_ast_visit_children(node, js_ast_observation_child, &context);
-    return context.mask;
+    if (walk.observations_active) {
+        if (js_ast_identifier_named(node, "arguments", 9)) {
+            walk.facts->observations |= JS_AST_OBSERVES_ARGUMENTS;
+        } else if (js_ast_identifier_named(node, "this", 4)) {
+            walk.facts->observations |= JS_AST_OBSERVES_THIS;
+        } else if (js_ast_identifier_named(node, "new.target", 10)) {
+            walk.facts->observations |= JS_AST_OBSERVES_NEW_TARGET;
+        }
+        if (node->node_type == JS_AST_NODE_CALL_EXPRESSION ||
+                node->node_type == JS_AST_NODE_NEW_EXPRESSION) {
+            JsCallNode* call = (JsCallNode*)node;
+            if (js_ast_identifier_named(call->callee, "super", 5)) {
+                walk.facts->observations |= JS_AST_OBSERVES_THIS;
+            }
+        } else if (node->node_type == JS_AST_NODE_MEMBER_EXPRESSION) {
+            JsMemberNode* member = (JsMemberNode*)node;
+            if (js_ast_identifier_named(member->object, "super", 5)) {
+                walk.facts->observations |= JS_AST_OBSERVES_THIS;
+            }
+        }
+    }
+    if (walk.with_active && node->node_type == JS_AST_NODE_WITH_STATEMENT) {
+        walk.facts->has_with = true;
+    }
+    if (walk.tail_active && (node->node_type == JS_AST_NODE_WITH_STATEMENT ||
+            node->node_type == AST_NODE_TRY_STAM ||
+            js_ast_identifier_named(node, "eval", 4))) {
+        walk.facts->tail_reuse_safe = false;
+    }
+    js_ast_visit_children(node, js_ast_collect_function_facts_child, &walk);
 }
 
-uint8_t js_ast_function_observation_mask(JsFunctionNode* function) {
-    if (!function) return 0;
-    uint8_t mask = 0;
-    for (JsAstNode* param = (JsAstNode*)function->params; param;
+JsAstFunctionFacts js_ast_collect_function_facts(JsAstNode* params,
+        JsAstNode* body) {
+    JsAstFunctionFacts facts = {};
+    facts.tail_reuse_safe = true;
+    for (JsAstNode* param = params; param;
             param = (JsAstNode*)param->next) {
-        mask |= js_ast_observation_node(param, NULL);
+        js_ast_collect_function_facts_node(param, {&facts, true, true, false, true, false});
     }
-    return mask | js_ast_observation_node((JsAstNode*)function->body, NULL);
-}
-
-static bool js_ast_with_child(JsAstNode* child, void*) {
-    return js_ast_function_boundary(child, NULL) ? false :
-        child && (child->node_type == JS_AST_NODE_WITH_STATEMENT ||
-            js_ast_any_child(child, js_ast_with_child, NULL));
-}
-
-bool js_ast_function_has_with(JsFunctionNode* function) {
-    return function && js_ast_any_child((JsAstNode*)function->body,
-        js_ast_with_child, NULL);
-}
-
-bool js_ast_function_uses_arguments(JsFunctionNode* function) {
-    return (js_ast_function_observation_mask(function) &
-        JS_AST_OBSERVES_ARGUMENTS) != 0;
-}
-
-static bool js_ast_tail_reuse_node_safe(JsAstNode* node, JsAstNode* root);
-
-static bool js_ast_tail_reuse_child_unsafe(JsAstNode* child, void* opaque) {
-    return !js_ast_tail_reuse_node_safe(child, (JsAstNode*)opaque);
-}
-
-static bool js_ast_tail_reuse_node_safe(JsAstNode* node, JsAstNode* root) {
-    if (!node || js_ast_function_boundary(node, root)) return !node;
-    if (node->node_type == JS_AST_NODE_WITH_STATEMENT ||
-            node->node_type == AST_NODE_TRY_STAM) return false;
-    if (node->node_type == AST_NODE_IDENT) {
-        String* name = ((JsIdentifierNode*)node)->name;
-        if (name && name->len == 4 && strncmp(name->chars, "eval", 4) == 0) return false;
-    }
-    return !js_ast_any_child(node, js_ast_tail_reuse_child_unsafe, root);
-}
-
-bool js_ast_function_tail_reuse_safe(JsFunctionNode* function) {
-    return function && !js_ast_function_uses_arguments(function) &&
-        js_ast_tail_reuse_node_safe((JsAstNode*)function, (JsAstNode*)function);
+    js_ast_collect_function_facts_node(body,
+        {&facts, true, true, true, true, true});
+    facts.tail_reuse_safe = facts.tail_reuse_safe &&
+        !(facts.observations & JS_AST_OBSERVES_ARGUMENTS);
+    return facts;
 }
 
 bool js_ast_publish_extension_facts(AstNode* node, struct AstIndex* index) {
@@ -295,6 +291,119 @@ bool js_ast_any_child(JsAstNode* node, JsAstChildPredicate predicate, void* ctx)
     const ChildRow* row = row_for(node->node_type);
     if (!row) return false;
     return walk_child_row(node, row, predicate, ctx);
+}
+
+void js_ast_visit_binding_pattern_children(JsAstNode* node,
+        JsAstChildVisit visit, void* ctx) {
+    if (!visit) return;
+    VisitContext context = {visit, ctx};
+    ast_visit_binding_pattern_children((AstNode*)node, visit_binding_child,
+        &context);
+}
+
+bool js_ast_any_binding_pattern_child(JsAstNode* node,
+        JsAstChildPredicate predicate, void* ctx) {
+    if (!predicate) return false;
+    CoreVisitContext context = {NULL, predicate, ctx, false};
+    return ast_any_binding_pattern_child((AstNode*)node,
+        predicate_binding_child, &context);
+}
+
+JsIdentifierNode* js_ast_parameter_binding_identifier(JsAstNode* parameter) {
+    if (!parameter) return NULL;
+    if (parameter->node_type == JS_AST_NODE_IDENTIFIER) {
+        return (JsIdentifierNode*)parameter;
+    }
+    if (parameter->node_type == (int)TS_AST_NODE_PARAMETER) {
+        return js_ast_parameter_binding_identifier(
+            ((TsParameterNode*)parameter)->pattern);
+    }
+    if (parameter->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
+        return js_ast_parameter_binding_identifier(
+            ((JsAssignmentPatternNode*)parameter)->left);
+    }
+    if (parameter->node_type == JS_AST_NODE_REST_ELEMENT ||
+            parameter->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
+        return js_ast_parameter_binding_identifier(
+            ((JsSpreadElementNode*)parameter)->argument);
+    }
+    return NULL;
+}
+
+static bool js_ast_parameter_has_default_value(JsAstNode* parameter);
+
+static bool js_ast_parameter_default_child(JsAstNode* child, void*) {
+    return js_ast_parameter_has_default_value(child);
+}
+
+static bool js_ast_parameter_has_default_value(JsAstNode* parameter) {
+    return parameter &&
+        (parameter->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN ||
+         js_ast_any_binding_pattern_child(parameter,
+             js_ast_parameter_default_child, NULL));
+}
+
+static bool js_ast_parameter_names_equal(JsAstNode* left, JsAstNode* right) {
+    JsIdentifierNode* left_id = js_ast_parameter_binding_identifier(left);
+    JsIdentifierNode* right_id = js_ast_parameter_binding_identifier(right);
+    return left_id && right_id && left_id->name && right_id->name &&
+        left_id->name->len == right_id->name->len &&
+        memcmp(left_id->name->chars, right_id->name->chars,
+            left_id->name->len) == 0;
+}
+
+JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters) {
+    JsAstParameterFacts facts = {};
+    int formal_count = 0;
+    bool formal_ended = false;
+    JsAstNode* last_parameter = NULL;
+    for (JsAstNode* parameter = parameters; parameter;
+            parameter = parameter->next) {
+        if (!formal_ended) {
+            bool ends_formal_length =
+                parameter->node_type == JS_AST_NODE_REST_ELEMENT ||
+                parameter->node_type == JS_AST_NODE_SPREAD_ELEMENT ||
+                parameter->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN;
+            if (parameter->node_type == (int)TS_AST_NODE_PARAMETER) {
+                ends_formal_length = ends_formal_length ||
+                    ((TsParameterNode*)parameter)->default_value;
+            }
+            if (ends_formal_length) {
+                facts.formal_length = formal_count;
+                formal_ended = true;
+            } else {
+                formal_count++;
+            }
+        }
+        facts.has_default_params = facts.has_default_params ||
+            js_ast_parameter_has_default_value(parameter);
+        if (parameter->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN ||
+            parameter->node_type == JS_AST_NODE_ARRAY_PATTERN ||
+            parameter->node_type == JS_AST_NODE_OBJECT_PATTERN ||
+            parameter->node_type == JS_AST_NODE_REST_ELEMENT ||
+            parameter->node_type == JS_AST_NODE_SPREAD_ELEMENT ||
+            (parameter->node_type != JS_AST_NODE_IDENTIFIER &&
+             parameter->node_type != (int)TS_AST_NODE_PARAMETER)) {
+            facts.has_non_simple_params = true;
+        }
+        for (JsAstNode* later = parameter->next; later;
+                later = later->next) {
+            if (js_ast_parameter_names_equal(parameter, later)) {
+                facts.has_duplicate_param_names = true;
+                facts.first_duplicate_param =
+                    js_ast_parameter_binding_identifier(later);
+                break;
+            }
+        }
+        last_parameter = parameter;
+    }
+    if (last_parameter &&
+            (last_parameter->node_type == JS_AST_NODE_REST_ELEMENT ||
+             last_parameter->node_type == JS_AST_NODE_SPREAD_ELEMENT)) {
+        facts.has_rest_param = true;
+        facts.has_non_simple_params = true;
+    }
+    return facts;
 }
 
 bool js_ast_child_catalog_complete(void) {

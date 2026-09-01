@@ -40,236 +40,169 @@ static void direct_set_identifier(JsTranspiler* tp, JsIdentifierNode* id,
         ? entry->node->type : js_set_type_any(tp, ANY_OPEN_PARAM);
 }
 
-static void direct_bind_pattern(JsTranspiler* tp, JsAstNode* pattern,
-        JsVarKind kind, JsAstNode* owner, bool is_parameter,
-        bool is_for_in_head) {
-    if (!tp || !pattern) return;
+// Scope rebuilding shares the pattern shape while each mode retains its
+// distinct identifier, initializer, and object-rest semantics.
+enum DirectPatternWalkMode {
+    DIRECT_PATTERN_BIND,
+    DIRECT_PATTERN_DEFAULTS,
+    DIRECT_PATTERN_ASSIGNMENT,
+    DIRECT_PATTERN_DEFINE,
+};
+
+struct DirectPatternWalk {
+    JsTranspiler* tp;
+    JsVarKind kind;
+    JsAstNode* owner;
+    JsAstNode* declarator_owner;
+    DirectPatternWalkMode mode;
+    bool is_parameter;
+    bool is_for_in_head;
+    bool rest_binding;
+};
+
+static void direct_walk_pattern(DirectPatternWalk walk, JsAstNode* pattern) {
+    if (!walk.tp || !pattern) return;
     if (pattern->node_type == (JsAstNodeType)TS_AST_NODE_PARAMETER) {
-        direct_bind_pattern(tp, ((TsParameterNode*)pattern)->pattern, kind,
-            NULL, is_parameter, is_for_in_head);
+        TsParameterNode* parameter = (TsParameterNode*)pattern;
+        if (walk.mode == DIRECT_PATTERN_ASSIGNMENT) {
+            direct_walk_node(walk.tp, pattern);
+            return;
+        }
+        walk.owner = NULL;
+        direct_walk_pattern(walk, parameter->pattern);
+        if (walk.mode == DIRECT_PATTERN_DEFAULTS) {
+            direct_walk_node(walk.tp, parameter->default_value);
+        }
         return;
     }
     switch (pattern->node_type) {
     case JS_AST_NODE_IDENTIFIER: {
         JsIdentifierNode* id = (JsIdentifierNode*)pattern;
-        NameEntry* entry = js_scope_lookup_current(tp, id->name);
-        if (!entry) entry = js_scope_define(tp, id->name,
-            owner ? owner : pattern, kind);
-        id->entry = entry;
-        if (entry) {
-            entry->is_parameter = entry->is_parameter || is_parameter;
-            entry->is_for_in_head = entry->is_for_in_head || is_for_in_head;
+        if (walk.mode == DIRECT_PATTERN_BIND) {
+            NameEntry* entry = js_scope_lookup_current(walk.tp, id->name);
+            if (!entry) entry = js_scope_define(walk.tp, id->name,
+                walk.owner ? walk.owner : pattern, walk.kind);
+            id->entry = entry;
+            if (entry) {
+                entry->is_parameter = entry->is_parameter || walk.is_parameter;
+                entry->is_for_in_head = entry->is_for_in_head || walk.is_for_in_head;
+            }
+            // Binding identifiers are not reads. Rebuild their open parameter
+            // state after the parser-time scope has been discarded; otherwise a
+            // same-named declaration from an unrelated enclosing construct leaks
+            // into the declaration's static type.
+            id->type = js_set_type_any(walk.tp, ANY_OPEN_PARAM);
+        } else if (walk.mode == DIRECT_PATTERN_ASSIGNMENT) {
+            direct_set_identifier(walk.tp, id, js_scope_lookup(walk.tp, id->name));
+        } else if (walk.mode == DIRECT_PATTERN_DEFINE) {
+            JsAstNode* binding_node = walk.owner ? walk.owner : pattern;
+            if (walk.rest_binding && walk.declarator_owner) {
+                JsIdentifierNode* placeholder = (JsIdentifierNode*)pool_alloc(
+                    walk.tp->pool, sizeof(JsIdentifierNode));
+                memset(placeholder, 0, sizeof(JsIdentifierNode));
+                placeholder->node_type = JS_AST_NODE_IDENTIFIER;
+                placeholder->source_span = walk.declarator_owner->source_span;
+                placeholder->name = id->name;
+                placeholder->type = &TYPE_ANY;
+                binding_node = (JsAstNode*)placeholder;
+            }
+            NameEntry* entry = js_scope_define(walk.tp, id->name, binding_node,
+                walk.kind);
+            if (walk.rest_binding) id->entry = entry;
         }
-        // Binding identifiers are not reads. Rebuild their open parameter
-        // state after the parser-time scope has been discarded; otherwise a
-        // same-named declaration from an unrelated enclosing construct leaks
-        // into the declaration's static type.
-        id->type = js_set_type_any(tp, ANY_OPEN_PARAM);
         break;
     }
-    case JS_AST_NODE_ASSIGNMENT_PATTERN:
-        direct_bind_pattern(tp, ((JsAssignmentPatternNode*)pattern)->left,
-            kind, NULL, is_parameter, is_for_in_head);
-        break;
-    case JS_AST_NODE_REST_ELEMENT:
-        direct_bind_pattern(tp, ((JsSpreadElementNode*)pattern)->argument,
-            kind, NULL, is_parameter, is_for_in_head);
-        break;
-    case JS_AST_NODE_REST_PROPERTY:
-        // Object-rest arguments are binding patterns, even though their
-        // runtime collection is handled by the enclosing object pattern.
-        direct_bind_pattern(tp, ((JsSpreadElementNode*)pattern)->argument,
-            kind, NULL, is_parameter, is_for_in_head);
-        break;
-    case JS_AST_NODE_SPREAD_ELEMENT:
-        break;
-    case JS_AST_NODE_ARRAY_PATTERN:
-        for (JsAstNode* item = ((JsArrayPatternNode*)pattern)->elements;
-                item; item = item->next) {
-            direct_bind_pattern(tp, item, kind, NULL, is_parameter,
-                is_for_in_head);
+    case JS_AST_NODE_ASSIGNMENT_PATTERN: {
+        DirectPatternWalk child = walk;
+        child.owner = NULL;
+        direct_walk_pattern(child, ((JsAssignmentPatternNode*)pattern)->left);
+        if (walk.mode == DIRECT_PATTERN_DEFAULTS ||
+                walk.mode == DIRECT_PATTERN_ASSIGNMENT) {
+            direct_walk_node(walk.tp, ((JsAssignmentPatternNode*)pattern)->right);
         }
         break;
+    }
+    case JS_AST_NODE_REST_ELEMENT:
+    case JS_AST_NODE_REST_PROPERTY:
+    case JS_AST_NODE_SPREAD_ELEMENT: {
+        if (walk.mode == DIRECT_PATTERN_BIND &&
+                pattern->node_type == JS_AST_NODE_SPREAD_ELEMENT) break;
+        DirectPatternWalk child = walk;
+        child.owner = NULL;
+        if (walk.mode == DIRECT_PATTERN_DEFINE &&
+                (pattern->node_type == JS_AST_NODE_REST_PROPERTY ||
+                 pattern->node_type == JS_AST_NODE_SPREAD_ELEMENT)) {
+            child.rest_binding = true;
+        }
+        direct_walk_pattern(child, ((JsSpreadElementNode*)pattern)->argument);
+        break;
+    }
+    case JS_AST_NODE_ARRAY_PATTERN: {
+        for (JsAstNode* item = ((JsArrayPatternNode*)pattern)->elements;
+                item; item = item->next) {
+            DirectPatternWalk child = walk;
+            child.owner = NULL;
+            if (walk.mode == DIRECT_PATTERN_DEFINE) child.rest_binding = false;
+            direct_walk_pattern(child, item);
+        }
+        break;
+    }
     case JS_AST_NODE_OBJECT_PATTERN: {
         for (JsAstNode* item = ((JsObjectPatternNode*)pattern)->properties;
                 item; item = item->next) {
+            DirectPatternWalk child = walk;
+            child.owner = NULL;
+            if (walk.mode == DIRECT_PATTERN_DEFINE) child.rest_binding = false;
             if (item->node_type == JS_AST_NODE_PROPERTY) {
                 JsPropertyNode* property = (JsPropertyNode*)item;
-                if (property->computed) direct_walk_node(tp, property->key);
-                else if (property->key && property->key->node_type ==
-                        JS_AST_NODE_IDENTIFIER) {
-                    JsIdentifierNode* key = (JsIdentifierNode*)property->key;
-                    key->entry = NULL;
-                    key->type = &TYPE_ANY;
+                if (walk.mode == DIRECT_PATTERN_BIND ||
+                        walk.mode == DIRECT_PATTERN_ASSIGNMENT) {
+                    if (property->computed) direct_walk_node(walk.tp, property->key);
+                    else if (property->key && property->key->node_type ==
+                            JS_AST_NODE_IDENTIFIER) {
+                        JsIdentifierNode* key = (JsIdentifierNode*)property->key;
+                        key->entry = NULL;
+                        key->type = &TYPE_ANY;
+                    }
                 }
-                direct_bind_pattern(tp, property->value, kind, NULL,
-                    is_parameter, is_for_in_head);
+                direct_walk_pattern(child, property->value);
             } else {
-                direct_bind_pattern(tp, item, kind, NULL, is_parameter,
-                    is_for_in_head);
+                direct_walk_pattern(child, item);
             }
         }
         break;
     }
     default:
+        if (walk.mode == DIRECT_PATTERN_ASSIGNMENT) {
+            direct_walk_node(walk.tp, pattern);
+        }
         break;
     }
 }
 
+static void direct_bind_pattern(JsTranspiler* tp, JsAstNode* pattern,
+        JsVarKind kind, JsAstNode* owner, bool is_parameter,
+        bool is_for_in_head) {
+    direct_walk_pattern({tp, kind, owner, NULL, DIRECT_PATTERN_BIND,
+        is_parameter, is_for_in_head, false}, pattern);
+}
+
 static void direct_walk_pattern_defaults(JsTranspiler* tp, JsAstNode* pattern) {
-    if (!pattern) return;
-    if (pattern->node_type == (JsAstNodeType)TS_AST_NODE_PARAMETER) {
-        TsParameterNode* parameter = (TsParameterNode*)pattern;
-        direct_walk_pattern_defaults(tp, parameter->pattern);
-        direct_walk_node(tp, parameter->default_value);
-        return;
-    }
-    switch (pattern->node_type) {
-    case JS_AST_NODE_ASSIGNMENT_PATTERN:
-        direct_walk_pattern_defaults(tp,
-            ((JsAssignmentPatternNode*)pattern)->left);
-        direct_walk_node(tp, ((JsAssignmentPatternNode*)pattern)->right);
-        break;
-    case JS_AST_NODE_REST_ELEMENT:
-    case JS_AST_NODE_REST_PROPERTY:
-    case JS_AST_NODE_SPREAD_ELEMENT:
-        direct_walk_pattern_defaults(tp,
-            ((JsSpreadElementNode*)pattern)->argument);
-        break;
-    case JS_AST_NODE_ARRAY_PATTERN:
-        for (JsAstNode* item = ((JsArrayPatternNode*)pattern)->elements;
-                item; item = item->next) {
-            direct_walk_pattern_defaults(tp, item);
-        }
-        break;
-    case JS_AST_NODE_OBJECT_PATTERN:
-        for (JsAstNode* item = ((JsObjectPatternNode*)pattern)->properties;
-                item; item = item->next) {
-            if (item->node_type == JS_AST_NODE_PROPERTY) {
-                JsPropertyNode* property = (JsPropertyNode*)item;
-                direct_walk_pattern_defaults(tp, property->value);
-            } else {
-                direct_walk_pattern_defaults(tp, item);
-            }
-        }
-        break;
-    default:
-        break;
-    }
+    direct_walk_pattern({tp, JS_VAR_VAR, NULL, NULL, DIRECT_PATTERN_DEFAULTS,
+        false, false, false}, pattern);
 }
 
 static void direct_walk_assignment_pattern(JsTranspiler* tp,
         JsAstNode* pattern) {
-    if (!tp || !pattern) return;
-    switch (pattern->node_type) {
-    case JS_AST_NODE_IDENTIFIER:
-        direct_set_identifier(tp, (JsIdentifierNode*)pattern,
-            js_scope_lookup(tp, ((JsIdentifierNode*)pattern)->name));
-        break;
-    case JS_AST_NODE_ASSIGNMENT_PATTERN:
-        direct_walk_assignment_pattern(tp,
-            ((JsAssignmentPatternNode*)pattern)->left);
-        direct_walk_node(tp, ((JsAssignmentPatternNode*)pattern)->right);
-        break;
-    case JS_AST_NODE_REST_ELEMENT:
-    case JS_AST_NODE_REST_PROPERTY:
-    case JS_AST_NODE_SPREAD_ELEMENT:
-        direct_walk_assignment_pattern(tp,
-            ((JsSpreadElementNode*)pattern)->argument);
-        break;
-    case JS_AST_NODE_ARRAY_PATTERN:
-        for (JsAstNode* item = ((JsArrayPatternNode*)pattern)->elements;
-                item; item = item->next) {
-            direct_walk_assignment_pattern(tp, item);
-        }
-        break;
-    case JS_AST_NODE_OBJECT_PATTERN:
-        for (JsAstNode* item = ((JsObjectPatternNode*)pattern)->properties;
-                item; item = item->next) {
-            if (item->node_type == JS_AST_NODE_PROPERTY) {
-                JsPropertyNode* property = (JsPropertyNode*)item;
-                if (property->computed) direct_walk_node(tp, property->key);
-                else if (property->key && property->key->node_type ==
-                        JS_AST_NODE_IDENTIFIER) {
-                    JsIdentifierNode* key = (JsIdentifierNode*)property->key;
-                    key->entry = NULL;
-                    key->type = &TYPE_ANY;
-                }
-                direct_walk_assignment_pattern(tp, property->value);
-            } else {
-                direct_walk_assignment_pattern(tp, item);
-            }
-        }
-        break;
-    default:
-        direct_walk_node(tp, pattern);
-        break;
-    }
+    direct_walk_pattern({tp, JS_VAR_VAR, NULL, NULL,
+        DIRECT_PATTERN_ASSIGNMENT, false, false, false}, pattern);
 }
 
 static void direct_define_pattern(JsTranspiler* tp, JsAstNode* pattern,
         JsVarKind kind, JsAstNode* owner, JsAstNode* declarator_owner,
         bool rest_binding) {
-    if (!tp || !pattern) return;
-    if (pattern->node_type == (JsAstNodeType)TS_AST_NODE_PARAMETER) {
-        direct_define_pattern(tp, ((TsParameterNode*)pattern)->pattern, kind,
-            NULL, declarator_owner, rest_binding);
-        return;
-    }
-    switch (pattern->node_type) {
-    case JS_AST_NODE_IDENTIFIER: {
-        JsIdentifierNode* id = (JsIdentifierNode*)pattern;
-        JsAstNode* binding_node = owner ? owner : pattern;
-        JsIdentifierNode* placeholder = NULL;
-        if (rest_binding && declarator_owner) {
-            placeholder = (JsIdentifierNode*)pool_alloc(tp->pool,
-                sizeof(JsIdentifierNode));
-            memset(placeholder, 0, sizeof(JsIdentifierNode));
-            placeholder->node_type = JS_AST_NODE_IDENTIFIER;
-            placeholder->source_span = declarator_owner->source_span;
-            placeholder->name = id->name;
-            placeholder->type = &TYPE_ANY;
-            binding_node = (JsAstNode*)placeholder;
-        }
-        NameEntry* entry = js_scope_define(tp, id->name, binding_node, kind);
-        if (rest_binding) id->entry = entry;
-        break;
-    }
-    case JS_AST_NODE_ASSIGNMENT_PATTERN:
-        direct_define_pattern(tp, ((JsAssignmentPatternNode*)pattern)->left,
-            kind, NULL, declarator_owner, rest_binding);
-        break;
-    case JS_AST_NODE_REST_ELEMENT:
-        direct_define_pattern(tp, ((JsSpreadElementNode*)pattern)->argument,
-            kind, NULL, declarator_owner, rest_binding);
-        break;
-    case JS_AST_NODE_REST_PROPERTY:
-    case JS_AST_NODE_SPREAD_ELEMENT:
-        direct_define_pattern(tp, ((JsSpreadElementNode*)pattern)->argument,
-            kind, NULL, declarator_owner, true);
-        break;
-    case JS_AST_NODE_ARRAY_PATTERN:
-        for (JsAstNode* item = ((JsArrayPatternNode*)pattern)->elements;
-                item; item = item->next) {
-            direct_define_pattern(tp, item, kind, NULL, declarator_owner,
-                false);
-        }
-        break;
-    case JS_AST_NODE_OBJECT_PATTERN:
-        for (JsAstNode* item = ((JsObjectPatternNode*)pattern)->properties;
-                item; item = item->next) {
-            if (item->node_type == JS_AST_NODE_PROPERTY) {
-                direct_define_pattern(tp, ((JsPropertyNode*)item)->value,
-                    kind, NULL, declarator_owner, false);
-            } else {
-                direct_define_pattern(tp, item, kind, NULL, declarator_owner,
-                    false);
-            }
-        }
-        break;
-    default:
-        break;
-    }
+    direct_walk_pattern({tp, kind, owner, declarator_owner,
+        DIRECT_PATTERN_DEFINE, false, false, rest_binding}, pattern);
 }
 
 static void direct_define_variable(JsTranspiler* tp,

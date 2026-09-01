@@ -5,10 +5,6 @@
 
 __thread NamePool* g_js_mir_name_pool_override = NULL;
 
-void jm_set_name_pool_override(NamePool* pool) {
-    g_js_mir_name_pool_override = pool;
-}
-
 static NamePool* jm_active_name_pool(void) {
     if (g_js_mir_name_pool_override) return g_js_mir_name_pool_override;
     JsMirTranspiler* mt = g_active_mir_transpiler;
@@ -131,6 +127,23 @@ JsTryContext* jm_try_context_push(JsMirTranspiler* mt) {
     context->end_label_error_lane_state = JS_ERROR_LANE_UNREACHABLE;
     mt->try_ctx_depth++;
     return context;
+}
+
+// All synthetic and source try regions start from this cleared routing contract.
+void jm_try_context_setup(JsTryContext* context, MIR_label_t catch_label,
+        MIR_label_t finally_label, MIR_label_t end_label, MIR_reg_t return_val_reg,
+        MIR_reg_t has_return_reg, bool has_catch, bool has_finally,
+        JsAstNode* finally_body, MIR_reg_t incoming_error_lane_val_reg) {
+    if (!context) return;
+    context->catch_label = catch_label;
+    context->finally_label = finally_label;
+    context->end_label = end_label;
+    context->return_val_reg = return_val_reg;
+    context->has_return_reg = has_return_reg;
+    context->has_catch = has_catch;
+    context->has_finally = has_finally;
+    context->finally_body = finally_body;
+    context->incoming_error_lane_val_reg = incoming_error_lane_val_reg;
 }
 
 int js_local_func_cmp(const void *a, const void *b, void *udata) {
@@ -789,7 +802,7 @@ void jm_push_scope(JsMirTranspiler* mt) {
 }
 
 static bool jm_arguments_param_matches_vname(JsAstNode* param, const char* vname) {
-    JsIdentifierNode* identifier = jm_get_param_identifier(param);
+    JsIdentifierNode* identifier = js_ast_parameter_binding_identifier(param);
     if (!identifier || !identifier->name || !vname || strncmp(vname, "_js_", 4) != 0) {
         return false;
     }
@@ -850,13 +863,14 @@ int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname,
 // Return the formal binding paired with arguments[index], if one exists.
 JsMirVarEntry* jm_arguments_param_var(JsMirTranspiler* mt, int param_index) {
     JsAstNode* param = jm_arguments_param_at(mt, param_index);
-    JsIdentifierNode* identifier = jm_get_param_identifier(param);
+    JsIdentifierNode* identifier = js_ast_parameter_binding_identifier(param);
     if (!identifier || !identifier->name) return NULL;
 
     // Earlier duplicate formals are ordinary arguments properties, not mapped
     // bindings.  The final matching formal is the one kept by the JS binding.
     for (JsAstNode* later = param->next; later; later = later->next) {
-        JsIdentifierNode* later_identifier = jm_get_param_identifier(later);
+        JsIdentifierNode* later_identifier =
+            js_ast_parameter_binding_identifier(later);
         if (later_identifier && later_identifier->name &&
             later_identifier->name->len == identifier->name->len &&
             memcmp(later_identifier->name->chars, identifier->name->chars,
@@ -898,6 +912,70 @@ void jm_pop_scope(JsMirTranspiler* mt) {
 
 JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
 
+JsMirVarEntry* jm_find_var_at(JsMirTranspiler* mt, const char* name,
+        int depth) {
+    if (!mt || !name || depth < 0 || depth > mt->scope_depth) return NULL;
+    struct hashmap* scope = jm_var_scope_at(mt, depth);
+    if (!scope) return NULL;
+    JsVarScopeEntry key;
+    memset(&key, 0, sizeof(key));
+    key.name = name;
+    JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(scope, &key);
+    return found ? &found->var : NULL;
+}
+
+int jm_last_closure_capture_count_clamped(int count) {
+    if (count < 0) return 0;
+    if (count > JS_MIR_LAST_CLOSURE_CAPTURE_MAX) {
+        return JS_MIR_LAST_CLOSURE_CAPTURE_MAX;
+    }
+    return count;
+}
+
+void jm_save_last_closure_snapshot(JsMirTranspiler* mt,
+        JsMirLastClosureSnapshot* snapshot) {
+    if (!mt || !snapshot) return;
+    snapshot->has_env = mt->last_closure_has_env;
+    snapshot->env_reg = mt->last_closure_env_reg;
+    snapshot->capture_count = jm_last_closure_capture_count_clamped(
+        mt->last_closure_capture_count);
+    for (int i = 0; i < snapshot->capture_count; i++) {
+        snapshot->capture_names[i] = jm_persist_name(
+            mt->last_closure_capture_names[i]);
+        snapshot->capture_slots[i] = mt->last_closure_capture_slots[i];
+        snapshot->capture_is_transitive[i] =
+            mt->last_closure_capture_is_transitive[i];
+        snapshot->capture_is_nfe[i] = mt->last_closure_capture_is_nfe[i];
+        snapshot->capture_is_assigned[i] =
+            mt->last_closure_capture_is_assigned[i];
+    }
+}
+
+void jm_clear_last_closure_snapshot(JsMirTranspiler* mt) {
+    if (!mt) return;
+    mt->last_closure_has_env = false;
+    mt->last_closure_env_reg = 0;
+    mt->last_closure_capture_count = 0;
+}
+
+void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
+        const JsMirLastClosureSnapshot* snapshot) {
+    if (!mt || !snapshot) return;
+    mt->last_closure_has_env = snapshot->has_env;
+    mt->last_closure_env_reg = snapshot->env_reg;
+    mt->last_closure_capture_count = snapshot->capture_count;
+    for (int i = 0; i < snapshot->capture_count; i++) {
+        mt->last_closure_capture_names[i] = jm_persist_name(
+            snapshot->capture_names[i]);
+        mt->last_closure_capture_slots[i] = snapshot->capture_slots[i];
+        mt->last_closure_capture_is_transitive[i] =
+            snapshot->capture_is_transitive[i];
+        mt->last_closure_capture_is_nfe[i] = snapshot->capture_is_nfe[i];
+        mt->last_closure_capture_is_assigned[i] =
+            snapshot->capture_is_assigned[i];
+    }
+}
+
 JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
         JsVarScopeEntry* entry) {
     struct hashmap* scope = jm_var_scope_at(mt, depth);
@@ -910,15 +988,10 @@ JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
     entry->var.gc_home_id = mt->em.frame.active
         ? em_gc_new_home(&mt->em) : 0;
     hashmap_set(scope, entry);
-
-    JsVarScopeEntry key;
-    memset(&key, 0, sizeof(key));
-    key.name = entry->name;
-    JsVarScopeEntry* inserted = (JsVarScopeEntry*)hashmap_get(
-        scope, &key);
+    JsMirVarEntry* inserted = jm_find_var_at(mt, entry->name, depth);
     if (!inserted) return NULL;
-    jm_update_gc_root_slot(mt, &inserted->var);
-    return &inserted->var;
+    jm_update_gc_root_slot(mt, inserted);
+    return inserted;
 }
 
 void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
@@ -943,12 +1016,8 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
         bool existing_in_target_scope = false;
         struct hashmap* target_scope = jm_var_scope_at(mt, target_depth);
         if (target_depth >= 0 && target_scope) {
-            JsVarScopeEntry key;
-            memset(&key, 0, sizeof(key));
-            key.name = name;
-            JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(target_scope, &key);
-            if (found) {
-                existing = &found->var;
+            existing = jm_find_var_at(mt, name, target_depth);
+            if (existing) {
                 existing_in_target_scope = true;
             }
         }
@@ -1001,26 +1070,17 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     struct hashmap* target_scope = jm_var_scope_at(mt, target_depth);
     if (!target_scope) return;
     hashmap_set(target_scope, &entry);
-    JsVarScopeEntry key;
-    memset(&key, 0, sizeof(key));
-    key.name = name;
-    JsVarScopeEntry* inserted = (JsVarScopeEntry*)hashmap_get(
-        target_scope, &key);
+    JsMirVarEntry* inserted = jm_find_var_at(mt, name, target_depth);
     if (inserted) {
-        jm_update_gc_root_slot(mt, &inserted->var);
+        jm_update_gc_root_slot(mt, inserted);
     }
 }
 
 JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name) {
     if (!mt || !name) return NULL;
-    JsVarScopeEntry key;
-    memset(&key, 0, sizeof(key));
-    key.name = name;
     for (int i = mt->scope_depth; i >= 0; i--) {
-        struct hashmap* scope = jm_var_scope_at(mt, i);
-        if (!scope) continue;
-        JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(scope, &key);
-        if (found) return &found->var;
+        JsMirVarEntry* found = jm_find_var_at(mt, name, i);
+        if (found) return found;
     }
     return NULL;
 }

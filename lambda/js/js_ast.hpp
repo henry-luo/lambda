@@ -266,27 +266,49 @@ typedef AstImportSpecifierNode JsImportSpecifierNode;
 typedef void (*JsAstChildVisit)(JsAstNode* child, void* ctx);
 typedef bool (*JsAstChildPredicate)(JsAstNode* child, void* ctx);
 
+// Parameter shape is source-owned: interpreter metadata and MIR planning must
+// not independently rediscover default/rest and binding-name semantics.
+struct JsAstParameterFacts {
+    int formal_length = -1;
+    bool has_default_params = false;
+    bool has_duplicate_param_names = false;
+    JsIdentifierNode* first_duplicate_param = NULL;
+    bool has_rest_param = false;
+    bool has_non_simple_params = false;
+};
+
 // Visit every child in source order; list-valued edges walk their ->next chain.
 void js_ast_visit_children(JsAstNode* node, JsAstChildVisit visit, void* ctx);
 // Short-circuiting variant: stops at the first child the predicate accepts.
 bool js_ast_any_child(JsAstNode* node, JsAstChildPredicate predicate, void* ctx);
+// Visit only destructuring binding targets. Keys and default-value expressions
+// are semantic reads, so they deliberately remain outside this edge set.
+void js_ast_visit_binding_pattern_children(JsAstNode* node,
+    JsAstChildVisit visit, void* ctx);
+bool js_ast_any_binding_pattern_child(JsAstNode* node,
+    JsAstChildPredicate predicate, void* ctx);
+JsIdentifierNode* js_ast_parameter_binding_identifier(JsAstNode* parameter);
+JsAstParameterFacts js_ast_collect_parameter_facts(JsAstNode* parameters);
 // Structural gate: every JS-only child layout must appear in the extension table.
 bool js_ast_child_catalog_complete(void);
 
-// Syntactic direct eval belongs to the immediately enclosing function. Both
-// compiler and AST executor use this one classification when installing the
-// shared EvalContext bridge.
-bool js_ast_has_direct_eval_call(JsAstNode* node);
-bool js_ast_function_has_direct_eval(JsFunctionNode* function);
 enum JsAstObservation {
     JS_AST_OBSERVES_ARGUMENTS = 1u << 0,
     JS_AST_OBSERVES_THIS = 1u << 1,
     JS_AST_OBSERVES_NEW_TARGET = 1u << 2,
 };
-uint8_t js_ast_function_observation_mask(JsFunctionNode* function);
-bool js_ast_function_has_with(JsFunctionNode* function);
-bool js_ast_function_uses_arguments(JsFunctionNode* function);
-bool js_ast_function_tail_reuse_safe(JsFunctionNode* function);
+struct JsAstFunctionFacts {
+    uint8_t observations = 0;
+    bool has_direct_eval = false;
+    bool has_with = false;
+    bool has_direct_super_call = false;
+    uint32_t first_direct_super_call_start = 0;
+    bool tail_reuse_safe = false;
+};
+// Facts intentionally stop at each semantic function boundary, except that
+// arrows contribute their lexical observations to the enclosing function.
+JsAstFunctionFacts js_ast_collect_function_facts(JsAstNode* params,
+                                                  JsAstNode* body);
 bool js_ast_is_proto_literal_key(JsAstNode* key);
 
 // Adapter for the shared AstIndex walker. Core-shaped JavaScript nodes are

@@ -1,7 +1,6 @@
 // ts_type_parser.cpp — direct-parser admitted TypeScript type reductions
 
 #include "ts_type_parser.hpp"
-#include "ts_transpiler.hpp"
 #include "../js/js_c_ast_helpers.hpp"
 #include "../../lib/mempool.h"
 #include "../../lib/hashmap.h"
@@ -374,12 +373,12 @@ TsTypeFactNode* ts_parse_type_text(JsTranspiler* tp, const char* text, int len) 
 
 HASHMAP_DEFINE_STRKEY(ts_type_reg, TsTypeRegistryEntry, name)
 
-void ts_type_registry_init(TsTranspiler* tp) {
+void ts_type_registry_init(JsTranspiler* tp) {
     tp->type_registry = hashmap_new(sizeof(TsTypeRegistryEntry), 32, 0, 0,
         ts_type_reg_hash, ts_type_reg_cmp, NULL, NULL);
 }
 
-void ts_type_registry_add(TsTranspiler* tp, const char* name, Type* type) {
+void ts_type_registry_add(JsTranspiler* tp, const char* name, Type* type) {
     TsTypeRegistryEntry entry;
     memset(&entry, 0, sizeof(entry));
     size_t name_len = strlen(name);
@@ -390,7 +389,7 @@ void ts_type_registry_add(TsTranspiler* tp, const char* name, Type* type) {
     hashmap_set(tp->type_registry, &entry);
 }
 
-Type* ts_type_registry_lookup(TsTranspiler* tp, const char* name) {
+Type* ts_type_registry_lookup(JsTranspiler* tp, const char* name) {
     TsTypeRegistryEntry query;
     memset(&query, 0, sizeof(query));
     size_t name_len = strlen(name);

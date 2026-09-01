@@ -1027,14 +1027,6 @@ extern "C" void js_batch_reset() {
     js_batch_reset_runtime_caches("js_batch_reset pre-cleanup", true);
 }
 
-extern "C" void js_prepare_compiled_preamble_vars(int declaration_count) {
-    js_reset_module_vars();
-    if (declaration_count < 0) declaration_count = 0;
-    if (declaration_count > JS_MAX_MODULE_VARS) declaration_count = JS_MAX_MODULE_VARS;
-    // Compile-only preambles retain declarations but no heap-backed values;
-    // js_main initializes these fresh slots in the new document realm.
-}
-
 // Partial batch reset: restore module vars to a checkpoint and clear test state,
 // but leave heap and cached builtins intact.  Used by js-test-batch preamble mode
 // to avoid re-initializing the harness between tests.

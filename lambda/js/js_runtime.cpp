@@ -51,17 +51,11 @@ void js_interp_async_clear_continuations(JsAsyncContextStateRecord* state);
 Item js_throw_type_errorf(const char* format, ...) {
     JS_THROW_FORMATF(js_throw_type_error(message));
 }
-Item js_throw_range_errorf(const char* format, ...) {
-    JS_THROW_FORMATF(js_throw_range_error(message));
-}
 Item js_throw_type_error_codef(const char* code, const char* format, ...) {
     JS_THROW_FORMATF(js_throw_type_error_code(code, message));
 }
 Item js_throw_range_error_codef(const char* code, const char* format, ...) {
     JS_THROW_FORMATF(js_throw_range_error_code(code, message));
-}
-Item js_throw_named_error_textf(const char* type_name, const char* format, ...) {
-    JS_THROW_FORMATF(js_throw_named_error_text(type_name, message));
 }
 #undef JS_THROW_FORMATF
 
@@ -883,11 +877,16 @@ static Item js_private_environment_for_class(Item class_item, bool create) {
     return environment_root.get();
 }
 
-static bool js_private_key_item_is_valid(Item key) {
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
+static String* js_private_key_string(Item key) {
+    if (get_type_id(key) != LMD_TYPE_STRING) return NULL;
     String* key_string = it2s(key);
     return key_string && property_key_requires_identity(key_string) &&
-        property_key_kind(key_string) == NAME_KEY_PRIVATE;
+        property_key_kind(key_string) == NAME_KEY_PRIVATE
+        ? key_string : NULL;
+}
+
+static bool js_private_key_item_is_valid(Item key) {
+    return js_private_key_string(key) != NULL;
 }
 
 static Item js_private_key_for_class_environment(Item environment_item,
@@ -941,9 +940,7 @@ extern "C" Item js_private_key_for_current_class(Item source_name) {
     if (js_current_private_home_class.item == 0 ||
         js_current_private_home_class.item == ItemNull.item) {
         Item eval_key = js_eval_private_resolve(source_name);
-        if (get_type_id(eval_key) == LMD_TYPE_STRING &&
-            property_key_requires_identity(it2s(eval_key)) &&
-            property_key_kind(it2s(eval_key)) == NAME_KEY_PRIVATE) {
+        if (js_private_key_string(eval_key)) {
             return eval_key;
         }
         return js_throw_type_error("Private name used outside its declaring class");
@@ -2299,9 +2296,7 @@ static Item js_private_storage_object(Item object) {
 }
 
 static bool js_private_storage_has_own(Item object, Item private_key) {
-    if (get_type_id(private_key) != LMD_TYPE_STRING ||
-        !property_key_requires_identity(it2s(private_key)) ||
-        property_key_kind(it2s(private_key)) != NAME_KEY_PRIVATE) return false;
+    if (!js_private_key_string(private_key)) return false;
     Item lookup_object = js_private_storage_object(object);
     if (get_type_id(lookup_object) != LMD_TYPE_MAP) return false;
     JsShapeSlotStatus status = js_own_shape_slot_status_name_id(
@@ -2318,9 +2313,7 @@ static Item js_private_brand_key_for_class(Item class_item) {
     bool found = false;
     Item brand = js_class_internal_property(class_item, "__pk_brand__", 12,
         &found);
-    if (found && get_type_id(brand) == LMD_TYPE_STRING &&
-        property_key_requires_identity(it2s(brand)) &&
-        property_key_kind(it2s(brand)) == NAME_KEY_PRIVATE) {
+    if (found && js_private_key_string(brand)) {
         return brand;
     }
     NameRef brand_key = name_pool_create_unique_private(context->name_pool,
@@ -2343,9 +2336,7 @@ static Item js_private_brand_key_for_class_existing(Item class_item) {
     bool found = false;
     Item brand = js_class_internal_property(class_item, "__pk_brand__", 12,
         &found);
-    if (!found || get_type_id(brand) != LMD_TYPE_STRING ||
-        !property_key_requires_identity(it2s(brand)) ||
-        property_key_kind(it2s(brand)) != NAME_KEY_PRIVATE) return ItemNull;
+    if (!found || !js_private_key_string(brand)) return ItemNull;
     return brand;
 }
 
@@ -2498,9 +2489,7 @@ static Item js_init_class_instance_field(Item callee, Item object, Item field_ke
     Rooted<Item> private_storage_root(roots, object);
     if (!roots.valid()) return js_status_ok();
 
-    bool private_key = get_type_id(key_root.get()) == LMD_TYPE_STRING &&
-        property_key_requires_identity(it2s(key_root.get())) &&
-        property_key_kind(it2s(key_root.get())) == NAME_KEY_PRIVATE;
+    bool private_key = js_private_key_string(key_root.get()) != NULL;
     if (private_key) {
         bool duplicate_private = brand_only ?
             js_private_brand_storage_has_own(object_root.get(), callee_root.get()) :
@@ -2680,9 +2669,7 @@ JS_FORWARD_ITEM(js_init_class_instance_fields_after_super,
 
 extern "C" Item js_private_brand_add(Item object, Item private_key, Item callee) {
     if (!js_can_host_private_slots(object)) return js_status_ok();
-    if (get_type_id(private_key) != LMD_TYPE_STRING ||
-        !property_key_requires_identity(it2s(private_key)) ||
-        property_key_kind(it2s(private_key)) != NAME_KEY_PRIVATE) return js_status_ok();
+    if (!js_private_key_string(private_key)) return js_status_ok();
     if (object.item == callee.item) {
         // Static private members are found as own slots on the constructor;
         // giving it the instance brand would expose prototype-private methods.
@@ -4388,13 +4375,9 @@ static bool js_property_key_needs_object_to_key(Item key) {
 
 
 static bool js_is_private_internal_property_key(Item key) {
-    if (get_type_id(key) != LMD_TYPE_STRING) return false;
-    String* sk = it2s(key);
-    if (!sk) return false;
     // Private proxy slots are keyed by NamePool identity; spelling prefixes
     // cannot distinguish a user property from an engine-owned private name.
-    return property_key_requires_identity(sk) &&
-        property_key_kind(sk) == NAME_KEY_PRIVATE;
+    return js_private_key_string(key) != NULL;
 }
 
 static Item js_private_brand_owner(Item object, String* private_key, bool* out_found);
@@ -4506,9 +4489,7 @@ extern "C" Item js_private_in(Item object, Item private_key) {
     if (!js_is_object_value(object)) {
         return js_throw_type_error("Right-hand side of private 'in' is not an object");
     }
-    if (get_type_id(private_key) != LMD_TYPE_STRING ||
-        !property_key_requires_identity(it2s(private_key)) ||
-        property_key_kind(it2s(private_key)) != NAME_KEY_PRIVATE) {
+    if (!js_private_key_string(private_key)) {
         return (Item){.item = b2it(false)};
     }
     if (js_private_storage_has_own(object, private_key)) return (Item){.item = b2it(true)};
@@ -4523,9 +4504,7 @@ static Item js_eval_initializer_resolve_private_key(Item object, String* key) {
         return ItemNull;
     }
     Item private_key = js_eval_private_resolve((Item){.item = s2it(key)});
-    if (get_type_id(private_key) != LMD_TYPE_STRING ||
-        !property_key_requires_identity(it2s(private_key)) ||
-        property_key_kind(it2s(private_key)) != NAME_KEY_PRIVATE) return ItemNull;
+    if (!js_private_key_string(private_key)) return ItemNull;
     return private_key;
 }
 
@@ -4874,11 +4853,9 @@ extern "C" Item js_get_key_core(Item object, Item key,
     if (js_get_host_dynamic_property(object, key, &host_value)) {
         return host_value;
     }
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* private_key = it2s(key);
-        if (private_key && property_key_requires_identity(private_key) &&
-            property_key_kind(private_key) == NAME_KEY_PRIVATE &&
-            !js_can_host_private_slots(object)) {
+    {
+        String* private_key = js_private_key_string(key);
+        if (private_key && !js_can_host_private_slots(object)) {
             return js_private_member_access_error(private_key, false);
         }
     }
@@ -4892,11 +4869,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
                 Item ord_val = ItemNull;
                 JsOwnGetStatus st = js_ordinary_get_own(slots, key, object, &ord_val);
                 if (st == JS_OWN_READY) {
-                    if (get_type_id(key) == LMD_TYPE_STRING) {
-                        String* private_key = it2s(key);
-                        if (private_key && property_key_requires_identity(private_key) &&
-                            property_key_kind(private_key) == NAME_KEY_PRIVATE &&
-                            js_private_brand_mismatch(object, private_key)) {
+                    {
+                        String* private_key = js_private_key_string(key);
+                        if (private_key && js_private_brand_mismatch(object,
+                                private_key)) {
                             return js_private_member_access_error(private_key, false);
                         }
                     }
@@ -4986,11 +4962,10 @@ extern "C" Item js_get_key_core(Item object, Item key,
                     }
                     return make_js_undefined();
                 }
-                if (get_type_id(key) == LMD_TYPE_STRING) {
-                    String* private_key = it2s(key);
-                    if (private_key && property_key_requires_identity(private_key) &&
-                        property_key_kind(private_key) == NAME_KEY_PRIVATE &&
-                        js_private_brand_mismatch(object, private_key)) {
+                {
+                    String* private_key = js_private_key_string(key);
+                    if (private_key && js_private_brand_mismatch(object,
+                            private_key)) {
                         return js_private_member_access_error(private_key, false);
                     }
                 }
@@ -5068,10 +5043,9 @@ extern "C" Item js_get_key_core(Item object, Item key,
         // has getter == ItemNull, returning undefined per ES §9.1.8).
         // Prototype chain fallback: if property not found on own object, walk __proto__.
         // Use _ex variant to distinguish "found, returned JS null" from "not found".
-        if (!own_found && get_type_id(key) == LMD_TYPE_STRING) {
-            String* private_key = it2s(key);
-            if (private_key && property_key_requires_identity(private_key) &&
-                property_key_kind(private_key) == NAME_KEY_PRIVATE) {
+        if (!own_found) {
+            String* private_key = js_private_key_string(key);
+            if (private_key) {
                 if (js_private_brand_mismatch(object, private_key)) {
                     return js_private_member_access_error(private_key, false);
                 }
@@ -5339,11 +5313,9 @@ extern "C" Item js_get_key_core(Item object, Item key,
             // kernel to perform the primitive conversion for C[null].
             JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
         }
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* private_key = it2s(key);
-            if (private_key && property_key_requires_identity(private_key) &&
-                    property_key_kind(private_key) == NAME_KEY_PRIVATE &&
-                    js_private_brand_mismatch(object, private_key)) {
+        {
+            String* private_key = js_private_key_string(key);
+            if (private_key && js_private_brand_mismatch(object, private_key)) {
                 // Static private names are own slots on the declaring
                 // constructor; treating every callable as a valid receiver
                 // let a sibling class read a missing slot as undefined.
@@ -6760,12 +6732,10 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
     }
     bool private_internal_property_key = js_is_private_internal_property_key(key);
     if (private_internal_property_key && js_is_proxy(object)) {
-        if (get_type_id(key) == LMD_TYPE_STRING) {
-            String* private_key = it2s(key);
-            if (private_key && property_key_requires_identity(private_key) &&
-                property_key_kind(private_key) == NAME_KEY_PRIVATE &&
-                !js_private_define_active &&
-                js_private_brand_mismatch(object, private_key)) {
+        {
+            String* private_key = js_private_key_string(key);
+            if (private_key && !js_private_define_active &&
+                    js_private_brand_mismatch(object, private_key)) {
                 return js_private_member_access_error(private_key, true);
             }
         }
@@ -7374,11 +7344,9 @@ static Item js_set_storage_mode(Item object, Item key,
     if (object.item == ITEM_NULL || object.item == ITEM_JS_UNDEFINED) {
         return js_throw_type_error("Cannot set property on null or undefined");
     }
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* private_key = it2s(key);
-        if (private_key && property_key_requires_identity(private_key) &&
-            property_key_kind(private_key) == NAME_KEY_PRIVATE &&
-            !js_can_host_private_slots(object)) {
+    {
+        String* private_key = js_private_key_string(key);
+        if (private_key && !js_can_host_private_slots(object)) {
             return js_private_member_access_error(private_key, true);
         }
     }
@@ -7611,10 +7579,9 @@ JS_FORWARD_EXPRESSION(Item, js_set_key_policy, (Item object, Item key, Item valu
 
 static Item js_private_property_set_checked(Item object, Item key, Item value,
                                              bool strict) {
-    if (get_type_id(key) == LMD_TYPE_STRING) {
-        String* private_key = it2s(key);
-        if (private_key && property_key_requires_identity(private_key) &&
-            property_key_kind(private_key) == NAME_KEY_PRIVATE) {
+    {
+        String* private_key = js_private_key_string(key);
+        if (private_key) {
             if (!js_can_host_private_slots(object)) {
                 return js_private_member_access_error(private_key, true);
             }

@@ -413,9 +413,18 @@ struct AstNode {
     SourceSpan source_span;
 };
 
+// Shared sibling-list sizing keeps language profiles from carrying private
+// count walks for the same `next` contract.
+static inline int ast_linked_node_count(const AstNode* first) {
+    int count = 0;
+    for (; first; first = first->next) count++;
+    return count;
+}
+
 // One identity/index table for all post-parse passes. Language profiles add
 // extension children, while core passes consume these dense IDs.
 typedef void (*AstChildVisitor)(AstNode* child, AstNode* parent, void* ctx);
+typedef bool (*AstBindingChildPredicate)(AstNode* child, void* ctx);
 
 typedef struct AstFunctionIndexEntry {
     AstNode* node;
@@ -476,6 +485,10 @@ enum AstNodeFactFlags : uint32_t {
 extern "C" {
 #endif
 void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx);
+void ast_visit_binding_pattern_children(AstNode* node, AstChildVisitor visitor,
+    void* ctx);
+bool ast_any_binding_pattern_child(AstNode* node,
+    AstBindingChildPredicate predicate, void* ctx);
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile);
 int ast_index_compiler_pass(void* opaque);
 // Adds a newly retained AST fragment without invalidating the stable IDs and
@@ -1272,6 +1285,8 @@ typedef struct FnAnalysis {
     bool js_uses_arguments;
     bool js_has_rest_param;
     bool js_has_non_simple_params;
+    bool js_has_default_params;
+    bool js_has_duplicate_param_names;
     bool js_observes_this;
     bool js_observes_new_target;
     bool js_uses_with;
@@ -1286,6 +1301,8 @@ typedef struct FnAnalysis {
     bool js_is_derived_constructor;
     bool js_is_class_method;
     bool js_is_class_field_initializer;
+    bool js_has_direct_super_call;
+    uint32_t js_first_direct_super_call_start;
     AstClassId js_owner_class_id;
     bool js_closure_env_has_parent_link;
     int js_closure_env_parent_link_slot;
@@ -1298,14 +1315,7 @@ typedef struct FnAnalysis {
     TypeId js_return_type;
     ScalarReturnClass js_boxed_return_scalar_class;
     int js_formal_length;
-    // immutable JS scope walk caches live with the function-owned analysis;
-    // collection entries only index the function and do not own pass facts.
-    struct hashmap* js_cached_var_locals;
-    struct hashmap* js_cached_all_locals;
-    struct hashmap* js_cached_direct_lexicals;
-    struct hashmap* js_cached_annexb_suppressed;
     struct hashmap* js_cached_scope_slot_collisions;
-    bool js_cached_annexb_suppressed_ready;
     // The active JS MIR compilation's backend artifact; reset with all other
     // profile facts before the next compilation of this AST.
     void* js_mir_backend;

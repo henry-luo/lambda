@@ -101,8 +101,6 @@ static const char* js_dump_kind_name(int type) {
         case JS_AST_NODE_EXPORT_SPECIFIER: return "JS_AST_NODE_EXPORT_SPECIFIER";
         case JS_AST_NODE_WITH_STATEMENT: return "JS_AST_NODE_WITH_STATEMENT";
         case JS_AST_NODE_TAGGED_TEMPLATE: return "JS_AST_NODE_TAGGED_TEMPLATE";
-        case TS_AST_NODE_TYPE_ALIAS: return "TS_AST_NODE_TYPE_ALIAS";
-        case TS_AST_NODE_INTERFACE: return "TS_AST_NODE_INTERFACE";
         case TS_AST_NODE_PARAMETER: return "TS_AST_NODE_PARAMETER";
         default: return "JS_AST_NODE_UNKNOWN";
     }

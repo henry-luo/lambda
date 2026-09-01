@@ -112,16 +112,7 @@ NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
         target_scope = tp->global_scope;
     }
 
-    NameEntry* existing = NULL;
-    NameEntry* scan = target_scope->first;
-    while (scan) {
-        if (scan->name->len == name->len &&
-            memcmp(scan->name->chars, name->chars, name->len) == 0) {
-            existing = scan;
-            break;
-        }
-        scan = scan->next;
-    }
+    NameEntry* existing = js_scope_find_entry(target_scope, name);
 
     // Function-scoped var declarations are one hoisted binding even when the
     // source contains several declarations or a declaration is pre-scanned.
@@ -139,8 +130,12 @@ NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
                 existing->node = (AstNode*)node;
                 return existing;
             }
-            log_error("Identifier '%.*s' has already been declared",
-                     (int)name->len, name->chars);
+            char message[320];
+            snprintf(message, sizeof(message),
+                "Identifier '%.*s' has already been declared in this scope",
+                (int)name->len, name->chars);
+            js_syntax_error(tp, node->source_span, message);
+            tp->binding_error_count++;
             return existing;
         }
     }
@@ -251,6 +246,14 @@ void js_error(JsTranspiler* tp, SourceSpan span, const char* format, ...) {
     log_error("JavaScript transpiler error: %s", buffer);
 }
 
+void js_syntax_error(JsTranspiler* tp, SourceSpan span, const char* message) {
+    if (!tp || !message) return;
+    js_error(tp, span, "%s", message);
+    LambdaSourcePoint point = lambda_source_span_start_point(tp->source, span);
+    fprintf(stderr, "SyntaxError: %s (at line %u, column %u)\n", message,
+        point.row + 1, point.column + 1); // PRINTF_OK: host syntax diagnostic.
+}
+
 // Transpiler lifecycle functions
 
 JsTranspiler* js_transpiler_create(Runtime* runtime) {
@@ -262,9 +265,6 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     tp->name_pool = name_pool_create(tp->pool, NULL);
     tp->error_buf = NULL;
 
-    // Initialize scopes
-    tp->global_scope = js_scope_create(tp, JS_SCOPE_GLOBAL, NULL);
-    tp->current_scope = tp->global_scope;
     tp->strict_mode = false;
     tp->has_errors = false;
     tp->strict_js = true;  // default: pure JS mode (reject TS syntax)

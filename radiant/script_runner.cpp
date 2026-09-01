@@ -1682,7 +1682,7 @@ static Item execute_cached_external_classic(Runtime* runtime,
 
     if (timing) timing->cache_lookups++;
     const JsPreambleState* cached = js_mir_cache_lookup(
-        s_js_mir_cache, JS_MIR_CACHE_EXTERNAL_CLASSIC,
+        s_js_mir_cache, false,
         source, source_len, filename, preamble);
     if (timing) {
         if (cached) timing->cache_hits++;
@@ -1699,7 +1699,7 @@ static Item execute_cached_external_classic(Runtime* runtime,
             return compile_result;
         }
         cached = js_mir_cache_adopt(
-            s_js_mir_cache, JS_MIR_CACHE_EXTERNAL_CLASSIC,
+            s_js_mir_cache, false,
             source, source_len, filename, preamble, &compiled);
         if (cached && timing) timing->cache_compiles++;
         if (!cached) {
@@ -2093,7 +2093,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     if (s_js_mir_cache && !s_retain_js_state) {
         if (timing) timing->cache_lookups++;
         cached_preamble = js_mir_cache_lookup(
-            s_js_mir_cache, JS_MIR_CACHE_PREAMBLE,
+            s_js_mir_cache, true,
             preamble_buf->str, preamble_buf->length, preamble_filename, nullptr);
         if (timing) {
             if (cached_preamble) timing->cache_hits++;
@@ -2109,7 +2109,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
             js_mir_accumulate_last_phase_timing(true);
             if (get_type_id(result) != LMD_TYPE_ERROR) {
                 cached_preamble = js_mir_cache_adopt(
-                    s_js_mir_cache, JS_MIR_CACHE_PREAMBLE,
+                    s_js_mir_cache, true,
                     preamble_buf->str, preamble_buf->length, preamble_filename,
                     nullptr, preamble);
                 if (cached_preamble && timing) timing->cache_compiles++;
@@ -2809,9 +2809,9 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     }
 
     uint64_t compile_result_home = 0;
-    Item compile_result = transpile_js_to_mir_with_preamble(runtime, compile_buf->str,
-                                                             "<event-handlers>", preamble,
-                                                             &compile_result_home);
+    Item compile_result = transpile_js_to_mir_with_preamble_len(runtime,
+        compile_buf->str, (size_t)compile_buf->length, "<event-handlers>",
+        preamble, &compile_result_home);
     strbuf_free(compile_buf);
 
     TypeId result_type = get_type_id(compile_result);

@@ -499,6 +499,82 @@ void ast_visit_core_children(AstNode* node, AstChildVisitor visitor, void* ctx) 
 #undef AST_VISIT
 }
 
+typedef bool (*AstBindingChildAction)(AstNode* child, void* context);
+
+static bool ast_apply_binding_pattern_children(AstNode* node,
+        AstBindingChildAction action, void* context) {
+    if (!node || !action) return false;
+    AstNode* child = NULL;
+    switch (node->node_type) {
+    case AST_NODE_ARRAY_PATTERN:
+    case AST_NODE_ARRAY:
+        child = ((AstArrayNode*)node)->item;
+        break;
+    case AST_NODE_MAP_PATTERN:
+    case AST_NODE_MAP:
+        child = ((AstMapNode*)node)->item;
+        break;
+    case AST_NODE_PROPERTY:
+        child = ((AstPropertyNode*)node)->value;
+        break;
+    case AST_NODE_ASSIGN_PATTERN:
+        child = ((AstAssignNode*)node)->left;
+        break;
+    case AST_NODE_REST_ELEMENT:
+    case AST_NODE_REST_PROPERTY:
+    case AST_NODE_SPREAD:
+        child = ((AstSpreadNode*)node)->argument;
+        break;
+    default:
+        return false;
+    }
+    for (; child; child = child->next) {
+        if (action(child, context)) return true;
+    }
+    return false;
+}
+
+struct AstBindingChildVisit {
+    AstChildVisitor visitor;
+    AstNode* parent;
+    void* context;
+};
+
+static bool ast_visit_binding_pattern_child(AstNode* child, void* opaque) {
+    AstBindingChildVisit* visit = (AstBindingChildVisit*)opaque;
+    visit->visitor(child, visit->parent, visit->context);
+    return false;
+}
+
+void ast_visit_binding_pattern_children(AstNode* node, AstChildVisitor visitor,
+        void* ctx) {
+    if (!visitor) return;
+    AstBindingChildVisit visit = {visitor, node, ctx};
+    ast_apply_binding_pattern_children(node, ast_visit_binding_pattern_child,
+        &visit);
+}
+
+struct AstBindingChildSearch {
+    AstBindingChildPredicate predicate;
+    void* context;
+    bool found;
+};
+
+static bool ast_find_binding_pattern_child(AstNode* child, void* opaque) {
+    AstBindingChildSearch* search = (AstBindingChildSearch*)opaque;
+    search->found = search->predicate(child, search->context);
+    return search->found;
+}
+
+bool ast_any_binding_pattern_child(AstNode* node,
+        AstBindingChildPredicate predicate, void* ctx) {
+    if (!predicate) return false;
+    AstBindingChildSearch search = {predicate, ctx, false};
+    ast_apply_binding_pattern_children(node, ast_find_binding_pattern_child,
+        &search);
+    return search.found;
+}
+
 bool ast_index_build_profile(AstIndex* index, AstNode* root, const LangProfile* profile) {
     if (!index) return false;
     ast_index_destroy(index);

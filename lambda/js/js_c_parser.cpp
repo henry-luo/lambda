@@ -1,7 +1,6 @@
 #include "js_transpiler.hpp"
 #include "js_c_ast_helpers.hpp"
 #include "../ts/ts_ast.hpp"
-#include "../ts/ts_transpiler.hpp"
 #include "../ts/ts_type_parser.hpp"
 
 #include "../../lib/mempool.h"
@@ -32,10 +31,6 @@ typedef struct JsCAstSink {
     uint32_t rejected_end;
 } JsCAstSink;
 
-typedef struct JsCTypeParametersNode {
-    JsAstNode base;
-} JsCTypeParametersNode;
-
 static bool js_c_span_contains(SourceSpan outer, SourceSpan inner) {
     return outer.start_byte <= inner.start_byte &&
         outer.end_byte >= inner.end_byte;
@@ -54,17 +49,46 @@ static bool js_c_unsupported(JsCAstSink* sink) {
     return false;
 }
 
+static bool js_c_push(JsCAstSink* sink, JsAstNode* node, SourceSpan span);
+
+// every direct-parser reduction publishes one constructed node or one failure.
+static bool js_c_push_result(JsCAstSink* sink, JsAstNode* node, SourceSpan span) {
+    return node ? js_c_push(sink, node, span) : js_c_unsupported(sink);
+}
+
 static bool js_c_is_ts_type_node(const JsAstNode* node) {
     return node && (int)node->node_type == TS_AST_NODE_TYPE_FACT;
 }
 
 static bool js_c_is_type_parameters(const JsAstNode* node) {
-    return node && (int)node->node_type == TS_AST_NODE_TYPE_PARAMETERS;
+    // Generic parameter lists are consumed by their direct parent and use the
+    // ordinary null sentinel so no TS wrapper reaches the executable tree.
+    return node && node->node_type == JS_AST_NODE_NULL;
 }
 
 static Type* js_c_type_fact(JsAstNode* type_node) {
     return js_c_is_ts_type_node(type_node)
         ? ((TsTypeFactNode*)type_node)->resolved_type : NULL;
+}
+
+static JsAstNode* js_c_discard_type_fact(JsAstNode* type_fact,
+        SourceSpan declaration_span) {
+    if (!type_fact) return NULL;
+    type_fact->node_type = JS_AST_NODE_NULL;
+    type_fact->source_span = declaration_span;
+    type_fact->next = NULL;
+    return type_fact;
+}
+
+static JsAstNode* js_c_make_enum_number(JsCAstSink* sink, SourceSpan span,
+        int value) {
+    JsLiteralNode* literal = (JsLiteralNode*)alloc_js_ast_node_span(
+        sink->transpiler, JS_AST_NODE_LITERAL, span, sizeof(JsLiteralNode));
+    if (!literal) return NULL;
+    literal->literal_type = JS_LITERAL_NUMBER;
+    literal->value.number_value = (double)value;
+    literal->type = &TYPE_INT;
+    return (JsAstNode*)literal;
 }
 
 static bool js_c_is_space(char c) {
@@ -159,9 +183,8 @@ static bool js_c_read_name(const char* source, size_t end, size_t* offset,
 // A TS enum has a JavaScript runtime value. Construct that value directly so
 // the published tree never needs a second TS-to-JS rewrite or fact rebuild.
 static JsAstNode* js_c_lower_ts_enum(JsCAstSink* sink,
-        TsEnumDeclarationNode* enumeration) {
-    if (!sink || !enumeration) return NULL;
-    SourceSpan span = enumeration->source_span;
+        SourceSpan span, String* name, JsAstNode** members, int member_count) {
+    if (!sink || !name) return NULL;
     JsObjectNode* object = (JsObjectNode*)alloc_js_ast_node_span(
         sink->transpiler, JS_AST_NODE_OBJECT_EXPRESSION, span,
         sizeof(JsObjectNode));
@@ -169,42 +192,35 @@ static JsAstNode* js_c_lower_ts_enum(JsCAstSink* sink,
     object->type = &TYPE_MAP;
 
     JsAstNode* last_property = NULL;
-    for (int i = 0; i < enumeration->member_count; i++) {
-        TsEnumMemberNode* member = (TsEnumMemberNode*)enumeration->members[i];
-        if (!member || !member->name) continue;
-        JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node_span(
-            sink->transpiler, JS_AST_NODE_PROPERTY, span,
-            sizeof(JsPropertyNode));
-        JsIdentifierNode* key = (JsIdentifierNode*)alloc_js_ast_node_span(
-            sink->transpiler, JS_AST_NODE_IDENTIFIER, span,
-            sizeof(JsIdentifierNode));
-        if (!property || !key) return NULL;
-        key->name = member->name;
+    for (int i = 0; i < member_count; i++) {
+        JsPropertyNode* property = (JsPropertyNode*)members[i];
+        if (!property || property->node_type != JS_AST_NODE_PROPERTY ||
+                !property->key || property->key->node_type != JS_AST_NODE_IDENTIFIER) {
+            return NULL;
+        }
+        JsIdentifierNode* key = (JsIdentifierNode*)property->key;
         key->type = &TYPE_STRING;
-        property->key = (JsAstNode*)key;
         property->computed = false;
         property->method = false;
-        if (member->initializer && member->auto_value < 0) {
-            property->value = member->initializer;
-        } else {
-            JsLiteralNode* value = (JsLiteralNode*)alloc_js_ast_node_span(
-                sink->transpiler, JS_AST_NODE_LITERAL, span,
-                sizeof(JsLiteralNode));
-            if (!value) return NULL;
-            value->literal_type = JS_LITERAL_NUMBER;
-            value->value.number_value = (double)member->auto_value;
-            value->type = &TYPE_INT;
-            property->value = (JsAstNode*)value;
-        }
         property->type = property->value ? property->value->type : &TYPE_ANY;
+        property->next = NULL;
         if (last_property) last_property->next = (JsAstNode*)property;
         else object->properties = (JsAstNode*)property;
         last_property = (JsAstNode*)property;
     }
 
-    for (int i = 0; i < enumeration->member_count; i++) {
-        TsEnumMemberNode* member = (TsEnumMemberNode*)enumeration->members[i];
-        if (!member || !member->name || member->auto_value < 0) continue;
+    for (int i = 0; i < member_count; i++) {
+        JsPropertyNode* member = (JsPropertyNode*)members[i];
+        if (!member || !member->key ||
+                member->key->node_type != JS_AST_NODE_IDENTIFIER ||
+                !member->value || member->value->node_type != JS_AST_NODE_LITERAL) {
+            continue;
+        }
+        JsLiteralNode* member_value = (JsLiteralNode*)member->value;
+        if (member_value->literal_type != JS_LITERAL_NUMBER ||
+                member_value->value.number_value < 0) continue;
+        String* member_name = ((JsIdentifierNode*)member->key)->name;
+        if (!member_name) continue;
         JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node_span(
             sink->transpiler, JS_AST_NODE_PROPERTY, span,
             sizeof(JsPropertyNode));
@@ -216,10 +232,10 @@ static JsAstNode* js_c_lower_ts_enum(JsCAstSink* sink,
             sizeof(JsLiteralNode));
         if (!property || !key || !value) return NULL;
         key->literal_type = JS_LITERAL_NUMBER;
-        key->value.number_value = (double)member->auto_value;
+        key->value.number_value = member_value->value.number_value;
         key->type = &TYPE_INT;
         value->literal_type = JS_LITERAL_STRING;
-        value->value.string_value = member->name;
+        value->value.string_value = member_name;
         value->type = &TYPE_STRING;
         property->key = (JsAstNode*)key;
         property->value = (JsAstNode*)value;
@@ -240,7 +256,7 @@ static JsAstNode* js_c_lower_ts_enum(JsCAstSink* sink,
             JS_AST_NODE_VARIABLE_DECLARATION, span,
             sizeof(JsVariableDeclarationNode));
     if (!declarator || !identifier || !declaration) return NULL;
-    identifier->name = enumeration->name;
+    identifier->name = name;
     identifier->type = &TYPE_MAP;
     declarator->id = (JsAstNode*)identifier;
     declarator->init = (JsAstNode*)object;
@@ -255,7 +271,7 @@ static JsAstNode* js_c_lower_ts_enum(JsCAstSink* sink,
 // assignments before the tree is indexed instead of preserving decorator nodes
 // for a later AST rewrite.
 static JsAstNode* js_c_lower_decorated_class(JsCAstSink* sink,
-        TsDecoratorNode** decorators, uint32_t decorator_count,
+        JsAstNode** decorators, uint32_t decorator_count,
         JsAstNode* class_node) {
     if (!sink || !decorators || !class_node ||
             (class_node->node_type != JS_AST_NODE_CLASS_DECLARATION &&
@@ -284,8 +300,8 @@ static JsAstNode* js_c_lower_decorated_class(JsCAstSink* sink,
 
     JsAstNode* tail = (JsAstNode*)declaration;
     for (uint32_t i = decorator_count; i > 0; i--) {
-        TsDecoratorNode* decorator = decorators[i - 1];
-        if (!decorator || !decorator->expression) continue;
+        JsAstNode* decorator = decorators[i - 1];
+        if (!decorator) continue;
         JsIdentifierNode* argument = (JsIdentifierNode*)alloc_js_ast_node_span(
             sink->transpiler, JS_AST_NODE_IDENTIFIER, span,
             sizeof(JsIdentifierNode));
@@ -311,7 +327,7 @@ static JsAstNode* js_c_lower_decorated_class(JsCAstSink* sink,
         if (!argument || !call || !fallback || !coalesce || !left ||
                 !assignment || !statement) return NULL;
         argument->name = class_value->name;
-        call->callee = decorator->expression;
+        call->callee = decorator;
         call->arguments = (JsAstNode*)argument;
         fallback->name = class_value->name;
         coalesce->op = JS_OP_NULLISH_COALESCE;
@@ -380,9 +396,8 @@ static void js_c_append_namespace_statement(JsAstNode** first, JsAstNode** last,
 // A TS namespace is emitted as the standard namespace IIFE before binding and
 // indexing. This keeps its synthetic function in the same one-pass AST facts.
 static JsAstNode* js_c_lower_ts_namespace(JsCAstSink* sink,
-        TsNamespaceDeclarationNode* namespace_node) {
-    if (!sink || !namespace_node || !namespace_node->name) return NULL;
-    SourceSpan span = namespace_node->source_span;
+        SourceSpan span, String* namespace_name, JsAstNode* statements) {
+    if (!sink || !namespace_name) return NULL;
     JsVariableDeclaratorNode* namespace_declarator =
         (JsVariableDeclaratorNode*)alloc_js_ast_node_span(sink->transpiler,
             JS_AST_NODE_VARIABLE_DECLARATOR, span,
@@ -393,15 +408,17 @@ static JsAstNode* js_c_lower_ts_namespace(JsCAstSink* sink,
             sizeof(JsVariableDeclarationNode));
     if (!namespace_declarator || !namespace_declaration) return NULL;
     namespace_declarator->id = js_c_make_namespace_identifier(sink, span,
-        namespace_node->name);
+        namespace_name);
     if (!namespace_declarator->id) return NULL;
     namespace_declaration->kind = JS_VAR_VAR;
     namespace_declaration->declarations = (JsAstNode*)namespace_declarator;
 
     JsAstNode* body_first = NULL;
     JsAstNode* body_last = NULL;
-    for (int i = 0; i < namespace_node->body_count; i++) {
-        JsAstNode* statement = namespace_node->body[i];
+    for (JsAstNode* raw_statement = statements; raw_statement;) {
+        JsAstNode* next = raw_statement->next;
+        raw_statement->next = NULL;
+        JsAstNode* statement = raw_statement;
         if (!statement) continue;
         bool exported = statement->node_type == JS_AST_NODE_EXPORT_DECLARATION;
         if (exported) {
@@ -415,7 +432,7 @@ static JsAstNode* js_c_lower_ts_namespace(JsCAstSink* sink,
             JsAstNode* property = js_c_make_namespace_identifier(sink, span,
                 function->name);
             statement = js_c_make_namespace_assignment(sink, span,
-                namespace_node->name, property, (JsAstNode*)function);
+                namespace_name, property, (JsAstNode*)function);
         } else if (exported &&
                 statement->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
             JsVariableDeclarationNode* variables =
@@ -426,16 +443,18 @@ static JsAstNode* js_c_lower_ts_namespace(JsCAstSink* sink,
                     (JsVariableDeclaratorNode*)item;
                 if (!declarator->id || !declarator->init) continue;
                 JsAstNode* assignment = js_c_make_namespace_assignment(sink,
-                    span, namespace_node->name, declarator->id,
+                    span, namespace_name, declarator->id,
                     declarator->init);
                 if (!assignment) return NULL;
                 js_c_append_namespace_statement(&body_first, &body_last,
                     assignment);
             }
+            raw_statement = next;
             continue;
         }
         if (!statement) return NULL;
         js_c_append_namespace_statement(&body_first, &body_last, statement);
+        raw_statement = next;
     }
 
     JsBlockNode* body = (JsBlockNode*)alloc_js_ast_node_span(sink->transpiler,
@@ -444,11 +463,11 @@ static JsAstNode* js_c_lower_ts_namespace(JsCAstSink* sink,
         sink->transpiler, JS_AST_NODE_FUNCTION_EXPRESSION, span,
         sizeof(JsFunctionNode));
     JsAstNode* parameter = js_c_make_namespace_identifier(sink, span,
-        namespace_node->name);
+        namespace_name);
     JsAstNode* argument = js_c_make_namespace_identifier(sink, span,
-        namespace_node->name);
+        namespace_name);
     JsAstNode* fallback_lhs = js_c_make_namespace_identifier(sink, span,
-        namespace_node->name);
+        namespace_name);
     JsObjectNode* fallback_object = (JsObjectNode*)alloc_js_ast_node_span(
         sink->transpiler, JS_AST_NODE_OBJECT_EXPRESSION, span,
         sizeof(JsObjectNode));
@@ -510,116 +529,74 @@ static JsAstNode* js_c_build_ts_declaration(JsCAstSink* sink,
                 type_fact = children[i];
         }
         if (!type_fact || !js_c_is_ts_type_node(type_fact)) return NULL;
-        TsTypeAliasNode* alias = (TsTypeAliasNode*)alloc_js_ast_node_span(
-            sink->transpiler, (JsAstNodeType)TS_AST_NODE_TYPE_ALIAS,
-            reduction->span, sizeof(TsTypeAliasNode));
-        alias->name = name;
-        alias->resolved_type = js_c_type_fact(type_fact);
+        Type* alias_type = js_c_type_fact(type_fact);
         ts_type_registry_add(sink->transpiler, name->chars,
-            alias->resolved_type);
-        return (JsAstNode*)alias;
+            alias_type);
+        return js_c_discard_type_fact(type_fact, reduction->span);
     }
 
     if (reduction->introducer.kind == JS_TOK_INTERFACE) {
         if (reduction->child_count < 1 || !children) return NULL;
-        TsInterfaceNode* iface = (TsInterfaceNode*)alloc_js_ast_node_span(
-            sink->transpiler, (JsAstNodeType)TS_AST_NODE_INTERFACE,
-            reduction->span, sizeof(TsInterfaceNode));
-        iface->name = name;
-        bool has_type_parameters = false;
-        for (uint32_t i = 0; i + 1 < reduction->child_count; i++) {
-            if (js_c_is_type_parameters(children[i])) has_type_parameters = true;
-        }
         JsAstNode* body = children[reduction->child_count - 1];
         if (!body || !js_c_is_ts_type_node(body)) {
             return NULL;
         }
         for (uint32_t i = 0; i + 1 < reduction->child_count; i++) {
-            if (has_type_parameters && js_c_is_type_parameters(children[i])) continue;
+            if (js_c_is_type_parameters(children[i])) continue;
             if (!children[i] || !js_c_is_ts_type_node(children[i])) return NULL;
         }
-        iface->resolved_type = js_c_type_fact(body);
-        if (iface->resolved_type && iface->resolved_type->type_id == LMD_TYPE_MAP) {
-            ((TypeMap*)iface->resolved_type)->struct_name = name->chars;
+        Type* interface_type = js_c_type_fact(body);
+        if (interface_type && interface_type->type_id == LMD_TYPE_MAP) {
+            ((TypeMap*)interface_type)->struct_name = name->chars;
         }
         ts_type_registry_add(sink->transpiler, name->chars,
-            iface->resolved_type);
-        return (JsAstNode*)iface;
+            interface_type);
+        return js_c_discard_type_fact(body, reduction->span);
     }
 
     if (reduction->introducer.kind == JS_TOK_ENUM) {
-        TsEnumDeclarationNode* enum_node =
-            (TsEnumDeclarationNode*)alloc_js_ast_node_span(sink->transpiler,
-                (JsAstNodeType)TS_AST_NODE_ENUM_DECLARATION,
-                reduction->span, sizeof(TsEnumDeclarationNode));
-        enum_node->name = name;
-        enum_node->member_count = (int)reduction->child_count;
-        if (enum_node->member_count > 0) {
-            enum_node->members = (JsAstNode**)pool_alloc(sink->transpiler->pool,
-                sizeof(JsAstNode*) * (size_t)enum_node->member_count);
-            if (!enum_node->members) return NULL;
+        int member_count = (int)reduction->child_count;
+        if (member_count > 0) {
             int next_value = 0;
             bool next_value_valid = true;
             for (uint32_t i = 0; i < reduction->child_count; i++) {
-                JsAstNode* member = children[i];
-                if (!member || (int)member->node_type != TS_AST_NODE_ENUM_MEMBER) {
+                JsPropertyNode* member = (JsPropertyNode*)children[i];
+                if (!member || member->node_type != JS_AST_NODE_PROPERTY) {
                     return NULL;
                 }
-                TsEnumMemberNode* enum_member = (TsEnumMemberNode*)member;
-                enum_node->members[i] = member;
-                if (enum_member->initializer &&
-                        enum_member->initializer->node_type == JS_AST_NODE_LITERAL) {
-                    JsLiteralNode* literal = (JsLiteralNode*)enum_member->initializer;
+                if (member->value &&
+                        member->value->node_type == JS_AST_NODE_LITERAL) {
+                    JsLiteralNode* literal = (JsLiteralNode*)member->value;
                     if (literal->literal_type == JS_LITERAL_NUMBER) {
-                        enum_member->auto_value = (int)literal->value.number_value;
-                        next_value = enum_member->auto_value + 1;
+                        int numeric_value = (int)literal->value.number_value;
+                        member->value = js_c_make_enum_number(sink,
+                            reduction->span, numeric_value);
+                        if (!member->value) return NULL;
+                        next_value = numeric_value + 1;
                         next_value_valid = true;
                     } else {
-                        enum_member->auto_value = -1;
                         next_value_valid = false;
                     }
-                } else if (!enum_member->initializer && next_value_valid) {
-                    enum_member->auto_value = next_value++;
+                } else if (!member->value && next_value_valid) {
+                    member->value = js_c_make_enum_number(sink,
+                        reduction->span, next_value++);
+                    if (!member->value) return NULL;
                 } else {
-                    enum_member->auto_value = -1;
                     next_value_valid = false;
                 }
             }
         }
-        return js_c_lower_ts_enum(sink, enum_node);
+        return js_c_lower_ts_enum(sink, reduction->span, name, children,
+            member_count);
     }
 
     if (reduction->introducer.kind == JS_TOK_NAMESPACE ||
             reduction->introducer.kind == JS_TOK_MODULE) {
         if (reduction->child_count != 1 || !children || !children[0] ||
                 children[0]->node_type != JS_AST_NODE_BLOCK_STATEMENT) return NULL;
-        TsNamespaceDeclarationNode* ns =
-            (TsNamespaceDeclarationNode*)alloc_js_ast_node_span(
-                sink->transpiler,
-                (JsAstNodeType)TS_AST_NODE_NAMESPACE_DECLARATION,
-                reduction->span, sizeof(TsNamespaceDeclarationNode));
-        ns->name = name;
         JsBlockNode* block = (JsBlockNode*)children[0];
-        ns->body = block->statements ? &block->statements : NULL;
-        ns->body_count = 0;
-        for (JsAstNode* item = block->statements; item; item = item->next) {
-            ns->body_count++;
-        }
-        if (ns->body_count > 0) {
-            ns->body = (JsAstNode**)pool_alloc(sink->transpiler->pool,
-                sizeof(JsAstNode*) * (size_t)ns->body_count);
-            if (!ns->body) return NULL;
-            int i = 0;
-            for (JsAstNode* item = block->statements; item;) {
-                JsAstNode* next = item->next;
-                // namespace members are stored as an array; detach their
-                // former block sibling edge before transferring ownership.
-                item->next = NULL;
-                ns->body[i++] = item;
-                item = next;
-            }
-        }
-        return js_c_lower_ts_namespace(sink, ns);
+        return js_c_lower_ts_namespace(sink, reduction->span, name,
+            block->statements);
     }
     (void)source;
     return NULL;
@@ -756,6 +733,35 @@ static bool js_c_pop_children(JsCAstSink* sink, uint32_t count,
     if (out_left) *out_left = nodes[0];
     if (out_right) *out_right = nodes[1];
     return true;
+}
+
+// Reducers transfer child ownership through one list builder before invoking
+// their form-specific AST constructor.
+static JsAstNode* js_c_link_children(JsAstNode** nodes, uint32_t begin,
+        uint32_t end) {
+    JsAstNode* first = NULL;
+    JsAstNode* previous = NULL;
+    for (uint32_t i = begin; i < end; i++) {
+        if (!first) first = nodes[i];
+        else previous->next = nodes[i];
+        previous = nodes[i];
+    }
+    if (previous) previous->next = NULL;
+    return first;
+}
+
+static JsAstNode* js_c_link_non_type_parameter_children(JsAstNode** nodes,
+        uint32_t begin, uint32_t end) {
+    JsAstNode* first = NULL;
+    JsAstNode* previous = NULL;
+    for (uint32_t i = begin; i < end; i++) {
+        if (js_c_is_type_parameters(nodes[i])) continue;
+        if (!first) first = nodes[i];
+        else previous->next = nodes[i];
+        previous = nodes[i];
+    }
+    if (previous) previous->next = NULL;
+    return first;
 }
 
 static bool js_c_pop_value(JsCAstSink* sink, uint32_t count,
@@ -911,18 +917,16 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
 
     if (reduction->kind == JS_REDUCE_TYPE &&
             reduction->form == JS_REDUCTION_TYPE_PARAMETER) {
-        if (reduction->child_count > 2) return js_c_unsupported(sink);
+        if (!reduction->child_count || reduction->child_count > 2) {
+            return js_c_unsupported(sink);
+        }
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count,
                 reduction->span, &nodes)) return false;
         for (uint32_t i = 0; i < reduction->child_count; i++) {
             if (!js_c_is_ts_type_node(nodes[i])) return js_c_unsupported(sink);
         }
-        JsAstNode* parameter = alloc_js_ast_node_span(sink->transpiler,
-            (JsAstNodeType)TS_AST_NODE_TYPE_PARAMETER, reduction->span,
-            sizeof(JsAstNode));
-        return parameter ? js_c_push(sink, parameter, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, nodes[0], reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_TYPE &&
@@ -930,16 +934,12 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count,
                 reduction->span, &nodes)) return false;
-        JsCTypeParametersNode* parameters =
-            (JsCTypeParametersNode*)alloc_js_ast_node_span(sink->transpiler,
-                (JsAstNodeType)TS_AST_NODE_TYPE_PARAMETERS,
-                reduction->span, sizeof(JsCTypeParametersNode));
-        if (!parameters) return js_c_unsupported(sink);
+        if (!reduction->child_count) return js_c_unsupported(sink);
         for (uint32_t i = 0; i < reduction->child_count; i++) {
-            if (!nodes[i] || (int)nodes[i]->node_type !=
-                    TS_AST_NODE_TYPE_PARAMETER) return js_c_unsupported(sink);
+            if (!js_c_is_ts_type_node(nodes[i])) return js_c_unsupported(sink);
         }
-        return js_c_push(sink, (JsAstNode*)parameters, reduction->span);
+        return js_c_push_result(sink,
+            js_c_discard_type_fact(nodes[0], reduction->span), reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_TYPE &&
@@ -951,8 +951,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         TsTypeFactNode* type = ts_parse_type_text(sink->transpiler, source.str,
             (int)source.length);
         if (type) type->source_span = reduction->span;
-        return type ? js_c_push(sink, (JsAstNode*)type, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, (JsAstNode*)type, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_DECLARATION &&
@@ -966,12 +965,15 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         if (!nodes[0] || nodes[0]->node_type != JS_AST_NODE_IDENTIFIER) {
             return js_c_unsupported(sink);
         }
-        TsEnumMemberNode* member = (TsEnumMemberNode*)alloc_js_ast_node_span(
-            sink->transpiler, (JsAstNodeType)TS_AST_NODE_ENUM_MEMBER,
-            reduction->span, sizeof(TsEnumMemberNode));
-        member->name = ((JsIdentifierNode*)nodes[0])->name;
-        member->initializer = reduction->child_count == 2 ? nodes[1] : NULL;
-        member->auto_value = -1;
+        JsPropertyNode* member = (JsPropertyNode*)alloc_js_ast_node_span(
+            sink->transpiler, JS_AST_NODE_PROPERTY, reduction->span,
+            sizeof(JsPropertyNode));
+        if (!member) return js_c_unsupported(sink);
+        member->key = nodes[0];
+        member->value = reduction->child_count == 2 ? nodes[1] : NULL;
+        member->computed = false;
+        member->method = false;
+        member->shorthand = false;
         return js_c_push(sink, (JsAstNode*)member, reduction->span);
     }
 
@@ -980,12 +982,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* expression = NULL;
         if (!js_c_pop_value(sink, reduction->child_count, &expression,
                 reduction->span)) return false;
-        TsDecoratorNode* decorator = (TsDecoratorNode*)alloc_js_ast_node_span(
-            sink->transpiler, (JsAstNodeType)TS_AST_NODE_DECORATOR,
-            reduction->span, sizeof(TsDecoratorNode));
-        if (!decorator) return js_c_unsupported(sink);
-        decorator->expression = expression;
-        return js_c_push(sink, (JsAstNode*)decorator, reduction->span);
+        return js_c_push_result(sink, expression, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_DECLARATION &&
@@ -997,20 +994,18 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* declaration = nodes[reduction->child_count - 1];
         if (!declaration) return js_c_unsupported(sink);
         declaration->source_span.start_byte = reduction->span.start_byte;
-        TsDecoratorNode* decorators[16];
+        JsAstNode* decorators[16];
         uint32_t decorator_count = reduction->child_count - 1;
         if (decorator_count > 16) return js_c_unsupported(sink);
         for (uint32_t i = 0; i + 1 < reduction->child_count; i++) {
-            if (!nodes[i] || nodes[i]->node_type !=
-                    (JsAstNodeType)TS_AST_NODE_DECORATOR) {
+            if (!nodes[i]) {
                 return js_c_unsupported(sink);
             }
-            decorators[i] = (TsDecoratorNode*)nodes[i];
+            decorators[i] = nodes[i];
         }
         JsAstNode* lowered = js_c_lower_decorated_class(sink, decorators,
             decorator_count, declaration);
-        return lowered ? js_c_push(sink, lowered, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, lowered, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_DECLARATION &&
@@ -1020,8 +1015,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 &nodes)) return false;
         JsAstNode* declaration = js_c_build_ts_declaration(sink, reduction,
             nodes);
-        return declaration ? js_c_push(sink, declaration, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, declaration, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1030,35 +1024,30 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 reduction->operator_token.kind != JS_TOK_EOF) {
             JsAstNode* target = build_js_new_target_from_span(
                 sink->transpiler, reduction->span);
-            return target ? js_c_push(sink, target, reduction->span) :
-                js_c_unsupported(sink);
+            return js_c_push_result(sink, target, reduction->span);
         }
         JsAstNode* leaf = js_c_leaf(sink, reduction);
-        return leaf ? js_c_push(sink, leaf, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, leaf, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_PATTERN &&
             reduction->form == JS_REDUCTION_TOKEN) {
         JsAstNode* binding = js_c_leaf(sink, reduction);
-        return binding ? js_c_push(sink, binding, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, binding, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_PATTERN &&
             reduction->form == JS_REDUCTION_HOLE) {
         JsAstNode* hole = build_js_pattern_hole(sink->transpiler,
             reduction->span);
-        return hole ? js_c_push(sink, hole, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, hole, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
             reduction->form == JS_REDUCTION_HOLE) {
         JsAstNode* hole = build_js_array_hole(sink->transpiler,
             reduction->span);
-        return hole ? js_c_push(sink, hole, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, hole, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_PATTERN &&
@@ -1069,8 +1058,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 reduction->span)) return false;
         JsAstNode* assignment = build_js_assignment_pattern_from_children(
             sink->transpiler, reduction->span, left, right);
-        return assignment ? js_c_push(sink, assignment, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, assignment, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_PATTERN &&
@@ -1081,8 +1069,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* rest = build_js_rest_pattern_from_child(sink->transpiler,
             reduction->span, argument,
             (reduction->flags & JS_REDUCTION_FLAG_PROPERTY) != 0);
-        return rest ? js_c_push(sink, rest, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, rest, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_PATTERN &&
@@ -1095,8 +1082,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             sink->transpiler, reduction->span, nodes[0], nodes[1],
             (reduction->flags & JS_REDUCTION_FLAG_COMPUTED) != 0,
             (reduction->flags & JS_REDUCTION_FLAG_SHORTHAND) != 0);
-        return property ? js_c_push(sink, property, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, property, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_PATTERN &&
@@ -1105,21 +1091,13 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count,
                 reduction->span, &nodes)) return false;
-        JsAstNode* list = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = 0; i < reduction->child_count; i++) {
-            if (!list) list = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* list = js_c_link_children(nodes, 0, reduction->child_count);
         JsAstNode* pattern = reduction->form == JS_REDUCTION_ARRAY
             ? build_js_pattern_array_from_list(sink->transpiler,
                 reduction->span, list, reduction->child_count)
             : build_js_pattern_object_from_list(sink->transpiler,
                 reduction->span, list, reduction->child_count);
-        return pattern ? js_c_push(sink, pattern, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, pattern, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1131,8 +1109,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* element = build_js_template_element_from_source(
             sink->transpiler, source, reduction->span,
             (reduction->flags & JS_REDUCTION_FLAG_TEMPLATE_TAIL) != 0);
-        return element ? js_c_push(sink, element, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, element, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1140,18 +1117,10 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count,
                 reduction->span, &nodes)) return false;
-        JsAstNode* parts = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = 0; i < reduction->child_count; i++) {
-            if (!parts) parts = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* parts = js_c_link_children(nodes, 0, reduction->child_count);
         JsAstNode* literal = build_js_template_from_parts(sink->transpiler,
             reduction->span, parts, reduction->child_count);
-        return literal ? js_c_push(sink, literal, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, literal, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1162,8 +1131,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 reduction->span)) return false;
         JsAstNode* tagged = build_js_tagged_template_from_children(
             sink->transpiler, reduction->span, tag, quasi);
-        return tagged ? js_c_push(sink, tagged, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, tagged, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_DECLARATION &&
@@ -1185,8 +1153,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 reduction->span, nodes[0], js_c_type_fact(type_node), init)
             : build_js_declarator_from_children(sink->transpiler,
                 reduction->span, nodes[0], init);
-        return declarator ? js_c_push(sink, declarator, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, declarator, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_DECLARATION &&
@@ -1196,19 +1163,12 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count, reduction->span,
                 &nodes)) return false;
-        JsAstNode* declarations = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = 0; i < reduction->child_count; i++) {
-            if (!previous) declarations = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* declarations = js_c_link_children(nodes, 0,
+            reduction->child_count);
         JsAstNode* declaration = build_js_variable_declaration_from_list(
             sink->transpiler, reduction->span, declarations,
             reduction->child_count, kind);
-        return declaration ? js_c_push(sink, declaration, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, declaration, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_DECLARATION &&
@@ -1240,8 +1200,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             ts_parameter->accessibility = reduction->parameter_accessibility;
             ts_parameter->readonly = reduction->parameter_readonly;
         }
-        return parameter ? js_c_push(sink, parameter, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, parameter, reduction->span);
     }
 
     if ((reduction->kind == JS_REDUCE_DECLARATION ||
@@ -1271,17 +1230,8 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             name = nodes[0];
             parameter_start = 1;
         }
-        JsAstNode* params = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = parameter_start; i < body_index; i++) {
-            if (js_c_is_type_parameters(nodes[i])) {
-                continue;
-            }
-            if (!previous) params = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* params = js_c_link_non_type_parameter_children(nodes,
+            parameter_start, body_index);
         bool declaration =
             (reduction->flags & JS_REDUCTION_FLAG_DECLARATION) != 0 &&
             (reduction->flags & JS_REDUCTION_FLAG_NAMED) != 0;
@@ -1301,8 +1251,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 (reduction->flags & 2u) != 0,
                 declaration,
                 arrow);
-        return function ? js_c_push(sink, function, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, function, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_CLASS_MEMBER &&
@@ -1310,18 +1259,11 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count, reduction->span,
                 &nodes)) return false;
-        JsAstNode* members = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = 0; i < reduction->child_count; i++) {
-            if (!previous) members = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* members = js_c_link_children(nodes, 0,
+            reduction->child_count);
         JsAstNode* body = build_js_class_body_from_list(sink->transpiler,
             reduction->span, members, reduction->child_count);
-        return body ? js_c_push(sink, body, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, body, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_CLASS_MEMBER &&
@@ -1336,15 +1278,8 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 !js_c_is_type_parameters(nodes[body_index - 1])) {
             return_type = nodes[--body_index];
         }
-        JsAstNode* params = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = 1; i < body_index; i++) {
-            if (js_c_is_type_parameters(nodes[i])) continue;
-            if (!previous) params = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* params = js_c_link_non_type_parameter_children(nodes, 1,
+            body_index);
         JsAstNode* method = build_js_method_from_children(sink->transpiler,
             reduction->span, nodes[0], params,
             nodes[reduction->child_count - 1], reduction->flags);
@@ -1358,8 +1293,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             ((JsMethodDefinitionNode*)method)->declared_return_type =
                 js_c_type_fact(return_type);
         }
-        return method ? js_c_push(sink, method, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, method, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_CLASS_MEMBER &&
@@ -1376,8 +1310,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         }
         JsAstNode* field = build_js_field_from_children(sink->transpiler,
             reduction->span, nodes[0], value, reduction->flags);
-        return field ? js_c_push(sink, field, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, field, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_CLASS_MEMBER &&
@@ -1387,8 +1320,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 reduction->span)) return false;
         JsAstNode* block = build_js_static_block_from_child(sink->transpiler,
             reduction->span, body);
-        return block ? js_c_push(sink, block, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, block, reduction->span);
     }
 
     if ((reduction->kind == JS_REDUCE_DECLARATION ||
@@ -1414,8 +1346,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* class_node = build_js_class_from_children(
             sink->transpiler, reduction->span, name, superclass, nodes[index],
             (reduction->flags & JS_REDUCTION_FLAG_DECLARATION) != 0);
-        return class_node ? js_c_push(sink, class_node, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, class_node, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_DECLARATION &&
@@ -1429,8 +1360,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* specifier = build_js_import_specifier_from_children(
             sink->transpiler, reduction->span, nodes[0],
             reduction->child_count == 2 ? nodes[1] : NULL);
-        return specifier ? js_c_push(sink, specifier, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, specifier, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_DECLARATION &&
@@ -1464,8 +1394,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* import_node = build_js_import_from_children(
             sink->transpiler, reduction->span, nodes[source_index],
             default_name, namespace_name, specifiers);
-        return import_node ? js_c_push(sink, import_node, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, import_node, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_DECLARATION &&
@@ -1479,8 +1408,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* specifier = build_js_export_specifier_from_children(
             sink->transpiler, reduction->span, nodes[0],
             reduction->child_count == 2 ? nodes[1] : NULL);
-        return specifier ? js_c_push(sink, specifier, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, specifier, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_DECLARATION &&
@@ -1514,8 +1442,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* export_node = build_js_export_from_children(
             sink->transpiler, reduction->span, declaration, specifiers,
             source, reduction->flags);
-        return export_node ? js_c_push(sink, export_node, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, export_node, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1524,19 +1451,12 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count, reduction->span,
                 &nodes)) return false;
-        JsAstNode* params = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = 1; i + 1 < reduction->child_count; i++) {
-            if (!previous) params = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* params = js_c_link_children(nodes, 1,
+            reduction->child_count - 1);
         JsAstNode* property = build_js_object_method_from_children(
             sink->transpiler, reduction->span, nodes[0], params,
             nodes[reduction->child_count - 1], reduction->flags);
-        return property ? js_c_push(sink, property, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, property, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -1562,8 +1482,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* body = index < reduction->child_count ? nodes[index] : NULL;
         JsAstNode* loop = build_js_for_from_children(sink->transpiler,
             reduction->span, init, test, update, body);
-        return loop ? js_c_push(sink, loop, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, loop, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -1586,8 +1505,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             declares_binding,
             (reduction->flags & JS_REDUCTION_FLAG_FOR_AWAIT) != 0,
             reduction->form == JS_REDUCTION_FOR_IN);
-        return loop ? js_c_push(sink, loop, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, loop, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -1602,19 +1520,12 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 &nodes)) return false;
         JsAstNode* test = is_default ? NULL : nodes[0];
         uint32_t statement_start = is_default ? 0u : 1u;
-        JsAstNode* consequent = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = statement_start; i < reduction->child_count; i++) {
-            if (!previous) consequent = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* consequent = js_c_link_children(nodes, statement_start,
+            reduction->child_count);
         (void)expected;
         JsAstNode* case_node = build_js_switch_case_from_children(
             sink->transpiler, reduction->span, test, consequent, is_default);
-        return case_node ? js_c_push(sink, case_node, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, case_node, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -1623,18 +1534,10 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count, reduction->span,
                 &nodes)) return false;
-        JsAstNode* cases = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = 1; i < reduction->child_count; i++) {
-            if (!previous) cases = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* cases = js_c_link_children(nodes, 1, reduction->child_count);
         JsAstNode* switched = build_js_switch_from_children(sink->transpiler,
             reduction->span, nodes[0], cases, reduction->child_count - 1);
-        return switched ? js_c_push(sink, switched, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, switched, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -1650,8 +1553,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* body = nodes[reduction->child_count - 1];
         JsAstNode* handler = build_js_catch_from_children(sink->transpiler,
             reduction->span, parameter, body);
-        return handler ? js_c_push(sink, handler, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, handler, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -1671,8 +1573,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             ? nodes[index++] : NULL;
         JsAstNode* tried = build_js_try_from_children(sink->transpiler,
             reduction->span, block, handler, finalizer);
-        return tried ? js_c_push(sink, tried, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, tried, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_BLOCK &&
@@ -1680,18 +1581,11 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count, reduction->span,
                 &nodes)) return false;
-        JsAstNode* statements = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = 0; i < reduction->child_count; i++) {
-            if (!previous) statements = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* statements = js_c_link_children(nodes, 0,
+            reduction->child_count);
         JsAstNode* block = build_js_block_from_list(sink->transpiler,
             reduction->span, statements, reduction->child_count);
-        return block ? js_c_push(sink, block, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, block, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1709,8 +1603,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             JsAstNode* expression = build_js_type_expression_from_children(
                 sink->transpiler, reduction->span, inner, target_type,
                 reduction->operator_token.kind == JS_TOK_SATISFIES, false);
-            return expression ? js_c_push(sink, expression, reduction->span) :
-                js_c_unsupported(sink);
+            return js_c_push_result(sink, expression, reduction->span);
         }
         if (!js_c_binary_operator_supported(
                 reduction->operator_token.kind)) {
@@ -1727,8 +1620,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* binary = build_js_binary_from_children(sink->transpiler,
             reduction->span,
             js_operator_from_string(op.str, op.length), left, right);
-        return binary ? js_c_push(sink, binary, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, binary, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1747,8 +1639,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 : build_js_yield_from_child(sink->transpiler,
                     reduction->span, operand,
                     (reduction->flags & JS_REDUCTION_FLAG_YIELD_DELEGATE) != 0);
-            return value ? js_c_push(sink, value, reduction->span) :
-                js_c_unsupported(sink);
+            return js_c_push_result(sink, value, reduction->span);
         }
         if (!js_c_unary_operator_supported(reduction->operator_token.kind)) {
             return js_c_unsupported(sink);
@@ -1764,8 +1655,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             reduction->span,
             js_unary_operator_from_string(op.str, op.length), operand,
             reduction->form == JS_REDUCTION_PREFIX);
-        return unary ? js_c_push(sink, unary, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, unary, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1775,8 +1665,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 reduction->span)) return false;
         JsAstNode* expression = build_js_non_null_from_child(
             sink->transpiler, reduction->span, inner);
-        return expression ? js_c_push(sink, expression, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, expression, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1787,8 +1676,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                     reduction->span, &nodes)) return false;
         JsAstNode* expression = build_js_type_expression_from_children(
             sink->transpiler, reduction->span, nodes[1], nodes[0], false, true);
-        return expression ? js_c_push(sink, expression, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, expression, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1797,19 +1685,12 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count, reduction->span,
                 &nodes)) return false;
-        JsAstNode* arguments = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = 1; i < reduction->child_count; i++) {
-            if (!previous) arguments = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* arguments = js_c_link_children(nodes, 1,
+            reduction->child_count);
         JsAstNode* call = build_js_call_from_children(sink->transpiler,
             reduction->span, nodes[0], arguments,
             (reduction->flags & JS_REDUCTION_FLAG_OPTIONAL) != 0);
-        return call ? js_c_push(sink, call, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, call, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1818,18 +1699,11 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count, reduction->span,
                 &nodes)) return false;
-        JsAstNode* arguments = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = 1; i < reduction->child_count; i++) {
-            if (!previous) arguments = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* arguments = js_c_link_children(nodes, 1,
+            reduction->child_count);
         JsAstNode* expression = build_js_new_from_children(sink->transpiler,
             reduction->span, nodes[0], arguments);
-        return expression ? js_c_push(sink, expression, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, expression, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1847,8 +1721,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* assignment = build_js_assignment_from_children(
             sink->transpiler, reduction->span,
             js_operator_from_string(op.str, op.length), left, right);
-        return assignment ? js_c_push(sink, assignment, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, assignment, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1884,8 +1757,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                     reduction->span, &nodes)) return false;
         JsAstNode* conditional = build_js_conditional_from_children(
             sink->transpiler, reduction->span, nodes[0], nodes[1], nodes[2]);
-        return conditional ? js_c_push(sink, conditional, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, conditional, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1901,8 +1773,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             sink->transpiler, reduction->span, nodes[0], value,
             (reduction->flags & JS_REDUCTION_FLAG_COMPUTED) != 0,
             (reduction->flags & JS_REDUCTION_FLAG_SHORTHAND) != 0);
-        return property ? js_c_push(sink, property, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, property, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1912,8 +1783,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 reduction->span)) return false;
         JsAstNode* spread = build_js_spread_from_child(sink->transpiler,
             reduction->span, argument);
-        return spread ? js_c_push(sink, spread, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, spread, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1921,21 +1791,16 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count, reduction->span,
                 &nodes)) return false;
-        JsAstNode* properties = NULL;
-        JsAstNode* previous = NULL;
         for (uint32_t i = 0; i < reduction->child_count; i++) {
             if (nodes[i] && nodes[i]->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
                 mark_js_object_spread(sink->transpiler, nodes[i]);
             }
-            if (!previous) properties = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
         }
-        if (previous) previous->next = NULL;
+        JsAstNode* properties = js_c_link_children(nodes, 0,
+            reduction->child_count);
         JsAstNode* object = build_js_object_from_list(sink->transpiler,
             reduction->span, properties, reduction->child_count);
-        return object ? js_c_push(sink, object, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, object, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1950,8 +1815,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             reduction->form == JS_REDUCTION_SUBSCRIPT ||
                 (reduction->flags & JS_REDUCTION_FLAG_COMPUTED) != 0,
             (reduction->flags & JS_REDUCTION_FLAG_OPTIONAL) != 0);
-        return member ? js_c_push(sink, member, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, member, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_EXPRESSION &&
@@ -1959,18 +1823,11 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode** nodes = NULL;
         if (!js_c_take_values(sink, reduction->child_count, reduction->span,
                 &nodes)) return false;
-        JsAstNode* elements = NULL;
-        JsAstNode* previous = NULL;
-        for (uint32_t i = 0; i < reduction->child_count; i++) {
-            if (!previous) elements = nodes[i];
-            else previous->next = nodes[i];
-            previous = nodes[i];
-        }
-        if (previous) previous->next = NULL;
+        JsAstNode* elements = js_c_link_children(nodes, 0,
+            reduction->child_count);
         JsAstNode* array = build_js_array_from_list(sink->transpiler,
             reduction->span, elements, reduction->child_count);
-        return array ? js_c_push(sink, array, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, array, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -1994,8 +1851,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         }
         JsAstNode* statement = build_js_expression_statement_from_child(
             sink->transpiler, reduction->span, expression);
-        return statement ? js_c_push(sink, statement, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, statement, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -2017,8 +1873,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             : (reduction->child_count == 3 ? nodes[2] : NULL);
         JsAstNode* statement = build_js_if_from_children(sink->transpiler,
             reduction->span, nodes[0], consequent, alternate);
-        return statement ? js_c_push(sink, statement, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, statement, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -2030,8 +1885,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         JsAstNode* statement = build_js_while_from_children(
             sink->transpiler, reduction->span, nodes[0],
             reduction->child_count == 2 ? nodes[1] : NULL);
-        return statement ? js_c_push(sink, statement, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, statement, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -2049,8 +1903,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
             sink->transpiler, reduction->span,
             missing_body ? NULL : nodes[0],
             missing_body ? nodes[0] : nodes[1]);
-        return statement ? js_c_push(sink, statement, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, statement, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -2061,8 +1914,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 &nodes)) return false;
         JsAstNode* statement = build_js_return_from_child(sink->transpiler,
             reduction->span, reduction->child_count ? nodes[0] : NULL);
-        return statement ? js_c_push(sink, statement, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, statement, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -2072,8 +1924,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                 reduction->span)) return false;
         JsAstNode* statement = build_js_throw_from_child(sink->transpiler,
             reduction->span, argument);
-        return statement ? js_c_push(sink, statement, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, statement, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -2086,8 +1937,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
                     &label)) return js_c_unsupported(sink);
         JsAstNode* statement = build_js_break_continue(sink->transpiler,
             reduction->span, reduction->form == JS_REDUCTION_CONTINUE, label);
-        return statement ? js_c_push(sink, statement, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, statement, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -2104,8 +1954,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         }
         JsAstNode* statement = build_js_labeled_from_child(
             sink->transpiler, reduction->span, label, body);
-        return statement ? js_c_push(sink, statement, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, statement, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_STATEMENT &&
@@ -2120,8 +1969,7 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         if (reduction->child_count == 2) body = nodes[1];
         JsAstNode* statement = build_js_with_from_children(
             sink->transpiler, reduction->span, object, body);
-        return statement ? js_c_push(sink, statement, reduction->span) :
-            js_c_unsupported(sink);
+        return js_c_push_result(sink, statement, reduction->span);
     }
 
     if (reduction->kind == JS_REDUCE_PROGRAM) {
@@ -2147,7 +1995,6 @@ static bool js_c_reduce(void* context, const JsParseReduction* reduction) {
         if (body) program->source_span.start_byte = (uint32_t)
             js_c_program_start(sink->source, body->source_span.start_byte,
                 sink->source_length);
-        program->global_vars = sink->transpiler->global_scope;
         program->has_use_strict_directive =
             js_ast_statement_list_has_use_strict_directive(body);
         program->type = &TYPE_ANY;
@@ -2206,6 +2053,7 @@ static int js_parse_build_compiler_pass(void* opaque) {
     tp->parse_error_valid = false;
     tp->parse_error_message[0] = '\0';
     tp->has_errors = false;
+    tp->binding_error_count = 0;
     tp->ast_root = NULL;
     bool caller_strict = tp->strict_mode;
     tp->strict_js = !(mode & JS_PARSE_TYPESCRIPT);
@@ -2267,7 +2115,6 @@ static int js_bind_compiler_pass(void* opaque) {
     JsProgramNode* program = (JsProgramNode*)pass->root;
     if (program->has_use_strict_directive) {
         tp->strict_mode = true;
-        if (tp->global_scope) tp->global_scope->strict = true;
     }
     if (!js_rebuild_direct_scope_graph(tp, pass->root)) {
         tp->has_errors = true;
