@@ -681,7 +681,8 @@ void init_flex_item_view(LayoutContext* lycon, DomNode* node) {
 // Calculate intrinsic sizes for a flex item
 static bool flex_measure_pseudo_content(LayoutContext* lycon, DomElement* item,
                                         int pseudo_element,
-                                        float* width, float* height) {
+                                        float* width, float* height,
+                                        float* min_width = nullptr) {
     const char* content = dom_element_get_pseudo_element_content(item, pseudo_element);
     if (!content || !*content) return false;
 
@@ -691,8 +692,25 @@ static bool flex_measure_pseudo_content(LayoutContext* lycon, DomElement* item,
     float line_height = flex_font_line_height(lycon, 16.0f);
 
     *width += widths.max_content;
-    if (line_height > *height) *height = line_height;
+    if (height && line_height > *height) *height = line_height;
+    if (min_width && widths.min_content > *min_width) {
+        *min_width = widths.min_content;
+    }
     return true;
+}
+
+static bool flex_measure_pseudo_contents(LayoutContext* lycon, DomElement* item,
+                                         float* width, float* height,
+                                         float* min_width = nullptr) {
+    const int pseudo_elements[2] = {
+        PSEUDO_ELEMENT_BEFORE, PSEUDO_ELEMENT_AFTER
+    };
+    bool found = false;
+    for (int i = 0; i < 2; i++) {
+        found |= flex_measure_pseudo_content(
+            lycon, item, pseudo_elements[i], width, height, min_width);
+    }
+    return found;
 }
 
 void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex_layout) {
@@ -915,25 +933,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
         float pseudo_width = 0, pseudo_height = 0;
 
         if (lycon) {
-            DomElement* elem = item;
-            bool has_before = dom_element_has_before_content(elem);
-            bool has_after = dom_element_has_after_content(elem);
-
-            if (has_before || has_after) {
-                // Get content of pseudo-elements and measure using parent's font
-                // For FontAwesome icons, the icon font-family is inherited from parent
-                if (has_before) {
-                    has_pseudo_content |= flex_measure_pseudo_content(
-                        lycon, elem, PSEUDO_ELEMENT_BEFORE,
-                        &pseudo_width, &pseudo_height);
-                }
-
-                if (has_after) {
-                    has_pseudo_content |= flex_measure_pseudo_content(
-                        lycon, elem, PSEUDO_ELEMENT_AFTER,
-                        &pseudo_width, &pseudo_height);
-                }
-            }
+            has_pseudo_content = flex_measure_pseudo_contents(
+                lycon, item, &pseudo_width, &pseudo_height);
         }
         // Intrinsic content size for empty elements = content-based measurement only.
         // Explicit CSS width/height are NOT intrinsic content sizes — they are extrinsic
@@ -980,22 +981,8 @@ void calculate_item_intrinsic_sizes(ViewElement* item, FlexContainerLayout* flex
                 // CSS Generated Content: add ::before/::after pseudo-element content widths.
                 // These inline pseudo-elements participate in the element's inline formatting
                 // context and contribute to its intrinsic size (CSS Sizing §5.1).
-                {
-                    DomElement* elem = item;
-                    for (int pi = 0; pi < 2; pi++) {
-                        bool is_before = (pi == 0);
-                        bool has_pseudo = is_before ? dom_element_has_before_content(elem)
-                                                    : dom_element_has_after_content(elem);
-                        if (!has_pseudo) continue;
-                        const char* pc = dom_element_get_pseudo_element_content(elem,
-                            is_before ? PSEUDO_ELEMENT_BEFORE : PSEUDO_ELEMENT_AFTER);
-                        if (pc && *pc) {
-                            TextIntrinsicWidths pw = measure_text_intrinsic_widths(lycon, pc, strlen(pc));
-                            max_width += pw.max_content;
-                            if (pw.min_content > min_width) min_width = pw.min_content;
-                        }
-                    }
-                }
+                flex_measure_pseudo_contents(lycon, item, &max_width, nullptr,
+                                             &min_width);
                 // Calculate height using CSS line-height if available, otherwise font metrics
                 // Line-height is inherited; font-relative lengths/percentages are
                 // computed on the declaring ancestor, while unitless numbers use

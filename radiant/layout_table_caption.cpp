@@ -4,6 +4,56 @@
 #include "../lib/tagged.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 
+void layout_table_caption_content_setup(LayoutContext* lycon, ViewBlock* caption,
+                                        float content_width) {
+    lycon->block.content_width = content_width;
+    lycon->block.content_height = 10000;
+    lycon->block.advance_y = 0;
+
+    float inner_left = layout_axis_decoration_start(
+        caption->bound ? caption->boundary() : nullptr, LAYOUT_AXIS_X);
+    lycon->block.advance_y += layout_axis_decoration_start(
+        caption->bound ? caption->boundary() : nullptr, LAYOUT_AXIS_Y);
+    lycon->line.left = inner_left;
+    lycon->line.right = inner_left + content_width;
+
+    if (caption->font) {
+        setup_font(lycon->ui_context, &lycon->font, caption->font);
+    }
+    setup_line_height(lycon, caption);
+    layout_setup_block_font_metrics(lycon);
+    if (caption->blk) {
+        lycon->block.text_indent = isnan(caption->block()->text_indent_percent)
+            ? caption->block()->text_indent
+            : content_width * caption->block()->text_indent_percent / 100.0f;
+        if (lycon->block.text_indent != 0.0f) lycon->block.is_first_line = true;
+    }
+    line_reset(lycon);
+    if (caption->blk && caption->block_mut()->text_align) {
+        lycon->block.text_align = caption->block()->text_align;
+    }
+    if (caption->blk && caption->block_mut()->direction) {
+        lycon->block.direction = caption->block()->direction;
+    }
+}
+
+float layout_table_caption_content_finish(LayoutContext* lycon, ViewBlock* caption,
+                                          float given_height_padding) {
+    float content_height = lycon->block.advance_y;
+    float given_height = caption->blk && caption->block_mut()->given_height >= 0
+        ? caption->block()->given_height : -1.0f;
+    if (given_height >= 0.0f) {
+        caption->height = given_height + given_height_padding;
+    } else {
+        caption->height = content_height + layout_axis_decoration_end(
+            caption->bound ? caption->boundary() : nullptr, LAYOUT_AXIS_Y);
+    }
+    if (caption->blk) {
+        caption->height = layout_apply_min_max_axis(caption, caption->height, false, true);
+    }
+    return caption->height;
+}
+
 float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_width) {
     (void)table_width;
     DomElement* dom_elem = lam::dom_require_element(cap);
@@ -31,64 +81,13 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
     lycon->view = static_cast<View*>(cap);
     dom_node_resolve_style(static_cast<DomNode*>(cap), lycon);
 
-    lycon->block.content_width = content_width;
-    lycon->block.content_height = 10000;
-    lycon->block.advance_y = 0;
-
-    float inner_left = layout_axis_decoration_start(
-        cap->bound ? cap->boundary() : nullptr, LAYOUT_AXIS_X);
-    lycon->block.advance_y += layout_axis_decoration_start(
-        cap->bound ? cap->boundary() : nullptr, LAYOUT_AXIS_Y);
-    lycon->line.left = inner_left;
-    lycon->line.right = inner_left + content_width;
-
-    if (cap->font) {
-        setup_font(lycon->ui_context, &lycon->font, cap->font);
-    }
-    setup_line_height(lycon, cap);
-    layout_setup_block_font_metrics(lycon);
-
-    if (cap->blk) {
-        if (!isnan(cap->block()->text_indent_percent)) {
-            lycon->block.text_indent = content_width * cap->block()->text_indent_percent / 100.0f;
-        } else {
-            lycon->block.text_indent = cap->block()->text_indent;
-        }
-        if (lycon->block.text_indent != 0.0f) {
-            lycon->block.is_first_line = true;
-        }
-    }
-
-    line_reset(lycon);
-
-    if (cap->blk && cap->block_mut()->text_align) {
-        lycon->block.text_align = cap->block()->text_align;
-    }
-    if (cap->blk && cap->block_mut()->direction) {
-        lycon->block.direction = cap->block()->direction;
-    }
+    layout_table_caption_content_setup(lycon, cap, content_width);
 
     if (dom_elem) {
-        for (DomNode* child = dom_elem->first_child; child; child = child->next_sibling) {
-            layout_flow_node(lycon, child);
-        }
-        if (!lycon->line.is_line_start) { line_break(lycon); }
+        layout_flow_children(lycon, dom_elem->first_child, true);
     }
 
-    float caption_content_height = lycon->block.advance_y;
-    float caption_given_height = (cap->blk && cap->block_mut()->given_height >= 0)
-        ? cap->block()->given_height : -1;
-    if (caption_given_height >= 0) {
-        cap->height = caption_given_height;
-        cap->height += cap_box.pad_border_v;
-    } else {
-        cap->height = caption_content_height;
-        cap->height += layout_axis_decoration_end(
-            cap->bound ? cap->boundary() : nullptr, LAYOUT_AXIS_Y);
-    }
-    if (cap->blk) {
-        cap->height = layout_apply_min_max_axis(cap, cap->height, false, true);
-    }
+    layout_table_caption_content_finish(lycon, cap, cap_box.pad_border_v);
 
     log_debug("Caption re-layout complete: width=%.1f, height=%.1f", cap->width, cap->height);
 

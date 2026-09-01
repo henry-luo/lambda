@@ -2267,6 +2267,26 @@ static void record_collapsed_line_fragment_for_inline_ancestors(
 static bool line_trailing_space_is_vertical_atomic_gap(ViewText* text_view,
                                                        TextRect* text_rect);
 
+static void trim_line_trailing_space(LayoutContext* lycon, ViewText* text_view,
+                                     TextRect* text_rect, float space_width,
+                                     bool trim_text_bounds,
+                                     bool update_ancestor_bounds) {
+    if (!lycon || !text_rect) return;
+    bool preserve_vertical_gap = line_trailing_space_is_vertical_atomic_gap(
+        text_view, text_rect);
+    float trim_amount = preserve_vertical_gap ? 0.0f : space_width;
+    if (trim_text_bounds) text_rect->width -= trim_amount;
+    lycon->line.advance_x -= trim_amount;
+    if (trim_text_bounds && !preserve_vertical_gap &&
+        text_rect->width <= 0.01f && text_view) {
+        record_collapsed_line_fragment_for_inline_ancestors(
+            lycon, text_view, text_rect);
+    }
+    if (update_ancestor_bounds && text_view) {
+        propagate_text_trim(text_view, trim_amount);
+    }
+}
+
 void line_consume_trailing_collapsible_space(LayoutContext* lycon,
                                              bool trim_text_bounds,
                                              bool update_ancestor_bounds) {
@@ -2274,51 +2294,22 @@ void line_consume_trailing_collapsible_space(LayoutContext* lycon,
     // CSS 2.1 §16.6.1: collapsible trailing spaces do not occupy inline
     // space before the next inline item, even when no line break is forced.
     if (lycon->line.trailing_space_width > 0 && lycon->line.last_text_rect) {
-        bool preserve_vertical_gap = line_trailing_space_is_vertical_atomic_gap(
-            lycon->line.last_text_view, lycon->line.last_text_rect);
-        float trim_amount = preserve_vertical_gap ? 0.0f :
-            lycon->line.trailing_space_width;
-        if (trim_text_bounds) {
-            lycon->line.last_text_rect->width -= trim_amount;
-        }
-        lycon->line.advance_x -= trim_amount;
+        trim_line_trailing_space(
+            lycon, lycon->line.last_text_view, lycon->line.last_text_rect,
+            lycon->line.trailing_space_width, trim_text_bounds,
+            update_ancestor_bounds);
         lycon->line.trailing_space_width = 0;
-        if (trim_text_bounds && !preserve_vertical_gap &&
-            lycon->line.last_text_rect->width <= 0.01f && lycon->line.last_text_view) {
-            record_collapsed_line_fragment_for_inline_ancestors(
-                lycon, lycon->line.last_text_view, lycon->line.last_text_rect);
-        }
-        if (update_ancestor_bounds && lycon->line.last_text_view) {
-            propagate_text_trim(lycon->line.last_text_view, trim_amount);
-        }
-        lycon->line.committed_trailing_rect = nullptr;
-        lycon->line.committed_trailing_view = nullptr;
-        lycon->line.committed_trailing_space = 0;
     } else if (lycon->line.committed_trailing_space > 0 &&
                lycon->line.committed_trailing_rect) {
-        bool preserve_vertical_gap = line_trailing_space_is_vertical_atomic_gap(
-            lycon->line.committed_trailing_view,
-            lycon->line.committed_trailing_rect);
-        float trim_amount = preserve_vertical_gap ? 0.0f :
-            lycon->line.committed_trailing_space;
-        if (trim_text_bounds) {
-            lycon->line.committed_trailing_rect->width -= trim_amount;
-        }
-        lycon->line.advance_x -= trim_amount;
-        if (trim_text_bounds && !preserve_vertical_gap &&
-            lycon->line.committed_trailing_rect->width <= 0.01f &&
-            lycon->line.committed_trailing_view) {
-            record_collapsed_line_fragment_for_inline_ancestors(
-                lycon, lycon->line.committed_trailing_view,
-                lycon->line.committed_trailing_rect);
-        }
-        if (update_ancestor_bounds && lycon->line.committed_trailing_view) {
-            propagate_text_trim(lycon->line.committed_trailing_view, trim_amount);
-        }
-        lycon->line.committed_trailing_rect = nullptr;
-        lycon->line.committed_trailing_view = nullptr;
-        lycon->line.committed_trailing_space = 0;
+        trim_line_trailing_space(
+            lycon, lycon->line.committed_trailing_view,
+            lycon->line.committed_trailing_rect,
+            lycon->line.committed_trailing_space, trim_text_bounds,
+            update_ancestor_bounds);
     }
+    lycon->line.committed_trailing_rect = nullptr;
+    lycon->line.committed_trailing_view = nullptr;
+    lycon->line.committed_trailing_space = 0;
 }
 
 /**
@@ -3355,15 +3346,9 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
                 }
             }
         }
-        float baseline_shift = vertical_align_baseline_shift(
-            lycon, lycon->line.vertical_align,
-            lycon->line.vertical_align_offset);
-        if (baseline_shift != 0.0f) {
-            lycon->line.has_baseline_shift = true;
-            ascender += baseline_shift;
-            descender -= baseline_shift;
-            css_baseline_ascender += baseline_shift;
-        }
+        float baseline_shift = layout_apply_baseline_shift(
+            lycon, &ascender, &descender);
+        css_baseline_ascender += baseline_shift;
         float emphasis_extent = text_emphasis_line_extent(
             lycon, text, rect, text_length);
         if (emphasis_extent > 0.0f) {
@@ -3405,10 +3390,8 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     }
 
     if (text->rect == rect) {  // first rect
-        text->x = rect->x;
-        text->y = rect->y;
-        text->width = rect->width;
-        text->height = rect->height;
+        layout_set_view_geometry(text, rect->x, rect->y,
+                                 rect->width, rect->height);
     } else {  // following rects after first rect
         include_text_rect_bounds(text, rect);
     }
@@ -3425,10 +3408,8 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
 void adjust_text_bounds(ViewText* text) {
     TextRect* rect = text->rect;
     if (!rect) return;
-    text->x = rect->x;
-    text->y = rect->y;
-    text->width = rect->width;
-    text->height = rect->height;
+    layout_set_view_geometry(text, rect->x, rect->y,
+                             rect->width, rect->height);
     rect = rect->next;
     while (rect) {
         include_text_rect_bounds(text, rect);
@@ -3565,73 +3546,50 @@ static inline bool line_is_at_collapsible_text_edge(LayoutContext* lycon) {
         !lycon->line.has_non_c1_text;
 }
 
+template <typename Target, typename Source>
+static void copy_line_metrics(Target* target, const Source* source) {
+    if (!target || !source) return;
+    target->max_ascender = source->max_ascender;
+    target->max_descender = source->max_descender;
+    target->max_css_baseline_ascender = source->max_css_baseline_ascender;
+    target->ruby_annotation_min_line_height = source->ruby_annotation_min_line_height;
+    target->ruby_annotation_over_shift = source->ruby_annotation_over_shift;
+    target->initial_letter_origin_advance = source->initial_letter_origin_advance;
+    target->has_initial_letter = source->has_initial_letter;
+    target->has_drop_initial_letter = source->has_drop_initial_letter;
+    target->has_phantom_inline_fragment = source->has_phantom_inline_fragment;
+    target->has_replaced_content = source->has_replaced_content;
+    target->atomic_inline_count = source->atomic_inline_count;
+    target->max_desc_before_last_text = source->max_desc_before_last_text;
+    target->has_expanded_inline_lh = source->has_expanded_inline_lh;
+    target->has_baseline_shift = source->has_baseline_shift;
+    target->max_inline_line_height = source->max_inline_line_height;
+    target->max_atomic_inline_height = source->max_atomic_inline_height;
+    target->max_text_ascender = source->max_text_ascender;
+    target->max_text_descender = source->max_text_descender;
+    target->clamped_baseline_tail = source->clamped_baseline_tail;
+    target->has_clamped_baseline_tail = source->has_clamped_baseline_tail;
+    target->has_different_inline_font = source->has_different_inline_font;
+    target->max_normal_line_height = source->max_normal_line_height;
+    target->has_c1_control_text = source->has_c1_control_text;
+    target->has_non_c1_text = source->has_non_c1_text;
+    target->has_direct_block_text = source->has_direct_block_text;
+    target->c1_control_line_height = source->c1_control_line_height;
+    target->has_cjk_text = source->has_cjk_text;
+    target->max_top_bottom_height = source->max_top_bottom_height;
+    target->max_top_height = source->max_top_height;
+    target->max_bottom_height = source->max_bottom_height;
+}
+
 static void capture_line_metrics(LineMetricsSnapshot* snapshot, const Linebox* line) {
     if (!snapshot || !line) return;
     snapshot->valid = true;
-    snapshot->max_ascender = line->max_ascender;
-    snapshot->max_descender = line->max_descender;
-    snapshot->max_css_baseline_ascender = line->max_css_baseline_ascender;
-    snapshot->ruby_annotation_min_line_height = line->ruby_annotation_min_line_height;
-    snapshot->ruby_annotation_over_shift = line->ruby_annotation_over_shift;
-    snapshot->initial_letter_origin_advance = line->initial_letter_origin_advance;
-    snapshot->has_initial_letter = line->has_initial_letter;
-    snapshot->has_drop_initial_letter = line->has_drop_initial_letter;
-    snapshot->has_phantom_inline_fragment = line->has_phantom_inline_fragment;
-    snapshot->has_replaced_content = line->has_replaced_content;
-    snapshot->atomic_inline_count = line->atomic_inline_count;
-    snapshot->max_desc_before_last_text = line->max_desc_before_last_text;
-    snapshot->has_expanded_inline_lh = line->has_expanded_inline_lh;
-    snapshot->has_baseline_shift = line->has_baseline_shift;
-    snapshot->max_inline_line_height = line->max_inline_line_height;
-    snapshot->max_atomic_inline_height = line->max_atomic_inline_height;
-    snapshot->max_text_ascender = line->max_text_ascender;
-    snapshot->max_text_descender = line->max_text_descender;
-    snapshot->clamped_baseline_tail = line->clamped_baseline_tail;
-    snapshot->has_clamped_baseline_tail = line->has_clamped_baseline_tail;
-    snapshot->has_different_inline_font = line->has_different_inline_font;
-    snapshot->max_normal_line_height = line->max_normal_line_height;
-    snapshot->has_c1_control_text = line->has_c1_control_text;
-    snapshot->has_non_c1_text = line->has_non_c1_text;
-    snapshot->has_direct_block_text = line->has_direct_block_text;
-    snapshot->c1_control_line_height = line->c1_control_line_height;
-    snapshot->has_cjk_text = line->has_cjk_text;
-    snapshot->max_top_bottom_height = line->max_top_bottom_height;
-    snapshot->max_top_height = line->max_top_height;
-    snapshot->max_bottom_height = line->max_bottom_height;
+    copy_line_metrics(snapshot, line);
 }
 
 static void restore_line_metrics(Linebox* line, const LineMetricsSnapshot* snapshot) {
     if (!line || !snapshot || !snapshot->valid) return;
-    line->max_ascender = snapshot->max_ascender;
-    line->max_descender = snapshot->max_descender;
-    line->max_css_baseline_ascender = snapshot->max_css_baseline_ascender;
-    line->ruby_annotation_min_line_height = snapshot->ruby_annotation_min_line_height;
-    line->ruby_annotation_over_shift = snapshot->ruby_annotation_over_shift;
-    line->initial_letter_origin_advance = snapshot->initial_letter_origin_advance;
-    line->has_initial_letter = snapshot->has_initial_letter;
-    line->has_drop_initial_letter = snapshot->has_drop_initial_letter;
-    line->has_phantom_inline_fragment = snapshot->has_phantom_inline_fragment;
-    line->has_replaced_content = snapshot->has_replaced_content;
-    line->atomic_inline_count = snapshot->atomic_inline_count;
-    line->max_desc_before_last_text = snapshot->max_desc_before_last_text;
-    line->has_expanded_inline_lh = snapshot->has_expanded_inline_lh;
-    line->has_baseline_shift = snapshot->has_baseline_shift;
-    line->max_inline_line_height = snapshot->max_inline_line_height;
-    line->max_atomic_inline_height = snapshot->max_atomic_inline_height;
-    line->max_text_ascender = snapshot->max_text_ascender;
-    line->max_text_descender = snapshot->max_text_descender;
-    line->clamped_baseline_tail = snapshot->clamped_baseline_tail;
-    line->has_clamped_baseline_tail = snapshot->has_clamped_baseline_tail;
-    line->has_different_inline_font = snapshot->has_different_inline_font;
-    line->max_normal_line_height = snapshot->max_normal_line_height;
-    line->has_c1_control_text = snapshot->has_c1_control_text;
-    line->has_non_c1_text = snapshot->has_non_c1_text;
-    line->has_direct_block_text = snapshot->has_direct_block_text;
-    line->c1_control_line_height = snapshot->c1_control_line_height;
-    line->has_cjk_text = snapshot->has_cjk_text;
-    line->max_top_bottom_height = snapshot->max_top_bottom_height;
-    line->max_top_height = snapshot->max_top_height;
-    line->max_bottom_height = snapshot->max_bottom_height;
+    copy_line_metrics(line, snapshot);
 }
 
 static void record_line_break_opportunity(LayoutContext* lycon,
@@ -4045,15 +4003,16 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         text_view->font = lycon->font.style;
     }
 
+    TextRect* rect = lycon->doc->view_tree->alloc_text_rect();
+    if (!text_view->rect) {
+        text_view->rect = rect;
+    } else {
+        TextRect* last_rect = text_view->rect;
+        while (last_rect && last_rect->next) { last_rect = last_rect->next; }
+        last_rect->next = rect;
+    }
+
     if (lycon->font.style && lycon->font.style->font_size <= 0.0f) {
-        TextRect* rect = lycon->doc->view_tree->alloc_text_rect();
-        if (!text_view->rect) {
-            text_view->rect = rect;
-        } else {
-            TextRect* last_rect = text_view->rect;
-            while (last_rect && last_rect->next) { last_rect = last_rect->next; }
-            last_rect->next = rect;
-        }
         rect->start_index = 0;
         rect->length = strlen((char*)text_start);
         rect->x = lycon->line.advance_x;
@@ -4064,14 +4023,6 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         return;
     }
 
-    TextRect* rect = lycon->doc->view_tree->alloc_text_rect();
-    if (!text_view->rect) {
-        text_view->rect = rect;
-    } else {
-        TextRect* last_rect = text_view->rect;;
-        while (last_rect && last_rect->next) { last_rect = last_rect->next; }
-        last_rect->next = rect;
-    }
     rect->start_index = str - text_start;
     if (soft_hyphen_leading_width > 0.0f) {
         rect->width = soft_hyphen_leading_width;

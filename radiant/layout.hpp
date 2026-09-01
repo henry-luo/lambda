@@ -323,6 +323,10 @@ float layout_resolve_intrinsic_size_keyword(CssEnum keyword, float min_size,
 float layout_intrinsic_padding_border_axis(LayoutContext* lycon, DomElement* element,
                                            bool horizontal, float inline_base);
 bool layout_display_contents_has_block_child(DomElement* element);
+bool layout_display_is_inline_level(CssEnum display);
+void layout_set_view_geometry(View* view, float x, float y,
+                              float width, float height);
+const char* layout_css_counter_name(const CssValue* value, bool allow_string);
 
 TextIntrinsicWidths measure_text_intrinsic_widths(LayoutContext* lycon,
                                                    const char* text,
@@ -3274,6 +3278,11 @@ typedef enum LayoutTextRectContentKind {
 LayoutTextRectContentKind layout_text_rect_content_kind(ViewText* text,
                                                         TextRect* rect);
 bool layout_text_rect_has_painted_codepoint(ViewText* text, TextRect* rect);
+inline bool layout_text_rect_is_visible(ViewText* text, TextRect* rect) {
+    return rect && rect->width > 0.0f && rect->height > 0.0f &&
+        layout_text_rect_content_kind(text, rect) !=
+            LAYOUT_TEXT_RECT_COLLAPSED_WHITESPACE;
+}
 float layout_vertical_flow_block_start_margin(ViewBlock* child, WritingMode parent_mode);
 float layout_vertical_flow_block_end_margin(ViewBlock* child, WritingMode parent_mode);
 bool layout_parent_block_edge_is_unedged(ViewBlock* block, bool horizontal, bool start);
@@ -3329,6 +3338,10 @@ void layout_reresolve_percentage_box(ViewBlock* block, float inline_base);
 bool layout_view_tree_has_percentage_spacing(View* root);
 // Table Captions
 
+void layout_table_caption_content_setup(LayoutContext* lycon, ViewBlock* caption,
+                                        float content_width);
+float layout_table_caption_content_finish(LayoutContext* lycon, ViewBlock* caption,
+                                          float given_height_padding);
 float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_width);
 float adjust_table_caption_width(ViewBlock* cap, float wrapper_content_width);
 // Table Layout
@@ -3845,6 +3858,8 @@ void layout_refresh_html_body_ua_margin(LayoutContext* lycon, DomElement* dom_el
 View* layout_inline_fragment_root(View* view);
 float layout_rtl_inline_item_x(Linebox* line, float item_width);
 void layout_flow_node(LayoutContext* lycon, DomNode* node);
+void layout_flow_children(LayoutContext* lycon, DomNode* first_child,
+                         bool finalize_line = false);
 // CSS Shadow DOM: return the tree that supplies a host's rendered children;
 // light-DOM children remain the DOM/API tree and are projected at <slot>.
 DomNode* layout_render_child_list(DomElement* element);
@@ -4229,23 +4244,17 @@ static inline void layout_walk_view_tree(View* view, Visit visit, Leave leave,
     }
 }
 
-template <typename Visit, typename Leave>
-static inline void layout_walk_view_descendants(View* view, Visit visit, Leave leave,
-                                                bool skip_out_of_flow = true,
-                                                int depth = 0) {
+template <typename Predicate>
+static inline bool layout_view_tree_any(View* view, Predicate predicate) {
     while (view) {
-        bool descend = false;
-        if (!skip_out_of_flow || !layout_view_is_out_of_flow(view)) {
-            descend = visit(view, depth);
-            if (descend && view->is_element()) {
-                layout_walk_view_descendants(
-                    static_cast<View*>(view->as_element()->first_child), visit, leave,
-                    skip_out_of_flow, depth + 1);
-            }
-            leave(view, depth);
+        if (predicate(view)) return true;
+        if (view->is_element() && layout_view_tree_any(
+                static_cast<ViewElement*>(view)->first_placed_child(), predicate)) {
+            return true;
         }
         view = view->next();
     }
+    return false;
 }
 
 inline bool layout_span_children_have_no_line_content(ViewSpan* span);
@@ -4296,6 +4305,9 @@ void line_init(LayoutContext* lycon, float left, float right);
 void line_reset(LayoutContext* lycon);
 float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
                                     float valign_offset = 0);
+float layout_apply_baseline_shift(LayoutContext* lycon,
+                                  float* ascender, float* descender);
+CssEnum layout_resolve_text_align(CssEnum align, CssEnum direction);
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset = 0);
 bool layout_zero_sized_atomic_in_vertical_lr(ViewBlock* block);
 float layout_unresolved_html_cell_horizontal_box_extra(DomElement* cell);

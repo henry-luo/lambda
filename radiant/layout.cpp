@@ -1023,10 +1023,34 @@ CssEnum layout_specified_keyword(DomElement* element, CssPropertyCode property,
     return declaration->value->data.keyword;
 }
 
-static bool layout_inline_display(CssEnum display) {
+bool layout_display_is_inline_level(CssEnum display) {
     return display == CSS_VALUE_INLINE || display == CSS_VALUE_INLINE_BLOCK ||
         display == CSS_VALUE_INLINE_FLEX || display == CSS_VALUE_INLINE_GRID ||
         display == CSS_VALUE_INLINE_TABLE;
+}
+
+void layout_set_view_geometry(View* view, float x, float y,
+                              float width, float height) {
+    if (!view) return;
+    view->x = x;
+    view->y = y;
+    view->width = width;
+    view->height = height;
+}
+
+const char* layout_css_counter_name(const CssValue* value, bool allow_string) {
+    if (!value) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) {
+        return value->data.custom_property.name;
+    }
+    if (allow_string && value->type == CSS_VALUE_TYPE_STRING) {
+        return value->data.string;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : nullptr;
+    }
+    return nullptr;
 }
 
 bool layout_display_contents_has_block_child(DomElement* element) {
@@ -1044,7 +1068,7 @@ bool layout_display_contents_has_block_child(DomElement* element) {
 
         if (child_display.outer == CSS_VALUE_CONTENTS) {
             if (layout_display_contents_has_block_child(child_element)) return true;
-        } else if (!layout_inline_display(child_display.outer)) {
+        } else if (!layout_display_is_inline_level(child_display.outer)) {
             return true;
         }
     }
@@ -1056,7 +1080,7 @@ bool layout_element_was_inline(DomElement* element, bool include_replaced) {
     if (!element) return false;
     CssEnum display = layout_specified_keyword(
         element, CSS_PROPERTY_DISPLAY, CSS_VALUE__UNDEF);
-    if (display != CSS_VALUE__UNDEF) return layout_inline_display(display);
+    if (display != CSS_VALUE__UNDEF) return layout_display_is_inline_level(display);
 
     static const NameId inline_tags[] = {
         MARKUP_NAME_SPAN, MARKUP_NAME_A, MARKUP_NAME_EM, MARKUP_NAME_STRONG,
@@ -1720,6 +1744,28 @@ float vertical_align_baseline_shift(LayoutContext* lycon, CssEnum align,
     }
 }
 
+float layout_apply_baseline_shift(LayoutContext* lycon,
+                                  float* ascender, float* descender) {
+    float shift = vertical_align_baseline_shift(
+        lycon, lycon->line.vertical_align, lycon->line.vertical_align_offset);
+    if (shift != 0.0f) {
+        lycon->line.has_baseline_shift = true;
+        *ascender += shift;
+        *descender -= shift;
+    }
+    return shift;
+}
+
+CssEnum layout_resolve_text_align(CssEnum align, CssEnum direction) {
+    if (align == CSS_VALUE_START) {
+        return direction == CSS_VALUE_RTL ? CSS_VALUE_RIGHT : CSS_VALUE_LEFT;
+    }
+    if (align == CSS_VALUE_END) {
+        return direction == CSS_VALUE_RTL ? CSS_VALUE_LEFT : CSS_VALUE_RIGHT;
+    }
+    return align;
+}
+
 float calculate_vertical_align_offset(LayoutContext* lycon, CssEnum align, float item_height, float line_height, float baseline_pos, float item_baseline, float valign_offset) {
     // CSS 2.1 §10.8.1: text-top/text-bottom/middle/super/sub reference the PARENT element's
     float pa_asc = lycon->line.parent_font_ascender;
@@ -2097,10 +2143,9 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
     // parents retain the inline insertion point used by their line box.
     bool inline_parent = elem->parent && elem->parent->is_element() &&
         resolve_display_value(elem->parent).outer == CSS_VALUE_INLINE;
-    marker->x = inline_parent ? lycon->line.advance_x : lycon->line.left;
-    marker->y = lycon->block.advance_y;
-    marker->width = 0.0f;
-    marker->height = 0.0f;
+    layout_set_view_geometry(marker,
+        inline_parent ? lycon->line.advance_x : lycon->line.left,
+        lycon->block.advance_y, 0.0f, 0.0f);
     if (!lycon->line.start_view) {
         lycon->line.start_view = marker;
     }
@@ -3484,9 +3529,7 @@ void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot) {
     }
     if (!has_assigned_nodes) {
         // HTML: an unassigned slot renders its fallback children.
-        for (DomNode* child = slot->first_child; child; child = child->next_sibling) {
-            layout_flow_node(lycon, child);
-        }
+        layout_flow_children(lycon, slot->first_child);
     }
 }
 
@@ -3496,10 +3539,7 @@ void layout_init_display_contents_view(LayoutContext* lycon, DomElement* elem) {
     elem->view_type = RDT_VIEW_INLINE;
     elem->display.outer = CSS_VALUE_CONTENTS;
     elem->display.inner = CSS_VALUE_CONTENTS;
-    elem->x = 0.0f;
-    elem->y = 0.0f;
-    elem->width = 0.0f;
-    elem->height = 0.0f;
+    layout_set_view_geometry(elem, 0.0f, 0.0f, 0.0f, 0.0f);
 
     LayoutViewScope view_scope(lycon);
     lycon->view = static_cast<View*>(elem);
@@ -3542,10 +3582,7 @@ static void layout_empty_mathml_tree(LayoutContext* lycon, DomNode* node,
     lycon->elmt = node;
     dom_node_resolve_style(node, lycon);
     node->as_element()->display = display;
-    view->x = x;
-    view->y = y;
-    view->width = 0.0f;
-    view->height = 0.0f;
+    layout_set_view_geometry(view, x, y, 0.0f, 0.0f);
     node->as_element()->content_width = 0.0f;
     node->as_element()->content_height = 0.0f;
 
@@ -4026,10 +4063,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             // A retained element can become display:none after previously
             elem->display = display;
             elem->view_type = RDT_VIEW_NONE;
-            elem->x = 0.0f;
-            elem->y = 0.0f;
-            elem->width = 0.0f;
-            elem->height = 0.0f;
+            layout_set_view_geometry(elem, 0.0f, 0.0f, 0.0f, 0.0f);
             elem->content_width = 0.0f;
             elem->content_height = 0.0f;
             break;
@@ -4054,10 +4088,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             }
             // CSS Shadow DOM: display:contents flattens the host's rendered
             // tree, so a shadow root replaces light-DOM children here.
-            for (DomNode* child = layout_render_child_list(elem); child;
-                 child = child->next_sibling) {
-                layout_flow_node(lycon, child);
-            }
+            layout_flow_children(lycon, layout_render_child_list(elem));
             // HTML rendering gives an empty external optgroup an anonymous label
             // line; display:contents removes its principal box but preserves that
             // line contribution when its flattened subtree is empty.
@@ -4086,6 +4117,15 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         }
     }
     lycon->depth--;
+}
+
+void layout_flow_children(LayoutContext* lycon, DomNode* first_child,
+                          bool finalize_line) {
+    if (!lycon) return;
+    for (DomNode* child = first_child; child; child = child->next_sibling) {
+        layout_flow_node(lycon, child);
+    }
+    if (finalize_line && !lycon->line.is_line_start) line_break(lycon);
 }
 
 static void layout_set_root_available_width(LayoutContext* lycon, ViewBlock* root,
@@ -4167,10 +4207,7 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
             ViewBlock* body = lam::view_require_block(set_view(
                 lycon, RDT_VIEW_BLOCK, body_element));
             body->display = resolve_display_value(body_element);
-            body->x = 0.0f;
-            body->y = 0.0f;
-            body->width = 0.0f;
-            body->height = 0.0f;
+            layout_set_view_geometry(body, 0.0f, 0.0f, 0.0f, 0.0f);
             body->content_width = 0.0f;
             body->content_height = 0.0f;
         }
