@@ -128,6 +128,17 @@ calls `focus_set` and `scroll_into_view`. The same candidate snapshot makes
 selection/key-command policy over `selection_operation`; it does not receive
 raw DOM range endpoints or reproduce layout geometry.
 
+**F11 consolidation (2026-09-01).** `keymap.ls` is the one key-to-edit-intent
+table for text controls and rich editing. `caret.ls` is the one key-to-named
+caret-operation table. The native key path consumes only those named results:
+it applies the live text-control range/buffer edit, canonical selection,
+history, clipboard, `beforeinput`/`input`, and repaint. The text-control
+native path contains no second accelerator or delete-policy table.
+`PageUp`/`PageDown` are named by native,
+selected by `caret.ls` only for a `<textarea>`, and resolved there as native
+live-buffer line geometry; they remain distinct from the still-missing
+document-scroll default action in ESO48.
+
 The generic traversal replaces the current policy-specific tree-query waists:
 
 | Retired waist | Package replacement |
@@ -272,10 +283,10 @@ Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`,
 | Event | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
 | `keydown` | UI Events; cancelable | text input, caret movement, scrolling, activation via Space/Enter — "the key processing model" | dispatched to JS first, then split by kind (below) | 🟡 — see the four rows |
-| ↳ **`caretkey`** (default action) | — | caret movement | dispatched *with* context, so a prevented keydown suppresses it → `caret.ls`, both surfaces. Arrow / Home / End only; **PageUp/PageDown absent** | 🟡 |
+| ↳ **`caretkey`** (default action) | — | caret movement | dispatched *with* context, so a prevented keydown suppresses it → `caret.ls`, both surfaces. Arrow / Home / End apply to both; `PageUp` / `PageDown` are package-selected for `<textarea>` and use native live-buffer line geometry | 🟡 |
 | ↳ **`keyintent`** (translation) | — | key → `inputType` | dispatched context-free, deliberately (F11) → `keymap.ls` | ✅ |
 | ↳ **`dropdownkey`** | — | UA handling of an open `<select>` popup | Up / Down / Enter / Escape → `form.ls`. **No typeahead** | 🟡 |
-| ↳ **document scrolling** | — | Space / PageUp / PageDown / Home / End / arrows scroll the nearest scrollport | **absent for HTML.** Scroll arrives only from wheel (`RDT_EVENT_SCROLL`), scrollbar drag, and drag-autoscroll; page keys are handled only inside `<textarea>` (`event.cpp:10151`) and the PDF viewer. `key_code_to_name` (`event.cpp:1505`) has no `PageUp`/`PageDown` case, so JS also sees `event.key === ""` for them | ❌ (ESO48) |
+| ↳ **document scrolling** | — | Space / PageUp / PageDown / Home / End / arrows scroll the nearest scrollport | **absent for HTML.** Scroll arrives only from wheel (`RDT_EVENT_SCROLL`), scrollbar drag, and drag-autoscroll. `PageUp` / `PageDown` are now named for JS and handled only inside `<textarea>` through `caret.ls`; no key scrolls the nearest document scrollport | ❌ (ESO48) |
 | ↳ **Space/Enter activation** | — | activate the focused element | `input[type=checkbox]` / `input[type=radio]` (Space), `button`, `select`, and `<a href>` (Enter) use the click/activation path. `navigation.ls` claims an uncancelled link click and requests native execution; the focused link is therefore keyboard-operable | 🟡 (§5.4) |
 | `keyup` | UI Events; cancelable | none meaningful | dispatched; no package involvement | ✅ |
 | `keypress` | legacy, deprecated | — | not dispatched, deliberately. `script_runner.cpp:2590` still registers `onkeypress`, so the attribute is inert rather than absent | — (dead attribute) |
@@ -478,7 +489,7 @@ New rows start at ESO48; ESO1–ESO47 remain in DOM_State §7. Rows here are def
 
 | # | Issue | Direction |
 | --- | --- | --- |
-| ESO48 | **No keyboard scrolling for HTML documents.** Space / PageUp / PageDown / Home / End / arrows do not scroll the nearest scrollport; scroll arrives only from wheel, scrollbar drag, and drag-autoscroll. `key_code_to_name` also lacks `PageUp`/`PageDown`, so JS sees `event.key === ""` for them | fix the key naming first (one-line, unblocks JS pages immediately); then a scroll default action on the keydown path, ordered after `caretkey` declines. Interacts with §5.4 |
+| ESO48 | **No keyboard scrolling for HTML documents.** Space / PageUp / PageDown / Home / End / arrows do not scroll the nearest scrollport; scroll arrives only from wheel, scrollbar drag, and drag-autoscroll. `PageUp`/`PageDown` naming and textarea-local movement are landed, but no key scrolls the nearest document scrollport | add a scroll default action on the keydown path, ordered after `caretkey` declines. Interacts with §5.4 |
 | ESO49 | **Activation behavior has two implementations; popover activation still lives only in the JS one.** §5.2 | F4 moved submit/reset into `form.ls`/`submit.ls` and gave native/JS click paths the same claim protocol. Remaining work: migrate popover activation, and give the browsing layer a real POST body/method transport |
 | ESO50 | **Pointer Events are partial** — `pointerdown`/`up`/`move` dispatch, but no `pointerover`/`out`/`enter`/`leave`/`cancel` and no `setPointerCapture` | boundary events follow the existing mouse boundary logic; capture needs a target-override in the dispatch path |
 | ESO51 | ~~**Link activation is on `mousedown`, and has no keyboard path.**~~ **landed 2026-09-01 (ES31)** | `navigation.ls` claims `linkactivation` after an uncancelled click; Enter dispatches that same click. It resolves fragments and existing root/iframe targets through the ES30/ES31 snapshot surface, and native executes only the pinned request |
@@ -511,7 +522,7 @@ Ordered by how often the gap is hit by an ordinary page, not by implementation c
 
 **Tier 2 — cheap, high visibility**
 
-4. `PageUp`/`PageDown` key naming, then keyboard scrolling (ESO48).
+4. Keyboard scrolling after `caretkey` declines (ESO48).
 5. ~~`<details>` toggle (ESO56)~~ and ~~`:target` (ESO53)~~ **landed**; `:visited` remains blocked on history/privacy policy (ESO12).
 6. `dblclick` / `select` / cancelable `contextmenu` dispatch (ESO55).
 7. `tabindex` ordering, focus scroll-into-view, `autofocus` scope (ESO52 + ESO60) — one `focus.ls` pass.

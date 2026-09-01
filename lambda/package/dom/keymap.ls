@@ -35,6 +35,7 @@ pub fn intent_for(key, shift, alt, ctrl, meta) {
     else if (cmd and k == "u") { "formatUnderline" }
     else if (cmd and k == "v") { "insertFromPaste" }
     else if (cmd and k == "x") { "deleteByCut" }
+    else if (cmd and k == "c") { "copy" }
     else if (cmd and k == "a") { "selectAll" }
     else if (k == "enter") { if (shift) "insertLineBreak" else "insertParagraph" }
     else if (k == "tab") { if (shift) "formatOutdent" else "formatIndent" }

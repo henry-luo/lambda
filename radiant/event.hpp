@@ -446,6 +446,10 @@ typedef enum InputIntentType {
     INPUT_INTENT_SELECT_ALL,
     INPUT_INTENT_HISTORY_UNDO,
     INPUT_INTENT_HISTORY_REDO,
+    // Copy is a key-default command rather than a beforeinput edit. Keeping it
+    // in the shared intent carrier lets the package choose the shortcut while
+    // native remains the clipboard mechanism.
+    INPUT_INTENT_COPY,
 } InputIntentType;
 
 typedef struct InputIntent {
