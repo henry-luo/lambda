@@ -4589,8 +4589,7 @@ static FontProp* ensure_placeholder_font(LayoutContext* lycon,
 }
 
 static void resolve_placeholder_pseudo_style(DomElement* dom_elem, LayoutContext* lycon) {
-    if (!dom_elem || !lycon || dom_elem->role_kind() != DomElement::ROLE_FORM ||
-        !dom_elem->form) {
+    if (!dom_elem || !lycon || !dom_elem->form_control()) {
         return;
     }
     FormControlProp* form = dom_elem->form;
@@ -7351,7 +7350,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             bool is_backdrop_filter = prop_id == CSS_PROPERTY_BACKDROP_FILTER;
             FilterProp** target_filter = is_backdrop_filter
                 ? span->backdrop_filter_slot()
-                : &span->filter;
+                : span->filter_slot();
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
                 *target_filter = nullptr;
                 break;

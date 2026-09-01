@@ -1927,12 +1927,12 @@ void css_transition_capture_before_change(DomElement* element, CssPropertyCode p
     // is commonly the author-supplied `from` value, not a style change to animate.
     if (!has_transition || !css_transition_covers(&transition, prop_id)) return;
 
-    CssTransitionElemState* es = (CssTransitionElemState*)element->transition_state;
+    CssTransitionElemState* es = (CssTransitionElemState*)element->transition_state_prop();
     if (!es) {
         es = (CssTransitionElemState*)pool_calloc(
             element->doc->document_pool, sizeof(CssTransitionElemState));
         if (!es) return;
-        element->transition_state = es;
+        element->set_transition_state_prop(es);
     }
     CssTransitionTrack* track = css_transition_track_for(es, prop_id, vt);
     if (!track || track->has_snapshot || track->has_pending_from) return;
@@ -2011,7 +2011,7 @@ void css_transition_finish(AnimationInstance* anim) {
     // Snap the element's persistent snapshot to the target so a subsequent style
     // change interpolates from the true end value. We locate the track fresh (no
     // raw back-pointer is kept, to stay safe across view-pool relayouts).
-    CssTransitionElemState* es = (CssTransitionElemState*)st->element->transition_state;
+    CssTransitionElemState* es = (CssTransitionElemState*)st->element->transition_state_prop();
     if (es) {
         for (int i = 0; i < es->track_count; i++) {
             if (es->tracks[i].property_code == st->property_code) {
@@ -2402,11 +2402,11 @@ void css_transition_resolve(DomElement* element, LayoutContext* lycon) {
 
     // Lazily allocate the persistent per-element transition state (survives the
     // view-pool relayout because it lives in the doc pool, not the view pool).
-    CssTransitionElemState* es = (CssTransitionElemState*)element->transition_state;
+    CssTransitionElemState* es = (CssTransitionElemState*)element->transition_state_prop();
     if (!es) {
         es = (CssTransitionElemState*)pool_calloc(pool, sizeof(CssTransitionElemState));
         es->track_count = 0;
-        element->transition_state = es;
+        element->set_transition_state_prop(es);
     }
 
     double now = scheduler->current_time;

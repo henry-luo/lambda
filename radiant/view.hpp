@@ -2288,8 +2288,9 @@ inline ViewTableCell* ViewTable::find_cell(Predicate predicate) {
     return result;
 }
 
-// Direct fi/gi/tb/td/form reads outside these tag-checking accessors are invalid;
-// parent-item role and the element's own role occupy separate tagged unions.
+// Direct fi/gi/tb/td/form reads outside these accessors are invalid; the
+// parent-item tag selects fi/gi and the structural role tag selects tb/td,
+// while form state may coexist with either table role.
 
 // Radiant view wrappers are static_cast/reinterpret_cast overlays on DOM storage
 // (see lib/tagged.hpp unsafe_* helpers), so adding fields here corrupts nodes.
@@ -3205,7 +3206,7 @@ typedef struct CssTransitionTrack {
     CssTransitionValue pending_from; // before-change value for the next style resolution
 } CssTransitionTrack;
 
-// Persistent per-element transition state (pointed to by DomElement.transition_state).
+// Persistent per-element transition state (stored in DomElement's extension).
 // tier-2: view-pool, rebuilt each relayout
 typedef struct CssTransitionElemState {
     CssTransitionTrack tracks[CSS_TRANSITION_MAX_TRACKED];

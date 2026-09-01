@@ -2642,7 +2642,7 @@ float apply_flex_constraint(
     if (!item) return computed_size;
     // Compute min/max constraints from CSS given_min/max and intrinsic sizes.
     // CSS Flexbox §4.5: min-width:auto for replaced elements = intrinsic width.
-    if (item->role_kind() == DomElement::ROLE_FORM) {
+    if (item->form_control()) {
         bool is_horizontal = is_main_axis_horizontal(flex_layout);
         // and cross-axis must apply CSS min-/max- constraints; previously the
         bool axis_is_horizontal = is_main_axis ? is_horizontal : !is_horizontal;
@@ -2697,8 +2697,7 @@ float apply_stretch_constraint(
     float container_cross_size,
     FlexContainerLayout* flex_layout
 ) {
-    if (!item || (!has_flex_item_prop(item) &&
-                  item->role_kind() != DomElement::ROLE_FORM)) {
+    if (!item || (!has_flex_item_prop(item) && !item->form_control())) {
         return container_cross_size;
     }
     return apply_flex_constraint(item, container_cross_size, false, flex_layout);

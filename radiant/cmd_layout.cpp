@@ -3997,8 +3997,7 @@ static bool capture_lambda_focus_restore(DocState* state,
     View* focused = focus_get(state);
     if (!focused || !focused->is_element()) return false;
     DomElement* focused_elem = lam::dom_require_element(focused);
-    if (focused_elem->role_kind() != DomElement::ROLE_FORM ||
-        !focused_elem->form ||
+    if (!focused_elem->form_control() ||
         focused_elem->form->control_type != FORM_CONTROL_TEXT) {
         return true;
     }

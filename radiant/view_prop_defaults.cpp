@@ -160,7 +160,7 @@ const ScrollProp* DomElement::scroll() const { return scroller ? scroller : &SCR
 const PositionProp* DomElement::positionp() const { return position ? position : &POSITION_PROP_DEFAULT; }
 const EmbedProp* DomElement::embedp() const { return embed ? embed : &EMBED_PROP_DEFAULT; }
 const TransformProp* DomElement::transformp() const { return transform ? transform : &TRANSFORM_PROP_DEFAULT; }
-const FilterProp* DomElement::filterp() const { return filter ? filter : &FILTER_PROP_DEFAULT; }
+const FilterProp* DomElement::filterp() const { return filter_prop() ? filter_prop() : &FILTER_PROP_DEFAULT; }
 BlockProp* DomElement::block_mut() { return blk; }
 BoundaryProp* DomElement::boundary_mut() { return bound; }
 FontProp* DomElement::font_mut() { return font; }
@@ -174,4 +174,4 @@ ScrollProp* DomElement::scroll_mut() { return scroller; }
 PositionProp* DomElement::position_mut() { return position; }
 EmbedProp* DomElement::embed_mut() { return embed; }
 TransformProp* DomElement::transform_mut() { return transform; }
-FilterProp* DomElement::filter_mut() { return filter; }
+FilterProp* DomElement::filter_mut() { return filter_prop(); }

@@ -2418,12 +2418,12 @@ static bool js_interp_eval_redeclares_parameter(JsInterpFrame* frame, Item code)
     }
     String* source = it2s(code);
     JsTranspiler* transpiler = js_transpiler_create(context ? context->runtime : NULL);
-    if (!source || !transpiler || !js_transpiler_parse(transpiler, source->chars,
-            source->len)) {
+    if (!source || !transpiler || !js_transpiler_parse_c(transpiler, source->chars,
+            source->len, JS_PARSE_AUTO)) {
         js_transpiler_destroy(transpiler);
         return false;
     }
-    JsAstNode* eval_ast = js_transpiler_build_ast(transpiler);
+    JsAstNode* eval_ast = (JsAstNode*)transpiler->ast_root;
     bool redeclares_parameter = false;
     if (eval_ast && transpiler->global_scope) {
         for (NameEntry* declared = transpiler->global_scope->first; declared &&
@@ -5822,11 +5822,12 @@ JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
         transpiler->strict_mode = true;
         transpiler->global_scope->strict = true;
     }
-    if (!transpiler || !js_transpiler_parse(transpiler, source, source_length)) {
+    if (!transpiler || !js_transpiler_parse_c(transpiler, source, source_length,
+            JS_PARSE_AUTO)) {
         js_transpiler_destroy(transpiler);
         return NULL;
     }
-    JsAstNode* ast = js_transpiler_build_ast(transpiler);
+    JsAstNode* ast = (JsAstNode*)transpiler->ast_root;
     if (!ast || transpiler->has_errors) {
         js_transpiler_destroy(transpiler);
         return NULL;

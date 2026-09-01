@@ -24,9 +24,10 @@ TEST(JsScriptOwnership, AdoptsCommonScriptPrefixIntoRuntimeCatalog) {
     const char source[] = "let retained = 41; retained + 1;";
     JsTranspiler* tp = js_transpiler_create(NULL);
     ASSERT_NE(tp, nullptr);
-    ASSERT_TRUE(js_transpiler_parse(tp, source, sizeof(source) - 1));
+    ASSERT_TRUE(js_transpiler_parse_c(tp, source, sizeof(source) - 1,
+        JS_PARSE_AUTO));
 
-    JsAstNode* ast = js_transpiler_build_ast(tp);
+    JsAstNode* ast = tp->ast_root;
     ASSERT_NE(ast, nullptr);
 
     Pool* ast_pool = tp->pool;
@@ -57,6 +58,32 @@ TEST(JsScriptOwnership, AdoptsCommonScriptPrefixIntoRuntimeCatalog) {
 
     // Runtime teardown owns the adopted Script once it has been catalogued.
     runtime_free_all_scripts(&runtime);
+}
+
+TEST(JsScriptOwnership, IndexesFunctionParentsStructurallyInTopLevelAwaitModule) {
+    StrBuf* source = strbuf_new();
+    ASSERT_NE(source, nullptr);
+    ASSERT_TRUE(js_test262_append_file(source, "ref/test262/harness/assert.js"));
+    uint32_t test_start = source->length;
+    ASSERT_TRUE(js_test262_append_file(source,
+        "ref/test262/test/language/expressions/class/"
+        "cpn-class-expr-computed-property-name-from-await-expression.js"));
+
+    JsTranspiler* tp = js_transpiler_create(NULL);
+    ASSERT_NE(tp, nullptr);
+    ASSERT_TRUE(js_transpiler_parse_c(tp, source->str, source->length,
+        JS_PARSE_MODULE));
+
+    uint32_t target_function_count = 0;
+    for (uint32_t i = 0; i < tp->ast_index.function_count; i++) {
+        AstFunctionIndexEntry* function = &tp->ast_index.functions[i];
+        if (function->node->source_span.start_byte < test_start) continue;
+        EXPECT_EQ(function->parent, AST_FUNCTION_ID_INVALID);
+        target_function_count++;
+    }
+    EXPECT_EQ(target_function_count, 2u);
+    js_transpiler_destroy(tp);
+    strbuf_free(source);
 }
 
 TEST(JsInterpreter, ExecutesThroughSharedRuntimeAndModuleState) {

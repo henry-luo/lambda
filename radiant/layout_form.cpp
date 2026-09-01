@@ -772,7 +772,7 @@ static void calc_select_size(LayoutContext* lycon, ViewBlock* block, FormControl
  * Called from layout_block when the element owns the form-control role.
  */
 void layout_form_control(LayoutContext* lycon, ViewBlock* block) {
-    if (!block || block->role_kind() != DomElement::ROLE_FORM || !block->form) {
+    if (!block || !block->form_control()) {
         return;
     }
 

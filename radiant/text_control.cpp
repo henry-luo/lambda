@@ -109,7 +109,7 @@ void form_control_prop_release(FormControlProp* f) {
 }
 
 FormControlProp* tc_get_or_create_form(DomElement* elem) {
-    if (elem->form && elem->role_kind() == DomElement::ROLE_FORM)
+    if (elem && elem->form)
         return elem->form;
     FormControlProp* f = (FormControlProp*)mem_calloc(1, sizeof(FormControlProp), MEM_CAT_LAYOUT);
     if (!f) return nullptr;
@@ -122,12 +122,14 @@ FormControlProp* tc_get_or_create_form(DomElement* elem) {
         f->control_type = FORM_CONTROL_TEXT;
     }
     elem->form = f;
-    elem->set_role_kind(DomElement::ROLE_FORM);
+    if (elem->role_kind() == DomElement::ROLE_NONE) {
+        elem->set_role_kind(DomElement::ROLE_FORM);
+    }
     return f;
 }
 
 void form_control_release_prop(DomElement* elem) {
-    if (!elem || elem->role_kind() != DomElement::ROLE_FORM || !elem->form) {
+    if (!elem || !elem->form) {
         return;
     }
 
@@ -141,7 +143,9 @@ void form_control_release_prop(DomElement* elem) {
         mem_free(form);
     }
     elem->form = nullptr;
-    elem->set_role_kind(DomElement::ROLE_NONE);
+    if (elem->role_kind() == DomElement::ROLE_FORM) {
+        elem->set_role_kind(DomElement::ROLE_NONE);
+    }
 }
 
 // ---- internal: initial value resolution --------------------------------

@@ -1095,7 +1095,7 @@ bool multicol_spanner_can_escape_child(ViewBlock* child) {
     // containing block for positioned descendants.
     if (child->blk && child->block()->contain_positioning) return false;
     if (child->transform && child->transformp()->functions) return false;
-    if (child->filter && child->filterp()->functions) return false;
+    if (child->filter_prop() && child->filterp()->functions) return false;
     if (child->embed && (child->embedp()->flex || child->embedp()->grid)) return false;
     if (child->view_type == RDT_VIEW_INLINE_BLOCK || child->view_type == RDT_VIEW_TABLE) return false;
     return true;

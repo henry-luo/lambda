@@ -1,6 +1,6 @@
-// format-math-latex.cpp - LaTeX Math formatter for tree-sitter Mark AST
+// format-math-latex.cpp - LaTeX Math formatter for direct-parser Mark AST
 //
-// Converts the tree-sitter-latex-math Mark Element AST back to LaTeX text.
+// Converts the direct math Mark Element AST back to LaTeX text.
 // The AST has element tags like: math, subsup, operator, relation, group,
 // radical, command, fraction, delimiter_group, environment, etc.
 // Variables and numbers appear as plain String children.

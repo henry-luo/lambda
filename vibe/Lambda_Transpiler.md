@@ -95,16 +95,14 @@ type is committed at emission.
 
 ### DD5.2 — The compilation pipeline is prepass-structured
 
-`transpile_mir_ast()` runs ordered passes over the AST:
+The direct MIR driver runs the **D8.2.5** ordered operations over the AST:
 
 | Pass | Work |
 |---|---|
-| 1 | compile regex/string patterns |
-| 2 | create BSS items for module-level variables |
-| 3 | forward-declare all functions (**and cache inferred parameter types**) |
-| 4 | define function bodies |
-| 5 | emit the module main body |
-| — | `MIR_link()` (resolve imports), `MIR_gen()` (native codegen) |
+| plan | compile patterns, create module BSS, collect call facts, and forward-declare all functions (**and cache inferred parameter types**) |
+| lower | define function bodies and emit the module main body |
+| finalize/load | finish and load the MIR module |
+| link | `MIR_link()` resolves imports and `MIR_gen()` performs native codegen |
 
 **Passes 3 and 4 must stay separate.** Merging them was proposed and rejected:
 mutual recursion requires every sibling function to be forward-declared before

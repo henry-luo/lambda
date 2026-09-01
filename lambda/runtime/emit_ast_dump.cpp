@@ -6,7 +6,7 @@
 #include "../../lib/mem_factory.h"
 #include "emit_ast_dump.h"
 #include "transpiler.hpp"
-#include "ast_build.hpp"          // lambda_rd_build_ast: the production C parser
+#include "ast_build.hpp"          // lambda_rd_reduce_ast: the production C parser
 #include "type_contract.hpp"
 #include "../input/input.hpp"
 #include "../core/lambda-decimal.hpp"
@@ -77,7 +77,7 @@ static void emit_init_direct_transpiler(Transpiler* tp,
 static bool emit_build_direct_ast(Transpiler* tp, const char* source) {
     AstScript* direct_root = NULL;
     LambdaParseError parse_error = {};
-    LambdaParseStatus status = lambda_rd_build_ast(tp, source, strlen(source),
+    LambdaParseStatus status = lambda_rd_reduce_ast(tp, source, strlen(source),
         &direct_root, &parse_error);
     if (status != LAMBDA_PARSE_OK || !direct_root) {
         fprintf(stderr, "Error: C parser rejected '%s': %s\n",
@@ -85,6 +85,7 @@ static bool emit_build_direct_ast(Transpiler* tp, const char* source) {
             parse_error.message ? parse_error.message : "direct AST reduction failed");
         return false;
     }
+    lambda_ast_finalize_script(tp, direct_root);
     tp->ast_root = (AstNode*)direct_root;
     return true;
 }

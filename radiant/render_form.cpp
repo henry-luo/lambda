@@ -1552,7 +1552,7 @@ static void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp
  */
 
 void render_form_control(RenderContext* rdcon, ViewBlock* block) {
-    if (!block || block->role_kind() != DomElement::ROLE_FORM || !block->form) {
+    if (!block || !block->form_control()) {
         return;
     }
 

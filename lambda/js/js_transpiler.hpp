@@ -91,6 +91,7 @@ struct JsTranspiler : JsScript {
     // static type fell back to `any`. Diagnostic only — shares the Lambda
     // reason catalog so both lanes report against one vocabulary.
     int any_census[ANY_REASON_COUNT];
+    CompilerPassManager pass_manager;
 
     // Error handling
     bool has_errors;                // Error flag
@@ -128,35 +129,14 @@ void js_record_interp_export(JsTranspiler* tp, String* local,
 
 // Shared direct-parser AST facts.
 void js_report_any_census(JsTranspiler* tp);
-typedef struct JsAstIndexPassContext {
-    JsTranspiler* transpiler;
-    JsAstNode* root;
-    int validation_errors;
-} JsAstIndexPassContext;
 int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast);
-static inline int js_validate_compiler_pass(void* opaque) {
-    JsAstIndexPassContext* pass = (JsAstIndexPassContext*)opaque;
-    if (!pass || !pass->transpiler || !pass->root) return 0;
-    pass->validation_errors = js_check_early_errors(pass->transpiler, pass->root);
-    return pass->validation_errors == 0;
-}
 
 // AST utility functions shared by direct JS and TypeScript reductions.
 JsOperator js_operator_from_string(const char* op_str, size_t len);
 bool js_rebuild_direct_scope_graph(JsTranspiler* tp, JsAstNode* ast);
-JsAstNode* publish_js_ast_indexed(JsTranspiler* tp, JsAstNode* ast);
 
 bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
                            JsParseMode mode);
-bool js_transpiler_parse_c_auto(JsTranspiler* tp, const char* source,
-                                size_t length);
-bool js_transpiler_parse_module(JsTranspiler* tp, const char* source,
-                                size_t length);
-
-// The C parser publishes the indexed AST as part of successful reduction.
-static inline JsAstNode* js_transpiler_build_ast(JsTranspiler* tp) {
-    return tp ? (JsAstNode*)tp->ast_root : NULL;
-}
 
 // Error handling functions
 void js_error(JsTranspiler* tp, SourceSpan span, const char* format, ...);
@@ -164,7 +144,6 @@ void js_error(JsTranspiler* tp, SourceSpan span, const char* format, ...);
 // Transpiler lifecycle functions
 JsTranspiler* js_transpiler_create(Runtime* runtime);
 void js_transpiler_destroy(JsTranspiler* tp);
-bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length);
 int js_transpiler_parse_error_get(const JsTranspiler* tp, int64_t* out_row,
                                   int64_t* out_col, char* out_message,
                                   int64_t out_message_size);

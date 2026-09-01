@@ -1411,27 +1411,81 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ## Appendix A — Implementation Footnotes
 
-Status of `*`-marked rulings as of 2026-08-29.
+Status of `*`-marked rulings as of 2026-08-31.
 
-The D8.2.4–D8.2.6 implementation record now includes P3j and P4l
-(2026-08-29):
+The D8.2.4–D8.2.6 implementation record now includes P3j, P4l, and the
+post-P6 binding/identity schedule work (2026-08-31):
 `CompilerPassSpec` carries an optional pass-owned context, and the shared
 `AstIndexPassContext`/`ast_index_compiler_pass` callback is used by Lambda and
-LambdaJS. The JS `transpile_js_mir_ast` entry is a manager-owned
-analysis/lower/finalize composite that publishes its four facts only after the
-existing sequence succeeds. Lambda MIR Direct now uses the same ordered
-manager for const-fold, lower/finalize, and link/entry publication; JS source,
-eval, module, and cached-AST execution use one recovery-aware entry helper.
-The Lambda driver conditionally schedules the indexed prerequisite when a
-retained AST has not already published it, so build-to-entry is one
-authoritative schedule. Indexed suspension/assignment/return/local/constructor
-facts and sparse scope-environment writeback now use the AST-owned function
-identity; the recursive mirrors are retired. The follow-on P4l slice retires
-duplicate lexical-key, module-block, and `for`-initializer walks in favor of
-the indexed scope chain and shared child contract, and reuses
-`em_frame_dispose()` for frame teardown. Post-link BSS/template
-publication and final owner transfer remain explicit runtime handoff work under
-**D8.2.5**.
+LambdaJS. The JS driver has discrete manager-owned `analyze-plan`,
+`mir-lower`, `mir-finalize-load`, and static `prelink` operations; Lambda MIR Direct has matching
+plan, lower, and finalization/load operations before its established entry
+link. Builder-published `NameEntry` links and collection-time
+`FnAnalysis::js_mir_backend` replace lowering-time name and callable recovery;
+direct class-entry consumers map the common nearest `AstClassId` to their
+index-ordered backend entries, while nested/private class resolution, subtree
+membership, descendant capture writes, and subtree visitors use indexed
+structural ancestry/adjacency rather than source ranges or backend order recovery; module declaration caching consumes the same
+binding-definition edge. Function backend relationships now carry their sealed
+`AstFunctionId`: parent lookup follows that ID through the published
+`FnAnalysis::js_mir_backend` link, and the active lowering function is its
+published backend record rather than a post-order table position. JS source, eval, module, and cached-AST execution use one
+recovery-aware entry helper. The Lambda driver conditionally schedules the
+indexed prerequisite when a retained AST has not already published it, so
+build-to-entry is one authoritative schedule. Indexed
+suspension/assignment/return/local/constructor facts and sparse
+scope-environment writeback now use the AST-owned function identity; the
+recursive mirrors are retired. The follow-on P4l slice retires duplicate
+lexical-key, module-block, and `for`-initializer walks in favor of the indexed
+scope chain and shared child contract, and reuses `em_frame_dispose()` for frame
+teardown. Post-link BSS/template publication and final owner transfer remain
+explicit runtime handoff work under **D8.2.5**.
+
+The post-P6 FunctionId fact-table follow-up (2026-08-31) puts JavaScript
+strictness, IIFE promotion, class/constructor/field-initializer status, and
+TCO eligibility on the source function's `FnAnalysis`; collection publishes
+them after its backend link resets the analysis record, and lowering consumes
+those facts without re-reading directive syntax or using a post-order entry
+flag. The shared IIFE-body predicate retires repeated current-function tests.
+The next follow-up also stores lexical class ownership as `AstClassId` on that
+analysis record and resolves its MIR class entry only at a backend-use boundary;
+`NATIVE_RETURN_NONE` is the sole no-native plan state, replacing the duplicate
+native-version flag. Copied-closure parent-link, reusable-parent environment,
+direct-parent-link, parent-link-direction, and native-return classification
+plan/slot facts are likewise source function facts on `FnAnalysis`; the
+synthetic module carrier and MIR entry handles remain backend artifacts because
+they have no source `FunctionId`. This is an implementation-only **D8.2.4**
+status update; no formal ruling or document semver changes.
+
+The JavaScript C front end now has a manager-owned `parse-build` → `bind` →
+`validate` → `index` schedule under **D8.2.5**. Parsing and binding failures
+leave no published AST; an early-error validation failure retains its AST and
+existing diagnostic state but cannot publish `INDEXED`. Automatic JavaScript /
+TypeScript and module selection enter the same C-parser boundary. That manager
+is retained by `JsTranspiler` and resumes at appended `analyze-plan` →
+`mir-lower` → `mir-finalize-load` → `prelink` passes, rather than re-seeding
+front-end facts in a second manager. The AST owner is also the MIR pass root.
+Static property-key prelink is manager-owned; runtime module-state linking
+remains an execution-boundary operation. Lambda's active `Transpiler` starts that same compiler
+unit with `parse-build-bind` → `validate` → `index`, then carries it through
+const-fold, planning, MIR lowering, finalization/load, and entry link;
+retained-AST fallback starts a fresh manager from its already indexed unit.
+Direct Lambda source reduction and lexical binding remain one synchronous
+operation because reduction constructs the scopes and declarations consumed by
+later syntax, but post-reduction semantic validation is now a manager-owned
+operation. A rejected validation cannot publish `INDEXED`. This is an
+implementation-only **D8.2.5** status update; JS runtime linking and
+separation of Lambda parse/build/bind remain open.
+
+The post-P6 **D8.2.4** follow-up makes the direct lexical parent of every
+source function an `AstIndex` fact keyed by `FunctionId`. The relation follows
+the index's structural parent links, not `owner_functions` labels recovered
+from source spans; class-field synthetic collection alone applies its explicit
+direct-descendant policy to this shared relation. `JsFuncCollected` retains its
+`FunctionId` and MIR-emission artifacts but no parent cache, and JavaScript
+strictness/ancestor consumers resolve the common parent record and its shared
+structural-descendant predicate. This is an
+implementation-only status update; no formal ruling or document semver changes.
 
 P3e (2026-08-28) remains the declaration-snapshot slice:
 eval-preamble publication and batch/preamble declaration snapshots share
@@ -1550,7 +1604,7 @@ slice; no formal semantic ruling or document semver changes.
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
 | D2.6.5 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. One wrinkle remains: `list_push`'s normalization is asymmetric — null-stripping is unconditional, but string merging additionally requires an active `input_context`/`input_allocation_context` (`collection_runtime.cpp:323`), so outside an input parse the merge half of S16.7 does not run. Also unreconciled: `input-ics.cpp` and `input-mark.cpp` use MarkBuilder *and* call `list_push` directly, so those two formats mix normalizing and verbatim appends within one document. |
-| D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering; remaining raw producers and the final legacy-shim ratchet stay open. |
+| D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm; identifier, call, control, extension, and JS raw producers plus the final legacy-shim ratchet stay open. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.6.2 | ArrayNum `==` representation-sensitivity is a known live bug (also gates the data-processing engines). |
 | D2.6.3 | ELEM_INT i64 revert landed; SIMD kernels only partly re-enabled (C16-era gating comments remain). |

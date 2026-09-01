@@ -513,7 +513,9 @@ struct DomElementExt {
     StyleTree* pseudo_styles[PSEUDO_STYLE_COUNT];
     MultiColumnProp* multicol;
     VectorPathProp* vpath;
+    FilterProp* filter;
     FilterProp* backdrop_filter;
+    void* transition_state;
     void* custom_layout_paint;
     LayoutFragmentBox* layout_fragments;
     int layout_fragment_count;
@@ -632,18 +634,19 @@ struct DomElement : DomNode {
     };
 
     // Parent-item and own-role storage are independent because CSS permits a
-    // table or form control to participate in a flex/grid parent.
+    // table or form control to participate in a flex/grid parent. Table
+    // structure and form-control state are also independent: a replaced form
+    // control can occupy a table-internal grid slot without losing its form
+    // behavior.
     // Reads must enter through the tagged accessors below; direct members are
     // reserved for mutation after the corresponding tag has been established.
     union {
         FlexItemProp* fi;
         GridItemProp* gi;
     };
-    union {
-        TableProp* tb;  // table specific properties
-        TableCellProp* td;  // table cell specific properties
-        FormControlProp* form;  // form control properties
-    };
+    TableProp* tb;  // table specific properties
+    TableCellProp* td;  // table cell specific properties
+    FormControlProp* form;  // form control properties
 
     // block properties
     float content_width, content_height;  // width and height of the child content including padding
@@ -655,15 +658,8 @@ struct DomElement : DomNode {
     PositionProp* position;
     // CSS transform properties
     TransformProp* transform;
-    // CSS transitions: persistent per-element snapshot of the last-applied used
-    // values of transitionable properties, plus back-pointers to running
-    // transition instances. Allocated lazily from doc->document_pool (survives view-pool
-    // relayout, unlike in_line/bound/transform which are view-pool allocated).
-    // Opaque here (radiant/view.hpp owns the type) to avoid a header dep.
-    void* transition_state;
-    // CSS filter properties
-    FilterProp* filter;
-    // CSS backdrop-filter properties
+    // CSS filter and transition state live in the doc-pool extension so the
+    // table/form metadata can remain independent without growing this object.
     // pseudo-element content and layout state (::before/::after)
     PseudoContentProp* pseudo;
     // vector path for PDF/SVG curve rendering
@@ -753,7 +749,10 @@ struct DomElement : DomNode {
     GridItemProp* grid_item() const { return parent_item_kind() == PARENT_ITEM_GRID ? gi : nullptr; }
     TableProp* table_prop() const { return role_kind() == ROLE_TABLE ? tb : nullptr; }
     TableCellProp* cell_prop() const { return role_kind() == ROLE_CELL ? td : nullptr; }
-    FormControlProp* form_control() const { return role_kind() == ROLE_FORM ? form : nullptr; }
+    FormControlProp* form_control() const {
+        RoleKind role = role_kind();
+        return (role == ROLE_FORM || role == ROLE_TABLE || role == ROLE_CELL) ? form : nullptr;
+    }
 
     const BlockProp* block() const;
     const BoundaryProp* boundary() const;
@@ -871,9 +870,16 @@ struct DomElement : DomNode {
     void set_multicol_prop(MultiColumnProp* value) { if (value || ext) ensure_ext()->multicol = value; }
     VectorPathProp* vector_path() const { return ext ? ext->vpath : nullptr; }
     void set_vector_path(VectorPathProp* value) { if (value || ext) ensure_ext()->vpath = value; }
+    FilterProp* filter_prop() const { return ext ? ext->filter : nullptr; }
+    FilterProp** filter_slot() { return &ensure_ext()->filter; }
+    void set_filter_prop(FilterProp* value) { if (value || ext) ensure_ext()->filter = value; }
     FilterProp* backdrop_filter_prop() const { return ext ? ext->backdrop_filter : nullptr; }
     FilterProp** backdrop_filter_slot() { return &ensure_ext()->backdrop_filter; }
     void set_backdrop_filter_prop(FilterProp* value) { if (value || ext) ensure_ext()->backdrop_filter = value; }
+    void* transition_state_prop() const { return ext ? ext->transition_state : nullptr; }
+    void set_transition_state_prop(void* value) {
+        if (value || ext) ensure_ext()->transition_state = value;
+    }
     void* custom_layout_paint_prop() const { return ext ? ext->custom_layout_paint : nullptr; }
     void set_custom_layout_paint_prop(void* value) { if (value || ext) ensure_ext()->custom_layout_paint = value; }
     LayoutFragmentBox* layout_fragment_list() const { return ext ? ext->layout_fragments : nullptr; }
