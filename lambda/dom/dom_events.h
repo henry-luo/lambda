@@ -206,6 +206,27 @@ void js_restore_window_event_for_legacy(Item prev);
  */
 void js_dom_events_reset(void);
 
+// ============================================================================
+// Host-facing entry points (F23) — see the note in dom.h
+// ============================================================================
+
+/** Form-control role predicates consulted by the UA activation stage. */
+bool js_dom_is_submit_button(void* dom_elem);
+bool js_dom_is_reset_button(void* dom_elem);
+
+/** requestSubmit() bridge shared by the native and script activation paths. */
+Item js_dom_form_request_submit_bridge(Item form_item, Item submitter_item);
+
+#ifdef __cplusplus
+struct DomElement;
+struct JsRuntimeState;
+
+/** Resolve a control's form owner, honouring an explicit `form=` association. */
+DomElement* js_dom_find_form_owner(void* control);
+
+void js_dom_events_destroy_context(JsRuntimeState* state);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

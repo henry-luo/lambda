@@ -41,10 +41,7 @@ extern "C" {
 extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc);
 void radiant_run_behavior_init(DomDocument* doc);
 extern "C" void js_batch_reset(void);
-extern "C" void js_dom_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
-extern "C" void js_dom_set_ui_context(void* ui_context);
-extern "C" void js_dom_set_host_driven_loop(bool enabled);
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 extern UiContext ui_context;

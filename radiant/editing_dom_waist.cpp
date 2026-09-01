@@ -27,13 +27,9 @@
 #include "../lib/tagged.hpp"
 
 #include <string.h>
+#include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_observers.h"
 
-extern "C" void js_dom_notify_mutation(DomJsMutationKind kind, void* target,
-                                        void* parent);
-extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind,
-                                               void* target, void* parent,
-                                               const char* attribute_name,
-                                               const char* old_value);
 
 // F13: the DOM-range waist. The edit dispatch stashes its resolved single-text
 // range here; `radiant.dom_edit_range` reads it and `radiant.dom_replace_range`
@@ -902,7 +898,6 @@ bool dom_edit_unwrap_range_u16(DocState* state, uint32_t start_u16,
     return true;
 }
 
-extern "C" bool js_dom_exec_insert_html(DomDocument* doc, const char* html);
 
 // Insert a parsed fragment over the selection. The parse and the Range splice
 // are the JS DOM's own — this is the same mechanism the retired `insertHTML`

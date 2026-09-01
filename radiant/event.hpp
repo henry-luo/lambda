@@ -45,9 +45,6 @@ bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
 
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
 void radiant_reconcile_js_dom_mutations(UiContext* uicon, DomDocument* doc);
-extern "C" uint64_t js_dom_mutation_epoch(DomDocument* doc);
-extern "C" bool js_dom_mutation_since_affects_subtree(
-        DomDocument* doc, uint32_t sequence_before, void* root);
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value,
     double elapsed_time);

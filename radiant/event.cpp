@@ -45,20 +45,6 @@
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
 extern Item js_make_number(double value);
-extern "C" void js_dom_notify_mutation(DomJsMutationKind kind,
-                                        void* target, void* parent);
-extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind,
-                                               void* target, void* parent,
-                                               const char* attribute_name,
-                                               const char* old_value);
-extern "C" DomElement* js_dom_find_form_owner(void* control);
-extern "C" bool js_dom_is_submit_button(void* dom_elem);
-extern "C" bool js_dom_is_reset_button(void* dom_elem);
-extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter_item);
-extern "C" bool js_dom_is_disabled(void* dom_elem);
-extern "C" bool js_dom_is_connected(void* dom_elem);
-extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus);
-extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem);
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
 #include <chrono>       // timing for reactive event dispatch
@@ -7033,7 +7019,6 @@ static bool radiant_dispatch_simple_event(EventContext* evcon, View* target,
 
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event);
 void event_context_cleanup(EventContext* evcon);
-extern "C" void js_dom_select_set_selected_index_bridge(void* dom_elem, Item value);
 
 extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
                                                          View* target,

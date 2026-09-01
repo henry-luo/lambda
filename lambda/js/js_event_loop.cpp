@@ -28,7 +28,6 @@
 
 extern __thread EvalContext* context;
 extern Item js_make_number(double value);
-extern "C" bool js_dom_is_host_driven_loop(void);  // defined in lambda/js/js_dom.cpp
 extern "C" Item js_async_hooks_get_current_resource(void);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);

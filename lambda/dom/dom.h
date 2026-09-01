@@ -356,6 +356,51 @@ Item js_dom_is_same_node(Item node, Item other);
  * @return Result Item
  */
 
+// =============================================================================
+// Host-facing entry points (F23)
+//
+// The Radiant engine, the Lambda runtime and the JS runtime all drive these.
+// They are declared here instead of being re-declared `extern "C"` at each call
+// site, because a prototype copied per caller is how a signature drifts from
+// its definition without the linker noticing. Jube modules reach the same core
+// through JubeHostDomAPI (ES34), never through this header.
+// =============================================================================
+
+/** Session/runtime teardown. */
+void js_dom_shutdown(void);
+void js_dom_batch_reset(void);
+void js_dom_collections_release_context(void);
+void js_dom_foreign_documents_release_context(void);
+
+/** Element-state queries used by the native event and form paths. */
+bool js_dom_is_disabled(void* dom_elem);
+bool js_dom_is_connected(void* dom_elem);
+
+/** Activation bridges invoked after the UA tier claims an event. */
+Item js_dom_focus_method_bridge(void* dom_elem, bool focus);
+Item js_dom_scroll_into_view_bridge(void* dom_elem);
+void js_dom_select_set_selected_index_bridge(void* dom_elem, Item value);
+
+/** dataset expando write, routed from the JS property-set path. */
+bool js_dom_dataset_set_object_property(Item dataset, Item key, Item value);
+
+#ifdef __cplusplus
+struct DomDocument;
+struct JsRuntimeState;
+
+/** Per-runtime-state teardown for the DOM-owned caches. */
+void js_dom_collections_destroy_context(JsRuntimeState* state);
+void js_dom_foreign_documents_destroy_context(JsRuntimeState* state);
+
+/** contenteditable HTML insertion, driven by the editing waist. */
+bool js_dom_exec_insert_html(DomDocument* doc, const char* html);
+
+/** Mutation-sequence reads for incremental reconciliation. */
+uint64_t js_dom_mutation_epoch(DomDocument* doc);
+bool js_dom_mutation_since_affects_subtree(
+        DomDocument* doc, uint32_t sequence_before, void* root);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

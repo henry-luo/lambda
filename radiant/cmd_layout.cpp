@@ -73,10 +73,10 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lib/tagged.hpp"
 #include "../lambda/runtime/render_map.h"
 #include "../lambda/runtime/template_state.h"
+#include "../lambda/dom/dom.h"
 
 // JS runtime batch reset functions (from lambda/js/)
 extern "C" void js_batch_reset(void);
-extern "C" void js_dom_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
 extern "C" void script_runner_cleanup_heap(void);
 

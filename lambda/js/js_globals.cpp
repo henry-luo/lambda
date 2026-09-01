@@ -43,6 +43,7 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "../../lib/log.h"
 #include "../../lib/utf.h"
 #include <assert.h>
+#include "../dom/dom.h"
 
 extern "C" Item js_xhr_new(void);
 extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver);
@@ -59,8 +60,6 @@ extern "C" Item js_get_typed_array_base();
 extern "C" uint64_t js_get_heap_epoch(void);
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_get_buffer_namespace(void);
-extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
-                                                       Item value);
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 static bool js_string_exotic_index_in_range(Item obj, String* key);

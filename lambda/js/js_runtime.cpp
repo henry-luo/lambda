@@ -28,6 +28,8 @@
 #include "../../lib/re2_glue.hpp"
 #include "../../lib/utf.h"
 #include <stdarg.h>
+#include "../dom/dom.h"
+#include "../dom/dom_events.h"
 
 struct JsGeneratorStateRecord;
 struct gc_heap;
@@ -219,12 +221,6 @@ extern "C" bool js_item_to_integral_int64(Item value, int64_t* out, bool allow_i
 extern __thread EvalContext* context;
 extern "C" Item js_object_set_prototype_of(Item obj, Item proto);
 extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
-extern "C" void js_dom_event_handler_property_set(Item target,
-                                                    const char* property_name,
-                                                    int property_name_len,
-                                                    Item value);
-extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
-                                                     Item value);
 extern "C" int js_intrinsic_initialization_begin_for_constructor(Item constructor);
 extern "C" void js_intrinsic_initialization_end_for_constructor(int active);
 extern "C" Item js_util_custom_promisify_args_symbol(void);

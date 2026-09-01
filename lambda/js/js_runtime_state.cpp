@@ -6,6 +6,10 @@
 #include "../lambda.hpp"
 #include "../input/input.hpp"
 #include "../jube/jube_registry.h"
+#include "../dom/dom.h"
+#include "../dom/dom_events.h"
+#include "../dom/dom_observers.h"
+#include "../dom/dom_platform.h"
 
 __thread JsRuntimeState* js_active_runtime_state = NULL;
 extern __thread EvalContext* context;
@@ -13,9 +17,6 @@ extern "C" int js_initial_call_stack_limit(void);
 extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_regex_cache_destroy_context(JsRuntimeState* state);
-extern "C" void js_dom_platform_destroy_context(JsRuntimeState* state);
-extern "C" void js_dom_events_destroy_context(JsRuntimeState* state);
-extern "C" void js_dom_observers_destroy_context(JsRuntimeState* state);
 extern "C" void js_xhr_destroy_context(JsRuntimeState* state);
 extern "C" void js_iterator_proto_cache_reset(void);
 extern "C" void js_history_reset(void);
@@ -72,10 +73,6 @@ static void js_reset_core_module_caches(void) {
 }
 extern "C" void js_history_destroy_context(JsRuntimeState* state);
 extern "C" void js_window_dialog_reset(void);
-extern "C" void js_dom_collections_release_context(void);
-extern "C" void js_dom_collections_destroy_context(JsRuntimeState* state);
-extern "C" void js_dom_foreign_documents_release_context(void);
-extern "C" void js_dom_foreign_documents_destroy_context(JsRuntimeState* state);
 extern "C" void js_fetch_apply_bootstrap_base_path(void);
 extern "C" void js_fetch_destroy_context(JsRuntimeState* state);
 extern "C" void js_fs_pending_destroy_context(JsRuntimeState* state);
