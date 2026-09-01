@@ -52,6 +52,9 @@ extern "C" Item js_dom_check_validity_bridge(Item elem_item);
 extern "C" bool js_dom_focus_first_invalid_form_control(void* form_elem);
 extern "C" Item js_dom_form_reset_bridge(Item form_item);
 extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
+extern "C" void* js_dom_popover_target_for_button(void* button);
+extern "C" int js_dom_popover_target_action(void* button);
+extern "C" bool js_dom_activate_popover(void* popover, int action);
 extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
                                                             void* submitter_node);
 
@@ -1695,6 +1698,17 @@ RADIANT_C_API Item fn_radiant_set_dropdown_open(Item node_item, Item open_item) 
     return (Item){.item = b2it(ok ? 1 : 0)};
 }
 
+// The package chooses activation by declaring this behavior; native resolves
+// `popovertarget` and applies the live visibility transition once.
+RADIANT_C_API Item fn_radiant_activate_popover(Item node_item) {
+    DomElement* button = radiant_dom_element_from_item(node_item, "ACTIVATE_POPOVER");
+    if (!button) return radiant_bool_item(false);
+    void* popover = js_dom_popover_target_for_button((void*)button);
+    if (!popover) return radiant_bool_item(false);
+    int action = js_dom_popover_target_action((void*)button);
+    return radiant_bool_item(js_dom_activate_popover(popover, action));
+}
+
 // Option count for a <select>; the option list itself is layout-owned.
 RADIANT_C_API Item fn_radiant_option_count(Item node_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "OPTION_COUNT");
@@ -2734,6 +2748,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_dropdown_open(Item node)", (fn_ptr)fn_radiant_dropdown_open},
     {"set_dropdown_open", "fn(node: dom_node, open: bool) -> bool", (fn_ptr)fn_radiant_set_dropdown_open, JUBE_FN_NONE,
      "Item fn_radiant_set_dropdown_open(Item node, Item open)", (fn_ptr)fn_radiant_set_dropdown_open},
+    {"activate_popover", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_activate_popover, JUBE_FN_NONE,
+     "Item fn_radiant_activate_popover(Item node)", (fn_ptr)fn_radiant_activate_popover},
     {"option_count", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_option_count, JUBE_FN_NONE,
      "Item fn_radiant_option_count(Item node)", (fn_ptr)fn_radiant_option_count},
     {"selected_index", "fn(node: dom_node) -> int|null", (fn_ptr)fn_radiant_selected_index, JUBE_FN_NONE,

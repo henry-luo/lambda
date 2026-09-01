@@ -35,13 +35,9 @@
 extern Item js_make_number(double d);
 
 struct EventContext;
-extern "C" bool radiant_native_click_dispatch_active(void);
-extern "C" bool radiant_dispatch_behavior_submit_activation(EventContext* evcon,
-                                                            View* target);
-extern "C" bool radiant_dispatch_behavior_reset_activation(EventContext* evcon,
-                                                           View* target);
-bool radiant_behavior_claims_event(EventContext* evcon, View* target,
-                                   const char* event_name);
+extern "C" bool radiant_synthetic_dom_dispatch_is_reentry(Item event_item);
+extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
+                                                      Item event_item);
 extern "C" bool radiant_author_template_event_live(const char* event_name);
 extern "C" bool radiant_author_template_dispatch_begin(Item event);
 extern "C" void radiant_author_template_dispatch_end(Item event);
@@ -56,15 +52,8 @@ extern "C" void radiant_dom_event_clear_lambda_dispatch_position(Item event);
 // js_dom.h, declared here under extern "C" to avoid header coupling).
 extern __thread EvalContext* context;
 
-// Form-control IDL helpers from js_dom.cpp — used by HTMLElement click
-// activation behavior (HTML §6.4.4).
-extern "C" bool js_dom_is_checkbox_or_radio(void* dom_elem);
-extern "C" bool js_dom_get_checkedness(void* dom_elem);
-extern "C" void js_dom_set_checkedness(void* dom_elem, bool v);
+// Shared form-control classification used by requestSubmit/reset helpers.
 extern "C" const char* js_dom_input_type_lower(void* dom_elem);
-extern "C" const char* js_dom_tag_name_raw(void* dom_elem);
-extern "C" bool js_dom_is_disabled(void* dom_elem);
-extern "C" bool js_dom_is_connected(void* dom_elem);
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
 extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
 extern "C" Item js_dom_check_validity_bridge(Item elem_item);
@@ -2074,80 +2063,21 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         log_error("js_dom_dispatch_event: event has no type");
         return (Item){.item = ITEM_FALSE};
     }
+
+    // F19/ES25: direct DOM dispatch enters the same native scope as trusted
+    // input. The re-entry guard keeps the shared propagation walk below as the
+    // single engine for both paths instead of creating a JS-only default tier.
+    if (radiant_dom_event_is(event_item) &&
+        !radiant_synthetic_dom_dispatch_is_reentry(event_item) &&
+        js_dom_unwrap_element(elem_item)) {
+        Item unified_result = radiant_dispatch_synthetic_dom_event(elem_item,
+                                                                    event_item);
+        if (unified_result.item != ITEM_NULL) return unified_result;
+    }
+
     // get bubbles flag
     Item bubbles_val = js_get_name_key(event_item, "bubbles");
     bool bubbles = js_is_truthy(bubbles_val);
-
-    // ------------------------------------------------------------------
-    // HTML §6.4.4 click activation behavior — pre-activation hook.
-    // For checkbox/radio, toggle the live "checkedness" before dispatch
-    // so listeners see the new value. If the event is canceled we will
-    // restore. We run pre-activation even on disabled elements (per
-    // wpt: "disabled checkbox should still be checked when clicked").
-    // ------------------------------------------------------------------
-    void* act_target = nullptr;        // DomElement* target of activation, NULL if none
-    void* popover_target = nullptr;    // DomElement* target of popover activation
-    int popover_action = 0;
-    int act_kind = 0;                  // 1 = checkbox/radio toggle, 2 = submit
-    bool act_old_checked = false;
-    bool act_disabled = false;         // disabled at pre-activation time
-    if (strcmp(type, "click") == 0) {
-        // Per HTML §6.4.4 + §4.10.5.3, activation behavior only fires
-        // when the event's class is `MouseEvent` (or descendant such as
-        // PointerEvent). A plain `Event("click")` does not trigger any
-        // legacy-pre-activation steps.
-        bool is_mouse_event = radiant_dom_event_is(event_item)
-            ? radiant_dom_event_is_mouse_like(event_item)
-            : js_class_is_mouse_event_like(js_class_id(event_item));
-        void* node_ptr = is_mouse_event ? js_dom_unwrap_element(elem_item) : nullptr;
-        if (node_ptr) {
-            DomNode* node = (DomNode*)node_ptr;
-            if (node->is_element()) {
-                void* el = node_ptr;  // DomElement*
-                act_disabled = js_dom_is_disabled(el);
-                if (js_dom_is_checkbox_or_radio(el)) {
-                    act_target = el;
-                    act_kind = 1;
-                    act_old_checked = js_dom_get_checkedness(el);
-                    const char* itype = js_dom_input_type_lower(el);
-                    if (strcmp(itype, "radio") == 0) {
-                        // Per HTML, clicking a radio sets it to checked
-                        // (group exclusion not implemented headlessly).
-                        js_dom_set_checkedness(el, true);
-                    } else {
-                        // Checkbox: toggle.
-                        js_dom_set_checkedness(el, !act_old_checked);
-                    }
-                }
-                // Submit-button activation kind is identified for
-                // post-activation form submission.
-                const char* tag = js_dom_tag_name_raw(el);
-                if (!act_kind && tag) {
-                    if (strcasecmp(tag, "input") == 0) {
-                        const char* itype = js_dom_input_type_lower(el);
-                        if (strcmp(itype, "submit") == 0 || strcmp(itype, "image") == 0) {
-                            act_target = el; act_kind = 2;
-                        } else if (strcmp(itype, "reset") == 0) {
-                            act_target = el; act_kind = 3;
-                        }
-                    } else if (strcasecmp(tag, "button") == 0) {
-                        // Default button type is "submit".
-                        const char* btype = js_dom_input_type_lower(el);
-                        if (strcmp(btype, "text") == 0 /* default */ ||
-                            strcmp(btype, "submit") == 0) {
-                            act_target = el; act_kind = 2;
-                        } else if (strcmp(btype, "reset") == 0) {
-                            act_target = el; act_kind = 3;
-                        }
-                    }
-                }
-                if (tag && strcasecmp(tag, "button") == 0) {
-                    popover_target = js_dom_popover_target_for_button(el);
-                    popover_action = js_dom_popover_target_action(el);
-                }
-            }
-        }
-    }
 
     // Spec: throw InvalidStateError DOMException if event is already being dispatched.
     if (event_flag_get(event_item, "__dispatch_flag")) {
@@ -2293,79 +2223,6 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     if (prevented) {
         event_set_bool(event_item, "defaultPrevented", true);
         event_set_bool(event_item, "returnValue", false);
-    }
-
-    // ------------------------------------------------------------------
-    // HTML §6.4.4 click activation behavior — post-activation hook.
-    // - Canceled: undo any pre-activation state changes.
-    // - Otherwise: run the activation behavior. For checkbox/radio
-    //   that means firing `input` then `change` events synchronously.
-    //   For submit buttons it means firing `submit` on the form.
-    // We skip the post-activation steps when the element was disabled
-    // at pre-activation time (disabled controls don't fire change events
-    // or submit forms).
-    // ------------------------------------------------------------------
-    if (act_kind == 1 && act_target) {
-        if (prevented) {
-            // Restore prior checkedness.
-            js_dom_set_checkedness(act_target, act_old_checked);
-        } else if (!act_disabled) {
-            // Fire `input` (bubbles, non-cancelable) then `change`.
-            Item self_item = js_dom_wrap_element(act_target);
-            Item input_ev = js_create_event("input", true, false);
-            js_dom_dispatch_event(self_item, input_ev);
-            Item change_ev = js_create_event("change", true, false);
-            js_dom_dispatch_event(self_item, change_ev);
-        }
-    } else if (act_kind == 2 && act_target && !prevented && !act_disabled) {
-        // Native clicks run the package activation after the JS click returns.
-        // Script-created clicks use the same claim protocol here; the bridge
-        // remains only for documents where the package is not available.
-        if (js_dom_is_disabled(act_target)) {
-            // listener disabled the control mid-flight — skip submit.
-        } else if (!js_dom_is_connected(act_target)) {
-            // disconnected forms must not submit (HTML §4.10.21.3).
-        } else {
-            DomElement* el = (DomElement*)act_target;
-            if (!radiant_native_click_dispatch_active()) {
-                DomElement* owner = js_dom_find_form_owner(el);
-                if (owner) {
-                    View* target_view = (View*)el;
-                    bool claimed = radiant_behavior_claims_event(
-                        nullptr, target_view, "submitactivation");
-                    if (claimed) {
-                        radiant_dispatch_behavior_submit_activation(nullptr,
-                                                                    target_view);
-                    } else {
-                        js_dom_form_request_submit_bridge(
-                            js_dom_wrap_element(owner), js_dom_wrap_element(el));
-                    }
-                }
-            }
-        }
-    } else if (act_kind == 3 && act_target && !prevented && !act_disabled) {
-        // Reset follows the same package claim protocol as submit.
-        if (!js_dom_is_disabled(act_target) && js_dom_is_connected(act_target)) {
-            DomElement* el = (DomElement*)act_target;
-            DomElement* owner = js_dom_find_form_owner(el);
-            if (owner) {
-                if (!radiant_native_click_dispatch_active()) {
-                    View* target_view = (View*)el;
-                    bool claimed = radiant_behavior_claims_event(
-                        nullptr, target_view, "resetactivation");
-                    if (claimed) {
-                        radiant_dispatch_behavior_reset_activation(nullptr,
-                                                                   target_view);
-                    } else {
-                        radiant_dom_element_operation(js_dom_wrap_element(owner),
-                            JUBE_DOM_RESET, nullptr, 0);
-                    }
-                }
-            }
-        }
-    }
-    if (popover_target && !prevented && !act_disabled) {
-        js_dom_activate_popover(popover_target, popover_action);
     }
 
     log_debug("js_dom_dispatch_event: dispatched '%s' on %p (prevented=%d)",

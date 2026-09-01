@@ -6499,15 +6499,6 @@ static Item build_mouse_event_item(void* userdata) {
     return event;
 }
 
-// Native pointer/keyboard activation enters JS through this wrapper. The
-// marker lets the JS activation pass defer to the package/native waist without
-// confusing it with a script-created HTMLElement.click().
-static __thread bool s_native_click_dispatch_active = false;
-
-extern "C" bool radiant_native_click_dispatch_active(void) {
-    return s_native_click_dispatch_active;
-}
-
 static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
                                          const char* type, double client_x, double client_y,
                                          int button, int buttons,
@@ -6520,11 +6511,8 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
         ctrl, shift, alt, meta, detail, -1.0
     };
     bool is_click = type && strcmp(type, "click") == 0;
-    bool saved_click = s_native_click_dispatch_active;
-    if (is_click) s_native_click_dispatch_active = true;
     bool prevented = radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
         &args, true, dispatched, !is_click);
-    s_native_click_dispatch_active = saved_click;
     return prevented;
 }
 
@@ -7580,7 +7568,7 @@ static View* find_link_activation_target(View* target) {
 // only once click cancellation is settled, then the package submits its
 // resolved request for native execution (ES31).
 static bool run_link_activation(EventContext* evcon, View* target) {
-    if (!evcon || evcon->default_prevented) return false;
+    if (!evcon || !evcon->ui_context || evcon->default_prevented) return false;
     View* anchor = find_link_activation_target(target);
     if (!anchor) return false;
     if (!radiant_behavior_claims_event(evcon, anchor, "linkactivation")) {
@@ -7591,6 +7579,103 @@ static bool run_link_activation(EventContext* evcon, View* target) {
     }
     DomDocument* document = event_context_target_document(evcon);
     return radiant_execute_pending_navigation(evcon->ui_context, document);
+}
+
+// ES25/ES26: trusted and script-created clicks settle one UA default tier.
+// Checkbox/radio association, form activation, and navigation are mechanisms;
+// their policy remains the behavior package selected by the shared record.
+static bool dispatch_click_default_actions(EventContext* evcon, View* target) {
+    if (!evcon || !target || evcon->default_prevented) return false;
+
+    bool handled = false;
+    View* activation_target = find_checkbox_radio_input(target);
+    if (!activation_target) activation_target = target;
+    if (dispatch_lambda_handler(evcon, activation_target, "click")) {
+        evcon->need_repaint = true;
+        handled = true;
+    }
+
+    View* submit_target = find_form_activation_button(target, false);
+    if (submit_target && !evcon->default_prevented &&
+        !js_dom_is_disabled((void*)submit_target) &&
+        js_dom_is_connected((void*)submit_target)) {
+        if (run_form_submit_activation(evcon, submit_target)) {
+            evcon->need_repaint = true;
+            handled = true;
+        }
+    }
+
+    View* reset_target = find_form_activation_button(target, true);
+    if (reset_target && !evcon->default_prevented &&
+        !js_dom_is_disabled((void*)reset_target) &&
+        js_dom_is_connected((void*)reset_target)) {
+        if (run_form_reset_activation(evcon, reset_target)) {
+            evcon->need_repaint = true;
+            handled = true;
+        }
+    }
+
+    if (!evcon->default_prevented && run_link_activation(evcon, target)) {
+        evcon->need_repaint = true;
+        handled = true;
+    }
+    return handled;
+}
+
+// Only the exact bridge re-entry bypasses the wrapper below. A synthetic event
+// raised from a trusted listener is a distinct logical dispatch and must enter
+// the shared tier too.
+static thread_local Item s_synthetic_dom_dispatch_raw_event = ItemNull;
+
+extern "C" bool radiant_synthetic_dom_dispatch_is_reentry(Item event_item) {
+    return event_item.item != ITEM_NULL &&
+        event_item.item == s_synthetic_dom_dispatch_raw_event.item;
+}
+
+extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
+                                                      Item event_item) {
+    if (!radiant_dom_event_is(event_item)) return ItemNull;
+    DomElement* target = (DomElement*)js_dom_unwrap_element(target_item);
+    if (!target || !target->doc) return ItemNull;
+
+    EventContext evcon = {};
+    evcon.target = static_cast<View*>(target);
+    evcon.target_document = target->doc;
+    evcon.ui_context = static_cast<UiContext*>(target->doc->js.host_ui_context);
+    JsDispatchScope dispatch_scope(&evcon);
+    bool borrows_script_context = !dispatch_scope.active && context &&
+        js_dom_get_document() == target->doc;
+    if (!dispatch_scope.active && !borrows_script_context) return ItemNull;
+    EventContext* previous_active_event_context = s_active_js_dispatch_event_context;
+    if (borrows_script_context) {
+        // Bootstrap scripts already own the document evaluator but run before
+        // the first native input batch. Publish this event only for the call so
+        // the author cascade and its nested synthetic events retain one owner.
+        s_active_js_dispatch_event_context = &evcon;
+    }
+
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, target_item);
+    Rooted<Item> event_root(roots, event_item);
+    event_context_set_dom_event(&evcon, event_root.get());
+    Item previous_raw_event = s_synthetic_dom_dispatch_raw_event;
+    s_synthetic_dom_dispatch_raw_event = event_root.get();
+    Item result = js_dom_dispatch_event(target_root.get(), event_root.get());
+    s_synthetic_dom_dispatch_raw_event = previous_raw_event;
+    if (!item_is_error(result)) {
+        const char* event_name = fn_to_cstr(js_get_name_key(event_root.get(), "type"));
+        if (event_name && !radiant_dom_event_default_prevented(event_root.get())) {
+            if (strcmp(event_name, "click") == 0) {
+                dispatch_click_default_actions(&evcon, evcon.target);
+            } else {
+                dispatch_lambda_handler(&evcon, evcon.target, event_name);
+            }
+        }
+    }
+    if (borrows_script_context) {
+        s_active_js_dispatch_event_context = previous_active_event_context;
+    }
+    return result;
 }
 
 
@@ -10364,18 +10449,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 !text_selection_drag_handled) {
                 // Dispatch click through JS EventTarget before built-in default
                 // actions so listeners or IDL handlers can call preventDefault().
-                bool js_click_dispatched = false;
-                View* click_check_radio = evcon.target
-                    ? find_checkbox_radio_input(evcon.target) : nullptr;
-                DocState* click_check_radio_state = click_check_radio
-                    ? event_context_target_state(&evcon) : nullptr;
-                bool click_check_radio_had_state = click_check_radio &&
-                    click_check_radio_state;
-                bool click_check_radio_before = click_check_radio_had_state
-                    ? state_get_pseudo_state(click_check_radio_state,
-                                             click_check_radio,
-                                             PSEUDO_STATE_CHECKED)
-                    : false;
                 // Native disabled controls suppress click dispatch even when
                 // hit testing lands on a child created by a widget library.
                 bool click_on_disabled_control = click_target_is_disabled_control(
@@ -10388,30 +10461,9 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         event_mod_shift(btn_event->mods),
                         event_mod_alt(btn_event->mods),
                         event_mod_super(btn_event->mods),
-                        1,
-                        &js_click_dispatched);
+                        1);
                     if (prevented) evcon.default_prevented = true;
                 }
-                // Handle checkbox/radio click toggle
-                log_debug("MOUSE_UP: evcon.target=%p", evcon.target);
-                bool click_check_radio_changed = false;
-                if (click_check_radio_had_state) {
-                    bool after = state_get_pseudo_state(click_check_radio_state,
-                                                        click_check_radio,
-                                                        PSEUDO_STATE_CHECKED);
-                    click_check_radio_changed = after != click_check_radio_before;
-                    if (evcon.default_prevented && click_check_radio_changed) {
-                        form_control_set_checked(click_check_radio_state,
-                                                 click_check_radio,
-                                                 click_check_radio_before);
-                        sync_pseudo_state(click_check_radio,
-                                          PSEUDO_STATE_CHECKED,
-                                          click_check_radio_before);
-                        doc_state_request_repaint(click_check_radio_state);
-                        click_check_radio_changed = false;
-                    }
-                }
-
 
                 // Handle click on <video> element — play/pause toggle + seek bar
                 if (evcon.target && state && !evcon.default_prevented) {
@@ -10515,64 +10567,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                 }
 
-                // Dispatch to Lambda template event handlers. Author templates
-                // always see the click; the behavior half is the UA default
-                // action, so it stands down on exactly the condition the native
-                // activation above uses — when the JS realm already ran the
-                // activation for this click, a behavior template running too
-                // would toggle the control a second time and land on the
-                // original value. ES10 makes JS and Lambda peers over one
-                // canonical state, which means only one of them may perform the
-                // default action for a given event.
                 if (evcon.target) {
-                    // Narrowly: the JS realm ran *this* click's checkbox/radio
-                    // activation. Only then must the behavior template stand
-                    // down — a select's dropdown is a native UA affordance that
-                    // JS never performs, so its template still runs here.
-                    bool js_did_activation = js_click_dispatched &&
-                        click_check_radio && click_check_radio_changed;
-                    bool behavior_may_activate = !js_did_activation;
-                    // A click on a <label> activates its associated control,
-                    // and `for="id"` is not an ancestor relationship, so the
-                    // behavior walk cannot reach the control on its own. The
-                    // association lookup is mechanism and stays native; what it
-                    // feeds is the template dispatch. Native activation used to
-                    // consume this resolution internally, so deleting it
-                    // silently broke label-activated checkboxes.
-                    View* activation_target = find_checkbox_radio_input(evcon.target);
-                    if (!activation_target) activation_target = evcon.target;
-                    if (dispatch_lambda_handler(&evcon, activation_target, "click",
-                                                nullptr, nullptr,
-                                                behavior_may_activate)) {
-                        evcon.need_repaint = true;
-                    }
-
-                    // F4: submit/reset are separate default-action seams. The
-                    // ordinary click handler above remains the author hook;
-                    // only this post-click behavior event may activate the
-                    // form, and the old JS bridge is the package-off fallback.
-                    View* submit_target = find_form_activation_button(evcon.target, false);
-                    if (submit_target && !evcon.default_prevented &&
-                        !js_dom_is_disabled((void*)submit_target) &&
-                        js_dom_is_connected((void*)submit_target)) {
-                        if (run_form_submit_activation(&evcon, submit_target)) {
-                            evcon.need_repaint = true;
-                        }
-                    }
-
-                    View* reset_target = find_form_activation_button(evcon.target, true);
-                    if (reset_target && !evcon.default_prevented &&
-                        !js_dom_is_disabled((void*)reset_target) &&
-                        js_dom_is_connected((void*)reset_target)) {
-                        if (run_form_reset_activation(&evcon, reset_target)) {
-                            evcon.need_repaint = true;
-                        }
-                    }
-
-                    if (!evcon.default_prevented &&
-                        run_link_activation(&evcon, evcon.target)) {
-                        evcon.need_repaint = true;
-                    }
+                    dispatch_click_default_actions(&evcon, evcon.target);
                 }
             }
 

@@ -43,7 +43,11 @@ Per ES5 and the DOM_Pkg placement rules, the seam runs between *resolving* and *
 | **Policy** — which key means what, what a click does to a control, what an `inputType` does to the document | **dom package (L)** | `form.ls` activation, `caret.ls` key→operation, `keymap.ls` key→intent, `editing.ls` / `dom_edit.ls` appliers, `commands.ls` command set, `menu.ls`, `ime.ls`, `validate.ls`, `aria.ls` |
 | **Waist primitives** — the named, ≤4-argument operations policy drives mechanism through | **`radiant` module (M)** | `set_state`, `dispatch`, `radio_group`, `replace_range`, `dom_replace_range`, `dom_wrap_range`, `caret_operation` |
 
-The recurring failure mode is a default action that ends up in a **fourth** home — the JS dispatch layer (`lambda/js/js_dom_events.cpp`), which implements activation behavior for `dispatchEvent`'s benefit. That home is legitimate for JS-initiated activation but becomes a second implementation when the native pointer path also routes through it (§5.2, ESO49).
+The recurring failure mode was a default action in a **fourth** home — the JS
+dispatch layer (`lambda/js/js_dom_events.cpp`) implementing activation only for
+`dispatchEvent`. F19 retires that copy: direct DOM dispatch now enters the
+native synthetic bridge and the package remains the single policy owner (§5.2,
+ES25/ES26).
 
 ---
 
@@ -75,7 +79,7 @@ Three properties hold it together:
 
 ### 2.2 Two realms, one canonical state
 
-Per ES10, JS and Lambda are parallel peers over one canonical state store; neither gatekeeps the other, and **only one of them may perform the default action for a given event**. The migrated activation classes use the behavior claim protocol to make that ownership explicit; remaining legacy coordination and the un-migrated popover path stay in ESO49.
+Per ES10, JS and Lambda are parallel peers over one canonical state store; neither gatekeeps the other, and **only one of them may perform the default action for a given event**. F19 makes that ownership structural for every current click activation class: trusted and synthetic entries share one package claim protocol (ES25/ES26).
 
 ### 2.3 Behavior-only hooks
 
@@ -296,7 +300,7 @@ Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`,
 | Event | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
 | `mousedown` | UI Events; cancelable | begin selection, focus change, drag preparation | transform-aware hit-testing native (ESO47); `selectstart` dispatched at selection begin; focus transition via the state machine. Link navigation is the legacy **package-off** fallback only; package-enabled documents activate on uncancelled `click` | ✅ dispatch · 🟡 default (§5.1) |
-| `mouseup` / `click` | UI Events; cancelable; canceling `click` cancels **activation behavior** | element-specific activation (HTML) | activation is the package's for checkbox / radio / `<select>` open-close, with no native fallback (F1b/F2b). Canceled activation restores pre-click checkedness. Label association lookup stays native (`for=` is not an ancestor walk); the dispatch is retargeted | 🟡 — per element, see §3.9 |
+| `mouseup` / `click` | UI Events; cancelable; canceling `click` cancels **activation behavior** | element-specific activation (HTML) | trusted and synthetic entries reach one package activation stage for checkbox / radio / `<select>` open-close and popover. Cancellation settles before the package write, so no cross-realm checkedness restore is needed. Label association lookup stays native (`for=` is not an ancestor walk); the dispatch is retargeted | 🟡 — per element, see §3.9 |
 | dropdown option click | no spec event — the popup overlay is not DOM | — | native geometry resolves the row; behavior-only **`optioncommit`** carries the index; `form.ls` commits and closes (F2c). One commit path shared by pointer, Enter, and the test harness | ✅ |
 | `dblclick` | UI Events; cancelable | UA convention: word selection | word/line/select-all selection implemented natively via click counts (`event.cpp:8807`). **The `dblclick` event itself is never dispatched**, and `ondblclick` is registered at `script_runner.cpp:2582` — another inert attribute | 🟡 default · ❌ dispatch |
 | `contextmenu` | UI Events; cancelable | show the UA context menu | right-click dispatches the behavior-only hook; `menu.ls` decides target + enable mask (F10), native paints the popup. **The spec-visible JS event is not dispatched** — a page cannot `preventDefault` it or build its own menu | ✅ default · ❌ dispatch |
@@ -337,7 +341,7 @@ Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`,
 
 | Concept | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
-| **Form submission from user interaction** | HTML §4.10.21; `submit` cancelable | submit-button activation, or implicit submission (Enter in a text field), runs the submission algorithm | native pointer/keyboard activation now reaches `form.ls` → `submit.ls`; the package checks validity, fires cancelable `submit`, builds the native entry list (including `form="..."` associations), serializes GET/urlencoded/multipart data, and calls `request_navigation`. The browsing waist currently accepts URL/target only, so POST body delivery remains open | 🟡 (F4; ESO49) |
+| **Form submission from user interaction** | HTML §4.10.21; `submit` cancelable | submit-button activation, or implicit submission (Enter in a text field), runs the submission algorithm | native pointer/keyboard activation now reaches `form.ls` → `submit.ls`; the package checks validity, fires cancelable `submit`, builds the native entry list (including `form="..."` associations), serializes GET/urlencoded/multipart data, and calls `request_navigation`. The browsing waist currently accepts URL/target only, so POST body delivery remains open | 🟡 (F4; ESO71) |
 | `form.submit()` / `requestSubmit()` | HTML | as above | implemented, including `novalidate` / `formnovalidate`, the cancelable `submit` event with `submitter`, and the disconnected-form rule | ✅ |
 | **Reset from user interaction** | HTML; `reset` cancelable | reset-button activation resets the form | native pointer/keyboard activation and script-created clicks use the same package claim protocol; `form.ls` calls the existing cancelable reset waist, including associated controls | ✅ |
 | `form.reset()` | HTML | as above | implemented incl. `form=`-associated controls outside the subtree (`js_dom.cpp:8088`) | ✅ |
@@ -378,7 +382,7 @@ The `click` row of §3.3, expanded. This is the table to check before claiming "
 | `a[href]` | follow the hyperlink | `navigation.ls` owns click/Enter policy and target/fragment resolution; native executes the resolved existing context. New browsing contexts remain ESO70 | 🟡 (ES31; ESO70) |
 | `summary` | toggle the parent `<details>` `open` attribute | `details.ls` (F15), including the `name=` exclusive accordion via the `details_group` waist. Layout already honoured `open`; the disclosure marker was a constant and now follows it | 🟡 — activation ✅, script-write and load-time exclusivity open (ESO62) |
 | `dialog` (+ `showModal`, Esc-to-cancel, focus trap, top layer) | HTML dialog behavior | absent entirely | ❌ |
-| `[popovertarget]` button | toggle the popover, fire `beforetoggle`/`toggle`, light-dismiss on Esc / outside click | toggling implemented in the JS layer (`js_dom.cpp:4483`); **no `toggle`/`beforetoggle` events and no light dismiss** | 🟡 |
+| `[popovertarget]` button | toggle the popover, fire `beforetoggle`/`toggle`, light-dismiss on Esc / outside click | `form.ls` claims click through `radiant.activate_popover`; native resolves the target and transition once. **No `toggle`/`beforetoggle` events and no light dismiss** | 🟡 |
 | `video` / `audio` controls | play/pause, seek, volume, mute; media events | play/pause + volume by **hard-coded pixel geometry** (`event.cpp:9193`); no seek drag, no keyboard, no mute state ("TODO: track muted state properly"), no media events | 🟡 |
 | `area` (image map) | follow the hyperlink | `<area>` is recognized as a void/metadata element only | ❌ |
 
@@ -448,20 +452,24 @@ target have no `UiContext` host factory that can create a browsing context.
 They resolve to an explicit `new` request and are rejected rather than
 misrouted to `_self` (**ESO70**).
 
-### 5.2 Activation behavior has two implementations
+### 5.2 Activation behavior is single-sourced (F19)
 
-`lambda/js/js_dom_events.cpp:2376–2650` implements a complete activation-behavior pass inside `dispatchEvent`: checkbox/radio pre-activation with canceled-activation restore, submit-button activation, reset-button activation, popover activation, and the post-activation `input`/`change` pair. `form.ls` implements the first of those for the native path. They are reconciled at `event.cpp:9271` by observing whether the JS realm actually changed checkedness:
+F19 deletes the activation pass from `lambda/js/js_dom_events.cpp` and routes a
+direct DOM `dispatchEvent()` / `el.click()` through
+`radiant_dispatch_synthetic_dom_event`. The native bridge lets the shared
+author pass settle cancellation, then calls the same `dispatch_click_default_actions`
+stage as trusted pointer input. Native retains label association, target
+resolution, canonical state storage, and form/link execution mechanics;
+`form.ls` owns checkbox/radio transitions, group exclusivity, `input`/`change`,
+submit/reset decisions, and popover policy through waist primitives (S12.1.3);
+native keeps canonical state at the S9.1.4/D4.5.1v3 seam.
 
-```cpp
-bool js_did_activation = js_click_dispatched && click_check_radio && click_check_radio_changed;
-```
-
-Two consequences follow, and both are already visible:
-
-1. **They have diverged.** The JS copy sets a clicked radio checked but its own comment concedes *"group exclusion not implemented headlessly"* — the exclusivity walk `form.ls` performs is absent there. This is exactly the class of defect that made `radiant_uncheck_radio_group` a shadow implementation of radio policy until it was retired in F1b.
-2. **Submit and reset used to exist only in the JS copy.** F4 moved their policy into `form.ls`/`submit.ls`; native and JS click paths now consult the same behavior claim protocol, while the native browsing waist still owns only navigation execution. Popover activation remains JS-only.
-
-ES10's rule ("only one of them may perform the default action for a given event") is now structural for submit/reset: both paths consult one claim protocol, and the package owns the local policy. Popover remains the un-migrated half of **ESO49**.
+There is no checkedness diff, no JS-side pre-activation, and no cancellation
+restore across realms: a canceled click reaches no package write. The one
+author/UA pipeline is therefore the ES10 owner for both trusted and synthetic
+click activation (ES25/ES26). `test/ui/dom_synthetic_activation.json` proves
+load-time `click()`, `click()` radio selection, `dispatchEvent` radio
+exclusivity, cancellation, and popover visibility. **ESO49 is resolved.**
 
 ### 5.3 Sequential focus ignores `tabindex` order and never scrolls
 
@@ -490,7 +498,7 @@ New rows start at ESO48; ESO1–ESO47 remain in DOM_State §7. Rows here are def
 | # | Issue | Direction |
 | --- | --- | --- |
 | ESO48 | **No keyboard scrolling for HTML documents.** Space / PageUp / PageDown / Home / End / arrows do not scroll the nearest scrollport; scroll arrives only from wheel, scrollbar drag, and drag-autoscroll. `PageUp`/`PageDown` naming and textarea-local movement are landed, but no key scrolls the nearest document scrollport | add a scroll default action on the keydown path, ordered after `caretkey` declines. Interacts with §5.4 |
-| ESO49 | **Activation behavior has two implementations; popover activation still lives only in the JS one.** §5.2 | F4 moved submit/reset into `form.ls`/`submit.ls` and gave native/JS click paths the same claim protocol. Remaining work: migrate popover activation, and give the browsing layer a real POST body/method transport |
+| ESO49 | ~~**Activation behavior has two implementations; popover activation still lives only in the JS one.**~~ **Resolved — F19 / ES25–ES26.** Direct DOM clicks and trusted clicks share one package-owned activation stage; popover policy moved to `form.ls` and the JS activation/reconciliation copy is deleted | verified by `test/ui/dom_synthetic_activation.json` (6/6), `dom_pkg_prevent_default.json` (4/4), and `dom_pkg_radio.json` (7/7) |
 | ESO50 | **Pointer Events are partial** — `pointerdown`/`up`/`move` dispatch, but no `pointerover`/`out`/`enter`/`leave`/`cancel` and no `setPointerCapture` | boundary events follow the existing mouse boundary logic; capture needs a target-override in the dispatch path |
 | ESO51 | ~~**Link activation is on `mousedown`, and has no keyboard path.**~~ **landed 2026-09-01 (ES31)** | `navigation.ls` claims `linkactivation` after an uncancelled click; Enter dispatches that same click. It resolves fragments and existing root/iframe targets through the ES30/ES31 snapshot surface, and native executes only the pinned request |
 | ESO52 | **Sequential focus ignores `tabindex` ordering and never scrolls the target into view.** §5.3 | both belong to the `focus.ls` work (DOM_State §6.2), together with the ESO60 autofocus fix |
@@ -500,6 +508,7 @@ New rows start at ESO48; ESO1–ESO47 remain in DOM_State §7. Rows here are def
 | ESO56 | ~~**`<details>` / `<summary>` has no toggle behavior**~~ **landed 2026-08-31 (F15)** — `lambda/package/dom/details.ls` claims `click` on `view <summary>`, writes the parent's `open` through `set_attr`, and dispatches `toggle` on the details. ESO3 was not in fact a blocker: `set_attr` has gone through the DOM operation path with mutation notices since F7. Two prerequisites were wrong in the tree rather than absent — the disclosure marker was pinned to `disclosure-closed` so the triangle never turned, and `set_attr`'s null-clear was dead code (see the ESO62 row). Loading the package needed one more widening of the EO4/F9 `package_governs` gate: a `<details>` in a static document has no form control and no script, so the document owned no evaluator and the toggle silently did nothing — the same shape F9 fixed for rich editing. Residues split out as **ESO62** | proved by `test/ui/dom_pkg_details.json` (12/12 with the package, 9/12 under `RADIANT_DOM_PKG=0`) `dom_pkg_details_accordion.json` (20/20), and `dom_pkg_details_noscript.json` (6/6, the static-document path) |
 | ESO62 | **`<details>` openness is claimed only where the package decides it — the click.** Three gaps follow. (a) A script write (`d.open = true`, `setAttribute('open','')`) does not close the `name=` group; (b) a document that *loads* with two open members of one group keeps both; (c) activation accepts any direct summary child, not strictly the first | (a) has no cheap seam: of the ~20 `DOM_JS_MUTATION_ATTRIBUTE` notify sites most carry no attribute name, so an `openchange` hook there would hand Lambda every attribute write to filter — the same "no chokepoint" finding F7 made for `state_change`, and the identical residue radio exclusivity carries (§5.2). (b) wants the `init` hook, but that phase visits only `elem->form_control()` elements (EO4) and `<details>` is not one. (c) waits on `:first-of-type` in the selector engine, which would tighten `resolve_css_style.cpp`'s marker rule in the same change |
 | ESO70 | **New browsing contexts cannot execute.** ES31 resolves `_blank` and unmatched target names to `target_kind:"new"`, but `UiContext` owns one current document and exposes no window/tab/context factory | add a host-level context creation API that returns a new browsing session/window, names it when requested, then execute the already-resolved `new` request without a DOM re-search |
+| ESO71 | **Form POST transport is incomplete.** The package constructs form data and selects the request method, but the browsing waist currently accepts only URL/target | extend the native request/execution seam with method, headers, and body ownership; this is transport work, not a second activation policy |
 | ESO57 | **`<dialog>` is entirely absent**, and the popover implementation fires no `beforetoggle`/`toggle` and has no light dismiss | both need a top-layer concept in the view tree and an Esc/outside-click policy; the Esc path can follow the context-menu and dropdown precedent (`event.cpp:9561`) |
 | ESO58 | **Non-text `<input>` types have no interaction**: `range` (no thumb drag, no keys — `form.ls:130` says so), `number` (no spinner, no arrow-key step), and `file`/`color`/`date`-family, which `input_type_to_control()` degrades to `FORM_CONTROL_TEXT` (`view.hpp:2727`) | `range` and `number` are template-shaped and cheap; the picker types need host UI and are a separate decision |
 | ESO59 | **Composite-widget keyboard policy is missing**: `<select multiple>` / listbox has no click or key handling at all, `<select>` has no typeahead, and radio groups have no arrow-key navigation | all three belong in `form.ls` next to the existing `dropdownkey` handler; the listbox additionally needs its option rows to be hit-testable |
@@ -518,7 +527,7 @@ Ordered by how often the gap is hit by an ordinary page, not by implementation c
    commands now use the F14.2 structural primitives; paste, cut, drop, and
    history remain the visible contenteditable gaps.
 2. **New browsing-context execution** (ESO70 / ES31). Link click/Enter, fragment state, and existing target resolution are landed; `_blank` and unmatched names need the host window/session factory.
-3. **Complete form submission transport and popover activation** (ESO49 / F4). Local submit/reset activation is landed; POST body delivery and popover remain.
+3. **Complete form submission transport** (ESO71 / F4). Local submit/reset and popover activation are landed; POST body delivery remains.
 
 **Tier 2 — cheap, high visibility**
 
@@ -535,7 +544,7 @@ Ordered by how often the gap is hit by an ordinary page, not by implementation c
 11. Pointer boundary events and capture (ESO50).
 12. The ESO61 residue.
 
-Of these, only ESO49's submit half (F4), link activation (DOM_State §6.1), and focus policy (DOM_State §6.2) were tracked anywhere before this document.
+Of these, only ESO71's submission transport residue (F4), link activation (DOM_State §6.1), and focus policy (DOM_State §6.2) were tracked anywhere before this document.
 
 ---
 
