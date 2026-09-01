@@ -1,7 +1,7 @@
 # Radiant UI Test Runner Unification
 
-- **Status:** proposed
-- **Date:** 2026-08-31
+- **Status:** Phase 1/2 implementation in progress
+- **Date:** 2026-09-01
 - **Scope:** event-driven Radiant UI fixtures executed through `lambda.exe view`
 - **Formal linkage:** no new language or runtime ruling. The runner's use and teardown of Lambda's strict JSON parser must follow **D4.2.1v3**: allocator parent/backing edges are established at creation and released in reverse-dependency order.
 
@@ -20,6 +20,10 @@ test/test_ui_automation_gtest.exe --suite <name>
 ```
 
 `test_ui_automation_gtest.exe` becomes the only runner for JSON event fixtures. It owns discovery, strict parsing, preflight, filtering, process launch, resource limits, result parsing, and reporting. Make targets become thin suite selectors.
+
+### Implementation checkpoint (2026-09-01)
+
+The first cut is now landed in the working tree: `test/ui/ui_test_manifest.json` owns 466 fixtures across the six suites; the C++ runner uses Lambda's strict JSON parser, validates ownership/pages/assertions, supports `--suite`, `--tag`, `--test`, `--preflight`, bounded scheduling, and machine-result assertions; and `lambda.exe view` emits the versioned result file. The DOM Node runner, hit-test/editor shell loops, hard-coded editor command list, and JSON-fixture launch table in `test_radiant_view_gtest.cpp` have been removed. Native fixtures have an explicit `--native-gui` execution path and are excluded from ordinary headless selections. Remaining follow-up work is modularizing the runner, aggregate JSON reporting, and dedicated preflight/error-path unit tests.
 
 The following parallel runner implementations are retired:
 
@@ -209,7 +213,7 @@ An illustrative schema is:
 }
 ```
 
-This is an example of the contract, not the completed migration manifest. The checked-in manifest must enumerate every current exception and pass preflight before legacy paths are removed.
+The checked-in manifest is the executable ownership contract. It must enumerate every managed fixture and pass preflight before a suite is allowed to launch children.
 
 ### Manifest rules
 
@@ -434,7 +438,7 @@ Illustrative recipes are:
 UI_TEST_RUNNER := ./test/test_ui_automation_gtest.exe
 
 test-ui-automation: build-test
-	$(UI_TEST_RUNNER) --suite baseline $(ARGS)
+	$(UI_TEST_RUNNER) --suite all $(ARGS)
 
 dom-ui-run: build-test
 	$(UI_TEST_RUNNER) --suite dom $(ARGS)
@@ -448,11 +452,12 @@ editor-4c-view: build-test
 editable-editor-e2e: build-test
 	$(UI_TEST_RUNNER) --suite editor --tag upstream-editor $(ARGS)
 
-radiant-view-ui: build-test
+view-ui: build-test
 	$(UI_TEST_RUNNER) --suite view $(ARGS)
 
 native-gui-ui: build-test
-	$(UI_TEST_RUNNER) --suite native-gui $(ARGS)
+	$(UI_TEST_RUNNER) --suite native-gui --native-gui $(ARGS)
+
 ```
 
 Other existing aliases map to suite plus tags:
@@ -470,7 +475,7 @@ Other existing aliases map to suite plus tags:
 
 Composite targets such as `test-editable` and `test-drawing` may retain dependencies on those thin aliases. They must not contain fixture paths.
 
-The Radiant baseline invokes the unified runner once with `--suite baseline --suite dom --suite editor --suite hit-test --suite view` and consumes the aggregate report, rather than separately scraping UI, DOM UI, and view-fixture summaries. Native C++ view tests remain a separate native-test line only if they no longer launch JSON fixtures. The native-GUI suite runs in a GUI-capable job, not as an implied part of a headless baseline.
+The Radiant baseline should eventually invoke the unified runner once with `--suite baseline,dom,editor,hit-test,view` and consume the aggregate report, rather than separately scraping UI, DOM UI, and view-fixture summaries. Native C++ view tests remain a separate native-test line only if they no longer launch JSON fixtures. The native-GUI suite runs in a GUI-capable job with `--native-gui`, not as an implied part of a headless baseline.
 
 ## 11. Migration plan
 
@@ -481,7 +486,7 @@ The Radiant baseline invokes the unified runner once with `--suite baseline --su
 3. Add preflight unit tests for malformed JSON, missing pages, zero assertions, duplicate ownership, unowned files, bad defaults, path escapes, and sanitized-name collisions.
 4. Make `--preflight --suite all` pass with current fixtures.
 
-Legacy runners remain active during this phase.
+The legacy runners have now been removed as part of the initial cutover; the remaining work in this phase is to split the large runner and add its dedicated error-path tests.
 
 ### Phase 2 — unified execution and result protocol
 
@@ -501,15 +506,15 @@ Legacy runners remain active during this phase.
 
 Moves occur only after manifest-based execution works, so a move changes an ownership glob rather than a runner implementation.
 
-### Phase 4 — cutover and deletion
+### Phase 4 — cutover and deletion (initial cut completed)
 
-1. Switch all Make targets to `test_ui_automation_gtest.exe --suite ...`.
-2. Remove `test/ui/dom/run-dom-ui.mjs`.
-3. Delete the hit-test and editor shell loops.
-4. Delete the 32-command `editable-editor-e2e` list.
-5. Remove JSON fixture execution from `test_radiant_view_gtest.cpp`.
-6. Remove hand-written JSON scanners and human-summary parsing from `test_ui_automation_gtest.cpp`.
-7. Make full preflight a prerequisite of the Radiant baseline.
+1. Switch event-fixture Make targets to `test_ui_automation_gtest.exe --suite ...` (completed for the current aliases).
+2. Remove `test/ui/dom/run-dom-ui.mjs` (completed).
+3. Delete the hit-test and editor shell loops (completed).
+4. Delete the 32-command `editable-editor-e2e` list (completed).
+5. Remove JSON fixture execution from `test_radiant_view_gtest.cpp` (completed; native format smoke tests remain).
+6. Remove hand-written JSON scanners and human-summary parsing from `test_ui_automation_gtest.cpp` (completed; machine-result JSON is consumed).
+7. Make full preflight a prerequisite of the Radiant baseline and replace its remaining text scraping with the aggregate report (in progress).
 
 No legacy runner remains as a fallback after cutover; otherwise coverage will diverge again.
 

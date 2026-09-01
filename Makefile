@@ -551,7 +551,7 @@ tree-sitter-libs: tree-sitter-core-libs $(TREE_SITTER_BASH_LIB) $(TREE_SITTER_PY
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
 	    fuzz-lambda fuzz-lambda-extended fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir verify-mir-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
-	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
+	    test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable drawing-editor-e2e test-drawing check-error-recovery \
 	    build-graph-mermaid-test test-graph-mermaid build-graph-graphviz-test test-graph-graphviz \
 	    build-graph-structurizr-test test-graph-structurizr \
 	    node-baseline node-regression-gate node-full node-update-baseline node-official-report test-jube-node-net-crypto-dynamic
@@ -621,6 +621,8 @@ help:
 	@echo "  test-layout-baseline - Run the shared layout baseline suites only"
 	@echo "  test-radiant-online - Run Radiant online URL smoke tests"
 	@echo "  test-reactive-ui     - Run Reactive UI event simulation tests (todo toggle/delete)"
+	@echo "  view-ui              - Run manifest-owned Radiant view event fixtures"
+	@echo "  native-gui-ui        - Run manifest-owned native GUI event fixtures"
 	@echo "  editable-unit        - Run focused editable gate, DOM action, and cancellation fixtures"
 	@echo "  editable-ui          - Run contenteditable UI automation fixtures"
 	@echo "  editable-editor-e2e  - Run offline CodeMirror, ProseMirror, and Editor.js probes"
@@ -2151,13 +2153,16 @@ run-radiant-baseline:
 	echo ""; \
 	echo "📦 UI Automation Tests:"; \
 	if [ -f "test/test_ui_automation_gtest.exe" ]; then \
-		run_logged "temp/_radiant_ui_automation.log" ./test/test_ui_automation_gtest.exe || true; \
+		ui_exit=0; \
+		run_logged "temp/_radiant_ui_automation.log" ./test/test_ui_automation_gtest.exe --suite baseline $(ARGS) || ui_exit=$$?; \
 		ui_elapsed=$$run_logged_elapsed; \
 		output=$$(cat "temp/_radiant_ui_automation.log"); \
 		echo "$$output" | grep -E "^\[|tests executed" | tail -5; \
-		ui_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-		ui_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		ui_result_line=$$(echo "$$output" | grep -E "^UI fixture results:" | tail -1); \
+		ui_passed=$$(echo "$$ui_result_line" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0"); \
+		ui_failed=$$(echo "$$ui_result_line" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0"); \
 		ui_passed=$${ui_passed:-0}; ui_failed=$${ui_failed:-0}; \
+		if [ $$ui_exit -ne 0 ] && [ $$ui_failed -eq 0 ]; then ui_failed=1; fi; \
 		if [ "$$ui_failed" = "0" ] || [ -z "$$ui_failed" ]; then ui_status="✅ PASS"; ui_failed=0; else ui_status="❌ FAIL"; any_failed=1; fi; \
 	else \
 		echo "   ⚠️  test/test_ui_automation_gtest.exe not found"; \
@@ -2176,6 +2181,24 @@ run-radiant-baseline:
 		if [ "$$radiant_view_failed" = "0" ] || [ -z "$$radiant_view_failed" ]; then radiant_view_status="✅ PASS"; radiant_view_failed=0; else radiant_view_status="❌ FAIL"; any_failed=1; fi; \
 	else \
 		echo "   ⚠️  test/test_radiant_view_gtest.exe not found"; \
+	fi; \
+	\
+	echo "📦 Radiant View UI Fixtures:"; \
+	view_ui_exit=0; \
+	if [ -f "test/test_ui_automation_gtest.exe" ]; then \
+		run_logged "temp/_radiant_view_ui.log" ./test/test_ui_automation_gtest.exe --suite view $(ARGS) || view_ui_exit=$$?; \
+		view_ui_elapsed=$$run_logged_elapsed; \
+		output=$$(cat "temp/_radiant_view_ui.log"); \
+		echo "$$output" | grep -E "^UI fixture results:|^\[  (PASSED|FAILED)  \]" | tail -5; \
+		view_ui_result_line=$$(echo "$$output" | grep -E "^UI fixture results:" | tail -1); \
+		view_ui_passed=$$(echo "$$view_ui_result_line" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0"); \
+		view_ui_failed=$$(echo "$$view_ui_result_line" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0"); \
+		view_ui_passed=$${view_ui_passed:-0}; view_ui_failed=$${view_ui_failed:-0}; \
+		view_ui_total=$$((view_ui_passed + view_ui_failed)); \
+		if [ $$view_ui_exit -ne 0 ] && [ $$view_ui_failed -eq 0 ]; then view_ui_failed=1; fi; \
+		if [ $$view_ui_exit -eq 0 ] && [ $$view_ui_total -gt 0 ]; then view_ui_status="✅ PASS"; else view_ui_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		view_ui_elapsed=0; view_ui_passed=0; view_ui_failed=1; view_ui_status="❌ FAIL"; any_failed=1; \
 	fi; \
 	\
 	echo ""; \
@@ -2249,11 +2272,11 @@ run-radiant-baseline:
 	dom_ui_elapsed=$$run_logged_elapsed; \
 	output=$$(cat "temp/_radiant_dom_ui.log"); \
 	echo "$$output" | tail -5; \
-	dom_ui_line=$$(echo "$$output" | grep "^dom-ui:" | tail -1); \
-	dom_ui_passed=$$(echo "$$dom_ui_line" | grep -oE "[0-9]+/[0-9]+" | cut -d/ -f1 || echo "0"); \
-	dom_ui_total=$$(echo "$$dom_ui_line" | grep -oE "[0-9]+/[0-9]+" | cut -d/ -f2 || echo "0"); \
-	dom_ui_passed=$${dom_ui_passed:-0}; dom_ui_total=$${dom_ui_total:-0}; \
-	dom_ui_failed=$$((dom_ui_total - dom_ui_passed)); \
+	dom_ui_result_line=$$(echo "$$output" | grep -E "^UI fixture results:" | tail -1); \
+	dom_ui_passed=$$(echo "$$dom_ui_result_line" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" || echo "0"); \
+	dom_ui_failed=$$(echo "$$dom_ui_result_line" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" || echo "0"); \
+	dom_ui_passed=$${dom_ui_passed:-0}; dom_ui_failed=$${dom_ui_failed:-0}; \
+	dom_ui_total=$$((dom_ui_passed + dom_ui_failed)); \
 	if [ $$dom_ui_exit -eq 0 ] && [ $$dom_ui_total -gt 0 ]; then dom_ui_status="✅ PASS"; else dom_ui_status="❌ FAIL"; if [ $$dom_ui_failed -eq 0 ]; then dom_ui_failed=1; fi; any_failed=1; fi; \
 	\
 	wpt_syntax_passed=0; wpt_syntax_failed=0; wpt_syntax_status="⏭️  SKIP"; wpt_syntax_elapsed=0; \
@@ -2290,8 +2313,8 @@ run-radiant-baseline:
 		if [ $$failed -eq 0 ]; then echo "   ✅ $$runner ($$passed passing files)"; else echo "   ❌ $$runner ($$failed regressions)"; wpt_dom2_status="❌ FAIL"; any_failed=1; fi; \
 	done; \
 	\
-	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + dom_ui_passed + radiant_view_passed + page_passed + fuzzy_passed + render_passed + wpt_syntax_passed + wpt_dom2_passed)); \
-	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + dom_ui_failed + radiant_view_failed + page_failed + fuzzy_failed + render_failed + wpt_syntax_failed + wpt_dom2_failed)); \
+	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + dom_ui_passed + radiant_view_passed + view_ui_passed + page_passed + fuzzy_passed + render_passed + wpt_syntax_passed + wpt_dom2_passed)); \
+	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + dom_ui_failed + radiant_view_failed + view_ui_failed + page_failed + fuzzy_failed + render_failed + wpt_syntax_failed + wpt_dom2_failed)); \
 	total_skipped=$$layout_total_skipped; \
 	total_tests=$$((total_passed + layout_total_partial + total_failed)); \
 	\
@@ -2307,6 +2330,7 @@ run-radiant-baseline:
 	echo "   ├── UI Automation       $$ui_status  ($$(format_duration "$$ui_elapsed"), $$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
 	echo "   ├── DOM UI Integration  $$dom_ui_status  ($$(format_duration "$$dom_ui_elapsed"), $$dom_ui_passed passed, $$dom_ui_failed failed) (dom-ui-run)"; \
 	echo "   ├── Radiant View Cmd    $$radiant_view_status  ($$(format_duration "$$radiant_view_elapsed"), $$radiant_view_passed passed, $$radiant_view_failed failed) (test_radiant_view_gtest.exe)"; \
+	echo "   ├── View UI Fixtures    $$view_ui_status  ($$(format_duration "$$view_ui_elapsed"), $$view_ui_passed passed, $$view_ui_failed failed) (test_ui_automation_gtest.exe --suite view)"; \
 	echo "   ├── View Page & Markdown $$page_status  ($$(format_duration "$$page_elapsed"), $$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
 	echo "   ├── Fuzzy Crash         $$fuzzy_status  ($$(format_duration "$$fuzzy_elapsed"), $$fuzzy_passed passed, $$fuzzy_failed failed) (test_layout_fuzzy_gtest.exe)"; \
 	echo "   ├── Render Visual       $$render_status  ($$(format_duration "$$render_elapsed"), $$render_details) (test_radiant_render.js --baseline)"; \
@@ -2378,7 +2402,7 @@ test-ui-automation: build-test
 	@echo "Running UI Automation test suite..."
 	@echo "=============================================================="
 	@if [ -f "test/test_ui_automation_gtest.exe" ]; then \
-		./test/test_ui_automation_gtest.exe; \
+		./test/test_ui_automation_gtest.exe --suite all $(ARGS); \
 	else \
 		echo "Error: test/test_ui_automation_gtest.exe not found - run 'make build-test' first"; \
 		exit 1; \
@@ -2422,112 +2446,44 @@ test-pdf-render: build-pdf-render-test
 		exit 1; \
 	fi
 
-test-reactive-ui: build
+test-reactive-ui: build-test
 	@echo "Running Reactive UI test suite..."
 	@echo "=============================================================="
-	@PASS=0; FAIL=0; TOTAL=0; \
-	for json in test/ui/todo_toggle.json test/ui/todo_delete.json test/ui/todo_add_item.json test/ui/todo_text_input.json; do \
-		name=$$(basename $$json .json); \
-		TOTAL=$$((TOTAL + 1)); \
-		echo "--- $$name ---"; \
-		if ./lambda.exe view test/lambda/ui/todo.ls --event-file $$json --headless --no-log; then \
-			PASS=$$((PASS + 1)); \
-		else \
-			FAIL=$$((FAIL + 1)); \
-			echo "FAIL: $$name"; \
-		fi; \
-	done; \
-	echo "=============================================================="; \
-	echo "Reactive UI: $$PASS/$$TOTAL passed"; \
-	if [ $$FAIL -gt 0 ]; then exit 1; fi
+	@./test/test_ui_automation_gtest.exe --suite baseline --test "todo_toggle,todo_delete,todo_add_item,todo_text_input" $(ARGS)
 
 # The upstream packages are checked-in offline artifacts. These targets never
 # run npm and exercise the same public event route as platform input.
-editable-unit: build
-	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_dom_action.json --headless --no-log
-	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_unsupported_transfer.json --headless --no-log
-	@./lambda.exe view test/html/editable-physical-keydown.html --event-file test/ui/test_editing_physical_keydown_cancellation.json --headless --no-log
-	@./lambda.exe view test/ui/editable-template-gate.ls --event-file test/ui/editable-template-gate.json --headless --no-log
+editable-unit: build-test
+	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_dom_action,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,editable_template_gate" $(ARGS)
 
-editable-ui: build
-	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_dom_action.json --headless --no-log
-	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_composition.json --headless --no-log
-	@./lambda.exe view test/html/editable-dom-composition.html --event-file test/ui/test_editing_contenteditable_unsupported_transfer.json --headless --no-log
-	@./lambda.exe view test/html/editable-physical-keydown.html --event-file test/ui/test_editing_physical_keydown_cancellation.json --headless --no-log
-	@./lambda.exe view test/ui/editing/contenteditable.html --event-file test/ui/test_editing_paired_false_island_contenteditable.json --headless --no-log
-	@./lambda.exe view test/ui/rte_prototype.ls --event-file test/ui/rte_typing_at_caret.json --headless --no-log
-	@./lambda.exe view test/ui/editable-mixed-routes.ls --event-file test/ui/editable-mixed-routes.json --headless --no-log
+editable-ui: build-test
+	@./test/test_ui_automation_gtest.exe --suite editor --test "test_editing_contenteditable_dom_action,test_editing_contenteditable_composition,test_editing_contenteditable_unsupported_transfer,test_editing_physical_keydown_cancellation,test_editing_paired_false_island_contenteditable,rte_typing_at_caret,editable_mixed_routes" $(ARGS)
 
-editable-editor-e2e: build
-	@./lambda.exe view test/ui/dom_mutation_replacechild_notifies.html --event-file test/ui/dom_mutation_replacechild_notifies.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-operations.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-full.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-selection-composition.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-domchange.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/codemirror/typing.html --event-file test/ui/editable-editors-codemirror-events.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/codemirror/readonly.html --event-file test/ui/editable-editors-codemirror-readonly.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/codemirror/direction.html --event-file test/ui/editable-editors-codemirror-direction.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-operations.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-full.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-selection-composition.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-domchange.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/prosemirror/marked.html --event-file test/ui/editable-editors-prosemirror-marked-composition.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/prosemirror/typing.html --event-file test/ui/editable-editors-prosemirror-clipboard-html.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/prosemirror/readonly.html --event-file test/ui/editable-editors-prosemirror-readonly.json --headless --no-log
-	@./lambda.exe view test/html/editable-prosemirror.html --event-file test/ui/editable-editors-prosemirror-toolbar.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-operations.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-tools.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-lifecycle.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-onchange.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-block-ids.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/empty.html --event-file test/ui/editable-editors-editorjs-dataempty.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/clipboard.html --event-file test/ui/editable-editors-editorjs-paste.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/clipboard.html --event-file test/ui/editable-editors-editorjs-delete.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/clipboard.html --event-file test/ui/editable-editors-editorjs-arrow.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/clipboard.html --event-file test/ui/editable-editors-editorjs-clipboard.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/typing.html --event-file test/ui/editable-editors-editorjs-onchange-index.json --headless --no-log
-	@./lambda.exe view test/editable-editors/fixtures/editorjs/readonly.html --event-file test/ui/editable-editors-editorjs-readonly.json --headless --no-log
-	@./lambda.exe view test/html/editable-editorjs.html --event-file test/ui/editable-editors-editorjs-page.json --headless --no-log
+editable-editor-e2e: build-test
+	@./test/test_ui_automation_gtest.exe --suite editor --test "editable-editors-*" $(ARGS)
 
 test-editable: editable-unit editable-ui editable-editor-e2e
 
 # Pinned drawing packages are built locally by test/drawing-editors; this target
 # never installs packages and exercises ordinary DOM/SVG/event lifetime paths.
-drawing-editor-e2e: build
+drawing-editor-e2e: build-test
 	@cd test/drawing-editors && node tools/build.mjs
-	@./lambda.exe view test/html/svg-dom-contract.html --event-file test/ui/svg-dom-contract.json --headless --no-log
-	@./lambda.exe view test/html/js-loop-listener-contract.html --event-file test/ui/js-loop-listener-contract.json --headless --no-log
-	@./lambda.exe view test/html/js-loop-listener-bundle-contract.html --event-file test/ui/js-loop-listener-bundle-contract.json --headless --no-log
-	@./lambda.exe view test/html/editable-raphael.html --event-file test/ui/editable-drawing-raphael.json --headless --no-log
-	@./lambda.exe view test/html/editable-maxgraph.html --event-file test/ui/editable-drawing-maxgraph.json --headless --no-log
-	@./lambda.exe view test/html/editable-jointjs.html --event-file test/ui/editable-drawing-jointjs.json --headless --no-log
+	@./test/test_ui_automation_gtest.exe --suite editor --test "svg-dom-contract,js-loop-listener-*,editable-drawing-*" $(ARGS)
 
 test-drawing: drawing-editor-e2e hit-test-ui
 
 # Coordinate assertions against document.elementFromPoint(), including ported
 # WPT SVG geometry cases. Each fixture names its own HTML page.
-hit-test-ui: build
-	@echo "Running Radiant hit-test UI suite..."
-	@echo "=============================================================="
-	@PASS=0; FAIL=0; TOTAL=0; \
-	for json in test/ui/hit-test/*.json; do \
-		[ -f "$$json" ] || continue; \
-		name=$$(basename "$$json" .json); \
-		TOTAL=$$((TOTAL + 1)); \
-		page=$$(sed -n 's/.*"html"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$$json" | head -1); \
-		if [ -z "$$page" ]; then echo "  FAIL $$name (missing html)"; FAIL=$$((FAIL + 1)); continue; fi; \
-		if ./lambda.exe view "$$page" --event-file "$$json" --headless --no-log; then \
-			echo "  PASS $$name"; PASS=$$((PASS + 1)); \
-		else \
-			echo "  FAIL $$name"; FAIL=$$((FAIL + 1)); \
-		fi; \
-	done; \
-	echo "=============================================================="; \
-	echo "hit-test-ui: $$PASS/$$TOTAL passed"; \
-	if [ $$FAIL -gt 0 ]; then exit 1; fi
+hit-test-ui: build-test
+	@./test/test_ui_automation_gtest.exe --suite hit-test $(ARGS)
+
+# Radiant view fixtures (iframe and cross-format navigation) are event-driven
+# tests; native format smoke tests remain in test_radiant_view_gtest.
+view-ui: build-test
+	@./test/test_ui_automation_gtest.exe --suite view $(ARGS)
+
+native-gui-ui: build-test
+	@./test/test_ui_automation_gtest.exe --suite native-gui --native-gui $(ARGS)
 
 # Stage 4C Phase A — the full plain-DOM editor suite headless under `lambda.exe js`.
 # The runner (test/editor-js/tools/run-phase-a.mjs) bundles each test group
@@ -2544,35 +2500,14 @@ editor-4c-js: build
 # (test/ui/editor4c/*.json), and the Phase-C expansion set
 # (test/ui/editor4c_phase_c/*.json). Each fixture may name its own harness page
 # via the "html" field (default test/html/editor-dom.html).
-editor-4c-view: build
-	@echo "Running Stage 4C Phase B/C editor UI test suite..."
-	@echo "=============================================================="
-	@PASS=0; FAIL=0; TOTAL=0; \
-	for json in test/ui/editor4b/*.json test/ui/editor4c/*.json test/ui/editor4c_phase_c/*.json; do \
-		[ -f "$$json" ] || continue; \
-		name=$$(basename $$json .json); \
-		TOTAL=$$((TOTAL + 1)); \
-		page=$$(sed -n 's/.*"html"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$$json" | head -1); \
-		[ -n "$$page" ] || page="test/html/editor-dom.html"; \
-		if ./lambda.exe view "$$page" --event-file $$json --headless --no-log >/dev/null 2>&1; then \
-			PASS=$$((PASS + 1)); \
-			printf "  \033[32m✓\033[0m %s\n" "$$name"; \
-		else \
-			FAIL=$$((FAIL + 1)); \
-			printf "  \033[31m✗\033[0m %s\n" "$$name"; \
-		fi; \
-	done; \
-	echo "=============================================================="; \
-	echo "editor-4c-view: $$PASS/$$TOTAL passed"; \
-	if [ $$FAIL -gt 0 ]; then exit 1; fi
+editor-4c-view: build-test
+	@./test/test_ui_automation_gtest.exe --suite editor --test "editor4b_*,editor4c_*,editor4c_phase_c_*" $(ARGS)
 
 # Browser-library DOM fixtures run through the real Radiant input/event/layout loop.
-dom-ui: build dom-ui-run
+dom-ui: build-test dom-ui-run
 
-dom-ui-run:
-	@echo "Running DOM UI integration suite..."
-	@echo "=============================================================="
-	@node test/ui/dom/run-dom-ui.mjs --jobs "$(DOM_UI_JOBS)" $(if $(or $(test),$(TEST)),--test "$(or $(test),$(TEST))")
+dom-ui-run: build-test
+	@./test/test_ui_automation_gtest.exe --suite dom $(if $(or $(test),$(TEST)),--test "$(or $(test),$(TEST))") $(ARGS)
 
 # Stage 4C Milestone 3 — parity report: cross-check the Radiant Phase-A pass-set
 # against the vitest/jsdom oracle (the editor's own suite under Node). Runs

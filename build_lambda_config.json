@@ -5095,7 +5095,7 @@
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "UI Automation Tests",
             "dependencies": [
-              "lambda-lib"
+              "lambda-data"
             ],
             "binary": "test_ui_automation_gtest.exe",
             "libraries": [
