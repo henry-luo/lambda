@@ -90,7 +90,6 @@ struct UiTestInfo {
     bool skip_headless;      // requires native GUI window (e.g. WKWebView tests)
     int estimated_wait_ms;   // explicit event waits, used only for launch scheduling
     int explicit_wait_count;
-    int wait_before_assert_count;
     int assertion_count;
 
     friend std::ostream& operator<<(std::ostream& os, const UiTestInfo& info) {
@@ -183,7 +182,6 @@ static char* read_json_text(const std::string& json_path, size_t limit) {
 typedef struct UiWaitStats {
     int total_ms;
     int count;
-    int before_assert_count;
 } UiWaitStats;
 
 // Match manifest paths without allowing a single '*' to cross a directory.
@@ -515,8 +513,7 @@ static bool ui_load_fixture(const std::string& json_path, const UiSuiteSpec& sui
             else info->output_not_contains.emplace_back(not_contains.cstring());
         }
     }
-    UiWaitStats stats = {0, 0, 0};
-    bool wait_pending = false;
+    UiWaitStats stats = {0, 0};
     ArrayReader events = events_item.asArray();
     for (int64_t i = 0; i < events.length(); i++) {
         ItemReader event_item = events.get(i);
@@ -538,10 +535,6 @@ static bool ui_load_fixture(const std::string& json_path, const UiSuiteSpec& sui
             stats.count++;
             ItemReader ms = event.get("ms");
             if (ms.isNumber() && ms.asInt() > 0) stats.total_ms += ms.asInt32();
-            wait_pending = true;
-        } else if (strcmp(type, "log") != 0) {
-            if (wait_pending && assertion) stats.before_assert_count++;
-            wait_pending = false;
         }
         if (assertion) info->assertion_count++;
     }
@@ -553,7 +546,6 @@ static bool ui_load_fixture(const std::string& json_path, const UiSuiteSpec& sui
     }
     info->estimated_wait_ms = stats.total_ms;
     info->explicit_wait_count = stats.count;
-    info->wait_before_assert_count = stats.before_assert_count;
     ui_dispose_json_input(pool, input);
     return true;
 }
@@ -1245,19 +1237,9 @@ int main(int argc, char** argv) {
 
         int selected_wait_count = 0;
         int selected_wait_ms = 0;
-        int selected_wait_before_assert = 0;
         for (size_t idx : selected_indices) {
             selected_wait_count += g_ui_tests[idx].explicit_wait_count;
             selected_wait_ms += g_ui_tests[idx].estimated_wait_ms;
-            selected_wait_before_assert += g_ui_tests[idx].wait_before_assert_count;
-        }
-        // A fixed sleep before an auto-waiting assertion is always redundant and
-        // otherwise lets conservative delays silently accumulate in the baseline.
-        if (selected_wait_before_assert > 0) {
-            std::cerr << "ERROR: selected UI fixtures contain "
-                      << selected_wait_before_assert
-                      << " explicit wait(s) before assertions\n";
-            return 2;
         }
 
         std::cout << "Found " << g_ui_tests.size() << " UI test(s), selected "

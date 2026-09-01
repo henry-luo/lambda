@@ -2812,6 +2812,11 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
                                           : (DomDocument*)js_dom_get_document();
     if (!doc || form->doc != doc) return false;
 
+    // A script-less document has no EventTarget realm or submit listeners.
+    // Its Lambda behavior evaluator must not manufacture JS objects: that
+    // evaluator deliberately owns no JS Input/shape pool.
+    if (!doc->js_has_dom_realm) return true;
+
     Item event = js_create_event("submit", true, true);
     js_set_key_cstr(event, "isTrusted", (Item){.item = ITEM_TRUE});
     js_set_key_cstr(event, "submitter", submitter_node

@@ -13505,12 +13505,35 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
                                       DomNode* ref_child) {
     if (!parent || !text || !text->native_string || !parent->doc ||
         !parent->doc->input) return false;
+
+    // DocumentFragment nodes have no Element backing.  HTMX builds a
+    // fragment in the main document and adopts text nodes from a parsed
+    // response before splicing them into the target; sending that temporary
+    // parent through MarkEditor reports "not an element" and drops the text.
+    if (parent->is_synthetic()) {
+        if (text->parent && text->parent != (DomNode*)parent) {
+            // The cross-document adoption path has already detached nodes;
+            // same-document moves need only unlink the temporary DOM parent.
+            // The fragment has no backing Element to edit, so routing this
+            // through dom_text_remove would ask for a nonexistent native slot.
+            if (!text->parent->remove_child((DomNode*)text)) return false;
+        }
+        return ((DomNode*)parent)->insert_before((DomNode*)text, ref_child);
+    }
+
     parent = js_dom_prepare_children_for_mutation(parent);
     if (!parent) return false;
     String* native_string = text->native_string;
 
     if (text->parent) {
-        if (!text->parent->is_element() || !dom_text_remove(text)) {
+        if (!text->parent->is_element()) return false;
+        // A parsed response is staged in a synthetic DocumentFragment before
+        // its text nodes are moved into the live target.  That parent has no
+        // Mark child slot, so unlink it through the DOM chain rather than
+        // asking dom_text_remove() to edit nonexistent backing storage.
+        if (text->parent->as_element()->is_synthetic()) {
+            if (!text->parent->remove_child((DomNode*)text)) return false;
+        } else if (!dom_text_remove(text)) {
             return false;
         }
         // static Mark text is invalidated when unlinked, but appendChild must

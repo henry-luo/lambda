@@ -5,7 +5,7 @@
 > **Scope**: default actions and activation behavior for HTML documents under Radiant — the pointer, keyboard, editing, focus, clipboard, drag, composition, form, and navigation families. Event *dispatch* mechanism is in scope only where a missing dispatch is what makes a default action unreachable.
 > **Companion docs**: `vibe/Lambda_Design_DOM_State.md` (the behavior-template architecture and the ES/ESO ledgers this doc extends), `vibe/Lambda_Design_DOM_Pkg.md` (layering and placement policy), `doc/dev/radiant/RAD_15_Events_Input.md`, `RAD_17_Interaction_State.md`, `RAD_19_Form_Controls.md`.
 > **Formal anchors**: S12.1.3 (reactive templates: body = pure `fn`, mutation only in `on` handlers), S12.2.2 (element mutation), S9.1.4 (state lives in view state), S7.6/S7.10 (error discharge and the sys-func contract), D4.5.1v3 (the Radiant memory seam).
-> **Ledger series**: this doc extends the DOM-State area's existing `ES#` (decisions) and `ESO#` (open issues) series per `doc/Doc_Convention.md` §4 — it mints no new series. New open issues start at **ESO63** (ESO48-ESO62 are minted below).
+> **Ledger series**: this doc extends the DOM-State area's existing `ES#` (decisions) and `ESO#` (open issues) series per `doc/Doc_Convention.md` §4 — it mints no new series. ESO48–ESO62 are minted below; ESO63–ESO69 (and ES22–ES29, F17–F21) are minted in `vibe/Lambda_Design_DOM_Dispatch.md`. New open issues start at **ESO70**.
 
 ---
 

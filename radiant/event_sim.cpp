@@ -957,6 +957,14 @@ static void sim_extract_text(View* view, StrBuf* buf) {
 static bool resolve_target(SimEvent* ev, DomDocument* doc, float* out_x, float* out_y) {
     // Priority: selector > text > raw coordinates
     if (ev->target_selector && doc) {
+        // Script-created styles can be applied after the initial retained tree
+        // is laid out. Pointer actions must resolve against the current box
+        // geometry, just as a native input turn does.
+        if (ev->type == SIM_EVENT_CLICK || ev->type == SIM_EVENT_DBLCLICK ||
+            ev->type == SIM_EVENT_MOUSE_DOWN || ev->type == SIM_EVENT_MOUSE_UP ||
+            ev->type == SIM_EVENT_MOUSE_MOVE || ev->type == SIM_EVENT_MOUSE_DRAG) {
+            reflow_html_doc(doc);
+        }
         View* elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
         if (elem) {
             if (ev->has_target_offset) {

@@ -1453,9 +1453,32 @@ RADIANT_C_API Item fn_radiant_submit_event(Item form_item, Item submitter_item) 
     if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
         return radiant_bool_item(false);
     }
-    bool ok = radiant_dispatch_submit_event_from_script(
-        (void*)form, radiant_optional_dom_element(submitter_item));
-    return radiant_bool_item(ok);
+    return radiant_bool_item(radiant_dispatch_submit_event_from_script(
+        (void*)form, radiant_optional_dom_element(submitter_item)));
+}
+
+static bool radiant_is_constraint_control(DomElement* elem) {
+    if (!elem || !elem->tag_name) return false;
+    return strcasecmp(elem->tag_name, "input") == 0 ||
+           strcasecmp(elem->tag_name, "select") == 0 ||
+           strcasecmp(elem->tag_name, "textarea") == 0 ||
+           strcasecmp(elem->tag_name, "button") == 0;
+}
+
+static DomElement* radiant_first_invalid_form_control(DomNode* node,
+                                                       DocState* state) {
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!current->is_element()) continue;
+        DomElement* elem = current->as_element();
+        if (radiant_is_constraint_control(elem) &&
+                state_get_bool(state, elem, STATE_INVALID)) {
+            return elem;
+        }
+        DomElement* nested = radiant_first_invalid_form_control(
+            elem->first_child, state);
+        if (nested) return nested;
+    }
+    return nullptr;
 }
 
 RADIANT_C_API Item fn_radiant_check_validity(Item form_item) {
@@ -1463,11 +1486,28 @@ RADIANT_C_API Item fn_radiant_check_validity(Item form_item) {
     if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
         return radiant_bool_item(false);
     }
-    Item valid = js_dom_check_validity_bridge(form_item);
-    if (!is_truthy(valid)) {
-        js_dom_focus_first_invalid_form_control((void*)form);
+    DomDocument* doc = radiant_dom_document_from_node((DomNode*)form);
+    DocState* state = doc ? radiant_document_ensure_state(doc, "CHECK_VALIDITY")
+                            : nullptr;
+    if (!state) return radiant_bool_item(false);
+
+    // A live author-script realm owns invalid-event dispatch. Reuse its
+    // established validity bridge so every invalid control receives the event.
+    if (doc->js_has_dom_realm) {
+        Item valid = js_dom_check_validity_bridge(form_item);
+        if (!is_truthy(valid)) {
+            js_dom_focus_first_invalid_form_control((void*)form);
+        }
+        return radiant_bool_item(is_truthy(valid));
     }
-    return radiant_bool_item(is_truthy(valid));
+
+    // F3 owns the constraint pass and publishes one canonical :invalid bit.
+    // Submission consumes that verdict directly; rebuilding a JS ValidityState
+    // here crosses into a realm that script-less Lambda evaluators do not own.
+    DomElement* invalid = radiant_first_invalid_form_control(
+        form->first_child, state);
+    if (invalid) focus_set_programmatic(state, (View*)invalid);
+    return radiant_bool_item(invalid == nullptr);
 }
 
 RADIANT_C_API Item fn_radiant_reset_form(Item form_item) {

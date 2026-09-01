@@ -346,10 +346,11 @@ extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter
         if (!js_is_truthy(valid)) return make_js_undefined();
     }
 
-    Item submit_event = js_create_event("submit", true, true);
-    js_set_key_cstr(submit_event, "isTrusted", (Item){.item = ITEM_TRUE});
-    js_set_key_cstr(submit_event, "submitter", submitter ? js_dom_wrap_element(submitter) : ItemNull);
-    Item submit_ok = js_dom_dispatch_event(form_item, submit_event);
+    RootFrame roots(1);
+    Rooted<Item> submit_event_root(roots, js_create_event("submit", true, true));
+    js_set_key_cstr(submit_event_root.get(), "isTrusted", (Item){.item = ITEM_TRUE});
+    js_set_key_cstr(submit_event_root.get(), "submitter", submitter ? js_dom_wrap_element(submitter) : ItemNull);
+    Item submit_ok = js_dom_dispatch_event(form_item, submit_event_root.get());
     if (submit_ok.item == ITEM_FALSE) return make_js_undefined();
 
     js_dom_run_form_submit_navigation(form, submitter);

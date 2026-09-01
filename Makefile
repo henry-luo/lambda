@@ -1998,18 +1998,17 @@ format_duration() { \
 	};
 endef
 
-# Parse the checker's fail-closed runner summary and preserve its exit status.
+# Parse the checker's execution-integrity summary and preserve its exit status.
 define CLASSIFY_LAYOUT_SNAPSHOT_RESULT
 snapshot_result_output="$${$(1)}"; \
-snapshot_passed=$$(echo "$$snapshot_result_output" | grep "^Runner:" | grep -oE "[0-9]+ successful" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-snapshot_failed=$$(echo "$$snapshot_result_output" | grep "^Runner:" | grep -oE "[0-9]+ failed" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+snapshot_measured=$$(echo "$$snapshot_result_output" | grep "^Runner:" | grep -oE "[0-9]+ measured" | grep -oE "[0-9]+" | head -1 || echo "0"); \
 snapshot_errors=$$(echo "$$snapshot_result_output" | grep "^Runner:" | grep -oE "[0-9]+ errors" | grep -oE "[0-9]+" | head -1 || echo "0"); \
-snapshot_passed=$${snapshot_passed:-0}; snapshot_failed=$${snapshot_failed:-0}; snapshot_errors=$${snapshot_errors:-0}; \
-if [ $$snapshot_errors -gt $$snapshot_failed ]; then snapshot_failed=$$snapshot_errors; fi; \
+snapshot_measured=$${snapshot_measured:-0}; snapshot_errors=$${snapshot_errors:-0}; \
+snapshot_passed=0; snapshot_failed=0; \
 if [ $$snapshot_exit -ne 0 ]; then \
-	snapshot_status="❌ FAIL"; if [ $$snapshot_failed -eq 0 ]; then snapshot_failed=1; fi; any_failed=1; \
+	snapshot_status="❌ FAIL"; snapshot_failed=$$snapshot_errors; if [ $$snapshot_failed -eq 0 ]; then snapshot_failed=1; fi; any_failed=1; \
 elif echo "$$snapshot_result_output" | grep -q "Snapshot check passed"; then \
-	snapshot_status="✅ PASS"; \
+	snapshot_status="✅ PASS"; snapshot_passed=$$snapshot_measured; \
 else \
 	snapshot_status="❌ FAIL"; snapshot_failed=1; any_failed=1; \
 fi;
