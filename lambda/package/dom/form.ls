@@ -142,6 +142,11 @@ view <form> state form_activation {}
 on submitactivation(evt) { submit.run(~, null) }
 
 view <button> state form_activation {}
+// Popover activation is a click default, so synthetic and trusted clicks use
+// this one behavior instead of the retired JS-only activation hook.
+on click(evt) {
+    if (radiant.activate_popover(~)) { true } else { 'pass' }
+}
 on submitactivation(evt) {
     let kind = radiant.attr(~, "type");
     let normalized = if (kind == null or kind == "") "submit" else lower(kind);

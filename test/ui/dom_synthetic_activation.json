@@ -1,0 +1,14 @@
+{
+  "name": "F19: synthetic click and dispatchEvent share radio activation",
+  "html": "test/ui/dom_synthetic_activation.html",
+  "viewport": { "width": 400, "height": 300 },
+  "events": [
+    { "type": "assert_attribute", "target": { "selector": "#result" }, "attribute": "data-bootstrap", "equals": "true" },
+    { "type": "assert_attribute", "target": { "selector": "#result" }, "attribute": "data-bootstrap-radio", "equals": "false:true" },
+    { "type": "click", "target": { "selector": "#trigger" } },
+    { "type": "assert_attribute", "target": { "selector": "#result" }, "attribute": "data-click", "equals": "true:false" },
+    { "type": "assert_attribute", "target": { "selector": "#result" }, "attribute": "data-dispatch", "equals": "false:true" },
+    { "type": "assert_attribute", "target": { "selector": "#result" }, "attribute": "data-cancel", "equals": "false:true" },
+    { "type": "assert_visible", "target": { "selector": "#popover" }, "visible": true }
+  ]
+}

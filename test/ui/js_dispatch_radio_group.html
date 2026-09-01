@@ -15,7 +15,7 @@
       var c2 = document.getElementById('c2');
       c2.addEventListener('click', function (event) {
         document.getElementById('seen').textContent =
-          !document.getElementById('c1').checked && c2.checked ? 'tentative' : 'wrong';
+          document.getElementById('c1').checked && !c2.checked ? 'before-default' : 'wrong';
         event.preventDefault();
       });
       c2.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));

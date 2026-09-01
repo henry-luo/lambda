@@ -4146,6 +4146,16 @@ static void form_control_set_checked_for_event(DocState* state, View* view, bool
     if (!view || !view->is_element()) return;
     SmTransitionGuard sm_guard(state, SM_FAMILY_FORM_CHECKABLE, event, view);
     FormControlProp* form = form_prop_for_view(view);
+    if (!form) {
+        // Scripts may click parsed controls before the first layout pass. The
+        // shared lazy allocator preserves the same StateStore owner in that
+        // lifecycle instead of dropping the checked transition.
+        form = tc_get_or_create_form(lam::dom_require_element(view));
+    }
+    if (!form || (form->control_type != FORM_CONTROL_CHECKBOX &&
+                  form->control_type != FORM_CONTROL_RADIO)) {
+        return;
+    }
     ViewState* view_state = form_view_state_get_or_create(state, view, form);
     if (!view_state) return;
 
