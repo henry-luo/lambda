@@ -26,6 +26,23 @@ typedef struct RenderContext RenderContext;
 struct UiContext;
 struct DomDocument;
 struct DomElement;
+
+typedef enum RadiantNavigationTargetKind {
+    RADIANT_NAVIGATION_TARGET_EXISTING = 0,
+    RADIANT_NAVIGATION_TARGET_NEW,
+} RadiantNavigationTargetKind;
+
+// Package policy resolves the browsing target and fragment element. Native
+// retains this deferred request until the cancelable event finishes, then
+// validates and executes it against the canonical DOM/lifecycle state (ES31).
+bool radiant_queue_navigation_request(DomElement* source, const char* url,
+                                      DomElement* target,
+                                      RadiantNavigationTargetKind target_kind,
+                                      const char* target_name,
+                                      DomElement* fragment_target);
+bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source);
+bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
+
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
 void radiant_reconcile_js_dom_mutations(UiContext* uicon, DomDocument* doc);
 extern "C" uint64_t js_dom_mutation_epoch(DomDocument* doc);

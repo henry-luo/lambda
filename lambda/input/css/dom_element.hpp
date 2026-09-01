@@ -240,6 +240,12 @@ struct DomDocument {
     // Reactive UI: retained Lambda runtime for event handler execution
     Runtime* lambda_runtime;     // Retained runtime (heap, JIT context) for reactive UI sessions
 
+    // An embedded document has one bounded upward browsing-context edge. The
+    // owner reference is generation-checked so package traversal cannot keep a
+    // detached iframe alive or follow a recycled node (ES31, D4.5.1v3).
+    DomDocument* embedding_document;
+    DomNodeRef embedding_element_ref;
+
     // Native extensions retain runtime-backed values through document resources.
     struct DomDocumentResource* resources;
 
@@ -321,7 +327,8 @@ struct DomDocument {
                     font_faces_processed(false),
                     view_tree(nullptr), state_store(nullptr), state(nullptr),
                     resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
-                    lambda_runtime(nullptr), resources(nullptr),
+                    lambda_runtime(nullptr), embedding_document(nullptr),
+                    embedding_element_ref({nullptr, 0}), resources(nullptr),
                     cached_inline_sheets(nullptr), cached_inline_sheet_count(0),
                     element_dom_map(nullptr),
                     skip_style_reset(false),
@@ -374,6 +381,13 @@ typedef struct DomDocumentResource {
 
 bool dom_document_add_resource(DomDocument* document, void* data,
                                DomDocumentResourceDestroyFn destroy);
+
+// The parent iframe owns the embedded document's bounded upward edge. The
+// document keeps a generation-checked reference rather than a raw node pointer.
+bool dom_document_set_embedding(DomDocument* embedded, DomDocument* parent,
+                                DomElement* iframe);
+void dom_document_clear_embedding(DomDocument* embedded);
+DomElement* dom_document_embedding_element(DomDocument* embedded);
 
 // tier-1: doc-pool, survives relayout
 typedef struct {

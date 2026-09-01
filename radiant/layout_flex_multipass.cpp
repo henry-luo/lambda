@@ -957,6 +957,8 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                             flex_item->ensure_embed(lycon);
                         }
                         flex_item->embed->doc = doc;
+                        dom_document_set_embedding(doc, lycon->ui_context->document,
+                                                   (DomElement*)flex_item);
                         if (doc->html_root) {
                             layout_iframe_embedded_doc(lycon, doc,
                                 (int)iframe_content.width, // INT_CAST_OK: iframe viewport expects int

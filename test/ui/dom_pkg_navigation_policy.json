@@ -1,0 +1,15 @@
+{
+  "name": "ES31: Lambda resolves fragment policy; native commits :target and geometry",
+  "html": "test/ui/navigation_policy.html",
+  "viewport": { "width": 800, "height": 600 },
+  "events": [
+    { "type": "click", "target": { "selector": "#fragment-link" } },
+    { "type": "assert_state", "target": { "selector": "#chapter" }, "state": ":target", "value": true },
+    { "type": "focus", "target": { "selector": "#missing-link" } },
+    { "type": "key_press", "key": "enter" },
+    { "type": "assert_state", "target": { "selector": "#chapter" }, "state": ":target", "value": false },
+    { "type": "focus", "target": { "selector": "#fragment-link" } },
+    { "type": "key_press", "key": "enter" },
+    { "type": "assert_state", "target": { "selector": "#chapter" }, "state": ":target", "value": true }
+  ]
+}
