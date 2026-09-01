@@ -73,10 +73,10 @@ void log_mem_stage(const char* stage);  // defined in radiant/window.cpp
 #include "../lib/tagged.hpp"
 #include "../lambda/runtime/render_map.h"
 #include "../lambda/runtime/template_state.h"
+#include "../lambda/dom/dom.h"
 
 // JS runtime batch reset functions (from lambda/js/)
 extern "C" void js_batch_reset(void);
-extern "C" void js_dom_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
 extern "C" void script_runner_cleanup_heap(void);
 
@@ -2988,6 +2988,15 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
     document->page_kind = page_kind;
     log_debug("[page-kind] %s document -> %s", document_kind,
               dom_page_kind_name(page_kind));
+    if (page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT) {
+        document->element_dom_map = element_dom_map_create();
+        if (!document->element_dom_map) {
+            log_error("[LAYOUT DOC INIT] failed to create Lambda element map");
+            dom_document_destroy(document);
+            release_layout_runtime(owned_runtime);
+            return nullptr;
+        }
+    }
     // Inline declarations are parsed while building DomElement nodes, so the
     // property table must exist before the tree is materialized.
     if (!css_property_system_init(document->document_pool)) {
@@ -5124,7 +5133,7 @@ static bool layout_single_file(
     if (!script_runner_js_batch_cleanup_unsafe()) {
         js_event_loop_shutdown();
         js_batch_reset();
-        js_dom_batch_reset();
+        dom_batch_reset();
         js_globals_batch_reset();
 
         script_runner_cleanup_heap();

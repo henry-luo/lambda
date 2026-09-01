@@ -10,7 +10,7 @@
  */
 #include "js_runtime.h"
 #include "js_typed_array.h"
-#include "js_dom_events.h"
+#include "../dom/dom_events.h"
 #include "js_error_codes.h"
 #include "../jube/jube_node_permission.h"
 #include "js_property_attrs.h"
@@ -27,8 +27,8 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "js_function.hpp"
 #include "js_builtin_catalog.hpp"
 #include "js_state_guards.h"
-#include "js_dom_platform.h"
-#include "js_dom_observers.h"
+#include "../dom/dom_platform.h"
+#include "../dom/dom_observers.h"
 #include "js_test262_fast_paths.h"
 #include "../lambda-data.hpp"
 #include "../core/lambda-decimal.hpp"
@@ -43,6 +43,7 @@ extern "C" bool js_promise_vmap_is(Item value);
 #include "../../lib/log.h"
 #include "../../lib/utf.h"
 #include <assert.h>
+#include "../dom/dom.h"
 
 extern "C" Item js_xhr_new(void);
 extern "C" Item js_proxy_trap_set_with_receiver(Item proxy, Item key, Item value, Item receiver);
@@ -59,8 +60,6 @@ extern "C" Item js_get_typed_array_base();
 extern "C" uint64_t js_get_heap_epoch(void);
 extern "C" Item js_get_process_object_value(void);
 extern "C" Item js_get_buffer_namespace(void);
-extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
-                                                       Item value);
 extern Item _map_read_field(ShapeEntry* field, void* map_data);
 
 static bool js_string_exotic_index_in_range(Item obj, String* key);
@@ -6557,7 +6556,7 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
     value = value_root.get();
     receiver = receiver_root.get();
     if (receiver.item == target.item &&
-            js_dom_dataset_set_object_property(target_root.get(), key_root.get(),
+            dom_dataset_set_object_property(target_root.get(), key_root.get(),
                                                value_root.get())) {
         // Dataset assignment otherwise takes the ordinary Map fast path and
         // only mutates the temporary object returned by the getter.
@@ -13903,7 +13902,7 @@ extern "C" Item js_get_global_this() {
         // populate standard globals
         js_set_key_cstr(js_global_this_obj, "undefined", make_js_undefined());
         // Legacy IE-style `window.event` — initially undefined, set to the
-        // in-flight event during dispatch by js_dom_dispatch_event.
+        // in-flight event during dispatch by dom_dispatch_event.
         js_set_key_cstr(js_global_this_obj, "event", make_js_undefined());
         js_set_key_cstr(js_global_this_obj, "NaN", push_d(NAN));
         js_set_key_cstr(js_global_this_obj, "Infinity", push_d(INFINITY));

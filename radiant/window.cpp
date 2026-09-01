@@ -26,10 +26,10 @@
 #include "../lambda/network/network_downloader.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/js/js_event_loop.h"
-#include "../lambda/js/js_dom.h"
+#include "../lambda/dom/dom.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
-#include "../lambda/js/js_dom_observers.h"
+#include "../lambda/dom/dom_observers.h"
 #include "../lambda/lambda.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/runtime/transpiler.hpp"
@@ -41,10 +41,7 @@ extern "C" {
 extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc);
 void radiant_run_behavior_init(DomDocument* doc);
 extern "C" void js_batch_reset(void);
-extern "C" void js_dom_batch_reset(void);
 extern "C" void js_globals_batch_reset(void);
-extern "C" void js_dom_set_ui_context(void* ui_context);
-extern "C" void js_dom_set_host_driven_loop(bool enabled);
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 extern UiContext ui_context;
@@ -79,13 +76,13 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
         input_context = saved_input_ctx;
         return false;
     }
-    js_dom_set_document(doc);
+    dom_set_document(doc);
     // A native handler can enqueue a Promise callback after inserting its DOM
     // (Popper and virtual-list libraries do this). Commit that insertion before
     // flushing the callback so its geometry reads sample a frame boundary,
     // rather than forcing layout from the getter itself.
-    radiant_reconcile_js_dom_mutations(uicon, doc);
-    js_dom_observers_post_layout();
+    radiant_reconcile_dom_mutations(uicon, doc);
+    dom_observers_post_layout();
     bool pumped = true;
     if (action == RADIANT_JS_LOOP_ADVANCE) {
         if (js_event_loop_virtual_clock_enabled()) {
@@ -96,14 +93,14 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
             js_event_loop_pump_nowait();
             double timestamp_ms = js_performance_monotonic_now_ms();
             pumped = js_animation_frame_flush(timestamp_ms) > 0;
-            pumped = js_dom_tick_headless_animation_frame() || pumped;
+            pumped = dom_tick_headless_animation_frame() || pumped;
         }
     } else if (wait_ms >= 0) {
         pumped = js_event_loop_pump_wait(wait_ms);
     } else {
         js_event_loop_pump_nowait();
     }
-    if (uicon) radiant_reconcile_js_dom_mutations(uicon, doc);
+    if (uicon) radiant_reconcile_dom_mutations(uicon, doc);
     input_context = saved_input_ctx;
     return pumped;
 }
@@ -950,9 +947,9 @@ static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
     network_downloader_cleanup_shared();
     view_close_event_log();
     view_close_state_dump();
-    js_dom_set_ui_context(nullptr);
+    dom_set_ui_context(nullptr);
     // ui_context is stack-backed; JS must drop the host loop reference before teardown.
-    js_dom_set_host_driven_loop(false);
+    dom_set_host_driven_loop(false);
     ui_context_cleanup(&ui_context);
     view_cleanup_input_manager();
     lambda_uv_cleanup();
@@ -1094,8 +1091,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         if (!pool) {
             log_error("Failed to create memory pool for document");
             url_destroy(cwd);
-            js_dom_set_ui_context(nullptr);
-            js_dom_set_host_driven_loop(false);
+            dom_set_ui_context(nullptr);
+            dom_set_host_driven_loop(false);
             ui_context_cleanup(&ui_context);
             return -1;
         }
@@ -1136,8 +1133,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
                 log_error("Failed to parse in-memory script URL: %s", file_to_load);
                 pool_destroy(pool);
                 url_destroy(cwd);
-                js_dom_set_ui_context(nullptr);
-                js_dom_set_host_driven_loop(false);
+                dom_set_ui_context(nullptr);
+                dom_set_host_driven_loop(false);
                 js_event_loop_set_virtual_clock(false, 0.0);
                 ui_context_cleanup(&ui_context);
                 return -1;
@@ -1155,8 +1152,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
             log_error("Failed to load document: %s", file_to_load);
             pool_destroy(pool);
             url_destroy(cwd);
-            js_dom_set_ui_context(nullptr);
-            js_dom_set_host_driven_loop(false);
+            dom_set_ui_context(nullptr);
+            dom_set_host_driven_loop(false);
             js_event_loop_set_virtual_clock(false, 0.0);
             ui_context_cleanup(&ui_context);
             return -1;

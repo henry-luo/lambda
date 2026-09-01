@@ -38,9 +38,9 @@
 #include "../../lib/file_utils.h"
 #include "../../lib/shell.h"
 #include "../../lib/uv_loop.h"
+#include "../dom/dom.h"
 
 extern "C" Item js_get_key_default(Item object, Item key);
-extern "C" void js_dom_shutdown(void);
 struct DomDocument;
 extern void free_document(DomDocument* doc);
 
@@ -2093,7 +2093,7 @@ void runtime_cleanup(Runtime* runtime) {
         lambda_uv_cleanup();
         event_loop_cleaned = true;
 
-        js_dom_shutdown();
+        dom_shutdown();
         if (runtime->dom_doc) {
             free_document((DomDocument*)runtime->dom_doc);
             runtime->dom_doc = NULL;
@@ -2146,7 +2146,7 @@ void runtime_cleanup(Runtime* runtime) {
         cleanup_context->type_list = NULL;
         cleanup_context->scheduler = NULL;
     } else {
-        js_dom_shutdown();
+        dom_shutdown();
         if (runtime->dom_doc) {
             free_document((DomDocument*)runtime->dom_doc);
             runtime->dom_doc = NULL;

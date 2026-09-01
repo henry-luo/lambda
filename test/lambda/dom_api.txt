@@ -1,0 +1,15 @@
+{
+  root_tag: "HTML",
+  intro_tag: "P",
+  intro_text: "Alpha",
+  body_tag: "BODY",
+  matches_html: true,
+  closest_body: "BODY",
+  by_id: "P",
+  attr_read_back: "yes",
+  has_attr: true,
+  outer_html: "<p id=\"intro\" data-checked=\"yes\">Alpha</p>",
+  p_count_with_clone: 2,
+  p_count_after_remove: 1,
+  contains_intro: true
+}

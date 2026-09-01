@@ -636,14 +636,14 @@ DomRange* dom_selection_get_range_at(DomSelection* s, uint32_t index, const char
 }
 
 // Phase 8D: weak symbol bridge to JS layer. Implemented in
-// lambda/js/js_dom_selection.cpp; absent in pure-radiant unit tests where
+// lambda/js/dom_selection.cpp; absent in pure-radiant unit tests where
 // the bindings aren't linked. The hook fires after every selection
 // mutation; the JS side handles spec-compliant task-queuing and
 // coalescing per WHATWG HTML §6.5.2 ("queue a task to fire
 // selectionchange"). We can't include state_store.hpp here (it pulls in
 // GLFW), so the JS side reads sync_depth and the seq counters directly.
-extern "C" __attribute__((weak)) void js_dom_queue_selectionchange(DomSelection* sel);
-extern "C" __attribute__((weak)) void js_dom_queue_selectionchange(DomSelection* /*sel*/) {
+extern "C" __attribute__((weak)) void dom_queue_selectionchange(DomSelection* sel);
+extern "C" __attribute__((weak)) void dom_queue_selectionchange(DomSelection* /*sel*/) {
     // weak fallback for unit-test targets without JS bindings linked
 }
 
@@ -651,7 +651,7 @@ static inline void notify_selection_changed(DomSelection* s) {
     if (!s) return;
     state_store_note_selection_mutation(s->state);
     state_store_refresh_editing_selection_shadow(s->state);
-    js_dom_queue_selectionchange(s);
+    dom_queue_selectionchange(s);
 }
 
 static bool selection_notification_snapshot_matches(const DomSelection* s,

@@ -23,11 +23,11 @@
  * naturally skip the polyfills when the natives are present.
  */
 
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
-#include "js_typed_array.h"
-#include "js_class.h"
-#include "js_dom_events.h"
+#include "../js/js_runtime.h"
+#include "../js/js_runtime_state.hpp"
+#include "../js/js_typed_array.h"
+#include "../js/js_class.h"
+#include "dom_events.h"
 #include "../lambda-data.hpp"
 #include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../runtime/transpiler.hpp"
@@ -1007,7 +1007,7 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
     }
     Item ev = js_create_event(type, /*bubbles=*/1, /*cancelable=*/1);
     js_set_key_cstr(ev, "clipboardData", dt);
-    js_dom_dispatch_event(target_item, ev);
+    dom_dispatch_event(target_item, ev);
     bool prevented = radiant_dom_event_default_prevented(ev);
     if (!is_paste) {
         const char* plain = dt_read_record(dt, "text/plain");
@@ -1060,7 +1060,7 @@ extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
     }
     Item ev = js_create_native_drag_event(type, client_x, client_y,
         g_drag_data_transfer, false, false, false, false);
-    js_dom_dispatch_event(target_item, ev);
+    dom_dispatch_event(target_item, ev);
     return radiant_dom_event_default_prevented(ev);
 }
 

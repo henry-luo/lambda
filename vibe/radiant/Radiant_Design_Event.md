@@ -11,7 +11,8 @@ A new GTest harness
 [test/wpt/test_wpt_dom_events_gtest.cpp](../../test/wpt/test_wpt_dom_events_gtest.cpp)
 drives the WPT corpus and gates progress.
 
-## Current status (April 2026)
+## Current status (historical April 2026 WPT snapshot; dispatch state
+reconciled 2026-09-01)
 
 **WPT DOM events:** **43 PASSED / 52 SKIPPED / 0 FAILED** (out of
 95 discovered tests). **Lambda baseline preserved at 2744/2764.**
@@ -75,7 +76,8 @@ subsystem changes well outside the event dispatcher:
   `timeStamp` (always `0`).
 * `target`, `currentTarget` (initially `null`).
 * `preventDefault`, `stopPropagation`, `stopImmediatePropagation`
-  bound to native C handlers that flip thread-local flags.
+  bound to native C handlers that update the dispatch record's per-event
+  state (`__default_prevented`, `__stop_prop`, and `__stop_imm`).
 
 `js_create_custom_event(...)` further stamps a `detail` slot.
 
@@ -103,8 +105,8 @@ Event(type, init)`.
   from a bool or a `{capture, once, passive}` map. **`signal` is
   not parsed.**
 * Dispatch implements 3-phase propagation (capture → target →
-  bubble) using thread-local `_stop_propagation` /
-  `_stop_immediate` / `_default_prevented` flags.
+  bubble) through the shared per-event record; nested dispatch cannot share
+  propagation or cancellation state.
 * `on<type>` IDL handlers are looked up on each path node and
   fired before `addEventListener` listeners (target + bubble
   phases only).
@@ -150,7 +152,7 @@ the `new` site with `ReferenceError`.
 | `once` option (already implemented)                | `AddEventListenerOptions-once.any.js`         | ✅            |
 | Listener-list snapshot per dispatch (additions during dispatch don't fire this dispatch) | `Event-dispatch-handlers-changed.html`, `EventListener-addEventListener.sub.window.js` | mostly ✅ but uses live `nl->count` mutation rather than snapshot |
 | Listener "removed" flag (deferred removal during dispatch) | several dispatch tests | **missing** — uses array compaction which can shift unfired listeners |
-| Re-entrant dispatch / nested dispatch protected by per-event "dispatch" flag | `Event-dispatch-reenter.html`, `Event-dispatch-throwing*.html`, `Event-dispatch-redispatch.html` | thread-local globals — corrupts state under nesting |
+| Re-entrant dispatch / nested dispatch protected by per-event "dispatch" flag | `Event-dispatch-reenter.html`, `Event-dispatch-throwing*.html`, `Event-dispatch-redispatch.html` | per-event `__dispatch_flag` and stop/cancellation members; F21 reconciled this description with the shared record |
 | `dispatchEvent` throws `InvalidStateError` if event already being dispatched | dispatch-redispatch | **missing** |
 | `dispatchEvent` returns `false` only for cancelled cancellable events | dispatchEvent-returnvalue | partially — drops `cancelable` check |
 | Listeners on the same target invoked in registration order across capture/target/bubble phases, on<event> ordering | `Event-dispatch-listener-order.window.js`, `Event-dispatch-order-at-target.html` | partially — on<event> fires **before** addEventListener; spec requires it to slot in by registration order |
@@ -303,13 +305,10 @@ Each phase ends with a concrete run of
    adapter that looks up the slot and sets `removed=true`).
    AbortSignal infrastructure already exists in
    [`js_globals.cpp:10464`](../../lambda/js/js_globals.cpp).
-6. **Per-event dispatch state:** move
-   `_stop_propagation`/`_stop_immediate`/`_default_prevented` off
-   thread-local globals and onto the event object itself
-   (`__stop_prop`, `__stop_imm`, `__default_prevented`,
-   `__dispatch_flag`, `__in_passive_listener`). The C handler
-   wrappers consume these via `js_get_this()` so they work under
-   nested dispatch.
+6. **Per-event dispatch state (landed):** the event record carries
+   `__stop_prop`, `__stop_imm`, `__default_prevented`, and
+   `__dispatch_flag`; the native handler wrappers consume that state through
+   `js_get_this()`, so nested dispatch cannot cross-contaminate records.
 7. **`dispatchEvent` `InvalidStateError`** when the
    `__dispatch_flag` is already set.
 8. **Listener-order with `on<event>`**: the
@@ -497,10 +496,9 @@ clipboard tracker.
 
 ## 5. Risks & open questions
 
-* **Per-event dispatch state** (Phase 2.6) interacts with every
-  call site of the existing thread-local flags — a careful audit
-  of `js_dom_events.cpp`, `js_clipboard.cpp` and any `on<event>`
-  IDL invokers is needed before flipping.
+* **Per-event dispatch state** is record-owned after F21. Future event
+  extensions must preserve that single state channel rather than adding a
+  dispatch-global mirror (D3.4.7, ES24).
 * **`signal` integration** depends on `AbortSignal` being able to
   carry an arbitrary list of "abort algorithms"; the current
   AbortSignal in [js_globals.cpp:10474](../../lambda/js/js_globals.cpp)
@@ -809,4 +807,3 @@ the same dispatcher.
 * `make test-radiant-baseline` (Radiant interactive baseline) is
   unchanged after each U-step.
 * `make test-lambda-baseline` (2744/2764) is unchanged.
-

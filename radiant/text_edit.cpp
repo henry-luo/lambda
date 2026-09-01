@@ -469,13 +469,13 @@ bool te_history_step(DomElement* elem, bool redo) {
 // ---------- F5: events + constraint validation -------------------------
 
 // Weak hook for legacy callers that still mutate a text control without an
-// EventContext. Cancellable beforeinput is owned by editing_dispatch.cpp.
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_input(DomElement* elem);
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_input(DomElement* /*elem*/) {}
+// EventContext. Cancellable beforeinput is owned by event.cpp.
+extern "C" __attribute__((weak)) void dom_queue_textcontrol_input(DomElement* elem);
+extern "C" __attribute__((weak)) void dom_queue_textcontrol_input(DomElement* /*elem*/) {}
 
 void te_dispatch_input(DomElement* elem) {
     if (!elem) return;
-    js_dom_queue_textcontrol_input(elem);
+    dom_queue_textcontrol_input(elem);
 }
 
 // ---------- paste: range only ------------------------------------------
@@ -561,5 +561,4 @@ bool te_ime_commit_prepare(DomElement* elem, DocState* state,
 
 
 // ---------- F8: ARIA reflection (Radiant_Design_Form_Input.md §4) -----
-
 

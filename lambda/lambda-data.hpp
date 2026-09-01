@@ -313,6 +313,9 @@ typedef struct ShapeEntry {
     NameId name_id;  // generated or identity-scope identity; NONE for id-less Input.
     uint8_t key_kind;  // NAME_KEY_STRING, NAME_KEY_SYMBOL, or NAME_KEY_PRIVATE.
     uint8_t flags;  // JSPD_* flags; 0 = JS default (data, writable/enum/config)
+    // Object-method field lowering uses the builder-resolved binding directly.
+    // Runtime/Input-created shapes leave this compiler-only edge null.
+    struct NameEntry* binding;
 } ShapeEntry;
 
 // Both shape walks (map_get_by_name_id_keyed and fn_map_set) confirm a field by

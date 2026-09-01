@@ -408,7 +408,7 @@ char* execute_js_script_with_doc(const char* script_path, const char* html_path,
 }
 
 // Helper function to test JavaScript DOM script against expected output file
-void test_js_dom_script_against_file(const char* script_path, const char* html_path,
+void test_dom_script_against_file(const char* script_path, const char* html_path,
         const char* expected_file_path,
         JsExecutionBackend backend = JS_BACKEND_INHERIT) {
     const char* script_name = strrchr(script_path, '/');
@@ -939,7 +939,7 @@ TEST_P(JsFileTest, Run) {
 
     if (!p.html_path.empty()) {
         // DOM tests: use subprocess fallback (--document flag)
-        test_js_dom_script_against_file(
+        test_dom_script_against_file(
             p.script_path.c_str(), p.html_path.c_str(), p.expected_path.c_str(), backend);
         return;
     }

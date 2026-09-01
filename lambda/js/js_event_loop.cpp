@@ -9,7 +9,7 @@
  * - Drain: uv_run(UV_RUN_DEFAULT) — runs until no active handles
  */
 #include "js_event_loop.h"
-#include "js_dom.h"
+#include "../dom/dom.h"
 #include "js_runtime.h"
 #include "js_runtime_state.hpp"
 #include "js_class.h"
@@ -28,7 +28,6 @@
 
 extern __thread EvalContext* context;
 extern Item js_make_number(double value);
-extern "C" bool js_dom_is_host_driven_loop(void);  // defined in lambda/js/js_dom.cpp
 extern "C" Item js_async_hooks_get_current_resource(void);
 extern "C" Item js_async_hooks_enter_resource(Item resource);
 extern "C" void js_async_hooks_restore_resource(Item previous);
@@ -266,7 +265,7 @@ JS_FORWARD_EXPRESSION(int, js_animation_frame_has_pending, (void),
     js_active_runtime_state && raf_count > 0 ? 1 : 0)
 
 static void js_event_loop_render_checkpoint(void) {
-    if (!js_dom_get_ui_context() || js_dom_is_host_driven_loop()) {
+    if (!dom_get_ui_context() || dom_is_host_driven_loop()) {
         js_microtask_flush();
         return;
     }
@@ -274,7 +273,7 @@ static void js_event_loop_render_checkpoint(void) {
     // One-shot DOM tasks need a rendering opportunity before dependent library
     // continuations inspect geometry. Repeat because observer microtasks can mutate DOM.
     for (int turn = 0; turn < 8; turn++) {
-        bool committed = js_dom_commit_headless_layout_checkpoint();
+        bool committed = dom_commit_headless_layout_checkpoint();
         bool had_microtasks = js_microtask_pending_count() > 0;
         if (had_microtasks) js_microtask_flush();
         if (!committed && !had_microtasks) break;
@@ -418,14 +417,14 @@ static void timer_capture_runtime(JsTimerHandle* th, const char* resource_name, 
         th->runtime_name_pool = context->name_pool;
         th->runtime_pool = context->pool;
     }
-    th->runtime_doc = js_dom_get_document();
+    th->runtime_doc = dom_get_document();
     timer_register_gc_roots(th);
 }
 
 static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
     if (!th || !scope) return false;
     memset(scope, 0, sizeof(JsTimerRuntimeScope));
-    scope->saved_doc = js_dom_get_document();
+    scope->saved_doc = dom_get_document();
     if (!th->runtime_context || !th->runtime_heap || !th->runtime_name_pool ||
             !eval_context_matches(th->runtime_context) ||
             !js_runtime_state_thread_matches(th->runtime_context)) {
@@ -435,7 +434,7 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
         return false;
     }
     if (th->runtime_doc) {
-        js_dom_set_document(th->runtime_doc);
+        dom_set_document(th->runtime_doc);
         scope->doc_active = true;
     }
     return true;
@@ -444,7 +443,7 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
 static void timer_runtime_exit(JsTimerRuntimeScope* scope) {
     if (!scope) return;
     if (scope->doc_active) {
-        js_dom_set_document(scope->saved_doc);
+        dom_set_document(scope->saved_doc);
         scope->doc_active = false;
     }
 }
@@ -879,7 +878,7 @@ static int virtual_clock_advance_slice(double target_ms, bool animation_frame) {
 
     if (animation_frame) {
         progress += js_animation_frame_flush(virtual_clock_ms);
-        if (js_dom_tick_headless_animation_frame()) progress++;
+        if (dom_tick_headless_animation_frame()) progress++;
     }
     js_microtask_flush();
     // rAF and microtasks may queue zero-delay timers at this same timestamp.
@@ -1400,7 +1399,7 @@ extern "C" void js_event_loop_init(void) {
         // (e.g. an editor's post-mount setTimeout(0)); the host drains them after
         // committing layout. The loop is already live here (timers exist), so
         // preserve it. The first init of a session runs fully (timer_count == 0).
-        if (js_dom_is_host_driven_loop()) {
+        if (dom_is_host_driven_loop()) {
             event_loop_shutting_down = false;
             return;
         }
@@ -1787,7 +1786,7 @@ extern "C" int js_event_loop_drain(void) {
     // fire load-time setTimeout(0) callbacks too early, against an uncommitted
     // document, so geometry queries read zero boxes. Microtasks (promise jobs)
     // are already flushed above; leave timers queued for the host's pump.
-    if (js_dom_is_host_driven_loop()) return 0;
+    if (dom_is_host_driven_loop()) return 0;
 
     uv_loop_t* loop = lambda_uv_loop();
     if (!loop) return 0;
@@ -1846,13 +1845,13 @@ extern "C" int js_event_loop_drain(void) {
         js_event_loop_render_checkpoint();
 
         int animation_frames = 0;
-        while (!watchdog_state.fired && js_dom_tick_headless_animation_frame() &&
+        while (!watchdog_state.fired && dom_tick_headless_animation_frame() &&
                animation_frames < 256) {
             js_event_loop_render_checkpoint();
             uv_run(loop, UV_RUN_NOWAIT);
             animation_frames++;
         }
-        if (animation_frames >= 256 && js_dom_tick_headless_animation_frame()) {
+        if (animation_frames >= 256 && dom_tick_headless_animation_frame()) {
             log_error("event_loop: headless CSS animation drain exceeded 256 frames");
         }
 
@@ -1880,13 +1879,13 @@ extern "C" int js_event_loop_drain(void) {
 
 extern "C" void js_event_loop_drain_script_turn(bool has_dom_document,
                                                   bool drain_timers) {
-    if (js_dom_is_host_driven_loop()) {
+    if (dom_is_host_driven_loop()) {
         js_microtask_flush();
         return;
     }
 
     if (drain_timers) {
-        if (has_dom_document) js_dom_commit_headless_layout();
+        if (has_dom_document) dom_commit_headless_layout();
         js_event_loop_drain();
     }
     if (has_dom_document) {

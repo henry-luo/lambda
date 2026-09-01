@@ -394,7 +394,7 @@ JavaScript Source
 | Runtime | `lambda/js/js_runtime.cpp` | 2,170 |
 | Globals | `lambda/js/js_globals.cpp` | 819 |
 | Runtime header | `lambda/js/js_runtime.h` | 298 |
-| DOM bridge | `lambda/js/js_dom.cpp` | 1,772 |
+| DOM bridge | `lambda/dom/dom.cpp` | 1,772 |
 | Typed arrays | `lambda/js/js_typed_array.cpp` | 199 |
 | Scoping | `lambda/js/js_scope.cpp` | 248 |
 | **Total** | | **~18,000** |

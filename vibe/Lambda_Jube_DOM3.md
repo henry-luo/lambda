@@ -84,11 +84,11 @@ method names by walking `strcmp` chains. A full scan of the five DOM implementat
 
 | File | strcmp/strncmp/strcasecmp | Name-dispatch surfaces |
 |---|---:|---|
-| `lambda/js/js_dom.cpp` (14,325 lines) | **708** | element/text/comment get (147 names), set (33), element methods (58), document get (~42) + methods (40), location (9), classList (7+2), DOMImplementation (4), style hosts, reflection helper chains |
-| `lambda/js/js_dom_selection.cpp` (2,022) | **130** | range (33 names), selection (29) — each list duplicated in a `*_is_native_property` predicate |
-| `lambda/js/js_cssom.cpp` (1,633) | **41** | stylesheet (~9), css_rule (~8), rule_style_decl (2+3 + CSS-table), CSS namespace (2) |
+| `lambda/dom/dom.cpp` (14,325 lines) | **708** | element/text/comment get (147 names), set (33), element methods (58), document get (~42) + methods (40), location (9), classList (7+2), DOMImplementation (4), style hosts, reflection helper chains |
+| `lambda/dom/dom_selection.cpp` (2,022) | **130** | range (33 names), selection (29) — each list duplicated in a `*_is_native_property` predicate |
+| `lambda/dom/dom_cssom.cpp` (1,633) | **41** | stylesheet (~9), css_rule (~8), rule_style_decl (2+3 + CSS-table), CSS namespace (2) |
 | `lambda/module/radiant/radiant_dom_bridge.cpp` | **279** | its own element get/set/method chains (32+28+59 names), reflected-attr predicate chains, hardcoded own-key lists |
-| `lambda/js/js_dom_events.cpp` (2,274) | 26 (none is property dispatch) | — events are ordinary stamped Map objects; **out of scope for DOM3** |
+| `lambda/dom/dom_events.cpp` (2,274) | 26 (none is property dispatch) | — events are ordinary stamped Map objects; **out of scope for DOM3** |
 
 Totals across the dispatching files: **~1,150 name-comparison sites**, **~184 distinct element/
 document property names**, **~145 distinct method names**, plus range/selection/CSSOM surfaces.
@@ -103,16 +103,16 @@ before reaching the expando/prototype fallback.
 The same name list is hand-maintained in parallel chains that must agree but have no mechanism
 forcing agreement:
 
-- **Range**: `range_is_native_property` (js_dom_selection.cpp:259, 33 names) duplicates the
+- **Range**: `range_is_native_property` (dom_selection.cpp:259, 33 names) duplicates the
   getter chain (`js_dom_range_get_property`:940), feeds the setter guard (:1005), *and* the
   bridge keeps a third copy as the own-keys list (radiant_dom_bridge.cpp:2616) plus a fourth in
   `init_range_methods` (:912) binding method arities. Selection: same ×4 (29 names).
-- **Element**: getter chain (js_dom.cpp:8915), setter chain (:10477), method chain (:12533),
+- **Element**: getter chain (dom.cpp:8915), setter chain (:10477), method chain (:12533),
   `dom_methods[]` feature-detect list (:10344, 55 names), `form_idl_props[]` skip list (:10191),
   bridge own-keys list (radiant_dom_bridge.cpp:2630, 25 names), bridge's *own* get/set/method
   chains (:1436/:1624/:1888) that partially shadow the engine's.
 - **Document**: method chain (:5689), property chain (:6225), `doc_methods[]` (:6499, 26 names).
-- **Drift is already observable**: `js_cssom_resource_has_property` (js_cssom.cpp:359) omits
+- **Drift is already observable**: `js_cssom_resource_has_property` (dom_cssom.cpp:359) omits
   `length`/`disabled`/`href`/`title` for stylesheets and diverges on `parentStyleSheet` — the
   `in` operator and the getter disagree today. This is the bug class the structure guarantees.
 
@@ -143,14 +143,14 @@ scan is only validating a pointer we already trust everywhere else.)
 `own_property_keys` returns hardcoded camelCase arrays (radiant_dom_bridge.cpp:2612–2657);
 descriptors are synthesized ad hoc; `has_property` chains re-list names (F1); prototype method
 objects are built by hand-maintained binders with hardcoded arities
-(`init_range_methods`/`init_selection_methods`, js_dom_selection.cpp:912/1504); the
+(`init_range_methods`/`init_selection_methods`, dom_selection.cpp:912/1504); the
 feature-detect lists `dom_methods[]`/`doc_methods[]` return `ITEM_TRUE` for method names read as
 properties. All six surfaces are projections of one fact base — "this type has these properties
 and methods" — that exists nowhere as data.
 
 #### F5. Attribute reflection is predicate chains + scattered defaults
 
-`_idl_to_attr_name` (js_dom.cpp:8686), `_is_bool_reflected` (:8739), `_is_int_reflected`
+`_idl_to_attr_name` (dom.cpp:8686), `_is_bool_reflected` (:8739), `_is_int_reflected`
 (:8769), `_is_string_reflected` (:8805) — plus the bridge's parallel copies
 (radiant_dom_bridge.cpp:359/495/560/683) — encode what WebIDL calls *reflected attributes*
 (`checked` ⇄ attribute `checked`, `maxLength` ⇄ `maxlength` with default −1, …) as code. These
@@ -171,7 +171,7 @@ per-entry tag guards without splitting the `dom_node` brand).
 
 Four patterns cannot be table rows because their name sets are open:
 
-- the `<form>` **named getter** (js_dom.cpp:10188): any name → matching descendant control;
+- the `<form>` **named getter** (dom.cpp:10188): any name → matching descendant control;
 - the **generic attribute fallback**: any unmatched name on an element reads/writes the
   attribute (:10247, :10979);
 - **`on*` event-handler properties** (:1283): recognized by prefix;
@@ -337,7 +337,7 @@ Handlers return status ints; any abrupt completion remains the returned ERROR
 `Item` under D8.4.3, matching `JubeHostObjectOps` without a pending flag.
 Same-name members with different `applies_to`/`guard` are legal; **declaration order is
 resolution order** (first matching guard wins), preserving today's ordering-dependent overloads
-(`<select>.remove(index)` before `ChildNode.remove()`, js_dom.cpp:12550) as visible data.
+(`<select>.remove(index)` before `ChildNode.remove()`, dom.cpp:12550) as visible data.
 
 **Registration cross-checks the two halves** and fails loudly on mismatch: every declared
 member must have exactly one binding cluster (declared-but-unbound is an error, except
@@ -423,17 +423,17 @@ runs everything from the table + hooks.
 - The generic layer synthesizes each type's prototype method objects from declared methods
   (`js_new_function(handler, arity-from-signature)`), cached **one function object per method
   per type** and GC-rooted at registration — the pattern `init_range_methods`/
-  `init_selection_methods` (js_dom_selection.cpp:912/1504) already implement by hand, now
+  `init_selection_methods` (dom_selection.cpp:912/1504) already implement by hand, now
   generated. Handlers recover the receiver via `js_get_this()`, unchanged. Identity is
   spec-shaped (`a.foo === b.foo`, prototype-level), and there is no per-read allocation.
 - Reading a method name as a property returns the cached function object (**D0d, decided**).
   The evidence this is a correction, not a gamble: `ITEM_TRUE` already broke real code, and the
   codebase has been converting names to real functions piecemeal — the trampoline block at
-  js_dom.cpp:2282 says it outright: *"Trampolines so property access to these method names
+  dom.cpp:2282 says it outright: *"Trampolines so property access to these method names
   returns a real, callable function instead of the ITEM_TRUE feature-detection sentinel. …
   without a callable property, optional-chaining calls (`el?.querySelector(sel)`) fall through
   to `(true)(sel)` and throw 'is not a function'."* DOM3 finishes that conversion for the ~80
-  names still on the `dom_methods[]`/`doc_methods[]` `ITEM_TRUE` lists (js_dom.cpp:10344/6499),
+  names still on the `dom_methods[]`/`doc_methods[]` `ITEM_TRUE` lists (dom.cpp:10344/6499),
   mechanically instead of trampoline-by-trampoline. Both values are truthy, so
   `if (el.method)` probes are unaffected; `typeof`-probes flip from the wrong answer to the
   spec answer. Golden updates are isolated to the sub-step that lands this (Phase 4d), with
@@ -573,7 +573,7 @@ getter/setter chains, both method binders, the bridge's range/selection own-key 
 range/selection branches inside the bridge host_ops.
 
 Gates: anchors; focused `dom_module_props` + WPT-shim selection tests; grep gate:
-`rg -c "strcmp" lambda/js/js_dom_selection.cpp` ≤ 10 (residual data compares only); full JS
+`rg -c "strcmp" lambda/dom/dom_selection.cpp` ≤ 10 (residual data compares only); full JS
 gtest; UI-automation (selection is editing-coupled).
 
 Progress (2026-07-11): **Phase 1 complete.**
@@ -585,7 +585,7 @@ Progress (2026-07-11): **Phase 1 complete.**
   `__force_direction` carries a `js_name` override (`__forceDirection`, since snake→camel
   cannot preserve the double-underscore spelling). Bindings are macro-generated thin adapters
   onto 54 new receiver-explicit `JubeHostDomAPI` entries.
-- **Engine** (`js_dom_selection.cpp`, 2022 → 1606 lines): all 40 behavior functions refactored
+- **Engine** (`dom_selection.cpp`, 2022 → 1606 lines): all 40 behavior functions refactored
   receiver-first (no `js_get_this()` in behavior paths); 6+8 per-property getters added; both
   `*_is_native_property` predicates, both strcmp getter/setter chains, both method
   caches/binders, the expando side tables (+ their 8 extern wrappers and GC-root arrays), and
@@ -603,7 +603,7 @@ Progress (2026-07-11): **Phase 1 complete.**
 - **Bridge**: all range/selection branches deleted from get/set/call/projected/expando/
   own-keys/prototype host ops plus 16 dead `#define` aliases; the retired `JubeHostDomAPI`
   slots (get/set_property, native_property, expando triads — 14) are NULLed with layout
-  preserved. `js_dom.cpp`'s two routing arms deleted.
+  preserved. `dom.cpp`'s two routing arms deleted.
 - **Expandos** are now the generic backing-store expando (side tables gone); `__`-prefixed
   key filtering from enumeration is preserved by the generic layer's declared-members-first
   ordering (WPT-shim internals were only reachable through the deleted side tables' name
@@ -617,7 +617,7 @@ Progress (2026-07-11): **Phase 1 complete.**
   chain walks in DOM-heavy batch tests, build-cache variance notwithstanding); UI-automation
   **233 passed / 2 known webview skips / 0 failed**; focused lambda gtests 6/6; direct
   `radiant_poc` / `radiant_poc_uaf` / `hostobj_demo` goldens; `make test-lambda-baseline`
-  exit 0; strcmp budget: js_dom_selection.cpp = 5 (gate ≤ 10).
+  exit 0; strcmp budget: dom_selection.cpp = 5 (gate ≤ 10).
 - Carried to Phase 2+: `pn`-typed members in the type grammar (purity split for mutating
   methods — all range/selection methods currently declare `fn`), the `reflect_attr` generic
   routine, `applies_to` tag guards, O(1) typedef membership set, and radiant_dom_bridge.cpp's
@@ -630,7 +630,7 @@ names on declarations → `named_get/named_set` delegating to `css_property_id_f
 camel→css conversion moves inside the hook). The drifted `js_cssom_resource_has_property` chain
 is deleted — `in` is now derived and cannot disagree with `get` again.
 
-Gates: anchors; `dom_style`, CSSOM-focused JS tests; grep gate on js_cssom.cpp; full JS gtest.
+Gates: anchors; `dom_style`, CSSOM-focused JS tests; grep gate on dom_cssom.cpp; full JS gtest.
 
 Progress (2026-07-12): **Phase 2 complete** (implemented after Phase 3 at user direction).
 
@@ -647,8 +647,8 @@ Progress (2026-07-12): **Phase 2 complete** (implemented after Phase 3 at user d
   chain slots are NULLed. `sheet[N]` proved the **`indexed_get`** hook (raw index incl.
   charset rules, matching the legacy bracket path); rule declarations reuse the kept
   `cssom_rule_decl_get/set_property` as their named hooks with a new CSS-table `named_has`.
-  `js_dom.cpp`'s rule-style routers now call the receiver-explicit `js_cssom_rule_get_style`.
-- js_cssom.cpp strcmp **41 → 7** (two are the kept declaration-getter's length/cssText backend
+  `dom.cpp`'s rule-style routers now call the receiver-explicit `js_cssom_rule_get_style`.
+- dom_cssom.cpp strcmp **41 → 7** (two are the kept declaration-getter's length/cssText backend
   branches; five compare data values). Pinned: keys=[], no prototypes, descriptors undefined
   for open names, unknown writes swallowed (sheet/rule) or parsed as declarations (decl),
   setProperty still drops its priority argument.
@@ -745,7 +745,7 @@ pending).
   declarative `applies_to` column — keeps DOM knowledge out of the generic layer, same
   layering rule that evicted `setAttribute` from vmap.cpp) and reflection handlers are
   macro-generated module code (not the generic `reflect_attr` routine — revisit when a second
-  module needs reflection). The engine's parallel `_is_*_reflected` chains in js_dom.cpp
+  module needs reflection). The engine's parallel `_is_*_reflected` chains in dom.cpp
   remain (shadowed for dispatch, reachable by internal callers) — they go in the 4e engine
   sweep. Suites: recorded below with 4c.
 
@@ -842,7 +842,7 @@ pending).
     existing `radiant_dom_document_host_*` bridge so active-document replacement behavior
     stays centralized.
   - `dom_methods[]`, `doc_methods[]`, and `form_idl_props[]` were deleted from
-    `js_dom.cpp`; the remaining name checks are predicate helpers or semantic/data-value
+    `dom.cpp`; the remaining name checks are predicate helpers or semantic/data-value
     compares, not duplicated dispatch arrays.
   - Runtime direct DOM helper calls were swept: live collection/options refresh now goes
     through the neutral `js_array_exotic_before_property_*` hooks, strict equality uses
@@ -869,7 +869,7 @@ pending).
 
 Gates per sub-step: anchors + full JS gtest + `dom_jquery_lib`/`dom_v12b`/`dom_identity` direct
 diffs; 4c/4e additionally UI-automation + `make test-radiant-baseline` vs the DOM2 Phase-0
-triage table; phase-end grep gates: `dom_methods\[\]|doc_methods\[\]|form_idl_props\[\]` → 0 hits; strcmp budget for js_dom.cpp ≤ ~200 (data compares), bridge dispatch chains deleted.
+triage table; phase-end grep gates: `dom_methods\[\]|doc_methods\[\]|form_idl_props\[\]` → 0 hits; strcmp budget for dom.cpp ≤ ~200 (data compares), bridge dispatch chains deleted.
 
 ### Phase 5 — Lambda projection convergence
 
@@ -937,14 +937,14 @@ again.
 
 | Fact | Evidence |
 |---|---|
-| 708 strcmp in js_dom.cpp; 147-name element getter | `js_dom_get_property_impl` js_dom.cpp:8915; set :10477; methods :12533 |
+| 708 strcmp in dom.cpp; 147-name element getter | `js_dom_get_property_impl` dom.cpp:8915; set :10477; methods :12533 |
 | Document chains + `doc_methods[]` | :5689, :6225, :6499 |
 | Feature-detect + skip lists | `dom_methods[]` :10344 (55), `form_idl_props[]` :10191 (16) |
 | Reflection helper chains | `_idl_to_attr_name` :8686, `_is_bool/int/string_reflected` :8739/:8769/:8805 |
 | Tag-gating density | 90 `_is_tag` sites (:1365), 30 `tc_is_text_control_elem`, 37 input-`itype` compares |
 | Catch-alls | form named getter :10188; attr fallback :10247/:10979; `on*` :1283; collection refresh :7557 |
-| Range/selection ×4 duplication | `range_is_native_property` js_dom_selection.cpp:259; getters :940/:1526; binders :912/:1504; bridge keys radiant_dom_bridge.cpp:2616–2625 |
-| CSSOM has/get drift | `js_cssom_resource_has_property` js_cssom.cpp:359 vs getters :731/:889/:1067 |
+| Range/selection ×4 duplication | `range_is_native_property` dom_selection.cpp:259; getters :940/:1526; binders :912/:1504; bridge keys radiant_dom_bridge.cpp:2616–2625 |
+| CSSOM has/get drift | `js_cssom_resource_has_property` dom_cssom.cpp:359 vs getters :731/:889/:1067 |
 | Bridge chains + own-key arrays | radiant_dom_bridge.cpp:1436/:1624/:1888; :2612–2657 |
 | Transient keys on host path | `string_key_item` → `heap_strcpy` vmap.cpp:52; `radiant_dom_key_equals` radiant_dom_bridge.cpp:2448 |
 | Case transforms + setAttribute in generic layer | vmap.cpp:56/:74/:141 |
@@ -952,4 +952,4 @@ again.
 | NamePool canonical-pointer guarantee | name_pool.cpp:79–126; String has len+is_ascii, no hash (lambda.h:596) |
 | CSS table precedent | `property_definitions[]` + djb2 table css_properties.cpp:400–697, lookup :734 |
 | Weak signature parser, can_raise=false | build_ast.cpp:156–266, :317 |
-| Events = ordinary objects (out of scope) | js_dom_events.cpp — no property-name dispatch found |
+| Events = ordinary objects (out of scope) | dom_events.cpp — no property-name dispatch found |

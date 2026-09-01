@@ -1,7 +1,7 @@
 # Lambda Impl: Runtime Struct and Type Clean-Up
 
 - **Date:** 2026-08-18
-- **Status:** PROPOSAL — census complete; no implementation started
+- **Status:** PROPOSAL — P1.1 implemented 2026-09-01; remaining stages pending
 - **Scope:** native Lambda data/runtime (`lambda-data` + `lmd-rt`), with shared `lib` and C ABI structures where they define the runtime boundary. LambdaJS and Radiant are consumers and compatibility gates, not primary clean-up targets.
 - **Principle:** one concept or mechanism has one authoritative struct. Semantic distinctions may share physical storage; unrelated ownership, cache, compiler-fact, and guest-language concerns must not accumulate in the same struct.
 - **Formal authority:** D1.2 (one `Item` currency), D1.3 (one runtime; guests reuse contracts, not accidents), D1.4v3 (explicit completion), D1.8 (decisions are carried), D2.1 (Item/container model), D2.4.1 (four facts/four authorities), D2.6.1 (three array forms and one storage-descriptor resolver), D3.1.1v2 (one `Type*` graph), D3.4.1–D3.4.7 (shape ABI), D5.2.1v3 (companion-lane returns), D5.4.1–D5.4.2 (one `EvalContext`), D6.2.1–D6.2.2v2 (function values and dispatch), D6.4.1 (boxed sys-function boundary), D7.1.5 (Mark API ownership), D7.4.5 (virtual carriers), D8.2.2/D8.2.4/D8.2.5 (unified AST, IDs, fact tables and pass manager). Semantic guardrails: S5.3.1 (one sequence family), S5.4.2 (objects remain nominally distinct), S5.5.1 (function identity).
@@ -354,6 +354,12 @@ The typed `RetBool`, `RetInt56`, `RetInt64`, `RetFloat`, `RetString`, `RetSymbol
 
 Delete them and their constructors/registry entries.
 
+**P1.1 implemented (2026-09-01).** The thirteen typed aggregate records,
+constructors, registry exports, and the test that existed solely for that
+abandoned API are deleted. A whole-tree use scan found no native function that
+returned a typed aggregate. `RetItem` and `C_RET_RETITEM` remain active pending
+the distinct P1.2 companion-lane migration required by D5.2.1v3.
+
 Migrate active `RetItem` functions to the formal completion model:
 
 - public/system-function boundary: one boxed `Item` (D6.4.1)
@@ -592,12 +598,15 @@ Acceptance: no behavior change; census and tests reproduce.
 
 ### P1 — Return-family deletion
 
-1. Delete the thirteen unused typed `Ret*` records, helpers and registry exports.
+1. **Done (P1.1, 2026-09-01):** delete the thirteen unused typed `Ret*` records, helpers and registry exports.
 2. Migrate active `RetItem` system functions to boxed `Item` completion in coherent groups.
 3. Delete `C_RET_RETITEM`, interpreter aggregate dispatch and MIR wrappers after the last user moves.
 4. Consolidate return planning into `FnAbiContract` without changing the companion-lane ABI.
 
-Acceptance: no `Ret*` definition or aggregate-return dispatch remains; error payloads and wide-scalar tests remain green.
+P1.1 acceptance: the thirteen obsolete typed records have no definition,
+constructor, registry export, or dedicated test. `RetItem` migration and its
+aggregate-return dispatch remain P1.2 work; error payloads and wide-scalar
+tests remain green.
 
 ### P2 — Source and parser working sets
 

@@ -55,6 +55,9 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem);
 RADIANT_C_API Item radiant_dom_lookup_cached_node(void* dom_elem);
 RADIANT_C_API void* radiant_dom_unwrap_node(Item item);
 RADIANT_C_API bool radiant_dom_is_node(Item item);
+// Resolves a wrapper through its generation-checked cache entry without
+// dereferencing a native node that may have been retired by a DOM mutation.
+RADIANT_C_API DomDocument* radiant_dom_item_document(Item item);
 // ES24/F17: a DOM event is one GC-owned host record. Its declared interface
 // projects core dispatch state while the wrapper backing store retains payload
 // fields and script expandos for the record's lifetime.

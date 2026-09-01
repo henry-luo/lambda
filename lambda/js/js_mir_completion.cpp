@@ -189,7 +189,7 @@ static MIR_reg_t jm_emit_error_lane_const(JsMirTranspiler* mt, int64_t value,
 
 static void jm_capture_routed_error_lane(JsMirTranspiler* mt, JsTryContext* context) {
     if (!mt) return;
-    MIR_reg_t value = mt->last_call_result_reg;
+    MIR_reg_t value = mt->last_call_result.reg;
     if (!context) {
         if (!value) {
             // Every fallible call publishes its merged lane. Reaching a
@@ -241,7 +241,7 @@ MIR_reg_t jm_emit_error_lane_return(JsMirTranspiler* mt) {
             return context->incoming_error_lane_val_reg;
         }
     }
-    if (mt->last_call_result_reg) return mt->last_call_result_reg;
+    if (mt->last_call_result.reg) return mt->last_call_result.reg;
     MIR_reg_t null_value = jm_emit_null(mt);
     // Exception exits preserve the last boxed helper result.  The fallback is
     // only for an impossible hand-written lowering edge and creates the same
@@ -306,9 +306,10 @@ MIR_reg_t jm_emit_error_lane_test(JsMirTranspiler* mt) {
         return jm_emit_error_lane_const(mt, 0, "exc_dead");
     case JS_ERROR_LANE_UNKNOWN:
     default:
-        if (mt->last_call_result_reg) {
+        if (mt->last_call_result.reg) {
             MIR_reg_t tag = jm_new_reg(mt, "exc_tag", MIR_T_I64);
-            jm_emit_reg_binary_op(mt, MIR_URSH, tag, mt->last_call_result_reg, MIR_new_int_op(mt->ctx, 56));
+            jm_emit_reg_binary_op(mt, MIR_URSH, tag, mt->last_call_result.reg,
+                MIR_new_int_op(mt->ctx, 56));
             MIR_reg_t is_error = jm_new_reg(mt, "exc_inband", MIR_T_I64);
             jm_emit_reg_binary_op(mt, MIR_EQ, is_error, tag, MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR));
             return is_error;

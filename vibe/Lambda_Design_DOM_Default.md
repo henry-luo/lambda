@@ -44,7 +44,7 @@ Per ES5 and the DOM_Pkg placement rules, the seam runs between *resolving* and *
 | **Waist primitives** — the named, ≤4-argument operations policy drives mechanism through | **`radiant` module (M)** | `set_state`, `dispatch`, `radio_group`, `replace_range`, `dom_replace_range`, `dom_wrap_range`, `caret_operation`, `scroll_operation` |
 
 The recurring failure mode was a default action in a **fourth** home — the JS
-dispatch layer (`lambda/js/js_dom_events.cpp`) implementing activation only for
+dispatch layer (`lambda/dom/dom_events.cpp`) implementing activation only for
 `dispatchEvent`. F19 retires that copy: direct DOM dispatch now enters the
 native synthetic bridge and the package remains the single policy owner (§5.2,
 ES25/ES26).
@@ -55,26 +55,26 @@ ES25/ES26).
 
 ### 2.1 The pipeline
 
-Dispatch order for a discrete event on a target element (ES5, conforming to DOM_Pkg decision 2):
+Dispatch order for a discrete event on a target element (ES5, ES22–ES29):
 
 ```
-[N] hit test → target path → trusted event construction
-[N] 3-phase dispatch: JS listeners (capture / target / bubble)
-[N] app-template handler dispatch (reverse render-map path — author level)
-      │  either layer may cancel: defaultPrevented / 'prevent-default'
+[N] hit test → one native event record → target path
+[N] AUTHOR TIER — one propagation cascade:
+      JS capture → JS target/bubble → Lambda template at that node
+      │  either participant may cancel: preventDefault / 'prevent-default'
       ▼
-[N] defaultPrevented? → done
-[L] BEHAVIOR DISPATCH — at most one Lambda call per discrete event:
+[N] record.default_prevented? → settle only
+[L] UA TIER — at most one behavior Lambda call per discrete event:
       walk target→root; first element whose behavior entry declares this
       event type wins (most specific template for that element)
 [M] handler effects via waist primitives only
-[N] cascade settle → restyle / reflow / repaint scheduling
+[N] S12.1.3 settle → restyle / reflow / repaint scheduling
 ```
 
 Three properties hold it together:
 
 - **One-call ceiling and hot-path guard.** A native per-event-type bitmask keeps `mousemove` / `pointermove` / `scroll` / `wheel` out of behavior dispatch unless a loaded template declares such a handler.
-- **Handler verdicts are return values** (ES15): `'pass'` declines — the walk continues and the native fallback for that class stays in charge; `'prevent-default'` claims and suppresses the remaining default actions; any other return means claimed.
+- **Handler verdicts are tier-specific return values** (ES15/ES29): at the author tier only `preventDefault()` / `'prevent-default'` suppresses the UA tier; participation and `'pass'` do not. At the UA tier, `'pass'` declines so the native fallback for that class stays in charge; `'prevent-default'` suppresses the remaining default actions; any other return claims.
 - **Fallback until claimed** (ES5/ES7): each native default-action block is guarded by `radiant_behavior_claims_event`, so behavior is untouched until the package registers, and `RADIANT_DOM_PKG=0` disables the package wholesale. Note the retirement direction: once a class is proven state-equivalent, the *native* half is deleted (F1b/F2b/F3), and after that `'pass'` means **nothing happens** — see §5.6.
 
 ### 2.2 Two realms, one canonical state
@@ -282,7 +282,7 @@ native rejects rather than silently treating either as `_self` (ESO70).
 
 ## 3. The ledger
 
-Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`, `lambda/js/js_dom_events.cpp`). Anchors are `file:line` at that revision — treat them as pointers to the right neighborhood, not as stable addresses.
+Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`, `lambda/dom/dom_events.cpp`). Anchors are `file:line` at that revision — treat them as pointers to the right neighborhood, not as stable addresses.
 
 ### 3.1 Input & editing
 
@@ -355,7 +355,7 @@ Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`,
 | **Form submission from user interaction** | HTML §4.10.21; `submit` cancelable | submit-button activation, or implicit submission (Enter in a text field), runs the submission algorithm | native pointer/keyboard activation now reaches `form.ls` → `submit.ls`; the package checks validity, fires cancelable `submit`, builds the native entry list (including `form="..."` associations), serializes GET/urlencoded/multipart data, and calls `request_navigation`. The browsing waist currently accepts URL/target only, so POST body delivery remains open | 🟡 (F4; ESO71) |
 | `form.submit()` / `requestSubmit()` | HTML | as above | implemented, including `novalidate` / `formnovalidate`, the cancelable `submit` event with `submitter`, and the disconnected-form rule | ✅ |
 | **Reset from user interaction** | HTML; `reset` cancelable | reset-button activation resets the form | native pointer/keyboard activation and script-created clicks use the same package claim protocol; `form.ls` calls the existing cancelable reset waist, including associated controls | ✅ |
-| `form.reset()` | HTML | as above | implemented incl. `form=`-associated controls outside the subtree (`js_dom.cpp:8088`) | ✅ |
+| `form.reset()` | HTML | as above | implemented incl. `form=`-associated controls outside the subtree (`dom.cpp:8088`) | ✅ |
 | **Interactive constraint validation** | HTML | block submission, fire `invalid`, show the validation bubble | `validate.ls` owns `:valid`/`:invalid` on `init`/`input`/`blur`; F4 calls the existing validity bridge before `submit`, fires `invalid`, and focuses the first invalid control. There is still no validation bubble | 🟡 |
 | `invalid` | HTML; cancelable | suppress the UA validation message | dispatched from the JS validity bridges only | 🟡 |
 
@@ -369,7 +369,7 @@ Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`,
 | `target=` / iframe navigation | HTML | navigate the named context | `navigation.ls` resolves `_self`, `_parent`, `_top`, loaded named iframes, `_blank`, and unmatched names. Native validates and executes existing root/iframe targets; `new` targets await host context creation | 🟡 (ESO70; ES31) |
 | `accesskey` | HTML | activate the element | absent — zero occurrences repo-wide | ❌ |
 | `beforeunload` | HTML; cancelable | prompt before leaving | absent | ❌ |
-| `load` / `DOMContentLoaded` | HTML | none | `DOMContentLoaded` and window `load` dispatched (`script_runner.cpp:1751`); `<iframe>` `load` dispatched (`js_dom.cpp:3370`). **`<img>` `load`/`error` are not** | 🟡 |
+| `load` / `DOMContentLoaded` | HTML | none | `DOMContentLoaded` and window `load` dispatched (`script_runner.cpp:1751`); `<iframe>` `load` dispatched (`dom.cpp:3370`). **`<img>` `load`/`error` are not** | 🟡 |
 | window `resize` / `scroll` | — | none | dispatched via `radiant_dispatch_window_event` (`event.cpp:5761`), which also drives `matchMedia` notification | ✅ |
 | `animationstart` / `animationend` / `transitionend` | CSS Animations / Transitions | none | dispatched from `css_animation.cpp` | ✅ |
 
@@ -466,7 +466,7 @@ misrouted to `_self` (**ESO70**).
 
 ### 5.2 Activation behavior is single-sourced (F19)
 
-F19 deletes the activation pass from `lambda/js/js_dom_events.cpp` and routes a
+F19 deletes the activation pass from `lambda/dom/dom_events.cpp` and routes a
 direct DOM `dispatchEvent()` / `el.click()` through
 `radiant_dispatch_synthetic_dom_event`. The native bridge lets the shared
 author pass settle cancellation, then calls the same `dispatch_click_default_actions`

@@ -7,7 +7,7 @@
 
 #include "js_transpiler.hpp"
 #include "../ts/ts_ast.hpp"
-#include "js_dom.h"
+#include "../dom/dom.h"
 #include "js_runtime.h"
 #include "js_typed_array.h"
 #include "js_event_loop.h"
@@ -53,6 +53,14 @@ enum JsModuleConstType {
 
 struct JsModuleConstEntry {
     const char* name;   // NamePool-owned semantic binding name
+    // Source bindings use this edge at lowering time. The hashmap remains
+    // name-keyed only for generated module locals and runtime ABI names.
+    NameEntry* binding;
+    AstNode* binding_node;
+    // A retained preamble was resolved in a different AST. Its globals cross
+    // that compilation boundary by public name, then link once to this unit's
+    // NameEntry before ordinary identity-based lowering resumes.
+    bool is_preamble_external;
     JsModuleConstType const_type;
     int64_t int_val;    // module variable index
     bool is_iife_var;   // true if promoted from IIFE scope (write-through always)
@@ -80,6 +88,15 @@ struct JsNameSetEntry {
     JsAstNode* binding_node; // defining node retained for source-keyed scope cells
 };
 
+// Resumable bodies assign stable environment slots before lowering their
+// statements. Keep that reservation keyed by the resolved binding: installing
+// a nested lexical into the live spelling scope would shadow an outer
+// parameter before the nested scope begins (D8.2.4).
+struct JsMirResumableLocal {
+    NameEntry* binding;
+    int env_slot;
+};
+
 static const uint64_t ITEM_NULL_VAL  = (uint64_t)LMD_TYPE_NULL << 56;
 static const uint64_t ITEM_JS_UNDEF_VAL = (uint64_t)LMD_TYPE_UNDEFINED << 56;
 static const uint64_t ITEM_TRUE_VAL  = ((uint64_t)LMD_TYPE_BOOL << 56) | 1;
@@ -103,6 +120,7 @@ typedef struct JsMirTdzClosureCapture {
     int slot;
     int binding_scope_depth;
     bool is_transitive;
+    NameEntry* binding;
     const char* name;   // NamePool-owned binding name
 } JsMirTdzClosureCapture;
 
@@ -144,6 +162,7 @@ struct JsFuncCollected {
     int scope_env_count;             // number of vars in scope env
     int scope_env_normal_count;      // number of normal vars (excluding NFE extra slots and parent env link)
     const char** scope_env_names;    // NamePool-owned scope binding keys
+    NameEntry** scope_env_bindings;  // resolved source identities; null only for generated slots
     bool has_parent_env_link;        // v29: scope env slot 0 stores parent env pointer (for mixed transitive)
     // phase 4: type inference results. Per-formal type records live in the
     // shared FnAnalysis metadata and are sized from the JS AST parameter list.
@@ -156,6 +175,45 @@ static inline FnAnalysis* jm_function_analysis(JsFuncCollected* fc) {
     // uses it as current_fc for the module scope environment.
     static FnAnalysis empty_analysis = {};
     return fc && fc->node ? fc->node->analysis : &empty_analysis;
+}
+
+static inline NameEntry* jm_scope_env_binding_at(const JsFuncCollected* fc,
+        int slot) {
+    return fc && fc->scope_env_bindings && slot >= 0 &&
+        slot < fc->scope_env_count ? fc->scope_env_bindings[slot] : NULL;
+}
+
+static inline int jm_scope_env_slot_for_binding(const JsFuncCollected* fc,
+        NameEntry* binding) {
+    if (!fc || !binding || !fc->scope_env_bindings) return -1;
+    for (int slot = 0; slot < fc->scope_env_count; slot++) {
+        if (fc->scope_env_bindings[slot] == binding) return slot;
+    }
+    return -1;
+}
+
+static inline bool jm_scope_env_slot_matches_capture(const JsFuncCollected* fc,
+        int slot, const FnCapture* capture) {
+    if (!fc || !capture || slot < 0 || slot >= fc->scope_env_count) return false;
+    NameEntry* binding = jm_scope_env_binding_at(fc, slot);
+    // Generated runtime captures have no source binding; only those retain
+    // their planner key fallback. Source captures compare their resolved edge.
+    if (binding || capture->entry) return binding == capture->entry;
+    const char* scope_name = fc->scope_env_names ? fc->scope_env_names[slot] : NULL;
+    if (!scope_name) return false;
+    return (capture->scope_env_key && capture->scope_env_key[0] &&
+        strcmp(capture->scope_env_key, scope_name) == 0) ||
+        (capture->name && strcmp(capture->name, scope_name) == 0);
+}
+
+static inline int jm_scope_env_slot_for_capture(const JsFuncCollected* fc,
+        const FnCapture* capture) {
+    if (!fc || !capture) return -1;
+    if (capture->entry) return jm_scope_env_slot_for_binding(fc, capture->entry);
+    for (int slot = 0; slot < fc->scope_env_count; slot++) {
+        if (jm_scope_env_slot_matches_capture(fc, slot, capture)) return slot;
+    }
+    return -1;
 }
 
 #define JM_CAPTURE_ARRAY(fc) (jm_function_analysis(fc)->captures)
@@ -196,6 +254,10 @@ static void jm_free_scope_env_names(JsFuncCollected* func_entries, int func_coun
         if (func_entries[i].scope_env_names) {
             mem_free(func_entries[i].scope_env_names);
             func_entries[i].scope_env_names = NULL;
+        }
+        if (func_entries[i].scope_env_bindings) {
+            mem_free(func_entries[i].scope_env_bindings);
+            func_entries[i].scope_env_bindings = NULL;
         }
         if (analysis && analysis->captures) {
             mem_free(analysis->captures);
@@ -330,6 +392,9 @@ struct JsMirTranspiler {
     ArrayList* var_scopes;
     int scope_depth;
     int var_hoist_depth;  // >=0: redirect jm_set_var to this depth for 'var' hoisting; -1 = normal
+    // Active generator/async local reservations, keyed by NameEntry*. These
+    // reserve suspend storage without becoming visible lexical bindings.
+    struct hashmap* resumable_locals;
 
     // Loop label stack. Entries are JsLoopLabels* owned by the ArrayList.
     ArrayList* loop_stack;
@@ -413,6 +478,7 @@ struct JsMirTranspiler {
     MIR_reg_t last_closure_env_reg;
     int last_closure_capture_count;
     const char* last_closure_capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    NameEntry* last_closure_capture_bindings[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     int last_closure_capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool last_closure_capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
     bool last_closure_capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
@@ -461,10 +527,12 @@ struct JsMirTranspiler {
     JsErrorLaneTrack error_lane_track;
     // The transition emitter remembers the most recent boxed call result so
     // in-band mode can test its ERROR tag without issuing a separate poll.
-    MIR_reg_t last_call_result_reg;
+    // This remains a full descriptor because branch restoration and GC rooting
+    // must not turn the error carrier back into an untyped MIR register.
+    MirValue last_call_result;
     // A function-level exceptional edge must retain the exact Item that
     // triggered the branch; later cleanup emitted on the normal path may
-    // legitimately replace last_call_result_reg before the landing pad.
+    // legitimately replace last_call_result before the landing pad.
     MIR_reg_t func_error_lane_value_reg;
 
     JsMirArgStackScope* arg_stack_scope; // active call/new argument extent, if any
@@ -567,6 +635,10 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
         arraylist_free(mt->var_scopes);
         mt->var_scopes = NULL;
     }
+    if (mt->resumable_locals) {
+        hashmap_free(mt->resumable_locals);
+        mt->resumable_locals = NULL;
+    }
     if (mt->loop_stack) {
         for (int i = 0; i < mt->loop_stack->length; i++) {
             JsLoopLabels* labels =
@@ -604,6 +676,10 @@ static void __attribute__((unused)) jm_cleanup_mir_transpiler_state(JsMirTranspi
     if (mt->module_fc.scope_env_names) {
         mem_free(mt->module_fc.scope_env_names);
         mt->module_fc.scope_env_names = NULL;
+    }
+    if (mt->module_fc.scope_env_bindings) {
+        mem_free(mt->module_fc.scope_env_bindings);
+        mt->module_fc.scope_env_bindings = NULL;
     }
     em_frame_dispose(&mt->em);
 }

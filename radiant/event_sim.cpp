@@ -19,7 +19,7 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/runtime-state.h"
-#include "../lambda/js/js_dom.h"
+#include "../lambda/dom/dom.h"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/js/js_runtime.h"
 #include "../lambda/js/js_runtime_state.hpp"
@@ -5150,7 +5150,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 ctx->fail_count++;
                 break;
             }
-            DomElement* found = (DomElement*)js_dom_document_element_from_point_native(
+            DomElement* found = (DomElement*)dom_document_element_from_point_native(
                 doc, ev->at_x, ev->at_y);
             if (!found) {
                 log_error("event_sim: assert_hit_test FAIL - no element found at (%.2f, %.2f)",

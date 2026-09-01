@@ -11,10 +11,10 @@
 #include <string.h>
 
 // Phase 8E: per-text-control selectionchange dispatch. Strong impl lives in
-// lambda/js/js_dom_selection.cpp (queues a coalesced setTimeout(0) drain).
+// lambda/js/dom_selection.cpp (queues a coalesced setTimeout(0) drain).
 // Headless/no-JS builds get the no-op weak fallback below.
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_selectionchange(DomElement* elem);
-extern "C" __attribute__((weak)) void js_dom_queue_textcontrol_selectionchange(DomElement* /*elem*/) {}
+extern "C" __attribute__((weak)) void dom_queue_textcontrol_selectionchange(DomElement* elem);
+extern "C" __attribute__((weak)) void dom_queue_textcontrol_selectionchange(DomElement* /*elem*/) {}
 extern void font_prop_release_handle(FontProp* fprop);
 
 void tc_notify_selection_changed(DomElement* elem) {
@@ -22,7 +22,7 @@ void tc_notify_selection_changed(DomElement* elem) {
     // Selection projection updates anchor and focus through nested StateStore
     // transitions; queue `select` with selectionchange so handlers never
     // re-enter selectionStart/End against the half-committed projection.
-    js_dom_queue_textcontrol_selectionchange(elem);
+    dom_queue_textcontrol_selectionchange(elem);
 }
 
 // ---- DomNode text walker (textarea initial value) ----------------------

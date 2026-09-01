@@ -16,6 +16,7 @@
 
 struct JsClassEntry;
 struct JubeTypeDef;
+struct NameEntry;
 
 // Imported MIR calls share Core Lambda's user-operand ceiling. Keeping this
 // storage below LAMBDA_MAX_FUNCTION_ARGS silently rejected valid 9..16-arg
@@ -35,6 +36,10 @@ struct MirImportCacheEntry {
 };
 
 struct VarEntry {
+    // The builder-resolved binding identity. MIR scope maps retain a spelling
+    // index for synthetic lowering-only locals, but source identifiers must
+    // enter through this edge rather than re-resolving a name (D8.2.4).
+    NameEntry* binding;
     MIR_reg_t reg;
     int root_slot;
     int gc_home_id;
@@ -281,11 +286,6 @@ struct MirRootBinding {
     int slot;
     int home_id;
 };
-struct MirPendingRootStore {
-    int slot;
-    MIR_reg_t value;
-    MIR_insn_t definition;
-};
 struct MirEnvBinding {
     MIR_reg_t source_reg;
     MIR_reg_t reg;
@@ -458,8 +458,6 @@ struct MirFrameState {
     int fixed_root_slots;
     int gc_home_count;
     int fixed_number_slots;
-    MIR_reg_t* root_latest;
-    int root_latest_capacity;
     MirRootBinding* root_bindings;
     int root_binding_count;
     int root_binding_capacity;
@@ -475,9 +473,6 @@ struct MirFrameState {
     int gc_candidate_capacity;
     int* gc_candidate_by_reg;
     int gc_candidate_by_reg_capacity;
-    MirPendingRootStore* pending_root_stores;
-    int pending_root_store_count;
-    int pending_root_store_capacity;
     MirGcCallSite* gc_call_sites;
     int gc_call_site_count;
     int gc_call_site_capacity;
@@ -647,13 +642,11 @@ static inline void em_function_arguments_restore(MirEmitter* em,
 static inline void em_frame_dispose(MirEmitter* em) {
     if (!em) return;
     MirFrameState* frame = &em->frame;
-    if (frame->root_latest) mem_free(frame->root_latest);
     if (frame->root_bindings) mem_free(frame->root_bindings);
     if (frame->root_binding_by_reg) mem_free(frame->root_binding_by_reg);
     if (frame->root_binding_by_home) mem_free(frame->root_binding_by_home);
     if (frame->gc_candidates) mem_free(frame->gc_candidates);
     if (frame->gc_candidate_by_reg) mem_free(frame->gc_candidate_by_reg);
-    if (frame->pending_root_stores) mem_free(frame->pending_root_stores);
     if (frame->gc_call_sites) mem_free(frame->gc_call_sites);
     if (frame->env_bindings) mem_free(frame->env_bindings);
     if (frame->scalar_home_bindings) mem_free(frame->scalar_home_bindings);
@@ -699,6 +692,110 @@ static inline bool em_root_ensure_index_map(int** map, int* capacity,
     *map = resized;
     *capacity = next_capacity;
     return true;
+}
+
+// Root-binding identity is representation-neutral frame metadata. Both
+// language lowerers publish it through this owner; profile code chooses which
+// semantic values need roots but cannot maintain a second binding map.
+static inline void em_root_register_binding(MirEmitter* em, MIR_reg_t reg,
+        int slot, int home_id) {
+    if (!em || !reg || slot < 0) return;
+    MirFrameState* frame = &em->frame;
+    int reg_key = (int)reg;
+    if (!em_root_ensure_index_map(&frame->root_binding_by_reg,
+            &frame->root_binding_by_reg_capacity, reg_key) ||
+            (home_id > 0 && !em_root_ensure_index_map(
+                &frame->root_binding_by_home,
+                &frame->root_binding_by_home_capacity, home_id))) {
+        log_error("mir-root-bindings: index-map allocation failed");
+        abort();
+    }
+    int index = home_id > 0 ? frame->root_binding_by_home[home_id]
+        : frame->root_binding_by_reg[reg_key];
+    if (index >= 0 && index < frame->root_binding_count) {
+        MirRootBinding* binding = &frame->root_bindings[index];
+        if (binding->reg != reg && binding->reg > 0 &&
+                binding->reg < (MIR_reg_t)frame->root_binding_by_reg_capacity &&
+                frame->root_binding_by_reg[binding->reg] == index) {
+            frame->root_binding_by_reg[binding->reg] = -1;
+        }
+        binding->reg = reg;
+        binding->slot = slot;
+        if (frame->root_binding_by_reg[reg_key] < 0) {
+            frame->root_binding_by_reg[reg_key] = index;
+        }
+        return;
+    }
+    if (frame->root_binding_count >= frame->root_binding_capacity) {
+        int next_capacity = frame->root_binding_capacity
+            ? frame->root_binding_capacity * 2 : 32;
+        MirRootBinding* resized = (MirRootBinding*)mem_realloc(
+            frame->root_bindings,
+            (size_t)next_capacity * sizeof(MirRootBinding), MEM_CAT_TEMP);
+        if (!resized) {
+            log_error("mir-root-bindings: binding allocation failed");
+            abort();
+        }
+        frame->root_bindings = resized;
+        frame->root_binding_capacity = next_capacity;
+    }
+    index = frame->root_binding_count++;
+    MirRootBinding* binding = &frame->root_bindings[index];
+    binding->reg = reg;
+    binding->slot = slot;
+    binding->home_id = home_id;
+    if (frame->root_binding_by_reg[reg_key] < 0) {
+        frame->root_binding_by_reg[reg_key] = index;
+    }
+    if (home_id > 0) frame->root_binding_by_home[home_id] = index;
+}
+
+static inline void em_root_unbind_home(MirEmitter* em, int home_id) {
+    if (!em || home_id <= 0) return;
+    MirFrameState* frame = &em->frame;
+    if (home_id >= frame->root_binding_by_home_capacity) return;
+    int index = frame->root_binding_by_home[home_id];
+    if (index < 0 || index >= frame->root_binding_count) return;
+    MirRootBinding* binding = &frame->root_bindings[index];
+    if (binding->reg > 0 &&
+            binding->reg < (MIR_reg_t)frame->root_binding_by_reg_capacity &&
+            frame->root_binding_by_reg[binding->reg] == index) {
+        frame->root_binding_by_reg[binding->reg] = -1;
+    }
+    binding->reg = 0;
+}
+
+static inline int em_root_binding_slot_for_reg(const MirEmitter* em,
+        MIR_reg_t reg) {
+    if (!em || !reg) return -1;
+    const MirFrameState* frame = &em->frame;
+    if (reg < (MIR_reg_t)frame->root_binding_by_reg_capacity) {
+        int index = frame->root_binding_by_reg[reg];
+        if (index >= 0 && index < frame->root_binding_count) {
+            return frame->root_bindings[index].slot;
+        }
+    }
+    for (int index = 0; index < frame->root_binding_count; index++) {
+        if (frame->root_bindings[index].reg == reg) {
+            return frame->root_bindings[index].slot;
+        }
+    }
+    return -1;
+}
+
+// A root home tracks its latest semantic register until the shared write-back
+// pass materializes it at collection boundaries. Frontends must not retain a
+// parallel register cache for that ownership relation (D5.3.4).
+static inline MIR_reg_t em_root_binding_reg_for_slot(const MirEmitter* em,
+        int slot) {
+    const MirFrameState* frame = em ? &em->frame : NULL;
+    if (!frame || slot < 0) return 0;
+    for (int index = frame->root_binding_count - 1; index >= 0; index--) {
+        if (frame->root_bindings[index].slot == slot) {
+            return frame->root_bindings[index].reg;
+        }
+    }
+    return 0;
 }
 
 static inline bool em_root_note_candidate(MirRootCandidate** candidates,
@@ -3973,6 +4070,16 @@ static inline JitValueClass em_value_class_for_rep(ValueRep rep) {
         : rep == VALUE_REP_RAW_GC_POINTER ? JIT_VALUE_RAW_GC_POINTER
         : rep == VALUE_REP_RAW_NON_GC_POINTER ? JIT_VALUE_RAW_NON_GC_POINTER
         : JIT_VALUE_NON_GC_SCALAR;
+}
+
+// Every expression producer describes its physical carrier with ValueRep.
+// Keep the MIR-register and GC-class mapping here so language lowerers cannot
+// grow their own representation classification alongside conversion policy.
+static inline MirValue em_value_for_rep(MIR_reg_t reg, TypeId semantic_type,
+        ValueRep rep, Type* semantic_contract = NULL,
+        const AstNode* provenance_node = NULL) {
+    return em_value(reg, em_mir_type_for_rep(rep), semantic_type, rep,
+        em_value_class_for_rep(rep), semantic_contract, provenance_node);
 }
 
 static inline MirCallResult em_call_direct(MirEmitter* em,

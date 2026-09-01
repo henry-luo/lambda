@@ -752,7 +752,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         // The stack worker binds a distinct execution realm. Carry the host's
         // borrowed UI session into that realm before any DOM wrapper or task is
         // created; rebinding it after execution leaves callbacks in a dead realm.
-        js_dom_set_ui_context(runtime->dom_ui_context);
+        dom_set_ui_context(runtime->dom_ui_context);
     }
     ArrayList* previous_debug_info = context->debug_info;
     RuntimeCurrentFileScope current_file(context, filename ? filename : "<string>");
@@ -978,7 +978,7 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
     // Compile-only cache construction must not instantiate DOM wrappers or
     // inline handlers in the disposable compilation heap.
     if (runtime->dom_doc && !g_jm_preamble_compile_only) {
-        js_dom_set_document(runtime->dom_doc);
+        dom_set_document(runtime->dom_doc);
     }
 
     // Execute
@@ -1240,8 +1240,8 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
         return ItemError;
     }
     RuntimeExecutionScope execution_scope(runtime_context);
-    if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
-    if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
+    if (runtime->dom_ui_context) dom_set_ui_context(runtime->dom_ui_context);
+    if (runtime->dom_doc) dom_set_document(runtime->dom_doc);
     if (execution_scope.is_outermost() &&
             !js_runtime_state.event_loop.callback_running &&
             js_dynamic_import_suppress_module_drain <= 0) {
@@ -1363,7 +1363,7 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
         preamble_state_destroy(out_state);
         return ItemError;
     }
-    if (runtime->dom_ui_context) js_dom_set_ui_context(runtime->dom_ui_context);
+    if (runtime->dom_ui_context) dom_set_ui_context(runtime->dom_ui_context);
     heap_init();
     if (!context->heap) {
         preamble_state_destroy(out_state);
@@ -1410,7 +1410,7 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
             !js_runtime_state.event_loop.callback_running) {
         js_event_loop_init();
     }
-    if (runtime->dom_doc) js_dom_set_document(runtime->dom_doc);
+    if (runtime->dom_doc) dom_set_document(runtime->dom_doc);
 
     JsMirMainFunc js_main = (JsMirMainFunc)cached->entry_func;
     js_mir_reset_last_phase_timing();

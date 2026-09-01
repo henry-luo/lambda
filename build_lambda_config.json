@@ -34,6 +34,7 @@
     "lambda/format",
     "lambda/validator",
     "lambda/js",
+    "lambda/dom",
     "lambda/module/radiant",
     "lambda/module/hostobj_demo",
     "lambda/ts",
@@ -638,6 +639,7 @@
       "lang": "c++17",
       "source_patterns": [
         "lambda/js/*.cpp",
+        "lambda/dom/*.cpp",
         "lambda/jube/*.cpp",
         "lambda/ts/*.cpp",
         "lambda/runtime/*.cpp",
@@ -1135,6 +1137,7 @@
         "lambda/format",
         "lambda/validator",
         "lambda/js",
+        "lambda/dom",
         "lambda/network",
         "lambda/serve"
       ],

@@ -1,6 +1,6 @@
 # Lambda DOM Event Dispatch — three flows, one engine
 
-> **Status**: **RATIFIED — implementation in progress** (2026-09-01). §2–§3 are **descriptive** — the current state of the three dispatch flows, verified against the tree at 2026-09-01. §4.1's rulings **ES22–ES29 are ratified in full (2026-09-01, user)**, §4.3's resolution design is endorsed, and ESO63/ESO67/ESO69 are resolved (ESO68 narrowed to measurement). F17–F19 are implemented; F20–F21 remain.
+> **Status**: **RATIFIED — implementation complete** (2026-09-01). §2–§3 are **descriptive** — the current state of the three dispatch flows, verified against the tree at 2026-09-01. §4.1's rulings **ES22–ES29 are ratified in full (2026-09-01, user)**, §4.3's resolution design is endorsed, and ESO63/ESO67/ESO69 are resolved (ESO68 narrowed to measurement). F17–F21 are implemented; only the separately tracked deferred/measurement ledger items remain.
 > **Role**: the design home for the event **dispatch mechanism** — how an event reaches handlers across the three flows, what object the handlers receive, and how cancellation composes. Complements `vibe/Lambda_Design_DOM_Default.md`, which owns default-action **placement** (what runs after dispatch); the boundary between the two docs is the boundary between *delivering* an event and *acting* on it.
 > **Scope**: propagation, handler registration and addressing, the event object, cancellation/verdict semantics, synthetic dispatch, and the unification design. **Out of scope**: which default actions exist and their status (the DOM_Default ledger), state storage and the waist (DOM_State ES-series), and the JS property/binding architecture (Jube DOM3/DOM4).
 > **Companion docs**: `vibe/Lambda_Design_DOM_State.md` (ES5 pipeline, ES10 peers-over-one-state, ES15 verdicts), `vibe/Lambda_Design_DOM_Default.md` (§5.2 single-sourced activation, resolved ESO49), `vibe/Lambda_Design_DOM_Pkg.md` (placement policy), `vibe/Lambda_Jube_DOM3.md`/`DOM4.md` (declared interfaces, ordinal dispatch), `doc/dev/radiant/RAD_15_Events_Input.md`, `doc/dev/js/JS_13_Web_DOM.md` §5.
@@ -29,7 +29,7 @@ Naming note: this doc says **author tier** for the spec's "author event handling
 
 Facts the unification builds on, all landed:
 
-- **One script runtime per document** (ES12, F0a; user direction 2026-08-25). `js.runtime` *is* a Lambda `Runtime*`; the dom package loads onto `dom_document_script_runtime(doc)`. The module-state-id collision that made JS pages defer the package was ESO34, **fixed 2026-08-26** — a JS page's package-driven state dump regenerates byte-identical to the native golden. (Stale artifact: the comment block at `radiant/event.cpp:2625` still claims the JS-realm deferral "stands"; the code below it loads into the shared runtime. F21 removes it.)
+- **One script runtime per document** (ES12, F0a; user direction 2026-08-25). `js.runtime` *is* a Lambda `Runtime*`; the dom package loads onto `dom_document_script_runtime(doc)`. The module-state-id collision that made JS pages defer the package was ESO34, **fixed 2026-08-26** — a JS page's package-driven state dump regenerates byte-identical to the native golden.
 - **One canonical state** (ES10). Both realms write through the same waist writers; state storage stays in C++ so views link to it during rendering.
 - **One receiver vocabulary.** Behavior handlers bind `~` to the same Jube `dom_node` branded VMap that JS holds (`radiant_dom_wrap_node`), so an element is *the same value* in both realms.
 - **One claim protocol for submit/reset** (F4). Both the native pointer path and the JS `dispatchEvent` path consult `radiant_behavior_claims_event` and route to the same package policy.
@@ -49,11 +49,21 @@ Facts the unification builds on, all landed:
 
 ### 2.3 Flow 2 — JS DOM event handlers
 
-**Registration.** Listener storage is **external to the DOM structs** — a side-table in `js_dom_events.cpp` (`:363–404`): `NodeListenerEntry { key, owner_doc, node_ref, target_root, listeners }`, keyed by `DomNode*` for elements, sentinel addresses for `document`/`window`, or the object pointer for a plain `new EventTarget()`, with a pointer-key hashmap index over the entries. Each `EventListener` carries the type string, a GC-rooted callback, `capture`/`once`/`passive` flags, an optional `AbortSignal` root, and a `removed` tombstone. `on<type>` IDL handlers occupy per-element slots; inline HTML attributes compile into them via `js_dom_set_event_handler_function`.
+**Registration.** Listener storage is **external to the DOM structs** — a side-table in `dom_events.cpp` (`:363–404`): `NodeListenerEntry { key, owner_doc, node_ref, target_root, listeners }`, keyed by `DomNode*` for elements, sentinel addresses for `document`/`window`, or the object pointer for a plain `new EventTarget()`, with a pointer-key hashmap index over the entries. Each `EventListener` carries the type string, a GC-rooted callback, `capture`/`once`/`passive` flags, an optional `AbortSignal` root, and a `removed` tombstone. `on<type>` IDL handlers occupy per-element slots; inline HTML attributes compile into them via `js_dom_set_event_handler_function`.
 
-**Dispatch.** `js_dom_dispatch_event` (JS_13 §5): validate → pre-activation → `build_path` collects target→ancestors→document→window → **CAPTURING** down, **AT_TARGET**, **BUBBLING** up (per-node: the `on<type>` handler first, then a snapshot of matching listeners so concurrent add/remove cannot perturb iteration) → teardown. Stop flags (`__stop_prop`/`__stop_imm` plus transitional thread-locals) gate phase boundaries and per-node iteration.
+**Dispatch.** `js_dom_dispatch_event` (JS_13 §5) validates the one native
+record, builds the target→ancestors→document→window path, then runs capture,
+target, and bubble. At each target/bubble node it fires JS listeners before
+that node's producing Lambda-template participant. The record's
+`__stop_prop`/`__stop_imm` members gate every participant; teardown clears
+only transient dispatch/stop state.
 
-**Native entry.** The pipeline reaches JS through `radiant_dispatch_built_event` (`event.cpp:6111`): build a JS event via a native factory (`js_create_native_mouse_event`, …), wrap the target, call `js_dom_dispatch_event`, and return **only** `js_event_is_default_prevented(ev)`. The stage is gated by `JsDispatchScope` — a document without a live JS batch context skips it entirely, so Lambda-only pages never construct JS events.
+**Native entry.** `radiant_dispatch_built_event` constructs the record and
+enters the shared author tier. With a JS runtime it wraps the target and calls
+`js_dom_dispatch_event`; without one it invokes the same Lambda participant
+and UA-tier policy directly. Both routes read the one record's cancellation
+state, so a Lambda-only document does not construct a JS view while still
+following ES22/ES24/ES29.
 
 **Synthetic bridge (F19).** A direct `dispatchEvent()` / `el.click()` on a
 live DOM element enters `radiant_dispatch_synthetic_dom_event` with the same
@@ -70,25 +80,35 @@ not a second entry into native dispatch (ES25/ES26).
 
 **Registration.** A `.ls` page's `view`/`edit` statements register at script load into the **same** EvalContext-scoped `g_template_registry` — author mode (`is_behavior == false`), with `is_edit` distinguishing edit templates, per-template `state` declarations (S9.1.4), and handlers in `TemplateHandlerEntry` lists. The link to the DOM they generate is the **render map**: when a template transforms a model, the map records *result element → (template_ref, source model item)*.
 
-**Dispatch.** `dispatch_lambda_handler` (`event.cpp:3200`): walk target→root; for each non-synthetic element, `render_map_reverse_lookup(dom_element_render_source(elem))` answers *which template instance produced this element and from which model*; if that template declares a handler for this event name, invoke it with **the model bound to the source data item** — not the DOM wrapper. That is the defining difference from flow 1: behavior templates are *element-addressed* (the element is its own model), author templates are *model-addressed through the render map* (the handler mutates data, never the view tree). `'pass'` continues the ancestor walk; if nothing claims, the function falls through to behavior dispatch (flow 1) at its bottom.
+**Dispatch.** At each eligible node in the shared cascade,
+`dispatch_author_template_participant` resolves the producing template through
+the render map. The handler receives **the model bound to that source item** —
+not the DOM wrapper — so author templates remain model-addressed while behavior
+templates remain element-addressed. Every matching author handler participates
+at its path position; it does not claim the UA tier (ES23/ES29).
 
-**After-effects.** `invoke_template_handler` (`event.cpp:2309`, **shared with flow 1**): bind the document runtime's EvalContext and side stack; build the Lambda event map (`build_lambda_event_map`, `:1777` — `type`, target class/tag/coords, and per-family payloads: `option_index`, `command`/`value`, `key`+modifiers, `input_type`/`data`/`mime`/`html`, `input_intent`, IME/composition, undo history); set the emit context; call `Item handler(model, event)`; read the verdict. Then the reactive loop: an edit template whose handler advanced the MarkEditor mutation epoch marks its render-map entry dirty; dirty entries **retransform** (the template body re-runs on the mutated model), deep-equal no-op elision skips unchanged output, and `rebuild_lambda_doc_incremental` patches the DOM. Lambda pages persist by regeneration (RS-series) — dispatch and re-render are one loop.
+**After-effects.** `invoke_template_handler` binds the document runtime's
+EvalContext and side stack, exposes the ES24 record as the Lambda event,
+invokes `Item handler(model, event)`, and applies its verdict to that record.
+An edit template that advances the MarkEditor mutation epoch marks its
+render-map entry dirty; dirty entries retransform, deep-equal no-op elision
+skips unchanged output, and `rebuild_lambda_doc_incremental` patches the DOM.
+Lambda pages persist by regeneration (RS-series) — dispatch and re-render are
+one S12.1.3 loop.
 
 ### 2.5 The pipeline as built (trusted events)
 
 ```
-[N]  hit test → target path → trusted event construction
-[JS] 3-phase dispatch (capture/target/bubble) — flow 2
-       gated: skipped when the document has no JS batch context
-       returns ONLY `prevented`; stop-propagation state stays inside
-[L]  author-template walk (target→root, reverse render map) — flow 3
-       │  either layer may cancel: defaultPrevented / 'prevent-default'
+[N]  hit test → one trusted event record → target path
+[N]  AUTHOR TIER — one cascade: JS capture / target / bubble and
+     the producing Lambda template after JS at each target/bubble node
+       │  either participant may cancel: preventDefault / 'prevent-default'
        ▼
-[N]  defaultPrevented? → done
-[L]  behavior-template walk (target→root, selector match) — flow 1
+[N]  record.default_prevented? → settle only
+[L]  UA TIER — behavior-template walk (target→root, selector match) — flow 1
 [M]  handler effects via waist primitives only
 [L]  retransform dirty render-map entries → incremental rebuild   (flow-3 docs)
-[N]  cascade settle → restyle / reflow / repaint
+[N]  S12.1.3 cascade settle → restyle / reflow / repaint
 ```
 
 Synthetic events (`dispatchEvent`, `el.click()`) enter the same author and UA
@@ -103,31 +123,41 @@ record and pass while the current record still completes only once (ES25).
 | Spec concept | UA default action / activation behavior | author event handling | author event handling |
 | Registered in | template registry, `is_behavior` (provenance-stamped at package load) | `_entries` side-table + `on<type>` IDL slots | template registry, author mode + render map |
 | Addressed by | element selector (tag + attribute predicates, specificity-ranked) | target instance (pointer key) | producing template instance (reverse render map) |
-| Handler receives | `~` = Jube `dom_node` wrapper + Lambda event map | JS `Event`/`MouseEvent`/… object | source model item + Lambda event map |
-| Propagation | target→root walk, no phases, one-call ceiling | full capture/target/bubble with stop flags | target→root walk, no capture phase |
-| Cancellation | `'prevent-default'` verdict → `evcon.default_prevented` | `preventDefault()`/stop flags on the JS event; only `prevented` crosses back | same verdict protocol as flow 1 |
+| Handler receives | `~` = Jube `dom_node` wrapper + shared event record | branded JS `Event`/`MouseEvent` view of that record | source model item + shared event record |
+| Propagation | target→root UA walk, one-call ceiling | capture/target/bubble author participant | target/bubble participant at its producing-node position |
+| Cancellation | record's `'prevent-default'` result suppresses remaining UA action | `preventDefault()`/stop flags on the shared record | `'prevent-default'` writes the same record flag |
 | Effects | waist writes to canonical state | IDL writes to the same canonical state (ES10) | model mutation → dirty → retransform → incremental rebuild |
 | Synthetic events | runs after the synthetic author tier | runs in the shared author tier | runs at its ordinary path position |
-| Dispatcher entry | `dispatch_behavior_handler` (`event.cpp:2872`) | `js_dom_dispatch_event` (`js_dom_events.cpp`) | `dispatch_lambda_handler` (`event.cpp:3200`) |
+| Dispatcher entry | `dispatch_behavior_handler` (`event.cpp:2872`) | `js_dom_dispatch_event` (`dom_events.cpp`) | `dispatch_lambda_handler` (`event.cpp:3200`) |
 
-### 2.7 What is already shared
+### 2.7 What is shared
 
-Flows 1+3 share the registry (two provenance categories), `invoke_template_handler`, the verdict protocol, the event-map builder, and the retransform machinery. All three share the runtime (ES12), the canonical state (ES10), and the Jube wrapper vocabulary. The conceptual ordering is already spec-shaped: flows 2 and 3 are the author tier in two realms; flow 1 is the UA tier. The unification is therefore **not** three-into-one — it is three registration styles feeding a two-tier pipeline that currently runs on three separate engines.
+Flows 1+3 share the registry (two provenance categories), handler invocation,
+the verdict protocol, and retransform machinery. All three share the runtime
+(ES12), canonical state (ES10), Jube wrapper vocabulary, and the ES24 event
+record. The three registration styles now feed one ES22 two-tier engine: flows
+2 and 3 are the author tier, and flow 1 is the UA tier.
 
 ---
 
 ## 3. Analysis: the disunities
 
-### 3.1 Three propagation walks over one tree
+### 3.1 Retired: three propagation walks over one tree
 
-The JS dispatcher's `build_path` (real capture/bubble phases), the author walk, and the behavior walk each traverse the same ancestor chain independently. Two observable consequences:
+Before F18, the JS dispatcher's `build_path`, author walk, and behavior walk
+traversed the same ancestor chain independently. The retired design had two
+observable consequences:
 
 - **Lambda handlers have no capture phase.** Author and behavior walks are target→root only.
 - **Stop-propagation does not compose.** The JS stage returns only `prevented` (`event.cpp:6173` → `:6111`); its stop flags never cross the boundary. A JS `stopPropagation()` stops JS listeners on ancestors — but the author-template handlers on those *same ancestors* still run in their own walk afterwards. Symmetrically, a Lambda `'pass'`/claim is invisible to JS. The two realms' propagation controls are two unrelated state machines.
 
-### 3.2 Two event representations, two cancellation states
+### 3.2 Retired: two event representations, two cancellation states
 
-JS handlers get a full `Event` object with `eventPhase`, `currentTarget`, stop flags, and expando properties; Lambda handlers get a per-dispatch Mark map rebuilt by `build_lambda_event_map`. Cancellation is mirrored — `evcon.default_prevented` on the native side, per-event flags on the JS side — and bridged by hand at every seam (`read_prevented`, the verdict-to-flag write, the F4 bridge's `js_event_is_default_prevented`). Every new event family pays the bridging cost twice, and the two views can never be handed the *same* in-flight event.
+Before F17, JS handlers received a full `Event` object while Lambda handlers
+received a rebuilt Mark map; cancellation was mirrored across separate native
+and JS flags. ES24 retired both representations in favor of the one native
+record, so both realms now observe the same in-flight event and one cancellation
+state.
 
 ### 3.3 Synthetic dispatch formerly bypassed the Lambda flows
 
@@ -154,9 +184,11 @@ Author-template handlers are conceptually peers of JS listeners, but they run st
 
 ### 3.6 Duplication inventory
 
-The remaining duplication is the transitional event-simulator/editing entry
-families in F20 and the cleanup listed in F21. F19 removed the second activation
-implementation and its state-diff reconciler.
+F19 removed the second activation implementation and its state-diff reconciler;
+F20 removed the legacy editing-dispatch bridge and folded the remaining trusted
+entry families into the shared route; F21 retired the stale deferral and
+dual-stop-state descriptions. The active dispatch implementation has no
+remaining duplicate entry family.
 
 ---
 
@@ -172,7 +204,7 @@ The unification target, stated once: **a single propagation engine delivers ever
 
 **ES24 (ratified 2026-09-01) — One event record.** An in-flight event is **one native record** (type, target, path position/phase, coordinates/key/intent payload, `bubbles`/`cancelable`, `default_prevented`, stop flags, `is_trusted`). Both realms see it through the existing host-object machinery: a Jube declared interface `type event { … }` in the radiant module (the same DOM3/DOM4 mechanism that already serves `dom_node` — D3.4.7/D7.4.1–D7.4.4), so the JS `Event` object becomes a branded wrapper over the record and the Lambda handler's `evt` is the same record through the same bindings. `preventDefault()`/`stopPropagation()` become waist operations on the record; the Lambda `'prevent-default'` verdict writes the same flag (ES15 verdicts stay — they are the Lambda-native spelling, now with one storage). `build_lambda_event_map` and the dual `evcon.default_prevented`-vs-JS-flag mirroring retire. JS expando properties on events remain a wrapper concern (ESO66).
 
-**ES25 (ratified 2026-09-01) — Synthetic dispatch enters the same engine.** `dispatchEvent()` and `el.click()` construct the native record (with `is_trusted = false`) and run the same two tiers: the full author pass — author templates and behavior claims see synthetic events, which is spec-correct and today false — then the UA tier through the behavior claim protocol. The embedded activation pass in `js_dom_events.cpp` is **deleted** once claims cover its remaining classes (checkbox/radio already have templates; popover needs one — the F4 pattern extended, closing ESO49). Trust-gated default actions consult `is_trusted` on the record where the spec requires.
+**ES25 (ratified 2026-09-01) — Synthetic dispatch enters the same engine.** `dispatchEvent()` and `el.click()` construct the native record (with `is_trusted = false`) and run the same two tiers: the full author pass — author templates and behavior claims see synthetic events, which is spec-correct and today false — then the UA tier through the behavior claim protocol. The embedded activation pass in `dom_events.cpp` is **deleted** once claims cover its remaining classes (checkbox/radio already have templates; popover needs one — the F4 pattern extended, closing ESO49). Trust-gated default actions consult `is_trusted` on the record where the spec requires.
 
 **ES26 (ratified 2026-09-01) — The reconciliation hacks retire with the second implementation.** `js_did_activation` state-diffing and the cancel-revert block die when exactly one activation implementation exists. Canceled-activation restore (the spec's legacy-canceled-activation steps) becomes the UA tier's own job, expressed in the claim protocol — pre-activation state capture and restore live with the tier that owns activation, not with a diff across realms.
 
@@ -231,8 +263,8 @@ Each stage is independently landable and behavior-neutral-verifiable against the
 | **F17 — one event record** | Native event record + Jube `type event { … }` declared interface; JS `Event` becomes a branded wrapper over it (constructors and native factories converge); Lambda handlers receive the same record (event-map fields preserved as declared members during migration); `preventDefault`/verdict write one flag | one `default_prevented`; `build_lambda_event_map` deleted; no behavior change in goldens |
 | **F18 — one propagation walk** | The engine owns path + phases + stop state; JS listeners and author-template handlers consulted per node in ES23's ratified order via the §4.3 resolution (per-store event-type masks, JS per-type listener counts, per-template event-name masks, ≤2 hashed probes per node); author-tier suppression narrowed per ES29 — claim no longer suppresses the UA tier (audit existing claiming templates; add explicit `'prevent-default'` where that intent was real); `build_path`/`build_view_stack`/author walk merge | a JS `stopPropagation()` stops author-template handlers on ancestors (pinned test); per-node interleaving pinned per ESO63; a claiming author template over a checkbox no longer suppresses the toggle without `'prevent-default'` (pinned test) |
 | **F19 — synthetic dispatch + activation single-sourcing (implemented 2026-09-01)** | `dispatchEvent`/`el.click()` route through `radiant_dispatch_synthetic_dom_event`; `form.ls` owns the popover claim; checkbox/radio/popover claims are shared by both entries; the embedded JS activation pass, `js_did_activation`, and cancel-revert block are deleted | `dom_synthetic_activation.json` proves load-time `click()`, both radio synthetic entries, cancellation, and popover visibility; DOM_Default §5.2 flips; ESO49 closes |
-| **F20 — remaining entry families** | `event_sim` (WebDriver substrate), editing/IME/composition dispatchers, and `radiant.dispatch()` re-entry fold onto the engine's one entry | no dispatcher constructs events outside the record factories |
-| **F21 — cleanup** | Stale comments (`event.cpp:2625`); retire transitional stop-flag thread-locals (JS_13 known-issue 7); doc updates: JS_13 §5, RAD_15, DOM_Default §2.1 pipeline | grep-clean; docs verified-against stamps updated |
+| **F20 — remaining entry families (implemented 2026-09-01)** | `event_sim` (WebDriver substrate), editing/IME/composition dispatchers, and `radiant.dispatch()` re-entry fold onto the engine's one entry | no dispatcher constructs events outside the record factories |
+| **F21 — cleanup (implemented 2026-09-01)** | Stale comments (`event.cpp:2625`); retire transitional stop-flag thread-locals (JS_13 known-issue 7); doc updates: JS_13 §5, RAD_15, DOM_Default §2.1 pipeline | grep-clean; docs verified-against stamps updated |
 
 Sequencing rationale: F17 before F18 because a shared walk needs a shared event to thread through it; F19 after both because deleting the JS activation pass is safe only when synthetic events can reach the behavior registry; F20/F21 are consolidation.
 
@@ -262,9 +294,8 @@ template-stop, checkbox, explicit-prevent-default, radio, and Todo text UI
 fixtures; JS Event gtests; and the JS click/mousedown/multi-event UI fixtures
 all pass. `editable_mixed_routes` could not be assessed in this worktree: its
 registered fixture source is absent while unrelated test-file deletions are
-already staged. F20 keeps editing/IME/composition and event-simulator entry
-points on their legacy first-author path until that phase moves them onto this
-cascade.
+already staged. F20 subsequently moves editing/IME/composition and
+event-simulator entry points onto this cascade.
 
 ### F19 implementation checkpoint (2026-09-01)
 
@@ -280,8 +311,46 @@ load-time script calls `click()` before layout has built a `FormControlProp`.
 
 Focused verification: `make build`; the Radiant no-int-cast rule;
 `test/ui/dom_synthetic_activation.json` (6/6); `dom_pkg_prevent_default.json`
-(4/4); and `dom_pkg_radio.json` (7/7). The final two legacy entry families are
-F20 and the stale comments/transitional cleanup remain F21.
+(4/4); and `dom_pkg_radio.json` (7/7). F20 removes the remaining legacy entry
+families; F21 then completes the stale-comment and documentation cleanup.
+
+### F20 implementation checkpoint (2026-09-01)
+
+Editing, IME/composition, automation, and package `radiant.dispatch()` now use
+the record-backed author-then-UA entry in `event.cpp`; the separate
+`editing_dispatch.cpp` callback bridge and its first-claim author walk are
+deleted. The Lambda-only route now creates a cancelable record for trusted
+event families that support cancellation, so ES24's one record retains a
+`'prevent-default'` verdict through the UA boundary; non-cancelable native
+families remain non-cancelable. Initial Lambda-document construction also
+creates the existing element-to-DOM index, so the first reactive nested event
+uses the S9.1.4 state-preserving incremental reconciliation route instead of a
+destructive fallback. This keeps handler effects and regeneration in the
+S12.1.3 settle stage while enforcing ES22 and ES29.
+
+Focused verification: `make build`; `dom_synthetic_activation` (6/6),
+`dom_pkg_prevent_default` (4/4), and `dom_pkg_radio` (7/7); plus the four
+contenteditable/composition/cancellation automation fixtures (18/18).
+
+### F21 implementation checkpoint (2026-09-01)
+
+The stale live-JS-realm package-deferral explanation is removed: the package
+now joins the document's one runtime, including pages that established it from
+JS. JS propagation has one source of truth in the native event record's
+`__stop_prop` and `__stop_imm` members; the claimed thread-local mirrors had
+already been retired, so F21 removes their stale JS_13 ledger entry rather than
+reintroducing a second state channel. The verified JS_13, RAD_15, and
+DOM_Default descriptions now show the ES22 author tier, ES24 record, ES29
+cancellation boundary, and S12.1.3 settle stage.
+
+Validation: `git diff --check`; targeted stale-state scan; `make build`; and
+the Radiant no-int-cast rule pass. The structural DOM-cleanup chain measures
+141 added and 797 deleted source lines (net **-656**) against its pre-cleanup
+parent, without counting documentation. F21 corrects stale source commentary
+in place, so it does not count comment removal as a reduction. Focused
+automation confirms synthetic activation (6/6), prevented defaults (4/4),
+radio activation (7/7), and the contenteditable/composition/cancellation
+fixtures (18/18).
 
 ---
 
@@ -305,13 +374,12 @@ F20 and the stale comments/transitional cleanup remain F21.
 |---|---|
 | `radiant/event.cpp:2612` | `radiant_dom_package_ensure` — lazy package load, behavior-mode registration, evaluator-creation predicate |
 | `radiant/event.cpp:2831` / `:2872` | `behavior_match_walk` / `dispatch_behavior_handler` — flow-1 dispatch |
-| `radiant/event.cpp:3200` | `dispatch_lambda_handler` — flow-3 dispatch, reverse render-map walk, fall-through to flow 1 |
-| `radiant/event.cpp:2309` | `invoke_template_handler` — shared flows 1+3: context bind, event map, verdicts, retransform loop |
-| `radiant/event.cpp:1777` | `build_lambda_event_map` — the Lambda event representation (retires in F17) |
-| `radiant/event.cpp:6111` / `:6173` | `radiant_dispatch_built_event` / `radiant_dispatch_mouse_event` — native→JS entry; returns `prevented` only |
+| `radiant/event.cpp` `dispatch_author_template_participant` | flow-3 participant: render-map model lookup at the shared path position |
+| `radiant/event.cpp` `invoke_template_handler` | shared flows 1+3: context bind, record verdict, retransform loop |
+| `radiant/event.cpp` `radiant_dispatch_built_event` / `radiant_dispatch_mouse_event` | shared trusted-event entry and author/UA boundary |
 | `radiant/event.cpp` `radiant_dispatch_synthetic_dom_event` / `dispatch_click_default_actions` | direct DOM synthetic bridge and one shared UA click stage; native keeps label association and execution mechanics |
-| `lambda/js/js_dom_events.cpp:363–404` | listener side-table structures + hashmap index |
-| `lambda/js/js_dom_events.cpp` `js_dom_dispatch_event` | direct DOM target dispatch enters the native bridge; exact-record re-entry stays on the shared author cascade |
+| `lambda/dom/dom_events.cpp:363–404` | listener side-table structures + hashmap index |
+| `lambda/dom/dom_events.cpp` `js_dom_dispatch_event` | direct DOM target dispatch enters the native bridge; exact-record re-entry stays on the shared author cascade |
 | `lambda/runtime/template_registry.h` | `TemplateEntry`/`is_behavior`/`is_edit`, specificity, behavior mode |
 | `lambda/runtime/render_map.h` | result→(template_ref, model) reverse lookup |
 | `lambda/module/radiant/radiant_dom_iface.cpp` | Jube declared interfaces — the mechanism ES24 extends with `type event` |

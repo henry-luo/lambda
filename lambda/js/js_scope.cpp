@@ -126,6 +126,17 @@ NameEntry* js_scope_define_in_scope(JsTranspiler* tp, JsScope* target_scope,
     // Check for redeclaration in strict mode or with let/const
     if (target_scope->strict || kind != JS_VAR_VAR) {
         if (existing) {
+            bool annex_b_duplicate_block_function = !target_scope->strict &&
+                target_scope->kind == SCOPE_KIND_BLOCK &&
+                !target_scope->is_function_body && kind == JS_VAR_LET &&
+                existing->is_lexical &&
+                existing->node->node_type == JS_AST_NODE_FUNCTION_DECLARATION &&
+                node->node_type == JS_AST_NODE_FUNCTION_DECLARATION;
+            if (annex_b_duplicate_block_function) {
+                // Annex B.3.3.4 permits sloppy block-only function duplicates.
+                existing->node = (AstNode*)node;
+                return existing;
+            }
             if (js_scope_entry_matches_node(existing, node)) {
                 existing->node = (AstNode*)node;
                 return existing;

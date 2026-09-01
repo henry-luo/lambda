@@ -48,16 +48,16 @@ const JubeHostAPI* radiant_host_api = nullptr;
 extern __thread EvalContext* context;
 extern __thread Context* input_context;
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
-extern "C" Item js_dom_check_validity_bridge(Item elem_item);
-extern "C" bool js_dom_focus_first_invalid_form_control(void* form_elem);
-extern "C" Item js_dom_form_reset_bridge(Item form_item);
-extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
-extern "C" void* js_dom_popover_target_for_button(void* button);
-extern "C" int js_dom_popover_target_action(void* button);
-extern "C" bool js_dom_activate_popover(void* popover, int action);
+extern "C" Item dom_check_validity_bridge(Item elem_item);
+extern "C" bool dom_focus_first_invalid_form_control(void* form_elem);
+extern "C" Item dom_form_reset_bridge(Item form_item);
+extern "C" bool dom_navigate_submit_target(const char* target_name, const char* url);
+extern "C" void* dom_popover_target_for_button(void* button);
+extern "C" int dom_popover_target_action(void* button);
+extern "C" bool dom_activate_popover(void* popover, int action);
 extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
                                                             void* submitter_node);
-extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem);
+extern "C" Item dom_scroll_into_view_bridge(void* dom_elem);
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -1155,7 +1155,7 @@ RADIANT_C_API Item fn_radiant_focus_set(Item node_item, Item from_keyboard_item)
 RADIANT_C_API Item fn_radiant_scroll_into_view(Item node_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "SCROLL_INTO_VIEW");
     if (!elem) return radiant_bool_item(false);
-    js_dom_scroll_into_view_bridge(elem);
+    dom_scroll_into_view_bridge(elem);
     return radiant_bool_item(true);
 }
 
@@ -1598,9 +1598,9 @@ RADIANT_C_API Item fn_radiant_check_validity(Item form_item) {
     // A live author-script realm owns invalid-event dispatch. Reuse its
     // established validity bridge so every invalid control receives the event.
     if (doc->js_has_dom_realm) {
-        Item valid = js_dom_check_validity_bridge(form_item);
+        Item valid = dom_check_validity_bridge(form_item);
         if (!is_truthy(valid)) {
-            js_dom_focus_first_invalid_form_control((void*)form);
+            dom_focus_first_invalid_form_control((void*)form);
         }
         return radiant_bool_item(is_truthy(valid));
     }
@@ -1619,7 +1619,7 @@ RADIANT_C_API Item fn_radiant_reset_form(Item form_item) {
     if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
         return radiant_bool_item(false);
     }
-    js_dom_form_reset_bridge(form_item);
+    dom_form_reset_bridge(form_item);
     return radiant_bool_item(true);
 }
 
@@ -1702,7 +1702,7 @@ RADIANT_C_API Item fn_radiant_request_navigation(Item request_item) {
     // serialized request while handing its URL/target to document navigation.
     log_info("FORM_NAVIGATION_HANDOFF method=%s enctype=%s target=%s url=%s body=%s",
              method, enctype, target, url, body ? body : "");
-    return radiant_bool_item(js_dom_navigate_submit_target(target, url));
+    return radiant_bool_item(dom_navigate_submit_target(target, url));
 }
 
 RADIANT_C_API Item fn_radiant_radio_group(Item node_item) {
@@ -1756,10 +1756,10 @@ RADIANT_C_API Item fn_radiant_set_dropdown_open(Item node_item, Item open_item) 
 RADIANT_C_API Item fn_radiant_activate_popover(Item node_item) {
     DomElement* button = radiant_dom_element_from_item(node_item, "ACTIVATE_POPOVER");
     if (!button) return radiant_bool_item(false);
-    void* popover = js_dom_popover_target_for_button((void*)button);
+    void* popover = dom_popover_target_for_button((void*)button);
     if (!popover) return radiant_bool_item(false);
-    int action = js_dom_popover_target_action((void*)button);
-    return radiant_bool_item(js_dom_activate_popover(popover, action));
+    int action = dom_popover_target_action((void*)button);
+    return radiant_bool_item(dom_activate_popover(popover, action));
 }
 
 // Option count for a <select>; the option list itself is layout-owned.

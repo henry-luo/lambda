@@ -76,7 +76,7 @@ This forces a different subtlety: if JS mutated the DOM (`dom_doc->js_mutation_c
 
 The old scripts-before-cascade order remains available for baseline triage via `RADIANT_SCRIPT_BEFORE_CASCADE=1`. In that mode the loader skips the initial cascade and applies the cascade after scripts, matching the previous behavior.
 
-The host↔JS wiring around this is set up earlier in the shell: `js_dom_set_ui_context` and `js_dom_set_host_driven_loop` (`window.cpp`, [RAD_20](RAD_20_Application_Shell_Browsing.md)) tell LambdaJS about Radiant's geometry APIs and who owns the event loop. When the loop is host-driven (interactive `view`), `execute_document_scripts` flushes only microtasks and leaves timers queued for the window loop to pump post-commit (`script_runner.cpp:1997-2008`); the reason is spelled out in the comment — draining `setTimeout(0)` before the first layout would make geometry APIs read zero-sized boxes. A static one-shot render drains the whole event loop immediately (`:2009-2015`).
+The host↔JS wiring around this is set up earlier in the shell: `dom_set_ui_context` and `dom_set_host_driven_loop` (`window.cpp`, [RAD_20](RAD_20_Application_Shell_Browsing.md)) tell LambdaJS about Radiant's geometry APIs and who owns the event loop. When the loop is host-driven (interactive `view`), `execute_document_scripts` flushes only microtasks and leaves timers queued for the window loop to pump post-commit (`script_runner.cpp:1997-2008`); the reason is spelled out in the comment — draining `setTimeout(0)` before the first layout would make geometry APIs read zero-sized boxes. A static one-shot render drains the whole event loop immediately (`:2009-2015`).
 
 ---
 
@@ -86,7 +86,7 @@ If the batch produced a valid preamble MIR context, the runtime is **retained on
 
 `collect_and_compile_event_handlers(DomDocument*)` (`script_runner.cpp:2256`) is the consumer of that retained state, and it only runs if `dom_doc->js_mir_ctx` is set (`:2257`). It walks the `DomElement*` tree with `collect_handlers_recursive` (`:2190`), reading the fixed table of `on*` attributes (`EVENT_HANDLER_ATTRS`, `:2098` — `onclick`, `onmouseover`, `onsubmit`, `onscroll`, and 13 others). For each it emits a wrapper `function __evt_handler_N(event) { … }` into one shared compile buffer. When the attribute is a plain global call like `doThing(event)`, `append_global_call_inline_handler` (`:2149`) rewrites it into a safe `globalThis["doThing"]`/`window["doThing"]` lookup-and-call so the handler resolves a script-defined function by name; otherwise the raw attribute body is inlined verbatim.
 
-The concatenated wrappers are compiled with `transpile_js_to_mir_with_preamble` (`:2311`) against a `Runtime` reconstructed from the retained heap/nursery/name_pool (`:2291-2297`). Setting the thread-local `context` to a matching `EvalContext` makes the transpiler treat this as `reusing_context=true`, so the new MIR context is **deferred rather than destroyed** — its code pages must survive because the installed `Function` Items point into them. Each wrapper is then fetched by name via `js_property_get` on the global object and installed into the element's `on<type>` IDL slot with `js_dom_set_event_handler_function` (`:2351`, defined in `lambda/js/js_dom.cpp:1182`). From that point the ordinary LambdaJS `js_dom_dispatch_event` path handles `this`, the `Event` argument, `return false` default-prevention, and propagation ([JS_13](../js/JS_13_Web_DOM.md), [RAD_15 — Events & Input](RAD_15_Events_Input.md)).
+The concatenated wrappers are compiled with `transpile_js_to_mir_with_preamble` (`:2311`) against a `Runtime` reconstructed from the retained heap/nursery/name_pool (`:2291-2297`). Setting the thread-local `context` to a matching `EvalContext` makes the transpiler treat this as `reusing_context=true`, so the new MIR context is **deferred rather than destroyed** — its code pages must survive because the installed `Function` Items point into them. Each wrapper is then fetched by name via `js_property_get` on the global object and installed into the element's `on<type>` IDL slot with `dom_set_event_handler_function` (`:2351`, defined in `lambda/dom/dom.cpp:1182`). From that point the ordinary LambdaJS `dom_dispatch_event` path handles `this`, the `Event` argument, `return false` default-prevention, and propagation ([JS_13](../js/JS_13_Web_DOM.md), [RAD_15 — Events & Input](RAD_15_Events_Input.md)).
 
 Editing-related handlers reach JS through the same retained runtime but a different trigger: `beforeinput` handlers are dispatched from the editing/selection layer at the beforeinput seam described in [RAD_18 — Editing, Selection & DOM Ranges](RAD_18_Editing_Selection_Ranges.md), not compiled here.
 
@@ -112,7 +112,7 @@ Editing-related handlers reach JS through the same retained runtime but a differ
 | `radiant/radiant.hpp` | Public script-runner surface: the two entry points plus `script_runner_set_retain_js_state`/`set_execute_external_scripts`/`cleanup_*`/`js_batch_cleanup_unsafe`. |
 | `radiant/cmd_layout.cpp` | Load pipeline ordering: initial cascade before scripts, `<style>` re-collection and recascade after JS mutation, event-handler compilation. |
 | `lambda/input/css/dom_element.hpp` | The retained-runtime fields on `DomDocument` (`js_mir_ctx`, `js_runtime_*`, `js_preamble_state`, `js_mutation_count`). |
-| `lambda/js/js_dom.cpp` | `js_dom_set_event_handler_function`, `js_dom_set_document`/`set_ui_context`/`set_host_driven_loop` — the binding calls this driver invokes (internals in JS_13). |
+| `lambda/dom/dom.cpp` | `dom_set_event_handler_function`, `dom_set_document`/`set_ui_context`/`set_host_driven_loop` — the binding calls this driver invokes (internals in JS_13). |
 
 ## Appendix B — Related documents
 
@@ -120,7 +120,7 @@ Editing-related handlers reach JS through the same retained runtime but a differ
 - [RAD_01 — View & DOM Model](RAD_01_View_and_DOM_Model.md) — the unified `DomElement*` tree that JS mutates and layout reads.
 - [RAD_15 — Events & Input](RAD_15_Events_Input.md) — the event dispatch path that fires the handlers this doc compiles.
 - [RAD_18 — Editing, Selection & DOM Ranges](RAD_18_Editing_Selection_Ranges.md) — the `beforeinput` seam through which editing reaches JS.
-- [RAD_20 — Application Shell & Browsing](RAD_20_Application_Shell_Browsing.md) — window setup, `js_dom_set_ui_context`/host-driven-loop wiring, and the network infra that loads external scripts.
+- [RAD_20 — Application Shell & Browsing](RAD_20_Application_Shell_Browsing.md) — window setup, `dom_set_ui_context`/host-driven-loop wiring, and the network infra that loads external scripts.
 - [RAD_22 — Media & Webview](RAD_22_Media_Webview.md) — embedded `<webview>` and the TODO IPC-to-runtime seam.
 - [JS_13 — Web-Platform DOM, CSSOM, Events & Fetch](../js/JS_13_Web_DOM.md) — the LambdaJS binding objects (`document`, `window`, elements, `getComputedStyle`, EventTarget) this driver transpiles against.
 

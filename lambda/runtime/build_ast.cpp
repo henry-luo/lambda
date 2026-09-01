@@ -6902,6 +6902,7 @@ static void direct_object_copy_base(LambdaDirectAstSink* sink,
             parent->name->str, parent->name->length);
         field->type = parent->type;
         lambda_ast_register_name(tp, field);
+        entry->binding = field->entry;
     }
 }
 
@@ -6977,6 +6978,7 @@ static void direct_object_add_field(LambdaDirectAstSink* sink,
     field_ref->name = field->name;
     field_ref->type = field_type;
     lambda_ast_register_name(tp, field_ref);
+    shape->binding = field_ref->entry;
 }
 
 static AstNode* direct_object_content_from_parts(Transpiler* tp,
@@ -7233,7 +7235,11 @@ static bool direct_view_add_state(LambdaDirectAstSink* sink,
         ? state->value->type : &TYPE_ANY;
     lambda_ast_register_name(tp, binding);
     NameEntry* entry = lookup_name_in_current_scope(tp, binding->name);
-    if (entry) entry->is_mutable = true;
+    if (entry) {
+        entry->is_mutable = true;
+        // Preserve the resolved declaration identity for both execution tiers.
+        state->entry = entry;
+    }
     return true;
 }
 
@@ -9339,11 +9345,12 @@ AstNode* build_loop_from_parts(Transpiler* tp, SourceSpan span,
             loop->key_filter == LOOP_KEY_SYMBOL ? &TYPE_SYMBOL :
             set_type_any(tp, ANY_LOOP_SRC);
         lambda_ast_register_name(tp, index);
+        loop->index_entry = lookup_name_in_current_scope(tp, loop->index_name);
     }
     lambda_ast_register_name(tp, (AstNamedNode*)loop);
+    loop->entry = lookup_name_in_current_scope(tp, loop->name);
     if (join) {
-        NameEntry* loop_entry = lookup_name_in_current_scope(tp, loop->name);
-        direct_rebind_join_ident(join, loop->name, loop_entry);
+        direct_rebind_join_ident(join, loop->name, loop->entry);
         build_join_key_specs(tp, loop, join);
     }
     if (loop->optional && !join) {

@@ -276,7 +276,7 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
   all** — NodeList/HTMLCollection/options/cssRules are eagerly materialized real Arrays
   with a companion-map `namedItem`/`constructor` decoration, kept "live" by a
   4096-entry issued-collection cache re-walked on every DOM mutation
-  (js_dom.cpp:1868, refresh sweeps) — copies on read *and* sweeps on write;
+  (dom.cpp:1868, refresh sweeps) — copies on read *and* sweeps on write;
   **element-shaped hosts are flattened** — Radiant's `Velmt` memcpys the struct into a
   VMap payload and strcmp-projects `tag`/`attrs`/`children`/`text` through the map-only
   interface. The carriers:
@@ -409,7 +409,7 @@ arrive as Items and some routes copy bytes per access just to probe the index.
   base-resolved access on that subtype. Debug assert at registration: for each subtype,
   `members[i].snake_name == parent->members[i].snake_name` for all parent ordinals.
 - **H4b — Brand-compare sweep.** ~31 direct `host_type ==` compares exist across
-  js_dom.cpp / the bridge / vmap.cpp; each must become family-aware (or provably
+  dom.cpp / the bridge / vmap.cpp; each must become family-aware (or provably
   base-only) when the family splits. A `radiant_dom_is_node_family(host_type)` predicate
   replaces them in one sweep; any survivor comparing raw equality against the base type
   is a latent "select element isn't a DOM node" bug.
@@ -477,7 +477,7 @@ perf/behavior canaries.
 
 ## 6. strcmp endgame — what DOM4 kills and what legitimately survives
 
-Census 2026-08-13: js_dom.cpp has ~687 string-compare sites (+89 bridge). DOM4's claim is
+Census 2026-08-13: dom.cpp has ~687 string-compare sites (+89 bridge). DOM4's claim is
 scoped: it eliminates string comparison as a **dispatch mechanism**, not as data
 semantics or parsing.
 

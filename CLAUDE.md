@@ -157,6 +157,7 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 | Output formatters | `lambda/format/` |
 | CSS, layout, rendering & interaction | `radiant/` — start with `radiant/view.hpp`, `radiant/layout.hpp`, `radiant/render.hpp`, `radiant/event.hpp`, `radiant/radiant.hpp`; detailed design in `doc/dev/radiant/RAD_00_Overview.md` (view/DOM model, CSS resolution, layout, rendering, SVG, events, editing, state, shell, JS scripting, media/webview) |
 | LambdaJS (JS engine) | `lambda/js/` — detailed design in `doc/dev/js/JS_00_Overview.md` |
+| DOM / web platform | `lambda/dom/` — realm-neutral DOM core driven by **both** JS (`el.querySelector`) and Lambda (`import dom`, and the `radiant.*` waist the `lambda/package/dom` templates use). Symbols are `dom_*`; `js_*` means the JS adapter. Design: `vibe/Lambda_Design_DOM_API.md`, surface: `doc/dev/js/JS_13_Web_DOM.md` |
 | Core runtime internals | `lambda/` (core) — detailed design in `doc/dev/lambda/LR_00_Overview.md` (value model, transpilers, MIR JIT, memory & GC, builtins) |
 | Custom lib types | `lib/str.h`, `lib/strbuf.h`, `lib/arraylist.h`, `lib/hashmap.h`, `lib/mempool.h` |
 | Tests | `test/*.cpp` (GTest), `test/lambda/*.ls` (integration), `test/layout/` (HTML/CSS) |

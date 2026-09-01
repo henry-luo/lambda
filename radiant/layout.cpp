@@ -20,7 +20,7 @@ extern "C" {
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/lambda-data.hpp"
-#include "../lambda/js/js_dom_observers.h"
+#include "../lambda/dom/dom_observers.h"
 
 using namespace std::chrono;
 
@@ -5008,7 +5008,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (doc->view_tree && uicon->window) {
         webview_manager_sync_layout(uicon, doc->view_tree);
     }
-    js_dom_observers_post_layout();
+    dom_observers_post_layout();
 
     auto t_end = high_resolution_clock::now();
     log_info("[TIMING] print_view_tree: %.1fms", duration<double, std::milli>(t_end - t_layout).count());

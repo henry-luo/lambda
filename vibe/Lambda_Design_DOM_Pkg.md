@@ -67,7 +67,7 @@ semantic mismatch gets recorded (in this doc's §9 ledger) rather than silently 
 
 | Design | Relationship |
 |---|---|
-| `Lambda_Design_Native_Module.md` | **Hard prerequisite.** The `dom` package sits on the `radiant-dom` Jube module (POC 1). It consumes the module's Lambda-facing API (`dom_node` VMap projections, tree/selector/mutation primitives) and extends the JS-facing surface. Do not start the package against the current `js_dom.cpp` monolith. |
+| `Lambda_Design_Native_Module.md` | **Hard prerequisite.** The `dom` package sits on the `radiant-dom` Jube module (POC 1). It consumes the module's Lambda-facing API (`dom_node` VMap projections, tree/selector/mutation primitives) and extends the JS-facing surface. Do not start the package against the current `dom.cpp` monolith. |
 | `vibe/radiant/Radiant_vs_Obscura.md` | Provides the API inventory and priority order (observers → custom elements → adopted stylesheets → traversal/parser → storage/facades). |
 | `vibe/radiant/Radiant_Design_Concurrency.md` (RC1–RC8) | Pages are Lambda isolates with same-thread script+layout. The `dom` package instantiates per page isolate; its state lives inside the isolate. |
 | `vibe/radiant/Radiant_Design_State_Management.md` (RS1–RS16) | The state store is already Lambda-shaped; it is a Phase-3 migration target into (or alongside) this package. |
@@ -595,6 +595,8 @@ not zero).
 
 ## 7. Phasing
 
+> **Phase-0 status 2026-09-01: the monolith gate is cleared.** The DOM bridge no longer lives in `lambda/js/`: it is `lambda/dom/`, under its own name, with `import dom` as a first-class Lambda surface (`vibe/Lambda_Design_DOM_API.md`, F22–F26). Package work no longer has to be written against `js_dom.cpp`. The L4 adapter is only partly extracted — the scheduling seam landed, the class-stamp/prototype/realm-global categories need a design pass (ESO79) — so §3.2's line is drawn in prose and in one seam, not yet throughout the code.
+
 **Phase 0 — prerequisite (already planned elsewhere): `radiant-dom` module POC.**
 Per `Lambda_Design_Native_Module.md` §8: DOM bridge carved into a Jube module, JS unified onto
 the VMap path, L4 semantic adapter designed (the eight deferred semantic items specified).
@@ -634,7 +636,7 @@ perf checks on interaction latency.*
 
 | Risk | Mitigation |
 |---|---|
-| Package built before the module boundary exists → built on `js_dom.cpp`, rebuilt later | Phase 0 is a hard gate; no package code against the monolith |
+| Package built before the module boundary exists → built on `dom.cpp`, rebuilt later | Phase 0 is a hard gate; no package code against the monolith |
 | GC rooting bug class (use-after-free of closures/Items) | Phase-0 rooting invariant + forced-GC stress tests; tracks `vibe/Lambda_GC_Root_Issue.md` |
 | JS↔Lambda call overhead creeps onto hot paths | placement rules (§3.3); interaction-latency checks in Phase 3; dispatch loop stays native |
 | Facades drift into fake-real ambiguity (the Obscura trap) | honesty accounting (§6.7); policy column in §4 is normative |
@@ -670,7 +672,7 @@ Friction-log entries from ST1–ST3 get appended here as F-numbered rows once wo
 | `vibe/radiant/Radiant_vs_Obscura.md` | API gap inventory and priorities this package implements |
 | `vibe/Lambda_Design_Native_Module.md` | Jube module system; `radiant-dom` POC (§8); VMap projections (§6.3); host API |
 | `vibe/Lambda_GC_Root_Issue.md` | open JIT GC-rooting issue the rooting invariant must respect |
-| `lambda/js/js_dom.cpp`, `js_dom_events.cpp`, `js_dom_selection.cpp`, `js_cssom.cpp` | current C+ DOM bridge (~18k lines) — Phase-0 carve-out source |
+| `lambda/dom/dom.cpp`, `dom_events.cpp`, `dom_selection.cpp`, `dom_cssom.cpp` | current C+ DOM bridge (~18k lines) — Phase-0 carve-out source |
 | `radiant/script_runner.cpp` | browser-global preamble whose no-op shims Phase 1 deletes |
 | `radiant/webdriver/webdriver_locator.cpp` | XPath locator gap closed by Phase-2 `document.evaluate` |
 | `doc/dev/js/JS_13_Web_DOM.md` | current LambdaJS DOM surface documentation |

@@ -7,10 +7,10 @@
  * JS object. Methods use js_get_this() to resolve the current XHR.
  */
 
-#include "js_xhr.h"
-#include "js_event_loop.h"
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
+#include "dom_xhr.h"
+#include "../js/js_event_loop.h"
+#include "../js/js_runtime.h"
+#include "../js/js_runtime_state.hpp"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
 #include "../input/input.hpp"

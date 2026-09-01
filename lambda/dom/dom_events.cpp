@@ -1,5 +1,5 @@
 /**
- * js_dom_events.cpp — DOM Event System for Lambda JS Runtime
+ * dom_events.cpp — DOM Event System for Lambda JS Runtime
  *
  * Implements the EventTarget interface (addEventListener, removeEventListener,
  * dispatchEvent) with full 3-phase propagation (capture → target → bubble).
@@ -8,12 +8,12 @@
  * DomNode pointer. Avoids modifying the DomNode struct.
  */
 
-#include "js_dom_events.h"
-#include "js_dom.h"
-#include "js_dom_selection.h"
-#include "js_runtime.h"
-#include "js_runtime_state.hpp"
-#include "js_class.h"
+#include "dom_events.h"
+#include "dom.h"
+#include "dom_selection.h"
+#include "../js/js_runtime.h"
+#include "../js/js_runtime_state.hpp"
+#include "../js/js_class.h"
 #include "../lambda.h"
 #include "../lambda-data.hpp"
 #include "../lambda.hpp"
@@ -49,14 +49,14 @@ extern "C" void radiant_dom_event_set_lambda_dispatch_position(
 extern "C" void radiant_dom_event_clear_lambda_dispatch_position(Item event);
 
 // Forward decls used by Event helpers below (signatures from js_runtime.h /
-// js_dom.h, declared here under extern "C" to avoid header coupling).
+// dom.h, declared here under extern "C" to avoid header coupling).
 extern __thread EvalContext* context;
 
 // Shared form-control classification used by requestSubmit/reset helpers.
-extern "C" const char* js_dom_input_type_lower(void* dom_elem);
+extern "C" const char* dom_input_type_lower(void* dom_elem);
 extern "C" Item js_formdata_collect_form_entries(void* form_elem, void* submitter_elem);
-extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
-extern "C" Item js_dom_check_validity_bridge(Item elem_item);
+extern "C" bool dom_navigate_submit_target(const char* target_name, const char* url);
+extern "C" Item dom_check_validity_bridge(Item elem_item);
 extern "C" Item radiant_dom_element_operation(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc);
@@ -65,7 +65,7 @@ extern "C" Item radiant_dom_element_operation(Item elem_item,
 // round trip the per-field url_encode_component() calls used to pay. This is
 // also the spec's serializer, which encodes U+0020 as '+' — encodeURIComponent
 // rules (%20, and ! ~ ' ( ) left literal) are not what a form submission emits.
-static void js_dom_append_form_encoded(StrBuf* sb, const char* text, size_t len) {
+static void dom_append_form_encoded(StrBuf* sb, const char* text, size_t len) {
     if (!sb || !text || len == 0) return;
     size_t need = url_encode_measure(text, len, URL_KEEP_FORM, true, NULL);
     if (!strbuf_ensure_cap(sb, sb->length + need + 1)) return;
@@ -73,7 +73,7 @@ static void js_dom_append_form_encoded(StrBuf* sb, const char* text, size_t len)
     sb->str[sb->length] = '\0';
 }
 
-static char* js_dom_build_submit_query(Item entries) {
+static char* dom_build_submit_query(Item entries) {
     if (get_type_id(entries) != LMD_TYPE_ARRAY) {
         return mem_strdup("", MEM_CAT_JS_RUNTIME);
     }
@@ -90,9 +90,9 @@ static char* js_dom_build_submit_query(Item entries) {
         if (!val) val = "";
 
         if (sb->length > 0) strbuf_append_char(sb, '&');
-        js_dom_append_form_encoded(sb, key, strlen(key));
+        dom_append_form_encoded(sb, key, strlen(key));
         strbuf_append_char(sb, '=');
-        js_dom_append_form_encoded(sb, val, strlen(val));
+        dom_append_form_encoded(sb, val, strlen(val));
     }
 
     char* query = mem_strdup(sb->str ? sb->str : "", MEM_CAT_JS_RUNTIME);
@@ -100,7 +100,7 @@ static char* js_dom_build_submit_query(Item entries) {
     return query;
 }
 
-static const char* js_dom_pick_submit_attr(DomElement* submitter, DomElement* form,
+static const char* dom_pick_submit_attr(DomElement* submitter, DomElement* form,
                                            const char* submitter_attr,
                                            const char* form_attr) {
     if (submitter) {
@@ -114,14 +114,14 @@ static const char* js_dom_pick_submit_attr(DomElement* submitter, DomElement* fo
     return "";
 }
 
-static void js_dom_run_form_submit_navigation(DomElement* form, DomElement* submitter) {
+static void dom_run_form_submit_navigation(DomElement* form, DomElement* submitter) {
     if (!form) return;
 
-    const char* method = js_dom_pick_submit_attr(submitter, form, "formmethod", "method");
+    const char* method = dom_pick_submit_attr(submitter, form, "formmethod", "method");
     if (!method || !*method) method = "get";
 
-    const char* target = js_dom_pick_submit_attr(submitter, form, "formtarget", "target");
-    const char* action = js_dom_pick_submit_attr(submitter, form, "formaction", "action");
+    const char* target = dom_pick_submit_attr(submitter, form, "formtarget", "target");
+    const char* action = dom_pick_submit_attr(submitter, form, "formaction", "action");
     if ((!action || !*action) && form->doc && form->doc->url) {
         action = url_get_href(form->doc->url);
     }
@@ -130,7 +130,7 @@ static void js_dom_run_form_submit_navigation(DomElement* form, DomElement* subm
     char* nav_url = nullptr;
     if (strcasecmp(method, "get") == 0) {
         Item entries = js_formdata_collect_form_entries(form, submitter);
-        char* query = js_dom_build_submit_query(entries);
+        char* query = dom_build_submit_query(entries);
         size_t action_len = strlen(action);
         size_t query_len = strlen(query);
         bool has_query = strchr(action, '?') != nullptr;
@@ -150,7 +150,7 @@ static void js_dom_run_form_submit_navigation(DomElement* form, DomElement* subm
     }
 
     if (nav_url) {
-        js_dom_navigate_submit_target(target, nav_url);
+        dom_navigate_submit_target(target, nav_url);
         mem_free(nav_url);
     }
 }
@@ -224,13 +224,13 @@ static void report_exception_to_window_onerror(Item err, const char* type) {
     (void)type;
 }
 
-extern "C" DomElement* js_dom_find_form_owner(void* control_ptr) {
+extern "C" DomElement* dom_find_form_owner(void* control_ptr) {
     DomElement* control = (DomElement*)control_ptr;
     if (!control) return nullptr;
     const char* form_id = control->get_attribute("form");
     if (form_id && *form_id) {
         DomDocument* doc = control->doc;
-        if (doc && doc->root) return js_dom_find_element_by_id(doc->root, form_id);
+        if (doc && doc->root) return dom_find_element_by_id(doc->root, form_id);
         return nullptr;
     }
 
@@ -243,39 +243,39 @@ extern "C" DomElement* js_dom_find_form_owner(void* control_ptr) {
     return nullptr;
 }
 
-extern "C" bool js_dom_is_submit_button(void* elem_ptr) {
+extern "C" bool dom_is_submit_button(void* elem_ptr) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !elem->tag_name) return false;
     if (strcasecmp(elem->tag_name, "input") == 0) {
-        const char* type = js_dom_input_type_lower(elem);
+        const char* type = dom_input_type_lower(elem);
         return strcmp(type, "submit") == 0 || strcmp(type, "image") == 0;
     }
     if (strcasecmp(elem->tag_name, "button") == 0) {
-        const char* type = js_dom_input_type_lower(elem);
+        const char* type = dom_input_type_lower(elem);
         return strcmp(type, "text") == 0 || strcmp(type, "submit") == 0;
     }
     return false;
 }
 
-extern "C" bool js_dom_is_reset_button(void* elem_ptr) {
+extern "C" bool dom_is_reset_button(void* elem_ptr) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !elem->tag_name) return false;
     if (strcasecmp(elem->tag_name, "input") == 0) {
-        return strcmp(js_dom_input_type_lower(elem), "reset") == 0;
+        return strcmp(dom_input_type_lower(elem), "reset") == 0;
     }
     if (strcasecmp(elem->tag_name, "button") == 0) {
-        return strcmp(js_dom_input_type_lower(elem), "reset") == 0;
+        return strcmp(dom_input_type_lower(elem), "reset") == 0;
     }
     return false;
 }
 
-static Item js_dom_throw_named_error(const char* name, const char* message) {
+static Item dom_throw_named_error(const char* name, const char* message) {
     Item error_name = js_name_item(name ? name : "Error");
     Item error_message = js_name_item(message ? message : "");
     return js_throw_value(js_new_error_with_name(error_name, error_message));
 }
 
-static Item js_dom_resolve_request_submitter(DomElement* form,
+static Item dom_resolve_request_submitter(DomElement* form,
                                              Item submitter_item,
                                              bool* has_submitter,
                                              DomElement** out_submitter) {
@@ -287,29 +287,29 @@ static Item js_dom_resolve_request_submitter(DomElement* form,
     }
 
     if (has_submitter) *has_submitter = true;
-    DomNode* node = (DomNode*)js_dom_unwrap_element(submitter_item);
+    DomNode* node = (DomNode*)dom_unwrap_element(submitter_item);
     DomElement* submitter = (node && node->is_element()) ? node->as_element() : nullptr;
-    if (!js_dom_is_submit_button(submitter)) {
+    if (!dom_is_submit_button(submitter)) {
         return js_throw_type_error("requestSubmit submitter must be a submit button");
     }
 
-    DomElement* owner = js_dom_find_form_owner(submitter);
+    DomElement* owner = dom_find_form_owner(submitter);
     if (owner != form) {
-        return js_dom_throw_named_error("NotFoundError",
+        return dom_throw_named_error("NotFoundError",
             "requestSubmit submitter is not owned by this form");
     }
     if (out_submitter) *out_submitter = submitter;
     return make_js_undefined();
 }
 
-static bool js_dom_should_validate_submit(DomElement* form, DomElement* submitter) {
+static bool dom_should_validate_submit(DomElement* form, DomElement* submitter) {
     if (form && form->has_attribute("novalidate")) return false;
     if (submitter && submitter->has_attribute("formnovalidate")) return false;
     return true;
 }
 
-extern "C" Item js_dom_form_submit_bridge(Item form_item) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(form_item);
+extern "C" Item dom_form_submit_bridge(Item form_item) {
+    DomNode* node = (DomNode*)dom_unwrap_element(form_item);
     DomElement* form = (node && node->is_element()) ? node->as_element() : nullptr;
     if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
         return make_js_undefined();
@@ -317,12 +317,12 @@ extern "C" Item js_dom_form_submit_bridge(Item form_item) {
 
     // submit() intentionally bypasses validation and the cancelable submit event;
     // requestSubmit() below keeps those checks before entering this shared navigation path.
-    js_dom_run_form_submit_navigation(form, nullptr);
+    dom_run_form_submit_navigation(form, nullptr);
     return make_js_undefined();
 }
 
-extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter_item) {
-    DomNode* node = (DomNode*)js_dom_unwrap_element(form_item);
+extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter_item) {
+    DomNode* node = (DomNode*)dom_unwrap_element(form_item);
     DomElement* form = (node && node->is_element()) ? node->as_element() : nullptr;
     if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
         return make_js_undefined();
@@ -330,23 +330,23 @@ extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter
 
     bool has_submitter = false;
     DomElement* submitter = nullptr;
-    JS_ASSIGN_OR_RETURN(submitter_result, js_dom_resolve_request_submitter(form, submitter_item,
+    JS_ASSIGN_OR_RETURN(submitter_result, dom_resolve_request_submitter(form, submitter_item,
         &has_submitter, &submitter));
     if (has_submitter && !submitter) return make_js_undefined();
 
-    if (js_dom_should_validate_submit(form, submitter)) {
-        Item valid = js_dom_check_validity_bridge(form_item);
+    if (dom_should_validate_submit(form, submitter)) {
+        Item valid = dom_check_validity_bridge(form_item);
         if (!js_is_truthy(valid)) return make_js_undefined();
     }
 
     RootFrame roots(1);
     Rooted<Item> submit_event_root(roots, js_create_event("submit", true, true));
     js_set_key_cstr(submit_event_root.get(), "isTrusted", (Item){.item = ITEM_TRUE});
-    js_set_key_cstr(submit_event_root.get(), "submitter", submitter ? js_dom_wrap_element(submitter) : ItemNull);
-    Item submit_ok = js_dom_dispatch_event(form_item, submit_event_root.get());
+    js_set_key_cstr(submit_event_root.get(), "submitter", submitter ? dom_wrap_element(submitter) : ItemNull);
+    Item submit_ok = dom_dispatch_event(form_item, submit_event_root.get());
     if (submit_ok.item == ITEM_FALSE) return make_js_undefined();
 
-    js_dom_run_form_submit_navigation(form, submitter);
+    dom_run_form_submit_navigation(form, submitter);
     return make_js_undefined();
 }
 
@@ -392,6 +392,12 @@ struct EventTypeCountEntry {
     const char* type;
     int count;
 };
+
+static void event_type_count_entry_free(void* item) {
+    EventTypeCountEntry* entry = (EventTypeCountEntry*)item;
+    if (entry && entry->type) mem_free((void*)entry->type);
+}
+
 HASHMAP_DEFINE_STRKEY(event_type_count, EventTypeCountEntry, type)
 
 // DOM listener registration is semantic realm state. The state capsule is
@@ -406,14 +412,14 @@ struct JsDomEventRuntimeState {
     uint64_t registration_order = 0;
 };
 
-static JsDomEventRuntimeState* js_dom_event_runtime_state_get() {
+static JsDomEventRuntimeState* dom_event_runtime_state_get() {
     if (!js_active_runtime_state) return nullptr;
     return (JsDomEventRuntimeState*)js_runtime_state.dom_event_state;
 }
 
-static bool js_dom_event_runtime_state_ensure() {
+static bool dom_event_runtime_state_ensure() {
     if (!js_active_runtime_state) return false;
-    if (js_dom_event_runtime_state_get()) return true;
+    if (dom_event_runtime_state_get()) return true;
     JsDomEventRuntimeState* state = (JsDomEventRuntimeState*)mem_calloc(1,
         sizeof(JsDomEventRuntimeState), MEM_CAT_JS_RUNTIME);
     if (!state) {
@@ -426,13 +432,13 @@ static bool js_dom_event_runtime_state_ensure() {
 
 // These aliases retain the compact legacy implementation while each expands
 // to a direct field of the already-bound context-local capsule.
-#define js_dom_event_state ((JsDomEventRuntimeState*)js_runtime_state.dom_event_state)
-#define _entries (js_dom_event_state->entries)
-#define _entry_count (js_dom_event_state->entry_count)
-#define _entry_capacity (js_dom_event_state->entry_capacity)
-#define _entry_index (js_dom_event_state->entry_index)
-#define _type_counts (js_dom_event_state->type_counts)
-#define _event_registration_order (js_dom_event_state->registration_order)
+#define dom_event_rt_state ((JsDomEventRuntimeState*)js_runtime_state.dom_event_state)
+#define _entries (dom_event_rt_state->entries)
+#define _entry_count (dom_event_rt_state->entry_count)
+#define _entry_capacity (dom_event_rt_state->entry_capacity)
+#define _entry_index (dom_event_rt_state->entry_index)
+#define _type_counts (dom_event_rt_state->type_counts)
+#define _event_registration_order (dom_event_rt_state->registration_order)
 
 // sentinel pointers for non-element targets
 static const int _window_sentinel = 0;
@@ -453,7 +459,7 @@ static void event_listener_release_roots(EventListener* listener) {
     }
 }
 
-static bool js_dom_event_is_document_target(Item target) {
+static bool dom_event_is_document_target(Item target) {
     if (get_type_id(target) == LMD_TYPE_VMAP && target.vmap && target.vmap->host_type) {
         const JubeTypeDef* type = jube_find_type_by_host_type(target.vmap->host_type);
         if (type && type->name) {
@@ -469,11 +475,11 @@ static bool js_dom_event_is_document_target(Item target) {
 static void* get_event_target_key(Item target) {
     // document wrappers are host VMAPs; key them through the registry instead
     // of the old proxy-brand predicate so listener storage follows host types.
-    if (js_dom_event_is_document_target(target)) {
+    if (dom_event_is_document_target(target)) {
         return (void*)&_document_sentinel;
     }
     // check for DOM node
-    void* node = js_dom_unwrap_element(target);
+    void* node = dom_unwrap_element(target);
     if (node) return node;
     // If target IS the global (window) object, key on the window sentinel so
     // that addEventListener on window and dispatch through the path agree.
@@ -498,7 +504,7 @@ static bool event_target_needs_root(Item target, void* key, DomNodeRef node_ref)
         key == (void*)&_window_sentinel || key == (void*)&_document_sentinel) {
         return false;
     }
-    if (js_dom_unwrap_element(target)) return false;
+    if (dom_unwrap_element(target)) return false;
     TypeId type = get_type_id(target);
     return type == LMD_TYPE_MAP || type == LMD_TYPE_OBJECT || type == LMD_TYPE_VMAP;
 }
@@ -601,7 +607,9 @@ static NodeListeners* find_listeners(void* key) {
 // removed or once listener never keeps a later dispatch on the slow path.
 static void note_listener_type(const char* type, int delta) {
     if (!type || !type[0] || delta == 0) return;
-    if (!_type_counts && delta > 0) _type_counts = event_type_count_new(16);
+    if (!_type_counts && delta > 0) {
+        _type_counts = event_type_count_new_with_free(16, event_type_count_entry_free);
+    }
     if (!_type_counts) return;
     EventTypeCountEntry lookup = {type, 0};
     const EventTypeCountEntry* found =
@@ -609,12 +617,22 @@ static void note_listener_type(const char* type, int delta) {
     int old_count = found ? found->count : 0;
     int new_count = old_count + delta;
     if (new_count <= 0) {
-        if (found) hashmap_delete(_type_counts, &lookup);
+        if (found) {
+            const EventTypeCountEntry* removed =
+                (const EventTypeCountEntry*)hashmap_delete(_type_counts, &lookup);
+            if (removed && removed->type) mem_free((void*)removed->type);
+        }
         return;
     }
-    EventTypeCountEntry updated = {found ? found->type : type, new_count};
+
+    // Listener compaction frees listener.type. The dispatch index must own its
+    // key so removing one listener cannot hide peers of the same event type.
+    const char* owned_type = found ? found->type : mem_strdup(type, MEM_CAT_JS_RUNTIME);
+    if (!owned_type) return;
+    EventTypeCountEntry updated = {owned_type, new_count};
     hashmap_set(_type_counts, &updated);
     if (hashmap_oom(_type_counts)) {
+        if (!found) mem_free((void*)owned_type);
         hashmap_free(_type_counts);
         _type_counts = nullptr;
         log_error("js-dom-events: listener type index allocation failed");
@@ -676,8 +694,8 @@ static EventListener* nl_find_idl_listener(NodeListeners* nl, const char* type) 
 static bool event_handler_target_supported(Item target) {
     Item global = js_get_global_this();
     if (target.item != 0 && target.item == global.item) return true;
-    if (js_dom_event_is_document_target(target)) return true;
-    if (js_dom_unwrap_element(target)) return true;
+    if (dom_event_is_document_target(target)) return true;
+    if (dom_unwrap_element(target)) return true;
     return get_type_id(target) == LMD_TYPE_MAP &&
            js_class_id(target) == JS_CLASS_EVENT_TARGET;
 }
@@ -736,13 +754,13 @@ static void event_handler_property_set_for_key(void* key, Item target,
     note_listener_type(listener.type, 1);
 }
 
-extern "C" void js_dom_event_handler_property_set(Item target,
+extern "C" void dom_event_handler_property_set(Item target,
                                                     const char* property_name,
                                                     int property_name_len,
                                                     Item value) {
-    if (!js_dom_event_runtime_state_ensure() || !event_handler_target_supported(target)) return;
+    if (!dom_event_runtime_state_ensure() || !event_handler_target_supported(target)) return;
     void* key = get_event_target_key(target);
-    DomNode* node = (DomNode*)js_dom_unwrap_element(target);
+    DomNode* node = (DomNode*)dom_unwrap_element(target);
     DomDocument* owner_doc = node && node->is_element()
         ? node->as_element()->doc : nullptr;
     DomNodeRef node_ref = node ? dom_node_ref(node) : DomNodeRef{nullptr, 0};
@@ -750,9 +768,9 @@ extern "C" void js_dom_event_handler_property_set(Item target,
                                        property_name_len, value, owner_doc, node_ref);
 }
 
-extern "C" void js_dom_event_handler_property_set_for_node(
+extern "C" void dom_event_handler_property_set_for_node(
         void* dom_node, const char* property_name, int property_name_len, Item value) {
-    if (!js_dom_event_runtime_state_ensure()) return;
+    if (!dom_event_runtime_state_ensure()) return;
     DomNode* node = (DomNode*)dom_node;
     DomDocument* owner_doc = node && node->is_element()
         ? node->as_element()->doc : nullptr;
@@ -838,11 +856,11 @@ static bool signal_is_aborted(Item signal_item) {
 // addEventListener / removeEventListener
 // ============================================================================
 
-void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {
-    if (!js_dom_event_runtime_state_ensure()) return;
+void dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {
+    if (!dom_event_runtime_state_ensure()) return;
     const char* type = fn_to_cstr(type_item);
     if (!type) {
-        log_debug("js_dom_add_event_listener: invalid type");
+        log_debug("dom_add_event_listener: invalid type");
         return;
     }
 
@@ -864,7 +882,7 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
     // lazily at dispatch time). Reject obviously-bad types like numbers/booleans.
     if (cb_tid != LMD_TYPE_FUNC && cb_tid != LMD_TYPE_MAP &&
         cb_tid != LMD_TYPE_OBJECT && cb_tid != LMD_TYPE_ELEMENT) {
-        log_debug("js_dom_add_event_listener: callback must be function or object (got tid=%d)", cb_tid);
+        log_debug("dom_add_event_listener: callback must be function or object (got tid=%d)", cb_tid);
         return;
     }
 
@@ -890,7 +908,7 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
                 key == (void*)&_document_sentinel) {
                 is_root_target = true;
             } else {
-                DomElement* el = (DomElement*)js_dom_unwrap_element(elem_item);
+                DomElement* el = (DomElement*)dom_unwrap_element(elem_item);
                 if (el && el->tag_name &&
                     (strcasecmp(el->tag_name, "html") == 0 ||
                      strcasecmp(el->tag_name, "body") == 0)) {
@@ -904,7 +922,7 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
         }
     }
 
-    DomNode* event_node = (DomNode*)js_dom_unwrap_element(elem_item);
+    DomNode* event_node = (DomNode*)dom_unwrap_element(elem_item);
     DomDocument* event_doc = nullptr;
     if (event_node) {
         for (DomNode* current = event_node; current; current = current->parent) {
@@ -913,7 +931,7 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
                 break;
             }
         }
-        if (!event_doc) event_doc = (DomDocument*)js_dom_get_document();
+        if (!event_doc) event_doc = (DomDocument*)dom_get_document();
     }
     DomNodeRef event_ref = event_node ? dom_node_ref(event_node) : DomNodeRef{nullptr, 0};
     if (event_node && (!event_doc || !dom_node_ref_validate(event_doc, event_ref))) return;
@@ -930,7 +948,7 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
         if (el->removed) continue;
         if (!el->is_idl_handler && strcmp(el->type, type) == 0 && el->capture == capture &&
             event_listener_root_item(el->callback_root).item == cb_item.item) {
-            log_debug("js_dom_add_event_listener: duplicate listener for '%s', skipping", type);
+            log_debug("dom_add_event_listener: duplicate listener for '%s', skipping", type);
             return;
         }
     }
@@ -952,7 +970,7 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
         (signal.item != 0 && get_type_id(signal) != LMD_TYPE_NULL && !listener.signal_root)) {
         event_listener_release_roots(&listener);
         mem_free(type_copy);
-        log_error("js_dom_add_event_listener: failed to root '%s' listener", type);
+        log_error("dom_add_event_listener: failed to root '%s' listener", type);
         return;
     }
     listener.order = ++_event_registration_order;
@@ -962,12 +980,12 @@ void js_dom_add_event_listener(Item elem_item, Item type_item, Item cb_item, Ite
 
     nl_push(nl, listener);
     note_listener_type(listener.type, 1);
-    log_debug("js_dom_add_event_listener: added '%s' listener (capture=%d, once=%d, passive=%d) on %p",
+    log_debug("dom_add_event_listener: added '%s' listener (capture=%d, once=%d, passive=%d) on %p",
               type, (int)capture, (int)once, (int)passive, key);
 }
 
-void js_dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {
-    if (!js_dom_event_runtime_state_get()) return;
+void dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, Item opts_item) {
+    if (!dom_event_runtime_state_get()) return;
     const char* type = fn_to_cstr(type_item);
     if (!type) return;
 
@@ -998,7 +1016,7 @@ void js_dom_remove_event_listener(Item elem_item, Item type_item, Item cb_item, 
             // tombstone — actual storage is reclaimed at next opportunity.
             // This protects in-flight dispatch loops walking the array.
             tombstone_listener(el);
-            log_debug("js_dom_remove_event_listener: removed '%s' listener from %p", type, key);
+            log_debug("dom_remove_event_listener: removed '%s' listener from %p", type, key);
             return;
         }
     }
@@ -1206,19 +1224,19 @@ Item js_create_custom_event_init(const char* type, bool bubbles, bool cancelable
 
 extern "C" Item js_eventtarget_add_listener(Item type, Item callback, Item opts) {
     Item self = js_get_this();
-    js_dom_add_event_listener(self, type, callback, opts);
+    dom_add_event_listener(self, type, callback, opts);
     return make_js_undefined();
 }
 
 extern "C" Item js_eventtarget_remove_listener(Item type, Item callback, Item opts) {
     Item self = js_get_this();
-    js_dom_remove_event_listener(self, type, callback, opts);
+    dom_remove_event_listener(self, type, callback, opts);
     return make_js_undefined();
 }
 
 extern "C" Item js_eventtarget_dispatch(Item event_item) {
     Item self = js_get_this();
-    return js_dom_dispatch_event(self, event_item);
+    return dom_dispatch_event(self, event_item);
 }
 
 Item js_create_event_target(void) {
@@ -1526,14 +1544,14 @@ static Item js_input_event_live_target_ranges(Item target_ranges) {
         Item end_container = init_item(range, "endContainer");
         bool static_range = js_input_event_is_static_range(range);
         bool static_range_has_dom_boundary =
-            js_dom_unwrap_element(start_container) ||
-            js_dom_unwrap_element(end_container);
+            dom_unwrap_element(start_container) ||
+            dom_unwrap_element(end_container);
         if (static_range && !static_range_has_dom_boundary) {
             js_array_push(ranges, js_input_event_snapshot_range(range));
             continue;
         }
         const char* exc = nullptr;
-        JS_ASSIGN_OR_RETURN(live_range, js_dom_create_live_range_from_boundaries(
+        JS_ASSIGN_OR_RETURN(live_range, dom_create_live_range_from_boundaries(
             start_container,
             init_int(range, "startOffset", 0),
             end_container,
@@ -1834,7 +1852,7 @@ extern "C" Item js_create_native_wheel_event(const char* type,
 
 // ============================================================================
 // Legacy IE-style `window.event` plumbing for the Radiant inline-handler
-// (`onclick="..."`) path. The bridge dispatch (`js_dom_dispatch_event`)
+// (`onclick="..."`) path. The bridge dispatch (`dom_dispatch_event`)
 // already sets/restores `window.event` around its listener invocation.
 // Inline handlers compiled by `collect_and_compile_event_handlers` take no
 // `event` parameter, so the only way for handler bodies like
@@ -1878,7 +1896,7 @@ static int build_path(Item target, void** path, bool* path_is_dom, int max_path)
     }
 
     // start from target's DOM node
-    void* node_ptr = js_dom_unwrap_element(target);
+    void* node_ptr = dom_unwrap_element(target);
     if (!node_ptr) {
         // plain JS-object EventTarget
         path_is_dom[count] = false;
@@ -1913,7 +1931,7 @@ static Item wrap_path_key(void* key, bool key_is_dom) {
         return js_get_document_object_value();
     }
     // Plain JS-object EventTarget: key is a container pointer (Map/Object/VMap).
-    // Test this before treating the key as a DomNode: js_dom_wrap_element
+    // Test this before treating the key as a DomNode: dom_wrap_element
     // dereferences its input as a node, and generic EventTarget maps are not
     // layout nodes despite sharing this listener-key path.
     if (key && !key_is_dom) {
@@ -1923,7 +1941,7 @@ static Item wrap_path_key(void* key, bool key_is_dom) {
             return it;
         }
     }
-    Item dom = js_dom_wrap_element(key);
+    Item dom = dom_wrap_element(key);
     if (dom.item != 0 && get_type_id(dom) != LMD_TYPE_NULL) return dom;
     return ItemNull;
 }
@@ -2037,7 +2055,7 @@ static void fire_listeners(void* key, const char* type, Item event, int phase,
     #undef _STOP_IMM
 }
 
-Item js_dom_dispatch_event(Item elem_item, Item event_item) {
+Item dom_dispatch_event(Item elem_item, Item event_item) {
     RootFrame roots(4);
     Rooted<Item> elem_root(roots, elem_item);
     Rooted<Item> event_root(roots, event_item);
@@ -2045,7 +2063,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     Rooted<Item> previous_global_event_root(roots, ItemNull);
     elem_item = elem_root.get();
     event_item = event_root.get();
-    if (!js_dom_event_runtime_state_ensure()) return (Item){.item = ITEM_FALSE};
+    if (!dom_event_runtime_state_ensure()) return (Item){.item = ITEM_FALSE};
     // Per spec: dispatchEvent(null) / dispatchEvent(non-Event) throws TypeError.
     TypeId evt_tid = get_type_id(event_item);
     if (event_item.item == 0 || evt_tid == LMD_TYPE_NULL ||
@@ -2060,7 +2078,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     Item type_val = js_get_name_key(event_item, "type");
     const char* type = fn_to_cstr(type_val);
     if (!type) {
-        log_error("js_dom_dispatch_event: event has no type");
+        log_error("dom_dispatch_event: event has no type");
         return (Item){.item = ITEM_FALSE};
     }
 
@@ -2069,7 +2087,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
     // single engine for both paths instead of creating a JS-only default tier.
     if (radiant_dom_event_is(event_item) &&
         !radiant_synthetic_dom_dispatch_is_reentry(event_item) &&
-        js_dom_unwrap_element(elem_item)) {
+        dom_unwrap_element(elem_item)) {
         Item unified_result = radiant_dispatch_synthetic_dom_event(elem_item,
                                                                     event_item);
         if (unified_result.item != ITEM_NULL) return unified_result;
@@ -2225,7 +2243,7 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
         event_set_bool(event_item, "returnValue", false);
     }
 
-    log_debug("js_dom_dispatch_event: dispatched '%s' on %p (prevented=%d)",
+    log_debug("dom_dispatch_event: dispatched '%s' on %p (prevented=%d)",
               type, (void*)path[0], (int)prevented);
 
     // dispatchEvent returns false only when the event is cancelable AND
@@ -2239,8 +2257,8 @@ Item js_dom_dispatch_event(Item elem_item, Item event_item) {
 // Lifecycle
 // ============================================================================
 
-void js_dom_events_reset(void) {
-    if (!js_dom_event_runtime_state_get()) return;
+void dom_events_reset(void) {
+    if (!dom_event_runtime_state_get()) return;
     for (int i = 0; i < _entry_count; i++) {
         NodeListeners* nl = &_entries[i].listeners;
         for (int j = 0; j < nl->count; j++) {
@@ -2275,7 +2293,7 @@ void js_dom_events_reset(void) {
     _event_registration_order = 0;
 }
 
-#undef js_dom_event_state
+#undef dom_event_rt_state
 #undef _entries
 #undef _entry_count
 #undef _entry_capacity
@@ -2283,7 +2301,7 @@ void js_dom_events_reset(void) {
 #undef _type_counts
 #undef _event_registration_order
 
-extern "C" void js_dom_events_destroy_context(JsRuntimeState* runtime_state) {
+extern "C" void dom_events_destroy_context(JsRuntimeState* runtime_state) {
     if (!runtime_state || !runtime_state->dom_event_state) return;
     JsDomEventRuntimeState* state =
         (JsDomEventRuntimeState*)runtime_state->dom_event_state;

@@ -28,6 +28,8 @@
 #include "../../lib/re2_glue.hpp"
 #include "../../lib/utf.h"
 #include <stdarg.h>
+#include "../dom/dom.h"
+#include "../dom/dom_events.h"
 
 struct JsGeneratorStateRecord;
 struct gc_heap;
@@ -219,12 +221,6 @@ extern "C" bool js_item_to_integral_int64(Item value, int64_t* out, bool allow_i
 extern __thread EvalContext* context;
 extern "C" Item js_object_set_prototype_of(Item obj, Item proto);
 extern "C" bool js_resolve_lazy_global(Item object, Item key, Item* out_value);
-extern "C" void js_dom_event_handler_property_set(Item target,
-                                                    const char* property_name,
-                                                    int property_name_len,
-                                                    Item value);
-extern "C" bool js_dom_dataset_set_object_property(Item dataset, Item key,
-                                                     Item value);
 extern "C" int js_intrinsic_initialization_begin_for_constructor(Item constructor);
 extern "C" void js_intrinsic_initialization_end_for_constructor(int active);
 extern "C" Item js_util_custom_promisify_args_symbol(void);
@@ -303,7 +299,7 @@ static inline void js_note_event_handler_property_set(Item object,
                                                        int name_len,
                                                        Item value) {
     if (!name || name_len < 3 || name[0] != 'o' || name[1] != 'n') return;
-    js_dom_event_handler_property_set(object, name, name_len, value);
+    dom_event_handler_property_set(object, name, name_len, value);
 }
 
 static inline void js_note_event_handler_property_set(Item object, Item key,
@@ -6727,7 +6723,7 @@ static Item js_set_map_core(Item object, Item key, Item value, Item receiver,
         // new String("x") must address property "x", not an unnameable slot.
         JS_ASSIGN_OR_RETURN_INTO(key, js_to_property_key(key));
     }
-    if (!bypass_accessor_dispatch && js_dom_dataset_set_object_property(object, key, value)) {
+    if (!bypass_accessor_dispatch && dom_dataset_set_object_property(object, key, value)) {
         return value;
     }
     bool private_internal_property_key = js_is_private_internal_property_key(key);
@@ -8085,7 +8081,7 @@ static inline Map* js_named_fast_receiver_map(Item object, const char* name,
             name_len)) {
         Array* arr = object.array;
         if (!arr || !js_array_has_props(arr) ||
-                js_dom_collection_has_live_property_state(object)) return NULL;
+                dom_collection_has_live_property_state(object)) return NULL;
         if (out_receiver_kind) {
             *out_receiver_kind = JS_NAMED_FAST_RECEIVER_ARRAY_PROPS;
         }

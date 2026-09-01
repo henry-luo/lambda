@@ -30,6 +30,69 @@ JsModuleConstEntry* jm_find_module_const_in(struct hashmap* consts, const char* 
     return (JsModuleConstEntry*)hashmap_get(consts, &lookup);
 }
 
+JsModuleConstEntry* jm_find_module_const_by_binding_in(struct hashmap* consts,
+        NameEntry* binding) {
+    if (!consts || !binding) return NULL;
+    // Annex B keeps the block function's lexical cell distinct from the
+    // function/global var cell it publishes. Module storage belongs to that
+    // publication binding, including reads compiled outside the block (D8.2.5).
+    NameEntry* module_binding = binding->annex_b_outer_binding
+        ? binding->annex_b_outer_binding : binding;
+    size_t iter = 0;
+    void* item = NULL;
+    while (hashmap_iter(consts, &iter, &item)) {
+        JsModuleConstEntry* candidate = (JsModuleConstEntry*)item;
+        if (candidate->binding == module_binding) return candidate;
+        if (!candidate->binding && candidate->binding_node &&
+                module_binding->node == candidate->binding_node) {
+            // Import syntax retains its declaration node while scope rebuild
+            // creates the NameEntry. Link those two source identities once;
+            // no spelling lookup participates in lowering (D8.2.4).
+            candidate->binding = module_binding;
+            return candidate;
+        }
+    }
+    if (!module_binding->name) return NULL;
+    // Preamble declarations belong to a separately compiled AST, so their
+    // NameEntry addresses cannot be shared with the consumer. This is the one
+    // explicit compilation-boundary link; all ordinary source lookups remain
+    // binding-identity based (D8.2.4).
+    JsModuleConstEntry lookup;
+    memset(&lookup, 0, sizeof(lookup));
+    lookup.name = jm_persist_name(jm_var_name(module_binding->name));
+    JsModuleConstEntry* external = (JsModuleConstEntry*)hashmap_get(consts,
+        &lookup);
+    if (external && external->is_preamble_external) {
+        external->binding = module_binding;
+        return external;
+    }
+    return NULL;
+}
+
+JsModuleConstEntry* jm_find_preamble_module_const(JsMirTranspiler* mt,
+        const char* name) {
+    if (!mt || !mt->module_consts || !name) return NULL;
+    JsModuleConstEntry lookup;
+    memset(&lookup, 0, sizeof(lookup));
+    lookup.name = jm_persist_name(name);
+    JsModuleConstEntry* entry = (JsModuleConstEntry*)hashmap_get(
+        mt->module_consts, &lookup);
+    return entry && entry->is_preamble_external ? entry : NULL;
+}
+
+JsModuleConstEntry* jm_find_unresolved_annex_b_module_const(
+        JsMirTranspiler* mt, const char* name) {
+    if (!mt || !mt->module_consts || !name) return NULL;
+    JsModuleConstEntry* candidate = jm_find_module_const_in(mt->module_consts,
+        name);
+    // The direct scope walk resolves references before descending into later
+    // blocks. Its one missing forward edge is the Annex-B var companion; the
+    // indexed hoist plan has already proved this exact public binding (D8.2.5).
+    return candidate && candidate->const_type == MCONST_MODVAR &&
+        candidate->is_nested_func_hoist && !candidate->is_iife_var
+        ? candidate : NULL;
+}
+
 const char* jm_var_name(const char* name, int len) {
     return jm_format_name("_js_%.*s", len, name);
 }
@@ -81,6 +144,46 @@ bool jm_var_scope_set(JsMirTranspiler* mt, int depth, struct hashmap* scope) {
     if (!mt || !mt->var_scopes || !jm_stack_ensure_slot(mt->var_scopes, depth)) return false;
     arraylist_set(mt->var_scopes, depth, scope);
     return true;
+}
+
+static int jm_resumable_local_cmp(const void* a, const void* b, void* udata) {
+    (void)udata;
+    const JsMirResumableLocal* left = (const JsMirResumableLocal*)a;
+    const JsMirResumableLocal* right = (const JsMirResumableLocal*)b;
+    return left->binding == right->binding ? 0 : 1;
+}
+
+static uint64_t jm_resumable_local_hash(const void* item, uint64_t seed0,
+        uint64_t seed1) {
+    const JsMirResumableLocal* local = (const JsMirResumableLocal*)item;
+    return hashmap_sip(&local->binding, sizeof(local->binding), seed0, seed1);
+}
+
+bool jm_reserve_resumable_local(JsMirTranspiler* mt, NameEntry* binding,
+        int env_slot) {
+    if (!mt || !binding || env_slot < 0) return false;
+    if (!mt->resumable_locals) {
+        mt->resumable_locals = hashmap_new(sizeof(JsMirResumableLocal), 16, 0,
+            0, jm_resumable_local_hash, jm_resumable_local_cmp, NULL, NULL);
+    }
+    if (!mt->resumable_locals) return false;
+    JsMirResumableLocal local = {binding, env_slot};
+    hashmap_set(mt->resumable_locals, &local);
+    return true;
+}
+
+int jm_resumable_local_env_slot(JsMirTranspiler* mt, NameEntry* binding) {
+    if (!mt || !binding || !mt->resumable_locals) return -1;
+    JsMirResumableLocal lookup = {binding, -1};
+    JsMirResumableLocal* found = (JsMirResumableLocal*)hashmap_get(
+        mt->resumable_locals, &lookup);
+    return found ? found->env_slot : -1;
+}
+
+void jm_clear_resumable_locals(JsMirTranspiler* mt) {
+    if (!mt || !mt->resumable_locals) return;
+    hashmap_free(mt->resumable_locals);
+    mt->resumable_locals = NULL;
 }
 
 JsLoopLabels* jm_loop_label_at(JsMirTranspiler* mt, int index) {
@@ -166,7 +269,8 @@ uint64_t js_module_const_hash(const void *item, uint64_t seed0, uint64_t seed1) 
 
 bool jm_capture_uses_live_module_var(JsMirTranspiler* mt, FnCapture* capture) {
     if (!mt || !capture || !mt->module_consts || capture->force_env_capture) return false;
-    JsModuleConstEntry* entry = jm_find_module_const(mt, capture->name);
+    JsModuleConstEntry* entry = jm_find_module_const_by_binding(mt,
+        capture->entry);
     return entry && entry->const_type == MCONST_MODVAR &&
         (entry->var_kind != JS_VAR_CONST || entry->is_iife_var ||
             entry->is_iife_func_decl);
@@ -279,64 +383,6 @@ static void jm_clear_block_caches(JsMirTranspiler* mt) {
     mt->module_name_id_cache_count = 0;
 }
 
-static void jm_ensure_index_map(int** map, int* capacity, int key) {
-    if (!map || !capacity || key < 0 || key < *capacity) return;
-    if (!em_root_ensure_index_map(map, capacity, key)) {
-        // Losing a home-to-register binding would make the exact root frame
-        // incomplete, so compilation must fail-stop on metadata OOM.
-        log_error("js-mir-root-bindings: index-map allocation failed");
-        abort();
-    }
-}
-
-static void jm_register_root_binding(JsMirTranspiler* mt, MIR_reg_t reg,
-        int slot, int home_id) {
-    if (!mt || !reg || slot < 0) return;
-    int reg_key = (int)reg;
-    jm_ensure_index_map(&mt->em.frame.root_binding_by_reg,
-        &mt->em.frame.root_binding_by_reg_capacity, reg_key);
-    if (home_id > 0) {
-        jm_ensure_index_map(&mt->em.frame.root_binding_by_home,
-            &mt->em.frame.root_binding_by_home_capacity, home_id);
-    }
-    int binding_index = home_id > 0
-        ? mt->em.frame.root_binding_by_home[home_id]
-        : mt->em.frame.root_binding_by_reg[reg_key];
-    if (binding_index >= 0 && binding_index < mt->em.frame.root_binding_count) {
-        JsMirRootBinding* binding = &mt->em.frame.root_bindings[binding_index];
-        if (binding->reg != reg && binding->reg > 0 &&
-                binding->reg < (MIR_reg_t)mt->em.frame.root_binding_by_reg_capacity &&
-                mt->em.frame.root_binding_by_reg[binding->reg] == binding_index) {
-            mt->em.frame.root_binding_by_reg[binding->reg] = -1;
-        }
-        binding->reg = reg;
-        binding->slot = slot;
-        if (mt->em.frame.root_binding_by_reg[reg_key] < 0) {
-            mt->em.frame.root_binding_by_reg[reg_key] = binding_index;
-        }
-        return;
-    }
-    if (mt->em.frame.root_binding_count >= mt->em.frame.root_binding_capacity) {
-        int next_capacity = mt->em.frame.root_binding_capacity
-            ? mt->em.frame.root_binding_capacity * 2 : 32;
-        mt->em.frame.root_bindings = (JsMirRootBinding*)mem_realloc(
-            mt->em.frame.root_bindings,
-            (size_t)next_capacity * sizeof(JsMirRootBinding), MEM_CAT_JS_RUNTIME);
-        mt->em.frame.root_binding_capacity = next_capacity;
-    }
-    binding_index = mt->em.frame.root_binding_count++;
-    JsMirRootBinding* binding = &mt->em.frame.root_bindings[binding_index];
-    binding->reg = reg;
-    binding->slot = slot;
-    binding->home_id = home_id;
-    if (mt->em.frame.root_binding_by_reg[reg_key] < 0) {
-        mt->em.frame.root_binding_by_reg[reg_key] = binding_index;
-    }
-    if (home_id > 0) {
-        mt->em.frame.root_binding_by_home[home_id] = binding_index;
-    }
-}
-
 static void jm_note_gc_candidate(JsMirTranspiler* mt, MIR_reg_t reg,
         JitValueClass value_class, int home_id) {
     if (!mt || !reg) return;
@@ -351,20 +397,6 @@ static void jm_note_gc_candidate(JsMirTranspiler* mt, MIR_reg_t reg,
         // write-through fallback because its identity has already been lost.
         abort();
     }
-}
-
-static void jm_unbind_root_home(JsMirTranspiler* mt, int home_id) {
-    if (!mt || home_id <= 0) return;
-    if (home_id >= mt->em.frame.root_binding_by_home_capacity) return;
-    int binding_index = mt->em.frame.root_binding_by_home[home_id];
-    if (binding_index < 0 || binding_index >= mt->em.frame.root_binding_count) return;
-    JsMirRootBinding* binding = &mt->em.frame.root_bindings[binding_index];
-    if (binding->reg > 0 &&
-            binding->reg < (MIR_reg_t)mt->em.frame.root_binding_by_reg_capacity &&
-            mt->em.frame.root_binding_by_reg[binding->reg] == binding_index) {
-        mt->em.frame.root_binding_by_reg[binding->reg] = -1;
-    }
-    binding->reg = 0;
 }
 
 void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg) {
@@ -398,21 +430,10 @@ void jm_register_owned_env(JsMirTranspiler* mt, MIR_reg_t reg) {
 int jm_create_gc_root_slot(JsMirTranspiler* mt, MIR_reg_t value) {
     if (!mt || !mt->em.frame.active || !value) return -1;
     jm_note_gc_candidate(mt, value, JIT_VALUE_UNKNOWN, 0);
-    if (value < (MIR_reg_t)mt->em.frame.root_binding_by_reg_capacity) {
-        int binding_index = mt->em.frame.root_binding_by_reg[value];
-        if (binding_index >= 0 && binding_index < mt->em.frame.root_binding_count) {
-            JsMirRootBinding* binding = &mt->em.frame.root_bindings[binding_index];
-            return binding->slot;
-        }
-    }
-    for (int i = 0; i < mt->em.frame.root_binding_count; i++) {
-        JsMirRootBinding* binding = &mt->em.frame.root_bindings[i];
-        if (binding->reg == value) {
-            return binding->slot;
-        }
-    }
+    int existing_slot = em_root_binding_slot_for_reg(&mt->em, value);
+    if (existing_slot >= 0) return existing_slot;
     int slot = mt->em.frame.root_slot_count++;
-    jm_register_root_binding(mt, value, slot, 0);
+    em_root_register_binding(&mt->em, value, slot, 0);
     return slot;
 }
 
@@ -460,7 +481,7 @@ void jm_update_gc_root_slot(JsMirTranspiler* mt, JsMirVarEntry* var) {
             // A stable binding can change representation. Clear its canonical
             // home instead of moving a double/scalar through an Item slot or
             // retaining the prior managed pointer.
-            jm_unbind_root_home(mt, var->gc_home_id);
+            em_root_unbind_home(&mt->em, var->gc_home_id);
         }
         return;
     }
@@ -469,7 +490,8 @@ void jm_update_gc_root_slot(JsMirTranspiler* mt, JsMirVarEntry* var) {
     }
     jm_note_gc_candidate(mt, var->reg,
         jm_gc_value_class(var->mir_type, var->type_id), var->gc_home_id);
-    jm_register_root_binding(mt, var->reg, var->root_slot, var->gc_home_id);
+    em_root_register_binding(&mt->em, var->reg, var->root_slot,
+        var->gc_home_id);
 }
 
 void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
@@ -482,7 +504,7 @@ void jm_begin_function_frame(JsMirTranspiler* mt, MIR_type_t return_type,
     // Frame-local result registers cannot cross a function boundary.  A clean
     // entry used to hide this stale register until a generator resume label
     // reopened the lane, producing MIR that referenced another function's reg.
-    mt->last_call_result_reg = 0;
+    mt->last_call_result = {};
     mt->func_error_lane_value_reg = 0;
     mt->arg_stack_scope = NULL;
     mt->arg_frame_base = 0;
@@ -665,7 +687,7 @@ void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
     // Async state-machine labels merge distinct resume activations, so the
     // prior call result cannot dominate the label. Ordinary labels can be
     // deliberate exception-rethrow targets and must retain their Item carrier.
-    if (mt->in_async && !mt->in_generator) mt->last_call_result_reg = 0;
+    if (mt->in_async && !mt->in_generator) mt->last_call_result = {};
     jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
     em_emit_label(&mt->em, label);
 }
@@ -682,7 +704,7 @@ void jm_emit_label_with_state(JsMirTranspiler* mt, MIR_label_t label, JsErrorLan
     // consumes an uninitialized root slot (D8.4.3).
     jm_clear_block_caches(mt);
     if (mt->in_async && !mt->in_generator && state != JS_ERROR_LANE_SET)
-        mt->last_call_result_reg = 0;
+        mt->last_call_result = {};
     jm_error_lane_set_state(mt, state == JS_ERROR_LANE_UNREACHABLE ? JS_ERROR_LANE_UNKNOWN : state);
     em_emit_label(&mt->em, label);
 }
@@ -942,6 +964,7 @@ void jm_save_last_closure_snapshot(JsMirTranspiler* mt,
     for (int i = 0; i < snapshot->capture_count; i++) {
         snapshot->capture_names[i] = jm_persist_name(
             mt->last_closure_capture_names[i]);
+        snapshot->capture_bindings[i] = mt->last_closure_capture_bindings[i];
         snapshot->capture_slots[i] = mt->last_closure_capture_slots[i];
         snapshot->capture_is_transitive[i] =
             mt->last_closure_capture_is_transitive[i];
@@ -967,6 +990,7 @@ void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
     for (int i = 0; i < snapshot->capture_count; i++) {
         mt->last_closure_capture_names[i] = jm_persist_name(
             snapshot->capture_names[i]);
+        mt->last_closure_capture_bindings[i] = snapshot->capture_bindings[i];
         mt->last_closure_capture_slots[i] = snapshot->capture_slots[i];
         mt->last_closure_capture_is_transitive[i] =
             snapshot->capture_is_transitive[i];
@@ -995,7 +1019,7 @@ JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
 }
 
 void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
-                       MIR_type_t mir_type , TypeId type_id ) {
+                       MIR_type_t mir_type , TypeId type_id, NameEntry* binding) {
     int target_depth = (mt->var_hoist_depth >= 0) ? mt->var_hoist_depth : mt->scope_depth;
     JsVarScopeEntry entry;
     memset(&entry, 0, sizeof(entry));
@@ -1006,6 +1030,15 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.async_slot = -1;
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
+    entry.var.binding = binding;
+    int resumable_slot = jm_resumable_local_env_slot(mt, binding);
+    if (resumable_slot >= 0) {
+        // Publish the preallocated resume home only when this source binding
+        // reaches its own lexical scope; spelling is never used for this link.
+        entry.var.from_env = true;
+        entry.var.env_slot = resumable_slot;
+        entry.var.env_reg = mt->gen_env_reg;
+    }
     // Preserve metadata from an existing same-named binding. Prefer the target
     // scope so a nested let/const shadow does not inherit an outer capture slot.
     // When a captured block binding is pre-registered in an enclosing function
@@ -1021,7 +1054,10 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                 existing_in_target_scope = true;
             }
         }
-        if (!existing) existing = jm_find_var(mt, name);
+        // A source declaration must preserve only its own reserved storage;
+        // spelling lookup can select an outer shadow with the same name.
+        if (!existing) existing = binding
+            ? jm_find_var_by_binding(mt, binding) : jm_find_var(mt, name);
         bool generator_storage_home = mt->in_generator && existing &&
             existing->from_env && existing->from_hoist;
         if (existing && (existing_in_target_scope || generator_storage_home)) {
@@ -1046,6 +1082,7 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                 entry.var.from_catch_param = true;
             }
             entry.var.jube_type = existing->jube_type;
+            if (!entry.var.binding) entry.var.binding = existing->binding;
             entry.var.binding_start = existing->binding_start;
             entry.var.binding_end = existing->binding_end;
             entry.var.gc_home_id = existing->gc_home_id;
@@ -1081,6 +1118,23 @@ JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name) {
     for (int i = mt->scope_depth; i >= 0; i--) {
         JsMirVarEntry* found = jm_find_var_at(mt, name, i);
         if (found) return found;
+    }
+    return NULL;
+}
+
+JsMirVarEntry* jm_find_var_by_binding(JsMirTranspiler* mt, NameEntry* binding) {
+    if (!mt || !binding) return NULL;
+    for (int depth = mt->scope_depth; depth >= 0; depth--) {
+        struct hashmap* scope = jm_var_scope_at(mt, depth);
+        if (!scope) continue;
+        size_t iter = 0;
+        void* item = NULL;
+        while (hashmap_iter(scope, &iter, &item)) {
+            JsVarScopeEntry* candidate = (JsVarScopeEntry*)item;
+            if (candidate->var.binding == binding) {
+                return &candidate->var;
+            }
+        }
     }
     return NULL;
 }

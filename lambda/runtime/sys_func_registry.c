@@ -194,10 +194,10 @@ extern bool target_equal(Target* a, Target* b);
 #ifdef LAMBDA_RUBY
 #include "../module/rb/rb_runtime.h"
 #endif
-#include "../js/js_dom.h"
+#include "../dom/dom.h"
 #include "../js/js_typed_array.h"
 #include "../js/js_event_loop.h"
-#include "../js/js_xhr.h"
+#include "../dom/dom_xhr.h"
 extern Item js_buffer_construct(Item arg, Item encoding);
 // Tune8 §2.5: js_array_indexOf_int fast path retired (0 telemetry emissions);
 // arr.indexOf(int) flows through the generic array method dispatcher now.
@@ -213,7 +213,7 @@ extern Item js_uri_decode_equals_from_char_code(Item str_item, Item first_item, 
 // after they made 8 decodeURI/decodeURIComponent tests batch-unstable.
 extern Item js_test262_decimal_to_percent_hex_string(Item n_item);
 extern Item js_test262_concat_percent_hex(Item left_item, Item n_item);
-// Phase 8C: Image() constructor (defined in js_dom.cpp)
+// Phase 8C: Image() constructor (defined in dom.cpp)
 extern Item js_image_construct(Item width_arg, Item height_arg, int argc);
 
 // helper functions for map pipe iteration in JIT
@@ -1995,35 +1995,8 @@ JitImport jit_runtime_imports[] = {
     {"lambda_array_set_checked_inplace", FPTR(lambda_array_set_checked_inplace)},
     {"lambda_array_set_checked_lane", FPTR(lambda_array_set_checked_lane)},
     {"lambda_array_set_checked_inplace_lane", FPTR(lambda_array_set_checked_inplace_lane)},
-    // Ret* constructor helpers
     {"ri_ok", FPTR(ri_ok)},
     {"ri_err", FPTR(ri_err)},
-    {"rb_ok", FPTR(rb_ok)},
-    {"rb_err", FPTR(rb_err)},
-    {"ri56_ok", FPTR(ri56_ok)},
-    {"ri56_err", FPTR(ri56_err)},
-    {"ri64_ok", FPTR(ri64_ok)},
-    {"ri64_err", FPTR(ri64_err)},
-    {"rf_ok", FPTR(rf_ok)},
-    {"rf_err", FPTR(rf_err)},
-    {"rs_ok", FPTR(rs_ok)},
-    {"rs_err", FPTR(rs_err)},
-    {"rsy_ok", FPTR(rsy_ok)},
-    {"rsy_err", FPTR(rsy_err)},
-    {"rm_ok", FPTR(rm_ok)},
-    {"rm_err", FPTR(rm_err)},
-    {"rl_ok", FPTR(rl_ok)},
-    {"rl_err", FPTR(rl_err)},
-    {"re_ok", FPTR(re_ok)},
-    {"re_err", FPTR(re_err)},
-    {"ro_ok", FPTR(ro_ok)},
-    {"ro_err", FPTR(ro_err)},
-    {"ra_ok", FPTR(ra_ok)},
-    {"ra_err", FPTR(ra_err)},
-    {"rr_ok", FPTR(rr_ok)},
-    {"rr_err", FPTR(rr_err)},
-    {"rp_ok", FPTR(rp_ok)},
-    {"rp_err", FPTR(rp_err)},
     {"item_to_ri", FPTR(item_to_ri)},
     {"ri_to_item", FPTR(ri_to_item)},
 

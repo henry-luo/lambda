@@ -21,6 +21,9 @@ typedef struct JsInterpImportBinding {
     String* local_name;
     String* source;
     String* export_name;
+    // Direct scope attaches the source binding after parsing. The AST tier
+    // uses it before ordinary environment lookup so imports remain live.
+    NameEntry* entry;
     bool namespace_import;
     struct JsInterpImportBinding* next;
 } JsInterpImportBinding;

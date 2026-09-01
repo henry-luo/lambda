@@ -44,10 +44,7 @@ bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source);
 bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
 
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
-void radiant_reconcile_js_dom_mutations(UiContext* uicon, DomDocument* doc);
-extern "C" uint64_t js_dom_mutation_epoch(DomDocument* doc);
-extern "C" bool js_dom_mutation_since_affects_subtree(
-        DomDocument* doc, uint32_t sequence_before, void* root);
+void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value,
     double elapsed_time);
@@ -1260,19 +1257,6 @@ bool editing_geometry_caret_rect(UiContext* uicon,
 struct EventContext;
 struct DocState;
 
-// Form controls retain this callback bridge because their value-store mutation
-// is owned by text_edit.cpp rather than the contenteditable action registry.
-typedef bool (*EditingDispatchInputEventFn)(EventContext* evcon, View* target,
-                                            const char* type,
-                                            const EditingIntent* intent,
-                                            void* user);
-struct EditingFormNotificationHooks {
-    EditingDispatchInputEventFn dispatch_input_event;
-    void* user;
-};
-
-struct EventContext;
-
 // Splices performed by the dom package's editing waist (radiant.replace_range).
 // Sampled either side of a beforeinput dispatch to tell an applier that edited
 // from one that claimed the intent and changed nothing (a maxlength-blocked
@@ -1281,26 +1265,6 @@ extern "C" uint64_t radiant_splice_epoch(void);
 // Change requests made by a behavior template's `commit` handler (ESO42),
 // sampled across the commit dispatch to read its answer.
 extern "C" uint64_t radiant_change_request_epoch(void);
-
-bool editing_dispatch_form_beforeinput(EventContext* evcon,
-                                       const EditingSurface* surface,
-                                       const EditingIntent* intent,
-                                       const EditingFormNotificationHooks* hooks,
-                                       bool* out_prevented,
-                                       // Set when a UA behavior template applied
-                                       // the edit itself (F5). Prevention then
-                                       // means "already done", not "cancelled",
-                                       // so the caller must skip its splice but
-                                       // must NOT restore the pre-edit selection
-                                       // — the applier has already moved the
-                                       // caret past the text it inserted.
-                                       bool* out_applied = nullptr);
-
-void editing_dispatch_form_input(EventContext* evcon,
-                                 const EditingSurface* surface,
-                                 const EditingIntent* intent,
-                                 const EditingFormNotificationHooks* hooks);
-
 
 // ===== editing controller =====
 
@@ -1540,7 +1504,7 @@ int dom_range_byte_offset_for_x(struct UiContext* uicon, struct ViewText* text,
 // ===== text controls =====
 
 // Phase 6E text-control helpers shared between:
-//   - lambda/js/js_dom.cpp    (programmatic API: value, selectionStart/End, ...)
+//   - lambda/dom/dom.cpp    (programmatic API: value, selectionStart/End, ...)
 //   - radiant/event.cpp       (mouse/keyboard editing)
 //   - radiant/render_form.cpp (caret + selection highlight inside <input>/<textarea>)
 //
@@ -1678,7 +1642,7 @@ uint32_t te_next_word_byte(const char* buf, uint32_t buf_len, uint32_t byte_off)
 // places the caret at `start + repl_len`, clears any active selection, and
 // pushes a history entry. Legacy fallback only: dispatches "input" via the
 // legacy event bus. Cancellable beforeinput is owned by the unified dispatcher
-// in event.cpp/editing_dispatch.cpp.
+// in event.cpp.
 //
 // `repl` may be NULL with repl_len=0 to perform a pure deletion. Returns
 // false if `elem` is not a text control or the range is invalid.
@@ -2493,7 +2457,7 @@ typedef struct DocState {
     bool                 selectionchange_pending;  // task queued and not yet fired
     // Phase 8E: per-text-control selectionchange coalescing. Linked list head
     // through the element's DOM task link. Drained by a single
-    // setTimeout(0) callback queued via `js_dom_queue_textcontrol_selectionchange`.
+    // setTimeout(0) callback queued via `dom_queue_textcontrol_selectionchange`.
     DomElement*          tc_selectionchange_head;
     bool                 tc_selectionchange_drain_scheduled;
     DomElement*          active_text_control;
