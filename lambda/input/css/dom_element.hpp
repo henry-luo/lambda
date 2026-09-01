@@ -302,6 +302,10 @@ struct DomDocument {
     // and must never be inferred from lambda_runtime being null.
     bool js_has_dom_realm;
 
+    // A one-shot render has executed page JS but intentionally released its
+    // realm. It must not later create a second evaluator for UA behavior.
+    bool js_realm_released_after_load;
+
     // The Lambda dom package supplies this document's UA behavior templates. It
     // loads at most once, on the first event, so static layout and render runs
     // never pay for it.
@@ -341,8 +345,8 @@ struct DomDocument {
                     pending_scroll_into_view_target_id(0),
                     pending_scroll_into_view_center(false),
                     mutation_epoch(0), page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
-                    dom_package_loaded(false), owns_script_runtime(false),
-                    behavior_init_pending(false) {}
+                    js_realm_released_after_load(false), dom_package_loaded(false),
+                    owns_script_runtime(false), behavior_init_pending(false) {}
 
     bool init(Input* input);
     void destroy();

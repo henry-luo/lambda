@@ -1,0 +1,13 @@
+{
+  "name": "JS MouseEvent radio activation shares package policy and cancellation timing",
+  "html": "test/ui/js_dispatch_radio_group.html",
+  "viewport": {"width": 320, "height": 180},
+  "events": [
+    {"type": "click", "target": {"selector": "#trigger"}},
+    {"type": "assert_checked", "target": {"selector": "#r1"}, "checked": false},
+    {"type": "assert_checked", "target": {"selector": "#r2"}, "checked": true},
+    {"type": "assert_text", "target": {"selector": "#seen"}, "contains": "before-default"},
+    {"type": "assert_checked", "target": {"selector": "#c1"}, "checked": true},
+    {"type": "assert_checked", "target": {"selector": "#c2"}, "checked": false}
+  ]
+}

@@ -135,8 +135,9 @@ Before F19, `dispatchEvent`/`el.click()` entered only the JS dispatcher, which
 grew a divergent activation pass: it set a clicked radio checked but did not
 perform the `form.ls` group-exclusivity walk. F19 routes direct DOM dispatch to
 the native synthetic bridge, so both entries now invoke that one package
-policy. `test/ui/dom_synthetic_activation.json` pins `click()`,
-`dispatchEvent(new MouseEvent("click"))`, cancellation, and popover activation.
+policy. `test/ui/dom_synthetic_activation.json` and
+`test/ui/js_dispatch_radio_group.json` pin direct click, MouseEvent dispatch,
+radio exclusivity, cancellation, and popover activation.
 
 ### 3.4 Coordination was state-diffing, not protocol
 

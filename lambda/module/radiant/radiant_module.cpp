@@ -57,6 +57,7 @@ extern "C" int js_dom_popover_target_action(void* button);
 extern "C" bool js_dom_activate_popover(void* popover, int action);
 extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
                                                             void* submitter_node);
+extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem);
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -1106,6 +1107,58 @@ RADIANT_C_API Item fn_radiant_next_element_sibling(Item node_item) {
     return ItemNull;
 }
 
+// ES30: native answers only layout-coupled focus eligibility. The returned
+// snapshot preserves DOM order; focus.ls owns HTML's tabindex ordering.
+RADIANT_C_API Item fn_radiant_focus_candidates(Item root_item) {
+    DomElement* root = radiant_dom_element_from_item(root_item, "FOCUS_CANDIDATES");
+    if (!root) return radiant_array_new_item(0);
+
+    ArrayList* candidates = arraylist_new(16);
+    if (!candidates) return ItemNull;
+    focus_collect_candidates((View*)root, candidates, false);
+
+    RootFrame roots(2);
+    Rooted<Item> result(roots, radiant_array_new_item(candidates->length));
+    Rooted<Item> candidate(roots, ItemNull);
+    for (int i = 0; i < candidates->length; i++) {
+        View* view = static_cast<View*>(candidates->data[i]);
+        candidate.set(radiant_obj_new());
+        radiant_rooted_obj_set(candidate, "node",
+                               radiant_dom_wrap_node((DomElement*)view));
+        int tab_index = focus_tab_index(view);
+        radiant_rooted_obj_set(candidate, "tab_index", radiant_int_item(tab_index));
+        radiant_rooted_obj_set(candidate, "order", radiant_int_item(i));
+        radiant_rooted_obj_set(candidate, "sequential",
+                               radiant_bool_item(is_view_focusable(view)));
+        radiant_array_push_item(result.get(), candidate.get());
+    }
+    arraylist_free(candidates);
+    return result.get();
+}
+
+RADIANT_C_API Item fn_radiant_focused(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "FOCUSED");
+    DocState* state = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
+    return radiant_bool_item(state && focus_get(state) == (View*)elem);
+}
+
+RADIANT_C_API Item fn_radiant_focus_set(Item node_item, Item from_keyboard_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "FOCUS_SET");
+    DocState* state = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
+    if (!state || !is_view_programmatically_focusable((View*)elem)) {
+        return radiant_bool_item(false);
+    }
+    focus_set(state, (View*)elem, is_truthy(from_keyboard_item));
+    return radiant_bool_item(true);
+}
+
+RADIANT_C_API Item fn_radiant_scroll_into_view(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "SCROLL_INTO_VIEW");
+    if (!elem) return radiant_bool_item(false);
+    js_dom_scroll_into_view_bridge(elem);
+    return radiant_bool_item(true);
+}
+
 RADIANT_C_API Item fn_radiant_embedding_element(Item node_item) {
     DomNode* node = radiant_dom_node_from_item(node_item, "EMBEDDING_ELEMENT");
     if (!node) return ItemNull;
@@ -2127,6 +2180,15 @@ RADIANT_C_API Item fn_radiant_caret_operation(Item node_item, Item op_item,
     return (Item){.item = b2it(1)};
 }
 
+// ESO48: key choice stays in the package; native resolves the live scrollport,
+// range and geometry after this behavior-only request returns.
+RADIANT_C_API Item fn_radiant_scroll_operation(Item node_item, Item op_item) {
+    const char* op = fn_to_cstr(op_item);
+    if (!op || !*op) return (Item){.item = b2it(0)};
+    radiant_scroll_operation_request(op);
+    return (Item){.item = b2it(1)};
+}
+
 // F10: the context-menu waist. The template names the target and the enable
 // mask; the popup position comes from the right click native already resolved,
 // so physical pixels never reach policy.
@@ -2700,6 +2762,14 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_first_element_child(Item node)", (fn_ptr)fn_radiant_first_element_child},
     {"next_element_sibling", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_next_element_sibling, JUBE_FN_NONE,
      "Item fn_radiant_next_element_sibling(Item node)", (fn_ptr)fn_radiant_next_element_sibling},
+    {"focus_candidates", "fn(root: dom_node) -> array", (fn_ptr)fn_radiant_focus_candidates, JUBE_FN_NONE,
+     "Item fn_radiant_focus_candidates(Item root)", (fn_ptr)fn_radiant_focus_candidates},
+    {"focused", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_focused, JUBE_FN_NONE,
+     "Item fn_radiant_focused(Item node)", (fn_ptr)fn_radiant_focused},
+    {"focus_set", "fn(node: dom_node, from_keyboard: bool) -> bool", (fn_ptr)fn_radiant_focus_set, JUBE_FN_NONE,
+     "Item fn_radiant_focus_set(Item node, Item from_keyboard)", (fn_ptr)fn_radiant_focus_set},
+    {"scroll_into_view", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_scroll_into_view, JUBE_FN_NONE,
+     "Item fn_radiant_scroll_into_view(Item node)", (fn_ptr)fn_radiant_scroll_into_view},
     {"embedding_element", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_embedding_element, JUBE_FN_NONE,
      "Item fn_radiant_embedding_element(Item node)", (fn_ptr)fn_radiant_embedding_element},
     {"embedded_document_root", "fn(iframe: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_embedded_document_root, JUBE_FN_NONE,
@@ -2811,6 +2881,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_caret_surface(Item node)", (fn_ptr)fn_radiant_caret_surface},
     {"caret_operation", "fn(node: dom_node, operation: string, extend: bool) -> bool", (fn_ptr)fn_radiant_caret_operation, JUBE_FN_NONE,
      "Item fn_radiant_caret_operation(Item node, Item operation, Item extend)", (fn_ptr)fn_radiant_caret_operation},
+    {"scroll_operation", "fn(node: dom_node, operation: string) -> bool", (fn_ptr)fn_radiant_scroll_operation, JUBE_FN_NONE,
+     "Item fn_radiant_scroll_operation(Item node, Item operation)", (fn_ptr)fn_radiant_scroll_operation},
     {"open_context_menu", "fn(node: dom_node, enabled_mask: int) -> bool", (fn_ptr)fn_radiant_open_context_menu, JUBE_FN_NONE,
      "Item fn_radiant_open_context_menu(Item node, Item enabled_mask)", (fn_ptr)fn_radiant_open_context_menu},
     {"close_context_menu", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_close_context_menu, JUBE_FN_NONE,

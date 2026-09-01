@@ -11,24 +11,24 @@
     rects: 1
   }, editing: {
     active_surface: true
-  }
-  <html flags: ['hover', 'focus-within']
-    <body index: 2, flags: ['hover', 'focus-within']
-      <div index: 5, flags: ['hover']
+  },
+  <html flags: ['hover', 'focus-within'],
+    <body index: 2, flags: ['hover', 'focus-within'],
+      <div index: 5, flags: ['hover'],
         <input index: 3, id: "email", flags: ['hover', 'valid'], form: {
             sel: [11, 11]
           }>>
-      <div index: 7
+      <div index: 7,
         <input index: 3, id: "name", flags: ['valid'], form: {
             sel: [5, 5]
           }>>
-      <div index: 9
+      <div index: 9,
         <input index: 3, id: "empty", flags: ['valid']>>
-      <div index: 11
-        <label index: 3
+      <div index: 11,
+        <label index: 3,
           <input index: 0, id: "newsletter", flags: ['checked']>>>
-      <div index: 13, flags: ['focus-within']
-        <label index: 1
+      <div index: 13, flags: ['focus-within'],
+        <label index: 1,
           <input index: 0, id: "radio-a", flags: ['checked']>>
-        <label index: 3, flags: ['focus-within']
+        <label index: 3, flags: ['focus-within'],
           <input index: 0, id: "radio-b", flags: ['focus', 'focus-visible', 'focus-within', 'checked']>>>>>>

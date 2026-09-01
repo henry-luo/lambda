@@ -92,6 +92,8 @@ RADIANT_C_API Item radiant_dom_set_property(Item elem_item, Item prop_name, Item
 RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
                                                  JubeDomElementOperation operation,
                                                  Item* args, int argc);
+// Shared policy waist: JS activation reuses the package's radio peer scope.
+RADIANT_C_API Item fn_radiant_radio_group(Item node_item);
 RADIANT_C_API void radiant_dom_invalidate_document(DomDocument* doc);
 RADIANT_C_API void radiant_dom_reset_wrapper_cache(void);
 
@@ -149,6 +151,10 @@ RADIANT_C_API Item fn_radiant_root(Item doc_item);
 RADIANT_C_API Item fn_radiant_document_root(Item node_item);
 RADIANT_C_API Item fn_radiant_first_element_child(Item node_item);
 RADIANT_C_API Item fn_radiant_next_element_sibling(Item node_item);
+RADIANT_C_API Item fn_radiant_focus_candidates(Item root_item);
+RADIANT_C_API Item fn_radiant_focused(Item node_item);
+RADIANT_C_API Item fn_radiant_focus_set(Item node_item, Item from_keyboard_item);
+RADIANT_C_API Item fn_radiant_scroll_into_view(Item node_item);
 RADIANT_C_API Item fn_radiant_embedding_element(Item node_item);
 RADIANT_C_API Item fn_radiant_embedded_document_root(Item iframe_item);
 RADIANT_C_API Item fn_radiant_navigation_destination(Item source_item, Item url_item,

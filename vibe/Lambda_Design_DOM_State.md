@@ -756,11 +756,16 @@ The motivating example needs two things forms don't: a **history source** for `v
 
 The key-policy ruling now lives in `Lambda_Design_DOM_Default.md` §2.4
 (ES30): `focus.ls` owns sequential focus, `autofocus`, and keyboard default
-policy over snapshot DOM navigation, while native retains canonical
-focus/selection state, range geometry, event emission, and paint. The old
-`focus_move`-plus-query sketch is superseded because `focus_move` itself
-chooses plain DOM order and therefore cannot express the required `tabindex`
-ordering.
+policy over snapshot DOM navigation, while native retains S9.1.4's canonical
+focus/selection state, range geometry, event emission, and paint. The landed
+waist returns a DOM-order candidate snapshot with native sequential
+eligibility; `focus.ls` orders positive `tabindex` before the zero/default
+tree-order set and asks native to commit focus plus geometry-aware scrolling.
+The old `focus_move`-plus-query sketch is superseded because `focus_move`
+itself chooses plain DOM order and therefore cannot express the required
+`tabindex` ordering. `focusinit` applies the same snapshot to tree-order
+autofocus; keyup owns Space's click boundary while its click policy stays in
+`form.ls`.
 
 ### 6.3 Schema and invariants as package data
 

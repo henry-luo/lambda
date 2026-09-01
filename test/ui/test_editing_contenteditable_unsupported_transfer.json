@@ -1,12 +1,21 @@
 {
-  "name": "Contenteditable clipboard and drop fall through without native mutation",
+  "name": "Contenteditable plain clipboard and text drag/drop use the DOM package",
   "html": "test/html/editable-dom-composition.html",
   "viewport": {"width": 640, "height": 240},
   "events": [
     {"type": "focus", "target": {"selector": "#surface"}},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 4, "end": 4},
     {"type": "paste_text", "target": {"selector": "#surface"}, "text": "paste"},
-    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seed"},
-    {"type": "drag_and_drop", "target": {"selector": "#drag-source"}, "to_target": {"selector": "#surface"}},
-    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seed"}
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "seedpaste"},
+    {"type": "set_editing_selection", "target": {"selector": "#surface"}, "start": 0, "end": 4},
+    {"type": "key_combo", "key": "x", "mods_str": "super"},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "paste"},
+    {"type": "assert_clipboard", "equals": "seed"},
+    {"type": "editing_text_drag_drop",
+     "target": {"text": "paste", "start": 0, "end": 2},
+     "to_target": {"text": "paste", "start": 4, "end": 4},
+     "text": "pa",
+     "move": true},
+    {"type": "assert_text", "target": {"selector": "#surface"}, "equals": "stepa"}
   ]
 }
