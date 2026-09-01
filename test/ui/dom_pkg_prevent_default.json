@@ -28,6 +28,13 @@
       }
     },
     {
+      "type": "assert_text",
+      "target": {
+        "selector": ".event-type"
+      },
+      "contains": "click"
+    },
+    {
       "type": "assert_count",
       "target": {
         "selector": ".changed"

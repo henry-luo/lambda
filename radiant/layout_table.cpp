@@ -837,6 +837,28 @@ static float table_cell_line_box_height_for_view(View* view, float cell_line_hei
     return max(cell_line_height > 0.0f ? cell_line_height : 0.0f, view_height);
 }
 
+static float table_text_line_box_top(View* view, float line_height,
+                                     bool line_height_is_normal) {
+    if (!view) return 0.0f;
+    float top = view->y;
+    if (!line_height_is_normal && line_height > 0.0f && view->height > line_height) {
+        // CSS Inline: explicit line-height centers the glyph cell around its
+        // line box; table-cell alignment must use that line box, not ink overhang.
+        top += (view->height - line_height) / 2.0f;
+    }
+    return top;
+}
+
+static float table_text_rect_line_box_top(const TextRect* rect, float line_height,
+                                          bool line_height_is_normal) {
+    if (!rect) return 0.0f;
+    float top = rect->y;
+    if (!line_height_is_normal && line_height > 0.0f && rect->height > line_height) {
+        top += (rect->height - line_height) / 2.0f;
+    }
+    return top;
+}
+
 static void table_collect_inline_line_box_extent(View* view, float cell_line_height,
                                                  bool line_height_is_normal,
                                                  float parent_font_size,
@@ -858,8 +880,11 @@ static void table_collect_inline_line_box_extent(View* view, float cell_line_hei
                 float rect_line_height = line_height_is_normal
                     ? max(line_height, rect->height) : line_height;
                 if (rect_line_height <= 0.0f) rect_line_height = rect->height;
-                table_note_cell_content_extent(extent, rect->y, rect->y + rect_line_height);
-                table_note_cell_line_position(extent, rect->y, rect_line_height);
+                float rect_top = table_text_rect_line_box_top(
+                    rect, rect_line_height, line_height_is_normal);
+                table_note_cell_content_extent(
+                    extent, rect_top, rect_top + rect_line_height);
+                table_note_cell_line_position(extent, rect_top, rect_line_height);
                 noted_rect = true;
             }
             if (noted_rect) return;
@@ -953,6 +978,9 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
     bool has_inline_formatting_content = false;
     float inline_content_min_y = 0.0f;  // Track min y of inline/text content
     float inline_content_max_y = 0.0f;  // Track max bottom of inline/text content
+    float self_margin_chain_start = 0.0f;
+    float self_margin_chain = 0.0f;
+    bool has_self_margin_chain = false;
     View* last_sizing_child = nullptr;
     for_each_table_cell_vertical_align_child(
         lam::view_require_element(tcell), [&](View* child) { last_sizing_child = child; });
@@ -986,14 +1014,27 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
         cell_line_height = 0.0f;
     }
     lycon->font = context_scope.saved_font;
+    auto flush_self_margin_chain = [&]() {
+        if (!has_self_margin_chain) return;
+        float chain_end = self_margin_chain_start + self_margin_chain;
+        if (!has_block_content || self_margin_chain_start < block_content_min_y) {
+            block_content_min_y = self_margin_chain_start;
+        }
+        if (!has_block_content || chain_end > block_content_max_y) {
+            block_content_max_y = chain_end;
+        }
+        has_block_content = true;
+        has_self_margin_chain = false;
+    };
     for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
         if (child->view_type == RDT_VIEW_TEXT) {
             ViewText* text = lam::view_require<RDT_VIEW_TEXT>(child);
             has_inline_formatting_content = true;
-            float text_top = text->y;
             float text_height = table_cell_line_box_height_for_view(
                 child, cell_line_height, cell_line_height_is_normal, cell_font_size,
                 tcell->font);
+            float text_top = table_text_line_box_top(
+                child, text_height, cell_line_height_is_normal);
             float text_bottom = text_top + text_height;
             if (!has_inline_content || text_top < inline_content_min_y) {
                 inline_content_min_y = text_top;
@@ -1063,7 +1104,23 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
                      metrics.padding.top > 0 || metrics.padding.bottom > 0)) {
                     is_self_collapsing = false;
                 }
-                if (!is_self_collapsing) {
+                if (is_self_collapsing) {
+                    // CSS 2.1 §8.3.1: a self-collapsing child's margins merge
+                    // into one margin; its border box contributes no height.
+                    float collapsed_margin = layout_collapse_margins(
+                        block->boundary()->margin.top,
+                        block->boundary()->margin.bottom);
+                    child_top -= block->boundary()->margin.top;
+                    if (!has_self_margin_chain) {
+                        self_margin_chain_start = child_top;
+                        self_margin_chain = collapsed_margin;
+                        has_self_margin_chain = true;
+                    } else {
+                        self_margin_chain = layout_collapse_margins(
+                            self_margin_chain, collapsed_margin);
+                    }
+                } else {
+                    flush_self_margin_chain();
                     child_top -= block->boundary()->margin.top;
                     float margin_bottom = block->boundary()->margin.bottom;
                     if (child == last_sizing_child && ignored_quirky_margin_bottom > 0.0f) {
@@ -1098,6 +1155,7 @@ static float measure_cell_content_height(LayoutContext* lycon, ViewTableCell* tc
             }
         }
     });
+    flush_self_margin_chain();
     float overall_min_y = 0, overall_max_y = 0;
     bool has_any = false;
     if (has_block_content) {
@@ -1687,15 +1745,72 @@ static void shift_table_cell_vertical_align_children(ViewTableCell* tcell,
         shift_view, no_leave, false);
 }
 
-static TableCellContentExtent table_cell_vertical_bounds(ViewTableCell* tcell,
+static void table_cell_alignment_line_metrics(LayoutContext* lycon,
+                                              ViewTableCell* tcell,
+                                              float* line_height,
+                                              bool* line_height_is_normal,
+                                              float* font_size) {
+    if (line_height) *line_height = 0.0f;
+    if (line_height_is_normal) *line_height_is_normal = false;
+    if (font_size) *font_size = 0.0f;
+    if (!lycon || !tcell) return;
+    LayoutContextScope context_scope(lycon);
+    if (tcell->font) setup_font(lycon->ui_context, &lycon->font, tcell->font);
+    setup_line_height(lycon, tcell);
+    if (line_height) *line_height = lycon->block.line_height;
+    if (line_height_is_normal) *line_height_is_normal = lycon->block.line_height_is_normal;
+    if (font_size) *font_size = lycon->font.current_font_size;
+}
+
+static TableCellContentExtent table_cell_vertical_bounds(LayoutContext* lycon,
+                                                         ViewTableCell* tcell,
                                                          bool include_margins = false) {
     TableCellContentExtent bounds = {};
     bounds.min_y = 1e9f;
     if (!tcell) return bounds;
+    float cell_line_height = 0.0f;
+    bool cell_line_height_is_normal = false;
+    float cell_font_size = 0.0f;
+    table_cell_alignment_line_metrics(
+        lycon, tcell, &cell_line_height, &cell_line_height_is_normal,
+        &cell_font_size);
     for_each_table_cell_vertical_align_child(lam::view_require_element(tcell), [&](View* child) {
         if (!child->view_type) return;
-            ViewBlock* child_block = lam::view_as_block(child);
-            float child_top = table_cell_hypothetical_child_y(child);
+        if (child->view_type == RDT_VIEW_TEXT) {
+            ViewText* text = lam::view_require_text(child);
+            bool noted_rect = false;
+            for (TextRect* rect = text->rect; rect; rect = rect->next) {
+                float line_box_height = table_cell_line_box_height_for_view(
+                    child, cell_line_height, cell_line_height_is_normal,
+                    cell_font_size, tcell->font);
+                float line_box_top = table_text_rect_line_box_top(
+                    rect, line_box_height, cell_line_height_is_normal);
+                table_note_cell_content_extent(
+                    &bounds, line_box_top, line_box_top + line_box_height);
+                noted_rect = true;
+            }
+            if (noted_rect) return;
+        }
+        if (child->view_type == RDT_VIEW_INLINE) {
+            if (table_inline_span_is_phantom_for_cell_height(
+                    lam::view_require<RDT_VIEW_INLINE>(child)) &&
+                !cell_line_height_is_normal) {
+                // an explicit zero-height inline must not create a second
+                // table-cell line box beside the authored cell line-height.
+                return;
+            }
+            TableCellContentExtent inline_bounds = {};
+            table_collect_inline_line_box_extent(
+                child, cell_line_height, cell_line_height_is_normal,
+                cell_font_size, tcell->font, &inline_bounds);
+            if (inline_bounds.has_content) {
+                table_note_cell_content_extent(
+                    &bounds, inline_bounds.min_y, inline_bounds.max_y);
+                return;
+            }
+        }
+        ViewBlock* child_block = lam::view_as_block(child);
+        float child_top = table_cell_hypothetical_child_y(child);
             if (include_margins && (child->view_type == RDT_VIEW_BLOCK ||
                                 child->view_type == RDT_VIEW_LIST_ITEM ||
                                 child->view_type == RDT_VIEW_INLINE_BLOCK ||
@@ -1745,7 +1860,7 @@ static void apply_cell_vertical_align(LayoutContext* lycon, ViewTableCell* tcell
     float content_start_y = insets.border.top + insets.padding.top;
     float target_y = table_cell_vertical_align_target(
         tcell->td->vertical_align, cell_content_area, content_height, content_start_y);
-    TableCellContentExtent bounds = table_cell_vertical_bounds(tcell, true);
+    TableCellContentExtent bounds = table_cell_vertical_bounds(lycon, tcell, true);
     if (!bounds.has_content) return;
     float current_content_top = bounds.min_y;
     current_content_top = find_cell_content_top_for_vertical_align(lycon, tcell, current_content_top);
@@ -4633,7 +4748,8 @@ static bool table_cell_vertical_align_skips_child(View* child) {
     return element && layout_position_is_abs_fixed(element->position);
 }
 
-static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
+static void reapply_rowspan_vertical_alignment(LayoutContext* lycon,
+                                               ViewTableCell* tcell) {
     if (!tcell || !tcell->td) return;
     if (tcell->td->row_span <= 1) return;  // Only for rowspan cells
     int valign = tcell->td->vertical_align;
@@ -4645,7 +4761,7 @@ static void reapply_rowspan_vertical_alignment(ViewTableCell* tcell) {
     float padding_bottom = insets.padding.bottom;
     float content_area_height = tcell->height - border_top - border_bottom - padding_top - padding_bottom;
     float content_start_y = border_top + padding_top;
-    TableCellContentExtent bounds = table_cell_vertical_bounds(tcell);
+    TableCellContentExtent bounds = table_cell_vertical_bounds(lycon, tcell);
     if (!bounds.has_content) return;
     float content_actual_height = bounds.max_y - bounds.min_y;
     float new_offset = table_cell_vertical_align_target(
@@ -4709,7 +4825,8 @@ static TableOrderedRowElements table_collect_ordered_row_elements(ViewTable* tab
     return result;
 }
 
-static void update_rowspan_cell_heights(ViewTable* table, TableMetadata* meta) {
+static void update_rowspan_cell_heights(LayoutContext* lycon,
+                                        ViewTable* table, TableMetadata* meta) {
     if (!table || !meta) return;
     table->each_cell( [&](ViewTableRow* row, ViewTableCell* tcell) {
             (void)row;
@@ -4722,7 +4839,7 @@ static void update_rowspan_cell_heights(ViewTable* table, TableMetadata* meta) {
                 table, meta, tcell->td->row_index, tcell->td->row_span);
             if (spanned_height <= 0.0f) return;
             tcell->height = spanned_height;
-            reapply_rowspan_vertical_alignment(tcell);
+            reapply_rowspan_vertical_alignment(lycon, tcell);
     });
 }
 
@@ -7278,7 +7395,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     });
     current_y = reflow_table_rows_from_metadata(
         lycon, table, meta, ordered_elements, content_area_top_y);
-    update_rowspan_cell_heights(table, meta);
+    update_rowspan_cell_heights(lycon, table, meta);
     float final_table_height = current_y;
     // CSS 2.1 Section 17.5.3: Handle explicit table height
     float explicit_css_height = 0;
@@ -7432,7 +7549,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // so we must reposition groups sequentially and recalculate both row-relative
             table_reposition_row_groups_from_metadata(table, meta);
             // pass, so rowspanning cell boxes must be refreshed from the final rows.
-            update_rowspan_cell_heights(table, meta);
+            update_rowspan_cell_heights(lycon, table, meta);
         }
     }
     // The second content pass must use the distributed cell height and must

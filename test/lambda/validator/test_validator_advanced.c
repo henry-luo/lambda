@@ -5,7 +5,7 @@
  * @license MIT
  */
 
-#include "../validator.h"
+#include "validator.hpp"
 #include "validator_enhanced.cpp"
 #include <stdio.h>
 #include <assert.h>

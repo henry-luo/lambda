@@ -112,6 +112,11 @@ static inline bool utf_is_valid_codepoint(uint32_t cp) {
     return cp <= 0x10FFFF && !utf_is_surrogate(cp);
 }
 
+/** True if cp has Unicode General_Category Cc (control character). */
+static inline bool utf_is_control(uint32_t cp) {
+    return cp <= 0x001F || (cp >= 0x007F && cp <= 0x009F);
+}
+
 /**
  * CJK character detection (Han, Kana, Hangul).
  * Covers CJK Unified Ideographs (main + Extensions A–E),

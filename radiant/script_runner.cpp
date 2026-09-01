@@ -17,6 +17,7 @@
 #include "radiant.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/js/js_transpiler.hpp"
+#include "../lambda/js/js_interp.hpp"
 #include "../lambda/js/js_dom.h"
 #include "../lambda/js/js_dom_events.h"
 #include "../lambda/js/js_runtime.h"
@@ -167,6 +168,17 @@ static LruCache* s_script_source_cache = nullptr;
 static JsMirCache* s_js_mir_cache = nullptr;
 static bool s_retain_js_state = true;
 static bool s_execute_external_scripts = true;
+
+static bool dom_tree_has_autofocus(DomElement* elem) {
+    if (!elem) return false;
+    if (elem->has_attribute("autofocus")) return true;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (child->is_element() && dom_tree_has_autofocus(child->as_element())) {
+            return true;
+        }
+    }
+    return false;
+}
 
 extern "C" bool radiant_eval_context_switch(EvalContext* target);
 
@@ -2530,6 +2542,8 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // The MIR context, heap, and name_pool stay alive so compiled
     // functions (clicked(), toggle(), setFontFamily(), etc.) can be invoked
     // at event time without re-compilation.
+    bool retain_for_autofocus = dom_doc->root &&
+        dom_tree_has_autofocus(dom_doc->root);
     if (preamble && preamble->mir_ctx) {
         dom_doc->js.preamble_state = preamble;
         dom_doc->js.mir_ctx = preamble->mir_ctx;
@@ -2537,17 +2551,34 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
         // the preamble installed document/window bindings: this document now
         // owns a real DOM script realm, which routing gates test explicitly.
         dom_doc->js_has_dom_realm = true;
-        if (s_retain_js_state) {
+        if (s_retain_js_state || retain_for_autofocus) {
             log_info("execute_document_scripts: retained MIR context for event handlers");
             // Do NOT destroy heap/pool — they're retained on the document
         } else {
             log_info("execute_document_scripts: releasing transient JS context");
+            // Preserve this ownership fact after cleanup. A post-layout UA
+            // hook must not bind a second evaluator to a document whose JS
+            // realm was intentionally destroyed for a one-shot render.
+            dom_doc->js_realm_released_after_load = true;
             // transient scripts can leave timers rooted in this heap, sometimes
             // without a document pointer; shut down the loop before heap free.
             js_event_loop_shutdown();
             js_batch_reset();
             script_runner_cleanup_js_state(dom_doc);
         }
+    } else if ((s_retain_js_state || retain_for_autofocus) &&
+            js_ast_interpreter_requested() && runtime) {
+        // The AST tier has no MIR preamble, but its JsScript functions still
+        // belong to the retained document Runtime and can service DOM events.
+        if (preamble) {
+            preamble_state_destroy(preamble);
+            mem_free(preamble);
+        }
+        dom_doc->js.preamble_state = nullptr;
+        dom_doc->js.mir_ctx = nullptr;
+        dom_doc->js.runtime = runtime;
+        dom_doc->js_has_dom_realm = true;
+        log_info("execute_document_scripts: retained AST context for event handlers");
     } else {
         // Fallback: no valid preamble — destroy as before
         if (preamble) {
@@ -2602,7 +2633,6 @@ static const struct {
     {"onmousemove",  "mousemove"},
     {"onkeydown",    "keydown"},
     {"onkeyup",      "keyup"},
-    {"onkeypress",   "keypress"},
     {"onfocus",      "focus"},
     {"onblur",       "blur"},
     {"onchange",     "change"},

@@ -507,6 +507,8 @@ static const CssEnumInfo css_value_definitions[] = {
     {"punctuation", 11, CSS_VALUE_PUNCTUATION, CSS_VALUE_GROUP_MISC},
     {"insert", 6, CSS_VALUE_INSERT, CSS_VALUE_GROUP_MISC},
     {"replace", 7, CSS_VALUE_REPLACE, CSS_VALUE_GROUP_MISC},
+    {"flat", 4, CSS_VALUE_FLAT, CSS_VALUE_GROUP_MISC},
+    {"preserve-3d", 11, CSS_VALUE_PRESERVE_3D, CSS_VALUE_GROUP_MISC},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 

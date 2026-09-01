@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<body>
+  <input id="bootstrap" type="checkbox">
+  <input id="first" type="radio" name="choice">
+  <input id="second" type="radio" name="choice">
+  <button id="trigger" type="button">run synthetic activation</button>
+  <button id="popover-trigger" type="button" popovertarget="popover">open popover</button>
+  <div id="popover" popover>popover content</div>
+  <output id="result"></output>
+  <script>
+    const bootstrap = document.getElementById("bootstrap");
+    const first = document.getElementById("first");
+    const second = document.getElementById("second");
+    const result = document.getElementById("result");
+
+    bootstrap.click();
+    result.setAttribute("data-bootstrap", String(bootstrap.checked));
+
+    first.click();
+    second.dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true
+    }));
+    result.setAttribute("data-bootstrap-radio", first.checked + ":" + second.checked);
+
+    document.getElementById("trigger").addEventListener("click", function() {
+      first.click();
+      result.setAttribute("data-click", first.checked + ":" + second.checked);
+
+      second.dispatchEvent(new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true
+      }));
+      result.setAttribute("data-dispatch", first.checked + ":" + second.checked);
+
+      first.addEventListener("click", function(event) { event.preventDefault(); });
+      first.click();
+      result.setAttribute("data-cancel", first.checked + ":" + second.checked);
+
+      document.getElementById("popover-trigger").click();
+    });
+  </script>
+</body>
+</html>

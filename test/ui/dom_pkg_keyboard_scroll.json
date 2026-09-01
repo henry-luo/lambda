@@ -1,0 +1,30 @@
+{
+  "name": "ESO48: Lambda policy scrolls the document after caret policy declines",
+  "html": "test/ui/test_scroll.html",
+  "viewport": {"width": 800, "height": 600},
+  "events": [
+    {"type": "log", "message": "=== ESO48 keyboard document scroll ==="},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2},
+    {"type": "key_press", "key": "PageDown"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2, "negate": true},
+    {"type": "key_press", "key": "Home"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2},
+    {"type": "key_press", "key": "ArrowDown"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2, "negate": true},
+    {"type": "key_press", "key": "Home"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2},
+    {"type": "key_press", "key": "Space"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2, "negate": true},
+    {"type": "key_press", "key": "Home"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2},
+    {"type": "key_press", "key": "End"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2, "negate": true},
+    {"type": "key_press", "key": "PageUp"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2, "negate": true},
+    {"type": "key_press", "key": "End"},
+    {"type": "key_press", "key": "Space", "mods_str": "shift"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2, "negate": true},
+    {"type": "key_press", "key": "Home"},
+    {"type": "assert_scroll", "x": 0, "y": 0, "tolerance": 2}
+  ]
+}

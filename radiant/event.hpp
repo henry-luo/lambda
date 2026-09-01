@@ -26,6 +26,23 @@ typedef struct RenderContext RenderContext;
 struct UiContext;
 struct DomDocument;
 struct DomElement;
+
+typedef enum RadiantNavigationTargetKind {
+    RADIANT_NAVIGATION_TARGET_EXISTING = 0,
+    RADIANT_NAVIGATION_TARGET_NEW,
+} RadiantNavigationTargetKind;
+
+// Package policy resolves the browsing target and fragment element. Native
+// retains this deferred request until the cancelable event finishes, then
+// validates and executes it against the canonical DOM/lifecycle state (ES31).
+bool radiant_queue_navigation_request(DomElement* source, const char* url,
+                                      DomElement* target,
+                                      RadiantNavigationTargetKind target_kind,
+                                      const char* target_name,
+                                      DomElement* fragment_target);
+bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source);
+bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
+
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
 void radiant_reconcile_js_dom_mutations(UiContext* uicon, DomDocument* doc);
 extern "C" uint64_t js_dom_mutation_epoch(DomDocument* doc);
@@ -429,6 +446,10 @@ typedef enum InputIntentType {
     INPUT_INTENT_SELECT_ALL,
     INPUT_INTENT_HISTORY_UNDO,
     INPUT_INTENT_HISTORY_REDO,
+    // Copy is a key-default command rather than a beforeinput edit. Keeping it
+    // in the shared intent carrier lets the package choose the shortcut while
+    // native remains the clipboard mechanism.
+    INPUT_INTENT_COPY,
 } InputIntentType;
 
 typedef struct InputIntent {
@@ -478,6 +499,14 @@ bool input_intent_from_text_input(uint32_t codepoint, InputIntent* out,
                                   char* utf8_buf, size_t utf8_buf_size);
 bool input_intent_from_composition_event(const CompositionEvent* comp_event,
                                          InputIntent* out);
+
+// The package's document-scoped keyboard policies must dispatch from the live
+// <body>, not a focus/caret node that an author render may already have replaced.
+DomElement* radiant_document_body_element(DomDocument* doc);
+extern "C" bool radiant_dispatch_behavior_scroll_key(struct EventContext* evcon,
+                                                       View* target,
+                                                       const InputIntent* intent);
+extern "C" void radiant_scroll_operation_request(const char* operation);
 
 
 // ===== editing surface =====
@@ -1326,9 +1355,9 @@ struct EditingControllerHooks {
 };
 
 // F9: the rich half of the caret waist. `_caret_surface_kind` reports which
-// surface the caret sits in (0 none, 1 text control, 2 rich) so the template can
-// decide what a key means there; `_apply_caret_operation` performs the named
-// operation it chose.
+// surface the caret sits in (0 none, 1 single-line text control, 2 rich,
+// 3 textarea) so the template can decide what a key means there;
+// `_apply_caret_operation` performs the named operation it chose.
 extern "C" int editing_controller_caret_surface_kind(DocState* state);
 bool editing_controller_apply_caret_operation(EventContext* evcon, DocState* state,
                                               const EditingControllerHooks* hooks,
@@ -2471,6 +2500,9 @@ typedef struct DocState {
     DomElement*          last_focused_text_control;
     EditingBehavior      editing_behavior;
     FocusState* focus;             // focus state with navigation info
+    // A Space keydown arms its keyup click against this identity. Pinning is
+    // required because author keydown handlers may reconcile before keyup.
+    DomNodeRef pending_space_activation;
     CursorState* cursor;           // mouse cursor state
     View* hover_target;            // currently hovered element
     View* active_target;           // currently active (pressed) element
@@ -2661,6 +2693,10 @@ bool state_get_bool(DocState* state, void* node, const char* name);
  * Read lazily-created per-view interaction state. Missing ViewState means defaults.
  */
 ViewState* view_state_get(DocState* state, View* view);
+// Retain view-scoped interaction state when an incremental template rebuild
+// replaces a structurally corresponding DOM subtree.
+void view_state_preserve_subtree_identity(DocState* state, DomNode* old_root,
+                                          DomNode* new_root);
 bool view_state_get_hovered(DocState* state, View* view);
 bool view_state_get_active(DocState* state, View* view);
 bool view_state_get_focused(DocState* state, View* view);
@@ -2960,6 +2996,8 @@ void selection_get_range(DocState* state, int* start, int* end);
 // Focus API
 // ============================================================================
 
+bool is_view_programmatically_focusable(View* view);
+
 /**
  * Set focus to an element
  * @param from_keyboard true if focus was triggered by keyboard (Tab, etc.)
@@ -2967,10 +3005,27 @@ void selection_get_range(DocState* state, int* start, int* end);
 void focus_set(DocState* state, View* view, bool from_keyboard);
 
 /**
+ * Collect focus candidates in DOM order. Sequential candidates exclude a
+ * negative tabindex; the broader mode includes programmatic-only targets for
+ * autofocus.
+ */
+void focus_collect_candidates(View* root, ArrayList* list, bool sequential_only);
+
+/**
+ * Return the effective tabindex used by sequential focus ordering.
+ */
+int focus_tab_index(View* view);
+bool is_view_focusable(View* view);
+bool is_view_programmatically_focusable(View* view);
+
+/**
  * Set focus from HTMLElement.focus(). Negative tabindex values remain
  * programmatically focusable even though they are excluded from Tab order.
  */
 void focus_set_programmatic(DocState* state, View* view);
+
+// Focus a DOM element through the retained document JS realm when present.
+bool radiant_focus_element(DomDocument* doc, View* target);
 
 /**
  * Clear focus (blur current element)
@@ -3001,6 +3056,10 @@ bool focus_restore(DocState* state);
 View* focus_get(DocState* state);
 bool focus_has_current(DocState* state);
 View* focus_get_visible(DocState* state);
+
+// ES30: package-owned autofocus selection. Native retains the focus write,
+// focus-event emission point, queued scroll geometry, and paint invalidation.
+void radiant_run_autofocus(struct DomDocument* doc);
 
 // ============================================================================
 // Doc-Level Interaction Target API
@@ -4215,6 +4274,16 @@ typedef struct EventContext {
     // event.preventDefault(). Default-action sites (link nav, checkbox toggle,
     // radio select, video play/pause) check this flag to skip the default.
     bool default_prevented;
+
+    // F17/ES24: the native event record shared by JS and Lambda handlers for
+    // the current logical dispatch. Its exact root belongs to this context.
+    Item dom_event;
+    void* dom_event_root_gc;
+    bool dom_event_root_lifetime;
+    // The UA tier records its one allowed claimant on the current event so
+    // legacy native call sites cannot replay the author walk after JS returns.
+    bool dom_event_ua_handled;
+    bool dom_event_author_dirty;
 
     // paste text (set before dispatching "paste" event)
     const char* paste_text;

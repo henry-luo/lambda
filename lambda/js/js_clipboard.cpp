@@ -29,6 +29,7 @@
 #include "js_class.h"
 #include "js_dom_events.h"
 #include "../lambda-data.hpp"
+#include "../module/radiant/radiant_dom_bridge.hpp"
 #include "../runtime/transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/mem.h"
@@ -1007,7 +1008,7 @@ extern "C" bool js_dispatch_clipboard_event_to_element(Item target_item, const c
     Item ev = js_create_event(type, /*bubbles=*/1, /*cancelable=*/1);
     js_set_key_cstr(ev, "clipboardData", dt);
     js_dom_dispatch_event(target_item, ev);
-    bool prevented = js_event_is_default_prevented(ev);
+    bool prevented = radiant_dom_event_default_prevented(ev);
     if (!is_paste) {
         const char* plain = dt_read_record(dt, "text/plain");
         const char* html  = dt_read_record(dt, "text/html");
@@ -1060,7 +1061,7 @@ extern "C" bool js_dispatch_drag_event_to_element(Item target_item,
     Item ev = js_create_native_drag_event(type, client_x, client_y,
         g_drag_data_transfer, false, false, false, false);
     js_dom_dispatch_event(target_item, ev);
-    return js_event_is_default_prevented(ev);
+    return radiant_dom_event_default_prevented(ev);
 }
 
 // =============================================================================

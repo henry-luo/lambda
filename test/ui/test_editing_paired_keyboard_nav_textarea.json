@@ -18,6 +18,11 @@
     {"type": "assert_editing_selection", "target": {"selector": "#nav-area"}, "start": 0, "end": 4},
     {"type": "set_editing_selection", "target": {"selector": "#nav-area"}, "start": 4, "end": 4},
     {"type": "key_press", "key": "End", "mods_str": "super shift"},
-    {"type": "assert_editing_selection", "target": {"selector": "#nav-area"}, "start": 4, "end": 8}
+    {"type": "assert_editing_selection", "target": {"selector": "#nav-area"}, "start": 4, "end": 8},
+    {"type": "set_editing_selection", "target": {"selector": "#auto-area"}, "start": 1, "end": 1},
+    {"type": "key_press", "key": "PageDown"},
+    {"type": "assert_editing_selection", "target": {"selector": "#auto-area"}, "start": 31, "end": 31},
+    {"type": "key_press", "key": "PageUp"},
+    {"type": "assert_editing_selection", "target": {"selector": "#auto-area"}, "start": 1, "end": 1}
   ]
 }

@@ -38,6 +38,27 @@ static bool html5_has_template_on_stack(Html5Parser* parser) {
     return false;
 }
 
+static void html5_merge_attributes_into_element(Html5Parser* parser,
+                                                Html5Token* token,
+                                                Element* element) {
+    if (!parser || !token || !token->attributes || !element) return;
+
+    MapReader attr_reader(token->attributes);
+    MapReader::EntryIterator it = attr_reader.entries();
+    const char* key;
+    ItemReader value;
+    while (it.next(&key, &value)) {
+        if (!key || element->has_attr(key)) continue;
+        Item attr_value = value.isString()
+            ? Item{.item = s2it(value.asString())}
+            : Item{.item = ITEM_NULL};
+        // html parsing merges only missing attributes; empty attributes still
+        // carry presence semantics (for example, contenteditable="").
+        MarkEditor editor(parser->input);
+        editor.elmt_update_attr(Item{.element = element}, key, attr_value);
+    }
+}
+
 static bool html5_is_list_scope_stop_tag(const char* tag) {
     static const char* stop_tags[] = {
         "applet", "area", "article", "aside", "base", "basefont", "bgsound",
@@ -1210,23 +1231,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
             if (!has_template && parser->open_elements->length > 0) {
                 // Find html element (should be first)
                 Element* html_el = (Element*)parser->open_elements->items[0].element;
-                // Add any attributes from token that are not already on html
-                if (token->attributes != nullptr && html_el->type != nullptr) {
-                    MapReader html_attrs = MapReader::fromItem(Item { .element = html_el });
-                    MapReader attr_reader(token->attributes);
-                    MapReader::EntryIterator it = attr_reader.entries();
-                    const char* key;
-                    ItemReader value;
-                    while (it.next(&key, &value)) {
-                        if (key && value.isString()) {
-                            // Only add if not already present
-                            if (!html_attrs.has(key)) {
-                                MarkEditor editor(parser->input);
-                                editor.elmt_update_attr(Item { .element = html_el }, key, Item { .item = s2it(value.asString()) });
-                            }
-                        }
-                    }
-                }
+                html5_merge_attributes_into_element(parser, token, html_el);
             }
             return;
         }
@@ -1242,23 +1247,7 @@ static void html5_process_in_body_mode(Html5Parser* parser, Html5Token* token) {
                 Element* body_el = (Element*)parser->open_elements->items[1].element;
                 const char* body_tag = ((TypeElmt*)body_el->type)->name.str;
                 if (strcmp(body_tag, "body") == 0) {
-                    // Add any attributes from token that are not already on body
-                    if (token->attributes != nullptr) {
-                        MapReader body_attrs = MapReader::fromItem(Item { .element = body_el });
-                        MapReader attr_reader(token->attributes);
-                        MapReader::EntryIterator it = attr_reader.entries();
-                        const char* key;
-                        ItemReader value;
-                        while (it.next(&key, &value)) {
-                            if (key && value.isString()) {
-                                // Only add if not already present
-                                if (!body_attrs.has(key)) {
-                                    MarkEditor editor(parser->input);
-                                    editor.elmt_update_attr(Item { .element = body_el }, key, Item { .item = s2it(value.asString()) });
-                                }
-                            }
-                        }
-                    }
+                    html5_merge_attributes_into_element(parser, token, body_el);
                     parser->frameset_ok = false;
                 }
             }

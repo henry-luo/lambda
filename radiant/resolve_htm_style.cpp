@@ -441,44 +441,78 @@ bool layout_canvas_natural_size(ViewBlock* block, float* out_width, float* out_h
 static void apply_html_replaced_default(LayoutContext* lycon, DomNode* element,
                                         ViewBlock* block, bool require_digit_start,
                                         bool persist_in_block, bool context_default,
-                                        bool default_invalid, bool ensure_block) {
+                                        bool default_invalid, bool ensure_block,
+                                        bool default_when_missing = true) {
     block->display.inner = RDT_DISPLAY_REPLACED;
     if (context_default) apply_html_context_default_size(lycon, 300.0f, 150.0f);
     if (ensure_block) block->ensure_block(lycon);
     HtmlDimensionPolicy policy = {
         300.0f, 150.0f, 0.0f, 0.0f, false, require_digit_start,
-        !context_default, default_invalid, false, persist_in_block
+        !context_default && default_when_missing, default_invalid, false, persist_in_block
     };
     apply_html_dimension_attributes(lycon, element, block, &policy);
 }
 
+static const char* html_media_next_source(DomElement* element, DomNode** cursor) {
+    if (!element || !cursor) return nullptr;
+    if (!*cursor) {
+        *cursor = element;
+        const char* direct = element->get_attribute("src");
+        if (direct && *direct) return direct;
+    }
+    DomNode* child = *cursor == element ? element->first_child : (*cursor)->next_sibling;
+    while (child) {
+        *cursor = child;
+        if (child->is_element() && child->as_element()->tag() == MARKUP_NAME_SOURCE) {
+            const char* src = child->as_element()->get_attribute("src");
+            if (src && *src) return src;
+        }
+        child = child->next_sibling;
+    }
+    return nullptr;
+}
+
 static void initialize_html_media(LayoutContext* lycon, DomNode* element,
                                   ViewBlock* block, bool is_video) {
-    const char* src = element->get_attribute("src");
+    DomElement* media_element = element && element->is_element()
+        ? element->as_element() : nullptr;
     DomDocument* doc = lycon->ui_context ? lycon->ui_context->document : nullptr;
-    if (!src || !*src || !doc || !doc->url) return;
+    if (!doc || !doc->url) return;
 
     if (!block->embed) {
         block->ensure_embed(lycon);
     }
     if (block->embedp()->video) return;
 
-    Url* abs_url = parse_url(doc->url, src);
-    char* file_path = abs_url ? url_to_local_path(abs_url) : NULL;
-    if (abs_url) url_destroy(abs_url);
-    if (!file_path) {
-        log_error("media source resolution failed: kind=%s src=%s",
-                  is_video ? "video" : "audio", src);
-        return;
-    }
-
     const char* preload = is_video ? element->get_attribute("preload") : nullptr;
     bool preload_none = preload && strcmp(preload, "none") == 0;
-    RdtVideo* media = rdt_video_create(&media_callbacks, doc->state);
-    if (media) {
-        if (!preload_none) {
-            rdt_video_open_file(media, file_path);
+    RdtVideo* media = nullptr;
+    char* selected_file_path = nullptr;
+    DomNode* source_cursor = nullptr;
+    const char* src = nullptr;
+    while ((src = html_media_next_source(media_element, &source_cursor))) {
+        Url* abs_url = parse_url(doc->url, src);
+        char* file_path = abs_url ? url_to_local_path(abs_url) : nullptr;
+        if (abs_url) url_destroy(abs_url);
+        if (!file_path) continue;
+
+        RdtVideo* candidate = rdt_video_create(&media_callbacks, doc->state);
+        if (!candidate) {
+            mem_free(file_path);
+            continue;
         }
+        if (!preload_none && rdt_video_open_file(candidate, file_path) != 0) {
+            rdt_video_destroy(candidate);
+            mem_free(file_path);
+            continue;
+        }
+        media = candidate;
+        selected_file_path = file_path;
+        break;
+    }
+    if (!media) return;
+
+    {
         if (element->has_attribute("loop")) rdt_video_set_loop(media, true);
         if (element->has_attribute("muted")) rdt_video_set_muted(media, true);
         block->embed->video = media;
@@ -492,12 +526,12 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
         }
 
         if (element->has_attribute("autoplay")) {
-            if (preload_none) rdt_video_open_file(media, file_path);
+            if (preload_none) rdt_video_open_file(media, selected_file_path);
             rdt_video_play(media);
             if (doc->state) doc->state->has_active_video = true;
         }
     }
-    mem_free(file_path);
+    mem_free(selected_file_path);
 }
 
 static DomElement* parent_table_element(DomNode* element) {
@@ -661,7 +695,27 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
     }
 
     BlockProp* block_prop = block->ensure_block(lycon);
-    block_prop->text_align = is_header ? CSS_VALUE_CENTER : CSS_VALUE_LEFT;
+    bool cell_is_rtl = false;
+    for (DomElement* current = cell; current;) {
+        CssEnum specified_direction = layout_specified_keyword(
+            current, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
+        const char* dir = current->get_attribute("dir");
+        if (specified_direction == CSS_VALUE_RTL ||
+            (dir && str_ieq_const(dir, strlen(dir), "rtl"))) {
+            cell_is_rtl = true;
+            break;
+        }
+        if (specified_direction == CSS_VALUE_LTR ||
+            (dir && str_ieq_const(dir, strlen(dir), "ltr"))) {
+            break;
+        }
+        DomNode* parent = current->parent;
+        current = parent && parent->is_element() ? parent->as_element() : nullptr;
+    }
+    // CSS Text initial 'start' alignment follows the cell's direction; retain
+    // the established LTR HTML geometry while correcting RTL table cells.
+    block_prop->text_align = is_header ? CSS_VALUE_CENTER :
+        (cell_is_rtl ? CSS_VALUE_START : CSS_VALUE_LEFT);
     apply_table_cell_dimension_attribute(cell, block, LAYOUT_AXIS_X);
     apply_table_cell_dimension_attribute(cell, block, LAYOUT_AXIS_Y);
 
@@ -781,6 +835,11 @@ static bool apply_html_inline_text_default(LayoutContext* lycon, ViewSpan* span,
         default: return false;
     }
     FontProp* font = span->ensure_font(lycon);
+    if (tag == MARKUP_NAME_RT) {
+        // CSS Text Decoration 4 §3.1: the UA disables emphasis inheritance on
+        // ruby text so marks remain attached to the ruby base.
+        font->text_emphasis_enabled = false;
+    }
     if (style != CSS_VALUE__UNDEF) font->font_style = style;
     if (weight == CSS_VALUE_BOLD) apply_html_font_weight(font, CSS_VALUE_BOLD, 700);
     if (decoration != CSS_VALUE__UNDEF) font->text_deco = decoration;
@@ -826,6 +885,12 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     NameId elmt_name = elmt->tag();
     if (elmt->is_element()) {
         DomElement* dom_elem = elmt->as_element();
+        const char* namespace_uri = dom_elem->get_attribute("__lambda_ns_uri");
+        if (namespace_uri &&
+            strcmp(namespace_uri, "http://www.w3.org/1999/xhtml") != 0) {
+            // HTML rendering rules apply only in the XHTML namespace.
+            return;
+        }
         bool popover_has_display_override = dom_elem->specified_style &&
             style_tree_get_declaration(dom_elem->specified_style, CSS_PROPERTY_DISPLAY);
         if (dom_elem->has_attribute("popover") &&
@@ -1060,7 +1125,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         break;
     case MARKUP_NAME_OBJECT:
         if (elmt->get_attribute("data")) {
-            apply_html_replaced_default(lycon, elmt, block, true, true, false, true, false);
+            // A loadable object uses the resource's intrinsic size when its
+            // HTML dimensions are omitted; the 300x150 size is only fallback.
+            apply_html_replaced_default(lycon, elmt, block, true, true, false, true, false, false);
         }
         break;
     case MARKUP_NAME_HR: {
@@ -1589,6 +1656,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         }
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->display.inner = RDT_DISPLAY_REPLACED;
+        if (block->form->multiple || block->form->select_size > 1) {
+            block->ensure_inline(lycon);
+            // HTML rendering gives native listboxes the text-bottom inline alignment.
+            block->in_line->vertical_align = CSS_VALUE_TEXT_BOTTOM;
+        }
         block->ensure_block(lycon);
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
         if (block->form->appearance_base_select) {
@@ -1739,12 +1811,21 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->ensure_block(lycon);
         if (str_ieq_const(dir_attr, strlen(dir_attr), "rtl")) {
             block->blk->direction = CSS_VALUE_RTL;
+            // HTML rendering §15.3.5: recognized dir values isolate the element
+            // from the surrounding bidi paragraph.
+            block->blk->unicode_bidi = CSS_VALUE_ISOLATE;
         } else if (str_ieq_const(dir_attr, strlen(dir_attr), "ltr")) {
             block->blk->direction = CSS_VALUE_LTR;
+            // HTML rendering §15.3.5: recognized dir values isolate the element
+            // from the surrounding bidi paragraph.
+            block->blk->unicode_bidi = CSS_VALUE_ISOLATE;
         } else if (str_ieq_const(dir_attr, strlen(dir_attr), "auto")) {
             // HTML5 §14.3.4: dir="auto" — resolve direction from first strong character
             CssEnum resolved = resolve_dir_auto(lam::dom_require_element(elmt));
             block->blk->direction = resolved;
+            // HTML rendering §15.3.5: dir=auto is isolated unless plaintext
+            // handling is required for preformatted or textarea content.
+            block->blk->unicode_bidi = CSS_VALUE_ISOLATE;
             if (elmt->tag() == MARKUP_NAME_PRE || elmt->tag() == MARKUP_NAME_TEXTAREA) {
                 // html rendering maps pre/textarea dir=auto to plaintext bidi.
                 block->blk->unicode_bidi = CSS_VALUE_PLAINTEXT;

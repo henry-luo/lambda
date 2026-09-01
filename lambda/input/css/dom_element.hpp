@@ -240,6 +240,12 @@ struct DomDocument {
     // Reactive UI: retained Lambda runtime for event handler execution
     Runtime* lambda_runtime;     // Retained runtime (heap, JIT context) for reactive UI sessions
 
+    // An embedded document has one bounded upward browsing-context edge. The
+    // owner reference is generation-checked so package traversal cannot keep a
+    // detached iframe alive or follow a recycled node (ES31, D4.5.1v3).
+    DomDocument* embedding_document;
+    DomNodeRef embedding_element_ref;
+
     // Native extensions retain runtime-backed values through document resources.
     struct DomDocumentResource* resources;
 
@@ -296,6 +302,10 @@ struct DomDocument {
     // and must never be inferred from lambda_runtime being null.
     bool js_has_dom_realm;
 
+    // A one-shot render has executed page JS but intentionally released its
+    // realm. It must not later create a second evaluator for UA behavior.
+    bool js_realm_released_after_load;
+
     // The Lambda dom package supplies this document's UA behavior templates. It
     // loads at most once, on the first event, so static layout and render runs
     // never pay for it.
@@ -321,7 +331,8 @@ struct DomDocument {
                     font_faces_processed(false),
                     view_tree(nullptr), state_store(nullptr), state(nullptr),
                     resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
-                    lambda_runtime(nullptr), resources(nullptr),
+                    lambda_runtime(nullptr), embedding_document(nullptr),
+                    embedding_element_ref({nullptr, 0}), resources(nullptr),
                     cached_inline_sheets(nullptr), cached_inline_sheet_count(0),
                     element_dom_map(nullptr),
                     skip_style_reset(false),
@@ -334,8 +345,8 @@ struct DomDocument {
                     pending_scroll_into_view_target_id(0),
                     pending_scroll_into_view_center(false),
                     mutation_epoch(0), page_kind(DOM_PAGE_KIND_UNKNOWN), js_has_dom_realm(false),
-                    dom_package_loaded(false), owns_script_runtime(false),
-                    behavior_init_pending(false) {}
+                    js_realm_released_after_load(false), dom_package_loaded(false),
+                    owns_script_runtime(false), behavior_init_pending(false) {}
 
     bool init(Input* input);
     void destroy();
@@ -374,6 +385,13 @@ typedef struct DomDocumentResource {
 
 bool dom_document_add_resource(DomDocument* document, void* data,
                                DomDocumentResourceDestroyFn destroy);
+
+// The parent iframe owns the embedded document's bounded upward edge. The
+// document keeps a generation-checked reference rather than a raw node pointer.
+bool dom_document_set_embedding(DomDocument* embedded, DomDocument* parent,
+                                DomElement* iframe);
+void dom_document_clear_embedding(DomDocument* embedded);
+DomElement* dom_document_embedding_element(DomDocument* embedded);
 
 // tier-1: doc-pool, survives relayout
 typedef struct {
@@ -530,6 +548,7 @@ struct DomElementExt {
     DomElement* shadow_root;
     float pending_element_scroll_x;
     float pending_element_scroll_y;
+    bool has_inline_cb_edge_snapshot;
     const char** attribute_names_cache;
     int attribute_names_capacity;
     // Layout-only ruby column geometry. This lives outside InlineProp because
@@ -726,6 +745,11 @@ struct DomElement : DomNode {
     void set_has_collapsed_line_fragment_union(bool value) { set_has_fragment_union(FRAGMENT_UNION_COLLAPSED_LINE, value); }
     bool has_split_inline_fragment_union() const { return has_fragment_union(FRAGMENT_UNION_SPLIT_INLINE); }
     void set_has_split_inline_fragment_union(bool value) { set_has_fragment_union(FRAGMENT_UNION_SPLIT_INLINE, value); }
+    bool has_inline_cb_edge_snapshot() const { return ext && ext->has_inline_cb_edge_snapshot; }
+    void set_has_inline_cb_edge_snapshot(bool value) {
+        DomElementExt* data = ensure_ext();
+        if (data) data->has_inline_cb_edge_snapshot = value;
+    }
 
     ParentItemKind parent_item_kind() const {
         return (ParentItemKind)((elmt_flags & ELMT_FLAG_PARENT_ITEM_KIND_MASK) >>
@@ -953,6 +977,7 @@ struct DomElement : DomNode {
         memset(ext->frags, 0, sizeof(ext->frags));
         ext->layout_fragments = nullptr;
         ext->layout_fragment_count = 0;
+        ext->has_inline_cb_edge_snapshot = false;
         ext->custom_layout_paint = nullptr;
         ext->ruby_column_anchor_x = 0.0f;
         ext->ruby_column_width = 0.0f;

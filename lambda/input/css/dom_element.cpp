@@ -251,6 +251,8 @@ void DomDocument::destroy() {
         svg_unregister_image_resolvers_for_tree(html_root);
     }
 
+    dom_document_clear_embedding(this);
+
     if (pending_navigation_url) {
         mem_free(pending_navigation_url);
         pending_navigation_url = nullptr;
@@ -313,6 +315,39 @@ bool dom_document_add_resource(DomDocument* document, void* data,
     resource->next = document->resources;
     document->resources = resource;
     return true;
+}
+
+bool dom_document_set_embedding(DomDocument* embedded, DomDocument* parent,
+                                DomElement* iframe) {
+    if (!embedded || !parent || !iframe || iframe->doc != parent) return false;
+    DomNodeRef ref = dom_node_ref((DomNode*)iframe);
+    if (!dom_node_ref_validate(parent, ref) ||
+        !dom_node_pin(parent, ref, DOM_NODE_PIN_EXTERNAL)) {
+        return false;
+    }
+    dom_document_clear_embedding(embedded);
+    embedded->embedding_document = parent;
+    embedded->embedding_element_ref = ref;
+    return true;
+}
+
+void dom_document_clear_embedding(DomDocument* embedded) {
+    if (!embedded) return;
+    if (embedded->embedding_document &&
+        embedded->embedding_element_ref.address) {
+        dom_node_unpin(embedded->embedding_document,
+                       embedded->embedding_element_ref,
+                       DOM_NODE_PIN_EXTERNAL);
+    }
+    embedded->embedding_document = nullptr;
+    embedded->embedding_element_ref = {nullptr, 0};
+}
+
+DomElement* dom_document_embedding_element(DomDocument* embedded) {
+    if (!embedded || !embedded->embedding_document) return nullptr;
+    DomNode* node = dom_node_ref_validate(embedded->embedding_document,
+                                          embedded->embedding_element_ref);
+    return node && node->is_element() ? node->as_element() : nullptr;
 }
 
 // ============================================================================

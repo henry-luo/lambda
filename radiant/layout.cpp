@@ -40,6 +40,13 @@ bool layout_block_establishes_scroll_container(ViewBlock* block) {
          layout_overflow_establishes_scroll_container(scroll->overflow_y));
 }
 
+float layout_text_overflow_ellipsis_width(FontHandle* font_handle,
+                                          float fallback_font_size) {
+    if (!font_handle) return max(fallback_font_size * 0.5f, 0.0f);
+    GlyphInfo ellipsis = font_get_glyph(font_handle, 0x2026);
+    return ellipsis.id != 0 ? ellipsis.advance_x : fallback_font_size * 0.5f;
+}
+
 float layout_effective_zoom(View* view) {
     float effective_zoom = 1.0f;
     for (View* current = view; current; current = current->parent_view()) {
@@ -555,14 +562,71 @@ static void reset_non_inherited_style_cache(ViewSpan* view) {
     }
 }
 
-static bool element_has_author_all_reset(DomElement* element) {
-    if (!element || !element->specified_style) return false;
+CssEnum layout_element_css_all_reset_keyword(DomElement* element) {
+    if (!element || !element->specified_style) return CSS_VALUE__UNDEF;
     CssDeclaration* declaration = style_tree_get_declaration(
         element->specified_style, CSS_PROPERTY_ALL);
     if (!declaration || !declaration->value ||
-        declaration->value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+        declaration->value->type != CSS_VALUE_TYPE_KEYWORD) return CSS_VALUE__UNDEF;
+    CssEnum keyword = declaration->value->data.keyword;
+    return keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_UNSET
+        ? keyword : CSS_VALUE__UNDEF;
+}
 
-    return declaration->value->data.keyword != CSS_VALUE_REVERT;
+static void reset_css_all_visual_style(LayoutContext* lycon, ViewSpan* view) {
+    if (!lycon || !view) return;
+
+    if (view->blk) {
+        memcpy(view->blk, &BLOCK_PROP_DEFAULT, sizeof(BlockProp));
+    }
+    if (view->font) {
+        font_prop_release_handle(view->font);
+        memcpy(view->font, &FONT_PROP_DEFAULT, sizeof(FontProp));
+    }
+    if (view->in_line) {
+        InlineProp* inline_prop = view->ensure_inline(lycon);
+        if (inline_prop) memcpy(inline_prop, &INLINE_PROP_DEFAULT, sizeof(InlineProp));
+    }
+    if (view->bound) {
+        BoundaryProp* boundary = view->boundary_mut();
+        boundary->margin = BOUNDARY_PROP_DEFAULT.margin;
+        boundary->flow_margin = BOUNDARY_PROP_DEFAULT.flow_margin;
+        boundary->has_flow_margin = false;
+        boundary->padding = BOUNDARY_PROP_DEFAULT.padding;
+        boundary->collapsed_through_mb = 0.0f;
+        boundary->has_clearance = false;
+        boundary->clearance_in_margin_chain = false;
+        boundary->margin_chain_positive = 0.0f;
+        boundary->margin_chain_negative = 0.0f;
+        if (boundary->border) {
+            memset(boundary->border, 0, sizeof(BorderProp));
+        }
+        if (boundary->background) {
+            memset(boundary->background, 0, sizeof(BackgroundProp));
+        }
+        if (boundary->outline) {
+            memset(boundary->outline, 0, sizeof(OutlineProp));
+            boundary->outline->style = CSS_VALUE_NONE;
+        }
+        boundary->mask = nullptr;
+        boundary->box_shadow = nullptr;
+    }
+    if (view->scroller) {
+        ScrollPane* pane = view->scroller->pane;
+        memcpy(view->scroller, &SCROLL_PROP_DEFAULT, sizeof(ScrollProp));
+        view->scroller->pane = pane;
+    }
+    if (view->position) {
+        memcpy(view->position, &POSITION_PROP_DEFAULT, sizeof(PositionProp));
+    }
+    if (view->embed) {
+        view->embed->object_fit = EMBED_PROP_DEFAULT.object_fit;
+        view->embed->object_position_x = EMBED_PROP_DEFAULT.object_position_x;
+        view->embed->object_position_y = EMBED_PROP_DEFAULT.object_position_y;
+        view->embed->object_position_set = EMBED_PROP_DEFAULT.object_position_set;
+        view->embed->object_position_x_is_percent = EMBED_PROP_DEFAULT.object_position_x_is_percent;
+        view->embed->object_position_y_is_percent = EMBED_PROP_DEFAULT.object_position_y_is_percent;
+    }
 }
 
 int64_t g_layout_cache_hits = 0;
@@ -1275,32 +1339,29 @@ float layout_resolve_line_height_value(LayoutContext* lycon, const CssValue* val
     return resolve_length_value(lycon, CSS_PROPERTY_LINE_HEIGHT, value);
 }
 
-float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
-                                   FontProp* style) {
+float layout_measure_glyph_advance(LayoutContext* lycon, FontHandle* handle,
+                                   FontProp* style, uint32_t codepoint) {
     if (!style) return 0.0f;
-    // otherwise return a fallback width and inflate intrinsic inline runs.
     if (style->font_size <= 0.0f) return 0.0f;
     if (!handle) handle = style->font_handle;
     if (handle) {
         FontStyleDesc desc = font_style_desc_from_prop(style);
-        FontHandle* resolved = handle;
-        bool release_resolved = false;
-        if (!font_has_codepoint(handle, (uint32_t)' ') && lycon &&
-            lycon->ui_context && lycon->ui_context->font_ctx) {
-            resolved = font_resolve_for_codepoint(
-                lycon->ui_context->font_ctx, &desc, (uint32_t)' ');
-            release_resolved = resolved != NULL;
-        }
-        LoadedGlyph* glyph = resolved
-            ? font_load_glyph(resolved, &desc, (uint32_t)' ', false) : NULL;
+        LoadedGlyph* glyph = font_load_glyph(handle, &desc, codepoint, false);
         float advance = 0.0f;
         if (glyph && glyph->advance_x > 0.0f) {
             float raster_scale = ui_context_raster_scale(lycon->ui_context);
             advance = glyph->advance_x / raster_scale;
         }
-        if (release_resolved) font_handle_release(resolved);
         if (advance > 0.0f) return advance;
     }
+    return 0.0f;
+}
+
+float layout_measure_space_advance(LayoutContext* lycon, FontHandle* handle,
+                                   FontProp* style) {
+    if (!style) return 0.0f;
+    float advance = layout_measure_glyph_advance(lycon, handle, style, (uint32_t)' ');
+    if (advance > 0.0f) return advance;
     return style->space_width;
 }
 
@@ -1561,8 +1622,12 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             if (parent_elem && parent_elem->font) {
                 setup_font(lycon->ui_context, &lycon->font, parent_elem->font);
             }
-            if (!element_has_author_all_reset(dom_elem)) {
-                apply_element_default_style(lycon, dom_elem);
+            apply_element_default_style(lycon, dom_elem);
+            if (layout_element_css_all_reset_keyword(dom_elem) != CSS_VALUE__UNDEF) {
+                // CSS Cascade: HTML defaults remain available for control semantics,
+                // while all:initial/unset resets the visual property state.
+                reset_css_all_visual_style(lycon,
+                    lam::view_require_element(lycon->view));
             }
 
             if (layout_context_is_measuring(lycon)) {
@@ -1579,7 +1644,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
 
             if (dom_elem->specified_style && dom_elem->specified_style->tree) {
                 AvlNode* display_node = avl_tree_search(dom_elem->specified_style->tree, CSS_PROPERTY_DISPLAY);
-                if (display_node) {
+                if (display_node ||
+                    layout_element_css_all_reset_keyword(dom_elem) != CSS_VALUE__UNDEF) {
                     DisplayValue resolved = resolve_display_value(dom_elem);
                     dom_elem->display = resolved;
                 }
@@ -1610,9 +1676,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
                 dom_elem->set_needs_style_recompute(false);
             }
         } else {
-            if (!element_has_author_all_reset(dom_elem)) {
-                apply_element_default_style(lycon, dom_elem);
-            }
+            apply_element_default_style(lycon, dom_elem);
             // CSS 2.1: Elements without specified styles still have computed values
             if (lycon->font.style) {
                 if (!dom_elem->font) {
@@ -1826,6 +1890,31 @@ bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
             }
         }
         child = child->next();
+    }
+    return false;
+}
+
+// CSS 2.1 §9.2.1.1: follow inline wrappers to find a leading block fragment.
+bool layout_inline_span_starts_with_in_flow_block_fragment(ViewSpan* span) {
+    if (!span) return false;
+    for (View* child = span->first_child; child; child = child->next()) {
+        if (child->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(child)) {
+            continue;
+        }
+        if (child->view_type == RDT_VIEW_TEXT && child->width <= 0.0f) {
+            continue;
+        }
+        if (ViewBlock* block = lam::view_as_block(child)) {
+            if (child->view_type == RDT_VIEW_INLINE_BLOCK ||
+                layout_block_is_self_collapsing(block)) {
+                return false;
+            }
+            return !layout_block_is_out_of_flow(block);
+        }
+        if (ViewSpan* child_span = lam::view_as<RDT_VIEW_INLINE>(child)) {
+            return layout_inline_span_starts_with_in_flow_block_fragment(child_span);
+        }
+        return false;
     }
     return false;
 }
@@ -2247,6 +2336,24 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
         adjust_text_bounds(text_view);
     }
+    else if (view->view_type == RDT_VIEW_BR) {
+        // CSS 2.1 §10.8.1: a forced break still carries the enclosing inline
+        // box's baseline alignment for its line-box fragment.
+        if (view->inline_line_number != lycon->block.line_number) return;
+        float item_height = view->height;
+        float item_baseline = item_height;
+        FontHandle* br_font = font_box_handle(&lycon->font);
+        if (br_font) {
+            float rendering_ascender = font_get_rendering_ascender(br_font);
+            if (rendering_ascender > 0.0f) item_baseline = rendering_ascender;
+        } else if (lycon->block.init_ascender > 0.0f) {
+            item_baseline = lycon->block.init_ascender;
+        }
+        float vertical_offset = calculate_vertical_align_offset(
+            lycon, lycon->line.vertical_align, item_height, line_height,
+            baseline_pos, item_baseline, lycon->line.vertical_align_offset);
+        view->y = lycon->block.advance_y + vertical_offset;
+    }
     else if (view->view_type == RDT_VIEW_INLINE_BLOCK ||
              view->view_type == RDT_VIEW_TABLE) {
         ViewBlock* block = lam::view_require_block(view);
@@ -2301,6 +2408,11 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         } else if (block->tag() == MARKUP_NAME_TEXTAREA && overflow_visible) {
             item_baseline = block->height +
                 (block->bound ? block->boundary()->margin.top : 0);
+        } else if (overflow_visible && block->display.inner == RDT_DISPLAY_REPLACED &&
+                   !block->form) {
+            // HTML replaced controls retain their dedicated baseline source;
+            // ordinary replaced inlines align their margin-box bottom edge.
+            item_baseline = item_height;
         } else if (block->display.inner == RDT_DISPLAY_REPLACED && overflow_visible) {
             item_baseline = block->height +
                 (block->bound ? block->boundary()->margin.top : 0);
@@ -2451,6 +2563,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         // instead of aligning the list-item to the final line's font box.
         bool has_block_fragment_child = layout_inline_span_has_in_flow_block_child(
             span, preserve_inline_list_marker_fragment);
+        bool has_leading_block_fragment =
+            layout_inline_span_starts_with_in_flow_block_fragment(span);
         bool span_is_multi_line = preserve_inline_list_marker_fragment &&
             (inline_span_has_multiple_line_fragments(span) ||
              has_block_fragment_child);
@@ -2470,7 +2584,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 span->x = finalized_inline_x;
                 span->width = finalized_inline_width;
             }
-            if (is_ruby_container && span_fh) {
+            if (is_ruby_container && span_fh && !has_leading_block_fragment) {
                 float ruby_ascender = span->font ? span->fontp()->ascender :
                     (lycon->font.style ? lycon->font.style->ascender : 0.0f);
                 float ruby_descender = span->font ? span->fontp()->descender :
@@ -2588,6 +2702,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         }
         if (span->tag() == MARKUP_NAME_RUBY &&
             span->inl()->ruby_position != CSS_VALUE_UNDER) {
+            bool preserve_trimmed_annotation_box =
+                ruby_has_text_box_trim_ancestor(span, TEXT_BOX_TRIM_START);
             float base_top_y = span->y;
             bool has_base_box = false;
             for (View* child = span->first_child; child; child = child->next()) {
@@ -2608,7 +2724,15 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
                 }
                 ViewSpan* annotation = lam::view_require<RDT_VIEW_INLINE>(child);
                 float target_y = base_top_y - annotation->height;
-                layout_shift_view_tree(child, 0.0f, target_y - annotation->y);
+                float offset_y = target_y - annotation->y;
+                if (preserve_trimmed_annotation_box) {
+                    // CSS Inline: trim-start excludes the over-side annotation
+                    // box from the ancestor line, but its annotation line still
+                    // follows the finalized baseline.
+                    layout_shift_view_children(child, 0.0f, offset_y);
+                } else {
+                    layout_shift_view_tree(child, 0.0f, offset_y);
+                }
             }
         }
     }

@@ -554,6 +554,120 @@ static bool evaluate_media_type(const char* type) {
  * - "(min-width: 768px) and (max-width: 1024px)"
  * - "screen, print"
  */
+typedef struct CssConditionSpan {
+    const char* start;
+    size_t length;
+} CssConditionSpan;
+
+static CssConditionSpan css_condition_trim(CssConditionSpan span) {
+    while (span.length > 0 &&
+           (span.start[0] == ' ' || span.start[0] == '\t' ||
+            span.start[0] == '\n' || span.start[0] == '\r')) {
+        span.start++;
+        span.length--;
+    }
+    while (span.length > 0) {
+        char last = span.start[span.length - 1];
+        if (last != ' ' && last != '\t' && last != '\n' && last != '\r') break;
+        span.length--;
+    }
+    return span;
+}
+
+static bool css_condition_outer_parens(CssConditionSpan* span) {
+    if (!span || span->length < 2 || span->start[0] != '(' ||
+        span->start[span->length - 1] != ')') return false;
+    int depth = 0;
+    for (size_t i = 0; i < span->length; i++) {
+        char c = span->start[i];
+        if (c == '(') depth++;
+        else if (c == ')') {
+            depth--;
+            if (depth == 0 && i != span->length - 1) return false;
+            if (depth < 0) return false;
+        }
+    }
+    if (depth != 0) return false;
+    span->start++;
+    span->length -= 2;
+    *span = css_condition_trim(*span);
+    return true;
+}
+
+static bool css_condition_find_operator(CssConditionSpan span, const char* op,
+                                        size_t* out_pos, size_t* out_len) {
+    if (!op || !out_pos || !out_len) return false;
+    size_t op_len = strlen(op);
+    int depth = 0;
+    for (size_t i = 0; i + op_len <= span.length; i++) {
+        char c = span.start[i];
+        if (c == '(') {
+            depth++;
+            continue;
+        }
+        if (c == ')') {
+            if (depth > 0) depth--;
+            continue;
+        }
+        if (depth != 0 || strncasecmp(span.start + i, op, op_len) != 0) continue;
+        bool left_space = i == 0 || span.start[i - 1] == ' ' ||
+            span.start[i - 1] == '\t' || span.start[i - 1] == '\n' || span.start[i - 1] == '\r';
+        size_t end = i + op_len;
+        bool right_space = end == span.length || span.start[end] == ' ' ||
+            span.start[end] == '\t' || span.start[end] == '\n' || span.start[end] == '\r';
+        if (left_space && right_space) {
+            *out_pos = i;
+            *out_len = op_len;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool css_evaluate_supports_span(CssEngine* engine, CssConditionSpan span) {
+    if (!engine || !engine->pool) return false;
+    span = css_condition_trim(span);
+    if (span.length == 0) return false;
+
+    if (span.length >= 4 && strncasecmp(span.start, "not ", 4) == 0) {
+        CssConditionSpan operand = {span.start + 4, span.length - 4};
+        return !css_evaluate_supports_span(engine, operand);
+    }
+
+    size_t op_pos = 0;
+    size_t op_len = 0;
+    if (css_condition_find_operator(span, "or", &op_pos, &op_len)) {
+        CssConditionSpan left = {span.start, op_pos};
+        CssConditionSpan right = {span.start + op_pos + op_len,
+                                  span.length - op_pos - op_len};
+        return css_evaluate_supports_span(engine, left) ||
+            css_evaluate_supports_span(engine, right);
+    }
+    if (css_condition_find_operator(span, "and", &op_pos, &op_len)) {
+        CssConditionSpan left = {span.start, op_pos};
+        CssConditionSpan right = {span.start + op_pos + op_len,
+                                  span.length - op_pos - op_len};
+        return css_evaluate_supports_span(engine, left) &&
+            css_evaluate_supports_span(engine, right);
+    }
+
+    css_condition_outer_parens(&span);
+    span = css_condition_trim(span);
+    if (span.length == 0) return false;
+    char* declaration = (char*)pool_alloc(engine->pool, span.length + 1);
+    if (!declaration) return false;
+    str_copy(declaration, span.length + 1, span.start, span.length);
+    CssDeclaration* parsed = css_parse_declaration_text(
+        declaration, span.length, engine->pool);
+    return css_declaration_is_supported(parsed);
+}
+
+bool css_evaluate_supports_condition(CssEngine* engine, const char* condition) {
+    if (!engine || !condition) return false;
+    CssConditionSpan span = {condition, strlen(condition)};
+    return css_evaluate_supports_span(engine, span);
+}
+
 bool css_evaluate_media_query(CssEngine* engine, const char* media_query) {
     if (!engine || !media_query) return true;  // Empty query matches all
 

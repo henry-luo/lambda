@@ -133,6 +133,15 @@ const char radiant_dom_interface_decl[] =
     "    remove_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
     "    dispatch_event: fn(a0: any) any\n"
     "}\n"
+    "type event {\n"
+    "    'type': string, target: any, current_target: any, src_element: any,\n"
+    "    bubbles: bool, cancelable: bool, composed: bool,\n"
+    "    default_prevented: bool, event_phase: int, is_trusted: bool,\n"
+    "    time_stamp: float, return_value: bool, cancel_bubble: bool,\n"
+    "    prevent_default: fn() null, stop_propagation: fn() null,\n"
+    "    stop_immediate_propagation: fn() null, composed_path: fn() any,\n"
+    "    init_event: fn(type: string, bubbles: bool, cancelable: bool) null\n"
+    "}\n"
     "type html_element : dom_node {\n"
     "    tag_name: string, local_name: string, namespace_uri: string, prefix: any,\n"
     "    id: string, class_name: string, child_element_count: int, children: any,\n"
@@ -418,6 +427,75 @@ static Item radiant_selection_prototype_seed(void) {
     {n, NULL, fn, NULL, NULL, NULL, JUBE_MEMBER_NON_ENUMERABLE}
 #define BIND_CALL(n, fn)     {n, NULL, NULL, NULL, fn, NULL, 0}
 #define BIND_CALL_JS(n, js, fn) {n, js, NULL, NULL, fn, NULL, 0}
+
+// ES24/F17: all declared Event fields project one native record. The binding
+// owns only spelling adaptation; record semantics stay in the Radiant bridge
+// so JS and Lambda reach the same cancellation and propagation state.
+#define RADIANT_EVENT_GETTER(fn_name, member_name)                           \
+    static int fn_name(Item receiver, Item* out) {                            \
+        return radiant_dom_event_member_get(receiver, member_name, out);      \
+    }
+#define RADIANT_EVENT_SETTER(fn_name, member_name)                           \
+    static int fn_name(Item receiver, Item value, Item* out) {                \
+        return radiant_dom_event_member_set(receiver, member_name, value, out); \
+    }
+#define RADIANT_EVENT_CALL(fn_name, member_name)                             \
+    static int fn_name(Item receiver, Item* args, int argc, Item* out) {      \
+        return radiant_dom_event_call(receiver, member_name, args, argc, out); \
+    }
+
+RADIANT_EVENT_GETTER(e_type_get, "type")
+RADIANT_EVENT_SETTER(e_type_set, "type")
+RADIANT_EVENT_GETTER(e_target_get, "target")
+RADIANT_EVENT_SETTER(e_target_set, "target")
+RADIANT_EVENT_GETTER(e_current_target_get, "currentTarget")
+RADIANT_EVENT_SETTER(e_current_target_set, "currentTarget")
+RADIANT_EVENT_GETTER(e_src_element_get, "srcElement")
+RADIANT_EVENT_SETTER(e_src_element_set, "srcElement")
+RADIANT_EVENT_GETTER(e_bubbles_get, "bubbles")
+RADIANT_EVENT_SETTER(e_bubbles_set, "bubbles")
+RADIANT_EVENT_GETTER(e_cancelable_get, "cancelable")
+RADIANT_EVENT_SETTER(e_cancelable_set, "cancelable")
+RADIANT_EVENT_GETTER(e_composed_get, "composed")
+RADIANT_EVENT_SETTER(e_composed_set, "composed")
+RADIANT_EVENT_GETTER(e_default_prevented_get, "defaultPrevented")
+RADIANT_EVENT_SETTER(e_default_prevented_set, "defaultPrevented")
+RADIANT_EVENT_GETTER(e_event_phase_get, "eventPhase")
+RADIANT_EVENT_SETTER(e_event_phase_set, "eventPhase")
+RADIANT_EVENT_GETTER(e_is_trusted_get, "isTrusted")
+RADIANT_EVENT_SETTER(e_is_trusted_set, "isTrusted")
+RADIANT_EVENT_GETTER(e_time_stamp_get, "timeStamp")
+RADIANT_EVENT_SETTER(e_time_stamp_set, "timeStamp")
+RADIANT_EVENT_GETTER(e_return_value_get, "returnValue")
+RADIANT_EVENT_SETTER(e_return_value_set, "returnValue")
+RADIANT_EVENT_GETTER(e_cancel_bubble_get, "cancelBubble")
+RADIANT_EVENT_SETTER(e_cancel_bubble_set, "cancelBubble")
+RADIANT_EVENT_CALL(e_prevent_default, "preventDefault")
+RADIANT_EVENT_CALL(e_stop_propagation, "stopPropagation")
+RADIANT_EVENT_CALL(e_stop_immediate_propagation, "stopImmediatePropagation")
+RADIANT_EVENT_CALL(e_composed_path, "composedPath")
+RADIANT_EVENT_CALL(e_init_event, "initEvent")
+
+static const JubeMemberBind radiant_event_members[] = {
+    {"type", NULL, e_type_get, e_type_set, NULL, NULL, 0},
+    {"target", NULL, e_target_get, e_target_set, NULL, NULL, 0},
+    {"current_target", NULL, e_current_target_get, e_current_target_set, NULL, NULL, 0},
+    {"src_element", NULL, e_src_element_get, e_src_element_set, NULL, NULL, 0},
+    {"bubbles", NULL, e_bubbles_get, e_bubbles_set, NULL, NULL, 0},
+    {"cancelable", NULL, e_cancelable_get, e_cancelable_set, NULL, NULL, 0},
+    {"composed", NULL, e_composed_get, e_composed_set, NULL, NULL, 0},
+    {"default_prevented", NULL, e_default_prevented_get, e_default_prevented_set, NULL, NULL, 0},
+    {"event_phase", NULL, e_event_phase_get, e_event_phase_set, NULL, NULL, 0},
+    {"is_trusted", NULL, e_is_trusted_get, e_is_trusted_set, NULL, NULL, 0},
+    {"time_stamp", NULL, e_time_stamp_get, e_time_stamp_set, NULL, NULL, 0},
+    {"return_value", NULL, e_return_value_get, e_return_value_set, NULL, NULL, 0},
+    {"cancel_bubble", NULL, e_cancel_bubble_get, e_cancel_bubble_set, NULL, NULL, 0},
+    BIND_CALL("prevent_default", e_prevent_default),
+    BIND_CALL("stop_propagation", e_stop_propagation),
+    BIND_CALL("stop_immediate_propagation", e_stop_immediate_propagation),
+    BIND_CALL("composed_path", e_composed_path),
+    BIND_CALL("init_event", e_init_event),
+};
 
 static const JubeMemberBind radiant_range_members[] = {
     BIND_GET("start_container", r_start_container),
@@ -1557,6 +1635,11 @@ extern const JubeTypeBinding radiant_dom_type_bindings[] = {
      (int32_t)(sizeof(radiant_rule_decl_members) / sizeof(radiant_rule_decl_members[0])),
      rd_named_get, rd_named_set, NULL, NULL, radiant_style_no_prototype, rd_named_has,
      NULL, NULL, NULL, NULL, NULL, NULL},
+    {"event", NULL, radiant_event_members,
+     (int32_t)(sizeof(radiant_event_members) / sizeof(radiant_event_members[0])),
+     radiant_dom_event_named_get, radiant_dom_event_named_set, NULL, NULL, NULL,
+     radiant_dom_event_named_has, NULL, NULL, NULL, NULL, NULL,
+     radiant_dom_event_prototype},
     {"dom_node", NULL, radiant_dom_node_members,
      (int32_t)(sizeof(radiant_dom_node_members) / sizeof(radiant_dom_node_members[0])),
      radiant_dom_node_named_get, radiant_dom_node_named_set, NULL, NULL, NULL,

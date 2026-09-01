@@ -109,17 +109,27 @@ void form_control_prop_release(FormControlProp* f) {
 }
 
 FormControlProp* tc_get_or_create_form(DomElement* elem) {
-    if (elem && elem->form)
-        return elem->form;
+    if (!elem) return nullptr;
+    if (elem->form) return elem->form;
     FormControlProp* f = (FormControlProp*)mem_calloc(1, sizeof(FormControlProp), MEM_CAT_LAYOUT);
     if (!f) return nullptr;
     form_control_prop_init(f);
     f->heap_allocated = 1;
-    f->state_ref = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
+    f->state_ref = elem->doc ? (DocState*)elem->doc->state : nullptr;
     if (elem->tag_name && strcasecmp(elem->tag_name, "textarea") == 0) {
         f->control_type = FORM_CONTROL_TEXTAREA;
+    } else if (elem->tag_name && strcasecmp(elem->tag_name, "input") == 0) {
+        f->input_type = elem->get_attribute("type");
+        f->control_type = get_input_control_type(f->input_type);
+    } else if (elem->tag_name && strcasecmp(elem->tag_name, "select") == 0) {
+        f->control_type = FORM_CONTROL_SELECT;
+    } else if (elem->tag_name && strcasecmp(elem->tag_name, "button") == 0) {
+        f->control_type = FORM_CONTROL_BUTTON;
     } else {
-        f->control_type = FORM_CONTROL_TEXT;
+        // This allocator is also the script-before-layout path; refuse a
+        // non-control so state writers cannot fabricate a form owner.
+        mem_free(f);
+        return nullptr;
     }
     elem->form = f;
     if (elem->role_kind() == DomElement::ROLE_NONE) {

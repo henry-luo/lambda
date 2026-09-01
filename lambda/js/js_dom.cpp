@@ -19,6 +19,7 @@
 #include "js_property_attrs.h"
 #include "js_runtime_state.hpp"
 #include "js_function.hpp"
+#include "js_interp.hpp"
 #include "js_event_loop.h"
 #include "js_dom_platform.h"
 #include "js_dom_observers.h"
@@ -1353,6 +1354,16 @@ static void js_dom_compile_event_attr_to_expando(DomElement* elem,
     }
 }
 
+static void js_dom_initialize_event_attrs(DomElement* elem) {
+    if (!elem) return;
+    int attr_count = 0;
+    const char** attr_names = elem->attribute_names(&attr_count);
+    for (int i = 0; attr_names && i < attr_count; i++) {
+        const char* name = attr_names[i];
+        js_dom_compile_event_attr_to_expando(elem, name, elem->get_attribute(name));
+    }
+}
+
 static void js_dom_clear_event_attr_expando(DomElement* elem, const char* attr_name) {
     if (!elem || !attr_name) return;
 
@@ -1544,11 +1555,21 @@ extern "C" bool js_dom_is_connected(void* dom_elem) {
 // Walks DOM tree, registers elements with id as global properties
 // ============================================================================
 
+static void js_dom_initialize_event_attrs(DomElement* elem);
+static __thread bool s_dom_event_attrs_initializing = false;
+
 static void register_named_elements_recursive(DomElement* elem, Item global) {
     if (!elem) return;
     // Generated layout nodes are not script-visible DOM and can outlive a
     // source subtree; never expose their retained storage as Window globals.
     if (elem->is_synthetic()) return;
+
+    if (js_ast_interpreter_requested() && !s_dom_event_attrs_initializing) {
+        // The AST tier has no deferred MIR preamble pass; compile parsed inline
+        // handlers while the document realm is active so later DOM events see
+        // the same EventTarget properties as the MIR tier.
+        js_dom_initialize_event_attrs(elem);
+    }
 
     if (elem->id && elem->id[0] != '\0') {
         Item key = js_name_item(elem->id);
@@ -1591,7 +1612,11 @@ static void register_named_elements_recursive(DomElement* elem, Item global) {
 void js_dom_register_named_elements(DomElement* root) {
     if (!root) return;
     Item global = js_get_global_this();
+    bool initialize_event_attrs = js_ast_interpreter_requested() &&
+        !s_dom_event_attrs_initializing;
+    if (initialize_event_attrs) s_dom_event_attrs_initializing = true;
     register_named_elements_recursive(root, global);
+    if (initialize_event_attrs) s_dom_event_attrs_initializing = false;
 }
 
 static void js_dom_install_window_frames_global(void);
@@ -1764,13 +1789,8 @@ JS_FORWARD_STATIC_VOID( reset_dom_wrapper_cache, (), radiant_dom_reset_wrapper_c
 extern "C" void js_dom_initialize_node_wrapper(void* dom_elem) {
     DomNode* node = (DomNode*)dom_elem;
     if (!node || !node->is_element()) return;
-    DomElement* elem = node->as_element();
-    int attr_count = 0;
-    const char** attr_names = elem->attribute_names(&attr_count);
-    for (int i = 0; attr_names && i < attr_count; i++) {
-        const char* name = attr_names[i];
-        const char* value = elem->get_attribute(name);
-        js_dom_compile_event_attr_to_expando(elem, name, value);
+    if (!s_dom_event_attrs_initializing) {
+        js_dom_initialize_event_attrs(node->as_element());
     }
 }
 
@@ -6856,7 +6876,9 @@ extern "C" bool js_dom_focus_editing_host_for_automation(void* dom_elem) {
     // Template documents have no JS runtime, so returning a JS Item through
     // focus() would dereference an unbound interpreter context. The common
     // focus and Selection writers are sufficient for physical input routing.
-    js_document_active_element = elem;
+    // Scriptless automation has no JsRuntimeState slot; DocState is the
+    // authoritative focus owner until a JavaScript realm is bound.
+    if (js_active_runtime_state) js_document_active_element = elem;
     View* old_focus = focus_get(state);
     focus_set_programmatic(state, (View*)elem);
     // automation focus follows the same idempotent focus contract as JS:
@@ -13505,12 +13527,35 @@ static bool js_dom_insert_backed_text(DomElement* parent, DomText* text,
                                       DomNode* ref_child) {
     if (!parent || !text || !text->native_string || !parent->doc ||
         !parent->doc->input) return false;
+
+    // DocumentFragment nodes have no Element backing.  HTMX builds a
+    // fragment in the main document and adopts text nodes from a parsed
+    // response before splicing them into the target; sending that temporary
+    // parent through MarkEditor reports "not an element" and drops the text.
+    if (parent->is_synthetic()) {
+        if (text->parent && text->parent != (DomNode*)parent) {
+            // The cross-document adoption path has already detached nodes;
+            // same-document moves need only unlink the temporary DOM parent.
+            // The fragment has no backing Element to edit, so routing this
+            // through dom_text_remove would ask for a nonexistent native slot.
+            if (!text->parent->remove_child((DomNode*)text)) return false;
+        }
+        return ((DomNode*)parent)->insert_before((DomNode*)text, ref_child);
+    }
+
     parent = js_dom_prepare_children_for_mutation(parent);
     if (!parent) return false;
     String* native_string = text->native_string;
 
     if (text->parent) {
-        if (!text->parent->is_element() || !dom_text_remove(text)) {
+        if (!text->parent->is_element()) return false;
+        // A parsed response is staged in a synthetic DocumentFragment before
+        // its text nodes are moved into the live target.  That parent has no
+        // Mark child slot, so unlink it through the DOM chain rather than
+        // asking dom_text_remove() to edit nonexistent backing storage.
+        if (text->parent->as_element()->is_synthetic()) {
+            if (!text->parent->remove_child((DomNode*)text)) return false;
+        } else if (!dom_text_remove(text)) {
             return false;
         }
         // static Mark text is invalidated when unlinked, but appendChild must
@@ -16097,10 +16142,15 @@ static CssAnimComposite js_web_animation_composite(Item value) {
 static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
                                                        Item keyframes_item) {
     if (!element || !element->doc ||
-        get_type_id(keyframes_item) != LMD_TYPE_ARRAY) return nullptr;
+        (get_type_id(keyframes_item) != LMD_TYPE_ARRAY &&
+         get_type_id(keyframes_item) != LMD_TYPE_MAP &&
+         get_type_id(keyframes_item) != LMD_TYPE_VMAP)) return nullptr;
 
-    int count = (int)js_array_length(keyframes_item);
-    if (count <= 0) return nullptr;
+    bool sequence = get_type_id(keyframes_item) == LMD_TYPE_ARRAY;
+    int count = sequence ? (int)js_array_length(keyframes_item) : 1;
+    // Web Animations accepts an empty keyframe object and still returns an
+    // Animation whose timing/properties can be inspected by the caller.
+    if (count <= 0) count = 1;
     if (count > 64) count = 64;
 
     Pool* pool = element->doc->document_pool;
@@ -16116,7 +16166,8 @@ static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
     for (int i = 0; i < count; i++) {
         CssKeyframeStop* stop = &keyframes->stops[i];
         stop->offset = count > 1 ? (float)i / (float)(count - 1) : 0.0f;
-        Item frame = js_elements_get_int(keyframes_item, i);
+        Item frame = sequence ? js_elements_get_int(keyframes_item, i)
+                              : keyframes_item;
         if (get_type_id(frame) != LMD_TYPE_MAP &&
             get_type_id(frame) != LMD_TYPE_VMAP) continue;
 
@@ -16162,6 +16213,13 @@ static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
 // prevent an implicit clock from changing that deterministic sample.
 JS_FORWARD_STATIC_EXPRESSION(Item, js_web_animation_pause, (void), ItemNull)
 
+static Item js_web_animation_reverse(void) {
+    // The headless layout runner samples currentTime explicitly; reversing an
+    // unplayed animation changes its playback direction without changing the
+    // sampled time, but must still return the Animation object.
+    return js_get_this();
+}
+
 static Item js_web_animation_current_time_get(void) {
     JsWebAnimationHost* host = js_web_animation_host(js_get_this());
     return host && host->state ? js_make_number(host->state->current_time_ms)
@@ -16206,6 +16264,13 @@ static Item js_dom_element_animate(Item keyframes_item, Item options_item) {
         if (easing_text) {
             css_animation_parse_timing_function_text(easing_text, &timing);
         }
+    } else {
+        Item duration = js_to_number(options_item);
+        TypeId duration_type = get_type_id(duration);
+        if (duration_type == LMD_TYPE_FLOAT) duration_ms = it2d(duration);
+        else if (duration_type == LMD_TYPE_INT || duration_type == LMD_TYPE_INT64) {
+            duration_ms = (double)it2i(duration);
+        }
     }
 
     CssWebAnimationState* state = css_web_animation_create(
@@ -16217,20 +16282,32 @@ static Item js_dom_element_animate(Item keyframes_item, Item options_item) {
     if (!host) return ItemNull;
     host->state = state;
 
-    Item holder = vmap_new();
-    if (get_type_id(holder) != LMD_TYPE_VMAP || !holder.vmap) return ItemNull;
-    holder.vmap->host_type = (const void*)&js_web_animation_vmap_marker;
-    holder.vmap->host_data = host;
-    // A plain object keeps pause() on the normal JS method path; the private
-    // native holder supplies the DOM-owned state to currentTime accessors.
-    Item animation = js_new_object();
-    js_set_key_cstr(animation, "__lambda_web_animation_host", holder);
-    js_set_native_key(animation, js_string_key("pause"), js_web_animation_pause);
-    js_install_native_accessor(animation, js_string_key("currentTime"),
+    RootFrame roots(3);
+    Rooted<Item> holder_root(roots, vmap_new());
+    if (get_type_id(holder_root.get()) != LMD_TYPE_VMAP || !holder_root.get().vmap) {
+        return ItemNull;
+    }
+    holder_root.get().vmap->host_type = (const void*)&js_web_animation_vmap_marker;
+    holder_root.get().vmap->host_data = host;
+    // A plain object keeps pause/reverse on the normal JS method path; the
+    // private native holder supplies the DOM-owned state to accessors.
+    Rooted<Item> animation_root(roots, js_new_object());
+    js_set_key_cstr(animation_root.get(), "__lambda_web_animation_host",
+                    holder_root.get());
+    js_set_native_key(animation_root.get(), js_string_key("pause"),
+                      js_web_animation_pause);
+    js_set_native_key(animation_root.get(), js_string_key("reverse"),
+                      js_web_animation_reverse);
+    js_install_native_accessor(animation_root.get(), js_string_key("currentTime"),
         js_new_native_function(js_web_animation_current_time_get),
         js_new_native_function(js_web_animation_current_time_set),
         JSPD_NON_ENUMERABLE);
-    return animation;
+    // Animation.ready is settled at creation. Resolve with an inert value:
+    // Promise.resolve(animation) would observe a page-defined Object.prototype
+    // `then` getter, unlike the internal ready promise in Web Animations.
+    js_set_key_cstr(animation_root.get(), "ready",
+                    js_promise_resolve(make_js_undefined()));
+    return animation_root.get();
 }
 
 extern "C" void js_dom_install_collection_globals(void) {

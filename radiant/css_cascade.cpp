@@ -20,7 +20,16 @@ static void apply_rule_to_element(DomElement* element, CssRule* rule,
         }
         return;
     }
-    if (rule->type == CSS_RULE_SUPPORTS || rule->type != CSS_RULE_STYLE) return;
+    if (rule->type == CSS_RULE_SUPPORTS) {
+        if (css_evaluate_supports_condition(engine, rule->data.conditional_rule.condition)) {
+            for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+                CssRule* nested = rule->data.conditional_rule.rules[i];
+                if (nested) apply_rule_to_element(element, nested, matcher, pool, engine);
+            }
+        }
+        return;
+    }
+    if (rule->type != CSS_RULE_STYLE) return;
 
     CssSelector* selector = rule->data.style_rule.selector;
     CssSelectorGroup* group = rule->data.style_rule.selector_group;

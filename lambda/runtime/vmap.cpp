@@ -287,6 +287,17 @@ extern "C" Item vmap_backing_get(VMap* vm, Item key) {
     return vm->vtable->get(vm->data, key);
 }
 
+extern "C" bool vmap_backing_has(VMap* vm, Item key) {
+    if (!vm || !vm->data || !vm->vtable) return false;
+    int64_t count = vm->vtable->count(vm->data);
+    for (int64_t index = 0; index < count; index++) {
+        if (lambda_item_compare(vm->vtable->key_at(vm->data, index), key) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value) {
     if (!vm || !vm->vtable) return false;
     if (!vmap_ensure_hashmap_data(vm)) return false;

@@ -3932,6 +3932,31 @@ static View* find_matching_input(View* root, const char* match_tag, const char* 
     return nullptr;
 }
 
+static View* find_initial_autofocus(View* root) {
+    if (!root || !root->is_element()) return nullptr;
+    DomElement* element = lam::dom_require_element(root);
+    if (element->has_attribute("autofocus") &&
+        is_view_programmatically_focusable(root)) {
+        return root;
+    }
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (child->node_type != DOM_NODE_ELEMENT) continue;
+        View* found = find_initial_autofocus(static_cast<View*>(child));
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+static bool apply_initial_autofocus(DomDocument* doc, DocState* state) {
+    if (!doc || !state || focus_has_current(state) ||
+        !doc->view_tree || !doc->view_tree->root) {
+        return false;
+    }
+    View* autofocus = find_initial_autofocus(doc->view_tree->root);
+    if (!autofocus || !radiant_focus_element(doc, autofocus)) return false;
+    return state->needs_reflow;
+}
+
 struct LambdaFocusRestore {
     bool valid;
     RenderMapLookup lookup;
@@ -4184,16 +4209,8 @@ void rebuild_lambda_doc(UiContext* uicon) {
 
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
-    if (state && !focus_has_current(state) &&
-        doc->view_tree && doc->view_tree->root) {
-        View* af = find_matching_input(doc->view_tree->root, "input", nullptr);
-        if (af && af->is_element()) {
-            DomElement* af_elem = lam::dom_require_element(af);
-            if (af_elem->has_attribute("autofocus")) {
-                focus_set(state, af, false);
-                state_store_caret_collapse_to_view_offset(state, af, 0);
-            }
-        }
+    if (state && !focus_has_current(state) && doc->view_tree && doc->view_tree->root) {
+        radiant_run_autofocus(doc);
     }
 
     if (state) {
@@ -4319,6 +4336,13 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             continue;
         }
 
+        // Reactive templates rebuild result nodes, while form/interaction
+        // state belongs to the retained view identity (S9.1.4). Preserve that
+        // identity for structurally corresponding descendants before retiring
+        // the old subtree.
+        view_state_preserve_subtree_identity(state, static_cast<DomNode*>(old_dom),
+                                             static_cast<DomNode*>(new_dom));
+
         if (old_dom->is_popover_open() && new_dom->has_attribute("popover")) {
             // Reconciliation replaces the DOM wrapper, but popover openness is
             // live state and must survive an unrelated class/style mutation.
@@ -4388,19 +4412,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
     if (state && !focus_has_current(state)) {
-        for (int i = 0; i < result_count; i++) {
-            if (new_doms[i]) {
-                View* af = find_matching_input(static_cast<View*>(new_doms[i]), "input", nullptr);
-                if (af && af->is_element()) {
-                    DomElement* af_elem = lam::dom_require_element(af);
-                    if (af_elem->has_attribute("autofocus")) {
-                        focus_set(state, af, false);
-                        state_store_caret_collapse_to_view_offset(state, af, 0);
-                        break;
-                    }
-                }
-            }
-        }
+        radiant_run_autofocus(doc);
     }
 
     if (state) {
@@ -4977,6 +4989,9 @@ static bool layout_single_file(
         // font-face loading and post-script cascade; DOM documents still need
         // this final commit to replace that stale layout-resource epoch.
         layout_html_doc(ui_context, doc, false);
+        if (apply_initial_autofocus(doc, state)) {
+            layout_html_doc(ui_context, doc, false);
+        }
         auto event_layout_end = std::chrono::high_resolution_clock::now();
         layout_end = event_layout_end;
         layout_phase_ran = true;

@@ -26,7 +26,11 @@ typedef struct BidiCharFragment {
     uint32_t codepoint;
     float width;
     float advance_width;
+    float visual_left;
+    float visual_width;
+    float range_visual_x;
     float visual_x;
+    bool has_visual_metrics;
 } BidiCharFragment;
 
 typedef struct BidiRectInfo {
@@ -123,6 +127,21 @@ static bool bidi_is_line_text_rect(ViewText* text, TextRect* rect, int line_numb
            text->text_data();
 }
 
+static bool bidi_rect_contains_segment_break(ViewText* text, TextRect* rect) {
+    if (!text || !rect || !text->text_data()) return false;
+    const char* cursor = (const char*)text->text_data() + rect->start_index;
+    int remaining = rect->length;
+    while (remaining > 0) {
+        uint32_t codepoint = 0;
+        int consumed = str_utf8_decode(cursor, (size_t)remaining, &codepoint);
+        if (consumed <= 0 || consumed > remaining) consumed = 1;
+        if (codepoint == 0x000A || codepoint == 0x000D) return true;
+        cursor += consumed;
+        remaining -= consumed;
+    }
+    return false;
+}
+
 static uint32_t bidi_marker_representative_codepoint(CssEnum direction) {
     // CSS Writing Modes: an isolated marker follows its inherited direction
     // for bidi ordering, even when its content mixes strong LTR and RTL text.
@@ -163,6 +182,41 @@ int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir) {
         if (strong_class != 0) return strong_class;
     }
     return 0;
+}
+
+int layout_find_last_strong_direction(DomNode* node, bool skip_explicit_dir) {
+    if (!node) return 0;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (!text->text || text->length == 0) return 0;
+        int last_strong = 0;
+        const char* cursor = text->text;
+        const char* end = cursor + text->length;
+        while (cursor < end) {
+            uint32_t codepoint = 0;
+            int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
+            if (bytes <= 0) { cursor++; continue; }
+            int strong_class = utf_bidi_strong_class(codepoint);
+            if (strong_class != 0) last_strong = strong_class;
+            cursor += bytes;
+        }
+        return last_strong;
+    }
+    if (!node->is_element()) return 0;
+    DomElement* element = node->as_element();
+    if (element->tag_id == MARKUP_NAME_SCRIPT ||
+        element->tag_id == MARKUP_NAME_STYLE ||
+        (element->tag_name && strcmp(element->tag_name, "::marker") == 0)) {
+        return 0;
+    }
+    if (element->tag_id == MARKUP_NAME_TEXTAREA) return 0;
+    if (skip_explicit_dir && element->get_attribute("dir")) return 0;
+    int last_strong = 0;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        int strong_class = layout_find_last_strong_direction(child, skip_explicit_dir);
+        if (strong_class != 0) last_strong = strong_class;
+    }
+    return last_strong;
 }
 
 CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback) {
@@ -214,15 +268,12 @@ CssEnum layout_resolve_line_base_direction(LayoutContext* lycon) {
     }
     int strong_class = bidi_first_strong_in_line_view(
         content, lycon->block.line_number);
-    if (strong_class == 0) {
-        for (int line_number = lycon->block.line_number - 1;
-             line_number >= 0 && strong_class == 0; line_number--) {
-            strong_class = bidi_first_strong_in_line_view(content, line_number);
-        }
-    }
     if (strong_class > 0) return CSS_VALUE_RTL;
     if (strong_class < 0) return CSS_VALUE_LTR;
-    return lycon->block.direction;
+    // CSS Writing Modes §2.4.1: plaintext uses UAX #9 P2/P3 per paragraph;
+    // a neutral-only paragraph therefore falls back to the default LTR level,
+    // rather than inheriting a preceding paragraph's strong direction.
+    return CSS_VALUE_LTR;
 }
 
 static bool bidi_is_line_break_codepoint(uint32_t codepoint) {
@@ -327,12 +378,46 @@ static float bidi_span_edge_width(ViewSpan* span, bool left) {
     return margin + padding + border;
 }
 
-static float bidi_char_raw_width(ViewText* text, uint32_t codepoint) {
-    if (!text || text_codepoint_has_zero_advance(codepoint) || !text->font ||
-        !text->font->font_handle) {
+static float bidi_char_raw_width(LayoutContext* lycon, ViewText* text,
+                                 uint32_t codepoint, float* visual_left,
+                                 float* visual_width,
+                                 bool use_fallback_metrics,
+                                 bool use_visual_metrics) {
+    if (visual_left) *visual_left = 0.0f;
+    if (visual_width) *visual_width = 0.0f;
+    if (!lycon || !text || text_codepoint_has_zero_advance(codepoint) ||
+        !text->font) {
         return 0.0f;
     }
-    float width = font_measure_char(text->font->font_handle, codepoint);
+    float width = use_fallback_metrics
+        ? (codepoint == 0x0009
+            ? layout_measure_space_advance(
+                lycon, text->font->font_handle, text->font)
+            : layout_measure_glyph_advance(
+                lycon, text->font->font_handle, text->font, codepoint))
+        : font_measure_char(text->font->font_handle, codepoint);
+    if (!use_fallback_metrics && codepoint != 0x0009 &&
+        font_get_glyph_index(text->font->font_handle, codepoint) == 0) {
+        // feature-only lines reuse the established text rect to distribute
+        // missing-glyph widths; they do not need a second fallback measure.
+        width = 0.0f;
+    }
+    FontStyleDesc style = font_style_desc_from_prop(text->font);
+    LoadedGlyph* glyph = use_visual_metrics && text->font->font_handle
+        ? font_load_glyph(text->font->font_handle, &style, codepoint, false) : nullptr;
+    if (glyph && text->font->font_handle &&
+        font_get_glyph_index(text->font->font_handle, codepoint) == 0) {
+        // a fallback glyph's side bearings are outside its CSS advance; keep
+        // them in the text-range bound without changing inline cursor advance.
+        float raster_scale = ui_context_raster_scale(lycon->ui_context);
+        if (visual_left) {
+            *visual_left = glyph->bitmap.bearing_x / raster_scale;
+        }
+        if (visual_width) {
+            *visual_width = glyph->bitmap.width / raster_scale;
+            if (*visual_width <= 0.0f) *visual_width = width;
+        }
+    }
     return width + text->font->letter_spacing;
 }
 
@@ -353,11 +438,11 @@ static ViewSpan* bidi_text_directional_span(ViewText* text, CssEnum direction) {
     return nullptr;
 }
 
-static void bidi_fill_views(View* view, int line_number, int depth,
+static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, int depth,
                             BidiCharFragment* chars, BidiRectInfo* rects,
                             BidiSpanInfo* spans, int* char_cursor,
                             int* rect_cursor, int* span_cursor,
-                            CssEnum direction) {
+                            CssEnum direction, bool use_fallback_metrics) {
     for (View* current = view; current; current = current->next()) {
         if (current->view_type == RDT_VIEW_NONE || layout_view_is_out_of_flow(current)) {
             continue;
@@ -377,6 +462,15 @@ static void bidi_fill_views(View* view, int line_number, int depth,
                     get_white_space_value(static_cast<DomNode*>(text)));
                 rect_info->line_has_bidi_inline_content = false;
                 rect_info->directional_span = bidi_text_directional_span(text, direction);
+                bool rect_use_fallback_metrics = use_fallback_metrics &&
+                    layout_text_autospace_flags(lycon, text) == 0 &&
+                    !bidi_rect_contains_segment_break(text, rect);
+                bool rect_use_visual_metrics = use_fallback_metrics &&
+                    layout_text_autospace_flags(lycon, text) == 0 &&
+                    text->font && text->font->letter_spacing == 0.0f &&
+                    // document-font ranges retain the primary font's CSS advance
+                    // when fallback only supplies missing glyphs.
+                    !font_handle_is_document_font(text->font->font_handle);
 
                 const unsigned char* cursor = text->text_data() + rect->start_index;
                 int remaining = rect->length;
@@ -399,8 +493,19 @@ static void bidi_fill_views(View* view, int line_number, int depth,
                     fragment->rect_slot = *rect_cursor - 1;
                     fragment->logical_index = *char_cursor - 1;
                     fragment->codepoint = codepoint;
-                    fragment->width = bidi_char_raw_width(text, codepoint);
+                    fragment->width = bidi_char_raw_width(
+                        lycon, text, codepoint, &fragment->visual_left,
+                        &fragment->visual_width, rect_use_fallback_metrics,
+                        rect_use_visual_metrics);
                     fragment->advance_width = fragment->width;
+                    if (fragment->visual_width <= 0.0f) {
+                        fragment->visual_width = fragment->width;
+                    }
+                    fragment->has_visual_metrics = rect_use_visual_metrics &&
+                        text->font->font_handle &&
+                        font_get_glyph_index(
+                            text->font->font_handle, codepoint) == 0 &&
+                        fragment->visual_width > 0.0f;
                     fragment->visual_x = 0.0f;
                     rect_info->char_count++;
                     rect_info->raw_width += fragment->width;
@@ -423,18 +528,23 @@ static void bidi_fill_views(View* view, int line_number, int depth,
             span_info->right_edge = bidi_span_edge_width(span_info->span, false);
             bool isolate = layout_inline_span_isolate(span_info->span);
             if (isolate) {
+                // CSS Writing Modes: an isolated inline is already represented
+                // by its complete atomic border box, including inline padding.
+                span_info->left_edge = 0.0f;
+                span_info->right_edge = 0.0f;
                 BidiCharFragment* fragment = &chars[(*char_cursor)++];
                 fragment->atomic_view = static_cast<View*>(span_info->span);
                 fragment->codepoint = span_info->span->blk->direction == CSS_VALUE_RTL
                     ? 0x0627 : 0x0041;
                 fragment->width = span_info->span->width;
                 fragment->advance_width = fragment->width;
+                fragment->visual_width = fragment->width;
                 span_info->logical_end = *char_cursor - 1;
                 continue;
             }
-            bidi_fill_views(span_info->span->first_child, line_number, depth + 1,
+            bidi_fill_views(lycon, span_info->span->first_child, line_number, depth + 1,
                             chars, rects, spans, char_cursor, rect_cursor, span_cursor,
-                            direction);
+                            direction, use_fallback_metrics);
             span_info->logical_end = *char_cursor - 1;
             continue;
         }
@@ -450,6 +560,7 @@ static void bidi_fill_views(View* view, int line_number, int depth,
                 fragment->codepoint = bidi_marker_representative_codepoint(direction);
                 fragment->width = marker->width;
                 fragment->advance_width = fragment->width;
+                fragment->visual_width = fragment->width;
                 fragment->visual_x = 0.0f;
             }
             continue;
@@ -466,6 +577,7 @@ static void bidi_fill_views(View* view, int line_number, int depth,
             fragment->codepoint = 0xFFFC;
             fragment->width = current->width;
             fragment->advance_width = fragment->width;
+            fragment->visual_width = fragment->width;
             fragment->visual_x = 0.0f;
             continue;
         }
@@ -524,6 +636,8 @@ static void bidi_scale_rect_widths(BidiCharFragment* chars, BidiRectInfo* rects,
             for (int j = 0; j < rect_info->char_count; j++) {
                 BidiCharFragment* fragment = &chars[rect_info->first_char + j];
                 fragment->width *= scale;
+                fragment->visual_left *= scale;
+                fragment->visual_width *= scale;
                 if (trimmed_hidden_space && !space_was_included_in_rect &&
                     bidi_is_collapsible_space(fragment->codepoint)) {
                     fragment->advance_width = 0.0f;
@@ -597,14 +711,29 @@ static void bidi_place_visual_line(LayoutContext* lycon,
                                    BidiRectInfo* rects, int rect_count,
                                    BidiSpanInfo* spans, int span_count,
                                    const int* visual_to_logical,
-                                   int char_count, int max_depth) {
+                                   int char_count, int max_depth,
+                                   bool use_visual_bounds) {
     float cursor = bidi_line_origin(chars, spans, char_count, span_count);
+    float range_cursor = cursor;
+    if (use_visual_bounds &&
+        lycon->line.inline_base_direction == CSS_VALUE_RTL) {
+        float advance_width = 0.0f;
+        float visual_width = 0.0f;
+        for (int i = 0; i < char_count; i++) {
+            advance_width += chars[i].advance_width;
+            visual_width += chars[i].visual_width;
+        }
+        // RTL text ranges stay anchored at the line's end when glyph ink is
+        // narrower than its CSS advance; preserve that alignment for bounds.
+        range_cursor += advance_width - visual_width;
+    }
     for (int visual = 0; visual < char_count; visual++) {
         for (int depth = 0; depth <= max_depth; depth++) {
             for (int span_index = 0; span_index < span_count; span_index++) {
                 BidiSpanInfo* span = &spans[span_index];
                 if (span->depth == depth && span->min_visual == visual) {
                     cursor += span->left_edge;
+                    range_cursor += span->left_edge;
                 }
             }
         }
@@ -612,6 +741,7 @@ static void bidi_place_visual_line(LayoutContext* lycon,
         int logical = visual_to_logical[visual];
         if (logical >= 0 && logical < char_count) {
             chars[logical].visual_x = cursor;
+            chars[logical].range_visual_x = range_cursor;
             if (chars[logical].atomic_view) {
                 View* atomic_view = chars[logical].atomic_view;
                 float atomic_shift = cursor - atomic_view->x;
@@ -626,6 +756,11 @@ static void bidi_place_visual_line(LayoutContext* lycon,
             if (chars[logical].advance_width > 0.0f) {
                 cursor += chars[logical].advance_width;
             }
+            if (chars[logical].visual_width > 0.0f) {
+                range_cursor += chars[logical].visual_width;
+            } else if (chars[logical].advance_width > 0.0f) {
+                range_cursor += chars[logical].advance_width;
+            }
         }
 
         for (int depth = max_depth; depth >= 0; depth--) {
@@ -633,6 +768,7 @@ static void bidi_place_visual_line(LayoutContext* lycon,
                 BidiSpanInfo* span = &spans[span_index];
                 if (span->depth == depth && span->max_visual == visual) {
                     cursor += span->right_edge;
+                    range_cursor += span->right_edge;
                 }
             }
         }
@@ -660,13 +796,70 @@ static void bidi_place_visual_line(LayoutContext* lycon,
         if (chars[i].width <= 0.0f &&
             (!text_codepoint_has_zero_advance(chars[i].codepoint) ||
              rects[slot].visible_count == 0)) continue;
-        min_x[slot] = min(min_x[slot], chars[i].visual_x);
-        max_x[slot] = max(max_x[slot], chars[i].visual_x + chars[i].width);
+        float range_x = use_visual_bounds ? chars[i].range_visual_x :
+            chars[i].visual_x;
+        float range_left = use_visual_bounds ? chars[i].visual_left : 0.0f;
+        float range_width = use_visual_bounds && chars[i].visual_width > 0.0f
+            ? chars[i].visual_width : chars[i].width;
+        min_x[slot] = min(min_x[slot], range_x + range_left);
+        max_x[slot] = max(max_x[slot], range_x + range_left + range_width);
     }
     for (int i = 0; i < rect_count; i++) {
         if (min_x[i] == FLT_MAX) continue;
         rects[i].rect->x = min_x[i];
         rects[i].rect->width = max_x[i] - min_x[i];
+    }
+    for (int span_index = 0; span_index < span_count; span_index++) {
+        BidiSpanInfo* span_info = &spans[span_index];
+        if (span_info->logical_start < 0 ||
+            span_info->logical_start > span_info->logical_end) continue;
+        bool has_visible_content = false;
+        for (int logical = span_info->logical_start;
+             logical <= span_info->logical_end; logical++) {
+            if (chars[logical].width > 0.0f) {
+                has_visible_content = true;
+                break;
+            }
+        }
+        if (has_visible_content) continue;
+
+        // CSS Inline exposes a zero-width inline at the preceding logical
+        // fragment's line position; its format-control bidi position is not a
+        // painted glyph position after UAX #9 reordering.
+        float anchor_x = span_info->span->x;
+        bool found_anchor = false;
+        if (lycon->line.inline_base_direction == CSS_VALUE_LTR) {
+            for (int logical = span_info->logical_start;
+                 logical <= span_info->logical_end && !found_anchor; logical++) {
+                anchor_x = chars[logical].visual_x;
+                found_anchor = true;
+            }
+        } else {
+            for (int logical = span_info->logical_start - 1;
+                 logical >= 0 && !found_anchor; logical--) {
+                if (chars[logical].rect) {
+                    anchor_x = chars[logical].rect->x;
+                    found_anchor = true;
+                }
+            }
+        }
+        if (!found_anchor && lycon->line.inline_base_direction == CSS_VALUE_RTL) {
+            for (int logical = span_info->logical_end + 1;
+                 logical < char_count && !found_anchor; logical++) {
+                if (chars[logical].rect) {
+                    anchor_x = chars[logical].rect->x;
+                    found_anchor = true;
+                }
+            }
+        }
+        if (found_anchor) {
+            float shift = anchor_x - span_info->span->x;
+            span_info->span->x = anchor_x;
+            if (shift != 0.0f) {
+                layout_shift_view_children(static_cast<View*>(span_info->span),
+                                            shift, 0.0f);
+            }
+        }
     }
     for (int i = 0; i < rect_count; i++) {
         for (int j = 0; j < rects[i].char_count; j++) {
@@ -695,6 +888,27 @@ static void bidi_refresh_bounds(View* view, int line_number,
     layout_walk_view_tree(view, visit, no_leave, false);
     (void)spans;
     (void)span_count;
+}
+
+static void bidi_position_forced_breaks(View* view, int line_number,
+                                         CssEnum direction, float left,
+                                         float right) {
+    if (!view) return;
+    for (View* current = view; current; current = current->next()) {
+        if (current->view_type == RDT_VIEW_BR) {
+            if (current->inline_line_number == line_number) {
+                // CSS Writing Modes places a forced break at the visual end
+                // of its bidi paragraph, not at the logical child-list end.
+                current->x = direction == CSS_VALUE_RTL ? left : right;
+            }
+            continue;
+        }
+        if (current->view_type == RDT_VIEW_INLINE) {
+            ViewSpan* span = lam::view_require<RDT_VIEW_INLINE>(current);
+            bidi_position_forced_breaks(span->first_child, line_number,
+                                         direction, left, right);
+        }
+    }
 }
 
 void layout_bidi_line(LayoutContext* lycon) {
@@ -742,14 +956,21 @@ void layout_bidi_line(LayoutContext* lycon) {
     int char_cursor = 0;
     int rect_cursor = 0;
     int span_cursor = 0;
-    bidi_fill_views(root, lycon->block.line_number, 0, chars, rects, spans,
+    bidi_fill_views(lycon, root, lycon->block.line_number, 0, chars, rects, spans,
                     &char_cursor, &rect_cursor, &span_cursor,
-                    line_direction);
+                    line_direction, counts.has_bidi_trigger);
     if (char_cursor != counts.chars || rect_cursor != counts.rects) return;
     for (int i = 0; i < rect_cursor; i++) {
         rects[i].line_has_bidi_inline_content = counts.has_bidi_inline_content;
     }
     bidi_scale_rect_widths(chars, rects, counts.rects);
+    bool has_visual_metrics = false;
+    for (int i = 0; i < counts.chars; i++) {
+        if (chars[i].has_visual_metrics) {
+            has_visual_metrics = true;
+            break;
+        }
+    }
 
     int max_level = 0;
 #if RDT_HAS_FRIBIDI
@@ -868,7 +1089,21 @@ void layout_bidi_line(LayoutContext* lycon) {
     bidi_update_span_visual_ranges(chars, visual_to_logical, spans, counts.spans,
                                    counts.chars);
     bidi_place_visual_line(lycon, chars, rects, counts.rects, spans, counts.spans,
-                           visual_to_logical, counts.chars, counts.max_depth);
+                           visual_to_logical, counts.chars, counts.max_depth,
+                           max_level > 0 && has_visual_metrics);
+    float visual_left = FLT_MAX;
+    float visual_right = -FLT_MAX;
+    for (int i = 0; i < counts.chars; i++) {
+        if (chars[i].width <= 0.0f) continue;
+        visual_left = min(visual_left, chars[i].visual_x);
+        visual_right = max(visual_right,
+                           chars[i].visual_x + chars[i].width);
+    }
+    if (visual_left != FLT_MAX) {
+        bidi_position_forced_breaks(
+            root, lycon->block.line_number, line_direction,
+            visual_left, visual_right);
+    }
     bidi_refresh_bounds(root, lycon->block.line_number, spans, counts.spans);
     if (max_level > 0) {
         for (int depth = counts.max_depth; depth >= 0; depth--) {

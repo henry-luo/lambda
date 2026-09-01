@@ -2329,6 +2329,7 @@ inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
     target->word_spacing = source->word_spacing;
     target->word_spacing_percent = source->word_spacing_percent;
     target->word_spacing_is_percent = source->word_spacing_is_percent;
+    target->platform_fallback_family = source->platform_fallback_family;
 }
 
 inline void radiant_fill_missing_font_values(FontProp* target, const FontProp* source,
@@ -2336,6 +2337,7 @@ inline void radiant_fill_missing_font_values(FontProp* target, const FontProp* s
     if (!target || !source) return;
     if (!target->family && source->family) {
         radiant_retain_font_family(target, lam::PoolPtr<char>(source->family));
+        target->platform_fallback_family = source->platform_fallback_family;
     }
     if (target->font_size <= 0.0f && !preserve_zero_size) {
         // zero is a valid authored size; only unresolved size inherits from the parent.

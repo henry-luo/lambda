@@ -3272,6 +3272,16 @@ CssDeclaration* css_parse_declaration_text(const char* text, size_t length, Pool
     return declaration;
 }
 
+bool css_declaration_is_supported(const CssDeclaration* declaration) {
+    if (!declaration) return false;
+    if (declaration->property_name &&
+        declaration->property_name[0] == '-' && declaration->property_name[1] == '-') {
+        return true;
+    }
+    return declaration->property_code > 0 &&
+        css_property_exists(declaration->property_code);
+}
+
 CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length,
                                                  Pool* pool, size_t* declaration_count) {
     if (declaration_count) *declaration_count = 0;

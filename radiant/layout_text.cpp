@@ -937,6 +937,93 @@ static inline uint32_t peek_codepoint(const unsigned char* str) {
     return cp ? cp : *str;
 }
 
+bool layout_get_grapheme_cluster_bytes(const unsigned char* cluster_start,
+                                       const unsigned char* text_end,
+                                       size_t* cluster_bytes) {
+    if (!cluster_start || !text_end || cluster_start >= text_end ||
+        !cluster_bytes) {
+        return false;
+    }
+    uint32_t previous = 0;
+    int first_bytes = str_utf8_decode(
+        (const char*)cluster_start, (size_t)(text_end - cluster_start), &previous);
+    if (first_bytes <= 0) return false;
+
+    const unsigned char* cursor = cluster_start + first_bytes;
+    bool has_extension = false;
+    while (cursor < text_end) {
+        uint32_t current = 0;
+        int bytes = str_utf8_decode(
+            (const char*)cursor, (size_t)(text_end - cursor), &current);
+        if (bytes <= 0 || utf8proc_grapheme_break(
+                (utf8proc_int32_t)previous, (utf8proc_int32_t)current)) {
+            break;
+        }
+        has_extension = true;
+        previous = current;
+        cursor += bytes;
+    }
+    if (!has_extension) return false;
+
+    *cluster_bytes = (size_t)(cursor - cluster_start);
+    return true;
+}
+
+bool layout_measure_grapheme_cluster_advance(
+        LayoutContext* lycon, const unsigned char* cluster_start,
+        const unsigned char* text_end, size_t* cluster_bytes,
+        float* cluster_width) {
+    if (!lycon || !cluster_start || !text_end || cluster_start >= text_end ||
+        !cluster_bytes || !cluster_width || !font_box_handle(&lycon->font)) {
+        return false;
+    }
+    size_t cluster_length = 0;
+    if (!layout_get_grapheme_cluster_bytes(cluster_start, text_end,
+                                            &cluster_length)) {
+        return false;
+    }
+    TextExtents extents = font_measure_text(
+        font_box_handle(&lycon->font), (const char*)cluster_start,
+        (int)cluster_length); // INT_CAST_OK: font_measure_text takes byte count
+    float fallback_width = 0.0f;
+    FontStyleDesc style = font_style_desc_from_prop(lycon->font.style);
+    const unsigned char* cursor = cluster_start;
+    const unsigned char* cluster_end = cluster_start + cluster_length;
+    float raster_scale = ui_context_raster_scale(lycon->ui_context);
+    while (cursor < cluster_end) {
+        uint32_t codepoint = 0;
+        int bytes = str_utf8_decode(
+            (const char*)cursor, (size_t)(cluster_end - cursor), &codepoint);
+        if (bytes <= 0) return false;
+        // emoji, bidi, and autospace paths keep their own script-boundary and
+        // fallback state; replacing them with one generic cluster advance
+        // would discard those semantic boundaries.
+        if (layout_text_autospace_flags(lycon) != 0 ||
+            utf_bidi_strong_class(codepoint) == 1 ||
+            utf_is_emoji_for_zwj(codepoint) ||
+            (codepoint >= 0xE0020 && codepoint <= 0xE007F) ||
+            codepoint == 0x200D ||
+            (codepoint >= 0xFE00 && codepoint <= 0xFE0F) ||
+            (codepoint >= 0xE0100 && codepoint <= 0xE01EF)) {
+            return false;
+        }
+        if (font_get_glyph_index(font_box_handle(&lycon->font), codepoint) == 0) {
+            LoadedGlyph* glyph = font_load_glyph(
+                font_box_handle(&lycon->font), &style, codepoint, false);
+            if (glyph) {
+                float advance = glyph->advance_x / raster_scale;
+                if (advance > fallback_width) fallback_width = advance;
+            }
+        }
+        cursor += bytes;
+    }
+    if (fallback_width > extents.width) extents.width = fallback_width;
+    if (extents.width <= 0.0f) return false;
+    *cluster_bytes = cluster_length;
+    *cluster_width = extents.width;
+    return true;
+}
+
 /**
  * Peek at the first codepoint of the next inline content following a given DOM node.
  * Traverses siblings and walks up through inline parents to find the next
@@ -1055,27 +1142,24 @@ static float measure_current_glyph_advance(LayoutContext* lycon, uint32_t codepo
     if (document_font_missing_figure_space(lycon, codepoint)) {
         return layout_font_em_size(lycon);
     }
-    FontHandle* handle = font_box_handle(&lycon->font) ? font_box_handle(&lycon->font) : lycon->font.style->font_handle;
-    if (handle) {
-        FontStyleDesc sd = font_style_desc_from_prop(lycon->font.style);
-        LoadedGlyph* glyph = font_load_glyph(handle, &sd, codepoint, false);
-        if (glyph) {
-            float raster_scale = ui_context_raster_scale(lycon->ui_context);
-            // CSS Text keeps the selected font's advance; East Asian width does
-            // not replace a real glyph metric with the nominal em cell.
-            float advance = glyph->advance_x / raster_scale;
-            if (trim_cjk_spacing) {
-                float base_advance = advance;
-                advance += font_get_halt_adjustment(handle, codepoint) * 0.5f;
-                if (!previous_codepoint) {
-                    previous_codepoint = lycon->line.prev_text_spacing_codepoint;
-                }
-                advance += text_spacing_trim_adjacent_advance(
-                    handle, previous_codepoint, codepoint,
-                    get_text_spacing_trim(lycon, nullptr), base_advance);
+    FontHandle* handle = font_box_handle(&lycon->font)
+        ? font_box_handle(&lycon->font) : lycon->font.style->font_handle;
+    float advance = layout_measure_glyph_advance(
+        lycon, handle, lycon->font.style, codepoint);
+    if (advance > 0.0f) {
+        // CSS Text keeps the selected font's advance; East Asian width does
+        // not replace a real glyph metric with the nominal em cell.
+        if (trim_cjk_spacing) {
+            float base_advance = advance;
+            advance += font_get_halt_adjustment(handle, codepoint) * 0.5f;
+            if (!previous_codepoint) {
+                previous_codepoint = lycon->line.prev_text_spacing_codepoint;
             }
-            return advance;
+            advance += text_spacing_trim_adjacent_advance(
+                handle, previous_codepoint, codepoint,
+                get_text_spacing_trim(lycon, nullptr), base_advance);
         }
+        return advance;
     }
     return layout_font_em_size(lycon);
 }
@@ -1269,6 +1353,123 @@ static bool measure_shaped_simple_latin_run(LayoutContext* lycon, const unsigned
         return false;
     }
     *out_bytes = (int)result.bytes; // INT_CAST_OK: text byte count
+    *out_width = result.width;
+    *out_first_codepoint = result.first_codepoint;
+    *out_last_codepoint = result.last_codepoint;
+    return true;
+}
+
+bool layout_measure_bidi_run(LayoutContext* lycon,
+                             const unsigned char* str,
+                             size_t remaining,
+                             CssEnum text_transform,
+                             CssEnum font_variant,
+                             bool break_anywhere,
+                             bool break_word,
+                             bool hyphenation,
+                             LayoutBidiRun* result) {
+    if (!lycon || !str || remaining == 0 || !result || !lycon->font.style ||
+        (!font_box_handle(&lycon->font) && !lycon->font.style->font_handle) ||
+        text_transform != CSS_VALUE_NONE ||
+        font_variant == CSS_VALUE_SMALL_CAPS || break_anywhere || break_word ||
+        hyphenation || lycon->font.style->letter_spacing != 0.0f ||
+        layout_text_autospace_flags(lycon) != 0) {
+        return false;
+    }
+
+    FontHandle* handle = font_box_handle(&lycon->font)
+        ? font_box_handle(&lycon->font) : lycon->font.style->font_handle;
+    const unsigned char* text_end = str + remaining;
+    const unsigned char* cursor = str;
+    uint32_t first_codepoint = 0;
+    uint32_t last_codepoint = 0;
+    bool has_rtl_codepoint = false;
+    while (cursor < text_end) {
+        uint32_t codepoint = 0;
+        int bytes = str_utf8_decode(
+            (const char*)cursor, (size_t)(text_end - cursor), &codepoint);
+        if (bytes <= 0 || is_space(codepoint) || codepoint == 0x000A ||
+            codepoint == 0x000D) {
+            break;
+        }
+        int strong_class = utf_bidi_strong_class(codepoint);
+        if (strong_class < 0 || (strong_class > 0 && strong_class != 1)) {
+            break;
+        }
+        if (!first_codepoint) first_codepoint = codepoint;
+        last_codepoint = codepoint;
+        has_rtl_codepoint = has_rtl_codepoint || strong_class == 1;
+        cursor += bytes;
+    }
+    if (!has_rtl_codepoint || cursor == str) return false;
+
+    size_t byte_count = (size_t)(cursor - str);
+    for (const unsigned char* glyph = str; glyph < cursor;) {
+        uint32_t codepoint = 0;
+        int bytes = str_utf8_decode(
+            (const char*)glyph, (size_t)(cursor - glyph), &codepoint);
+        if (bytes <= 0) return false;
+        if (font_get_glyph_index(handle, codepoint) == 0) {
+            // CSS Fonts segments a text run at a missing-glyph fallback face;
+            // per-codepoint layout then uses the same fallback metrics as paint.
+            return false;
+        }
+        glyph += bytes;
+    }
+    TextExtents ext = font_measure_text(
+        handle, (const char*)str, (int)byte_count); // INT_CAST_OK: font byte count
+    if (ext.width <= 0.0f) return false;
+    result->bytes = byte_count;
+    result->width = ext.width;
+    result->first_codepoint = first_codepoint;
+    result->last_codepoint = last_codepoint;
+    return true;
+}
+
+static bool measure_shaped_bidi_run(LayoutContext* lycon,
+                                    DomNode* text_node,
+                                    const unsigned char* str,
+                                    const unsigned char* text_end,
+                                    CssEnum text_transform, bool break_all,
+                                    bool break_word, bool hyphenation,
+                                    int* out_bytes, float* out_width,
+                                    uint32_t* out_first_codepoint,
+                                    uint32_t* out_last_codepoint) {
+    if (!text_node || !text_node->parent || !text_node->parent->is_element() ||
+        !text_node->parent->is_block()) {
+        return false;
+    }
+    DomNode* previous_sibling = nullptr;
+    for (DomNode* sibling = text_node->parent->as_element()->first_child;
+         sibling && sibling != text_node; sibling = sibling->next_sibling) {
+        if (!sibling->is_comment()) previous_sibling = sibling;
+    }
+    if (previous_sibling &&
+        layout_find_last_strong_direction(previous_sibling, false) == 1) {
+        // a preceding RTL glyph would make this a cross-inline shaping run.
+        return false;
+    }
+    for (DomNode* sibling = text_node->next_sibling; sibling;
+         sibling = sibling->next_sibling) {
+        if (sibling->is_comment()) continue;
+        if (layout_find_first_strong_direction(sibling, false) == 1) {
+            // a following RTL glyph would make this a cross-inline shaping run.
+            return false;
+        }
+        break;
+    }
+    if (!str || !text_end || str >= text_end || !out_bytes || !out_width ||
+        !out_first_codepoint || !out_last_codepoint) {
+        return false;
+    }
+    LayoutBidiRun result = {};
+    if (!layout_measure_bidi_run(
+            lycon, str, (size_t)(text_end - str), text_transform,
+            has_small_caps(lycon) ? CSS_VALUE_SMALL_CAPS : CSS_VALUE_NONE,
+            break_all, break_word, hyphenation, &result)) {
+        return false;
+    }
+    *out_bytes = (int)result.bytes; // INT_CAST_OK: bounded text run length
     *out_width = result.width;
     *out_first_codepoint = result.first_codepoint;
     *out_last_codepoint = result.last_codepoint;
@@ -1864,6 +2065,7 @@ void line_reset(LayoutContext* lycon) {
     lycon->line.has_clamped_baseline_tail = false;
     lycon->line.max_desc_before_last_text = 0;
     lycon->line.has_expanded_inline_lh = false;
+    lycon->line.has_baseline_shift = false;
     lycon->line.max_inline_line_height = lycon->line.max_atomic_inline_height = 0;
     lycon->line.has_different_inline_font = false;
     lycon->line.max_normal_line_height = 0;
@@ -2278,6 +2480,7 @@ void line_break(LayoutContext* lycon) {
         lycon->line.max_descender > lycon->block.init_descender ||
         lycon->line.has_different_inline_font ||
         lycon->line.has_replaced_content ||
+        lycon->line.has_baseline_shift ||
         lycon->line.max_top_bottom_height > 0 ||
         lycon->line.max_top_height > 0 ||
         lycon->line.max_bottom_height > 0) {
@@ -2298,6 +2501,31 @@ void line_break(LayoutContext* lycon) {
                 if (view) { view = view->next(); }
                 if (view) goto NEXT_VIEW;
             }
+            if (lycon->line.has_baseline_shift && lycon->line.last_text_view) {
+                auto find_shifted_span = [&](View* source) -> ViewSpan* {
+                    ViewSpan* shifted = nullptr;
+                    for (DomNode* ancestor = source ? source->parent : nullptr;
+                         ancestor && ancestor->is_element() &&
+                         ancestor->view_type == RDT_VIEW_INLINE;
+                         ancestor = ancestor->parent) {
+                        ViewSpan* candidate = lam::view_require<RDT_VIEW_INLINE>(ancestor);
+                        if (candidate->in_line && candidate->inl() &&
+                            vertical_align_baseline_shift(
+                                lycon, candidate->inl()->vertical_align,
+                                candidate->inl()->vertical_align_offset) != 0.0f) {
+                            shifted = candidate;
+                        }
+                    }
+                    return shifted;
+                };
+                ViewSpan* shifted_span = find_shifted_span(lycon->line.last_text_view);
+                if (!shifted_span) {
+                    shifted_span = find_shifted_span(lycon->line.start_view);
+                }
+                // CSS 2.1 §10.8.1: realign the current fragment through its
+                // shifted inline ancestor after the line walk.
+                if (shifted_span) view_vertical_align(lycon, shifted_span);
+            }
             lycon->font = pa_font;
         }
     }
@@ -2305,6 +2533,7 @@ void line_break(LayoutContext* lycon) {
     align_forced_break_rect_to_line_baseline(lycon);
 
     line_align(lycon);
+    layout_trim_isolated_inline_text_edges(lycon, lycon->line.start_view);
     place_rtl_initial_letter_line(lycon);
     // CSS Text 3 §4.1.3: RTL hanging space text rect adjustment.
     if (lycon->line.rtl_hanging_space > 0 && lycon->line.last_text_rect) {
@@ -2421,6 +2650,12 @@ void line_break(LayoutContext* lycon) {
         used_line_height = font_line_height;
     }
 
+    if (lycon->line.has_baseline_shift && font_line_height > used_line_height) {
+        // CSS 2.1 §10.8.1: a shifted inline baseline expands the line box to
+        // enclose the shifted inline box even when its font matches the strut.
+        used_line_height = font_line_height;
+    }
+
     if (layout_quirks_block_ignores_line_height(lycon, nullptr)) {
         used_line_height = font_line_height;
         if (lycon->block.line_height_is_normal &&
@@ -2432,6 +2667,7 @@ void line_break(LayoutContext* lycon) {
             used_line_height = css_line_height;
         }
     }
+
     // CSS 2.1 §10.8.1: Fix height of collapsed-content inline elements.
     // CSS 2.1 §9.4.2: Line boxes with no text/content/etc. are zero-height, so
     if (used_line_height > 0 && lycon->line.start_view) {
@@ -2500,8 +2736,8 @@ void line_break(LayoutContext* lycon) {
 
     if (reached_line_clamp) {
         if (lycon->line.last_text_rect && font_box_handle(&lycon->font)) {
-            GlyphInfo ellipsis = font_get_glyph(font_box_handle(&lycon->font), 0x2026); // U+2026 …
-            float ellipsis_w = (ellipsis.id != 0) ? ellipsis.advance_x : lycon->font.current_font_size * 0.5f;
+            float ellipsis_w = layout_text_overflow_ellipsis_width(
+                font_box_handle(&lycon->font), lycon->font.current_font_size);
             TextRect* tr = lycon->line.last_text_rect;
             float max_w = lycon->line.right - tr->x;
             if (tr->width + ellipsis_w > max_w && max_w > ellipsis_w) {
@@ -2849,6 +3085,26 @@ static bool text_range_has_non_collapsed_content(ViewText* text,
     return false;
 }
 
+static float text_emphasis_line_extent(LayoutContext* lycon, ViewText* text,
+                                       TextRect* rect, int text_length) {
+    if (!lycon || !text || !rect || !lycon->font.style ||
+        !lycon->font.style->text_emphasis_enabled ||
+        lycon->font.style->font_size <= 0.0f ||
+        !text_range_has_non_collapsed_content(text, rect, text_length)) {
+        return 0.0f;
+    }
+    ViewBlock* block = layout_nearest_block_ancestor(text->parent_view());
+    if (!block || !block->scroller) return 0.0f;
+    const ScrollProp* scroll = block->scroll();
+    if (!scroll || (scroll->overflow_x == CSS_VALUE_VISIBLE &&
+                    scroll->overflow_y == CSS_VALUE_VISIBLE)) {
+        return 0.0f;
+    }
+    // CSS Text Decoration 3 §3.4 gives emphasis marks ruby-like line metrics;
+    // retain their extent when the containing block establishes clipping.
+    return lycon->font.style->font_size * 0.5f;
+}
+
 static bool initial_letter_block_trims_start_edge(const DomNode* text_node,
                                                   const LayoutContext* lycon) {
     if (text_node && text_node->parent && text_node->parent->is_element()) {
@@ -3109,9 +3365,19 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
             lycon, lycon->line.vertical_align,
             lycon->line.vertical_align_offset);
         if (baseline_shift != 0.0f) {
+            lycon->line.has_baseline_shift = true;
             ascender += baseline_shift;
             descender -= baseline_shift;
             css_baseline_ascender += baseline_shift;
+        }
+        float emphasis_extent = text_emphasis_line_extent(
+            lycon, text, rect, text_length);
+        if (emphasis_extent > 0.0f) {
+            if (lycon->font.style->text_emphasis_under) {
+                descender += emphasis_extent;
+            } else {
+                ascender += emphasis_extent;
+            }
         }
         lycon->line.max_text_ascender = max(
             lycon->line.max_text_ascender, ascender);
@@ -3321,6 +3587,7 @@ static void capture_line_metrics(LineMetricsSnapshot* snapshot, const Linebox* l
     snapshot->atomic_inline_count = line->atomic_inline_count;
     snapshot->max_desc_before_last_text = line->max_desc_before_last_text;
     snapshot->has_expanded_inline_lh = line->has_expanded_inline_lh;
+    snapshot->has_baseline_shift = line->has_baseline_shift;
     snapshot->max_inline_line_height = line->max_inline_line_height;
     snapshot->max_atomic_inline_height = line->max_atomic_inline_height;
     snapshot->max_text_ascender = line->max_text_ascender;
@@ -3354,6 +3621,7 @@ static void restore_line_metrics(Linebox* line, const LineMetricsSnapshot* snaps
     line->atomic_inline_count = snapshot->atomic_inline_count;
     line->max_desc_before_last_text = snapshot->max_desc_before_last_text;
     line->has_expanded_inline_lh = snapshot->has_expanded_inline_lh;
+    line->has_baseline_shift = snapshot->has_baseline_shift;
     line->max_inline_line_height = snapshot->max_inline_line_height;
     line->max_atomic_inline_height = snapshot->max_atomic_inline_height;
     line->max_text_ascender = snapshot->max_text_ascender;
@@ -3894,8 +4162,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         }
         float wd;
         uint32_t codepoint = *str;
-        bool shaped_latin_run = false;
-        uint32_t shaped_latin_first_codepoint = 0;
+        bool shaped_text_run = false;
+        uint32_t shaped_run_first_codepoint = 0;
+        bool measured_grapheme_cluster = false;
+        float grapheme_cluster_width = 0.0f;
 
         if (!collapse_newlines && (*str == '\n' || *str == '\r')) {
             // CSS 2.2: When preserving newlines with collapsing spaces (pre-line),
@@ -3947,20 +4217,23 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             float shaped_width = 0.0f;
             uint32_t shaped_first_cp = 0;
             uint32_t shaped_last_cp = 0;
-            if (measure_shaped_simple_latin_run(lycon, str, text_end, text_transform,
-                                                trim_cjk_spacing, break_all, break_word,
-                                                auto_hyphenation,
-                                                &shaped_bytes, &shaped_width,
-                                                &shaped_first_cp, &shaped_last_cp)) {
+        if (measure_shaped_bidi_run(
+                    lycon, text_node, str, text_end, text_transform, break_all, break_word,
+                    auto_hyphenation, &shaped_bytes, &shaped_width,
+                    &shaped_first_cp, &shaped_last_cp) ||
+                measure_shaped_simple_latin_run(
+                    lycon, str, text_end, text_transform, trim_cjk_spacing,
+                    break_all, break_word, auto_hyphenation, &shaped_bytes,
+                    &shaped_width, &shaped_first_cp, &shaped_last_cp)) {
                 wd = shaped_width;
                 next_ch = str + shaped_bytes;
                 codepoint = shaped_last_cp;
-                shaped_latin_run = true;
-                shaped_latin_first_codepoint = shaped_first_cp;
+                shaped_text_run = true;
+                shaped_run_first_codepoint = shaped_first_cp;
                 if (!text_autospace_bidi_unsupported && layout_text_autospace_pair(
                         text_autospace, lycon->line.prev_text_autospace_codepoint,
                         shaped_first_cp)) {
-                    // css text 4: a shaped Latin run still begins at an autospace boundary.
+                    // css text 4: a shaped text run still begins at an autospace boundary.
                     float autospace = layout_text_autospace_advance(lycon);
                     wd += autospace;
                 }
@@ -3970,7 +4243,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
         }
 
-        if (shaped_latin_run) {
+        if (shaped_text_run) {
         } else if (is_space(codepoint)) {
             wd = layout_measure_space_advance(lycon, font_box_handle(&lycon->font), lycon->font.style);
             if (codepoint == '\t' && !collapse_spaces) {
@@ -4022,6 +4295,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 else { next_ch = str + bytes; }
             }
             else { next_ch = str + 1; }
+
+            if (text_transform == CSS_VALUE_NONE && !has_small_caps(lycon)) {
+                size_t cluster_length = 0;
+                measured_grapheme_cluster = layout_measure_grapheme_cluster_advance(
+                    lycon, str, text_end, &cluster_length, &grapheme_cluster_width);
+                if (measured_grapheme_cluster) next_ch = str + cluster_length;
+            }
 
             uint32_t tt_out[3];
             int tt_count = apply_text_transform_full(codepoint, text_transform, is_word_start, tt_out);
@@ -4182,7 +4462,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.trailing_letter_spacing =
                 text_letter_spacing(lycon->font.style, codepoint, collapse_spaces);
 
-            if (tt_count > 1) {
+                if (tt_count > 1) {
                 FontStyleDesc _sd_extra = font_style_desc_from_prop(lycon->font.style);
                 float raster_scale = ui_context_raster_scale(lycon->ui_context);
                 for (int ti = 1; ti < tt_count; ti++) {
@@ -4207,6 +4487,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     wd += extra_wd;
                 }
             }
+            if (measured_grapheme_cluster) wd = grapheme_cluster_width;
         }
         lycon->line.prev_text_spacing_codepoint = codepoint;
         if (!text_autospace_is_combining_mark(codepoint)) {
@@ -4216,7 +4497,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             // fallback or styled inline cannot form a pair in the next font.
             if (lycon->line.prev_codepoint &&
                 lycon->line.prev_kerning_font_style == lycon->font.style) {
-                uint32_t kerning_codepoint = shaped_latin_run ? shaped_latin_first_codepoint : codepoint;
+                uint32_t kerning_codepoint = shaped_text_run
+                    ? shaped_run_first_codepoint : codepoint;
                 float kerning_css = text_kerning_adjustment(
                     lycon, lycon->line.prev_codepoint, kerning_codepoint);
                 if (kerning_css != 0.0f) {

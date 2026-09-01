@@ -1700,6 +1700,7 @@ TEST_F(UtfClassifyTest, ZwjCompBasePersonEmoji) {
     EXPECT_TRUE(utf_is_zwj_composition_base(0x1F466));  // Boy
     EXPECT_TRUE(utf_is_zwj_composition_base(0x1F469));  // Woman
     EXPECT_TRUE(utf_is_zwj_composition_base(0x1F9D1));  // Person
+    EXPECT_TRUE(utf_is_zwj_composition_base(0x1F937));  // Person gesturing
 }
 
 TEST_F(UtfClassifyTest, ZwjCompBaseObjects) {

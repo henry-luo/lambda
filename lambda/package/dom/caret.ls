@@ -32,19 +32,29 @@ fn horizontal(key, alt, ctrl, meta) {
 // Vertical motion is the one place the surfaces genuinely differ, so it is the
 // one place the rule branches on them. A single-line <input> has no lines to
 // move between and collapses to the ends of its value, which is what Chrome
-// does; a rich surface moves by line.
+// does; textarea and rich surfaces move by line.
 fn vertical(key, surface) {
     let up = key == "ArrowUp";
-    if (surface == "rich") { if (up) "moveLineBackward" else "moveLineForward" }
+    if (surface == "rich" or surface == "textarea") {
+        if (up) "moveLineBackward" else "moveLineForward"
+    }
     else { if (up) "moveLineStart" else "moveLineEnd" }
 }
 
-// Cmd+Home/End reaches the document boundary on a rich surface; a text control
-// has no document to reach, so it stays at the value boundary.
+// Cmd+Home/End reaches the document boundary on a rich or textarea surface; a
+// single-line control has no document to reach, so it stays at the value boundary.
 fn boundary(key, surface, meta) {
     let home = key == "Home";
-    if (meta and surface == "rich") { if (home) "moveDocumentStart" else "moveDocumentEnd" }
+    if (meta and (surface == "rich" or surface == "textarea")) {
+        if (home) "moveDocumentStart" else "moveDocumentEnd"
+    }
     else { if (home) "moveLineStart" else "moveLineEnd" }
+}
+
+fn page(key, surface) {
+    if (surface != "textarea") { null }
+    else if (key == "PageUp") { "movePageBackward" }
+    else { "movePageForward" }
 }
 
 // `null` means this key is not caret navigation, and the handler declines so the
@@ -54,6 +64,7 @@ pub fn operation_for(surface, key, alt, ctrl, meta) {
     else if (key == "ArrowLeft" or key == "ArrowRight") { horizontal(key, alt, ctrl, meta) }
     else if (key == "ArrowUp" or key == "ArrowDown") { vertical(key, surface) }
     else if (key == "Home" or key == "End") { boundary(key, surface, meta) }
+    else if (key == "PageUp" or key == "PageDown") { page(key, surface) }
     else { null }
 }
 

@@ -89,6 +89,7 @@ typedef struct FontStyleDesc {
     float       size_px;            // desired size in CSS pixels
     FontWeight  weight;
     FontSlant   slant;
+    const char* platform_fallback_family; // UA-selected platform family for glyph fallback
 } FontStyleDesc;
 
 // advance through a CSS font-family list, returning one unquoted, trimmed family

@@ -180,6 +180,8 @@ bool css_set_custom_property(CssEngine* engine, CssComputedStyle* style,
 
 // Media query evaluation
 bool css_evaluate_media_query(CssEngine* engine, const char* media_query);
+// Conditional Rules: evaluate a CSS @supports condition.
+bool css_evaluate_supports_condition(CssEngine* engine, const char* condition);
 
 // Statistics and debugging
 typedef struct CssEngineStats {

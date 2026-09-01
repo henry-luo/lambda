@@ -534,6 +534,7 @@ bool css_is_valid_css_function(const char* name);
 CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool);
 CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length, Pool* pool);
 CssDeclaration* css_parse_declaration_text(const char* text, size_t length, Pool* pool);
+bool css_declaration_is_supported(const CssDeclaration* declaration);
 CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length,
                                                  Pool* pool, size_t* declaration_count);
 CssDeclaration* css_parse_property_declaration(const char* property, size_t property_length,

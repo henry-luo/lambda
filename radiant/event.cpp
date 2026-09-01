@@ -3,6 +3,7 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "radiant.hpp"
+#include "../lambda/module/radiant/radiant_history.hpp"
 #include "rdt_video.h"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
@@ -13,6 +14,7 @@
 #include "../lambda/runtime/radiant_event_hook.h"
 #include "../lib/utf.h"
 #include "../lib/str.h"
+#include "../lib/url.h"
 // str.h included via view.hpp
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
@@ -28,6 +30,7 @@
 #include "../lambda/input/input.hpp"
 #include "../lambda/module/radiant/radiant_dom_bridge.hpp"   // Runtime (heap and name_pool)
 #include "../lambda/runtime/runtime-state.h"
+#include "../lambda/runtime/gc/gc_heap.h"
 #include "../lambda/io/mark_builder.hpp" // MarkBuilder for event object construction
 #include "../lambda/js/js_dom.h"      // js_dom_set_document for HTML event handlers
 #include "../lambda/js/js_dom_events.h" // js_dom_dispatch_event + native event factories
@@ -41,6 +44,7 @@
 // only need the two-string builder for the paste/drop dispatch path.
 extern "C" Item js_data_transfer_new_with_strings(const char* text_plain,
                                                   const char* text_html);
+extern Item js_make_number(double value);
 extern "C" void js_dom_notify_mutation(DomJsMutationKind kind,
                                         void* target, void* parent);
 extern "C" void js_dom_notify_mutation_detail(DomJsMutationKind kind,
@@ -53,6 +57,8 @@ extern "C" bool js_dom_is_reset_button(void* dom_elem);
 extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter_item);
 extern "C" bool js_dom_is_disabled(void* dom_elem);
 extern "C" bool js_dom_is_connected(void* dom_elem);
+extern "C" Item js_dom_focus_method_bridge(void* dom_elem, bool focus);
+extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem);
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
 #include <chrono>       // timing for reactive event dispatch
@@ -582,6 +588,18 @@ static DomDocument* event_context_target_document(EventContext* evcon) {
     return evcon->target_document
         ? evcon->target_document
         : (evcon->ui_context ? evcon->ui_context->document : NULL);
+}
+
+DomElement* radiant_document_body_element(DomDocument* doc) {
+    DomElement* root = doc ? doc->root : nullptr;
+    if (!root) return nullptr;
+    if (root->tag() == MARKUP_NAME_BODY) return root;
+    for (DomNode* child = root->first_child; child; child = child->next_sibling) {
+        if (!child->is_element()) continue;
+        DomElement* elem = child->as_element();
+        if (elem && elem->tag() == MARKUP_NAME_BODY) return elem;
+    }
+    return nullptr;
 }
 
 static void restore_embedded_document_scroll_model(DomDocument* doc) {
@@ -1423,23 +1441,19 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
         log_debug("fired at anchor tag");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
             log_debug("mouse down at anchor tag");
-            // §7 unification (U-2): skip default link navigation if a JS
-            // mousedown listener called event.preventDefault().
-            if (evcon->default_prevented) {
-                log_debug("anchor nav suppressed by preventDefault()");
-            } else {
+            // ES31: once the package claims linkactivation, click (not
+            // mousedown) is the cancelable policy point. Keep the legacy
+            // fields only for package-off documents while evaluator ownership
+            // remains staged for every static embedded format.
+            bool package_claims = radiant_behavior_claims_event(
+                evcon, static_cast<View*>(span), "linkactivation");
+            if (!evcon->default_prevented && !package_claims) {
                 const char* href = span->get_attribute("href");
                 if (href) {
-                log_debug("got anchor href: %s", href);
-                evcon->new_url = (char*)href;
-                const char* target = span->get_attribute("target");
-                if (target) {
-                    log_debug("got anchor target: %s", target);
-                    evcon->new_target = (char*)target;
-                }
-                else {
-                    log_debug("no anchor target found");
-                }
+                    log_debug("legacy anchor href: %s", href);
+                    evcon->new_url = (char*)href;
+                    const char* target = span->get_attribute("target");
+                    if (target) evcon->new_target = (char*)target;
                 }
             }
         }
@@ -1528,6 +1542,8 @@ static const char* key_code_to_name(int key) {
         case RDT_KEY_DOWN:      return "ArrowDown";
         case RDT_KEY_HOME:      return "Home";
         case RDT_KEY_END:       return "End";
+        case RDT_KEY_PAGE_UP:   return "PageUp";
+        case RDT_KEY_PAGE_DOWN: return "PageDown";
         default:                return "";
     }
 }
@@ -1767,20 +1783,63 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
     return copied;
 }
 
-/**
- * Build a Lambda map Item representing an event object.
- * Contains: {type, target_class, target_tag, x, y}
- * For "input" events: adds "char" (typed character as UTF-8 string)
- * For "keydown" events: adds "key" (key name string, e.g. "Backspace", "Enter")
- * Uses doc->input (created during load_lambda_script_doc) for allocation.
- */
-static Item build_lambda_event_map(DomDocument* doc, View* target,
+// F17/ES24: legacy Lambda payload fields now project through the same event
+// wrapper JS receives. Nested Mark values still use the document Input arena;
+// only the outer event carrier moved from a one-shot Mark map to the record.
+class DomEventPayloadBuilder {
+public:
+    explicit DomEventPayloadBuilder(Item event) : event_(event) {}
+
+    void put(const char* name, const char* value) {
+        set(name, value ? js_name_item(value) : ItemNull);
+    }
+    void put(const char* name, int64_t value) {
+        set(name, (Item){.item = i2it(value)});
+    }
+    void put(const char* name, double value) {
+        set(name, js_make_number(value));
+    }
+    void put(const char* name, bool value) {
+        set(name, (Item){.item = b2it(value)});
+    }
+    void put(const char* name, Item value) {
+        set(name, value);
+    }
+    void putNull(const char* name) {
+        set(name, ItemNull);
+    }
+
+private:
+    void set(const char* name, Item value) {
+        Item result = ItemNull;
+        // The Lambda-only handler path has no JS realm. Project payload
+        // fields directly to the native carrier instead of entering JS
+        // property dispatch, which would lazily initialize intrinsics.
+        if (!radiant_dom_event_member_set(event_, name, value, &result)) {
+            log_error("dom event record: failed to set payload field '%s'", name);
+        }
+    }
+
+    Item event_;
+};
+
+static Item build_dom_event_record(DomDocument* doc, View* target,
                                    const char* event_name, EventContext* evcon,
-                                   const InputIntent* intent = nullptr) {
-    if (!doc || !doc->input) return ItemNull;
+                                   const InputIntent* intent = nullptr,
+                                   Item existing_event = ItemNull) {
+    RootFrame roots(1);
+    Rooted<Item> event_root(roots, existing_event);
+    if (!radiant_dom_event_is(event_root.get())) {
+        event_root.set(radiant_dom_event_create(event_name ? event_name : "", true,
+                                                false, false, JS_CLASS_EVENT));
+        radiant_dom_event_set_trusted(event_root.get(), evcon != nullptr);
+    }
+    if (!radiant_dom_event_is(event_root.get()) || !doc || !doc->input) {
+        return event_root.get();
+    }
 
     MarkBuilder builder(doc->input);
-    MapBuilder mb = builder.map();
+    DomEventPayloadBuilder mb(event_root.get());
     mb.put("type", event_name);
 
     // Emitted outside the intent-type guard: an option commit carries no edit
@@ -2065,7 +2124,7 @@ static Item build_lambda_event_map(DomDocument* doc, View* target,
         }
     }
 
-    return mb.final();
+    return event_root.get();
 }
 
 // ============================================================================
@@ -2089,8 +2148,6 @@ typedef struct EmitHandlerContext {
 } EmitHandlerContext;
 
 static __thread EmitHandlerContext* g_emit_handler_ctx = nullptr;
-
-static DomElement* find_element_by_author_id(DomNode* node, const char* id);
 
 static bool dom_node_is_within_root(DomNode* node, DomNode* root) {
     for (DomNode* cur = node; cur; cur = cur->parent) {
@@ -2117,7 +2174,7 @@ static DomNode* source_selection_scope_root(DomDocument* doc, DocState* state) {
     DomElement* owner = surface->owner;
     if (!dom_node_is_within_root(static_cast<DomNode*>(owner), doc_root) &&
         owner->id && owner->id[0]) {
-        DomElement* live_owner = find_element_by_author_id(doc_root, owner->id);
+        DomElement* live_owner = js_dom_find_element_by_id(doc->root, owner->id);
         if (live_owner) owner = live_owner;
     }
 
@@ -2302,6 +2359,137 @@ static bool handler_verdict_is(Item verdict, const char* word) {
     return len == want && memcmp(text, word, want) == 0;
 }
 
+static Item event_context_dom_event(EventContext* evcon, const char* event_name) {
+    if (!evcon || !radiant_dom_event_is(evcon->dom_event) ||
+        !radiant_dom_event_type_is(evcon->dom_event, event_name)) {
+        return ItemNull;
+    }
+    return evcon->dom_event;
+}
+
+static void event_context_set_dom_event(EventContext* evcon, Item event) {
+    if (!evcon || !radiant_dom_event_is(event)) return;
+    if (evcon->dom_event.item != event.item) {
+        evcon->dom_event_ua_handled = false;
+        evcon->dom_event_author_dirty = false;
+    }
+    if (evcon->dom_event_root_lifetime && !evcon->dom_event_root_gc) {
+        DomDocument* doc = event_context_target_document(evcon);
+        Runtime* runtime = dom_document_script_runtime(doc);
+        if (runtime && runtime->heap && runtime->heap->gc) {
+            gc_register_root(runtime->heap->gc, &evcon->dom_event.item);
+            evcon->dom_event_root_gc = runtime->heap->gc;
+        }
+    }
+    evcon->dom_event = event;
+}
+
+// F18 keeps reactive regeneration outside the author cascade. Rebuilding while
+// the path still holds ancestor nodes would turn a listener-like template
+// handler into a second, mutation-sensitive propagation walk.
+typedef struct AuthorTemplateCascade {
+    EventContext* evcon;
+    Item event;
+    bool dirty;
+} AuthorTemplateCascade;
+
+static thread_local EventContext* s_active_js_dispatch_event_context = nullptr;
+static thread_local AuthorTemplateCascade s_author_template_cascades[8];
+static thread_local int s_author_template_cascade_depth = 0;
+
+static AuthorTemplateCascade* author_template_cascade_current(EventContext* evcon) {
+    if (s_author_template_cascade_depth <= 0) return nullptr;
+    AuthorTemplateCascade* cascade =
+        &s_author_template_cascades[s_author_template_cascade_depth - 1];
+    return cascade->evcon == evcon ? cascade : nullptr;
+}
+
+static bool settle_template_retransform(EventContext* evcon,
+                                        bool* out_model_reconciled) {
+    if (!render_map_has_dirty()) return false;
+    RetransformResult results[16];
+    int count = render_map_retransform_with_results(results, 16);
+    bool any_changed = false;
+    int reported = count <= 16 ? count : 16;
+    for (int i = 0; i < reported; i++) {
+        if (!item_deep_equal(results[i].old_result, results[i].new_result)) {
+            any_changed = true;
+            break;
+        }
+    }
+    if (!any_changed) return false;
+    if (evcon) {
+        rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
+        evcon->need_repaint = true;
+    }
+    if (out_model_reconciled) *out_model_reconciled = true;
+    return true;
+}
+
+static bool settle_pending_author_templates(EventContext* evcon,
+                                            bool* out_model_reconciled = nullptr) {
+    if (!evcon || !evcon->dom_event_author_dirty) return false;
+    evcon->dom_event_author_dirty = false;
+    return settle_template_retransform(evcon, out_model_reconciled);
+}
+
+// An author handler may rebuild the template subtree that owns the hit-tested
+// target. The UA tier runs after author dispatch, so retain an all-node DOM
+// path and resolve it only after the author settle; a rebuilt checkbox must
+// receive its default action rather than leaving state on a retired wrapper.
+typedef struct EventTargetPath {
+    uint32_t child_indices[64];
+    int length;
+} EventTargetPath;
+
+static bool capture_event_target_path(DomDocument* doc, View* target,
+                                      EventTargetPath* out) {
+    if (!doc || !doc->root || !target || !out) return false;
+    DomNode* chain[65];
+    int depth = 0;
+    for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+        if (depth >= 65) return false;
+        chain[depth++] = node;
+        if (node == static_cast<DomNode*>(doc->root)) break;
+    }
+    if (depth == 0 || chain[depth - 1] != static_cast<DomNode*>(doc->root)) {
+        return false;
+    }
+    out->length = 0;
+    for (int i = depth - 1; i > 0; i--) {
+        uint32_t index = dom_node_child_index(chain[i - 1]);
+        if (index == UINT32_MAX || out->length >= 64) return false;
+        out->child_indices[out->length++] = index;
+    }
+    return true;
+}
+
+static View* resolve_event_target_path(DomDocument* doc,
+                                       const EventTargetPath* path) {
+    if (!doc || !doc->root || !path) return nullptr;
+    DomNode* node = static_cast<DomNode*>(doc->root);
+    for (int i = 0; i < path->length; i++) {
+        if (!node->is_element()) return nullptr;
+        DomNode* child = node->as_element()->first_child;
+        for (uint32_t index = 0; child && index < path->child_indices[i]; index++) {
+            child = child->next_sibling;
+        }
+        if (!child) return nullptr;
+        node = child;
+    }
+    return static_cast<View*>(node);
+}
+
+static View* settle_author_templates_for_ua(EventContext* evcon, View* target,
+                                             const EventTargetPath* target_path,
+                                             bool* out_model_reconciled) {
+    if (!settle_pending_author_templates(evcon, out_model_reconciled)) return target;
+    if (!target_path) return target;
+    DomDocument* doc = event_context_target_document(evcon);
+    View* rebuilt_target = resolve_event_target_path(doc, target_path);
+    return rebuilt_target;
+}
+
 // Bind the document's script runtime, build the event value, invoke one template
 // handler, then reconcile any model change back into layout. Shared by both
 // dispatch walks: the author-template walk passes the item apply() matched as the
@@ -2313,9 +2501,6 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
                                     bool* out_model_reconciled) {
     log_debug("invoke_template_handler: invoking '%s' handler on tmpl=%s",
               event_name, tmpl->name ? tmpl->name : tmpl->template_ref);
-
-    using namespace std::chrono;
-    auto t_start = high_resolution_clock::now();
 
     // Retained handlers borrow the document Runtime's canonical
     // context; no heap-only stack context may outlive dispatch.
@@ -2369,8 +2554,15 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
         input_context = nullptr;
     }
 
-    // build event object map: {type, target_class, target_tag, x, y}
-    Item event_item = build_lambda_event_map(doc, target, event_name, evcon, intent);
+    // F17: author/UA handlers receive the in-flight host record. When no JS
+    // stage created it (a Lambda-only document), create the same record shape
+    // here instead of rebuilding a separate Mark map.
+    RootFrame event_roots(1);
+    Rooted<Item> event_root(event_roots,
+        build_dom_event_record(doc, target, event_name, evcon, intent,
+            event_context_dom_event(evcon, event_name)));
+    Item event_item = event_root.get();
+    event_context_set_dom_event(evcon, event_item);
 
     // set up emit context so handlers can call emit()
     EmitHandlerContext emit_ctx;
@@ -2391,9 +2583,8 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     bool declined = handler_verdict_is(verdict, "pass");
     if (evcon && handler_verdict_is(verdict, "prevent-default")) {
         evcon->default_prevented = true;
+        radiant_dom_event_prevent_default(event_root.get());
     }
-
-    auto t_handler = high_resolution_clock::now();
 
     // restore emit context
     g_emit_handler_ctx = saved_emit_ctx;
@@ -2407,40 +2598,11 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
         render_map_mark_dirty(model_item, template_ref);
     }
 
-    // after handler, check for dirty entries and retransform
-    if (render_map_has_dirty()) {
-        RetransformResult results[16];
-        int count = render_map_retransform_with_results(results, 16);
-        auto t_retransform = high_resolution_clock::now();
-
-        // Phase 14: No-op elision — skip rebuild if output unchanged
-        bool any_changed = false;
-        int reported = count <= 16 ? count : 16;
-        for (int i = 0; i < reported; i++) {
-            if (!item_deep_equal(results[i].old_result, results[i].new_result)) {
-                any_changed = true;
-                break;
-            }
-        }
-
-        if (any_changed) {
-            // incremental DOM rebuild (falls back to full if map not ready)
-            if (evcon) rebuild_lambda_doc_incremental(evcon->ui_context, results, reported);
-            if (out_model_reconciled) *out_model_reconciled = true;
-        }
-        auto t_rebuild = high_resolution_clock::now();
-
-        using std::chrono::duration;
-        using std::chrono::duration_cast;
-        log_info("[TIMING] event dispatch: handler=%.2fms retransform=%.2fms rebuild=%.2fms total=%.2fms%s",
-            duration<double, std::milli>(t_handler - t_start).count(),
-            duration<double, std::milli>(t_retransform - t_handler).count(),
-            duration<double, std::milli>(t_rebuild - t_retransform).count(),
-            duration<double, std::milli>(t_rebuild - t_start).count(),
-            any_changed ? "" : " (no-op elided)");
+    AuthorTemplateCascade* cascade = author_template_cascade_current(evcon);
+    if (cascade) {
+        cascade->dirty = cascade->dirty || render_map_has_dirty();
     } else {
-        log_info("[TIMING] event dispatch: handler=%.2fms (no dirty entries)",
-            duration<double, std::milli>(t_handler - t_start).count());
+        settle_template_retransform(evcon, out_model_reconciled);
     }
 
     if (emit_ctx.has_pending_selection) {
@@ -2471,6 +2633,11 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
 extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     if (!doc) return false;
     if (dom_document_script_runtime(doc)) return true;   // EO3: already owns one
+
+    // A static render deliberately drops its page realm after load. Rebinding
+    // UA behavior afterwards would create a second document evaluator and can
+    // observe the released JS context through the thread-local owner.
+    if (doc->js_realm_released_after_load) return false;
 
     // On by default: constraint validation now lives wholly in the dom package,
     // so a script-less HTML page needs an evaluator to validate at all. Set
@@ -2511,6 +2678,88 @@ static bool event_is_hot_path(const char* event_name) {
            strcmp(event_name, "wheel") == 0 ||
            strcmp(event_name, "dragmove") == 0 ||
            strcmp(event_name, "dragover") == 0;
+}
+
+extern "C" bool radiant_author_template_event_live(const char* event_name) {
+    if (!s_active_js_dispatch_event_context || !context || !event_name ||
+        event_is_hot_path(event_name)) {
+        return false;
+    }
+    return template_registry_may_have_author_handler(g_template_registry,
+                                                     event_name);
+}
+
+static bool author_template_dispatch_begin(EventContext* evcon, Item event) {
+    if (!evcon || !radiant_dom_event_is(event) || event.item != evcon->dom_event.item ||
+        s_author_template_cascade_depth >= 8) {
+        return false;
+    }
+    AuthorTemplateCascade* cascade =
+        &s_author_template_cascades[s_author_template_cascade_depth++];
+    cascade->evcon = evcon;
+    cascade->event = event;
+    cascade->dirty = false;
+    return true;
+}
+
+extern "C" bool radiant_author_template_dispatch_begin(Item event) {
+    return author_template_dispatch_begin(s_active_js_dispatch_event_context, event);
+}
+
+extern "C" void radiant_author_template_dispatch_end(Item event) {
+    if (s_author_template_cascade_depth <= 0) return;
+    AuthorTemplateCascade* cascade =
+        &s_author_template_cascades[s_author_template_cascade_depth - 1];
+    if (cascade->event.item != event.item) return;
+    if (cascade->dirty) cascade->evcon->dom_event_author_dirty = true;
+    cascade->evcon = nullptr;
+    cascade->event = ItemNull;
+    cascade->dirty = false;
+    s_author_template_cascade_depth--;
+}
+
+static bool dispatch_author_template_participant(EventContext* evcon,
+                                                 void* dom_node, Item event,
+                                                 const char* event_name,
+                                                 const InputIntent* intent) {
+    if (!dom_node || !event_name || !radiant_dom_event_is(event) || !context ||
+        !g_template_registry ||
+        !author_template_cascade_current(evcon)) {
+        return false;
+    }
+    DomNode* node = static_cast<DomNode*>(dom_node);
+    if (!node->is_element()) return false;
+    DomElement* dom_elem = node->as_element();
+    if (!dom_elem || dom_elem->is_synthetic()) {
+        return false;
+    }
+
+    Item source_item;
+    source_item.element = dom_element_render_source(dom_elem);
+    RenderMapLookup lookup;
+    if (!render_map_reverse_lookup(source_item, &lookup)) return false;
+    TemplateEntry* tmpl = template_registry_find_ref(g_template_registry,
+                                                      lookup.template_ref);
+    if (!tmpl || tmpl->is_behavior ||
+        !template_entry_may_handle_event(tmpl, event_name)) {
+        return false;
+    }
+    TemplateHandlerEntry* handler = template_entry_find_handler(tmpl, event_name);
+    if (!handler) return false;
+    bool reconciled = false;
+    (void)invoke_template_handler(evcon, evcon->target, event_name, intent,
+                                  tmpl, handler, lookup.source_item,
+                                  lookup.template_ref, &reconciled);
+    if (reconciled) evcon->need_repaint = true;
+    return true;
+}
+
+extern "C" void radiant_dispatch_author_template_participant(void* dom_node,
+                                                               Item event,
+                                                               const char* event_name) {
+    (void)dispatch_author_template_participant(s_active_js_dispatch_event_context,
+                                               dom_node, event, event_name,
+                                               nullptr);
 }
 
 // Load the Lambda dom package into this document's script runtime, once, on the
@@ -2609,11 +2858,26 @@ static bool radiant_target_is_details_summary(View* target) {
     return false;
 }
 
+static bool radiant_target_is_link(View* target) {
+    for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* elem = node->as_element();
+        if (elem && elem->tag() == MARKUP_NAME_A && elem->get_attribute("href")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr) {
     if (!doc) return false;
     if (doc->dom_package_loaded) {
         return context && template_registry_has_behavior(g_template_registry);
     }
+
+    // No event can run after a one-shot render, and its JS evaluator has
+    // already been destroyed. Do not let an ambient stale context resurrect it.
+    if (doc->js_realm_released_after_load) return false;
 
     static int s_enabled = -1;
     if (s_enabled < 0) {
@@ -2657,20 +2921,22 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         // form page is the case that exposed this) has no other chance, and
         // since native activation was deleted the package is the only
         // implementation there is.
-        // Only for a target the package actually governs. Creating on any
-        // event at all is too eager: a thread holds one Runtime, so a click on
-        // an ordinary link would take it and deny it to a Lambda-script
-        // subdocument — which is exactly how the PDF and Lambda-report iframes
-        // broke when creation was eager at setup.
+        // Only for a target the package actually governs. The outer event
+        // scope may switch between document-owned evaluators, so link policy
+        // can now create its own static-document evaluator without borrowing
+        // the runtime of an embedded Lambda/PDF document.
         // F9 widened this from form controls alone to "a target the package
         // governs", which now includes a rich editing surface: the <body>
         // caretkey template owns arrow keys there, so a contenteditable-only
         // page with no form control anywhere would otherwise never load the
         // package and would lose caret navigation entirely once the native rich
-        // handler was deleted. Still narrow — an ordinary link click creates
-        // nothing, which is what keeps the PDF and Lambda-report iframes safe.
+        // handler was deleted.
+        // ESO48 uses that same body template for document scrolling. Unlike a
+        // focus target, the body remains available on an unfocused static page,
+        // which is exactly where PageDown needs to load package policy first.
         DomElement* te = target && target->is_element() ? target->as_element() : nullptr;
-        bool package_governs = te && te->form_control();
+        bool package_governs = te && (te->form_control() ||
+            te == radiant_document_body_element(doc));
         if (!package_governs && target) {
             EditingSurface governed_surface;
             package_governs = editing_surface_from_target(target, &governed_surface) &&
@@ -2679,11 +2945,12 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         // F15 widens it once more, for the same reason F9 did: a <details> in a
         // static document — a markdown README is the common case — has no form
         // control and no script anywhere on the page, so it would never load the
-        // package, and there is no native toggle to fall back to. The predicate
-        // is as narrow as the editing one: an ordinary link click still creates
-        // nothing, which is what keeps the PDF and Lambda-report iframes safe.
+        // package, and there is no native toggle to fall back to.
         if (!package_governs && target) {
             package_governs = radiant_target_is_details_summary(target);
+        }
+        if (!package_governs && target) {
+            package_governs = radiant_target_is_link(target);
         }
         if (package_governs) {
             radiant_document_ensure_evaluator(doc);
@@ -2691,8 +2958,10 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         }
     }
     if (!rt) {
-        log_debug("dom-package: document owns no evaluator; keeping native behavior");
-        doc->dom_package_loaded = true;
+        // This target did not need package policy, so evaluator creation was
+        // correctly deferred. Do not poison the document's load bit: a later
+        // body/form/link event may be the first target the package governs.
+        log_debug("dom-package: evaluator deferred for an ungoverned target");
         return false;
     }
     // No heap check here: a freshly created runtime gets its heap when the first
@@ -2812,6 +3081,11 @@ extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
                                           : (DomDocument*)js_dom_get_document();
     if (!doc || form->doc != doc) return false;
 
+    // A script-less document has no EventTarget realm or submit listeners.
+    // Its Lambda behavior evaluator must not manufacture JS objects: that
+    // evaluator deliberately owns no JS Input/shape pool.
+    if (!doc->js_has_dom_realm) return true;
+
     Item event = js_create_event("submit", true, true);
     js_set_key_cstr(event, "isTrusted", (Item){.item = ITEM_TRUE});
     js_set_key_cstr(event, "submitter", submitter_node
@@ -2861,6 +3135,10 @@ bool radiant_behavior_claims_event(EventContext* evcon, View* target,
     // ensure() binds (and if needed creates) the document's evaluator, so a
     // script-less page must not be rejected for having no context yet
     if (!radiant_dom_package_ensure(doc, target)) return false;
+    if (!template_registry_may_have_behavior_handler(g_template_registry,
+                                                     event_name)) {
+        return false;
+    }
     return behavior_match_walk(target, event_name, nullptr, nullptr) != nullptr;
 }
 
@@ -2891,6 +3169,10 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
         // first discrete event on this document loads the UA behavior package
         return false;
     }
+    if (!template_registry_may_have_behavior_handler(g_template_registry,
+                                                     event_name)) {
+        return false;
+    }
 
     View* cursor = target;
     while (cursor) {
@@ -2919,6 +3201,27 @@ static bool dispatch_behavior_handler(EventContext* evcon, View* target,
         cursor = static_cast<View*>(static_cast<DomNode*>(dom_elem)->parent);
     }
     return false;
+}
+
+static void radiant_dispatch_focus_event(EventContext* evcon, View* target,
+                                         const char* type, View* related);
+
+void radiant_run_autofocus(DomDocument* doc) {
+    if (!doc || !doc->state || !doc->root || focus_has_current((DocState*)doc->state)) {
+        return;
+    }
+    // `focusinit` is behavior-only; its resulting native focus transition
+    // still emits the public focus/focusin pair after the package selects it.
+    EventContext evcon = {};
+    evcon.target_document = doc;
+    View* previous_focus = focus_get((DocState*)doc->state);
+    dispatch_behavior_handler(&evcon, static_cast<View*>(doc->root),
+                              "focusinit", nullptr, nullptr);
+    View* next_focus = focus_get((DocState*)doc->state);
+    if (next_focus && next_focus != previous_focus) {
+        radiant_dispatch_focus_event(&evcon, next_focus, "focus", previous_focus);
+        radiant_dispatch_focus_event(&evcon, next_focus, "focusin", previous_focus);
+    }
 }
 
 // F8/ES19: the behavior init phase.
@@ -3049,6 +3352,11 @@ static __thread uint64_t s_caret_op_epoch = 0;
 static __thread char s_caret_op_name[32];
 static __thread bool s_caret_op_extend = false;
 
+// ESO48 follows the same request/resolve seam as caret navigation: policy
+// names an operation in Lambda, then native resolves the current scrollport.
+static __thread uint64_t s_scroll_op_epoch = 0;
+static __thread char s_scroll_op_name[32];
+
 extern "C" uint64_t radiant_caret_operation_epoch(void) { return s_caret_op_epoch; }
 
 // F11: the key-intent epoch, same pattern as the caret one.
@@ -3093,13 +3401,47 @@ extern "C" void radiant_caret_operation_request(const char* operation, bool exte
     s_caret_op_epoch++;
 }
 
-// Where each named operation lands in a single-line text control. This is the
-// whole of what stayed native: the *destination* is geometry over the live
-// buffer, while which key asks for which operation is policy and now lives in
-// the package. Up/Down collapse to line start/end because a single-line <input>
-// has no vertical motion — Chrome does the same.
+extern "C" void radiant_scroll_operation_request(const char* operation) {
+    if (!operation) return;
+    snprintf(s_scroll_op_name, sizeof(s_scroll_op_name), "%s", operation);
+    s_scroll_op_epoch++;
+}
+
+// Where each named operation lands in a text control. This is the whole of what
+// stayed native: the *destination* is geometry over the live buffer, while
+// which key asks for which operation is policy and now lives in the package.
+// A single-line <input> has no vertical motion and collapses Up/Down to its
+// ends; a textarea resolves line and page geometry over the live value.
+static int form_caret_line_start(const char* value, int cur) {
+    int start = cur;
+    while (start > 0 && value && value[start - 1] != '\n') start--;
+    return start;
+}
+
+static int form_caret_line_end(const char* value, int value_len, int cur) {
+    int end = cur;
+    while (end < value_len && value && value[end] != '\n') end++;
+    return end;
+}
+
+static int form_caret_move_line(const char* value, int value_len, int cur,
+                                int direction) {
+    int current_start = form_caret_line_start(value, cur);
+    int column = cur - current_start;
+    int target_start = current_start;
+    if (direction < 0 && current_start > 0) {
+        target_start = form_caret_line_start(value, current_start - 1);
+    } else if (direction > 0) {
+        int current_end = form_caret_line_end(value, value_len, cur);
+        if (current_end < value_len) target_start = current_end + 1;
+    }
+    int target_end = form_caret_line_end(value, value_len, target_start);
+    int target_len = target_end - target_start;
+    return target_start + (column < target_len ? column : target_len);
+}
+
 static bool form_caret_operation_destination(const char* op, const char* value,
-                                             int value_len, int cur,
+                                             int value_len, int cur, bool multiline,
                                              uint32_t* out_dest) {
     if (!op || !out_dest) return false;
     if (strcmp(op, "moveCharacterBackward") == 0) {
@@ -3115,9 +3457,28 @@ static bool form_caret_operation_destination(const char* op, const char* value,
     } else if (strcmp(op, "moveWordForward") == 0) {
         *out_dest = te_next_word_byte(value, (uint32_t)value_len, (uint32_t)cur);
     } else if (strcmp(op, "moveLineStart") == 0) {
-        *out_dest = 0;
+        *out_dest = (uint32_t)(multiline ? form_caret_line_start(value, cur) : 0);
     } else if (strcmp(op, "moveLineEnd") == 0) {
+        *out_dest = (uint32_t)(multiline
+            ? form_caret_line_end(value, value_len, cur) : value_len);
+    } else if (strcmp(op, "moveDocumentStart") == 0) {
+        *out_dest = 0;
+    } else if (strcmp(op, "moveDocumentEnd") == 0) {
         *out_dest = (uint32_t)value_len;
+    } else if (multiline && (strcmp(op, "moveLineBackward") == 0 ||
+                             strcmp(op, "moveLineForward") == 0)) {
+        *out_dest = (uint32_t)form_caret_move_line(value, value_len, cur,
+            strcmp(op, "moveLineBackward") == 0 ? -1 : 1);
+    } else if (multiline && (strcmp(op, "movePageBackward") == 0 ||
+                             strcmp(op, "movePageForward") == 0)) {
+        int direction = strcmp(op, "movePageBackward") == 0 ? -1 : 1;
+        int dest = cur;
+        for (int step = 0; step < 10; step++) {
+            int next = form_caret_move_line(value, value_len, dest, direction);
+            if (next == dest) break;
+            dest = next;
+        }
+        *out_dest = (uint32_t)dest;
     } else {
         return false;
     }
@@ -3131,7 +3492,10 @@ static bool form_apply_caret_operation(EventContext* evcon, DomElement* elem,
                                        DocState* state, View* target,
                                        const char* value, int value_len, int cur) {
     uint32_t dest = 0;
-    if (!form_caret_operation_destination(s_caret_op_name, value, value_len, cur, &dest)) {
+    bool multiline = elem && elem->form &&
+        elem->form->control_type == FORM_CONTROL_TEXTAREA;
+    if (!form_caret_operation_destination(s_caret_op_name, value, value_len,
+                                          cur, multiline, &dest)) {
         return false;
     }
     char extend_op[40];
@@ -3148,8 +3512,98 @@ extern "C" bool radiant_dispatch_behavior_caret_key(EventContext* evcon, View* t
     return dispatch_behavior_handler(evcon, target, "caretkey", intent, nullptr);
 }
 
-// F10: behavior-only, like `commit`, `optioncommit` and the composition hooks —
-// no DOM `contextmenu` event has fired, so there are no JS listeners to preempt.
+extern "C" bool radiant_dispatch_behavior_scroll_key(EventContext* evcon,
+                                                     View* target,
+                                                     const InputIntent* intent) {
+    return dispatch_behavior_handler(evcon, target, "scrollkey", intent, nullptr);
+}
+
+static ViewBlock* keyboard_scrollport_from_view(DomDocument* doc, View* start) {
+    if (!doc || !doc->view_tree || !doc->view_tree->root) return nullptr;
+    DomElement* root = doc->root;
+    for (DomNode* node = static_cast<DomNode*>(start); node; node = node->parent) {
+        if (!node->is_block()) continue;
+        ViewBlock* block = lam::view_require_block(static_cast<View*>(node));
+        if (!block->scroller || !block->scroll()->pane) continue;
+        DomElement* elem = node->as_element();
+        // The body block is only the root scrolling-element's layout proxy.
+        // Reaching it here must continue to the html viewport block.
+        if (elem && elem->tag() == MARKUP_NAME_BODY && elem->parent == root) {
+            continue;
+        }
+        float min_x = 0.0f, max_x = 0.0f, min_y = 0.0f, max_y = 0.0f;
+        scroll_state_get_range_for_view((DocState*)doc->state,
+            static_cast<View*>(block), block->scroll()->pane,
+            &min_x, &max_x, &min_y, &max_y);
+        if (max_x > min_x || max_y > min_y) return block;
+    }
+    View* root_view = doc->view_tree->root;
+    if (!root_view->is_block()) return nullptr;
+    ViewBlock* root_block = lam::view_require_block(root_view);
+    return root_block->scroller && root_block->scroll()->pane ? root_block : nullptr;
+}
+
+// ESO48 mechanism half: resolve the package's named operation against the
+// current scrollport. The line/page metrics, range clamp, state write, event,
+// and paint stay native because they depend on the laid-out live view tree.
+static bool apply_keyboard_scroll_operation(EventContext* evcon, View* origin,
+                                            const char* operation) {
+    DomDocument* doc = event_context_target_document(evcon);
+    DocState* state = event_context_target_state(evcon);
+    if (!doc || !state || !operation) return false;
+
+    ViewBlock* block = keyboard_scrollport_from_view(doc, origin);
+    if (!block || !block->scroll()->pane) return false;
+
+    float x = 0.0f, y = 0.0f;
+    float min_x = 0.0f, max_x = 0.0f, min_y = 0.0f, max_y = 0.0f;
+    scroll_state_get_position_for_view(state, static_cast<View*>(block),
+        block->scroll()->pane, &x, &y, nullptr, nullptr);
+    scroll_state_get_range_for_view(state, static_cast<View*>(block),
+        block->scroll()->pane, &min_x, &max_x, &min_y, &max_y);
+
+    float line_step = block->height * 0.1f;
+    if (line_step < 40.0f) line_step = 40.0f;
+    float page_step = block->height * 0.85f;
+    if (page_step < line_step) page_step = line_step;
+
+    float next_x = x;
+    float next_y = y;
+    if (strcmp(operation, "lineBackward") == 0) {
+        next_y -= line_step;
+    } else if (strcmp(operation, "lineForward") == 0) {
+        next_y += line_step;
+    } else if (strcmp(operation, "lineLeft") == 0) {
+        next_x -= line_step;
+    } else if (strcmp(operation, "lineRight") == 0) {
+        next_x += line_step;
+    } else if (strcmp(operation, "pageBackward") == 0) {
+        next_y -= page_step;
+    } else if (strcmp(operation, "pageForward") == 0) {
+        next_y += page_step;
+    } else if (strcmp(operation, "documentStart") == 0) {
+        next_y = min_y;
+    } else if (strcmp(operation, "documentEnd") == 0) {
+        next_y = max_y;
+    } else {
+        return false;
+    }
+
+    scroll_state_set_position_for_view(state, static_cast<View*>(block),
+        block->scroll()->pane, next_x, next_y, false);
+    scroll_state_get_position_for_view(state, static_cast<View*>(block),
+        block->scroll()->pane, &next_x, &next_y, nullptr, nullptr);
+    if (next_x == x && next_y == y) return false;
+
+    bool viewport = doc->view_tree->root == static_cast<View*>(block);
+    radiant_dispatch_simple_event(evcon, static_cast<View*>(block), "scroll",
+                                  false, false);
+    if (!viewport) js_dom_observers_post_layout();
+    evcon->need_repaint = true;
+    return true;
+}
+
+// F10: behavior-only after the ordinary cancelable DOM `contextmenu` event.
 // The template decides whether this target gets a menu and computes the enable
 // mask; native supplies only the hit target and the popup position.
 extern "C" bool radiant_dispatch_behavior_context_menu(EventContext* evcon,
@@ -3197,11 +3651,69 @@ extern "C" bool radiant_dispatch_behavior_beforeinput(EventContext* evcon,
     return prevented;
 }
 
+static bool dispatch_lambda_handler_legacy_author(EventContext* evcon, View* target,
+                                                   const char* event_name,
+                                                   const InputIntent* intent,
+                                                   bool* out_model_reconciled,
+                                                   bool allow_behavior) {
+    if (!context || !g_template_registry || g_template_registry->count == 0) {
+        return allow_behavior && dispatch_behavior_handler(evcon, target, event_name,
+                                                           intent, out_model_reconciled);
+    }
+
+    // F20 retains its established first-claim editor contract until the input,
+    // IME, and simulator entry families move to the shared author cascade.
+    for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* dom_elem = lam::dom_require_element(node);
+        if (dom_elem->is_synthetic()) continue;
+        Item result_item = {.element = dom_element_render_source(dom_elem)};
+        RenderMapLookup lookup;
+        if (!render_map_reverse_lookup(result_item, &lookup)) continue;
+        TemplateEntry* tmpl = template_registry_find_ref(g_template_registry,
+                                                         lookup.template_ref);
+        TemplateHandlerEntry* handler = template_entry_find_handler(tmpl, event_name);
+        if (tmpl && handler && invoke_template_handler(evcon, target, event_name, intent,
+                tmpl, handler, lookup.source_item, lookup.template_ref,
+                out_model_reconciled)) {
+            return true;
+        }
+    }
+    return allow_behavior && dispatch_behavior_handler(evcon, target, event_name,
+                                                       intent, out_model_reconciled);
+}
+
 static bool dispatch_lambda_handler(EventContext* evcon, View* target, const char* event_name,
                                     const InputIntent* intent = nullptr,
                                     bool* out_model_reconciled = nullptr,
-                                    bool allow_behavior = true) {
+                                    bool allow_behavior = true,
+                                    bool legacy_author = false) {
     if (out_model_reconciled) *out_model_reconciled = false;
+    if (legacy_author) {
+        return dispatch_lambda_handler_legacy_author(evcon, target, event_name, intent,
+                                                     out_model_reconciled, allow_behavior);
+    }
+    // F18 already delivered author templates from the shared JS path. Native
+    // callers retained during F20 therefore see only the UA-tier result here,
+    // never a second target-to-root author walk for the same record.
+    if (event_context_dom_event(evcon, event_name).item != ITEM_NULL) {
+        EventTargetPath target_path = {};
+        DomDocument* doc = event_context_target_document(evcon);
+        bool target_path_valid = capture_event_target_path(doc, target, &target_path);
+        if (!allow_behavior || radiant_dom_event_default_prevented(evcon->dom_event)) {
+            settle_pending_author_templates(evcon, out_model_reconciled);
+            return false;
+        }
+        if (!evcon->dom_event_ua_handled) {
+            View* ua_target = settle_author_templates_for_ua(
+                evcon, target, target_path_valid ? &target_path : nullptr,
+                out_model_reconciled);
+            if (!ua_target) return false;
+            evcon->dom_event_ua_handled = dispatch_behavior_handler(
+                evcon, ua_target, event_name, intent, out_model_reconciled);
+        }
+        return evcon->dom_event_ua_handled;
+    }
     // Plain HTML documents have no Lambda template Runtime.  Native input must
     // skip template dispatch instead of reading the context-local registry with
     // no document owner bound.
@@ -3212,54 +3724,68 @@ static bool dispatch_lambda_handler(EventContext* evcon, View* target, const cha
                                                            intent, out_model_reconciled);
     }
 
-    log_debug("dispatch_lambda_handler: searching for '%s' handler, registry has %d templates",
-             event_name, g_template_registry->count);
+    // Lambda-only documents have no JS dispatch, but their templates are still
+    // author participants. Build the same host record and walk every matching
+    // template target-to-root before the UA behavior tier; a handler verdict
+    // controls only cancellation, never whether an ancestor receives the event.
+    DomDocument* doc = event_context_target_document(evcon);
+    RootFrame roots(2);
+    Rooted<Item> event_root(roots,
+        build_dom_event_record(doc, target, event_name, evcon, intent));
+    Item event = event_root.get();
+    event_context_set_dom_event(evcon, event);
 
-    // walk up from target through DomNode ancestry
-    DomNode* node = static_cast<DomNode*>(target);
-#ifndef NDEBUG
-    int depth = 0;
-#endif
-    while (node) {
-        if (node->node_type == DOM_NODE_ELEMENT) {
-            DomElement* dom_elem = lam::dom_require_element(node);
-            if (!dom_elem->is_synthetic()) {
-                // construct Item from native element pointer
-                Item result_item;
-                result_item.element = dom_element_render_source(dom_elem);
+    EventTargetPath target_path = {};
+    bool target_path_valid = capture_event_target_path(doc, target, &target_path);
 
-                // reverse lookup: which template produced this element?
-                RenderMapLookup lookup;
-                if (render_map_reverse_lookup(result_item, &lookup)) {
-                    log_debug("dispatch_lambda_handler: reverse lookup hit at depth=%d, tmpl_ref=%s",
-                             depth, lookup.template_ref ? lookup.template_ref : "(null)");
-                    // find the TemplateEntry by template_ref
-                    TemplateEntry* tmpl = template_registry_find_ref(
-                        g_template_registry, lookup.template_ref);
+    Item ignored = ItemNull;
+    Item target_item = radiant_dom_wrap_node(target);
+    radiant_dom_event_member_set(event, "target", target_item, &ignored);
+    radiant_dom_event_member_set(event, "srcElement", target_item, &ignored);
+    radiant_dom_event_member_set(event, "__dispatch_flag",
+                                 (Item){.item = ITEM_TRUE}, &ignored);
 
-                    TemplateHandlerEntry* h = template_entry_find_handler(tmpl, event_name);
-                    if (tmpl && h) {
-                        if (invoke_template_handler(evcon, target, event_name, intent,
-                                tmpl, h, lookup.source_item, lookup.template_ref,
-                                out_model_reconciled)) {
-                            return true;
-                        }
-                        // handler returned 'pass': keep walking ancestors
-                    } else {
-                        log_debug("dispatch_lambda_handler: tmpl found but no '%s' handler", event_name);
-                    }
-                }
-            }
+    bool author_dispatched = false;
+    bool author_live = !event_is_hot_path(event_name) &&
+        template_registry_may_have_author_handler(g_template_registry, event_name);
+    bool author_cascade = author_live && author_template_dispatch_begin(evcon, event);
+    if (author_cascade) {
+        for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+            if (!node->is_element()) continue;
+            int phase = node == static_cast<DomNode*>(target) ? 2 : 3;
+            radiant_dom_event_set_lambda_dispatch_position(
+                event, radiant_dom_wrap_node(node), phase);
+            author_dispatched = dispatch_author_template_participant(
+                evcon, node, event, event_name, intent) || author_dispatched;
+            if (radiant_dom_event_propagation_stopped(event)) break;
         }
-        node = node->parent;
-#ifndef NDEBUG
-        depth++;
-#endif
+        radiant_author_template_dispatch_end(event);
     }
 
-    log_debug("dispatch_lambda_handler: no handler found after walking %d levels", depth);
-    return allow_behavior && dispatch_behavior_handler(evcon, target, event_name, intent,
-                                                       out_model_reconciled);
+    // Mirror the DOM dispatch cleanup before default actions. Cancellation is
+    // deliberately retained, while propagation state cannot leak to the next
+    // native dispatch of this reusable host record.
+    radiant_dom_event_member_set(event, "eventPhase", ItemNull, &ignored);
+    radiant_dom_event_member_set(event, "currentTarget", ItemNull, &ignored);
+    radiant_dom_event_clear_lambda_dispatch_position(event);
+    radiant_dom_event_member_set(event, "__stop_prop", ItemNull, &ignored);
+    radiant_dom_event_member_set(event, "__stop_imm", ItemNull, &ignored);
+    radiant_dom_event_member_set(event, "__dispatch_flag", ItemNull, &ignored);
+
+    // The UA tier observes the DOM after all author participants have settled.
+    // Rebind through the structural path when regeneration replaced its target.
+    View* ua_target = settle_author_templates_for_ua(
+        evcon, target, target_path_valid ? &target_path : nullptr,
+        out_model_reconciled);
+    bool prevented = radiant_dom_event_default_prevented(event);
+    evcon->default_prevented = prevented;
+    bool ua_handled = false;
+    if (allow_behavior && !prevented && ua_target) {
+        ua_handled = dispatch_behavior_handler(evcon, ua_target, event_name, intent,
+                                               out_model_reconciled);
+        evcon->dom_event_ua_handled = ua_handled;
+    }
+    return author_dispatched || ua_handled;
 }
 
 // Forward declaration — CE-3 JS InputEvent dispatcher lives further down,
@@ -3284,6 +3810,35 @@ static bool dispatch_editing_input_event(EventContext* evcon, View* target,
     return radiant_dispatch_input_event(evcon, target, type, intent);
 }
 
+bool radiant_focus_element(DomDocument* doc, View* target) {
+    if (!doc || !target) return false;
+
+    Runtime* runtime = doc->js.runtime;
+    if (!runtime) {
+        // Lambda template documents do not own a JavaScript runtime, but their
+        // contenteditable hosts still use the shared DOM focus/Selection path.
+        return js_dom_focus_editing_host_for_automation(target);
+    }
+
+    EvalContext* focus_ctx = runtime_get_eval_context(runtime);
+    if (!focus_ctx || !runtime->heap || !runtime->name_pool) return false;
+    Context* saved_input_ctx = input_context;
+    void* saved_doc = js_dom_get_document();
+    // Programmatic focus runs on the document's evaluator; event handlers must
+    // allocate and dispatch while that retained context owns the thread.
+    if (!runtime_context_bind_retained(runtime, focus_ctx)) return false;
+    input_context = nullptr;
+    if (focus_ctx->js_state && !js_runtime_state_init(focus_ctx)) {
+        input_context = saved_input_ctx;
+        return false;
+    }
+    js_dom_set_document(doc);
+    js_dom_focus_method_bridge(target, true);
+    js_dom_restore_active_document(saved_doc);
+    input_context = saved_input_ctx;
+    return true;
+}
+
 static bool event_document_has_js_runtime(EventContext* evcon) {
     DomDocument* document = event_context_target_document(evcon);
     // Lambda template documents retain a Jube support capsule in `js`, but it
@@ -3291,6 +3846,20 @@ static bool event_document_has_js_runtime(EventContext* evcon) {
     // rather than the absence of a Lambda runtime: a document may host page JS
     // and Lambda code at once, so runtime presence cannot classify the page.
     return dom_document_has_js_realm(document);
+}
+
+// A Lambda-only document deliberately has no JS-facing EventTarget realm.
+// Its trusted native entries still join F18's author/UA pipeline through the
+// record-backed template path instead of disappearing at the JS gateway.
+static bool dispatch_lambda_handler_without_js(EventContext* evcon, View* target,
+                                               const char* event_name,
+                                               const InputIntent* intent = nullptr,
+                                               bool* out_model_reconciled = nullptr,
+                                               bool allow_behavior = true,
+                                               bool legacy_author = false) {
+    if (event_document_has_js_runtime(evcon)) return false;
+    return dispatch_lambda_handler(evcon, target, event_name, intent,
+                                   out_model_reconciled, allow_behavior, legacy_author);
 }
 
 static bool dispatch_contenteditable_event(EventContext* evcon, View* target,
@@ -3381,19 +3950,6 @@ static bool dispatch_rich_selection_snapshot(EventContext* evcon,
     return true;
 }
 
-static DomElement* find_element_by_author_id(DomNode* node, const char* id) {
-    if (!node || !id || !id[0]) return nullptr;
-    if (node->node_type == DOM_NODE_ELEMENT) {
-        DomElement* elem = lam::dom_require_element(node);
-        if (elem->id && strcmp(elem->id, id) == 0) return elem;
-        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
-            DomElement* found = find_element_by_author_id(child, id);
-            if (found) return found;
-        }
-    }
-    return nullptr;
-}
-
 static bool dispatch_contenteditable_select_all_default(EventContext* evcon,
                                                         DocState* state,
                                                         View* target,
@@ -3408,8 +3964,7 @@ static bool dispatch_contenteditable_select_all_default(EventContext* evcon,
 
     DomElement* owner = surface.owner;
     if (owner->id && owner->doc && owner->doc->root) {
-        DomElement* live_owner = find_element_by_author_id(
-            static_cast<DomNode*>(owner->doc->root), owner->id);
+        DomElement* live_owner = js_dom_find_element_by_id(owner->doc->root, owner->id);
         if (live_owner) {
             owner = live_owner;
             surface.owner = live_owner;
@@ -3541,8 +4096,7 @@ static bool dispatch_form_text_replace(EventContext* evcon, DomElement* elem,
         input_type == INPUT_INTENT_DELETE_COMPOSITION_TEXT;
     if (!preserve_dispatch_target) {
         if (elem->id && elem->doc && elem->doc->root) {
-            DomElement* live_by_id = find_element_by_author_id(
-                static_cast<DomNode*>(elem->doc->root), elem->id);
+            DomElement* live_by_id = js_dom_find_element_by_id(elem->doc->root, elem->id);
             if (live_by_id && tc_is_text_control(live_by_id)) {
                 live_elem = live_by_id;
                 live_target = static_cast<View*>(live_by_id);
@@ -3597,8 +4151,7 @@ static void restore_form_text_focus_after_input(DocState* state,
     if (!state || focus_get(state) || !doc || !doc->root || !id || !id[0]) {
         return;
     }
-    DomElement* live_elem = find_element_by_author_id(
-        static_cast<DomNode*>(doc->root), id);
+    DomElement* live_elem = js_dom_find_element_by_id(doc->root, id);
     if (!live_elem || !tc_is_text_control(live_elem)) return;
     focus_set(state, static_cast<View*>(live_elem), false);
 }
@@ -3769,12 +4322,6 @@ static const char* form_control_live_value(DomElement* elem, uint32_t* out_len) 
     return value ? value : "";
 }
 
-static int form_control_live_value_len_int(DomElement* elem) {
-    uint32_t value_len = 0;
-    form_control_live_value(elem, &value_len);
-    return (int)value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
-}
-
 static bool dispatch_form_editing_surface(EventContext* evcon, DomElement* elem,
                                           DocState* state, View* target,
                                           EditingSurface* surface) {
@@ -3828,7 +4375,7 @@ static bool dispatch_form_caret_collapse(EventContext* evcon, DomElement* elem,
 }
 
 static void dispatch_form_keyboard_paste(EventContext* evcon, DocState* state,
-                                         View* focused, bool log_inserted) {
+                                         View* focused) {
     const char* clip = clipboard_get_text();
     if (clip && *clip) {
         evcon->paste_text = clip;
@@ -3838,124 +4385,9 @@ static void dispatch_form_keyboard_paste(EventContext* evcon, DocState* state,
         if (focused && focused->is_element()) {
             DomElement* elem = lam::dom_require_element(focused);
             if (tc_is_text_control(elem)) {
-                uint32_t inserted = dispatch_form_text_paste(
-                    evcon, elem, state, focused, clip, (uint32_t)strlen(clip));
-                if (log_inserted) {
-                    log_debug("Textarea paste: %u bytes inserted", inserted);
-                }
+                dispatch_form_text_paste(evcon, elem, state, focused,
+                                         clip, (uint32_t)strlen(clip));
             }
-        }
-    }
-    evcon->need_repaint = true;
-}
-
-static void dispatch_form_modified_delete(EventContext* evcon, DomElement* elem,
-                                          DocState* state, View* target,
-                                          const char* value, int value_len,
-                                          int caret, bool backward,
-                                          bool line_backward) {
-    // The boundary is the applier's to compute, not this function's: it owns
-    // deleteWord*/deleteSoftLine* and derives the span from its own scanners,
-    // so any range resolved here would be recomputed and discarded. Dispatch
-    // the collapsed caret and let the intent carry the meaning.
-    //
-    // Note this must dispatch even though the range is empty — the old
-    // `end > start` guard would suppress beforeinput entirely and the applier
-    // would never get the chance to decide.
-    (void)value; (void)value_len;
-    uint32_t caret_off = (uint32_t)caret;
-    InputIntentType intent;
-    if (backward) {
-        intent = line_backward ? INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD
-                               : INPUT_INTENT_DELETE_WORD_BACKWARD;
-    } else {
-        intent = INPUT_INTENT_DELETE_WORD_FORWARD;
-    }
-    dispatch_form_text_replace(evcon, elem, state, target, caret_off, caret_off,
-                               nullptr, 0, intent);
-    evcon->need_repaint = true;
-}
-
-static bool dispatch_form_modified_delete_key(EventContext* evcon,
-                                              DomElement* elem,
-                                              DocState* state,
-                                              View* target,
-                                              const char* value,
-                                              int value_len,
-                                              int caret,
-                                              int key,
-                                              bool alt,
-                                              bool cmd) {
-    if ((alt || cmd) && key == RDT_KEY_BACKSPACE) {
-        dispatch_form_modified_delete(
-            evcon, elem, state, target, value, value_len, caret, true, cmd);
-        return true;
-    }
-    if (alt && key == RDT_KEY_DELETE) {
-        dispatch_form_modified_delete(
-            evcon, elem, state, target, value, value_len, caret, false, false);
-        return true;
-    }
-    return false;
-}
-
-static void dispatch_form_delete_key(EventContext* evcon, DomElement* elem,
-                                     DocState* state, View* target,
-                                     const char* value, int value_len, int caret,
-                                     bool backward, bool had_lambda_keydown,
-                                     bool had_keydown_selection,
-                                     int keydown_sel_start,
-                                     int keydown_sel_end,
-                                     bool had_keydown_caret,
-                                     int keydown_caret_offset,
-                                     bool collapse_lambda_selection) {
-    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(elem));
-    if (backward && had_lambda_keydown) {
-        int base = had_keydown_caret ? keydown_caret_offset : caret;
-        const char* operation = "lambdaDeleteBackward";
-        if (collapse_lambda_selection && had_keydown_selection) {
-            base = keydown_sel_start;
-            operation = "lambdaDeleteSelection";
-        }
-        if (base < 0) base = 0;
-        if (base > value_len) base = value_len;
-        if ((collapse_lambda_selection && had_keydown_selection) ||
-            (base > 0 && value)) {
-            int new_len = form_control_live_value_len_int(elem);
-            uint32_t collapse = (uint32_t)(base <= new_len ? base : new_len);
-            dispatch_form_caret_collapse(evcon, elem, state, target,
-                                         collapse, operation);
-        }
-    } else if (!had_lambda_keydown && editable) {
-        uint32_t start = 0;
-        uint32_t end = 0;
-        if (had_keydown_selection) {
-            start = (uint32_t)keydown_sel_start;
-            end = (uint32_t)keydown_sel_end;
-        } else if (backward && caret > 0 && value) {
-            int previous = caret - 1;
-            while (previous > 0 &&
-                   ((unsigned char)value[previous] & 0xC0) == 0x80) {
-                previous--;
-            }
-            start = (uint32_t)previous;
-            end = (uint32_t)caret;
-        } else if (!backward && value && caret < value_len) {
-            int next = caret + 1;
-            while (next < value_len &&
-                   ((unsigned char)value[next] & 0xC0) == 0x80) {
-                next++;
-            }
-            start = (uint32_t)caret;
-            end = (uint32_t)next;
-        } else {
-            start = end = backward ? 0 : (uint32_t)caret;
-        }
-        if (end > start) {
-            dispatch_form_text_replace(
-                evcon, elem, state, target, start, end, nullptr, 0,
-                backward ? INPUT_INTENT_DELETE_CONTENT_BACKWARD
-                         : INPUT_INTENT_DELETE_CONTENT_FORWARD);
         }
     }
     evcon->need_repaint = true;
@@ -3968,7 +4400,9 @@ static bool dispatch_form_selection_extend(EventContext* evcon, DomElement* elem
     EditingSurface surface;
     if (!dispatch_form_editing_surface(evcon, elem, state, target, &surface)) return false;
 
-    int value_len = form_control_live_value_len_int(elem);
+    uint32_t live_value_len = 0;
+    form_control_live_value(elem, &live_value_len);
+    int value_len = (int)live_value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
     if (anchor_offset < 0) anchor_offset = 0;
     if (focus_offset < 0) focus_offset = 0;
     if (anchor_offset > value_len) anchor_offset = value_len;
@@ -4255,6 +4689,61 @@ static bool dispatch_form_history_via_controller(EventContext* evcon,
         }
     }
     return dispatch_form_history(evcon, elem, state, target, input_type);
+}
+
+// F11: translate the package-owned key intent into the one native mechanism
+// that performs it. The package chooses every command; this helper retains
+// canonical selection, buffer ownership, beforeinput/input emission, history,
+// and clipboard access in the engine.
+static bool dispatch_form_key_intent(EventContext* evcon, DomElement* elem,
+                                     DocState* state, View* target,
+                                     const KeyEvent* key_event, int caret) {
+    InputIntent intent;
+    if (!input_intent_from_key_event(state, key_event, &intent)) return false;
+
+    bool handled = true;
+    switch (intent.type) {
+        case INPUT_INTENT_COPY:
+            dispatch_form_copy_selection(evcon, elem, state, target, "form input copy");
+            break;
+        case INPUT_INTENT_SELECT_ALL:
+            dispatch_form_select_all(evcon, elem, state, target);
+            break;
+        case INPUT_INTENT_DELETE_BY_CUT:
+            dispatch_form_cut_selection(evcon, elem, state, target);
+            break;
+        case INPUT_INTENT_INSERT_FROM_PASTE:
+            dispatch_form_keyboard_paste(evcon, state, target);
+            break;
+        case INPUT_INTENT_HISTORY_UNDO:
+        case INPUT_INTENT_HISTORY_REDO:
+            dispatch_form_history_via_controller(evcon, elem, state, target,
+                                                 intent.type);
+            break;
+        case INPUT_INTENT_INSERT_PARAGRAPH:
+        case INPUT_INTENT_INSERT_LINE_BREAK:
+            if (elem->form->control_type == FORM_CONTROL_TEXTAREA) {
+                dispatch_form_text_replace(evcon, elem, state, target,
+                                           (uint32_t)caret, (uint32_t)caret,
+                                           "\n", 1, intent.type);
+            }
+            break;
+        case INPUT_INTENT_DELETE_CONTENT_BACKWARD:
+        case INPUT_INTENT_DELETE_CONTENT_FORWARD:
+        case INPUT_INTENT_DELETE_WORD_BACKWARD:
+        case INPUT_INTENT_DELETE_WORD_FORWARD:
+        case INPUT_INTENT_DELETE_SOFT_LINE_BACKWARD:
+        case INPUT_INTENT_DELETE_SOFT_LINE_FORWARD:
+            dispatch_form_text_replace(evcon, elem, state, target,
+                                       (uint32_t)caret, (uint32_t)caret,
+                                       nullptr, 0, intent.type);
+            break;
+        default:
+            handled = false;
+            break;
+    }
+    if (handled) evcon->need_repaint = true;
+    return handled;
 }
 
 static View* editing_text_drag_first_text_descendant(View* view) {
@@ -5742,7 +6231,7 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     s->active = false;
     s->handler_ctx = nullptr;
     s->doc = event_context_target_document(evcon);
-    if (!s->doc || !s->doc->js.mir_ctx || !s->doc->js.runtime) return false;
+    if (!s->doc || !s->doc->js.runtime) return false;
     Runtime* runtime = s->doc->js.runtime;
     s->handler_ctx = runtime_get_eval_context(runtime);
     if (!s->handler_ctx || !runtime->heap || !runtime->name_pool) return false;
@@ -5786,6 +6275,7 @@ struct JsDispatchScope {
     bool no_js_passthrough;
     uint32_t previous_batch_depth;
     DomDocument* previous_batch_document;
+    EventContext* previous_active_event_context;
 
     JsDispatchScope(EventContext* event_context, bool allow_without_js = false) {
         evcon = event_context;
@@ -5795,6 +6285,7 @@ struct JsDispatchScope {
         no_js_passthrough = false;
         previous_batch_depth = js_dispatch_batch_depth;
         previous_batch_document = js_dispatch_batch_document;
+        previous_active_event_context = s_active_js_dispatch_event_context;
         DomDocument* target_document = event_context_target_document(evcon);
         if (js_dispatch_batch_depth != 0 &&
             js_dispatch_batch_document == target_document) {
@@ -5803,6 +6294,7 @@ struct JsDispatchScope {
             js_dispatch_batch_depth++;
             active = true;
             reuses_batch = true;
+            s_active_js_dispatch_event_context = evcon;
             return;
         }
         if (allow_without_js && !event_document_has_js_runtime(evcon)) {
@@ -5810,6 +6302,7 @@ struct JsDispatchScope {
             // still runs without opening a second evaluator scope.
             active = true;
             no_js_passthrough = true;
+            s_active_js_dispatch_event_context = evcon;
             return;
         }
         if (radiant_js_ctx_enter(&scope, evcon)) {
@@ -5818,6 +6311,7 @@ struct JsDispatchScope {
             owns_batch = true;
             js_dispatch_batch_depth = 1;
             js_dispatch_batch_document = target_document;
+            s_active_js_dispatch_event_context = evcon;
         }
     }
 
@@ -5825,9 +6319,13 @@ struct JsDispatchScope {
         if (!active) return;
         if (reuses_batch) {
             if (js_dispatch_batch_depth > 0) js_dispatch_batch_depth--;
+            s_active_js_dispatch_event_context = previous_active_event_context;
             return;
         }
-        if (no_js_passthrough) return;
+        if (no_js_passthrough) {
+            s_active_js_dispatch_event_context = previous_active_event_context;
+            return;
+        }
         radiant_js_ctx_exit(&scope, evcon, t_start);
         // A nested event can target an iframe/second document. Restore the
         // enclosing batch instead of clearing it, otherwise its remaining
@@ -5837,6 +6335,7 @@ struct JsDispatchScope {
         if (previous_batch_depth != 0 && previous_batch_document) {
             js_dom_set_document(previous_batch_document);
         }
+        s_active_js_dispatch_event_context = previous_active_event_context;
     }
 };
 
@@ -5872,7 +6371,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
             // being selected before the author handler has declined.
             author_handled = dispatch_lambda_handler(
                 evcon, target, "beforeinput", intent,
-                &author_model_reconciled, false);
+                &author_model_reconciled, false, true);
         }
     }
 
@@ -5891,7 +6390,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
             bool input_model_reconciled = false;
             dispatch_lambda_handler(
                 evcon, static_cast<View*>(canonical_host), "input", intent,
-                &input_model_reconciled, false);
+                &input_model_reconciled, false, true);
             evcon->need_repaint = true;
         }
         return true;
@@ -5994,7 +6493,7 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
                 bool input_model_reconciled = false;
                 dispatch_lambda_handler(
                     evcon, static_cast<View*>(canonical_host), "input", intent,
-                    &input_model_reconciled, false);
+                    &input_model_reconciled, false, true);
             }
         }
         evcon->need_repaint = true;
@@ -6112,7 +6611,8 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
                                          RadiantJsEventBuilder build_event,
                                          void* userdata,
                                          bool read_prevented,
-                                         bool* dispatched = nullptr) {
+                                         bool* dispatched = nullptr,
+                                         bool run_ua_tier = true) {
     if (dispatched) *dispatched = false;
     DomElement* dom_target = radiant_view_to_dom_element(target);
     if (!dom_target || !build_event) return false;
@@ -6125,10 +6625,27 @@ static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
     // beforeinput/input instead of reusing the live allocation context.
     if (!dispatch_scope.active && !active_batch_context) return false;
     if (dispatched) *dispatched = true;
-    Item ev = build_event(userdata);
-    Item target_item = js_dom_wrap_element(dom_target);
-    js_dom_dispatch_event(target_item, ev);
-    return read_prevented ? js_event_is_default_prevented(ev) : false;
+    RootFrame roots(2);
+    Rooted<Item> event_root(roots, build_event(userdata));
+    event_context_set_dom_event(evcon, event_root.get());
+    EventTargetPath target_path = {};
+    bool target_path_valid = capture_event_target_path(target_doc, target, &target_path);
+    Rooted<Item> target_root(roots, js_dom_wrap_element(dom_target));
+    js_dom_dispatch_event(target_root.get(), event_root.get());
+    bool prevented = radiant_dom_event_default_prevented(event_root.get());
+    evcon->default_prevented = prevented;
+    const char* event_name = fn_to_cstr(js_get_name_key(event_root.get(), "type"));
+    if (run_ua_tier) {
+        View* ua_target = settle_author_templates_for_ua(
+            evcon, target, target_path_valid ? &target_path : nullptr, nullptr);
+        if (!prevented && event_name && ua_target) {
+            evcon->dom_event_ua_handled = dispatch_behavior_handler(
+                evcon, ua_target, event_name, nullptr, nullptr);
+            prevented = radiant_dom_event_default_prevented(event_root.get());
+            evcon->default_prevented = prevented;
+        }
+    }
+    return read_prevented ? prevented : false;
 }
 
 /**
@@ -6161,15 +6678,6 @@ static Item build_mouse_event_item(void* userdata) {
     return event;
 }
 
-// Native pointer/keyboard activation enters JS through this wrapper. The
-// marker lets the JS activation pass defer to the package/native waist without
-// confusing it with a script-created HTMLElement.click().
-static __thread bool s_native_click_dispatch_active = false;
-
-extern "C" bool radiant_native_click_dispatch_active(void) {
-    return s_native_click_dispatch_active;
-}
-
 static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
                                          const char* type, double client_x, double client_y,
                                          int button, int buttons,
@@ -6182,11 +6690,8 @@ static bool radiant_dispatch_mouse_event(EventContext* evcon, View* target,
         ctrl, shift, alt, meta, detail, -1.0
     };
     bool is_click = type && strcmp(type, "click") == 0;
-    bool saved_click = s_native_click_dispatch_active;
-    if (is_click) s_native_click_dispatch_active = true;
     bool prevented = radiant_dispatch_built_event(evcon, target, build_mouse_event_item,
-        &args, true, dispatched);
-    s_native_click_dispatch_active = saved_click;
+        &args, true, dispatched, !is_click);
     return prevented;
 }
 
@@ -6429,7 +6934,7 @@ static bool radiant_dispatch_input_event(EventContext* evcon, View* target,
     bool has_surface = editing_surface_from_target(target, &surface);
     InputEventBuildArgs args = {evcon, target, type, intent, surface, has_surface};
     return radiant_dispatch_built_event(evcon, target, build_input_event_item,
-        &args, true);
+        &args, true, nullptr, false);
 }
 
 typedef struct {
@@ -6451,7 +6956,7 @@ static void radiant_dispatch_composition_event(EventContext* evcon,
     if (!evcon || !target || !type) return;
     CompositionEventBuildArgs args = {type, data};
     radiant_dispatch_built_event(evcon, target, build_composition_event_item,
-        &args, false);
+        &args, false, nullptr, false);
     // ESO45: composition events reached JS only. A behavior template owns the
     // session now (ES18/F7), and the ancestor walk from the focused control
     // reaches <body>, which is where that template matches. After the JS
@@ -6567,7 +7072,7 @@ extern "C" bool radiant_dispatch_event_sim_select_change(UiContext* uicon,
         js_dom_dispatch_event(target_item, input_ev);
         Item change_ev = js_create_event("change", true, false);
         js_dom_dispatch_event(target_item, change_ev);
-        prevented = js_event_is_default_prevented(change_ev);
+        prevented = radiant_dom_event_default_prevented(change_ev);
     }
     event_context_cleanup(&evcon);
     return prevented;
@@ -6650,6 +7155,8 @@ static bool radiant_dispatch_wheel_event(EventContext* evcon, View* target,
 
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) {
     memset(evcon, 0, sizeof(EventContext));
+    evcon->dom_event = ItemNull;
+    evcon->dom_event_root_lifetime = true;
     evcon->ui_context = uicon;
     evcon->event = *event;
     evcon->target_document = uicon
@@ -6664,6 +7171,14 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
 }
 
 void event_context_cleanup(EventContext* evcon) {
+    if (!evcon) return;
+    if (evcon->dom_event_root_gc) {
+        gc_unregister_root((gc_heap_t*)evcon->dom_event_root_gc,
+                           &evcon->dom_event.item);
+    }
+    evcon->dom_event = ItemNull;
+    evcon->dom_event_root_gc = nullptr;
+    evcon->dom_event_root_lifetime = false;
 }
 
 bool radiant_editing_animation_active(DocState* state) {
@@ -7208,13 +7723,239 @@ static bool run_form_reset_activation(EventContext* evcon, View* target) {
     return true;
 }
 
-static void run_form_button_default(EventContext* evcon, View* target) {
-    if (!evcon || !target || evcon->default_prevented) return;
-    if (find_form_activation_button(target, true)) {
-        run_form_reset_activation(evcon, target);
-    } else if (find_form_activation_button(target, false)) {
-        run_form_submit_activation(evcon, target);
+static View* find_link_activation_target(View* target) {
+    for (View* current = target; current; current = current->parent) {
+        if (!current->is_element()) continue;
+        DomElement* elem = lam::dom_require_element(current);
+        if (elem->tag() == MARKUP_NAME_A && elem->get_attribute("href")) {
+            return current;
+        }
     }
+    return nullptr;
+}
+
+// The ordinary click is the author event. This behavior-only follow-up runs
+// only once click cancellation is settled, then the package submits its
+// resolved request for native execution (ES31).
+static bool run_link_activation(EventContext* evcon, View* target) {
+    if (!evcon || !evcon->ui_context || evcon->default_prevented) return false;
+    View* anchor = find_link_activation_target(target);
+    if (!anchor) return false;
+    if (!radiant_behavior_claims_event(evcon, anchor, "linkactivation")) {
+        return false;
+    }
+    if (!dispatch_behavior_handler(evcon, anchor, "linkactivation", nullptr, nullptr)) {
+        return false;
+    }
+    DomDocument* document = event_context_target_document(evcon);
+    return radiant_execute_pending_navigation(evcon->ui_context, document);
+}
+
+// ES25/ES26: trusted and script-created clicks settle one UA default tier.
+// Checkbox/radio association, form activation, and navigation are mechanisms;
+// their policy remains the behavior package selected by the shared record.
+static bool dispatch_click_default_actions(EventContext* evcon, View* target) {
+    if (!evcon || !target || evcon->default_prevented) return false;
+
+    bool handled = false;
+    View* activation_target = find_checkbox_radio_input(target);
+    if (!activation_target) activation_target = target;
+    if (dispatch_lambda_handler(evcon, activation_target, "click")) {
+        evcon->need_repaint = true;
+        handled = true;
+    }
+
+    View* submit_target = find_form_activation_button(target, false);
+    if (submit_target && !evcon->default_prevented &&
+        !js_dom_is_disabled((void*)submit_target) &&
+        js_dom_is_connected((void*)submit_target)) {
+        if (run_form_submit_activation(evcon, submit_target)) {
+            evcon->need_repaint = true;
+            handled = true;
+        }
+    }
+
+    View* reset_target = find_form_activation_button(target, true);
+    if (reset_target && !evcon->default_prevented &&
+        !js_dom_is_disabled((void*)reset_target) &&
+        js_dom_is_connected((void*)reset_target)) {
+        if (run_form_reset_activation(evcon, reset_target)) {
+            evcon->need_repaint = true;
+            handled = true;
+        }
+    }
+
+    if (!evcon->default_prevented && run_link_activation(evcon, target)) {
+        evcon->need_repaint = true;
+        handled = true;
+    }
+    return handled;
+}
+
+// Keyboard activation must complete the same author and UA tiers as a pointer
+// click; dispatching only the JS event would leave the package default action out.
+static bool run_keyboard_click_default(EventContext* evcon, View* target) {
+    bool prevented = radiant_dispatch_mouse_event(evcon, target, "click",
+        0, 0, 0, 0, false, false, false, false, 1);
+    if (prevented) evcon->default_prevented = true;
+    if (!evcon->default_prevented) {
+        dispatch_click_default_actions(evcon, target);
+    }
+    return true;
+}
+
+// Only the exact bridge re-entry bypasses the wrapper below. A synthetic event
+// raised from a trusted listener is a distinct logical dispatch and must enter
+// the shared tier too.
+static thread_local Item s_synthetic_dom_dispatch_raw_event = ItemNull;
+
+extern "C" bool radiant_synthetic_dom_dispatch_is_reentry(Item event_item) {
+    return event_item.item != ITEM_NULL &&
+        event_item.item == s_synthetic_dom_dispatch_raw_event.item;
+}
+
+extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
+                                                      Item event_item) {
+    if (!radiant_dom_event_is(event_item)) return ItemNull;
+    DomElement* target = (DomElement*)js_dom_unwrap_element(target_item);
+    if (!target || !target->doc) return ItemNull;
+
+    EventContext evcon = {};
+    evcon.target = static_cast<View*>(target);
+    evcon.target_document = target->doc;
+    evcon.ui_context = static_cast<UiContext*>(target->doc->js.host_ui_context);
+    JsDispatchScope dispatch_scope(&evcon);
+    bool borrows_script_context = !dispatch_scope.active && context &&
+        js_dom_get_document() == target->doc;
+    if (!dispatch_scope.active && !borrows_script_context) return ItemNull;
+    EventContext* previous_active_event_context = s_active_js_dispatch_event_context;
+    if (borrows_script_context) {
+        // Bootstrap scripts already own the document evaluator but run before
+        // the first native input batch. Publish this event only for the call so
+        // the author cascade and its nested synthetic events retain one owner.
+        s_active_js_dispatch_event_context = &evcon;
+    }
+
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, target_item);
+    Rooted<Item> event_root(roots, event_item);
+    event_context_set_dom_event(&evcon, event_root.get());
+    Item previous_raw_event = s_synthetic_dom_dispatch_raw_event;
+    s_synthetic_dom_dispatch_raw_event = event_root.get();
+    Item result = js_dom_dispatch_event(target_root.get(), event_root.get());
+    s_synthetic_dom_dispatch_raw_event = previous_raw_event;
+    if (!item_is_error(result)) {
+        const char* event_name = fn_to_cstr(js_get_name_key(event_root.get(), "type"));
+        if (event_name && !radiant_dom_event_default_prevented(event_root.get())) {
+            if (strcmp(event_name, "click") == 0) {
+                dispatch_click_default_actions(&evcon, evcon.target);
+            } else {
+                dispatch_lambda_handler(&evcon, evcon.target, event_name);
+            }
+        }
+    }
+    if (borrows_script_context) {
+        s_active_js_dispatch_event_context = previous_active_event_context;
+    }
+    return result;
+}
+
+static void space_activation_clear(DocState* state, DomDocument* document) {
+    if (!state || !state->pending_space_activation.address) return;
+    if (document) {
+        dom_node_unpin(document, state->pending_space_activation,
+                       DOM_NODE_PIN_STATE);
+    }
+    state->pending_space_activation = {nullptr, 0};
+}
+
+static bool space_activation_arm(EventContext* evcon, DocState* state,
+                                 View* target) {
+    DomDocument* document = event_context_target_document(evcon);
+    if (!state || !document || !target || !target->is_element()) return false;
+    space_activation_clear(state, document);
+    DomNodeRef ref = dom_node_ref(static_cast<DomNode*>(target));
+    if (!dom_node_ref_validate(document, ref) ||
+        !dom_node_pin(document, ref, DOM_NODE_PIN_STATE)) {
+        return false;
+    }
+    state->pending_space_activation = ref;
+    return true;
+}
+
+static View* space_activation_take(EventContext* evcon, DocState* state,
+                                   DomNodeRef* out_ref) {
+    DomDocument* document = event_context_target_document(evcon);
+    if (out_ref) *out_ref = {nullptr, 0};
+    if (!state || !document || !state->pending_space_activation.address) return nullptr;
+    DomNodeRef ref = state->pending_space_activation;
+    state->pending_space_activation = {nullptr, 0};
+    DomNode* node = dom_node_ref_validate(document, ref);
+    if (out_ref) *out_ref = ref;
+    return node && node->is_element() ? static_cast<View*>(node) : nullptr;
+}
+
+static void space_activation_release(EventContext* evcon, DomNodeRef ref) {
+    DomDocument* document = event_context_target_document(evcon);
+    if (document && ref.address) {
+        dom_node_unpin(document, ref, DOM_NODE_PIN_STATE);
+    }
+}
+
+static bool keyboard_space_activation_target(DocState* state, View* target) {
+    if (!state || !target || !target->is_element()) return false;
+    if (is_checkbox(target) || is_radio(target)) {
+        return !js_dom_is_disabled((void*)lam::dom_require_element(target));
+    }
+    ViewElement* element = lam::view_require_element(target);
+    if (element->tag() != MARKUP_NAME_BUTTON) return false;
+    DomElement* dom_element = lam::dom_require_element(target);
+    return !dom_element->form_control() ||
+        !form_control_is_disabled(state, static_cast<View*>(dom_element));
+}
+
+static bool run_keyboard_activation(EventContext* evcon, DocState* state,
+                                    View* focused, int key) {
+    if (!evcon || !state || !focused || !focused->is_element() ||
+        evcon->default_prevented || !js_dom_is_connected((void*)focused)) {
+        return false;
+    }
+    ViewElement* element = lam::view_require_element(focused);
+    uint32_t tag = element->tag();
+    if (tag == MARKUP_NAME_INPUT && key == RDT_KEY_SPACE &&
+        (is_checkbox(focused) || is_radio(focused))) {
+        return run_keyboard_click_default(evcon, focused);
+    }
+    if (tag == MARKUP_NAME_BUTTON &&
+        (key == RDT_KEY_SPACE || key == RDT_KEY_ENTER)) {
+        DomElement* dom_element = lam::dom_require_element(focused);
+        bool disabled = dom_element->form_control() &&
+            form_control_is_disabled(state, static_cast<View*>(dom_element));
+        if (disabled) return false;
+        return run_keyboard_click_default(evcon, focused);
+    }
+    if (tag == MARKUP_NAME_INPUT && key == RDT_KEY_ENTER &&
+        (js_dom_is_submit_button((void*)focused) ||
+         js_dom_is_reset_button((void*)focused))) {
+        DomElement* dom_element = lam::dom_require_element(focused);
+        bool disabled = dom_element->form_control() &&
+            form_control_is_disabled(state, static_cast<View*>(dom_element));
+        if (disabled) return false;
+        return run_keyboard_click_default(evcon, focused);
+    }
+    if (tag == MARKUP_NAME_A && key == RDT_KEY_ENTER) {
+        DomElement* anchor = lam::dom_require_element(focused);
+        if (!anchor->get_attribute("href")) return false;
+        return run_keyboard_click_default(evcon, focused);
+    }
+    if (tag == MARKUP_NAME_SELECT &&
+        (key == RDT_KEY_SPACE || key == RDT_KEY_ENTER)) {
+        DomElement* dom_element = lam::dom_require_element(focused);
+        bool disabled = dom_element->form_control() &&
+            form_control_is_disabled(state, static_cast<View*>(dom_element));
+        return !disabled && run_keyboard_click_default(evcon, focused);
+    }
+    return false;
 }
 
 
@@ -7479,6 +8220,12 @@ bool is_view_focusable(View* view) {
             return false;
         }
 
+        // A negative tabindex removes even a naturally focusable control from
+        // sequential navigation. Programmatic focus keeps the broader rule.
+        if (delem->get_attribute("tabindex") && focus_tab_index(view) < 0) {
+            return false;
+        }
+
         switch (tag) {
         case MARKUP_NAME_A:
             // <a> is focusable if it has href
@@ -7494,11 +8241,7 @@ bool is_view_focusable(View* view) {
         }
         default:
             // Check for tabindex attribute
-            const char* tabindex = elem->get_attribute("tabindex");
-            if (tabindex) {
-                int ti = (int)str_to_int64_default(tabindex, strlen(tabindex), 0);
-                return ti >= 0;
-            }
+            if (elem->get_attribute("tabindex")) return true;
             // CE-2 (Radiant_Design_Content_Editable.md §5): a contenteditable
             // editing host is implicitly focusable (treated as tabindex=0)
             // when no explicit tabindex is set.
@@ -7564,8 +8307,8 @@ static bool prepare_previous_focus_blur(EventContext* evcon,
 
 static void dispatch_focus_change_observed(EventContext* evcon, View* target) {
     if (!evcon || !target) return;
-    dispatch_lambda_handler(evcon, target, "change");
     radiant_dispatch_simple_event(evcon, target, "change", true, false);
+    dispatch_lambda_handler_without_js(evcon, target, "change");
     sm_observe_action(event_context_target_state(evcon),
                       SM_ACT_DISPATCH_CHANGE);
 }
@@ -7574,11 +8317,12 @@ static void dispatch_focus_blur_observed(EventContext* evcon,
                                          View* target,
                                          View* related_target) {
     if (!evcon || !target) return;
-    dispatch_lambda_handler(evcon, target, "blur");
     radiant_dispatch_focus_event(evcon, target, "blur", related_target);
+    dispatch_lambda_handler_without_js(evcon, target, "blur");
     sm_observe_action(event_context_target_state(evcon),
                       SM_ACT_DISPATCH_BLUR);
     radiant_dispatch_focus_event(evcon, target, "focusout", related_target);
+    dispatch_lambda_handler_without_js(evcon, target, "focusout");
 }
 
 /**
@@ -7634,7 +8378,9 @@ void update_focus_state(EventContext* evcon, View* new_focus, bool from_keyboard
         }
 
         radiant_dispatch_focus_event(evcon, new_focus, "focus", prev_focus);
+        dispatch_lambda_handler_without_js(evcon, new_focus, "focus");
         radiant_dispatch_focus_event(evcon, new_focus, "focusin", prev_focus);
+        dispatch_lambda_handler_without_js(evcon, new_focus, "focusin");
 
         // F1 (Radiant_Design_Form_Input.md §3.1): snapshot the value at
         // focus time so a later blur can decide whether to fire `change`.
@@ -7693,68 +8439,22 @@ void update_drag_state(EventContext* evcon, View* target, bool is_dragging) {
     log_debug("update_drag_state: dragging=%d, target=%p", is_dragging, target);
 }
 
-// find iframe by name and set new src using selector
-DomNode* set_iframe_src_by_name(DomElement *document, const char *target_name, const char *new_src) {
-    if (!document || !target_name || !new_src) {
-        log_error("Invalid parameters to set_iframe_src_by_name");
-        return NULL;
-    }
-    // get memory pool from document
-    Pool* pool = document->doc ? document->doc->document_pool : nullptr;
-    if (!pool) {
-        log_error("Document has no memory pool");
-        return NULL;
-    }
-
-    // construct selector string: iframe[name="target_name"]
-    char selector_str[256];
-    int len = snprintf(selector_str, sizeof(selector_str), "iframe[name=\"%s\"]", target_name);
-    if (len < 0 || len >= (int)sizeof(selector_str)) {
-        log_error("Selector string too long");
-        return NULL;
-    }
-
-    log_debug("parsing iframe selector: %s", selector_str);
-    // tokenize the selector
-    size_t token_count = 0;
-    CssToken* tokens = css_tokenize(selector_str, (size_t)len, pool, &token_count);
-    if (!tokens || token_count == 0) {
-        log_error("Failed to tokenize selector");
-        return NULL;
-    }
-    // parse the selector
-    int pos = 0;
-    CssSelector* selector = css_parse_selector_with_combinators(tokens, &pos, (int)token_count, pool);
-    if (!selector) {
-        log_error("Failed to parse selector");
-        return NULL;
-    }
-    // create selector matcher
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    if (!matcher) {
-        log_error("Failed to create selector matcher");
-        return NULL;
-    }
-    state_configure_selector_matcher(document->doc ? (DocState*)document->doc->state : nullptr, matcher);
-
-    // find the iframe element matching the selector
-    DomElement* iframe_element = selector_matcher_find_first(matcher, selector, document);
-    if (iframe_element) {
-        log_debug("Found iframe with name='%s', setting src to: %s", target_name, new_src);
-        // set the src attribute
-        if (!iframe_element->set_attribute("src", new_src)) {
-            log_error("Failed to set src attribute");
-            selector_matcher_destroy(matcher);
-            return NULL;
+// The legacy package-off target path only needs a named iframe lookup; parsing
+// a one-use CSS selector made the fallback depend on tokenizer and matcher state.
+static DomElement* find_iframe_by_name(DomNode* node, const char* target_name) {
+    if (!node || !target_name) return nullptr;
+    if (node->is_element()) {
+        DomElement* elem = node->as_element();
+        const char* name = elem->get_attribute("name");
+        if (elem->tag() == MARKUP_NAME_IFRAME && name && strcmp(name, target_name) == 0) {
+            return elem;
         }
-        log_debug("iframe src attribute set successfully");
-        selector_matcher_destroy(matcher);
-        return iframe_element;  // Return DomElement* (which is a DomNodeBase*)
+        for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+            DomElement* found = find_iframe_by_name(child, target_name);
+            if (found) return found;
+        }
     }
-
-    log_debug("No iframe found with name='%s'", target_name);
-    selector_matcher_destroy(matcher);
-    return NULL;
+    return nullptr;
 }
 
 // find the sub-view that matches the given node
@@ -7774,17 +8474,399 @@ View* find_view(View* view, DomNode* node) {
     return NULL;
 }
 
-// find a DomElement by its id attribute (for fragment navigation)
-static DomElement* find_element_by_id(DomElement* root, const char* id) {
-    if (!root || !id) return nullptr;
-    const char* elem_id = root->get_attribute("id");
-    if (elem_id && strcmp(elem_id, id) == 0) return root;
-    for (DomNode* child_node = root->first_child; child_node; child_node = child_node->next_sibling) {
-        if (!child_node->is_element()) continue;
-        DomElement* found = find_element_by_id(child_node->as_element(), id);
-        if (found) return found;
+// The request is document-owned, not EventContext-owned: a behavior handler
+// runs below the event dispatcher and must not retain a stack EventContext.
+// Node references are pinned across that return boundary (D4.5.1v3).
+typedef struct RadiantNavigationRequest {
+    DomDocument* source_document;
+    DomNodeRef source_ref;
+    DomDocument* target_document;
+    DomNodeRef target_ref;
+    DomDocument* fragment_document;
+    DomNodeRef fragment_ref;
+    char* url;
+    char* target_name;
+    RadiantNavigationTargetKind target_kind;
+    struct RadiantNavigationRequest* next;
+} RadiantNavigationRequest;
+
+typedef struct RadiantNavigationQueue {
+    RadiantNavigationRequest* first;
+    RadiantNavigationRequest* last;
+} RadiantNavigationQueue;
+
+static void navigation_request_destroy(RadiantNavigationRequest* request) {
+    if (!request) return;
+    if (request->source_document && request->source_ref.address) {
+        dom_node_unpin(request->source_document, request->source_ref,
+                       DOM_NODE_PIN_EVENT_QUEUE);
     }
-    return nullptr;
+    if (request->target_document && request->target_ref.address) {
+        dom_node_unpin(request->target_document, request->target_ref,
+                       DOM_NODE_PIN_EVENT_QUEUE);
+    }
+    if (request->fragment_document && request->fragment_ref.address) {
+        dom_node_unpin(request->fragment_document, request->fragment_ref,
+                       DOM_NODE_PIN_EVENT_QUEUE);
+    }
+    if (request->url) mem_free(request->url);
+    if (request->target_name) mem_free(request->target_name);
+    mem_free(request);
+}
+
+static void navigation_queue_destroy(void* data) {
+    RadiantNavigationQueue* queue = (RadiantNavigationQueue*)data;
+    if (!queue) return;
+    RadiantNavigationRequest* request = queue->first;
+    while (request) {
+        RadiantNavigationRequest* next = request->next;
+        navigation_request_destroy(request);
+        request = next;
+    }
+    mem_free(queue);
+}
+
+static RadiantNavigationQueue* navigation_queue_for_document(DomDocument* doc,
+                                                              bool create) {
+    if (!doc) return nullptr;
+    for (DomDocumentResource* resource = doc->resources; resource;
+         resource = resource->next) {
+        if (resource->destroy == navigation_queue_destroy) {
+            return (RadiantNavigationQueue*)resource->data;
+        }
+    }
+    if (!create) return nullptr;
+    RadiantNavigationQueue* queue = (RadiantNavigationQueue*)mem_calloc(
+        1, sizeof(RadiantNavigationQueue), MEM_CAT_LAYOUT);
+    if (!queue || !dom_document_add_resource(doc, queue, navigation_queue_destroy)) {
+        if (queue) mem_free(queue);
+        return nullptr;
+    }
+    return queue;
+}
+
+static bool navigation_request_pin(DomDocument* document, DomElement* element,
+                                   DomNodeRef* out_ref) {
+    if (!document || !element || !out_ref || element->doc != document) return false;
+    *out_ref = dom_node_ref((DomNode*)element);
+    return dom_node_ref_validate(document, *out_ref) &&
+           dom_node_pin(document, *out_ref, DOM_NODE_PIN_EVENT_QUEUE);
+}
+
+bool radiant_queue_navigation_request(DomElement* source, const char* url,
+                                      DomElement* target,
+                                      RadiantNavigationTargetKind target_kind,
+                                      const char* target_name,
+                                      DomElement* fragment_target) {
+    if (!source || !source->doc || !url || !url[0]) return false;
+    if ((target_kind == RADIANT_NAVIGATION_TARGET_EXISTING && !target) ||
+        (target_kind == RADIANT_NAVIGATION_TARGET_NEW && target)) {
+        return false;
+    }
+
+    RadiantNavigationRequest* request = (RadiantNavigationRequest*)mem_calloc(
+        1, sizeof(RadiantNavigationRequest), MEM_CAT_LAYOUT);
+    if (!request) return false;
+    request->source_document = source->doc;
+    request->target_kind = target_kind;
+    request->url = mem_strdup(url, MEM_CAT_LAYOUT);
+    if (target_name && target_name[0]) {
+        request->target_name = mem_strdup(target_name, MEM_CAT_LAYOUT);
+    }
+    if (!request->url || (target_name && target_name[0] && !request->target_name) ||
+        !navigation_request_pin(request->source_document, source,
+                                &request->source_ref)) {
+        navigation_request_destroy(request);
+        return false;
+    }
+    if (target && !navigation_request_pin(target->doc, target, &request->target_ref)) {
+        navigation_request_destroy(request);
+        return false;
+    }
+    request->target_document = target ? target->doc : nullptr;
+    if (fragment_target &&
+        !navigation_request_pin(fragment_target->doc, fragment_target,
+                                &request->fragment_ref)) {
+        navigation_request_destroy(request);
+        return false;
+    }
+    request->fragment_document = fragment_target ? fragment_target->doc : nullptr;
+
+    RadiantNavigationQueue* queue = navigation_queue_for_document(
+        request->source_document, true);
+    if (!queue) {
+        navigation_request_destroy(request);
+        return false;
+    }
+    if (queue->last) queue->last->next = request;
+    else queue->first = request;
+    queue->last = request;
+    return true;
+}
+
+static RadiantNavigationRequest* navigation_queue_take(DomDocument* doc) {
+    RadiantNavigationQueue* queue = navigation_queue_for_document(doc, false);
+    if (!queue || !queue->first) return nullptr;
+    RadiantNavigationRequest* request = queue->first;
+    queue->first = request->next;
+    if (!queue->first) queue->last = nullptr;
+    request->next = nullptr;
+    return request;
+}
+
+static bool navigation_request_is_live(const RadiantNavigationRequest* request,
+                                       DomElement** out_source,
+                                       DomElement** out_target,
+                                       DomElement** out_fragment) {
+    if (out_source) *out_source = nullptr;
+    if (out_target) *out_target = nullptr;
+    if (out_fragment) *out_fragment = nullptr;
+    if (!request) return false;
+    DomNode* source = dom_node_ref_validate(request->source_document,
+                                            request->source_ref);
+    if (!source || !source->is_element()) return false;
+    if (out_source) *out_source = source->as_element();
+    if (request->target_kind == RADIANT_NAVIGATION_TARGET_EXISTING) {
+        DomNode* target = dom_node_ref_validate(request->target_document,
+                                                request->target_ref);
+        if (!target || !target->is_element()) return false;
+        if (out_target) *out_target = target->as_element();
+    }
+    if (request->fragment_ref.address) {
+        DomNode* fragment = dom_node_ref_validate(request->fragment_document,
+                                                  request->fragment_ref);
+        if (!fragment || !fragment->is_element()) return false;
+        if (out_fragment) *out_fragment = fragment->as_element();
+    }
+    return true;
+}
+
+static bool navigation_url_resolve(DomDocument* source, const char* raw,
+                                   Url** out_url) {
+    if (out_url) *out_url = nullptr;
+    if (!source || !raw || !raw[0] || !out_url) return false;
+    Url* resolved = source->url ? url_parse_with_base(raw, source->url)
+                                : url_parse(raw);
+    if (!resolved || !url_is_valid(resolved)) {
+        if (resolved) url_destroy(resolved);
+        return false;
+    }
+    *out_url = resolved;
+    return true;
+}
+
+bool radiant_urls_match_without_fragment(const Url* first, const Url* second) {
+    if (!first || !second) return false;
+    const char* first_parts[] = {
+        url_get_protocol(first), url_get_username(first), url_get_password(first),
+        url_get_host(first), url_get_pathname(first), url_get_search(first),
+    };
+    const char* second_parts[] = {
+        url_get_protocol(second), url_get_username(second), url_get_password(second),
+        url_get_host(second), url_get_pathname(second), url_get_search(second),
+    };
+    for (size_t i = 0; i < sizeof(first_parts) / sizeof(first_parts[0]); i++) {
+        if (strcmp(first_parts[i] ? first_parts[i] : "",
+                   second_parts[i] ? second_parts[i] : "") != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void navigation_clear_target_state(DomNode* node, DocState* state) {
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!current->is_element()) continue;
+        DomElement* elem = current->as_element();
+        if (state_get_bool(state, elem, STATE_TARGET)) {
+            state_set_bool(state, elem, STATE_TARGET, false);
+            radiant_sync_pseudo_state((View*)elem, PSEUDO_STATE_TARGET, false);
+        }
+        navigation_clear_target_state(elem->first_child, state);
+    }
+}
+
+static bool navigation_apply_fragment(DomDocument* document,
+                                      DomElement* fragment,
+                                      const char* resolved_url) {
+    if (!document || !document->root || !resolved_url) return false;
+    RadiantHistoryTraversal traversal = {};
+    radiant_history_set_location(document, resolved_url, &traversal);
+    DocState* state = (DocState*)document->state;
+    if (!state) return false;
+    navigation_clear_target_state((DomNode*)document->root, state);
+    if (fragment) {
+        state_set_bool(state, fragment, STATE_TARGET, true);
+        radiant_sync_pseudo_state((View*)fragment, PSEUDO_STATE_TARGET, true);
+        js_dom_scroll_into_view_bridge(fragment);
+    }
+    doc_state_request_repaint(state);
+    return true;
+}
+
+static bool navigation_execute_iframe_target(UiContext* uicon,
+                                             DomElement* iframe,
+                                             const char* url) {
+    if (!uicon || !iframe || iframe->tag() != MARKUP_NAME_IFRAME ||
+        !iframe->doc || !iframe->doc->view_tree || !url || !url[0]) {
+        return false;
+    }
+    DomDocument* owner = iframe->doc;
+    View* iframe_view = find_view(owner->view_tree->root, (DomNode*)iframe);
+    if (!iframe_view || (iframe_view->view_type != RDT_VIEW_BLOCK &&
+                         iframe_view->view_type != RDT_VIEW_INLINE_BLOCK)) {
+        return false;
+    }
+    ViewBlock* block = lam::view_require_block(iframe_view);
+    if (!block || !block->embed) return false;
+    if (!iframe->set_attribute("src", url)) return false;
+    if (block->scroller && block->scroll_mut()->pane) {
+        block->scroll()->pane->reset();
+        block->content_width = 0.0f;
+        block->content_height = 0.0f;
+    }
+
+    int css_vw = (int)block->width; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    int css_vh = (int)block->height; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    DomDocument* old_doc = block->embedp()->doc;
+    if (uicon->font_ctx) {
+        // Glyph-cache keys retain raw document FontHandle addresses; clear
+        // them before iframe navigation can free and reuse those addresses.
+        font_context_reset_glyph_caches(uicon->font_ctx);
+    }
+    DomDocument* new_doc = load_html_doc(owner->url, (char*)url, css_vw, css_vh);
+    if (!new_doc) return false;
+    block->embed->doc = new_doc;
+    dom_document_set_embedding(new_doc, owner, iframe);
+    radiant_document_ensure_state(new_doc, "navigation_iframe_target");
+    new_doc->viewport.output_scale = 1.0f;
+    ui_context_sync_document_raster_scale(uicon, new_doc);
+
+    if (new_doc->html_root) {
+        DomDocument* saved_doc = uicon->document;
+        float saved_viewport_width = uicon->viewport_width;
+        float saved_viewport_height = uicon->viewport_height;
+        uicon->document = new_doc;
+        uicon->viewport_width = (float)css_vw;
+        uicon->viewport_height = (float)css_vh;
+        process_document_font_faces(uicon, new_doc);
+        layout_html_doc(uicon, new_doc, false);
+        uicon->document = saved_doc;
+        uicon->viewport_width = saved_viewport_width;
+        uicon->viewport_height = saved_viewport_height;
+    }
+    if (new_doc->view_tree && new_doc->view_tree->root) {
+        ViewBlock* root = lam::view_require_block(new_doc->view_tree->root);
+        if (root->scroller) {
+            if (root->content_height > root->height) root->height = root->content_height;
+            root->scroller = nullptr;
+        }
+        block->content_width = root->content_width > 0.0f ? root->content_width : root->width;
+        block->content_height = root->content_height > 0.0f ? root->content_height : root->height;
+        update_scroller(block, block->content_width, block->content_height);
+    }
+    clear_document_interaction_state_before_detach(old_doc);
+    dom_document_clear_embedding(old_doc);
+    free_document(old_doc);
+    if (owner->state) doc_state_mark_dirty(owner->state);
+    return true;
+}
+
+static bool navigation_execute_top_target(UiContext* uicon, DomDocument* document,
+                                          const char* url) {
+    if (!uicon || !document || document != uicon->document || !url || !url[0]) {
+        return false;
+    }
+    int css_vw = (int)uicon->viewport_width; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    int css_vh = (int)uicon->viewport_height; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    BrowsingSession* session = uicon->browsing_session;
+    DomDocument* new_doc = nullptr;
+    if (session) {
+        ViewBlock* root_block = document->view_tree
+            ? lam::view_require_block(document->view_tree->root) : nullptr;
+        DocState* state = (DocState*)document->state;
+        if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
+            float scroll_y = 0.0f;
+            scroll_state_get_position_for_view(state, static_cast<View*>(root_block),
+                                               root_block->scroll()->pane,
+                                               nullptr, &scroll_y, nullptr, nullptr);
+            session_save_scroll_position(session, scroll_y);
+        }
+        log_info("navigation-exec: navigating via session to %s", url);
+        new_doc = session_navigate(session, uicon, url, css_vw, css_vh);
+    } else {
+        log_info("navigation-exec: navigating directly to %s", url);
+        new_doc = show_html_doc(document->url, (char*)url, css_vw, css_vh);
+        free_document(document);
+    }
+    if (!new_doc) return false;
+    const char* page_title = session ? session_current_title(session) : nullptr;
+    if (!page_title) page_title = session_extract_title(new_doc);
+    if (page_title) {
+        char title_buf[512];
+        snprintf(title_buf, sizeof(title_buf), "Lambda - %s", page_title);
+        update_window_title(title_buf);
+    }
+    return true;
+}
+
+bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source) {
+    RadiantNavigationRequest* request = navigation_queue_take(source);
+    if (!request) return false;
+
+    DomElement* source_elem = nullptr;
+    DomElement* target_elem = nullptr;
+    DomElement* fragment_elem = nullptr;
+    bool live = navigation_request_is_live(request, &source_elem, &target_elem,
+                                           &fragment_elem);
+    Url* resolved = nullptr;
+    bool resolved_ok = live && navigation_url_resolve(source_elem->doc, request->url,
+                                                       &resolved);
+    const char* href = resolved ? url_get_href(resolved) : nullptr;
+    char* owned_href = href ? mem_strdup(href, MEM_CAT_LAYOUT) : nullptr;
+    RadiantNavigationTargetKind target_kind = request->target_kind;
+    DomDocument* target_document = target_elem ? target_elem->doc : nullptr;
+    bool target_is_iframe = target_elem && target_elem->tag() == MARKUP_NAME_IFRAME;
+    bool target_is_root = target_elem && target_document &&
+                          target_elem == target_document->root;
+    DomDocument* destination_document = target_is_iframe && target_elem->embed
+        ? target_elem->embedp()->doc : target_document;
+    bool fragment_is_target_document = !fragment_elem ||
+        (destination_document == fragment_elem->doc);
+    const char* hash = resolved ? url_get_hash(resolved) : nullptr;
+    bool fragment_destination = destination_document && destination_document->url &&
+        hash && hash[0] == '#' && radiant_urls_match_without_fragment(
+            destination_document->url, resolved);
+    navigation_request_destroy(request);
+    if (!resolved_ok || !owned_href) {
+        if (resolved) url_destroy(resolved);
+        if (owned_href) mem_free(owned_href);
+        return false;
+    }
+    if (resolved) url_destroy(resolved);
+
+    bool executed = false;
+    if (target_kind == RADIANT_NAVIGATION_TARGET_NEW) {
+        // A named/new browsing context needs a host-owned window factory. No
+        // current UiContext exposes one, so do not degrade it to _self.
+        log_warn("navigation-exec: new browsing context is not available");
+    } else if (!target_elem || (!target_is_iframe && !target_is_root) ||
+               !fragment_is_target_document) {
+        log_warn("navigation-exec: package supplied an invalid resolved target");
+    } else if (fragment_destination) {
+        executed = navigation_apply_fragment(destination_document, fragment_elem,
+                                             owned_href);
+    } else if (target_is_iframe) {
+        executed = navigation_execute_iframe_target(uicon, target_elem, owned_href);
+    } else if (target_document == uicon->document) {
+        executed = navigation_execute_top_target(uicon, target_document, owned_href);
+    } else {
+        DomElement* iframe = dom_document_embedding_element(target_document);
+        executed = navigation_execute_iframe_target(uicon, iframe, owned_href);
+    }
+    mem_free(owned_href);
+    if (executed) to_repaint();
+    return executed;
 }
 
 /**
@@ -8951,20 +10033,25 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // continue with normal handling so the new click still works.
             context_menu_close(state);
         }
-        // F10: a right click asks the `<body>` behavior template whether a menu
-        // belongs here and which items are live. Native still resolves the hit
-        // target and the popup position — logical geometry is mechanism and does
-        // not cross into policy — and records both so `radiant.open_context_menu`
-        // can place the popup without the template ever handling coordinates.
+        // F10: a right click first emits the ordinary cancelable DOM event, so
+        // an author can install a custom menu. Only an unclaimed default reaches
+        // the behavior template, which computes the native popup's item policy.
         if (event->type == RDT_EVENT_MOUSE_DOWN &&
             btn_event->button == GLFW_MOUSE_BUTTON_RIGHT &&
             state && evcon.target && evcon.target->is_element()) {
-            state->pending_context_menu_target = evcon.target;
-            state->pending_context_menu_x = (float)btn_event->x;
-            state->pending_context_menu_y = (float)btn_event->y;
-            bool opened = radiant_dispatch_behavior_context_menu(&evcon, evcon.target);
-            state->pending_context_menu_target = nullptr;
-            if (opened && state->context_menu_target) break;
+            bool prevented = radiant_dispatch_mouse_event(&evcon, evcon.target,
+                "contextmenu", btn_event->x, btn_event->y,
+                btn_event->button, 0,
+                event_mod_ctrl(btn_event->mods), event_mod_shift(btn_event->mods),
+                event_mod_alt(btn_event->mods), event_mod_super(btn_event->mods), 0);
+            if (!prevented) {
+                state->pending_context_menu_target = evcon.target;
+                state->pending_context_menu_x = (float)btn_event->x;
+                state->pending_context_menu_y = (float)btn_event->y;
+                bool opened = radiant_dispatch_behavior_context_menu(&evcon, evcon.target);
+                state->pending_context_menu_target = nullptr;
+                if (opened && state->context_menu_target) break;
+            }
         }
 
         // Update active and focus states
@@ -8978,7 +10065,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             // Set :active state
             update_active_state(&evcon, evcon.target, true);
 
-            dispatch_lambda_handler(&evcon, evcon.target, "mousedown");
+            if (dispatch_lambda_handler_without_js(&evcon, evcon.target,
+                                                   "mousedown")) {
+                evcon.need_repaint = true;
+            }
+
             bool pointer_prevented = radiant_dispatch_pointer_event(
                 &evcon, evcon.target, "pointerdown",
                 btn_event->x, btn_event->y, btn_event->button,
@@ -9447,6 +10538,10 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     event_mod_super(btn_event->mods),
                     1);
                 if (up_prevented) evcon.default_prevented = true;
+                if (dispatch_lambda_handler_without_js(&evcon, evcon.target,
+                                                       "mouseup")) {
+                    evcon.need_repaint = true;
+                }
             }
 
             // Stage 4C: JS drop + dragend for script editors, gated on the
@@ -9641,18 +10736,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 !text_selection_drag_handled) {
                 // Dispatch click through JS EventTarget before built-in default
                 // actions so listeners or IDL handlers can call preventDefault().
-                bool js_click_dispatched = false;
-                View* click_check_radio = evcon.target
-                    ? find_checkbox_radio_input(evcon.target) : nullptr;
-                DocState* click_check_radio_state = click_check_radio
-                    ? event_context_target_state(&evcon) : nullptr;
-                bool click_check_radio_had_state = click_check_radio &&
-                    click_check_radio_state;
-                bool click_check_radio_before = click_check_radio_had_state
-                    ? state_get_pseudo_state(click_check_radio_state,
-                                             click_check_radio,
-                                             PSEUDO_STATE_CHECKED)
-                    : false;
                 // Native disabled controls suppress click dispatch even when
                 // hit testing lands on a child created by a widget library.
                 bool click_on_disabled_control = click_target_is_disabled_control(
@@ -9665,30 +10748,21 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         event_mod_shift(btn_event->mods),
                         event_mod_alt(btn_event->mods),
                         event_mod_super(btn_event->mods),
-                        1,
-                        &js_click_dispatched);
+                        1);
                     if (prevented) evcon.default_prevented = true;
                 }
-                // Handle checkbox/radio click toggle
-                log_debug("MOUSE_UP: evcon.target=%p", evcon.target);
-                bool click_check_radio_changed = false;
-                if (click_check_radio_had_state) {
-                    bool after = state_get_pseudo_state(click_check_radio_state,
-                                                        click_check_radio,
-                                                        PSEUDO_STATE_CHECKED);
-                    click_check_radio_changed = after != click_check_radio_before;
-                    if (evcon.default_prevented && click_check_radio_changed) {
-                        form_control_set_checked(click_check_radio_state,
-                                                 click_check_radio,
-                                                 click_check_radio_before);
-                        sync_pseudo_state(click_check_radio,
-                                          PSEUDO_STATE_CHECKED,
-                                          click_check_radio_before);
-                        doc_state_request_repaint(click_check_radio_state);
-                        click_check_radio_changed = false;
-                    }
+                // The final primary click in a double-click carries the same
+                // target and coordinates as click, but is separately observable
+                // by `ondblclick` and EventTarget listeners. Word selection has
+                // already used the click count on mousedown; this dispatch adds
+                // no second selection policy.
+                if (evcon.target && btn_event->clicks == 2) {
+                    radiant_dispatch_mouse_event(&evcon, evcon.target,
+                        "dblclick", mouse_x, mouse_y,
+                        btn_event->button, 0,
+                        event_mod_ctrl(btn_event->mods), event_mod_shift(btn_event->mods),
+                        event_mod_alt(btn_event->mods), event_mod_super(btn_event->mods), 2);
                 }
-
 
                 // Handle click on <video> element — play/pause toggle + seek bar
                 if (evcon.target && state && !evcon.default_prevented) {
@@ -9792,59 +10866,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     }
                 }
 
-                // Dispatch to Lambda template event handlers. Author templates
-                // always see the click; the behavior half is the UA default
-                // action, so it stands down on exactly the condition the native
-                // activation above uses — when the JS realm already ran the
-                // activation for this click, a behavior template running too
-                // would toggle the control a second time and land on the
-                // original value. ES10 makes JS and Lambda peers over one
-                // canonical state, which means only one of them may perform the
-                // default action for a given event.
                 if (evcon.target) {
-                    // Narrowly: the JS realm ran *this* click's checkbox/radio
-                    // activation. Only then must the behavior template stand
-                    // down — a select's dropdown is a native UA affordance that
-                    // JS never performs, so its template still runs here.
-                    bool js_did_activation = js_click_dispatched &&
-                        click_check_radio && click_check_radio_changed;
-                    bool behavior_may_activate = !js_did_activation;
-                    // A click on a <label> activates its associated control,
-                    // and `for="id"` is not an ancestor relationship, so the
-                    // behavior walk cannot reach the control on its own. The
-                    // association lookup is mechanism and stays native; what it
-                    // feeds is the template dispatch. Native activation used to
-                    // consume this resolution internally, so deleting it
-                    // silently broke label-activated checkboxes.
-                    View* activation_target = find_checkbox_radio_input(evcon.target);
-                    if (!activation_target) activation_target = evcon.target;
-                    if (dispatch_lambda_handler(&evcon, activation_target, "click",
-                                                nullptr, nullptr,
-                                                behavior_may_activate)) {
-                        evcon.need_repaint = true;
-                    }
-
-                    // F4: submit/reset are separate default-action seams. The
-                    // ordinary click handler above remains the author hook;
-                    // only this post-click behavior event may activate the
-                    // form, and the old JS bridge is the package-off fallback.
-                    View* submit_target = find_form_activation_button(evcon.target, false);
-                    if (submit_target && !evcon.default_prevented &&
-                        !js_dom_is_disabled((void*)submit_target) &&
-                        js_dom_is_connected((void*)submit_target)) {
-                        if (run_form_submit_activation(&evcon, submit_target)) {
-                            evcon.need_repaint = true;
-                        }
-                    }
-
-                    View* reset_target = find_form_activation_button(evcon.target, true);
-                    if (reset_target && !evcon.default_prevented &&
-                        !js_dom_is_disabled((void*)reset_target) &&
-                        js_dom_is_connected((void*)reset_target)) {
-                        if (run_form_reset_activation(&evcon, reset_target)) {
-                            evcon.need_repaint = true;
-                        }
-                    }
+                    dispatch_click_default_actions(&evcon, evcon.target);
                 }
             }
 
@@ -9861,9 +10884,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
         if (evcon.target) {
             log_debug("Target view found at position (%.1f, %.1f)", mouse_x, mouse_y);
-            if (evcon.event.type == RDT_EVENT_MOUSE_UP) {
-                dispatch_lambda_handler(&evcon, evcon.target, "mouseup");
-            }
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 
@@ -9891,7 +10911,7 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (new_url[0] == '#' && doc->root) {
                 const char* fragment_id = new_url + 1;  // skip '#'
                 log_info("browse_nav: fragment navigation to #%s", fragment_id);
-                DomElement* target_elem = find_element_by_id(doc->root, fragment_id);
+                DomElement* target_elem = js_dom_find_element_by_id(doc->root, fragment_id);
                 if (target_elem) {
                     View* target_view = find_view(doc->view_tree->root, static_cast<DomNode*>(target_elem));
                     if (target_view) {
@@ -9924,120 +10944,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             if (evcon.new_target) {
                 log_debug("setting new src to target: %s", evcon.new_target);
-                // find iframe with the target name
-                DomNode* elmt = set_iframe_src_by_name(doc->root, evcon.new_target, evcon.new_url);
-                View* iframe = find_view(doc->view_tree->root, elmt);
-                if (iframe) {
-                    log_debug("found iframe view");
-                    if ((iframe->view_type == RDT_VIEW_BLOCK || iframe->view_type == RDT_VIEW_INLINE_BLOCK) && (lam::view_require_block(iframe))->embed) {
-                        log_debug("updating doc of iframe view");
-                        ViewBlock* block = lam::view_require_block(iframe);
-                        // reset scroll position
-                        if (block->scroller && block->scroll_mut()->pane) {
-                            block->scroll()->pane->reset();
-                            block->content_width = 0;  block->content_height = 0;
-                        }
-                        // load the new document
-                        // Use iframe dimensions as viewport (already in CSS logical pixels)
-                        int css_vw = (int)block->width;
-                        int css_vh = (int)block->height;
-                        DomDocument* old_doc = block->embedp()->doc;
-                        if (evcon.ui_context->font_ctx) {
-                            // Glyph-cache keys retain raw document FontHandle addresses; clear
-                            // them before iframe navigation can free and reuse those addresses.
-                            font_context_reset_glyph_caches(evcon.ui_context->font_ctx);
-                        }
-                        DomDocument* new_doc = block->embed->doc =
-                            load_html_doc(evcon.ui_context->document->url, evcon.new_url,
-                                          css_vw, css_vh);
-                        if (new_doc) {
-                            radiant_document_ensure_state(new_doc, "iframe_target_navigation");
-                            // Nested documents share the screen device scale but
-                            // retain their own semantic page zoom.
-                            new_doc->viewport.output_scale = 1.0f;
-                            ui_context_sync_document_raster_scale(evcon.ui_context, new_doc);
-
-                            if (new_doc->html_root) {
-                                // HTML/Markdown/XML documents: need CSS layout
-                                // Save the parent document and logical viewport.
-                                // The framebuffer remains the top-level physical surface.
-                                DomDocument* parent_doc = evcon.ui_context->document;
-                                // Set document context to iframe doc for proper URL resolution (e.g., images)
-                                evcon.ui_context->document = new_doc;
-                                // iframe dimensions are now in CSS pixels
-                                int saved_viewport_width = evcon.ui_context->viewport_width;
-                                int saved_viewport_height = evcon.ui_context->viewport_height;
-                                evcon.ui_context->viewport_width = css_vw;
-                                evcon.ui_context->viewport_height = css_vh;
-                                // Process @font-face rules before layout (critical for custom fonts)
-                                process_document_font_faces(evcon.ui_context, new_doc);
-                                layout_html_doc(evcon.ui_context, new_doc, false);
-                                // Restore the parent document and logical viewport.
-                                evcon.ui_context->document = parent_doc;
-                                evcon.ui_context->viewport_width = saved_viewport_width;
-                                evcon.ui_context->viewport_height = saved_viewport_height;
-                            }
-                            // For pre-laid-out documents, view_tree is already set
-                            if (new_doc->view_tree && new_doc->view_tree->root) {
-                                ViewBlock* root = lam::view_require_block(new_doc->view_tree->root);
-                                // Disable inner doc's viewport scroller — iframe container handles scrolling
-                                if (root->scroller) {
-                                    if (root->content_height > root->height) {
-                                        root->height = root->content_height;
-                                    }
-                                    root->scroller = NULL;
-                                }
-                                // Use width/height for PDF (content_width/height may be 0)
-                                block->content_width = root->content_width > 0 ? root->content_width : root->width;
-                                block->content_height = root->content_height > 0 ? root->content_height : root->height;
-                                update_scroller(block, block->content_width, block->content_height);
-                            }
-                        }
-                        clear_document_interaction_state_before_detach(old_doc);
-                        free_document(old_doc);
-                        doc_state_mark_dirty(uicon->document->state);
-                    }
-                    else {
-                        log_debug("iframe view has no embed");
-                    }
-                } else {
+                // Legacy package-off navigation resolves the target by name;
+                // execution stays shared with the package-pinned path.
+                DomElement* iframe = find_iframe_by_name(doc->root, evcon.new_target);
+                if (!iframe || !navigation_execute_iframe_target(evcon.ui_context, iframe, new_url)) {
                     log_debug("failed to find iframe view");
                 }
             }
             else {
-                // -- Main page navigation: route through browsing session for history management --
-                int css_vw = evcon.ui_context->viewport_width;
-                int css_vh = evcon.ui_context->viewport_height;
-                BrowsingSession* session = evcon.ui_context->browsing_session;
-                DomDocument* new_doc = nullptr;
-                if (session) {
-                    // save current scroll position in history
-                    ViewBlock* root_block = doc->view_tree ? lam::view_require_block(doc->view_tree->root) : nullptr;
-                    if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
-                        float scroll_y = 0.0f;
-                        scroll_state_get_position_for_view(state, static_cast<View*>(root_block), root_block->scroll()->pane,
-                                                           NULL, &scroll_y, NULL, NULL);
-                        session_save_scroll_position(session, scroll_y);
-                    }
-                    log_info("browse_nav: navigating via session to %s", new_url);
-                    new_doc = session_navigate(session, evcon.ui_context, new_url, css_vw, css_vh);
-                } else {
-                    // no session (local file, headless), fallback to direct navigation
-                    log_info("browse_nav: no session, navigating directly to %s", new_url);
-                    DomDocument* old_doc = evcon.ui_context->document;
-                    new_doc = show_html_doc(evcon.ui_context->document->url, (char*)new_url, css_vw, css_vh);
-                    free_document(old_doc);
-                }
-                if (new_doc) {
-                    // update window title from <title> tag
-                    const char* page_title = session ? session_current_title(session) : nullptr;
-                    if (!page_title) page_title = session_extract_title(new_doc);
-                    if (page_title) {
-                        char title_buf[512];
-                        snprintf(title_buf, sizeof(title_buf), "Lambda - %s", page_title);
-                        update_window_title(title_buf);
-                    }
-                }
+                // Legacy package-off navigation uses the same native executor
+                // after its mousedown policy determines the current document.
+                navigation_execute_top_target(evcon.ui_context, doc, new_url);
             }
             to_repaint();
         }
@@ -10233,7 +11150,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 DomDocument* focus_doc = evcon.target_document ? evcon.target_document : doc;
                 if (focus_doc && focus_doc->view_tree && focus_doc->view_tree->root) {
                     View* previous_focus = focus_get(state);
-                    focus_move(state, focus_doc->view_tree->root, forward);
+                    DomElement* focus_root = radiant_document_body_element(focus_doc);
+                    if (!focus_root) focus_root = focus_doc->root;
+                    InputIntent focus_key_intent = {};
+                    focus_key_intent.key = key_event->key;
+                    focus_key_intent.mods = key_event->mods;
+                    // The package owns target ordering. Package-off documents
+                    // retain the historical native move as the compatibility
+                    // fallback while the behavior registry remains optional.
+                    if (!dispatch_behavior_handler(&evcon, static_cast<View*>(focus_root),
+                                                   "focuskey", &focus_key_intent, nullptr)) {
+                        focus_move(state, focus_doc->view_tree->root, forward);
+                    }
                     View* next_focus = focus_get(state);
                     if (next_focus && next_focus != previous_focus) {
                         // Sequential focus navigation must emit focusin so
@@ -10295,83 +11223,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // Space toggles a focused checkbox / radio (matches native browser
-        // and ARIA keyboard behavior). Space and Enter both "activate" a
-        // focused <button> (browsers fire click on key-up for Space and
-        // key-down for Enter; we fire on key-down for both for simplicity
-        // so HTML form submission works without a mouse).
-        if (focused && focused->is_element()
-            && (key_event->key == RDT_KEY_SPACE || key_event->key == RDT_KEY_ENTER)
-            && !(key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER | RDT_MOD_ALT))) {
-            ViewElement* fe = lam::view_require_element(focused);
-            uint32_t tag = fe->tag();
-            bool handled = false;
-            if (tag == MARKUP_NAME_INPUT && key_event->key == RDT_KEY_SPACE) {
-                if (is_checkbox(focused) || is_radio(focused)) {
-                    bool js_click_dispatched = false;
-                    radiant_dispatch_mouse_event(&evcon, focused, "click",
-                        0, 0, 0, 0, false, false, false, false, 1,
-                        &js_click_dispatched);
-                    // Keyboard activation goes through the same dispatch the
-                    // mouse path uses, so the behavior template owns it too.
-                    // It used to call the native activation directly and
-                    // without consulting the claim, so a checkbox activated by
-                    // Space ran native while the same checkbox clicked by mouse
-                    // ran the template — benign only because the two agreed.
-                    if (!js_click_dispatched && !evcon.default_prevented) {
-                        dispatch_lambda_handler(&evcon, focused, "click");
-                    }
-                    handled = true;
-                }
-            } else if (tag == MARKUP_NAME_BUTTON) {
-                // Disabled buttons are inert.
-                DomElement* delem = lam::dom_require_element(focused);
-                bool disabled = delem->form_control() && form_control_is_disabled(state, static_cast<View*>(delem));
-                if (!disabled) {
-                    radiant_dispatch_mouse_event(&evcon, focused, "click",
-                        0, 0, 0, 0, false, false, false, false, 1);
-                    run_form_button_default(&evcon, focused);
-                    handled = true;
-                }
-            } else if (tag == MARKUP_NAME_INPUT &&
-                       key_event->key == RDT_KEY_ENTER &&
-                       (js_dom_is_submit_button((void*)focused) ||
-                        js_dom_is_reset_button((void*)focused))) {
-                DomElement* delem = lam::dom_require_element(focused);
-                bool disabled = delem->form_control() &&
-                    form_control_is_disabled(state, static_cast<View*>(delem));
-                if (!disabled) {
-                    radiant_dispatch_mouse_event(&evcon, focused, "click",
-                        0, 0, 0, 0, false, false, false, false, 1);
-                    run_form_button_default(&evcon, focused);
-                    handled = true;
-                }
-            } else if (tag == MARKUP_NAME_SELECT) {
-                // Space / Enter on a focused <select> opens (or toggles)
-                // the dropdown popup, matching native browser behavior.
-                DomElement* delem = lam::dom_require_element(focused);
-                bool disabled = delem->form_control() && form_control_is_disabled(state, static_cast<View*>(delem));
-                if (!disabled) {
-                    handled = dispatch_lambda_handler(&evcon, focused, "click");
-                }
-            }
-            if (handled) {
-                evcon.need_repaint = true;
-                break;
-            }
-        }
-
-        // capture selection state before dispatch (needed for caret adjustment after)
-        bool had_keydown_selection = false;
-        int keydown_sel_start = 0;
-        int keydown_sel_end_capture = 0;
-        if (selection_has(state)) {
-            had_keydown_selection = true;
-            selection_get_range(state, &keydown_sel_start, &keydown_sel_end_capture);
-        }
-        int keydown_caret_offset = 0;
-        bool had_keydown_caret = caret_get_offset(state, &keydown_caret_offset);
-
         // Rich-text editing path (Phase R4): translate platform key events
         // into browser-like beforeinput intents for contenteditable
         // template output. Native form controls continue down the existing
@@ -10401,21 +11252,6 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // dispatch "keydown" event to Lambda handler for actionable keys
-        bool had_lambda_keydown = false;
-        if (!rich_keydown_dispatched && focused &&
-            (key_event->key == RDT_KEY_BACKSPACE ||
-                        key_event->key == RDT_KEY_DELETE ||
-                        key_event->key == RDT_KEY_ENTER ||
-                        key_event->key == RDT_KEY_ESCAPE)) {
-            if (dispatch_lambda_handler(&evcon, focused, "keydown")) {
-                evcon.need_repaint = true;
-                had_lambda_keydown = true;
-            }
-            // Re-fetch focused element (dispatch may have rebuilt the DOM)
-            focused = focus_get(state);
-        }
-
         // Dispatch keydown through JS EventTarget for inline, IDL, and
         // addEventListener handlers.
         if (focused && !rich_keydown_dispatched) {
@@ -10423,6 +11259,33 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 "keydown", key_event->key, key_event->mods, false);
             if (prevented) evcon.default_prevented = true;
             focused = focus_get(state);
+        }
+        if (!rich_keydown_dispatched && focused &&
+            (key_event->key == RDT_KEY_BACKSPACE ||
+             key_event->key == RDT_KEY_DELETE ||
+             key_event->key == RDT_KEY_ENTER ||
+             key_event->key == RDT_KEY_ESCAPE)) {
+            if (dispatch_lambda_handler_without_js(
+                    &evcon, focused, "keydown", nullptr, nullptr, true, true)) {
+                evcon.need_repaint = true;
+                focused = focus_get(state);
+            }
+        }
+
+        // Enter activates immediately, but Space only arms a pending click.
+        // The identity pin lets a cancelable keydown reconcile the DOM without
+        // turning keyup into a dangling View* access (D4.5.1v3).
+        if (focused && !evcon.default_prevented &&
+            !(key_event->mods & (RDT_MOD_CTRL | RDT_MOD_SUPER | RDT_MOD_ALT))) {
+            if (key_event->key == RDT_KEY_SPACE &&
+                keyboard_space_activation_target(state, focused) &&
+                space_activation_arm(&evcon, state, focused)) {
+                break;
+            }
+            if (run_keyboard_activation(&evcon, state, focused, key_event->key)) {
+                evcon.need_repaint = true;
+                break;
+            }
         }
 
         // F4: a single-line text control's Enter is implicit submission, not
@@ -10448,468 +11311,35 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             }
         }
 
-        // Handle arrow keys and caret adjustment for text input form controls
+        // The old input and textarea key tables drifted by modifier and by
+        // operation vocabulary. Keymap/caret now choose all commands once in
+        // the package; native receives only the named command to apply.
         int form_caret_offset = 0;
-        if (focused && focused->is_element() && caret_get_offset(state, &form_caret_offset)) {
+        if (!evcon.default_prevented && focused && focused->is_element() &&
+            caret_get_offset(state, &form_caret_offset)) {
             DomElement* focus_elem = lam::dom_require_element(focused);
-            if (focus_elem->form_control() &&
-                focus_elem->form->control_type == FORM_CONTROL_TEXT) {
-
+            if (tc_is_text_control(focus_elem)) {
                 uint32_t live_value_len = 0;
                 const char* value = form_control_live_value(focus_elem, &live_value_len);
                 int value_len = (int)live_value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
                 int cur = form_caret_offset;
                 if (cur < 0) cur = 0;
                 if (cur > value_len) cur = value_len;
-                bool alt = (key_event->mods & RDT_MOD_ALT)   != 0;
-                bool ctrl = (key_event->mods & RDT_MOD_CTRL)  != 0;
-                bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
-                bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
 
-                // F4: Cmd+Z = undo, Cmd+Shift+Z (or Ctrl+Y) = redo. Bypass
-                // the rest of the input-branch dispatch on consume.
-                if (cmd && key_event->key == RDT_KEY_Z) {
-                    InputIntentType history_type = (key_event->mods & RDT_MOD_SHIFT)
-                        ? INPUT_INTENT_HISTORY_REDO
-                        : INPUT_INTENT_HISTORY_UNDO;
-                    bool did = dispatch_form_history_via_controller(
-                        &evcon, focus_elem, state, focused, history_type);
-                    if (did) {
-                        // Restore caret to the snapshot's selection end.
-                        int vlen = form_control_live_value_len_int(focus_elem);
-                        int caret_offset = 0;
-                        if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)vlen, "historyClamp");
-                        }
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_Y) {
-                    if (dispatch_form_history_via_controller(
-                            &evcon, focus_elem, state, focused,
-                            INPUT_INTENT_HISTORY_REDO)) {
-                        int vlen = form_control_live_value_len_int(focus_elem);
-                        int caret_offset = 0;
-                        if (caret_get_offset(state, &caret_offset) && caret_offset > vlen) {
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)vlen, "historyClamp");
-                        }
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-
-                if ((cmd || ctrl) && key_event->key == RDT_KEY_A) {
-                    if (dispatch_form_select_all(&evcon, focus_elem, state, focused)) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-                if ((cmd || ctrl) && key_event->key == RDT_KEY_C) {
-                    dispatch_form_copy_selection(&evcon, focus_elem, state,
-                                                 focused, "form input copy");
-                    break;
-                }
-                if ((cmd || ctrl) && key_event->key == RDT_KEY_X) {
-                    if (dispatch_form_cut_selection(&evcon, focus_elem, state,
-                                                    focused)) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-
-                // Cmd+V paste. The newline and maxlength policy is the dom
-                // package's now (F6) and is applied by the beforeinput applier;
-                // this path only resolves the replaced range and dispatches.
-                // Caret is positioned by the splice.
-                if ((cmd || ctrl) && key_event->key == RDT_KEY_V) {
-                    // Ctrl+V and Cmd+V are the same primary paste action; limiting
-                    // text controls to Cmd bypassed paste on non-macOS testdrivers.
-                    dispatch_form_keyboard_paste(&evcon, state, focused, false);
-                    break;
-                }
-
-                // F9: ask the <body> template which caret operation this key
-                // means. It answers by calling `radiant.caret_operation`, which
-                // bumps the epoch — a primitive has no EventContext, and
-                // performing the move needs one, so the answer comes back the
-                // way `request_change` reports its own (ESO-epoch pattern).
-                {
-                    uint64_t caret_epoch_before = radiant_caret_operation_epoch();
-                    InputIntent caret_key_intent;
-                    caret_key_intent.key = key_event->key;
-                    caret_key_intent.mods = key_event->mods;
-                    radiant_dispatch_behavior_caret_key(&evcon, focused, &caret_key_intent);
-                    if (radiant_caret_operation_epoch() != caret_epoch_before &&
-                        form_apply_caret_operation(&evcon, focus_elem, state, focused,
-                                                   value, value_len, cur)) {
-                        evcon.need_repaint = true;
-                        break;
-                    }
-                }
-
-                // F3: Alt+Backspace → delete previous word.
-                //     Cmd+Backspace → delete to start of value.
-                if (dispatch_form_modified_delete_key(
-                        &evcon, focus_elem, state, focused, value, value_len,
-                        cur, key_event->key, alt, cmd)) {
-                    break;
-                }
-
-                if (key_event->key == RDT_KEY_BACKSPACE) {
-                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, true, had_lambda_keydown,
-                        had_keydown_selection, keydown_sel_start,
-                        keydown_sel_end_capture, had_keydown_caret,
-                        keydown_caret_offset, false);
-                    break;
-                } else if (key_event->key == RDT_KEY_DELETE) {
-                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, false, had_lambda_keydown,
-                        had_keydown_selection, keydown_sel_start,
-                        keydown_sel_end_capture, had_keydown_caret,
-                        keydown_caret_offset, false);
-                    break;
-                }
-            }
-        }
-
-        // Handle arrow keys and caret adjustment for textarea form controls
-        int textarea_caret_offset = 0;
-        if (focused && focused->is_element() && caret_get_offset(state, &textarea_caret_offset)) {
-            DomElement* focus_elem = lam::dom_require_element(focused);
-            if (focus_elem->form_control() &&
-                focus_elem->form->control_type == FORM_CONTROL_TEXTAREA) {
-
-                uint32_t live_value_len = 0;
-                const char* value = form_control_live_value(focus_elem, &live_value_len);
-                int value_len = (int)live_value_len; // INT_CAST_OK: text-control byte offsets use StateStore int APIs.
-                int cur = textarea_caret_offset;
-                if (cur < 0) cur = 0;
-                if (cur > value_len) cur = value_len;
-
-                // helper: compute line start offset and line length for a given line
-                auto line_start_off = [&](int line) -> int {
-                    if (!value || line <= 0) return 0;
-                    int ln = 0;
-                    for (int i = 0; i < value_len; i++) {
-                        if (value[i] == '\n') {
-                            ln++;
-                            if (ln == line) return i + 1;
-                        }
-                    }
-                    return value_len;
-                };
-
-                auto line_len_from = [&](int off) -> int {
-                    int i = 0;
-                    while (off + i < value_len && value[off + i] != '\n') i++;
-                    return i;
-                };
-
-                // compute current line and column (byte offset within line)
-                int cur_line = 0, cur_col = 0;
-                if (value) {
-                    for (int i = 0; i < cur && i < value_len; i++) {
-                        if (value[i] == '\n') { cur_line++; cur_col = 0; }
-                        else cur_col++;
-                    }
-                }
-
-                // count total lines
-                int total_lines = 1;
-                if (value) {
-                    for (int i = 0; i < value_len; i++) {
-                        if (value[i] == '\n') total_lines++;
-                    }
-                }
-
-                bool shift = (key_event->mods & RDT_MOD_SHIFT) != 0;
-                bool cmd = (key_event->mods & RDT_MOD_SUPER) != 0;
-
-                // helper: begin or extend selection for shift-modified keys
-                // through the unified form editing surface.
-                auto sel_begin_or_extend = [&](int new_off, const char* operation) {
-                    dispatch_form_selection_extend(&evcon, focus_elem, state,
-                        focused, cur, new_off, operation);
-                };
-
-                // Cmd+C: copy selected textarea text to clipboard
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_C) {
-                    dispatch_form_copy_selection(&evcon, focus_elem, state,
-                                                 focused, "textarea copy");
-                    break;
-                }
-
-                // Cmd/Ctrl+X: cut selected textarea text through the same
-                // deleteByCut edit used by context-menu Cut.
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_X) {
-                    if (dispatch_form_cut_selection(&evcon, focus_elem, state,
-                                                    focused)) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-
-                // Cmd+V: paste clipboard text into textarea. F6 routes
-                // through the applier so newline normalization (\r\n → \n) and
-                // maxlength clamping happen in one place; caret + undo are
-                // handled by te_replace_byte_range.
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_V) {
-                    // Primary paste is platform-neutral even though the physical
-                    // modifier differs; both routes share the form edit.
-                    dispatch_form_keyboard_paste(&evcon, state, focused, true);
-                    break;
-                }
-
-                // Cmd/Ctrl+A: select all textarea text through the shared
-                // editing surface so keyboard and context-menu selection share
-                // one logging and projection path.
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_A) {
-                    if (dispatch_form_select_all(&evcon, focus_elem, state, focused)) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-
-                // F4: Cmd+Z = undo, Cmd+Shift+Z (or Ctrl+Y) = redo.
-                if (cmd && key_event->key == RDT_KEY_Z) {
-                    InputIntentType history_type = (key_event->mods & RDT_MOD_SHIFT)
-                        ? INPUT_INTENT_HISTORY_REDO
-                        : INPUT_INTENT_HISTORY_UNDO;
-                    bool did = dispatch_form_history_via_controller(
-                        &evcon, focus_elem, state, focused, history_type);
-                    if (did) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-                if ((cmd || (key_event->mods & RDT_MOD_CTRL)) &&
-                    key_event->key == RDT_KEY_Y) {
-                    if (dispatch_form_history_via_controller(
-                            &evcon, focus_elem, state, focused,
-                            INPUT_INTENT_HISTORY_REDO)) {
-                        evcon.need_repaint = true;
-                    }
-                    break;
-                }
-
-                bool alt = (key_event->mods & RDT_MOD_ALT) != 0;
-
-                // F3: Alt+Left/Right → word jump (with Shift = extend).
-                if (alt && key_event->key == RDT_KEY_LEFT) {
-                    int new_off = (int)te_prev_word_byte(
-                        value, (uint32_t)value_len, (uint32_t)cur);
-                    if (shift) sel_begin_or_extend(new_off, "extendWordBackward");
-                    else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state, focused,
-                            (uint32_t)new_off, "moveWordBackward");
-                    }
+                uint64_t caret_epoch_before = radiant_caret_operation_epoch();
+                InputIntent caret_key_intent;
+                caret_key_intent.key = key_event->key;
+                caret_key_intent.mods = key_event->mods;
+                radiant_dispatch_behavior_caret_key(&evcon, focused, &caret_key_intent);
+                if (radiant_caret_operation_epoch() != caret_epoch_before &&
+                    form_apply_caret_operation(&evcon, focus_elem, state, focused,
+                                               value, value_len, cur)) {
                     evcon.need_repaint = true;
                     break;
                 }
-                if (alt && key_event->key == RDT_KEY_RIGHT) {
-                    int new_off = (int)te_next_word_byte(
-                        value, (uint32_t)value_len, (uint32_t)cur);
-                    if (shift) sel_begin_or_extend(new_off, "extendWordForward");
-                    else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state, focused,
-                            (uint32_t)new_off, "moveWordForward");
-                    }
-                    evcon.need_repaint = true;
+                if (dispatch_form_key_intent(&evcon, focus_elem, state, focused,
+                                             key_event, cur)) {
                     break;
-                }
-
-                // F3: Alt+Backspace → delete previous word.
-                //     Cmd+Backspace → delete to start of current line.
-                if (dispatch_form_modified_delete_key(
-                        &evcon, focus_elem, state, focused, value, value_len,
-                        cur, key_event->key, alt, cmd)) {
-                    break;
-                }
-
-                // F3: PgUp / PgDn → move caret by ~10 logical lines (no
-                // viewport-aware metrics yet; matches the heuristic in the
-                // proposal §3.5).
-                if (key_event->key == RDT_KEY_PAGE_UP ||
-                    key_event->key == RDT_KEY_PAGE_DOWN) {
-                    int delta = (key_event->key == RDT_KEY_PAGE_UP) ? -10 : 10;
-                    int target_line = cur_line + delta;
-                    if (target_line < 0) target_line = 0;
-                    if (target_line > total_lines - 1) target_line = total_lines - 1;
-                    int loff = line_start_off(target_line);
-                    int llen = line_len_from(loff);
-                    int target_col = cur_col < llen ? cur_col : llen;
-                    int new_off = loff + target_col;
-                    if (shift) {
-                        sel_begin_or_extend(new_off,
-                            key_event->key == RDT_KEY_PAGE_UP
-                                ? "extendPageBackward" : "extendPageForward");
-                    }
-                    else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state, focused,
-                            (uint32_t)new_off,
-                            key_event->key == RDT_KEY_PAGE_UP
-                                ? "movePageBackward" : "movePageForward");
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                }
-
-                if (key_event->key == RDT_KEY_LEFT) {
-                    int new_off = cur;
-                    if (cur > 0 && value) {
-                        new_off = cur - 1;
-                        while (new_off > 0 && ((unsigned char)value[new_off] & 0xC0) == 0x80)
-                            new_off--;
-                    }
-                    if (shift) {
-                        sel_begin_or_extend(new_off, "extendCharacterBackward");
-                    } else {
-                        // collapse selection if active, else move caret
-                        if (selection_has(state)) {
-                            int start = 0, end = 0;
-                            selection_get_range(state, &start, &end);
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)start, "collapseSelectionStart");
-                        } else {
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)new_off, "moveCharacterBackward");
-                        }
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_RIGHT) {
-                    int new_off = cur;
-                    if (cur < value_len && value) {
-                        uint32_t cp;
-                        int bytes = str_utf8_decode(value + cur, (size_t)(value_len - cur), &cp);
-                        if (bytes > 0) new_off = cur + bytes;
-                    }
-                    if (shift) {
-                        sel_begin_or_extend(new_off, "extendCharacterForward");
-                    } else {
-                        if (selection_has(state)) {
-                            int start = 0, end = 0;
-                            selection_get_range(state, &start, &end);
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)end, "collapseSelectionEnd");
-                        } else {
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, (uint32_t)new_off, "moveCharacterForward");
-                        }
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_UP) {
-                    int new_off = cur;
-                    if (cur_line > 0) {
-                        int prev_line_off = line_start_off(cur_line - 1);
-                        int prev_line_len = line_len_from(prev_line_off);
-                        int target_col = cur_col < prev_line_len ? cur_col : prev_line_len;
-                        new_off = prev_line_off + target_col;
-                    }
-                    if (shift) {
-                        sel_begin_or_extend(new_off, "extendLineBackward");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, (uint32_t)new_off, "moveLineBackward");
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_DOWN) {
-                    int new_off = cur;
-                    if (cur_line < total_lines - 1) {
-                        int next_line_off = line_start_off(cur_line + 1);
-                        int next_line_len = line_len_from(next_line_off);
-                        int target_col = cur_col < next_line_len ? cur_col : next_line_len;
-                        new_off = next_line_off + target_col;
-                    }
-                    if (shift) {
-                        sel_begin_or_extend(new_off, "extendLineForward");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, (uint32_t)new_off, "moveLineForward");
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_HOME) {
-                    int new_off = shift && cmd ? 0 : line_start_off(cur_line);
-                    if (shift) {
-                        sel_begin_or_extend(new_off,
-                            cmd ? "extendDocumentStart" : "extendLineStart");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, (uint32_t)new_off,
-                            cmd ? "moveDocumentStart" : "moveLineStart");
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_END) {
-                    int loff = line_start_off(cur_line);
-                    int new_off = shift && cmd ? value_len : loff + line_len_from(loff);
-                    if (shift) {
-                        sel_begin_or_extend(new_off,
-                            cmd ? "extendDocumentEnd" : "extendLineEnd");
-                    } else {
-                        dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                            focused, (uint32_t)new_off,
-                            cmd ? "moveDocumentEnd" : "moveLineEnd");
-                    }
-                    evcon.need_repaint = true;
-                    break;
-                } else if (key_event->key == RDT_KEY_BACKSPACE) {
-                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, true, had_lambda_keydown,
-                        had_keydown_selection, keydown_sel_start,
-                        keydown_sel_end_capture, had_keydown_caret,
-                        keydown_caret_offset, true);
-                } else if (key_event->key == RDT_KEY_DELETE) {
-                    dispatch_form_delete_key(&evcon, focus_elem, state, focused,
-                        value, value_len, cur, false, had_lambda_keydown,
-                        had_keydown_selection, keydown_sel_start,
-                        keydown_sel_end_capture, had_keydown_caret,
-                        keydown_caret_offset, true);
-                } else if (key_event->key == RDT_KEY_ENTER) {
-                    bool editable = !form_control_is_user_readonly(state, static_cast<View*>(focus_elem));
-                    if (had_lambda_keydown) {
-                        // Lambda handler processed the enter; adjust caret
-                        if (had_keydown_selection) {
-                            // selection was replaced with '\n': caret goes to sel_start + 1
-                            int new_len = form_control_live_value_len_int(focus_elem);
-                            int new_off = keydown_sel_start + 1;
-                            uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, collapse_off, "lambdaInsertParagraph");
-                        } else {
-                            // normal enter: advance caret by 1 byte
-                            int new_len = form_control_live_value_len_int(focus_elem);
-                            int new_off = (had_keydown_caret ? keydown_caret_offset : cur) + 1;
-                            uint32_t collapse_off = (uint32_t)(new_off <= new_len ? new_off : new_len);
-                            dispatch_form_caret_collapse(&evcon, focus_elem, state,
-                                focused, collapse_off, "lambdaInsertParagraph");
-                        }
-                    } else if (editable) {
-                        // Plain HTML textarea: insert newline ourselves.
-                        uint32_t a, b;
-                        if (had_keydown_selection) {
-                            a = (uint32_t)keydown_sel_start;
-                            b = (uint32_t)keydown_sel_end_capture;
-                        } else {
-                            a = b = (uint32_t)cur;
-                        }
-                        dispatch_form_text_replace(&evcon, focus_elem, state, focused,
-                                                   a, b, "\n", 1,
-                                                   INPUT_INTENT_INSERT_PARAGRAPH);
-                    }
-                    evcon.need_repaint = true;
                 }
             }
         }
@@ -11034,6 +11464,35 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 log_debug("event: rich key fallback fenced; key=%d", key_event->key);
             }
         }
+
+        // ESO48 runs after every higher-priority keyboard default has had its
+        // turn: author keydown cancellation, control activation, and caretkey.
+        // Dispatch from the live body so a missing focus/caret still receives
+        // document policy, and so a stale rendered focus node cannot bypass it.
+        if (!evcon.default_prevented) {
+            DomDocument* key_doc = event_context_target_document(&evcon);
+            DomElement* body = radiant_document_body_element(key_doc);
+            if (body) {
+                InputIntent scroll_key_intent;
+                scroll_key_intent.key = key_event->key;
+                scroll_key_intent.mods = key_event->mods;
+                uint64_t scroll_epoch_before = s_scroll_op_epoch;
+                radiant_dispatch_behavior_scroll_key(
+                    &evcon, static_cast<View*>(body), &scroll_key_intent);
+                if (s_scroll_op_epoch != scroll_epoch_before) {
+                    View* scroll_origin = focus_get(state);
+                    if (!scroll_origin) {
+                        scroll_origin = static_cast<View*>(
+                            radiant_document_body_element(key_doc));
+                    }
+                    if (apply_keyboard_scroll_operation(
+                            &evcon, scroll_origin, s_scroll_op_name)) {
+                        break;
+                    }
+                }
+            }
+        }
+
         // Mirror StateStore selection projection into form->selection_* so JS
         // reads (selectionStart/End/value) observe text edits immediately.
         {
@@ -11063,18 +11522,29 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     state->editing.pending_text_input_prevented = false;
                     state->editing.pending_text_input_key = RDT_KEY_UNKNOWN;
                 }
+                DomNodeRef space_activation_ref = {nullptr, 0};
+                View* space_activation_target = event->key.key == RDT_KEY_SPACE
+                    ? space_activation_take(&evcon, state, &space_activation_ref) : nullptr;
                 View* focused = focus_get(state);
                 event_log_focused_target(cascade_log, cascade_id, focused);
                 WebViewHandle* focused_webview = focused_layer_webview_handle(focused);
                 if (focused_webview) {
                     webview_layer_platform_inject_key(
                         focused_webview, 1, event->key.key, event->key.mods);
+                    space_activation_release(&evcon, space_activation_ref);
                     break;
                 }
+                bool keyup_prevented = false;
                 if (focused) {
-                    radiant_dispatch_keyboard_event(&evcon, focused,
+                    keyup_prevented = radiant_dispatch_keyboard_event(&evcon, focused,
                         "keyup", event->key.key, event->key.mods, false);
                 }
+                if (space_activation_target && !keyup_prevented &&
+                    run_keyboard_activation(&evcon, state,
+                                            space_activation_target, RDT_KEY_SPACE)) {
+                    evcon.need_repaint = true;
+                }
+                space_activation_release(&evcon, space_activation_ref);
             }
         }
         break;
@@ -11189,7 +11659,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                         // behavior must NOT see this one — it fires before the
                         // value exists, and claiming it would stop typing.
                         if (dispatch_lambda_handler(&evcon, focused, "input", nullptr,
-                                                    nullptr, /*allow_behavior=*/false)) {
+                                                    nullptr, /*allow_behavior=*/false,
+                                                    /*legacy_author=*/true)) {
                             evcon.need_repaint = true;
                             View* live_focus = focus_get(state);
                             if (live_focus && live_focus->is_element()) {
