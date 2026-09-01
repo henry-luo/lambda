@@ -4827,6 +4827,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             else if (strcmp(ev->state_name, ":active") == 0) mask = PSEUDO_STATE_ACTIVE;
             else if (strcmp(ev->state_name, ":focus") == 0) mask = PSEUDO_STATE_FOCUS;
             else if (strcmp(ev->state_name, ":visited") == 0) mask = PSEUDO_STATE_VISITED;
+            else if (strcmp(ev->state_name, ":target") == 0) mask = PSEUDO_STATE_TARGET;
             else if (strcmp(ev->state_name, ":checked") == 0) mask = PSEUDO_STATE_CHECKED;
             else if (strcmp(ev->state_name, ":disabled") == 0) mask = PSEUDO_STATE_DISABLED;
             else if (strcmp(ev->state_name, ":enabled") == 0) mask = PSEUDO_STATE_ENABLED;

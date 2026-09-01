@@ -3,6 +3,7 @@
 #include "render.hpp"
 #include "view.hpp"
 #include "radiant.hpp"
+#include "../lambda/module/radiant/radiant_history.hpp"
 #include "rdt_video.h"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
@@ -13,6 +14,7 @@
 #include "../lambda/runtime/radiant_event_hook.h"
 #include "../lib/utf.h"
 #include "../lib/str.h"
+#include "../lib/url.h"
 // str.h included via view.hpp
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"
@@ -53,6 +55,7 @@ extern "C" bool js_dom_is_reset_button(void* dom_elem);
 extern "C" Item js_dom_form_request_submit_bridge(Item form_item, Item submitter_item);
 extern "C" bool js_dom_is_disabled(void* dom_elem);
 extern "C" bool js_dom_is_connected(void* dom_elem);
+extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem);
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
 #include <chrono>       // timing for reactive event dispatch
@@ -1423,23 +1426,19 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
         log_debug("fired at anchor tag");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
             log_debug("mouse down at anchor tag");
-            // §7 unification (U-2): skip default link navigation if a JS
-            // mousedown listener called event.preventDefault().
-            if (evcon->default_prevented) {
-                log_debug("anchor nav suppressed by preventDefault()");
-            } else {
+            // ES31: once the package claims linkactivation, click (not
+            // mousedown) is the cancelable policy point. Keep the legacy
+            // fields only for package-off documents while evaluator ownership
+            // remains staged for every static embedded format.
+            bool package_claims = radiant_behavior_claims_event(
+                evcon, static_cast<View*>(span), "linkactivation");
+            if (!evcon->default_prevented && !package_claims) {
                 const char* href = span->get_attribute("href");
                 if (href) {
-                log_debug("got anchor href: %s", href);
-                evcon->new_url = (char*)href;
-                const char* target = span->get_attribute("target");
-                if (target) {
-                    log_debug("got anchor target: %s", target);
-                    evcon->new_target = (char*)target;
-                }
-                else {
-                    log_debug("no anchor target found");
-                }
+                    log_debug("legacy anchor href: %s", href);
+                    evcon->new_url = (char*)href;
+                    const char* target = span->get_attribute("target");
+                    if (target) evcon->new_target = (char*)target;
                 }
             }
         }
@@ -2609,6 +2608,17 @@ static bool radiant_target_is_details_summary(View* target) {
     return false;
 }
 
+static bool radiant_target_is_link(View* target) {
+    for (DomNode* node = static_cast<DomNode*>(target); node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* elem = node->as_element();
+        if (elem && elem->tag() == MARKUP_NAME_A && elem->get_attribute("href")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr) {
     if (!doc) return false;
     if (doc->dom_package_loaded) {
@@ -2657,18 +2667,16 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         // form page is the case that exposed this) has no other chance, and
         // since native activation was deleted the package is the only
         // implementation there is.
-        // Only for a target the package actually governs. Creating on any
-        // event at all is too eager: a thread holds one Runtime, so a click on
-        // an ordinary link would take it and deny it to a Lambda-script
-        // subdocument — which is exactly how the PDF and Lambda-report iframes
-        // broke when creation was eager at setup.
+        // Only for a target the package actually governs. The outer event
+        // scope may switch between document-owned evaluators, so link policy
+        // can now create its own static-document evaluator without borrowing
+        // the runtime of an embedded Lambda/PDF document.
         // F9 widened this from form controls alone to "a target the package
         // governs", which now includes a rich editing surface: the <body>
         // caretkey template owns arrow keys there, so a contenteditable-only
         // page with no form control anywhere would otherwise never load the
         // package and would lose caret navigation entirely once the native rich
-        // handler was deleted. Still narrow — an ordinary link click creates
-        // nothing, which is what keeps the PDF and Lambda-report iframes safe.
+        // handler was deleted.
         DomElement* te = target && target->is_element() ? target->as_element() : nullptr;
         bool package_governs = te && te->form_control();
         if (!package_governs && target) {
@@ -2679,11 +2687,12 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         // F15 widens it once more, for the same reason F9 did: a <details> in a
         // static document — a markdown README is the common case — has no form
         // control and no script anywhere on the page, so it would never load the
-        // package, and there is no native toggle to fall back to. The predicate
-        // is as narrow as the editing one: an ordinary link click still creates
-        // nothing, which is what keeps the PDF and Lambda-report iframes safe.
+        // package, and there is no native toggle to fall back to.
         if (!package_governs && target) {
             package_governs = radiant_target_is_details_summary(target);
+        }
+        if (!package_governs && target) {
+            package_governs = radiant_target_is_link(target);
         }
         if (package_governs) {
             radiant_document_ensure_evaluator(doc);
@@ -7222,6 +7231,34 @@ static void run_form_button_default(EventContext* evcon, View* target) {
     }
 }
 
+static View* find_link_activation_target(View* target) {
+    for (View* current = target; current; current = current->parent) {
+        if (!current->is_element()) continue;
+        DomElement* elem = lam::dom_require_element(current);
+        if (elem->tag() == MARKUP_NAME_A && elem->get_attribute("href")) {
+            return current;
+        }
+    }
+    return nullptr;
+}
+
+// The ordinary click is the author event. This behavior-only follow-up runs
+// only once click cancellation is settled, then the package submits its
+// resolved request for native execution (ES31).
+static bool run_link_activation(EventContext* evcon, View* target) {
+    if (!evcon || evcon->default_prevented) return false;
+    View* anchor = find_link_activation_target(target);
+    if (!anchor) return false;
+    if (!radiant_behavior_claims_event(evcon, anchor, "linkactivation")) {
+        return false;
+    }
+    if (!dispatch_behavior_handler(evcon, anchor, "linkactivation", nullptr, nullptr)) {
+        return false;
+    }
+    DomDocument* document = event_context_target_document(evcon);
+    return radiant_execute_pending_navigation(evcon->ui_context, document);
+}
+
 
 static bool click_target_is_disabled_control(DocState* state, View* target) {
     for (View* current = target; current; current = current->parent) {
@@ -7790,6 +7827,401 @@ static DomElement* find_element_by_id(DomElement* root, const char* id) {
         if (found) return found;
     }
     return nullptr;
+}
+
+// The request is document-owned, not EventContext-owned: a behavior handler
+// runs below the event dispatcher and must not retain a stack EventContext.
+// Node references are pinned across that return boundary (D4.5.1v3).
+typedef struct RadiantNavigationRequest {
+    DomDocument* source_document;
+    DomNodeRef source_ref;
+    DomDocument* target_document;
+    DomNodeRef target_ref;
+    DomDocument* fragment_document;
+    DomNodeRef fragment_ref;
+    char* url;
+    char* target_name;
+    RadiantNavigationTargetKind target_kind;
+    struct RadiantNavigationRequest* next;
+} RadiantNavigationRequest;
+
+typedef struct RadiantNavigationQueue {
+    RadiantNavigationRequest* first;
+    RadiantNavigationRequest* last;
+} RadiantNavigationQueue;
+
+static void navigation_request_destroy(RadiantNavigationRequest* request) {
+    if (!request) return;
+    if (request->source_document && request->source_ref.address) {
+        dom_node_unpin(request->source_document, request->source_ref,
+                       DOM_NODE_PIN_EVENT_QUEUE);
+    }
+    if (request->target_document && request->target_ref.address) {
+        dom_node_unpin(request->target_document, request->target_ref,
+                       DOM_NODE_PIN_EVENT_QUEUE);
+    }
+    if (request->fragment_document && request->fragment_ref.address) {
+        dom_node_unpin(request->fragment_document, request->fragment_ref,
+                       DOM_NODE_PIN_EVENT_QUEUE);
+    }
+    if (request->url) mem_free(request->url);
+    if (request->target_name) mem_free(request->target_name);
+    mem_free(request);
+}
+
+static void navigation_queue_destroy(void* data) {
+    RadiantNavigationQueue* queue = (RadiantNavigationQueue*)data;
+    if (!queue) return;
+    RadiantNavigationRequest* request = queue->first;
+    while (request) {
+        RadiantNavigationRequest* next = request->next;
+        navigation_request_destroy(request);
+        request = next;
+    }
+    mem_free(queue);
+}
+
+static RadiantNavigationQueue* navigation_queue_for_document(DomDocument* doc,
+                                                              bool create) {
+    if (!doc) return nullptr;
+    for (DomDocumentResource* resource = doc->resources; resource;
+         resource = resource->next) {
+        if (resource->destroy == navigation_queue_destroy) {
+            return (RadiantNavigationQueue*)resource->data;
+        }
+    }
+    if (!create) return nullptr;
+    RadiantNavigationQueue* queue = (RadiantNavigationQueue*)mem_calloc(
+        1, sizeof(RadiantNavigationQueue), MEM_CAT_LAYOUT);
+    if (!queue || !dom_document_add_resource(doc, queue, navigation_queue_destroy)) {
+        if (queue) mem_free(queue);
+        return nullptr;
+    }
+    return queue;
+}
+
+static bool navigation_request_pin(DomDocument* document, DomElement* element,
+                                   DomNodeRef* out_ref) {
+    if (!document || !element || !out_ref || element->doc != document) return false;
+    *out_ref = dom_node_ref((DomNode*)element);
+    return dom_node_ref_validate(document, *out_ref) &&
+           dom_node_pin(document, *out_ref, DOM_NODE_PIN_EVENT_QUEUE);
+}
+
+bool radiant_queue_navigation_request(DomElement* source, const char* url,
+                                      DomElement* target,
+                                      RadiantNavigationTargetKind target_kind,
+                                      const char* target_name,
+                                      DomElement* fragment_target) {
+    if (!source || !source->doc || !url || !url[0]) return false;
+    if ((target_kind == RADIANT_NAVIGATION_TARGET_EXISTING && !target) ||
+        (target_kind == RADIANT_NAVIGATION_TARGET_NEW && target)) {
+        return false;
+    }
+
+    RadiantNavigationRequest* request = (RadiantNavigationRequest*)mem_calloc(
+        1, sizeof(RadiantNavigationRequest), MEM_CAT_LAYOUT);
+    if (!request) return false;
+    request->source_document = source->doc;
+    request->target_kind = target_kind;
+    request->url = mem_strdup(url, MEM_CAT_LAYOUT);
+    if (target_name && target_name[0]) {
+        request->target_name = mem_strdup(target_name, MEM_CAT_LAYOUT);
+    }
+    if (!request->url || (target_name && target_name[0] && !request->target_name) ||
+        !navigation_request_pin(request->source_document, source,
+                                &request->source_ref)) {
+        navigation_request_destroy(request);
+        return false;
+    }
+    if (target && !navigation_request_pin(target->doc, target, &request->target_ref)) {
+        navigation_request_destroy(request);
+        return false;
+    }
+    request->target_document = target ? target->doc : nullptr;
+    if (fragment_target &&
+        !navigation_request_pin(fragment_target->doc, fragment_target,
+                                &request->fragment_ref)) {
+        navigation_request_destroy(request);
+        return false;
+    }
+    request->fragment_document = fragment_target ? fragment_target->doc : nullptr;
+
+    RadiantNavigationQueue* queue = navigation_queue_for_document(
+        request->source_document, true);
+    if (!queue) {
+        navigation_request_destroy(request);
+        return false;
+    }
+    if (queue->last) queue->last->next = request;
+    else queue->first = request;
+    queue->last = request;
+    return true;
+}
+
+static RadiantNavigationRequest* navigation_queue_take(DomDocument* doc) {
+    RadiantNavigationQueue* queue = navigation_queue_for_document(doc, false);
+    if (!queue || !queue->first) return nullptr;
+    RadiantNavigationRequest* request = queue->first;
+    queue->first = request->next;
+    if (!queue->first) queue->last = nullptr;
+    request->next = nullptr;
+    return request;
+}
+
+static bool navigation_request_is_live(const RadiantNavigationRequest* request,
+                                       DomElement** out_source,
+                                       DomElement** out_target,
+                                       DomElement** out_fragment) {
+    if (out_source) *out_source = nullptr;
+    if (out_target) *out_target = nullptr;
+    if (out_fragment) *out_fragment = nullptr;
+    if (!request) return false;
+    DomNode* source = dom_node_ref_validate(request->source_document,
+                                            request->source_ref);
+    if (!source || !source->is_element()) return false;
+    if (out_source) *out_source = source->as_element();
+    if (request->target_kind == RADIANT_NAVIGATION_TARGET_EXISTING) {
+        DomNode* target = dom_node_ref_validate(request->target_document,
+                                                request->target_ref);
+        if (!target || !target->is_element()) return false;
+        if (out_target) *out_target = target->as_element();
+    }
+    if (request->fragment_ref.address) {
+        DomNode* fragment = dom_node_ref_validate(request->fragment_document,
+                                                  request->fragment_ref);
+        if (!fragment || !fragment->is_element()) return false;
+        if (out_fragment) *out_fragment = fragment->as_element();
+    }
+    return true;
+}
+
+static bool navigation_url_resolve(DomDocument* source, const char* raw,
+                                   Url** out_url) {
+    if (out_url) *out_url = nullptr;
+    if (!source || !raw || !raw[0] || !out_url) return false;
+    Url* resolved = source->url ? url_parse_with_base(raw, source->url)
+                                : url_parse(raw);
+    if (!resolved || !url_is_valid(resolved)) {
+        if (resolved) url_destroy(resolved);
+        return false;
+    }
+    *out_url = resolved;
+    return true;
+}
+
+bool radiant_urls_match_without_fragment(const Url* first, const Url* second) {
+    if (!first || !second) return false;
+    const char* first_parts[] = {
+        url_get_protocol(first), url_get_username(first), url_get_password(first),
+        url_get_host(first), url_get_pathname(first), url_get_search(first),
+    };
+    const char* second_parts[] = {
+        url_get_protocol(second), url_get_username(second), url_get_password(second),
+        url_get_host(second), url_get_pathname(second), url_get_search(second),
+    };
+    for (size_t i = 0; i < sizeof(first_parts) / sizeof(first_parts[0]); i++) {
+        if (strcmp(first_parts[i] ? first_parts[i] : "",
+                   second_parts[i] ? second_parts[i] : "") != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void navigation_clear_target_state(DomNode* node, DocState* state) {
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!current->is_element()) continue;
+        DomElement* elem = current->as_element();
+        if (state_get_bool(state, elem, STATE_TARGET)) {
+            state_set_bool(state, elem, STATE_TARGET, false);
+            radiant_sync_pseudo_state((View*)elem, PSEUDO_STATE_TARGET, false);
+        }
+        navigation_clear_target_state(elem->first_child, state);
+    }
+}
+
+static bool navigation_apply_fragment(DomDocument* document,
+                                      DomElement* fragment,
+                                      const char* resolved_url) {
+    if (!document || !document->root || !resolved_url) return false;
+    RadiantHistoryTraversal traversal = {};
+    radiant_history_set_location(document, resolved_url, &traversal);
+    DocState* state = (DocState*)document->state;
+    if (!state) return false;
+    navigation_clear_target_state((DomNode*)document->root, state);
+    if (fragment) {
+        state_set_bool(state, fragment, STATE_TARGET, true);
+        radiant_sync_pseudo_state((View*)fragment, PSEUDO_STATE_TARGET, true);
+        js_dom_scroll_into_view_bridge(fragment);
+    }
+    doc_state_request_repaint(state);
+    return true;
+}
+
+static bool navigation_execute_iframe_target(UiContext* uicon,
+                                             DomElement* iframe,
+                                             const char* url) {
+    if (!uicon || !iframe || iframe->tag() != MARKUP_NAME_IFRAME ||
+        !iframe->doc || !iframe->doc->view_tree || !url || !url[0]) {
+        return false;
+    }
+    DomDocument* owner = iframe->doc;
+    View* iframe_view = find_view(owner->view_tree->root, (DomNode*)iframe);
+    if (!iframe_view || (iframe_view->view_type != RDT_VIEW_BLOCK &&
+                         iframe_view->view_type != RDT_VIEW_INLINE_BLOCK)) {
+        return false;
+    }
+    ViewBlock* block = lam::view_require_block(iframe_view);
+    if (!block || !block->embed) return false;
+    if (!iframe->set_attribute("src", url)) return false;
+    if (block->scroller && block->scroll_mut()->pane) {
+        block->scroll()->pane->reset();
+        block->content_width = 0.0f;
+        block->content_height = 0.0f;
+    }
+
+    int css_vw = (int)block->width; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    int css_vh = (int)block->height; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    DomDocument* old_doc = block->embedp()->doc;
+    if (uicon->font_ctx) {
+        // Glyph-cache keys retain raw document FontHandle addresses; clear
+        // them before iframe navigation can free and reuse those addresses.
+        font_context_reset_glyph_caches(uicon->font_ctx);
+    }
+    DomDocument* new_doc = load_html_doc(owner->url, (char*)url, css_vw, css_vh);
+    if (!new_doc) return false;
+    block->embed->doc = new_doc;
+    dom_document_set_embedding(new_doc, owner, iframe);
+    radiant_document_ensure_state(new_doc, "navigation_iframe_target");
+    new_doc->viewport.output_scale = 1.0f;
+    ui_context_sync_document_raster_scale(uicon, new_doc);
+
+    if (new_doc->html_root) {
+        DomDocument* saved_doc = uicon->document;
+        float saved_viewport_width = uicon->viewport_width;
+        float saved_viewport_height = uicon->viewport_height;
+        uicon->document = new_doc;
+        uicon->viewport_width = (float)css_vw;
+        uicon->viewport_height = (float)css_vh;
+        process_document_font_faces(uicon, new_doc);
+        layout_html_doc(uicon, new_doc, false);
+        uicon->document = saved_doc;
+        uicon->viewport_width = saved_viewport_width;
+        uicon->viewport_height = saved_viewport_height;
+    }
+    if (new_doc->view_tree && new_doc->view_tree->root) {
+        ViewBlock* root = lam::view_require_block(new_doc->view_tree->root);
+        if (root->scroller) {
+            if (root->content_height > root->height) root->height = root->content_height;
+            root->scroller = nullptr;
+        }
+        block->content_width = root->content_width > 0.0f ? root->content_width : root->width;
+        block->content_height = root->content_height > 0.0f ? root->content_height : root->height;
+        update_scroller(block, block->content_width, block->content_height);
+    }
+    clear_document_interaction_state_before_detach(old_doc);
+    dom_document_clear_embedding(old_doc);
+    free_document(old_doc);
+    if (owner->state) doc_state_mark_dirty(owner->state);
+    return true;
+}
+
+static bool navigation_execute_top_target(UiContext* uicon, DomDocument* document,
+                                          const char* url) {
+    if (!uicon || !document || document != uicon->document || !url || !url[0]) {
+        return false;
+    }
+    int css_vw = (int)uicon->viewport_width; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    int css_vh = (int)uicon->viewport_height; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    BrowsingSession* session = uicon->browsing_session;
+    DomDocument* new_doc = nullptr;
+    if (session) {
+        ViewBlock* root_block = document->view_tree
+            ? lam::view_require_block(document->view_tree->root) : nullptr;
+        DocState* state = (DocState*)document->state;
+        if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
+            float scroll_y = 0.0f;
+            scroll_state_get_position_for_view(state, static_cast<View*>(root_block),
+                                               root_block->scroll()->pane,
+                                               nullptr, &scroll_y, nullptr, nullptr);
+            session_save_scroll_position(session, scroll_y);
+        }
+        log_info("navigation-exec: navigating via session to %s", url);
+        new_doc = session_navigate(session, uicon, url, css_vw, css_vh);
+    } else {
+        log_info("navigation-exec: navigating directly to %s", url);
+        new_doc = show_html_doc(document->url, (char*)url, css_vw, css_vh);
+        free_document(document);
+    }
+    if (!new_doc) return false;
+    const char* page_title = session ? session_current_title(session) : nullptr;
+    if (!page_title) page_title = session_extract_title(new_doc);
+    if (page_title) {
+        char title_buf[512];
+        snprintf(title_buf, sizeof(title_buf), "Lambda - %s", page_title);
+        update_window_title(title_buf);
+    }
+    return true;
+}
+
+bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source) {
+    RadiantNavigationRequest* request = navigation_queue_take(source);
+    if (!request) return false;
+
+    DomElement* source_elem = nullptr;
+    DomElement* target_elem = nullptr;
+    DomElement* fragment_elem = nullptr;
+    bool live = navigation_request_is_live(request, &source_elem, &target_elem,
+                                           &fragment_elem);
+    Url* resolved = nullptr;
+    bool resolved_ok = live && navigation_url_resolve(source_elem->doc, request->url,
+                                                       &resolved);
+    const char* href = resolved ? url_get_href(resolved) : nullptr;
+    char* owned_href = href ? mem_strdup(href, MEM_CAT_LAYOUT) : nullptr;
+    RadiantNavigationTargetKind target_kind = request->target_kind;
+    DomDocument* target_document = target_elem ? target_elem->doc : nullptr;
+    bool target_is_iframe = target_elem && target_elem->tag() == MARKUP_NAME_IFRAME;
+    bool target_is_root = target_elem && target_document &&
+                          target_elem == target_document->root;
+    DomDocument* destination_document = target_is_iframe && target_elem->embed
+        ? target_elem->embedp()->doc : target_document;
+    bool fragment_is_target_document = !fragment_elem ||
+        (destination_document == fragment_elem->doc);
+    const char* hash = resolved ? url_get_hash(resolved) : nullptr;
+    bool fragment_destination = destination_document && destination_document->url &&
+        hash && hash[0] == '#' && radiant_urls_match_without_fragment(
+            destination_document->url, resolved);
+    navigation_request_destroy(request);
+    if (!resolved_ok || !owned_href) {
+        if (resolved) url_destroy(resolved);
+        if (owned_href) mem_free(owned_href);
+        return false;
+    }
+    if (resolved) url_destroy(resolved);
+
+    bool executed = false;
+    if (target_kind == RADIANT_NAVIGATION_TARGET_NEW) {
+        // A named/new browsing context needs a host-owned window factory. No
+        // current UiContext exposes one, so do not degrade it to _self.
+        log_warn("navigation-exec: new browsing context is not available");
+    } else if (!target_elem || (!target_is_iframe && !target_is_root) ||
+               !fragment_is_target_document) {
+        log_warn("navigation-exec: package supplied an invalid resolved target");
+    } else if (fragment_destination) {
+        executed = navigation_apply_fragment(destination_document, fragment_elem,
+                                             owned_href);
+    } else if (target_is_iframe) {
+        executed = navigation_execute_iframe_target(uicon, target_elem, owned_href);
+    } else if (target_document == uicon->document) {
+        executed = navigation_execute_top_target(uicon, target_document, owned_href);
+    } else {
+        DomElement* iframe = dom_document_embedding_element(target_document);
+        executed = navigation_execute_iframe_target(uicon, iframe, owned_href);
+    }
+    mem_free(owned_href);
+    if (executed) to_repaint();
+    return executed;
 }
 
 /**
@@ -9850,6 +10282,11 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                             evcon.need_repaint = true;
                         }
                     }
+
+                    if (!evcon.default_prevented &&
+                        run_link_activation(&evcon, evcon.target)) {
+                        evcon.need_repaint = true;
+                    }
                 }
             }
 
@@ -9929,120 +10366,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
 
             if (evcon.new_target) {
                 log_debug("setting new src to target: %s", evcon.new_target);
-                // find iframe with the target name
+                // Legacy package-off navigation resolves the target by name;
+                // execution stays shared with the package-pinned path.
                 DomNode* elmt = set_iframe_src_by_name(doc->root, evcon.new_target, evcon.new_url);
-                View* iframe = find_view(doc->view_tree->root, elmt);
-                if (iframe) {
-                    log_debug("found iframe view");
-                    if ((iframe->view_type == RDT_VIEW_BLOCK || iframe->view_type == RDT_VIEW_INLINE_BLOCK) && (lam::view_require_block(iframe))->embed) {
-                        log_debug("updating doc of iframe view");
-                        ViewBlock* block = lam::view_require_block(iframe);
-                        // reset scroll position
-                        if (block->scroller && block->scroll_mut()->pane) {
-                            block->scroll()->pane->reset();
-                            block->content_width = 0;  block->content_height = 0;
-                        }
-                        // load the new document
-                        // Use iframe dimensions as viewport (already in CSS logical pixels)
-                        int css_vw = (int)block->width;
-                        int css_vh = (int)block->height;
-                        DomDocument* old_doc = block->embedp()->doc;
-                        if (evcon.ui_context->font_ctx) {
-                            // Glyph-cache keys retain raw document FontHandle addresses; clear
-                            // them before iframe navigation can free and reuse those addresses.
-                            font_context_reset_glyph_caches(evcon.ui_context->font_ctx);
-                        }
-                        DomDocument* new_doc = block->embed->doc =
-                            load_html_doc(evcon.ui_context->document->url, evcon.new_url,
-                                          css_vw, css_vh);
-                        if (new_doc) {
-                            radiant_document_ensure_state(new_doc, "iframe_target_navigation");
-                            // Nested documents share the screen device scale but
-                            // retain their own semantic page zoom.
-                            new_doc->viewport.output_scale = 1.0f;
-                            ui_context_sync_document_raster_scale(evcon.ui_context, new_doc);
-
-                            if (new_doc->html_root) {
-                                // HTML/Markdown/XML documents: need CSS layout
-                                // Save the parent document and logical viewport.
-                                // The framebuffer remains the top-level physical surface.
-                                DomDocument* parent_doc = evcon.ui_context->document;
-                                // Set document context to iframe doc for proper URL resolution (e.g., images)
-                                evcon.ui_context->document = new_doc;
-                                // iframe dimensions are now in CSS pixels
-                                int saved_viewport_width = evcon.ui_context->viewport_width;
-                                int saved_viewport_height = evcon.ui_context->viewport_height;
-                                evcon.ui_context->viewport_width = css_vw;
-                                evcon.ui_context->viewport_height = css_vh;
-                                // Process @font-face rules before layout (critical for custom fonts)
-                                process_document_font_faces(evcon.ui_context, new_doc);
-                                layout_html_doc(evcon.ui_context, new_doc, false);
-                                // Restore the parent document and logical viewport.
-                                evcon.ui_context->document = parent_doc;
-                                evcon.ui_context->viewport_width = saved_viewport_width;
-                                evcon.ui_context->viewport_height = saved_viewport_height;
-                            }
-                            // For pre-laid-out documents, view_tree is already set
-                            if (new_doc->view_tree && new_doc->view_tree->root) {
-                                ViewBlock* root = lam::view_require_block(new_doc->view_tree->root);
-                                // Disable inner doc's viewport scroller — iframe container handles scrolling
-                                if (root->scroller) {
-                                    if (root->content_height > root->height) {
-                                        root->height = root->content_height;
-                                    }
-                                    root->scroller = NULL;
-                                }
-                                // Use width/height for PDF (content_width/height may be 0)
-                                block->content_width = root->content_width > 0 ? root->content_width : root->width;
-                                block->content_height = root->content_height > 0 ? root->content_height : root->height;
-                                update_scroller(block, block->content_width, block->content_height);
-                            }
-                        }
-                        clear_document_interaction_state_before_detach(old_doc);
-                        free_document(old_doc);
-                        doc_state_mark_dirty(uicon->document->state);
-                    }
-                    else {
-                        log_debug("iframe view has no embed");
-                    }
-                } else {
+                if (!elmt || !elmt->is_element() ||
+                    !navigation_execute_iframe_target(evcon.ui_context, elmt->as_element(), new_url)) {
                     log_debug("failed to find iframe view");
                 }
             }
             else {
-                // -- Main page navigation: route through browsing session for history management --
-                int css_vw = evcon.ui_context->viewport_width;
-                int css_vh = evcon.ui_context->viewport_height;
-                BrowsingSession* session = evcon.ui_context->browsing_session;
-                DomDocument* new_doc = nullptr;
-                if (session) {
-                    // save current scroll position in history
-                    ViewBlock* root_block = doc->view_tree ? lam::view_require_block(doc->view_tree->root) : nullptr;
-                    if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
-                        float scroll_y = 0.0f;
-                        scroll_state_get_position_for_view(state, static_cast<View*>(root_block), root_block->scroll()->pane,
-                                                           NULL, &scroll_y, NULL, NULL);
-                        session_save_scroll_position(session, scroll_y);
-                    }
-                    log_info("browse_nav: navigating via session to %s", new_url);
-                    new_doc = session_navigate(session, evcon.ui_context, new_url, css_vw, css_vh);
-                } else {
-                    // no session (local file, headless), fallback to direct navigation
-                    log_info("browse_nav: no session, navigating directly to %s", new_url);
-                    DomDocument* old_doc = evcon.ui_context->document;
-                    new_doc = show_html_doc(evcon.ui_context->document->url, (char*)new_url, css_vw, css_vh);
-                    free_document(old_doc);
-                }
-                if (new_doc) {
-                    // update window title from <title> tag
-                    const char* page_title = session ? session_current_title(session) : nullptr;
-                    if (!page_title) page_title = session_extract_title(new_doc);
-                    if (page_title) {
-                        char title_buf[512];
-                        snprintf(title_buf, sizeof(title_buf), "Lambda - %s", page_title);
-                        update_window_title(title_buf);
-                    }
-                }
+                // Legacy package-off navigation uses the same native executor
+                // after its mousedown policy determines the current document.
+                navigation_execute_top_target(evcon.ui_context, doc, new_url);
             }
             to_repaint();
         }
@@ -10349,6 +10684,22 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                     radiant_dispatch_mouse_event(&evcon, focused, "click",
                         0, 0, 0, 0, false, false, false, false, 1);
                     run_form_button_default(&evcon, focused);
+                    handled = true;
+                }
+            } else if (tag == MARKUP_NAME_A && key_event->key == RDT_KEY_ENTER) {
+                DomElement* anchor = lam::dom_require_element(focused);
+                if (anchor->get_attribute("href")) {
+                    bool js_click_dispatched = false;
+                    bool prevented = radiant_dispatch_mouse_event(&evcon, focused, "click",
+                        0, 0, 0, 0, false, false, false, false, 1,
+                        &js_click_dispatched);
+                    if (prevented) evcon.default_prevented = true;
+                    if (!js_click_dispatched && !evcon.default_prevented) {
+                        dispatch_lambda_handler(&evcon, focused, "click");
+                    }
+                    if (!evcon.default_prevented) {
+                        run_link_activation(&evcon, focused);
+                    }
                     handled = true;
                 }
             } else if (tag == MARKUP_NAME_SELECT) {

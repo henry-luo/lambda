@@ -1073,6 +1073,54 @@ RADIANT_C_API Item fn_radiant_root(Item doc_item) {
     return radiant_dom_wrap_node(doc->root);
 }
 
+// ES30's traversal surface is deliberately element-only. Text/comment nodes
+// remain invisible to policy, while every returned wrapper still goes through
+// the canonical bridge and its generation check.
+RADIANT_C_API Item fn_radiant_document_root(Item node_item) {
+    DomNode* node = radiant_dom_node_from_item(node_item, "DOCUMENT_ROOT");
+    if (!node) return ItemNull;
+    DomDocument* doc = radiant_dom_document_from_node(node);
+    return doc && doc->root ? radiant_dom_wrap_node(doc->root) : ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_first_element_child(Item node_item) {
+    DomNode* node = radiant_dom_node_from_item(node_item, "FIRST_ELEMENT_CHILD");
+    DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
+    if (!elem) return ItemNull;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (child->is_element()) return radiant_dom_wrap_node(child->as_element());
+    }
+    return ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_next_element_sibling(Item node_item) {
+    DomNode* node = radiant_dom_node_from_item(node_item, "NEXT_ELEMENT_SIBLING");
+    if (!node) return ItemNull;
+    for (DomNode* sibling = node->next_sibling; sibling;
+         sibling = sibling->next_sibling) {
+        if (sibling->is_element()) return radiant_dom_wrap_node(sibling->as_element());
+    }
+    return ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_embedding_element(Item node_item) {
+    DomNode* node = radiant_dom_node_from_item(node_item, "EMBEDDING_ELEMENT");
+    if (!node) return ItemNull;
+    DomDocument* doc = radiant_dom_document_from_node(node);
+    DomElement* iframe = dom_document_embedding_element(doc);
+    return iframe ? radiant_dom_wrap_node(iframe) : ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_embedded_document_root(Item iframe_item) {
+    DomElement* iframe = radiant_dom_element_from_item(iframe_item,
+                                                        "EMBEDDED_DOCUMENT_ROOT");
+    if (!iframe || iframe->tag() != MARKUP_NAME_IFRAME || !iframe->embed ||
+        !iframe->embedp()->doc || !iframe->embedp()->doc->root) {
+        return ItemNull;
+    }
+    return radiant_dom_wrap_node(iframe->embedp()->doc->root);
+}
+
 RADIANT_C_API Item fn_radiant_attr(Item node_item, Item name_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "ATTR");
     const char* name = fn_to_cstr(name_item);
@@ -1528,7 +1576,62 @@ RADIANT_C_API Item fn_radiant_form_boundary() {
     return radiant_string_item(boundary);
 }
 
+RADIANT_C_API Item fn_radiant_navigation_destination(Item source_item,
+                                                      Item url_item,
+                                                      Item target_root_item) {
+    DomElement* source = radiant_dom_element_from_item(source_item,
+                                                        "NAVIGATION_DESTINATION");
+    DomElement* target_root = radiant_dom_element_from_item(target_root_item,
+                                                             "NAVIGATION_DESTINATION");
+    const char* raw_url = fn_to_cstr(url_item);
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "kind", radiant_string_item("document"));
+    radiant_rooted_obj_set(result, "fragment", ItemNull);
+    if (!source || !source->doc || !target_root || !target_root->doc ||
+        !raw_url || !raw_url[0]) {
+        return result.get();
+    }
+    Url* resolved = source->doc->url
+        ? url_parse_with_base(raw_url, source->doc->url) : url_parse(raw_url);
+    if (!resolved || !url_is_valid(resolved)) {
+        if (resolved) url_destroy(resolved);
+        return result.get();
+    }
+    const char* hash = url_get_hash(resolved);
+    if (hash && hash[0] == '#' && target_root->doc->url &&
+        radiant_urls_match_without_fragment(target_root->doc->url, resolved)) {
+        radiant_rooted_obj_set(result, "kind", radiant_string_item("fragment"));
+        radiant_rooted_obj_set(result, "fragment", radiant_string_item(hash + 1));
+    }
+    url_destroy(resolved);
+    return result.get();
+}
+
 RADIANT_C_API Item fn_radiant_request_navigation(Item request_item) {
+    Item source_item = radiant_obj_get(request_item, "source");
+    if (!radiant_item_is_missing(source_item)) {
+        DomElement* source = radiant_dom_element_from_item(source_item,
+                                                            "REQUEST_NAVIGATION");
+        Item target_item = radiant_obj_get(request_item, "target");
+        DomElement* target = radiant_item_is_missing(target_item) ? nullptr :
+            radiant_dom_element_from_item(target_item, "REQUEST_NAVIGATION");
+        DomElement* fragment = nullptr;
+        Item fragment_item = radiant_obj_get(request_item, "fragment_target");
+        if (!radiant_item_is_missing(fragment_item)) {
+            fragment = radiant_dom_element_from_item(fragment_item,
+                                                      "REQUEST_NAVIGATION");
+        }
+        const char* url = fn_to_cstr(radiant_obj_get(request_item, "url"));
+        const char* kind = fn_to_cstr(radiant_obj_get(request_item, "target_kind"));
+        const char* target_name = fn_to_cstr(radiant_obj_get(request_item,
+                                                              "target_name"));
+        RadiantNavigationTargetKind target_kind = kind && strcmp(kind, "new") == 0
+            ? RADIANT_NAVIGATION_TARGET_NEW : RADIANT_NAVIGATION_TARGET_EXISTING;
+        return radiant_bool_item(radiant_queue_navigation_request(
+            source, url, target, target_kind, target_name, fragment));
+    }
+
     const char* target = fn_to_cstr(radiant_obj_get(request_item, "target"));
     const char* url = fn_to_cstr(radiant_obj_get(request_item, "url"));
     const char* method = fn_to_cstr(radiant_obj_get(request_item, "method"));
@@ -2571,6 +2674,18 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_load(Item path)", (fn_ptr)fn_radiant_load},
     {"root", "fn(doc: dom_node) -> dom_node", (fn_ptr)fn_radiant_root, JUBE_FN_NONE,
      "Item fn_radiant_root(Item doc)", (fn_ptr)fn_radiant_root},
+    {"document_root", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_document_root, JUBE_FN_NONE,
+     "Item fn_radiant_document_root(Item node)", (fn_ptr)fn_radiant_document_root},
+    {"first_element_child", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_first_element_child, JUBE_FN_NONE,
+     "Item fn_radiant_first_element_child(Item node)", (fn_ptr)fn_radiant_first_element_child},
+    {"next_element_sibling", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_next_element_sibling, JUBE_FN_NONE,
+     "Item fn_radiant_next_element_sibling(Item node)", (fn_ptr)fn_radiant_next_element_sibling},
+    {"embedding_element", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_embedding_element, JUBE_FN_NONE,
+     "Item fn_radiant_embedding_element(Item node)", (fn_ptr)fn_radiant_embedding_element},
+    {"embedded_document_root", "fn(iframe: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_embedded_document_root, JUBE_FN_NONE,
+     "Item fn_radiant_embedded_document_root(Item iframe)", (fn_ptr)fn_radiant_embedded_document_root},
+    {"navigation_destination", "fn(source: dom_node, url: string, target_root: dom_node) -> map", (fn_ptr)fn_radiant_navigation_destination, JUBE_FN_NONE,
+     "Item fn_radiant_navigation_destination(Item source, Item url, Item target_root)", (fn_ptr)fn_radiant_navigation_destination},
     {"attr", "fn(node: dom_node, name: string) -> string", (fn_ptr)fn_radiant_attr, JUBE_FN_NONE,
      "Item fn_radiant_attr(Item node, Item name)", (fn_ptr)fn_radiant_attr},
     {"set_attr", "fn(node: dom_node, name: string, value: string) -> dom_node", (fn_ptr)fn_radiant_set_attr, JUBE_FN_NONE,

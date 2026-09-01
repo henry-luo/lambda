@@ -1,11 +1,11 @@
 # Lambda DOM Default Actions — the UA behavior ledger
 
-> **Status**: **normative for default-action placement and status** (2026-08-28). The architecture is decided (ES5, ES10, ES15, ES20); what this document adds is the complete per-event ledger and the gap inventory that drives it.
+> **Status**: **normative for default-action placement and status** (2026-09-01). The architecture is decided (ES5, ES10, ES15, ES20, ES30, ES31); what this document adds is the complete per-event ledger and the gap inventory that drives it.
 > **Role**: this is the **single source of truth for what Radiant does after an event is dispatched** — which UA default actions exist, where each half lives, and which are still missing. Every other doc that names a default action points here rather than restating it. Absorbs and replaces Appendix B of `vibe/Lambda_Design_DOM_State.md` (deleted there 2026-08-28).
 > **Scope**: default actions and activation behavior for HTML documents under Radiant — the pointer, keyboard, editing, focus, clipboard, drag, composition, form, and navigation families. Event *dispatch* mechanism is in scope only where a missing dispatch is what makes a default action unreachable.
 > **Companion docs**: `vibe/Lambda_Design_DOM_State.md` (the behavior-template architecture and the ES/ESO ledgers this doc extends), `vibe/Lambda_Design_DOM_Pkg.md` (layering and placement policy), `doc/dev/radiant/RAD_15_Events_Input.md`, `RAD_17_Interaction_State.md`, `RAD_19_Form_Controls.md`.
 > **Formal anchors**: S12.1.3 (reactive templates: body = pure `fn`, mutation only in `on` handlers), S12.2.2 (element mutation), S9.1.4 (state lives in view state), S7.6/S7.10 (error discharge and the sys-func contract), D4.5.1v3 (the Radiant memory seam).
-> **Ledger series**: this doc extends the DOM-State area's existing `ES#` (decisions) and `ESO#` (open issues) series per `doc/Doc_Convention.md` §4 — it mints no new series. ESO48–ESO62 are minted below; ESO63–ESO69 (and ES22–ES29, F17–F21) are minted in `vibe/Lambda_Design_DOM_Dispatch.md`. New open issues start at **ESO70**.
+> **Ledger series**: this doc extends the DOM-State area's existing `ES#` (decisions) and `ESO#` (open issues) series per `doc/Doc_Convention.md` §4 — it mints no new series. **ES30** is minted in §2.4 and **ES31** in §2.5; ESO48–ESO62 are minted below; ESO63–ESO69 (and ES22–ES29, F17–F21) are minted in `vibe/Lambda_Design_DOM_Dispatch.md`. New open issues start at **ESO70**.
 
 ---
 
@@ -81,7 +81,166 @@ Per ES10, JS and Lambda are parallel peers over one canonical state store; neith
 
 Radiant-internal seams that no JS listener can observe. Each exists because the spec concept it implements has no event of its own, or must run at a moment the event pipeline does not expose. Full table with suppression semantics: §3.11.
 
-### 2.4 Status vocabulary
+### 2.4 Key policy and snapshot DOM navigation (ES30)
+
+**Ruling (user direction, 2026-09-01).** The dom package owns all
+**keyboard default-action policy**: sequential focus, selection/caret command
+choice, keyboard scrolling, keyboard activation, and clipboard-command
+choice. Native continues to receive platform input, construct and dispatch the
+event, retain the canonical focus and selection state, resolve range/caret
+geometry, emit DOM events, and paint. This is the same policy/mechanism seam
+as the existing editing package: S12.1.3 puts the decision in an `on` handler;
+S9.1.4 keeps the mutable state in the view state; native owns the coupled
+geometry and paint substrate.
+
+The default-action half is one `keydefault` behavior hook after an uncanceled
+`keydown`, not a collection of native per-key branches. It has the existing UA
+tier one-call ceiling and may return `'pass'` or `'prevent-default'` under
+ES15. `keyintent` remains a separate context-free translation: it has no
+side effect and must still reach the package when author code prevents the
+`keydown`. Thus policy can choose a named action without reclassifying a
+translation as a default action.
+
+The package needs a bounded, element-only snapshot navigation surface. It
+builds a Lambda array while it traverses, before it mutates the tree; no live
+`children`/`childNodes` collection is exposed. That makes the package's
+iteration a snapshot as required by S9.2.2, while native retains node lifetime
+and generation validation.
+
+| API | Contract |
+| --- | --- |
+| `radiant.document_root(node)` | Return the document element owning `node`. |
+| `radiant.embedding_element(node)` | Return the owning `<iframe>` element when `node` belongs to an embedded document, otherwise `null`. This is the bounded upward edge of the browsing-context tree, not a live child-document collection. **ES31 extension.** |
+| `radiant.embedded_document_root(iframe)` | Return the active nested document's root for an `<iframe>`, otherwise `null`. This is the paired downward edge for navigation resolution; it validates the native document/node generation before returning the wrapper. **ES31 extension.** |
+| `radiant.first_element_child(node)` | Return the first element child, or `null`. |
+| `radiant.next_element_sibling(node)` | Return the next element sibling, or `null`. |
+| `radiant.parent(node)` / `radiant.closest(node, selector)` | Retain the existing upward navigation operations. |
+| `radiant.focus_candidates(root)` | Return a DOM-order **snapshot** of elements accepted by the native focusability query; it does not apply `tabindex` ordering. |
+| `radiant.focused(node)` | Return the document's currently focused element, or `null`. |
+| `radiant.focus_set(node, from_keyboard)` | Commit the selected focus target atomically: canonical state, pseudo-state, blur/focus events, iframe ownership, and text-control focus capture remain native mechanism. |
+| `radiant.scroll_into_view(node)` | Perform the geometry-dependent scroll after package policy chooses that it is required. |
+| `radiant.selection_operation(node, operation, extend)` | Generalize `caret_operation` to apply a named selection operation — character, word, line, document, page, or select-all — while native resolves the live range, updates canonical selection, emits `selectionchange`, and repaints. |
+
+`focus.ls` uses `focus_candidates` plus `attr`/`has_attr` to order positive
+`tabindex` candidates ascending before the tree-order `tabindex=0` set, then
+calls `focus_set` and `scroll_into_view`. The same candidate snapshot makes
+`autofocus` a tree-order package decision. `caret.ls` evolves into the
+selection/key-command policy over `selection_operation`; it does not receive
+raw DOM range endpoints or reproduce layout geometry.
+
+The generic traversal replaces the current policy-specific tree-query waists:
+
+| Retired waist | Package replacement |
+| --- | --- |
+| `radiant.form_of(node)` | `tree.ls` walks ancestors and, for an explicit `form=` owner, performs a root snapshot search by form `id`. |
+| `radiant.radio_group(node)` | `tree.ls` walks the relevant form or document snapshot and filters the HTML radio-group predicate. |
+| `radiant.details_group(node)` | `tree.ls` walks the document snapshot and filters same-name `<details>` peers. |
+| `radiant.context_menu_target(body)` | The context-menu hook reads `evt.target`; this is event addressing, not tree navigation. ES24's shared event record carries that target. |
+
+The four waists are removed only after their package callers use the shared
+`tree.ls` helpers and the behavior event map exposes `evt.target`. This keeps
+one traversal implementation in Lambda rather than retaining four native
+policy walkers. It does **not** move DOM node storage, focus/selection state,
+range geometry, event dispatch, or painting out of Radiant.
+
+### 2.5 Navigation policy and package target resolution (ES31)
+
+**Ruling (user direction, 2026-09-01).** The dom package owns navigation
+**policy**, including link activation, fragment-target lookup, and resolution
+of `target` to a browsing context. Native owns the navigation **execution**:
+URL/history commit, network or document loading, iframe replacement and
+layout, lifecycle event emission, canonical `:target` state, scroll geometry,
+and paint. This preserves S12.1.3's handler-owned decision while retaining
+native ownership of canonical state and native node validity at the D4.5.1v3
+memory seam.
+
+`navigation.ls` is reached by a `linkactivation` behavior-only hook only
+after an uncancelled `click`; it replaces the `mousedown` `new_url` shortcut.
+Keyboard policy activates a focused link by dispatching that same `click`, so
+pointer and keyboard follow one cancelable path. The handler reads `href` and
+`target` from the matched `<a href>` and returns its ES15 verdict after it has
+submitted the navigation request.
+
+#### 2.5.1 Package target resolution
+
+`navigation.ls` uses the ES30 element snapshots plus the two ES31 browsing-context
+edges to produce this immutable resolution record:
+
+| `target` spelling | Package resolution | Element supplied to native execution |
+| --- | --- | --- |
+| missing, empty, or `_self` | the source document root | that root element |
+| `_parent` | `embedding_element(source_root)` followed by its `document_root`; at top level, the source root | the resolved parent root element |
+| `_top` | repeatedly follow `embedding_element` then `document_root` until the top root | the resolved top root element |
+| `_blank` | a **new-context** resolution | `null`; no element exists before native host execution creates the context (ESO70) |
+| a non-reserved name | snapshot-walk the top browsing-context subtree's `<iframe name>` elements, crossing into active iframe documents only through `embedded_document_root`; a match resolves to that iframe and its nested root | the matched `<iframe>` element |
+| unmatched non-reserved name | a **new named-context** resolution carrying that name | `null`; native host execution creates the named context (ESO70) |
+
+`_blank` and an unmatched name are deliberately explicit `new` resolutions,
+not a forged DOM node and not an accidental fallback to `_self`. Thus every
+**existing** target is resolved by Lambda and passed as the exact root or
+iframe element; the two cases without an existing target carry `target: null`,
+`target_kind: "new"`, and (for a named target) `target_name`. This is the
+minimum honest representation of a browsing context that does not yet have a
+DOM owner.
+
+The snapshot walk is bounded: it never exposes an iframe's children as a live
+collection and it reaches a nested document only through
+`embedded_document_root`. Native validates every returned node belongs to the
+resolved document/context before executing, so a detached or stale wrapper
+cannot redirect a navigation.
+
+#### 2.5.2 Fragment policy and the native execution waist
+
+URL parsing and same-document comparison are native mechanism; the package
+must not reproduce base-URL resolution or percent decoding. It receives a
+small immutable result from:
+
+```text
+radiant.navigation_destination(source, raw_url, resolved_target_root)
+  -> { kind: "fragment" | "document", fragment: string|null }
+```
+
+`target_kind: "new"` has no current target root and is therefore always a
+document navigation. It skips this query until native execution has created
+the destination context.
+
+For a `fragment` result, `navigation.ls` snapshot-walks the resolved target
+root and selects the fragment element: an `id` match first, then an `<a name>`
+match, each in tree order. It passes that **resolved fragment element**, or
+`null` when no match exists, in the one request below. Lambda therefore
+decides which target and which fragment are meant; it never calculates scroll
+coordinates or writes selector state itself.
+
+```text
+radiant.request_navigation({
+  source, url: raw_url,
+  target: resolved_target_element | null,
+  target_kind: "existing" | "new",
+  target_name: string | null,
+  fragment_target: resolved_fragment_element | null
+})
+```
+
+The native executor validates the supplied elements but **does not re-search
+for a named iframe or a fragment id**. In one transaction it commits URL and
+history state, loads/replaces the resolved document when needed, and, for a
+same-document fragment navigation, clears the previous `STATE_TARGET`, writes
+the one supplied target (if any), schedules selector invalidation, and queues
+the existing geometry-aware scroll-into-view mechanism. This is the missing
+writer for `:target`; `PSEUDO_STATE_TARGET` already reads that state. A missing
+fragment supplies `null`, so the transaction can apply the defined clear/no-
+scroll behavior without retaining an old target.
+
+The current form-specific `request_navigation` remains available while forms
+still migrate their target-resolution policy. Links use the common request
+shape today: the lazy package loader now admits an `a[href]` target and the
+document-owned evaluator boundary switches at the outer event scope. Existing
+targets (`_self`, `_parent`, `_top`, and loaded named iframes) execute through
+the new transaction. `_blank` and unmatched names are correctly represented as
+`new`, but current `UiContext` has no host-owned browsing-context factory, so
+native rejects rather than silently treating either as `_self` (ESO70).
+
+### 2.6 Status vocabulary
 
 | Mark | Meaning |
 | --- | --- |
@@ -97,7 +256,7 @@ Radiant-internal seams that no JS listener can observe. Each exists because the 
 
 ## 3. The ledger
 
-Verified against the tree at 2026-08-28 (`event.cpp` 500KB, `lambda/package/dom/*.ls`, `lambda/js/js_dom_events.cpp`). Anchors are `file:line` at that revision — treat them as pointers to the right neighborhood, not as stable addresses.
+Verified against the tree at 2026-09-01 (`event.cpp`, `lambda/package/dom/*.ls`, `lambda/js/js_dom_events.cpp`). Anchors are `file:line` at that revision — treat them as pointers to the right neighborhood, not as stable addresses.
 
 ### 3.1 Input & editing
 
@@ -117,7 +276,7 @@ Verified against the tree at 2026-08-28 (`event.cpp` 500KB, `lambda/package/dom/
 | ↳ **`keyintent`** (translation) | — | key → `inputType` | dispatched context-free, deliberately (F11) → `keymap.ls` | ✅ |
 | ↳ **`dropdownkey`** | — | UA handling of an open `<select>` popup | Up / Down / Enter / Escape → `form.ls`. **No typeahead** | 🟡 |
 | ↳ **document scrolling** | — | Space / PageUp / PageDown / Home / End / arrows scroll the nearest scrollport | **absent for HTML.** Scroll arrives only from wheel (`RDT_EVENT_SCROLL`), scrollbar drag, and drag-autoscroll; page keys are handled only inside `<textarea>` (`event.cpp:10151`) and the PDF viewer. `key_code_to_name` (`event.cpp:1505`) has no `PageUp`/`PageDown` case, so JS also sees `event.key === ""` for them | ❌ (ESO48) |
-| ↳ **Space/Enter activation** | — | activate the focused element | `input[type=checkbox]` / `input[type=radio]` (Space), `button`, `select` — all routed through the same dispatch the mouse path uses (F1b). **`<a href>` is not covered**: Enter on a focused link does nothing | 🟡 ⚠️ (§5.4, ESO51) |
+| ↳ **Space/Enter activation** | — | activate the focused element | `input[type=checkbox]` / `input[type=radio]` (Space), `button`, `select`, and `<a href>` (Enter) use the click/activation path. `navigation.ls` claims an uncancelled link click and requests native execution; the focused link is therefore keyboard-operable | 🟡 (§5.4) |
 | `keyup` | UI Events; cancelable | none meaningful | dispatched; no package involvement | ✅ |
 | `keypress` | legacy, deprecated | — | not dispatched, deliberately. `script_runner.cpp:2590` still registers `onkeypress`, so the attribute is inert rather than absent | — (dead attribute) |
 
@@ -125,7 +284,7 @@ Verified against the tree at 2026-08-28 (`event.cpp` 500KB, `lambda/package/dom/
 
 | Event | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
-| `mousedown` | UI Events; cancelable | begin selection, focus change, drag preparation | transform-aware hit-testing native (ESO47); `selectstart` dispatched at selection begin; focus transition via the state machine. **Also performs link navigation, which belongs on `click`** | ✅ dispatch · ⚠️ default (§5.1) |
+| `mousedown` | UI Events; cancelable | begin selection, focus change, drag preparation | transform-aware hit-testing native (ESO47); `selectstart` dispatched at selection begin; focus transition via the state machine. Link navigation is the legacy **package-off** fallback only; package-enabled documents activate on uncancelled `click` | ✅ dispatch · 🟡 default (§5.1) |
 | `mouseup` / `click` | UI Events; cancelable; canceling `click` cancels **activation behavior** | element-specific activation (HTML) | activation is the package's for checkbox / radio / `<select>` open-close, with no native fallback (F1b/F2b). Canceled activation restores pre-click checkedness. Label association lookup stays native (`for=` is not an ancestor walk); the dispatch is retargeted | 🟡 — per element, see §3.9 |
 | dropdown option click | no spec event — the popup overlay is not DOM | — | native geometry resolves the row; behavior-only **`optioncommit`** carries the index; `form.ls` commits and closes (F2c). One commit path shared by pointer, Enter, and the test harness | ✅ |
 | `dblclick` | UI Events; cancelable | UA convention: word selection | word/line/select-all selection implemented natively via click counts (`event.cpp:8807`). **The `dblclick` event itself is never dispatched**, and `ondblclick` is registered at `script_runner.cpp:2582` — another inert attribute | 🟡 default · ❌ dispatch |
@@ -178,10 +337,10 @@ Verified against the tree at 2026-08-28 (`event.cpp` 500KB, `lambda/package/dom/
 
 | Concept | Spec, cancelable | Default action per spec | Radiant | Status |
 | --- | --- | --- | --- | --- |
-| **Link activation** | HTML; `click` activation behavior | follow the hyperlink | implemented, but on **`mousedown`** and gated on the *mousedown*'s `preventDefault` (`event.cpp:1409`, the only writer of `evcon->new_url`) | ⚠️ (§5.1, ESO51) |
-| Fragment navigation | HTML | scroll to the fragment **and set `:target`** | the scroll half works (`event.cpp:9329`). The `:target` half does not: `PSEUDO_STATE_TARGET` is matched by the selector engine and readable from the store, but **nothing ever writes `STATE_TARGET`** | 🟡 (ESO53) |
+| **Link activation** | HTML; `click` activation behavior | follow the hyperlink | `navigation.ls` handles `linkactivation` only after an uncancelled click; Enter on a focused link dispatches the same click. Native executes the pinned request. The mousedown `new_url` path is now package-off fallback only | 🟡 (ESO70 for new contexts; ES31) |
+| Fragment navigation | HTML | scroll to the fragment **and set `:target`** | `navigation.ls` snapshot-resolves `id`, then `<a name>`; native clears/writes `STATE_TARGET`, invalidates selector state, and queues geometry-aware scroll. Tested for existing and missing fragments | ✅ (ES31) |
 | `:visited` | Selectors; privacy-restricted | style visited links | same shape — readable, never written. Needs a history source and a privacy stance first (DOM_State §6.1, ESO12) | ❌ |
-| `target=` / iframe navigation | HTML | navigate the named context | implemented (`event.cpp:9367`) | ✅ |
+| `target=` / iframe navigation | HTML | navigate the named context | `navigation.ls` resolves `_self`, `_parent`, `_top`, loaded named iframes, `_blank`, and unmatched names. Native validates and executes existing root/iframe targets; `new` targets await host context creation | 🟡 (ESO70; ES31) |
 | `accesskey` | HTML | activate the element | absent — zero occurrences repo-wide | ❌ |
 | `beforeunload` | HTML; cancelable | prompt before leaving | absent | ❌ |
 | `load` / `DOMContentLoaded` | HTML | none | `DOMContentLoaded` and window `load` dispatched (`script_runner.cpp:1751`); `<iframe>` `load` dispatched (`js_dom.cpp:3370`). **`<img>` `load`/`error` are not** | 🟡 |
@@ -205,7 +364,7 @@ The `click` row of §3.3, expanded. This is the table to check before claiming "
 | `input[type=file]` | open the file picker | `input_type_to_control()` falls file/color/date through to `FORM_CONTROL_TEXT` (`view.hpp:2727`) | ❌ |
 | `input[type=color]`, `date`/`time`/`datetime-local`/`month`/`week` | open the respective picker | as above | ❌ |
 | `input[type=number]` | spinner buttons; arrow-key increment by `step` | text control only | ❌ |
-| `a[href]` | follow the hyperlink | on `mousedown`, not `click`; no keyboard activation | ⚠️ (§5.1) |
+| `a[href]` | follow the hyperlink | `navigation.ls` owns click/Enter policy and target/fragment resolution; native executes the resolved existing context. New browsing contexts remain ESO70 | 🟡 (ES31; ESO70) |
 | `summary` | toggle the parent `<details>` `open` attribute | `details.ls` (F15), including the `name=` exclusive accordion via the `details_group` waist. Layout already honoured `open`; the disclosure marker was a constant and now follows it | 🟡 — activation ✅, script-write and load-time exclusivity open (ESO62) |
 | `dialog` (+ `showModal`, Esc-to-cancel, focus trap, top layer) | HTML dialog behavior | absent entirely | ❌ |
 | `[popovertarget]` button | toggle the popover, fire `beforetoggle`/`toggle`, light-dismiss on Esc / outside click | toggling implemented in the JS layer (`js_dom.cpp:4483`); **no `toggle`/`beforetoggle` events and no light dismiss** | 🟡 |
@@ -223,6 +382,7 @@ Radiant-internal seams. No JS listener can observe them; each exists because the
 | `optioncommit` | activation of a `<select>` option — the popup overlay is not DOM, so no event exists | follows the click that carried it |
 | `dropdownkey` | UA keyboard handling of an open popup | follows its keydown |
 | `caretkey` | keydown's caret-movement **default action** | **yes** — dispatched with context |
+| `linkactivation` | HTML hyperlink activation and package navigation policy (ES31) | **yes** — runs only after an uncancelled `click` |
 | `keyintent` | the key→`inputType` **translation** inside UI Events' key processing model | **no** — deliberately context-free (F11: a JS editor that prevents the keydown still relies on the intent) |
 | `domedit` | `beforeinput`'s **default action** on contenteditable (Input Events: "update the DOM as described by the inputType") | **yes** — ordinary dispatch offers it only after an uncanceled `beforeinput` |
 | `execcommand` | the deprecated command surface, one rule set with the keyboard path (F14.1) | per command |
@@ -262,17 +422,20 @@ are implemented; the remaining rows are tracked as **ESO54** and **ESO43**.
 
 These matter more than the absences in §3, because an absence fails loudly and a divergence fails on ordinary pages while looking correct in the code.
 
-### 5.1 Link activation runs on `mousedown`
+### 5.1 Link activation is package-owned for package-enabled documents
 
-`fire_inline_event` (`event.cpp:1409`) writes `evcon->new_url` when `MARKUP_NAME_A` sees a `RDT_EVENT_MOUSE_DOWN`, gated on the *mousedown*'s `default_prevented`. It is the only writer of `new_url` in the tree.
+`navigation.ls` now receives `linkactivation` only after the cancelable
+`click` has settled. Its success path queues a pinned request, and native
+validates then executes it; a static-page `preventDefault()` therefore blocks
+navigation, and Enter dispatches that same click path. The old
+`fire_inline_event` `mousedown` write to `evcon->new_url` remains only when
+the package is disabled or cannot acquire a document evaluator. It is a
+compatibility fallback, not a second policy for package-enabled documents.
 
-Per HTML, following a hyperlink is `click` activation behavior. The consequence is that the single most common idiom on the web —
-
-```js
-a.addEventListener('click', e => e.preventDefault())   // every SPA router
-```
-
-— **does not suppress navigation** under Radiant. Cancellation only works if the page happens to cancel `mousedown`. Moving the trigger to the `click` path also puts it where §3.9's other activation behaviors already live, which is what would let it become a `form.ls`-style template (DOM_State §6.1) rather than a special case in the inline-event walk. **ESO51.**
+The remaining gap is not click cancellation: `_blank` and an unmatched named
+target have no `UiContext` host factory that can create a browsing context.
+They resolve to an explicit `new` request and are rejected rather than
+misrouted to `_self` (**ESO70**).
 
 ### 5.2 Activation behavior has two implementations
 
@@ -318,13 +481,14 @@ New rows start at ESO48; ESO1–ESO47 remain in DOM_State §7. Rows here are def
 | ESO48 | **No keyboard scrolling for HTML documents.** Space / PageUp / PageDown / Home / End / arrows do not scroll the nearest scrollport; scroll arrives only from wheel, scrollbar drag, and drag-autoscroll. `key_code_to_name` also lacks `PageUp`/`PageDown`, so JS sees `event.key === ""` for them | fix the key naming first (one-line, unblocks JS pages immediately); then a scroll default action on the keydown path, ordered after `caretkey` declines. Interacts with §5.4 |
 | ESO49 | **Activation behavior has two implementations; popover activation still lives only in the JS one.** §5.2 | F4 moved submit/reset into `form.ls`/`submit.ls` and gave native/JS click paths the same claim protocol. Remaining work: migrate popover activation, and give the browsing layer a real POST body/method transport |
 | ESO50 | **Pointer Events are partial** — `pointerdown`/`up`/`move` dispatch, but no `pointerover`/`out`/`enter`/`leave`/`cancel` and no `setPointerCapture` | boundary events follow the existing mouse boundary logic; capture needs a target-override in the dispatch path |
-| ESO51 | **Link activation is on `mousedown`, and has no keyboard path.** §5.1; and Enter on a focused `<a href>` does nothing (`event.cpp:9751` covers only `input`/`button`/`select`) | move to the `click` path, then to a template per DOM_State §6.1; add `<a>` to the Space/Enter activation set at the same time |
+| ESO51 | ~~**Link activation is on `mousedown`, and has no keyboard path.**~~ **landed 2026-09-01 (ES31)** | `navigation.ls` claims `linkactivation` after an uncancelled click; Enter dispatches that same click. It resolves fragments and existing root/iframe targets through the ES30/ES31 snapshot surface, and native executes only the pinned request |
 | ESO52 | **Sequential focus ignores `tabindex` ordering and never scrolls the target into view.** §5.3 | both belong to the `focus.ls` work (DOM_State §6.2), together with the ESO60 autofocus fix |
-| ESO53 | **`:target` is never set.** Fragment navigation scrolls but writes no `STATE_TARGET`; the selector engine and store already support reading it. `:visited` has the same shape but is blocked on a history source and the privacy stance (ESO12) | write the state at fragment navigation and clear the previous target; document-scoped, one element at a time |
+| ESO53 | ~~**`:target` is never set.**~~ **landed 2026-09-01 (ES31)** | package snapshot resolution supplies the fragment element (or `null`) to the native transaction. It clears the prior target, writes exactly one `STATE_TARGET`, invalidates selectors, and queues native geometry-aware scrolling |
 | ESO54 | **contenteditable implements a strict subset of the text-control intent set.** §4 — paste, cut, drop, word/line deletes, indent/outdent, and undo/redo still reach `domedit` and decline | clipboard/drop policy and tree-aware word/line operations remain; `historyUndo`/`historyRedo` additionally need the ring hoisted out of `FormControlProp` (ESO43) |
 | ESO55 | **Three content-attribute handlers are registered but can never fire.** `ondblclick`, `onkeypress`, `onselect` are installed by `script_runner.cpp:2582`, `:2590`, `:2597`; `dblclick`, `keypress` and `select` are dispatched nowhere. `contextmenu` is the inverse — the default action runs but no JS event is dispatched, so a page cannot cancel it or build its own menu | dispatch `dblclick` (the click-count machinery already exists), `select`, and a cancelable `contextmenu` ahead of the `menu.ls` hook; leave `keypress` undispatched per the deliberate legacy decision but stop registering the attribute |
 | ESO56 | ~~**`<details>` / `<summary>` has no toggle behavior**~~ **landed 2026-08-31 (F15)** — `lambda/package/dom/details.ls` claims `click` on `view <summary>`, writes the parent's `open` through `set_attr`, and dispatches `toggle` on the details. ESO3 was not in fact a blocker: `set_attr` has gone through the DOM operation path with mutation notices since F7. Two prerequisites were wrong in the tree rather than absent — the disclosure marker was pinned to `disclosure-closed` so the triangle never turned, and `set_attr`'s null-clear was dead code (see the ESO62 row). Loading the package needed one more widening of the EO4/F9 `package_governs` gate: a `<details>` in a static document has no form control and no script, so the document owned no evaluator and the toggle silently did nothing — the same shape F9 fixed for rich editing. Residues split out as **ESO62** | proved by `test/ui/dom_pkg_details.json` (12/12 with the package, 9/12 under `RADIANT_DOM_PKG=0`) `dom_pkg_details_accordion.json` (20/20), and `dom_pkg_details_noscript.json` (6/6, the static-document path) |
 | ESO62 | **`<details>` openness is claimed only where the package decides it — the click.** Three gaps follow. (a) A script write (`d.open = true`, `setAttribute('open','')`) does not close the `name=` group; (b) a document that *loads* with two open members of one group keeps both; (c) activation accepts any direct summary child, not strictly the first | (a) has no cheap seam: of the ~20 `DOM_JS_MUTATION_ATTRIBUTE` notify sites most carry no attribute name, so an `openchange` hook there would hand Lambda every attribute write to filter — the same "no chokepoint" finding F7 made for `state_change`, and the identical residue radio exclusivity carries (§5.2). (b) wants the `init` hook, but that phase visits only `elem->form_control()` elements (EO4) and `<details>` is not one. (c) waits on `:first-of-type` in the selector engine, which would tighten `resolve_css_style.cpp`'s marker rule in the same change |
+| ESO70 | **New browsing contexts cannot execute.** ES31 resolves `_blank` and unmatched target names to `target_kind:"new"`, but `UiContext` owns one current document and exposes no window/tab/context factory | add a host-level context creation API that returns a new browsing session/window, names it when requested, then execute the already-resolved `new` request without a DOM re-search |
 | ESO57 | **`<dialog>` is entirely absent**, and the popover implementation fires no `beforetoggle`/`toggle` and has no light dismiss | both need a top-layer concept in the view tree and an Esc/outside-click policy; the Esc path can follow the context-menu and dropdown precedent (`event.cpp:9561`) |
 | ESO58 | **Non-text `<input>` types have no interaction**: `range` (no thumb drag, no keys — `form.ls:130` says so), `number` (no spinner, no arrow-key step), and `file`/`color`/`date`-family, which `input_type_to_control()` degrades to `FORM_CONTROL_TEXT` (`view.hpp:2727`) | `range` and `number` are template-shaped and cheap; the picker types need host UI and are a separate decision |
 | ESO59 | **Composite-widget keyboard policy is missing**: `<select multiple>` / listbox has no click or key handling at all, `<select>` has no typeahead, and radio groups have no arrow-key navigation | all three belong in `form.ls` next to the existing `dropdownkey` handler; the listbox additionally needs its option rows to be hit-testable |
@@ -342,13 +506,13 @@ Ordered by how often the gap is hit by an ordinary page, not by implementation c
 1. **contenteditable clipboard and history** (ESO54/ESO43). Enter and line-break
    commands now use the F14.2 structural primitives; paste, cut, drop, and
    history remain the visible contenteditable gaps.
-2. **Link activation on `click`** (ESO51). One-line-shaped change in trigger point, and it makes `preventDefault` on `click` work — the assumption behind essentially every JS router.
+2. **New browsing-context execution** (ESO70 / ES31). Link click/Enter, fragment state, and existing target resolution are landed; `_blank` and unmatched names need the host window/session factory.
 3. **Complete form submission transport and popover activation** (ESO49 / F4). Local submit/reset activation is landed; POST body delivery and popover remain.
 
 **Tier 2 — cheap, high visibility**
 
 4. `PageUp`/`PageDown` key naming, then keyboard scrolling (ESO48).
-5. ~~`<details>` toggle (ESO56)~~ **landed**; `:target` (ESO53) remains — small, and frequently exercised by static documents.
+5. ~~`<details>` toggle (ESO56)~~ and ~~`:target` (ESO53)~~ **landed**; `:visited` remains blocked on history/privacy policy (ESO12).
 6. `dblclick` / `select` / cancelable `contextmenu` dispatch (ESO55).
 7. `tabindex` ordering, focus scroll-into-view, `autofocus` scope (ESO52 + ESO60) — one `focus.ls` pass.
 

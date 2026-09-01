@@ -217,7 +217,7 @@ Dispatch order for a discrete event on a target element, conforming to DOM_Pkg d
       walk target→root; first element whose behavior entry handles this
       event type wins (most specific template for that element)
 [M] handler effects via primitives: set_state · dispatch · submit_form ·
-    request_navigation · focus_move · …
+    request_navigation · focus_set · selection_operation · …
 [N] cascade settle → restyle/reflow/repaint scheduling
 ```
 
@@ -237,11 +237,13 @@ Behavior templates call these through the `radiant` Jube module (extending its e
 | --- | --- |
 | `get_state(elem, name)` / `set_state(elem, name, value)` | canonical engine state read/write with mirror-sync + restyle scheduling (the `state_set_bool` path); `set_state` on hot names is rejected |
 | `dispatch(elem, name)` / `dispatch(elem, name, data)` | fire a synthetic event into the normal pipeline (`change`, `invalid`, `submit`) as a fresh event |
-| `radio_group(elem)` | peers sharing `name` within the owning form/document (wraps `form_control_uncheck_radio_group_peer`'s walk, read side) |
-| `form_of(elem)` / `form_elements(form)` | form-owner resolution and member enumeration (HTML form-association rules) |
+| `document_root(elem)` / `first_element_child(elem)` / `next_element_sibling(elem)` | ES30 snapshot navigation: enough for the package's shared `tree.ls` traversal; no live collection crosses the waist (S9.2.2). |
+| `radio_group(elem)` | **Retiring under ES30.** `tree.ls` derives peers from the relevant form/document snapshot and the HTML radio-group predicate. |
+| `form_of(elem)` | **Retiring under ES30.** `tree.ls` derives ancestor and explicit `form=` ownership from snapshot navigation. `form_elements(form)` remains a form-data mechanism until its callers are separately migrated. |
 | `submit_form(form)` | run the submit pipeline: dispatch cancelable `submit` → behavior template's submission policy (F4) |
 | `request_navigation(url)` | hand off to the native navigation/lifecycle layer (already ruled N) |
-| `focus_move(elem)` | native focus transition (`focus_transition` writer) |
+| `focus_candidates(root)` / `focused(elem)` / `focus_set(elem, from_keyboard)` / `scroll_into_view(elem)` | ES30: native focusability query and atomic focus/scroll mechanism; `focus.ls` owns ordering and chooses the target. Replaces `focus_move`, whose built-in DOM order cannot express HTML `tabindex` order. |
+| `selection_operation(elem, operation, extend)` | ES30 generalization of `caret_operation`: Lambda chooses the named operation; native resolves geometry, commits canonical selection, emits `selectionchange`, and paints. |
 | `value_of(elem)` / selection reads | text-control value and selection as **codepoint** offsets; all UTF-8↔UTF-16↔codepoint conversion stays native (`tc_*`) |
 | `replace_range(elem, start, end, text)` | **the single text-control value writer** (F5): native converts codepoint→byte offsets, splices the UTF-8 buffer in one memmove, places the caret at end-of-insertion (optional explicit caret arg), syncs mirrors, refreshes placeholder state, schedules repaint. Fires **no** events — the dispatcher owns `beforeinput`/`input`; pushes **no** history — history is Lambda's (F6) |
 | `set_selection(elem, start, end, dir)` | text-control selection writer (wraps `tc_set_selection_range` semantics, codepoint offsets) |
@@ -478,7 +480,7 @@ Two things make this the one to do first. It is **not a hot path** — right-cli
 - **Which target deserves a menu.** `context_menu_open`'s hard-coded `tc_is_text_control` gate is deleted; `menu.open_for` asks the question instead, so widening it to contenteditable or a document selection is an edit here rather than in C++.
 - **Which items are live.** The five enable rules leave `context_menu_item_enabled`, which becomes a bitmask read. The mask is computed once at open and cached in `DocState::context_menu_enabled_mask`. **Caching is correct here and is not the staleness ES16 warned about**: the menu is modal, so nothing the rules read can change while it is up — and it is what keeps Lambda out of the paint pass, which reads the mask per item. Evaluating rules during render is exactly the quiescence violation F8 exists to prevent.
 
-Physical-pixel coordinates deliberately never reach policy: native resolves the hit target and popup position for the in-flight right click, records both, and `radiant.open_context_menu(node, mask)` places the popup from them. New waist primitives: `open_context_menu`, `close_context_menu`, `context_menu_target`, `clipboard_text` (read-only — the write side stays with cut/copy execution).
+Physical-pixel coordinates deliberately never reach policy: native resolves the hit target and popup position for the in-flight right click, records both, and `radiant.open_context_menu(node, mask)` places the popup from them. New waist primitives: `open_context_menu`, `close_context_menu`, `context_menu_target`, `clipboard_text` (read-only — the write side stays with cut/copy execution). Under ES30, `context_menu_target` retires when the behavior event record exposes `evt.target`; that is event addressing, not a tree-navigation primitive.
 
 Covered by `test/ui/dom_pkg_context_menu.json`: a right click on a text control opens the menu, a right click on a submit button does not, each pinned by a state-dump golden. Verified load-bearing — deleting the handler fails one of the two. **The mask is pinned too, by making it observable rather than by inferring it.** Two attempts to assert it through behaviour failed and are worth recording, because both failure modes are easy to repeat: asserting the clipboard after clicking Copy was **vacuous** (the earlier paste had already left the same text there, so it passed with the mask forced to zero), and the corrected version failed for an unrelated reason — `key_press` takes `mods` as an **int**, not a string array, so `"mods": ["ctrl"]` silently parsed as 0 and Ctrl+A never selected anything. A double click makes the selection through the real path instead.
 
@@ -752,7 +754,13 @@ The motivating example needs two things forms don't: a **history source** for `v
 
 ### 6.2 Focus & key policy
 
-Tab-order (sequential focus navigation, `autofocus` processing) and key→command mapping are already ruled L in DOM_Pkg; they slot in as `focus.ls` once forms are stable, using `focus_move` + the native focusability query.
+The key-policy ruling now lives in `Lambda_Design_DOM_Default.md` §2.4
+(ES30): `focus.ls` owns sequential focus, `autofocus`, and keyboard default
+policy over snapshot DOM navigation, while native retains canonical
+focus/selection state, range geometry, event emission, and paint. The old
+`focus_move`-plus-query sketch is superseded because `focus_move` itself
+chooses plain DOM order and therefore cannot express the required `tabindex`
+ordering.
 
 ### 6.3 Schema and invariants as package data
 

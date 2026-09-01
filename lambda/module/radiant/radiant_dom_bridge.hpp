@@ -114,6 +114,13 @@ RADIANT_C_API const void* radiant_dom_option_element_host_type(void);
 
 RADIANT_C_API Item fn_radiant_load(Item path_item);
 RADIANT_C_API Item fn_radiant_root(Item doc_item);
+RADIANT_C_API Item fn_radiant_document_root(Item node_item);
+RADIANT_C_API Item fn_radiant_first_element_child(Item node_item);
+RADIANT_C_API Item fn_radiant_next_element_sibling(Item node_item);
+RADIANT_C_API Item fn_radiant_embedding_element(Item node_item);
+RADIANT_C_API Item fn_radiant_embedded_document_root(Item iframe_item);
+RADIANT_C_API Item fn_radiant_navigation_destination(Item source_item, Item url_item,
+                                                      Item target_root_item);
 RADIANT_C_API Item fn_radiant_attr(Item node_item, Item name_item);
 RADIANT_C_API Item fn_radiant_set_attr(Item node_item, Item name_item, Item value_item);
 RADIANT_C_API Item fn_radiant_free(Item node_item);
