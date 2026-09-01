@@ -356,6 +356,7 @@ static void release_embedded_document(DomElement* elem) {
 
     DomDocument* embedded_doc = elem->embedp()->doc;
     elem->embed->doc = nullptr;
+    dom_document_clear_embedding(embedded_doc);
     free_document(embedded_doc);
 }
 

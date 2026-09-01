@@ -506,8 +506,7 @@ void jm_emit_class_constructor_property(JsMirTranspiler* mt, MIR_reg_t cls_obj,
 static void jm_hoisted_func_modvar_write_through(JsMirTranspiler* mt, const char* vname, MIR_reg_t val_reg) {
     if (!mt->module_consts) return;
     JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
-    if (mc && mc->const_type == MCONST_MODVAR && mc->var_kind == 0 &&
-        !mc->annexb_suppressed) {
+    if (mc && mc->const_type == MCONST_MODVAR && mc->var_kind == 0) {
         jm_store_module_var(mt, (uint32_t)mc->int_val, val_reg);
     }
 }
@@ -519,24 +518,6 @@ static bool jm_function_arguments_are_aliased(JsMirTranspiler* mt, JsFuncCollect
            !JM_JS_FACT(fc, is_strict);
 }
 
-static bool jm_function_has_duplicate_param_names(JsFunctionNode* fn) {
-    if (!fn) return false;
-    for (JsAstNode* param = fn->params; param; param = param->next) {
-        JsIdentifierNode* identifier = jm_get_param_identifier(param);
-        if (!identifier || !identifier->name) continue;
-        for (JsAstNode* later = param->next; later; later = later->next) {
-            JsIdentifierNode* later_identifier = jm_get_param_identifier(later);
-            if (later_identifier && later_identifier->name &&
-                later_identifier->name->len == identifier->name->len &&
-                memcmp(later_identifier->name->chars, identifier->name->chars,
-                    identifier->name->len) == 0) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 static void jm_activate_arguments_aliasing(JsMirTranspiler* mt, JsFuncCollected* fc, JsFunctionNode* fn, MIR_reg_t args_reg) {
     mt->arguments_reg = args_reg;
     // The AST already owns every formal.  Keeping its head avoids a second,
@@ -544,28 +525,6 @@ static void jm_activate_arguments_aliasing(JsMirTranspiler* mt, JsFuncCollected*
     mt->arguments_params = jm_function_arguments_are_aliased(mt, fc)
         ? fn->params : NULL;
     mt->arguments_param_scope_depth = mt->arguments_params ? mt->scope_depth : -1;
-}
-
-static bool jm_function_has_formal_arguments_binding(JsFunctionNode* fn) {
-    if (!fn) return false;
-    JsAstNode* param = fn->params;
-    for (int i = 0; param; i++, param = param->next) {
-        const char* pname = jm_get_param_name(param, i);
-        if (strcmp(pname, "_js_arguments") == 0) return true;
-    }
-    return false;
-}
-
-static JsMirVarEntry* jm_function_find_current_scope_var(JsMirTranspiler* mt, const char* name) {
-    struct hashmap* scope = jm_var_scope_at(mt, mt ? mt->scope_depth : -1);
-    if (!mt || !name || mt->scope_depth < 0 || !scope) {
-        return NULL;
-    }
-    JsVarScopeEntry key;
-    memset(&key, 0, sizeof(key));
-    key.name = name;
-    JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(scope, &key);
-    return found ? &found->var : NULL;
 }
 
 static void jm_function_clear_shadowed_capture_binding(JsMirVarEntry* var) {
@@ -581,31 +540,6 @@ static void jm_function_clear_shadowed_capture_binding(JsMirVarEntry* var) {
     var->scope_env_reg = 0;
 }
 
-static JsFunctionNode* jm_function_direct_body_function_binding(
-        JsFunctionNode* fn, const char* vname) {
-    if (!fn || !vname || !fn->body ||
-        fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) {
-        return NULL;
-    }
-    JsBlockNode* body = (JsBlockNode*)fn->body;
-    for (JsAstNode* stmt = body->statements; stmt; stmt = stmt->next) {
-        if (stmt->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
-        JsFunctionNode* decl = (JsFunctionNode*)stmt;
-        if (!decl->name) continue;
-        const char* name = jm_var_name(decl->name);
-        if (strcmp(name, vname) == 0) return decl;
-    }
-    return NULL;
-}
-
-static bool jm_function_has_direct_body_function_binding(JsFunctionNode* fn, const char* vname) {
-    return jm_function_direct_body_function_binding(fn, vname) != NULL;
-}
-
-static JsFunctionNode* jm_function_find_direct_body_function_binding(JsFunctionNode* fn, const char* vname) {
-    return jm_function_direct_body_function_binding(fn, vname);
-}
-
 static void jm_hoist_function_body_bindings(JsMirTranspiler* mt,
         JsFunctionNode* fn, JsFuncCollected* fc) {
     if (!fn || !fn->body || fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return;
@@ -613,33 +547,27 @@ static void jm_hoist_function_body_bindings(JsMirTranspiler* mt,
         jm_name_hash, jm_name_cmp, NULL, NULL);
     bool effective_strict = mt->is_global_strict || mt->is_module ||
         (fc && JM_JS_FACT(fc, is_strict));
-    struct hashmap* annexb_lex_collisions = NULL;
-    if (!effective_strict) {
-        annexb_lex_collisions = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
-            jm_name_hash, jm_name_cmp, NULL, NULL);
-        jm_collect_all_let_const_names_recursive(fn->body, annexb_lex_collisions);
-    }
     jm_collect_indexed_body_locals(mt, fn->body, body_locals, true);
     size_t viter = 0; void* vitem;
     while (hashmap_iter(body_locals, &viter, &vitem)) {
         JsNameSetEntry* e = (JsNameSetEntry*)vitem;
         if (e->from_func_decl && effective_strict &&
-            !jm_function_has_direct_body_function_binding(fn, e->name)) {
+            !jm_direct_body_function_binding(fn, e->name)) {
             log_debug("js-mir: strict skip nested function hoist '%s'", e->name);
             continue;
         }
-        if (e->from_func_decl && annexb_lex_collisions &&
-            jm_name_set_has(annexb_lex_collisions, e->name)) {
+        if (jm_function_decl_annex_b_disallowed(e)) {
             log_debug("js-mir: AnnexB skip function hoist '%s' (lexical collision)", e->name);
             continue;
         }
         if (e->from_func_decl && fc && JM_JS_FACT(fc, uses_arguments) &&
             strcmp(e->name, "_js_arguments") == 0 &&
-            jm_function_has_formal_arguments_binding(fn)) {
+            jm_func_has_param_named(fn, "arguments", 9)) {
             log_debug("js-mir: AnnexB skip function hoist '%s' (arguments binding)", e->name);
             continue;
         }
-        JsMirVarEntry* current_binding = jm_function_find_current_scope_var(mt, e->name);
+        JsMirVarEntry* current_binding = jm_find_var_at(mt, e->name,
+            mt->scope_depth);
         bool shadows_capture = current_binding && current_binding->from_env;
         // Function-body declarations shadow outer names, including arrow captures
         // installed as from_env bindings.
@@ -665,7 +593,6 @@ static void jm_hoist_function_body_bindings(JsMirTranspiler* mt,
             }
         }
     }
-    if (annexb_lex_collisions) hashmap_free(annexb_lex_collisions);
     hashmap_free(body_locals);
 
     struct hashmap* let_consts = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
@@ -675,11 +602,11 @@ static void jm_hoist_function_body_bindings(JsMirTranspiler* mt,
     while (hashmap_iter(let_consts, &lciter, &lcitem)) {
         JsNameSetEntry* lce = (JsNameSetEntry*)lcitem;
         if (lce->from_func_decl) continue;
-        JsMirVarEntry* ve = jm_function_find_current_scope_var(mt, lce->name);
+        JsMirVarEntry* ve = jm_find_var_at(mt, lce->name, mt->scope_depth);
         if (!ve) {
             MIR_reg_t vr = jm_new_reg(mt, lce->name, MIR_T_I64);
             jm_set_var(mt, lce->name, vr);
-            ve = jm_function_find_current_scope_var(mt, lce->name);
+            ve = jm_find_var_at(mt, lce->name, mt->scope_depth);
         }
         if (ve) {
             jm_emit_reg_op(mt, MIR_MOV, ve->reg,
@@ -711,7 +638,7 @@ static void jm_hoist_inner_function_declarations(JsMirTranspiler* mt,
         jm_emit_mov(mt, var_reg, fn_item);
         jm_set_var(mt, var_name, var_reg);
         jm_function_clear_shadowed_capture_binding(
-            jm_function_find_current_scope_var(mt, var_name));
+            jm_find_var_at(mt, var_name, mt->scope_depth));
         if (write_scope_env) {
             // A same-named lexical can force a source-keyed scope cell. Match
             // the declaration itself so its hoisted closure updates that cell.
@@ -721,46 +648,6 @@ static void jm_hoist_inner_function_declarations(JsMirTranspiler* mt,
         // nested closures may resolve a hoisted declaration through the module slot.
         jm_hoisted_func_modvar_write_through(mt, var_name, var_reg);
     }
-}
-
-static bool jm_param_tree_has_assignment_pattern(JsAstNode* node) {
-    for (JsAstNode* cur = node; cur; cur = cur->next) {
-        switch (cur->node_type) {
-        case JS_AST_NODE_ASSIGNMENT_PATTERN: {
-            JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)cur;
-            if (ap->left && jm_param_tree_has_assignment_pattern(ap->left)) return true;
-            return true;
-        }
-        case JS_AST_NODE_OBJECT_PATTERN: {
-            JsObjectPatternNode* op = (JsObjectPatternNode*)cur;
-            for (JsAstNode* prop = op->properties; prop; prop = prop->next) {
-                if (prop->node_type == JS_AST_NODE_PROPERTY) {
-                    JsPropertyNode* p = (JsPropertyNode*)prop;
-                    if (p->value && jm_param_tree_has_assignment_pattern(p->value)) return true;
-                } else if (prop->node_type == JS_AST_NODE_REST_PROPERTY ||
-                           prop->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
-                    JsSpreadElementNode* sp = (JsSpreadElementNode*)prop;
-                    if (sp->argument && jm_param_tree_has_assignment_pattern(sp->argument)) return true;
-                }
-            }
-            break;
-        }
-        case JS_AST_NODE_ARRAY_PATTERN: {
-            JsArrayPatternNode* ap = (JsArrayPatternNode*)cur;
-            if (jm_param_tree_has_assignment_pattern(ap->elements)) return true;
-            break;
-        }
-        case JS_AST_NODE_REST_ELEMENT:
-        case JS_AST_NODE_SPREAD_ELEMENT: {
-            JsSpreadElementNode* sp = (JsSpreadElementNode*)cur;
-            if (sp->argument && jm_param_tree_has_assignment_pattern(sp->argument)) return true;
-            break;
-        }
-        default:
-            break;
-        }
-    }
-    return false;
 }
 
 static bool jm_is_ascii_ident_start(char c) {
@@ -828,82 +715,43 @@ static bool jm_default_param_has_conflicting_direct_eval(JsFunctionNode* fn, JsA
     return false;
 }
 
-static void jm_collect_lexical_decl_names(JsAstNode* node, struct hashmap* names);
+struct JmIndexedLexicalNames {
+    struct hashmap* names;
+    AstFunctionId owner;
+};
 
-static void jm_collect_lexical_decl_statements(JsAstNode* stmt, struct hashmap* names) {
-    for (; stmt; stmt = stmt->next) {
-        jm_collect_lexical_decl_names(stmt, names);
-    }
-}
-
-static void jm_collect_lexical_decl_names(JsAstNode* node, struct hashmap* names) {
-    if (!node || !names) return;
-    switch (node->node_type) {
-    case JS_AST_NODE_VARIABLE_DECLARATION: {
-        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)node;
-        if (vd->kind != JS_VAR_LET && vd->kind != JS_VAR_CONST) return;
-        for (JsAstNode* decl = vd->declarations; decl; decl = decl->next) {
-            if (decl->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
-            jm_collect_pattern_names(((JsVariableDeclaratorNode*)decl)->id, names);
-        }
-        break;
-    }
-    case JS_AST_NODE_CLASS_DECLARATION: {
-        JsClassNode* cls = (JsClassNode*)node;
-        if (cls->name) {
-            const char* name = jm_var_name(cls->name);
-            jm_name_set_add(names, name);
-        }
-        break;
-    }
-    case JS_AST_NODE_BLOCK_STATEMENT:
-        jm_collect_lexical_decl_statements(((JsBlockNode*)node)->statements, names);
-        break;
-    case JS_AST_NODE_IF_STATEMENT: {
-        JsIfNode* in = (JsIfNode*)node;
-        jm_collect_lexical_decl_names(in->consequent, names);
-        jm_collect_lexical_decl_names(in->alternate, names);
-        break;
-    }
-    case AST_NODE_LOOP: {
-        AstLoopControlNode* loop = (AstLoopControlNode*)node;
-        if (loop->form == LOOP_FORM_FOR_C) {
-            jm_collect_lexical_decl_names(loop->init, names);
-        }
-        jm_collect_lexical_decl_names(loop->body, names);
-        break;
-    }
-    case JS_AST_NODE_FOR_IN_STATEMENT:
-    case JS_AST_NODE_FOR_OF_STATEMENT: {
-        JsForOfNode* fo = (JsForOfNode*)node;
-        jm_collect_lexical_decl_names(fo->left, names);
-        jm_collect_lexical_decl_names(fo->body, names);
-        break;
-    }
-    case JS_AST_NODE_SWITCH_STATEMENT: {
-        JsSwitchNode* sw = (JsSwitchNode*)node;
-        for (JsAstNode* c = sw->cases; c; c = c->next) {
-            if (c->node_type == JS_AST_NODE_SWITCH_CASE) {
-                jm_collect_lexical_decl_statements(((JsSwitchCaseNode*)c)->consequent, names);
+static bool jm_collect_indexed_lexical_name(const AstIndex* index,
+        AstNodeId node_id, void* opaque) {
+    JmIndexedLexicalNames* context = (JmIndexedLexicalNames*)opaque;
+    AstNode* node = index->nodes[node_id];
+    if (!node || index->owner_functions[node_id] != context->owner) return true;
+    if (node->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
+        JsVariableDeclarationNode* declaration = (JsVariableDeclarationNode*)node;
+        if (declaration->kind != JS_VAR_LET && declaration->kind != JS_VAR_CONST) return true;
+        for (JsAstNode* declarator = declaration->declarations; declarator;
+                declarator = declarator->next) {
+            if (declarator->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
+                jm_collect_pattern_names(((JsVariableDeclaratorNode*)declarator)->id,
+                    context->names);
             }
         }
-        break;
+    } else if (node->node_type == JS_AST_NODE_CLASS_DECLARATION) {
+        JsClassNode* cls = (JsClassNode*)node;
+        if (cls->name) jm_name_set_add(context->names, jm_var_name(cls->name));
     }
-    case JS_AST_NODE_TRY_STATEMENT: {
-        JsTryNode* tn = (JsTryNode*)node;
-        jm_collect_lexical_decl_names(tn->block, names);
-        jm_collect_lexical_decl_names(tn->handler, names);
-        jm_collect_lexical_decl_names(tn->finalizer, names);
-        break;
-    }
-    case JS_AST_NODE_CATCH_CLAUSE:
-        jm_collect_lexical_decl_names(((JsCatchNode*)node)->body, names);
-        break;
-    case JS_AST_NODE_LABELED_STATEMENT:
-        jm_collect_lexical_decl_names(((JsLabeledStatementNode*)node)->body, names);
-        break;
-    default:
-        break;
+    return true;
+}
+
+static void jm_collect_indexed_lexical_names(JsMirTranspiler* mt,
+        JsAstNode* root, struct hashmap* names) {
+    if (!mt || !mt->tp || !root || !names) return;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId root_id = ast_index_find(index, (AstNode*)root);
+    if (root_id == AST_NODE_ID_INVALID) return;
+    JmIndexedLexicalNames context = {names, index->owner_functions[root_id]};
+    if (!ast_index_visit_subtree(index, root_id, jm_collect_indexed_lexical_name,
+            &context)) {
+        log_error("js-mir: unable to visit indexed lexical declarations");
     }
 }
 
@@ -1347,7 +1195,7 @@ static void jm_restore_function_state(JsMirTranspiler* mt,
 
 void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     JsFunctionNode* fn = fc->node;
-    int param_count = jm_count_params(fn);
+    int param_count = ast_linked_node_count(fn->params);
     bool has_captures = (JM_CAPTURE_COUNT(fc) > 0);
     MIR_reg_t saved_arguments_reg_fn = mt->arguments_reg;
     JsAstNode* saved_arguments_params_fn = mt->arguments_params;
@@ -1356,37 +1204,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     mt->arguments_params = NULL;
     mt->arguments_param_scope_depth = -1;
 
-    // Phase 4: Check if this function qualifies for a native version.
-    // Requirements: no captures, at least one INT/FLOAT specialization, a
-    // boxed Item carrier for every remaining param, and a numeric return.
-    // The guarded entry proves only specialized formals; the Item formals keep
-    // their ordinary JavaScript dynamic behavior.
-    bool generate_native = false;
-    // Native MIR params cannot represent sloppy duplicate formals, and arrow
-    // block bodies still rely on boxed statement-completion return handling.
-    if (JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE &&
-        !has_captures && !JM_JS_FACT(fc, has_non_simple_params) &&
-        !jm_function_has_duplicate_param_names(fn) &&
-        !(fn->is_arrow && fn->body &&
-          fn->body->node_type == JS_AST_NODE_BLOCK_STATEMENT) &&
-        param_count > 0 &&
-        (JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_INT ||
-         JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_FLOAT)) {
-        bool has_native_param = false;
-        generate_native = true;
-        for (int i = 0; i < param_count; i++) {
-            TypeId param_type = jm_param_type(fc, i);
-            if (param_type == LMD_TYPE_INT || param_type == LMD_TYPE_FLOAT) {
-                has_native_param = true;
-                continue;
-            }
-            if (param_type != LMD_TYPE_ANY) {
-                generate_native = false;
-                break;
-            }
-        }
-        if (!has_native_param) generate_native = false;
-    }
+    // Phase 4 records this once before forwards are emitted. Later call-site
+    // analysis can only revoke the fact, so lowering must consume it directly.
+    bool generate_native = JM_JS_FACT(fc, native_return_kind) != NATIVE_RETURN_NONE;
 
     // --- Generate native version if eligible ---
     if (generate_native) {
@@ -1525,7 +1345,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             } else {
                 // Expression body (arrow function): return native value
                 MIR_reg_t val = jm_transpile_as_native(mt, fn->body,
-                    jm_get_effective_type(mt, fn->body), JM_JS_FACT(fc, return_type));
+                    JM_JS_FACT(fc, return_type));
                 jm_emit_ret(mt, val);
                 goto finish_native;
             }
@@ -1606,7 +1426,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         if (fn->body) jm_collect_indexed_body_locals(mt, fn->body, gen_locals);  // generators need all locals for state machine
         struct hashmap* gen_lexicals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
-        if (fn->body) jm_collect_lexical_decl_names(fn->body, gen_lexicals);
+        if (fn->body) jm_collect_indexed_lexical_names(mt, fn->body, gen_lexicals);
 
         // Also collect destructured param variable names so they get env slots.
         // These variables are created during param destructuring in state 0 and
@@ -1883,7 +1703,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                         MIR_reg_t vr = jm_new_reg(mt, ns->name, MIR_T_I64);
                         MIR_reg_t initial = 0;
                         JsFunctionNode* direct_fn =
-                            jm_function_find_direct_body_function_binding(fn, ns->name);
+                            jm_direct_body_function_binding(fn, ns->name);
                         if (direct_fn) {
                             JsFuncCollected* direct_fc = jm_find_collected_func(mt, direct_fn);
                             if (direct_fc && direct_fc->func_item) {
@@ -1908,18 +1728,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
             // Push implicit try context for async exception handling
             if (JsTryContext* tc = jm_try_context_push(mt)) {
-                tc->catch_label = async_sm_catch_label;
-                tc->finally_label = 0;
-                tc->end_label = mt->gen_done_label;
-                tc->return_val_reg = jm_new_reg(mt, "_asm_ret", MIR_T_I64);
-                tc->has_return_reg = jm_new_reg(mt, "_asm_has_ret", MIR_T_I64);
-                tc->has_catch = true;
-                tc->has_finally = false;
-                tc->inlining_finally = false;
-                tc->yield_state_only = false;
-                tc->finally_body = NULL;
-                tc->saved_error_lane_flag_reg = 0;
-                tc->saved_error_lane_val_reg = 0;
+                MIR_reg_t return_val_reg = jm_new_reg(mt, "_asm_ret", MIR_T_I64);
+                MIR_reg_t has_return_reg = jm_new_reg(mt, "_asm_has_ret", MIR_T_I64);
+                jm_try_context_setup(tc, async_sm_catch_label, 0, mt->gen_done_label,
+                    return_val_reg, has_return_reg, true, false, NULL, 0);
                 jm_emit_reg_op(mt, MIR_MOV, tc->return_val_reg, MIR_new_int_op(mt->ctx, 0));
                 jm_emit_reg_op(mt, MIR_MOV, tc->has_return_reg, MIR_new_int_op(mt->ctx, 0));
             }
@@ -2206,7 +2018,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
     // --- v15: Generator wrapper (creates generator object instead of running body) ---
     if (fn->is_generator && gen_sm_func_item) {
-        bool gen_has_default_params = jm_param_tree_has_assignment_pattern(fn->params);
+        bool gen_has_default_params = JM_JS_FACT(fc, has_default_params);
         if (gen_has_default_params) {
             jm_seed_default_parameter_bindings(mt, fn, param_count);
             if (JM_JS_FACT(fc, uses_arguments)) {
@@ -2472,8 +2284,9 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             }
         }
 
-        bool has_default_params = jm_param_tree_has_assignment_pattern(fn->params);
-        bool has_formal_arguments_binding = jm_function_has_formal_arguments_binding(fn);
+        bool has_default_params = JM_JS_FACT(fc, has_default_params);
+        bool has_formal_arguments_binding =
+            jm_func_has_param_named(fn, "arguments", 9);
 
         bool arguments_object_materialized = false;
         if (has_default_params && JM_JS_FACT(fc, uses_arguments) && !has_formal_arguments_binding) {
@@ -2766,18 +2579,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             async_end_label = jm_new_label(mt);
             // Push try context so that exceptions in the body jump to catch
             if (JsTryContext* tc = jm_try_context_push(mt)) {
-                tc->catch_label = async_catch_label;
-                tc->finally_label = 0;
-                tc->end_label = async_end_label;
-                tc->return_val_reg = jm_new_reg(mt, "_async_ret", MIR_T_I64);
-                tc->has_return_reg = jm_new_reg(mt, "_async_has_ret", MIR_T_I64);
-                tc->has_catch = true;
-                tc->has_finally = false;
-                tc->inlining_finally = false;
-                tc->yield_state_only = false;
-                tc->finally_body = NULL;
-                tc->saved_error_lane_flag_reg = 0;
-                tc->saved_error_lane_val_reg = 0;
+                MIR_reg_t return_val_reg = jm_new_reg(mt, "_async_ret", MIR_T_I64);
+                MIR_reg_t has_return_reg = jm_new_reg(mt, "_async_has_ret", MIR_T_I64);
+                jm_try_context_setup(tc, async_catch_label, 0, async_end_label,
+                    return_val_reg, has_return_reg, true, false, NULL, 0);
                 // Save register refs before try context could be popped
                 async_return_val_reg = tc->return_val_reg;
                 async_has_return_reg = tc->has_return_reg;
@@ -2789,7 +2594,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
 
         // v18q: Create 'arguments' array-like object for non-arrow functions
         bool has_direct_arguments_function_binding =
-            jm_function_has_direct_body_function_binding(fn, "_js_arguments");
+            jm_direct_body_function_binding(fn, "_js_arguments") != NULL;
         if (JM_JS_FACT(fc, uses_arguments) && !has_formal_arguments_binding &&
             !has_direct_arguments_function_binding) {
             // v20: Set up arguments aliasing for formal params, but only in sloppy mode
@@ -2946,9 +2751,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     }
 
 finish_boxed:
-    mt->last_closure_has_env = false;
-    mt->last_closure_env_reg = 0;
-    mt->last_closure_capture_count = 0;
+    jm_clear_last_closure_snapshot(mt);
     jm_pop_scope(mt);
     jm_finish_function_frame(mt, fc->name);
     MIR_finish_func(mt->ctx);

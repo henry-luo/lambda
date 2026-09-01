@@ -21,6 +21,7 @@
 
 #include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -1052,6 +1053,16 @@ static void state_store_detach_selection_for_unload(DocState* state) {
     selection_finish_active_gesture(state);
 }
 
+static void state_store_clear_pending_space_activation(DocState* state,
+                                                       DomDocument* document) {
+    if (!state || !state->pending_space_activation.address) return;
+    if (document) {
+        dom_node_unpin(document, state->pending_space_activation,
+                       DOM_NODE_PIN_STATE);
+    }
+    state->pending_space_activation = {nullptr, 0};
+}
+
 void StateStore::destroy() {
     DomDocument* owner_document = document;
     DocState* state = doc_state;
@@ -1067,6 +1078,7 @@ void StateStore::destroy() {
     if (state) {
         state_begin_batch(state);
         state_store_detach_selection_for_unload(state);
+        state_store_clear_pending_space_activation(state, owner_document);
         doc_state_set_hover_target(state, NULL);
         doc_state_set_active_target(state, NULL);
         focus_clear(state);
@@ -2500,6 +2512,93 @@ ViewState* view_state_get(DocState* state, View* view) {
 
     view->view_state_ref = NULL;
     return NULL;
+}
+
+static bool view_state_nodes_correspond(const DomNode* old_node,
+                                        const DomNode* new_node) {
+    if (!old_node || !new_node || old_node->node_type != new_node->node_type) {
+        return false;
+    }
+    if (!old_node->is_element()) return true;
+    const DomElement* old_elem = old_node->as_element();
+    const DomElement* new_elem = new_node->as_element();
+    return old_elem && new_elem && old_elem->tag_name && new_elem->tag_name &&
+        strcmp(old_elem->tag_name, new_elem->tag_name) == 0;
+}
+
+static bool view_state_is_text_control(View* view) {
+    if (!view || !view->is_element()) return false;
+    DomElement* elem = lam::dom_require_element(view);
+    return elem && elem->form &&
+        (elem->form->control_type == FORM_CONTROL_TEXT ||
+         elem->form->control_type == FORM_CONTROL_TEXTAREA);
+}
+
+static void view_state_rekey_node(DocState* state, View* old_view, View* new_view) {
+    if (!state || !state->view_state_map || !old_view || !new_view) return;
+
+    uint32_t old_id = view_state_resolve_id(old_view);
+    uint32_t new_id = view_state_resolve_id(new_view);
+    if (old_id == 0 || new_id == 0 || old_id == new_id) return;
+
+    // A regenerated node has a fresh lifecycle id. Move each retained state
+    // record to that id instead of reusing the old node id while it is live.
+    old_view->view_state_ref = NULL;
+    new_view->view_state_ref = NULL;
+    for (int kind_int = VIEW_STATE_BASE; kind_int <= VIEW_STATE_CUSTOM; kind_int++) {
+        ViewStateKind kind = (ViewStateKind)kind_int;
+        // A reactive text template owns its rendered value. Carrying the old
+        // text buffer into the replacement would mask the handler's new model.
+        if (kind == VIEW_STATE_FORM_CONTROL && view_state_is_text_control(old_view)) {
+            continue;
+        }
+        ViewStateEntry old_query = { .view_id = old_id, .kind = kind, .state = NULL };
+        const ViewStateEntry* old_entry =
+            (const ViewStateEntry*)hashmap_get(state->view_state_map, &old_query);
+        if (!old_entry || !old_entry->state) continue;
+
+        ViewStateEntry moved = *old_entry;
+        ViewStateEntry new_query = { .view_id = new_id, .kind = kind, .state = NULL };
+        const ViewStateEntry* new_entry =
+            (const ViewStateEntry*)hashmap_get(state->view_state_map, &new_query);
+        if (new_entry && new_entry->state) {
+            // The old record is canonical runtime state; discard a provisional
+            // state created while materializing the replacement subtree.
+            view_state_release_payload(new_entry->state);
+            hashmap_delete(state->view_state_map, &new_query);
+        }
+        if (!hashmap_delete(state->view_state_map, &old_query)) continue;
+
+        moved.view_id = new_id;
+        moved.owner_address = static_cast<DomNode*>(new_view);
+        moved.owner_id = new_id;
+        moved.state->view_id = new_id;
+        hashmap_set(state->view_state_map, &moved);
+        view_state_primary_cache(new_view, moved.state);
+    }
+}
+
+static void view_state_preserve_subtree_identity_impl(DocState* state,
+                                                      DomNode* old_node,
+                                                      DomNode* new_node) {
+    if (!view_state_nodes_correspond(old_node, new_node)) return;
+
+    view_state_rekey_node(state, static_cast<View*>(old_node), static_cast<View*>(new_node));
+    if (!old_node->is_element()) return;
+
+    DomNode* old_child = old_node->as_element()->first_child;
+    DomNode* new_child = new_node->as_element()->first_child;
+    while (old_child && new_child) {
+        view_state_preserve_subtree_identity_impl(state, old_child, new_child);
+        old_child = old_child->next_sibling;
+        new_child = new_child->next_sibling;
+    }
+}
+
+void view_state_preserve_subtree_identity(DocState* state, DomNode* old_root,
+                                          DomNode* new_root) {
+    if (!state || !old_root || !new_root) return;
+    view_state_preserve_subtree_identity_impl(state, old_root, new_root);
 }
 
 static void doc_state_detach_transient_owner(DocState* state, View* view) {
@@ -7943,10 +8042,24 @@ void focus_clear_preserve_selection(DocState* state) {
     }
 }
 
-// collect focusable elements from view tree in DOM order
-static void collect_focusable(View* view, ArrayList* list) {
+int focus_tab_index(View* view) {
+    if (!view || !view->is_element()) return 0;
+    DomElement* elem = lam::dom_require_element(view);
+    const char* raw = elem->get_attribute("tabindex");
+    if (!raw) return 0;
+    int64_t parsed = str_to_int64_default(raw, strlen(raw), 0);
+    if (parsed > INT_MAX) return INT_MAX;
+    if (parsed < INT_MIN) return INT_MIN;
+    return (int)parsed;
+}
+
+// Collect candidates in DOM order once. The package receives this snapshot and
+// owns tabindex ordering; native only answers layout-coupled eligibility.
+void focus_collect_candidates(View* view, ArrayList* list, bool sequential_only) {
     if (!view) return;
-    if (is_view_focusable(view)) {
+    bool focusable = sequential_only ? is_view_focusable(view)
+                                     : is_view_programmatically_focusable(view);
+    if (focusable) {
         arraylist_append(list, view);
     }
     // recurse into children (only element nodes have children)
@@ -7954,7 +8067,7 @@ static void collect_focusable(View* view, ArrayList* list) {
         DomElement* elem = lam::dom_require_element(view);
         DomNode* child = elem->first_child;
         while (child) {
-            collect_focusable(static_cast<View*>(child), list);
+            focus_collect_candidates(static_cast<View*>(child), list, sequential_only);
             child = child->next_sibling;
         }
     }
@@ -7975,7 +8088,7 @@ bool focus_move(DocState* state, View* root, bool forward) {
 
     // build list of focusable elements in DOM order
     ArrayList* focusable = arraylist_new(32);
-    collect_focusable(root, focusable);
+    focus_collect_candidates(root, focusable, true);
 
     if (focusable->length == 0) {
         arraylist_free(focusable);

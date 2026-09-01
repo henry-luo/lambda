@@ -1017,7 +1017,6 @@ extern "C" bool js_promise_initial_unhandled_rejections_strict(void);
 // owner-local, so dispatch keeps the old direct-load cost without a call,
 // lock, atomic, or shared-cache probe.
 #define js_with_stack_state (js_runtime_state.with_scope.stack)
-static inline int js_with_stack_depth_now(void) { return js_with_stack_state.depth; }
 
 #define js_input (js_runtime_state.input)
 #define js_strict_mode (js_runtime_state.strict_mode)

@@ -15,6 +15,29 @@ extern __thread EvalContext* context;
 extern "C" Item interp_eval_view_template(Context* context, Script* module,
                                            AstViewNode* view, Item model);
 
+// Handler names are dynamic strings, while the dispatch hot path only needs a
+// no-false-negative prefilter before its exact strcmp lookup.
+static uint64_t template_event_mask_bit(const char* event_name) {
+    if (!event_name || !event_name[0]) return 0;
+    uint64_t hash = UINT64_C(1469598103934665603);
+    for (const unsigned char* p = (const unsigned char*)event_name; *p; p++) {
+        hash ^= *p;
+        hash *= UINT64_C(1099511628211);
+    }
+    return UINT64_C(1) << (hash & 63u);
+}
+
+static void template_registry_note_handler(TemplateEntry* entry,
+                                           const char* event_name) {
+    uint64_t bit = template_event_mask_bit(event_name);
+    if (!entry || !bit) return;
+    entry->handler_event_mask |= bit;
+    TemplateRegistry* registry = g_template_registry;
+    if (!registry) return;
+    if (entry->is_behavior) registry->behavior_event_mask |= bit;
+    else registry->author_event_mask |= bit;
+}
+
 TemplateRegistry** template_registry_current_slot(void) {
     if (!context) {
         log_error("template-registry: no bound EvalContext");
@@ -106,6 +129,7 @@ void template_entry_add_handler(TemplateEntry* entry,
     h->handler_func = handler_func;
     h->next = entry->handlers;
     entry->handlers = h;  // prepend
+    template_registry_note_handler(entry, event_name);
 
     log_debug("template_entry_add_handler: tmpl=%s event=%s",
               entry->name ? entry->name : "(anon)", event_name);
@@ -126,6 +150,7 @@ void template_entry_add_interp_handler(TemplateEntry* entry,
     h->interp_module = module;
     h->next = entry->handlers;
     entry->handlers = h;
+    template_registry_note_handler(entry, event_name);
     log_debug("template_entry_add_interp_handler: tmpl=%s event=%s",
         entry->name ? entry->name : "(anon)", event_name);
 }
@@ -156,6 +181,24 @@ TemplateHandlerEntry* template_entry_find_handler(TemplateEntry* entry,
         if (h->event_name && strcmp(h->event_name, event_name) == 0) return h;
     }
     return NULL;
+}
+
+bool template_entry_may_handle_event(TemplateEntry* entry,
+                                     const char* event_name) {
+    uint64_t bit = template_event_mask_bit(event_name);
+    return entry && bit && (entry->handler_event_mask & bit) != 0;
+}
+
+bool template_registry_may_have_author_handler(TemplateRegistry* registry,
+                                                const char* event_name) {
+    uint64_t bit = template_event_mask_bit(event_name);
+    return registry && bit && (registry->author_event_mask & bit) != 0;
+}
+
+bool template_registry_may_have_behavior_handler(TemplateRegistry* registry,
+                                                  const char* event_name) {
+    uint64_t bit = template_event_mask_bit(event_name);
+    return registry && bit && (registry->behavior_event_mask & bit) != 0;
 }
 
 // A field pins a value only when its type is a string/symbol *literal*. A typed

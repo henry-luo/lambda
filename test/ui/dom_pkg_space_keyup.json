@@ -1,0 +1,18 @@
+{
+  "name": "ES48 Space activation runs on keyup",
+  "html": "test/ui/test_form_assertions.html",
+  "viewport": {"width": 320, "height": 180},
+  "events": [
+    {"type": "click", "target": {"selector": "#email"}},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "key_press", "key": "Tab"},
+    {"type": "assert_focus", "target": {"selector": "#newsletter"}},
+    {"type": "assert_checked", "target": {"selector": "#newsletter"}, "checked": false},
+    {"type": "key_down", "key": "Space"},
+    {"type": "assert_checked", "target": {"selector": "#newsletter"}, "checked": false},
+    {"type": "key_up", "key": "Space"},
+    {"type": "assert_checked", "target": {"selector": "#newsletter"}, "checked": true}
+  ]
+}

@@ -39,7 +39,6 @@ bool js_preamble_entries_from_module_consts(struct hashmap* module_consts,
 void js_preamble_entries_free(JsModuleConstEntry* entries, int count);
 void js_eval_preamble_entries_free(void);
 extern __thread NamePool* g_js_mir_name_pool_override;
-void jm_set_name_pool_override(NamePool* pool);
 extern bool g_jm_preamble_mode;
 extern bool g_jm_preamble_compile_only;
 extern JsPreambleState* g_jm_preamble_out;
@@ -105,6 +104,19 @@ typedef struct JsMirReference {
     uint8_t jube_kind;
     bool jube_can_raise;
 } JsMirReference;
+
+// One saved closure-writeback state is shared by expression, statement, and
+// branch lowering so sibling paths cannot retain each other's closure env.
+typedef struct JsMirLastClosureSnapshot {
+    bool has_env;
+    MIR_reg_t env_reg;
+    int capture_count;
+    const char* capture_names[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    int capture_slots[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool capture_is_transitive[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool capture_is_nfe[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+    bool capture_is_assigned[JS_MIR_LAST_CLOSURE_CAPTURE_MAX];
+} JsMirLastClosureSnapshot;
 
 typedef struct JsMirLexicalThisRebind {
     bool saved_force_closure_env_copy;
@@ -317,22 +329,35 @@ JsLoopLabels* jm_loop_label_at(JsMirTranspiler* mt, int index);
 JsMirIteratorFrame* jm_for_of_iterator_at(JsMirTranspiler* mt, int index);
 JsTryContext* jm_try_context_at(JsMirTranspiler* mt, int index);
 JsTryContext* jm_try_context_push(JsMirTranspiler* mt);
+void jm_try_context_setup(JsTryContext* context, MIR_label_t catch_label,
+    MIR_label_t finally_label, MIR_label_t end_label, MIR_reg_t return_val_reg,
+    MIR_reg_t has_return_reg, bool has_catch, bool has_finally,
+    JsAstNode* finally_body, MIR_reg_t incoming_error_lane_val_reg);
 void jm_push_scope(JsMirTranspiler* mt);
 int jm_arguments_param_index(JsMirTranspiler* mt, const char* vname,
     JsMirVarEntry* resolved_var);
 JsMirVarEntry* jm_arguments_param_var(JsMirTranspiler* mt, int param_index);
 bool jm_has_use_strict_directive(JsFunctionNode* fn);
 bool jm_function_decl_is_direct_binding(JsFunctionNode* fn, bool arrow_body_is_direct);
+bool jm_entry_is_owned_by_function(const JsFunctionNode* function,
+    const NameEntry* entry);
 void jm_pop_scope(JsMirTranspiler* mt);
 void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
                        MIR_type_t mir_type = MIR_T_I64, TypeId type_id = LMD_TYPE_ANY);
 JsMirVarEntry* jm_install_fresh_var_entry(JsMirTranspiler* mt, int depth,
     JsVarScopeEntry* entry);
+JsMirVarEntry* jm_find_var_at(JsMirTranspiler* mt, const char* name,
+    int depth);
+int jm_last_closure_capture_count_clamped(int count);
+void jm_save_last_closure_snapshot(JsMirTranspiler* mt,
+    JsMirLastClosureSnapshot* snapshot);
+void jm_clear_last_closure_snapshot(JsMirTranspiler* mt);
+void jm_restore_last_closure_snapshot(JsMirTranspiler* mt,
+    const JsMirLastClosureSnapshot* snapshot);
 JsMirVarEntry* jm_find_var(JsMirTranspiler* mt, const char* name);
 uint64_t jm_name_hash(const void* item, uint64_t seed0, uint64_t seed1);
 int jm_name_cmp(const void* a, const void* b, void* udata);
 void jm_name_set_add(struct hashmap* set, const char* name);
-void jm_name_set_add_kind(struct hashmap* set, const char* name, int kind);
 bool jm_name_set_has(struct hashmap* set, const char* name);
 int jm_count_yields(JsMirTranspiler* mt, JsAstNode* node);
 int jm_gen_spill_save(JsMirTranspiler* mt, MIR_reg_t reg);
@@ -348,18 +373,16 @@ void jm_collect_indexed_body_locals(JsMirTranspiler* mt, JsAstNode* node,
     struct hashmap* locals, bool var_only = false);
 void jm_collect_let_const_names(JsAstNode* block, struct hashmap* names);
 void jm_collect_switch_lexical_names(JsAstNode* switch_node, struct hashmap* names);
-void jm_collect_all_let_const_names_recursive(JsAstNode* node, struct hashmap* names);
+bool jm_function_decl_annex_b_disallowed(const JsNameSetEntry* entry);
 void jm_init_block_tdz(JsMirTranspiler* mt, JsAstNode* block);
 void jm_init_switch_tdz(JsMirTranspiler* mt, JsAstNode* switch_node);
 void jm_collect_pattern_names(JsAstNode* pat, struct hashmap* names);
 void jm_writeback_scope_env_pattern_bindings(JsMirTranspiler* mt, JsAstNode* pattern);
 void jm_analyze_captures(JsMirTranspiler* mt, JsFuncCollected* fc,
-                         struct hashmap* outer_scope_names,
                                 struct hashmap* module_consts,
-                                struct hashmap* ancestor_func_locals,
                                 bool captures_with_scope);
-bool jm_ast_contains_node(JsAstNode* root, JsAstNode* target);
-bool jm_ast_node_has_with_ancestor(JsAstNode* root, JsAstNode* target);
+bool jm_ast_node_has_with_ancestor(JsMirTranspiler* mt, JsAstNode* root,
+    JsAstNode* target);
 JsMirImportEntry* jm_ensure_import(JsMirTranspiler* mt, const char* name,
     MIR_type_t ret_type, int nargs, MIR_var_t* args, int nres);
 JsMirImportEntry* jm_ensure_import_ii_i(JsMirTranspiler* mt, const char* name);
@@ -443,10 +466,6 @@ MIR_reg_t jm_call_direct_boxed(JsMirTranspiler* mt, JsFuncCollected* callee,
 MIR_reg_t jm_module_name_id_at_index(JsMirTranspiler* mt, uint32_t index);
 MIR_reg_t jm_call_function_into(JsMirTranspiler* mt, MIR_op_t func,
         MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
-MIR_reg_t jm_call_function_discard(JsMirTranspiler* mt, MIR_op_t func,
-        MIR_op_t this_value, MIR_op_t args, MIR_op_t arg_count);
-MIR_reg_t jm_apply_function_discard(JsMirTranspiler* mt, MIR_op_t func,
-        MIR_op_t this_value, MIR_op_t args);
 MIR_reg_t jm_construct_value_into(JsMirTranspiler* mt, MIR_op_t callee,
         MIR_op_t args, MIR_op_t arg_count, MIR_op_t new_target);
 MIR_reg_t jm_apply_function_into(JsMirTranspiler* mt, MIR_op_t func,
@@ -465,17 +484,12 @@ MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
 #define jm_call_void_2(mt, fn, ...) jm_call_void_2_or_inline(mt, fn, __VA_ARGS__)
 #define jm_call_void_3(mt, fn, ...) \
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_3(&(mt)->em, fn, __VA_ARGS__, true))
-#define jm_call_void_4(mt, fn, ...) \
-    (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_4(&(mt)->em, fn, __VA_ARGS__, true))
 #define jm_call_void_5(mt, fn, ...) \
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_5(&(mt)->em, fn, __VA_ARGS__, true))
 #define jm_call_void_6(mt, fn, ...) \
     (jm_preserve_error_lane_carrier((mt), fn, false), em_call_void_6(&(mt)->em, fn, __VA_ARGS__, true))
 
-// Register-operand call shorthand. The overwhelming majority of helper calls
-// pass every argument as an I64 register; jm_callr_N spells that directly
-// instead of repeating `MIR_T_I64, MIR_new_reg_op(mt->ctx, x)` per argument.
-// Mixed sites keep the explicit jm_call_N form.
+// Register-operand call shorthand for helpers whose operands are all I64 registers.
 #define JM_REG(mt, r) MIR_T_I64, MIR_new_reg_op((mt)->ctx, (r))
 #define jm_callr_1(mt, fn, ret, a1) jm_call_1(mt, fn, ret, JM_REG(mt, a1))
 #define jm_callr_2(mt, fn, ret, a1, a2) \
@@ -488,23 +502,11 @@ MirValue jm_convert_rep(void* owner, MirValue value, ValueRep required);
 #define jm_callr_5(mt, fn, ret, a1, a2, a3, a4, a5) \
     jm_call_5(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
         JM_REG(mt, a4), JM_REG(mt, a5))
-#define jm_callr_6(mt, fn, ret, a1, a2, a3, a4, a5, a6) \
-    jm_call_6(mt, fn, ret, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
-        JM_REG(mt, a4), JM_REG(mt, a5), JM_REG(mt, a6))
 #define jm_callr_void_1(mt, fn, a1) jm_call_void_1(mt, fn, JM_REG(mt, a1))
 #define jm_callr_void_2(mt, fn, a1, a2) \
     jm_call_void_2(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2))
 #define jm_callr_void_3(mt, fn, a1, a2, a3) \
     jm_call_void_3(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3))
-#define jm_callr_void_4(mt, fn, a1, a2, a3, a4) \
-    jm_call_void_4(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
-        JM_REG(mt, a4))
-#define jm_callr_void_5(mt, fn, a1, a2, a3, a4, a5) \
-    jm_call_void_5(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
-        JM_REG(mt, a4), JM_REG(mt, a5))
-#define jm_callr_void_6(mt, fn, a1, a2, a3, a4, a5, a6) \
-    jm_call_void_6(mt, fn, JM_REG(mt, a1), JM_REG(mt, a2), JM_REG(mt, a3), \
-        JM_REG(mt, a4), JM_REG(mt, a5), JM_REG(mt, a6))
 MIR_reg_t jm_emit_null(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_undefined(JsMirTranspiler* mt);
 MIR_reg_t jm_boxed_immediate_const(JsMirTranspiler* mt, uint64_t item,
@@ -596,7 +598,7 @@ void jm_scope_env_mark_and_writeback_binding(JsMirTranspiler* mt, const char* na
     JsAstNode* binding_node, MIR_reg_t val_reg, TypeId type_id = LMD_TYPE_ANY);
 MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr);
 MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
-                                         TypeId expr_type, TypeId target_type);
+                                         TypeId target_type);
 MIR_reg_t jm_transpile_conditional_as_native(JsMirTranspiler* mt,
                                              JsConditionalNode* cond,
                                              TypeId target_type);
@@ -609,9 +611,6 @@ bool jm_call_result_uses_native_register(JsMirTranspiler* mt, JsCallNode* call, 
 bool jm_has_tail_call(JsMirTranspiler* mt, JsFuncCollected* fc);
 void jm_register_local_func(JsMirTranspiler* mt, const char* name, MIR_item_t func_item);
 const char* jm_make_fn_name(JsFunctionNode* fn, JsMirTranspiler* mt);
-int jm_count_params(JsFunctionNode* fn);
-int jm_formal_length(JsFunctionNode* fn);
-JsIdentifierNode* jm_get_param_identifier(JsAstNode* param_node);
 const char* jm_get_param_name(JsAstNode* param_node, int index);
 // Backend-only formal names are compiler-owned and independent of source
 // spelling; semantic JS binding names continue to use jm_get_param_name.
@@ -622,8 +621,26 @@ static inline bool jm_js_name_equal(const String* left, const String* right) {
     return left && right && left->len == right->len &&
         memcmp(left->chars, right->chars, left->len) == 0;
 }
+// Direct-body function declarations are hoisted by the function scope, while
+// nested block declarations retain their own lexical scope.
+static inline JsFunctionNode* jm_direct_body_function_binding(
+        JsFunctionNode* fn, const char* vname) {
+    if (!fn || !vname || !fn->body ||
+            fn->body->node_type != JS_AST_NODE_BLOCK_STATEMENT) return NULL;
+    for (JsAstNode* statement = ((JsBlockNode*)fn->body)->statements;
+            statement; statement = statement->next) {
+        if (statement->node_type != JS_AST_NODE_FUNCTION_DECLARATION) continue;
+        JsFunctionNode* declaration = (JsFunctionNode*)statement;
+        if (declaration->name &&
+                strcmp(jm_var_name(declaration->name), vname) == 0) {
+            return declaration;
+        }
+    }
+    return NULL;
+}
 static inline const String* jm_param_binding_name(JsAstNode* param_node) {
-    JsIdentifierNode* identifier = jm_get_param_identifier(param_node);
+    JsIdentifierNode* identifier =
+        js_ast_parameter_binding_identifier(param_node);
     return identifier ? identifier->name : NULL;
 }
 void jm_collect_indexed_functions(JsMirTranspiler* mt);
@@ -643,7 +660,6 @@ void jm_prescan_float_widening(JsMirTranspiler* mt, JsAstNode* body);
 bool jm_should_widen_to_float(JsMirTranspiler* mt, const char* vname);
 MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg_count);
 MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg);
-int jm_count_args(JsAstNode* arg);
 MIR_reg_t jm_create_method_function(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count);
 MIR_reg_t jm_transpile_literal(JsMirTranspiler* mt, JsLiteralNode* lit);
 MIR_reg_t jm_transpile_identifier(JsMirTranspiler* mt, JsIdentifierNode* id);
@@ -680,7 +696,7 @@ void jm_emit_class_static_named_field(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     JsStaticFieldEntry* sf, MIR_reg_t value);
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
-MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr);
+MirValue jm_transpile_expression_value(JsMirTranspiler* mt, JsAstNode* item);
 MirValue jm_transpile_box_value(JsMirTranspiler* mt, JsAstNode* item);
 MIR_reg_t jm_load_module_var(JsMirTranspiler* mt, uint32_t slot);
 void jm_store_module_var(JsMirTranspiler* mt, uint32_t slot, MIR_reg_t item);
@@ -698,7 +714,6 @@ void jm_emit_class_static_block(JsMirTranspiler* mt, MIR_reg_t cls_obj,
 void jm_emit_class_static_initializers(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce,
     MIR_reg_t ctor_super_val);
 typedef struct JsMirClassSetup {
-    MIR_reg_t ctor_super_val;
     MIR_reg_t class_proto_obj;
     JsAstNode* heritage;
     JsClassEntry* static_superclass;
@@ -707,6 +722,10 @@ void jm_emit_class_setup(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* c
     JsAstNode* class_node, bool computed_key_before_function, JsMirClassSetup* setup);
 void jm_emit_class_instance_setup_tail(JsMirTranspiler* mt, MIR_reg_t cls_obj,
     JsClassEntry* ce, MIR_reg_t proto_obj, MIR_reg_t ctor_super_val, bool heritage_is_null);
+void jm_emit_class_members(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* ce,
+    JsAstNode* class_node, bool computed_key_before_function);
+void jm_emit_class_prototype_properties(JsMirTranspiler* mt, MIR_reg_t cls_obj,
+    MIR_reg_t proto_obj);
 void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh);
 void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node);
 MIR_reg_t jm_build_closure_for_method(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count);
@@ -749,8 +768,6 @@ extern "C" Item js_new_function_from_string(Item* args, int argc);
 char* eval_try_insert_return(const char* code, size_t len);
 extern "C" Item js_builtin_eval(Item code_item, int64_t is_global_scope);
 void js_normalize_path_separators(char* path);
-Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source, const char* filename,
-                              uint64_t* result_home);
 Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                   const char* filename, uint64_t* result_home);
 Item load_js_module(Runtime* runtime, const char* js_path);

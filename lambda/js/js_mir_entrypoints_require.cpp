@@ -684,7 +684,6 @@ static Item transpile_js_to_mir_core_profile_len(Runtime* runtime, const char* j
         // property-miss synthesis dependency after D6.2.2v2 removed that path.
         tp->strict_js = false;
         tp->strict_mode = true;
-        tp->global_scope->strict = true;
     }
     jm_track_active_js_transpile(tp, NULL, NULL);
 
@@ -1125,12 +1124,6 @@ Item transpile_js_to_mir_core_len(Runtime* runtime, const char* js_source,
                                                 filename, result_home, false, false);
 }
 
-Item transpile_js_to_mir_core(Runtime* runtime, const char* js_source,
-                              const char* filename, uint64_t* result_home) {
-    return transpile_js_to_mir_core_len(runtime, js_source, strlen(js_source), filename,
-                                        result_home);
-}
-
 // ============================================================================
 // Public API wrappers for preamble support
 // ============================================================================
@@ -1166,12 +1159,6 @@ Item transpile_js_typescript_to_mir_len(Runtime* runtime, const char* js_source,
     g_jm_preamble_in = NULL;
     return transpile_js_to_mir_core_profile_len(runtime, js_source, js_source_len,
                                                 filename, result_home, true, false);
-}
-
-Item transpile_js_to_mir_preamble(Runtime* runtime, const char* js_source, const char* filename,
-                                   JsPreambleState* out_state, uint64_t* result_home) {
-    return transpile_js_to_mir_preamble_len(runtime, js_source, strlen(js_source), filename,
-                                            out_state, result_home);
 }
 
 Item transpile_js_to_mir_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
@@ -1296,12 +1283,6 @@ Item execute_compiled_js_in_current_realm(Runtime* runtime,
     return result;
 }
 
-Item transpile_js_to_mir_with_preamble(Runtime* runtime, const char* js_source, const char* filename,
-                                        const JsPreambleState* preamble, uint64_t* result_home) {
-    return transpile_js_to_mir_with_preamble_len(runtime, js_source, strlen(js_source), filename,
-                                                  preamble, result_home);
-}
-
 Item transpile_js_to_mir_with_preamble_len(Runtime* runtime, const char* js_source, size_t js_source_len,
                                            const char* filename, const JsPreambleState* preamble,
                                            uint64_t* result_home) {
@@ -1416,10 +1397,9 @@ Item instantiate_js_preamble(Runtime* runtime, const JsPreambleState* cached,
     out_state->module_state_id = lambda_active_module_state_id();
 
     // js262 restores a value checkpoint because its harness heap survives.
-    // This heap is new: clear all process caches, then retain only the compiled
-    // declaration count so js_main initializes fresh module values.
+    // This heap is new: clear all process caches before js_main initializes
+    // fresh values in the pre-reserved module slab.
     js_batch_reset();
-    js_prepare_compiled_preamble_vars(cached->module_var_count);
     Input* js_input_context = Input::create(context->pool);
     js_runtime_set_input(js_input_context);
     // Cached MIR is immutable, but its globals are document-local. Recreate

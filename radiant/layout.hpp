@@ -2143,9 +2143,6 @@ typedef struct FlexLineInfo {
     float cross_size;
     float cross_position;
     float free_space;
-    float total_flex_grow;
-    float total_flex_shrink;
-    float baseline;
 } FlexLineInfo;
 
 // tier-3: layout-transient, valid while resolving one flex item
@@ -2171,7 +2168,6 @@ typedef struct FlexContainerLayout : FlexProp {
     // Cached calculations
     float main_axis_size;
     float cross_axis_size;
-    bool needs_reflow;
     // The final direct-text pass owns text geometry for this flex container.
     bool direct_text_geometry_handled;
     // Original container used to distinguish direct text from flattened runs.
@@ -3005,15 +3001,12 @@ typedef struct GridContainerLayout : GridProp {
     GridLineName* line_names;
     int line_name_count;
     int allocated_line_names;
-    bool needs_reflow;
     int explicit_row_count;
     int explicit_column_count;
     int implicit_row_count;
     int implicit_column_count;
     int negative_implicit_row_count;
     int negative_implicit_column_count;
-    int auto_row_cursor;
-    int auto_col_cursor;
     float container_width;
     float container_height;
     float content_width;
@@ -3057,7 +3050,6 @@ void destroy_grid_track_list(GridTrackList* track_list);
 GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value);
 GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size);
 void destroy_grid_track_size(GridTrackSize* track_size);
-GridArea* create_grid_area(const char* name, int row_start, int row_end, int column_start, int column_end);
 char* grid_scratch_strdup(ScratchArena* scratch, const char* source);
 void destroy_grid_area(GridArea* area);
 void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_number, bool is_row);
@@ -3366,8 +3358,6 @@ float find_first_baseline_recursive(LayoutContext* lycon, View* parent, float cu
 float find_last_baseline_recursive(LayoutContext* lycon, View* parent, float cumulative_x, bool use_normal_lh = false);
 float layout_table_baseline_for_source(LayoutContext* lycon, ViewBlock* table,
                                        bool prefer_last);
-void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row,
-    float table_abs_x, float cell_border, float cell_padding);
 bool wrap_orphaned_table_children(LayoutContext* lycon, struct DomElement* parent);
 void layout_refresh_anonymous_table_fixup_inheritance(LayoutContext* lycon,
                                                        struct DomElement* parent,

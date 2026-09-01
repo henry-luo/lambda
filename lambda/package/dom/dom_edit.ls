@@ -59,6 +59,19 @@ pub pn apply_fn(host, evt) {
         else if (t == "deleteContentBackward" or t == "deleteContentForward") {
             if (radiant.dom_delete_dom_range(host)) { 'prevent-default' } else { 'pass' }
         }
+        // Clipboard and text-drag payloads are already native-provided plain
+        // text. Their policy is only to replace the selected DOM range; rich
+        // HTML remains available to an author through DataTransfer rather than
+        // being parsed a second time by this default applier.
+        else if (t == "insertFromPaste" or t == "insertFromDrop") {
+            let data = if (evt.data == null) "" else evt.data;
+            if (len(data) == 0) { 'pass' }
+            else if (radiant.dom_replace_dom_range(host, data)) { 'prevent-default' }
+            else { 'pass' }
+        }
+        else if (t == "deleteByCut" or t == "deleteByDrag") {
+            if (radiant.dom_delete_dom_range(host)) { 'prevent-default' } else { 'pass' }
+        }
         else { 'pass' }
     }
     else {
@@ -71,6 +84,16 @@ pub pn apply_fn(host, evt) {
             let data = if (evt.data == null) "" else evt.data;
             if (radiant.dom_replace_range(host, s, e, data) == null) { 'pass' }
             else { 'prevent-default' }
+        }
+        // The raw range waist deliberately covers cross-text-node clipboard
+        // and drag selections; the single-node splice above is only a fast
+        // path for ordinary typing. Empty means an HTML-only transfer, which
+        // this plain-text default declines for an author DataTransfer handler.
+        else if (t == "insertFromPaste" or t == "insertFromDrop") {
+            let data = if (evt.data == null) "" else evt.data;
+            if (len(data) == 0) { 'pass' }
+            else if (radiant.dom_replace_dom_range(host, data)) { 'prevent-default' }
+            else { 'pass' }
         }
         // F13.3. A composition edit replaces the range the IME named with the
         // preedit text, and leaves the caret *inside* it: `composition_caret` is
@@ -113,6 +136,13 @@ pub pn apply_fn(host, evt) {
             if (ds == de) { 'pass' }
             else if (radiant.dom_replace_range(host, ds, de, "") == null) { 'pass' }
             else { 'prevent-default' }
+        }
+        // Cut and move-drag delete exactly the range geometry that native
+        // captured before dispatch. They differ only in who put the copied
+        // text on the clipboard, so sharing the raw delete avoids a second
+        // tree-surgery policy branch.
+        else if (t == "deleteByCut" or t == "deleteByDrag") {
+            if (radiant.dom_delete_dom_range(host)) { 'prevent-default' } else { 'pass' }
         }
         // F14.1. The formatting intents arrive here on the keyboard path — the
         // ordinary edit dispatch sends them to `domedit` exactly as it does for

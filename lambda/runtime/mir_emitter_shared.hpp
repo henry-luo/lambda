@@ -572,7 +572,9 @@ static inline void em_visit_linked_nodes(AstNode* first, void* owner,
 }
 
 template <typename Node>
-static inline int em_linked_node_count(const Node* first) { int count = 0; for (; first; first = (const Node*)first->next) count++; return count; }
+static inline int em_linked_node_count(const Node* first) {
+    return ast_linked_node_count((const AstNode*)first);
+}
 
 static inline void em_note_pending_materialize(MirEmitter* em,
         MirPendingMaterializeReason reason) {

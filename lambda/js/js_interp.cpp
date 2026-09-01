@@ -810,7 +810,7 @@ static void js_interp_probe_loop_capture(JsAstNode* node,
         JsFunctionNode* function = (JsFunctionNode*)node;
         // Direct eval can publish a closure over a loop binding that does not
         // appear as an identifier in its enclosing AST.
-        if (js_ast_has_direct_eval_call((JsAstNode*)function->body)) {
+        if (js_ast_collect_function_facts(NULL, (JsAstNode*)function->body).has_direct_eval) {
             probe->captures_loop_lexical = true;
             return;
         }
@@ -846,10 +846,10 @@ static bool js_interp_loop_needs_per_iteration_env(NameScope* scope,
     if (!has_lexical) return false;
     // Direct eval in the loop frame can create a closure over its lexical
     // binding without an AST-visible nested function.
-    if (js_ast_has_direct_eval_call(initialization) ||
-            js_ast_has_direct_eval_call(test) ||
-            js_ast_has_direct_eval_call(update) ||
-            js_ast_has_direct_eval_call(body)) return true;
+    if (js_ast_collect_function_facts(NULL, initialization).has_direct_eval ||
+            js_ast_collect_function_facts(NULL, test).has_direct_eval ||
+            js_ast_collect_function_facts(NULL, update).has_direct_eval ||
+            js_ast_collect_function_facts(NULL, body).has_direct_eval) return true;
     JsInterpLoopCaptureProbe probe = {scope, 0, false};
     js_interp_probe_loop_capture(initialization, &probe);
     js_interp_probe_loop_capture(test, &probe);
@@ -1338,28 +1338,11 @@ static Item js_interp_write_binding(JsInterpFrame* frame, NameEntry* entry,
     return value;
 }
 
-static int js_interp_function_param_count(const JsFunctionNode* function) {
-    int count = 0;
-    for (const AstNode* param = function ? function->params : NULL; param;
-            param = param->next) {
-        count++;
-    }
-    return count;
-}
-
-// Function.length counts only parameters preceding the first default or rest
-// parameter; binding still needs the full source parameter list.
 static int js_interp_function_formal_length(const JsFunctionNode* function) {
-    int count = 0;
-    for (const AstNode* param = function ? function->params : NULL; param;
-            param = param->next) {
-        if (param->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN ||
-                param->node_type == JS_AST_NODE_REST_ELEMENT) {
-            break;
-        }
-        count++;
-    }
-    return count;
+    JsAstParameterFacts facts = js_ast_collect_parameter_facts(
+        function ? (JsAstNode*)function->params : NULL);
+    return facts.formal_length >= 0 ? facts.formal_length
+        : ast_linked_node_count(function ? function->params : NULL);
 }
 
 static Item js_interp_configure_function_metadata(Item function_item);
@@ -1379,7 +1362,7 @@ static Item js_interp_new_function(JsInterpFrame* frame,
     if (name_scope && (!name_env || !name_env_root.registered)) return ItemError;
     JS_ROOTS(roots, result_root, js_new_interpreted_function(function, frame->script,
         name_env ? name_env : frame->env,
-        js_interp_function_param_count(function), flags));
+        ast_linked_node_count(function->params), flags));
     if (!item_is_error(result_root.get()) &&
             (js_private_field_initializing || js_eval_initializer_context)) {
         // Nested closures retain the field-initializer early-error context
@@ -1395,7 +1378,8 @@ static Item js_interp_new_function(JsInterpFrame* frame,
     }
     result_root.set(js_interp_configure_function_metadata(result_root.get()));
     if (!item_is_error(result_root.get())) {
-        js_set_formal_length(result_root.get(), js_interp_function_formal_length(function));
+        js_set_formal_length(result_root.get(),
+            js_interp_function_formal_length(function));
         const char* source_text = NULL;
         uint32_t source_length = 0;
         if (frame->script && js_function_source_span(frame->script->source,
@@ -1508,7 +1492,6 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node);
 static JsInterpCompletion js_interp_exec_list(JsInterpFrame* frame, JsAstNode* node);
 static void js_interp_generator_clear_list_continuation(JsGeneratorStateRecord* state);
 static bool js_interp_is_anonymous_function_definition(JsAstNode* initializer);
-static JsAstNode* js_interp_unwrap_name_initializer(JsAstNode* initializer);
 static JsInterpCompletion js_interp_initialize_scope(JsInterpFrame* frame,
         NameScope* scope, bool initialize_functions = true);
 static JsInterpCompletion js_interp_initialize_function_declarations(
@@ -1843,10 +1826,9 @@ static JsInterpCompletion js_interp_eval_class(JsInterpFrame* frame,
 
 static JsInterpCompletion js_interp_eval_initializer_with_binding_name(
         JsInterpFrame* frame, JsAstNode* initializer, String* binding_name) {
-    JsAstNode* unwrapped = js_interp_unwrap_name_initializer(initializer);
-    if (binding_name && unwrapped &&
-            unwrapped->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
-        JsClassNode* cls = (JsClassNode*)unwrapped;
+    if (binding_name && initializer &&
+            initializer->node_type == JS_AST_NODE_CLASS_EXPRESSION) {
+        JsClassNode* cls = (JsClassNode*)initializer;
         if (!cls->name) return js_interp_eval_class(frame, cls, false, binding_name);
     }
     return js_interp_eval(frame, initializer);
@@ -2836,10 +2818,17 @@ static bool js_interp_is_undefined(Item value) {
 }
 
 static void js_interp_set_parameter_pattern_tdz(JsInterpFrame* frame,
+        JsAstNode* pattern);
+
+static void js_interp_set_parameter_pattern_tdz_child(JsAstNode* child,
+        void* opaque) {
+    js_interp_set_parameter_pattern_tdz((JsInterpFrame*)opaque, child);
+}
+
+static void js_interp_set_parameter_pattern_tdz(JsInterpFrame* frame,
         JsAstNode* pattern) {
     if (!frame || !pattern) return;
-    switch (pattern->node_type) {
-    case AST_NODE_IDENT: {
+    if (pattern->node_type == AST_NODE_IDENT) {
         JsIdentifierNode* identifier = (JsIdentifierNode*)pattern;
         NameEntry* entry = identifier->entry ? identifier->entry
             : js_interp_find_binding(frame, identifier->name);
@@ -2850,36 +2839,8 @@ static void js_interp_set_parameter_pattern_tdz(JsInterpFrame* frame,
         }
         return;
     }
-    case JS_AST_NODE_ASSIGNMENT_PATTERN:
-        js_interp_set_parameter_pattern_tdz(frame,
-            (JsAstNode*)((JsAssignmentPatternNode*)pattern)->left);
-        return;
-    case JS_AST_NODE_REST_ELEMENT:
-    case JS_AST_NODE_REST_PROPERTY:
-    case JS_AST_NODE_SPREAD_ELEMENT:
-        js_interp_set_parameter_pattern_tdz(frame,
-            (JsAstNode*)((JsSpreadElementNode*)pattern)->argument);
-        return;
-    case JS_AST_NODE_ARRAY_PATTERN:
-        for (JsAstNode* element = (JsAstNode*)((JsArrayPatternNode*)pattern)->elements;
-                element; element = (JsAstNode*)element->next) {
-            js_interp_set_parameter_pattern_tdz(frame, element);
-        }
-        return;
-    case JS_AST_NODE_OBJECT_PATTERN:
-        for (JsAstNode* property = (JsAstNode*)((JsObjectPatternNode*)pattern)->properties;
-                property; property = (JsAstNode*)property->next) {
-            if (property->node_type == JS_AST_NODE_REST_PROPERTY) {
-                js_interp_set_parameter_pattern_tdz(frame, property);
-            } else if (property->node_type == AST_NODE_PROPERTY) {
-                js_interp_set_parameter_pattern_tdz(frame,
-                    (JsAstNode*)((JsPropertyNode*)property)->value);
-            }
-        }
-        return;
-    default:
-        return;
-    }
+    js_ast_visit_binding_pattern_children(pattern,
+        js_interp_set_parameter_pattern_tdz_child, frame);
 }
 
 static void js_interp_prepare_parameter_tdz(JsInterpFrame* frame,
@@ -2914,15 +2875,7 @@ static JsInterpCompletion js_interp_finish_array_binding(Item iterator,
     return completion;
 }
 
-static JsAstNode* js_interp_unwrap_name_initializer(JsAstNode* initializer) {
-    while (initializer && initializer->node_type == AST_NODE_PRIMARY) {
-        initializer = (JsAstNode*)((AstPrimaryNode*)initializer)->expr;
-    }
-    return initializer;
-}
-
 static bool js_interp_is_anonymous_function_definition(JsAstNode* initializer) {
-    initializer = js_interp_unwrap_name_initializer(initializer);
     return initializer && (initializer->node_type == AST_NODE_FUNC_EXPR ||
         initializer->node_type == AST_NODE_ARROW_FUNC ||
         initializer->node_type == JS_AST_NODE_CLASS_EXPRESSION);
@@ -3350,8 +3303,6 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         return js_interp_normal(make_js_undefined());
     case JS_AST_NODE_CLASS_EXPRESSION:
         return js_interp_eval_class(frame, (JsClassNode*)node, false);
-    case AST_NODE_PRIMARY:
-        return js_interp_eval(frame, (JsAstNode*)((AstPrimaryNode*)node)->expr);
     case AST_NODE_EXPR_STMT:
         // Loop headers can retain an expression-statement wrapper from the
         // shared statement builder; its completion is the wrapped expression.
@@ -5006,11 +4957,26 @@ struct JsInterpSupportState {
     bool supported;
 };
 
+struct JsInterpPatternSupportState {
+    bool supported;
+    bool has_child;
+};
+
 static void js_interp_check_child(JsAstNode* child, void* opaque);
 
 static bool js_interp_identifier_is(JsAstNode* node, const char* name) {
     if (!node || node->node_type != AST_NODE_IDENT) return false;
     return js_interp_name_equals(((JsIdentifierNode*)node)->name, name);
+}
+
+static bool js_interp_pattern_supported(JsAstNode* pattern);
+
+static void js_interp_pattern_supported_child(JsAstNode* child,
+        void* opaque) {
+    JsInterpPatternSupportState* state = (JsInterpPatternSupportState*)opaque;
+    if (!state || child->node_type == AST_NODE_NULL) return;
+    state->has_child = true;
+    state->supported = state->supported && js_interp_pattern_supported(child);
 }
 
 static bool js_interp_pattern_supported(JsAstNode* pattern) {
@@ -5021,35 +4987,21 @@ static bool js_interp_pattern_supported(JsAstNode* pattern) {
     case AST_NODE_INDEX_EXPR:
         return true;
     case JS_AST_NODE_ASSIGNMENT_PATTERN:
-        return ((JsAssignmentPatternNode*)pattern)->left &&
-            js_interp_pattern_supported((JsAstNode*)((JsAssignmentPatternNode*)pattern)->left);
     case JS_AST_NODE_REST_ELEMENT:
     case JS_AST_NODE_REST_PROPERTY:
     case JS_AST_NODE_SPREAD_ELEMENT:
-        return ((JsSpreadElementNode*)pattern)->argument &&
-            js_interp_pattern_supported((JsAstNode*)((JsSpreadElementNode*)pattern)->argument);
-    case JS_AST_NODE_ARRAY_PATTERN: {
-        for (JsAstNode* element = (JsAstNode*)((JsArrayPatternNode*)pattern)->elements;
-                element; element = (JsAstNode*)element->next) {
-            if (element->node_type != AST_NODE_NULL &&
-                    !js_interp_pattern_supported(element)) return false;
-        }
-        return true;
+    case JS_AST_NODE_PROPERTY: {
+        JsInterpPatternSupportState state = {true, false};
+        js_ast_visit_binding_pattern_children(pattern,
+            js_interp_pattern_supported_child, &state);
+        return state.supported && state.has_child;
     }
+    case JS_AST_NODE_ARRAY_PATTERN:
     case JS_AST_NODE_OBJECT_PATTERN: {
-        for (JsAstNode* property = (JsAstNode*)((JsObjectPatternNode*)pattern)->properties;
-                property; property = (JsAstNode*)property->next) {
-            if (property->node_type == JS_AST_NODE_REST_PROPERTY ||
-                    property->node_type == JS_AST_NODE_SPREAD_ELEMENT) {
-                if (!js_interp_pattern_supported((JsAstNode*)((JsSpreadElementNode*)property)->argument)) {
-                    return false;
-                }
-            } else if (property->node_type != AST_NODE_PROPERTY ||
-                    !js_interp_pattern_supported((JsAstNode*)((JsPropertyNode*)property)->value)) {
-                return false;
-            }
-        }
-        return true;
+        JsInterpPatternSupportState state = {true, false};
+        js_ast_visit_binding_pattern_children(pattern,
+            js_interp_pattern_supported_child, &state);
+        return state.supported;
     }
     default:
         return false;
@@ -5084,7 +5036,7 @@ static void js_interp_check_node(JsAstNode* node, JsInterpSupportState* state) {
     switch (node->node_type) {
     case AST_SCRIPT: case AST_NODE_BLOCK: case AST_NODE_EXPR_STMT:
     case AST_NODE_VAR_STAM:
-    case AST_NODE_LITERAL: case AST_NODE_PRIMARY: case AST_NODE_NULL:
+    case AST_NODE_LITERAL: case AST_NODE_NULL:
     case AST_NODE_NEW_EXPR:
     case AST_NODE_ARRAY: case AST_NODE_MAP:
     case AST_NODE_CONDITIONAL_EXPR: case AST_NODE_SEQ:
@@ -5192,12 +5144,11 @@ static Item js_interp_configure_function_metadata(Item function_item) {
     if (get_type_id(function_item) != LMD_TYPE_FUNC) return function_item;
     JsFunction* function = (JsFunction*)function_item.function;
     if (!function || !function->ast_function) return ItemError;
-    function->ast_has_direct_eval = js_ast_function_has_direct_eval(
-        function->ast_function);
-    function->ast_uses_arguments = js_ast_function_uses_arguments(
-        function->ast_function);
-    function->ast_tail_reuse_safe = js_ast_function_tail_reuse_safe(
-        function->ast_function);
+    JsAstFunctionFacts facts = js_ast_collect_function_facts(
+        function->ast_function->params, function->ast_function->body);
+    function->ast_has_direct_eval = facts.has_direct_eval;
+    function->ast_uses_arguments = facts.observations & JS_AST_OBSERVES_ARGUMENTS;
+    function->ast_tail_reuse_safe = facts.tail_reuse_safe;
     return function_item;
 }
 
@@ -5820,7 +5771,6 @@ JsScript* js_interp_prepare_script(Runtime* runtime, const char* source,
     JsTranspiler* transpiler = js_transpiler_create(runtime);
     if (transpiler && strict) {
         transpiler->strict_mode = true;
-        transpiler->global_scope->strict = true;
     }
     if (!transpiler || !js_transpiler_parse_c(transpiler, source, source_length,
             JS_PARSE_AUTO)) {

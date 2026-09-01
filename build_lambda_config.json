@@ -3955,32 +3955,6 @@
             "icon": "🖥️"
           },
           {
-            "source": "test/test_jsx_roundtrip_new_gtest.cpp",
-            "name": "JSX Roundtrip Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "binary": "test_jsx_roundtrip_new_gtest.exe",
-            "icon": "🔢"
-          },
-          {
-            "source": "test/test_mdx_roundtrip_new_gtest.cpp",
-            "name": "MDX Roundtrip Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main"
-            ],
-            "binary": "test_mdx_roundtrip_new_gtest.exe",
-            "icon": "📝"
-          },
-          {
             "source": "test/css/test_css_style_node.cpp",
             "name": "CSS Style Node & Cascade Tests",
             "dependencies": [],
@@ -5071,7 +5045,7 @@
             "source": "test/test_ui_automation_gtest.cpp",
             "name": "UI Automation Tests",
             "dependencies": [
-              "lambda-lib"
+              "lambda-data"
             ],
             "binary": "test_ui_automation_gtest.exe",
             "libraries": [

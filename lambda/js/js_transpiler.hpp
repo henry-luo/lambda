@@ -95,6 +95,7 @@ struct JsTranspiler : JsScript {
 
     // Error handling
     bool has_errors;                // Error flag
+    int binding_error_count;        // direct-scope diagnostics before validation
     StrBuf* error_buf;              // Error messages
     bool parse_error_valid;
     int64_t parse_error_row;
@@ -140,6 +141,7 @@ bool js_transpiler_parse_c(JsTranspiler* tp, const char* source, size_t length,
 
 // Error handling functions
 void js_error(JsTranspiler* tp, SourceSpan span, const char* format, ...);
+void js_syntax_error(JsTranspiler* tp, SourceSpan span, const char* message);
 
 // Transpiler lifecycle functions
 JsTranspiler* js_transpiler_create(Runtime* runtime);
@@ -189,14 +191,6 @@ struct JsPreambleState {
     bool owns_compiled_state;   // clones share the immutable MIR context
 };
 
-enum JsMirCacheMode {
-    JS_MIR_CACHE_PREAMBLE = 1,
-    JS_MIR_CACHE_LIFECYCLE = 2,
-    JS_MIR_CACHE_EXTERNAL_CLASSIC = 3,
-    JS_MIR_CACHE_INLINE_CLASSIC = 4,
-    JS_MIR_CACHE_MODULE = 5,
-};
-
 struct JsMirCache;
 
 struct JsMirCacheStats {
@@ -205,7 +199,6 @@ struct JsMirCacheStats {
     uint64_t misses;
     uint64_t compiles;
     uint64_t instantiations;
-    uint64_t poisoned;
     size_t retained_entries;
     size_t retained_metadata_bytes;
 };
@@ -213,11 +206,11 @@ struct JsMirCacheStats {
 JsMirCache* js_mir_cache_create(void);
 void js_mir_cache_destroy(JsMirCache* cache);
 const JsPreambleState* js_mir_cache_lookup(
-    JsMirCache* cache, JsMirCacheMode mode,
+    JsMirCache* cache, bool preamble_mode,
     const char* source, size_t source_len, const char* filename,
     const JsPreambleState* preamble);
 const JsPreambleState* js_mir_cache_adopt(
-    JsMirCache* cache, JsMirCacheMode mode,
+    JsMirCache* cache, bool preamble_mode,
     const char* source, size_t source_len, const char* filename,
     const JsPreambleState* preamble, JsPreambleState* compiled_state);
 void js_mir_cache_record_instantiation(JsMirCache* cache);

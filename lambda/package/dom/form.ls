@@ -10,6 +10,8 @@ import ime: lambda.package.dom.ime
 import menu: lambda.package.dom.menu
 import caret: lambda.package.dom.caret
 import keymap: lambda.package.dom.keymap
+import scroll: lambda.package.dom.scroll
+import focus: lambda.package.dom.focus
 import dom_edit: lambda.package.dom.dom_edit
 import commands: lambda.package.dom.commands
 import submit: lambda.package.dom.submit
@@ -175,6 +177,11 @@ on contextmenu(evt) { menu.open_for(~) }
 on caretkey(evt) { caret.navigate(~, evt) }
 // F11: key -> edit intent, one rule set for both surfaces.
 on keyintent(evt) { keymap.resolve(~, evt) }
+// ESO48: runs only after keydown, caret, and activation have all declined.
+on scrollkey(evt) { scroll.navigate(~, evt) }
+// ES30: Tab order belongs to the package; native sends focus events and applies
+// the scroll request after this policy handler chooses the target.
+on focuskey(evt) { focus.navigate(~, evt) }
 // F13: editing a plain contenteditable, the DOM twin of the text-control applier.
 on domedit(evt) { dom_edit.apply_fn(~, evt) }
 // F14.1: the legacy command surface. Behavior-only — `document.execCommand` is

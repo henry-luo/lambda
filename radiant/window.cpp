@@ -440,6 +440,8 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     // ES19: the init phase sits between layout and render. Positioned, not
     // gated on paint — the render below may be skipped, the init may not be.
     radiant_run_behavior_init(doc);
+    // ES30: package policy selects autofocus; native commits the focus state.
+    radiant_run_autofocus(doc);
     // render html doc
     if (doc && doc->view_tree) {
         log_debug("html version: %d", doc->view_tree->html_version);
@@ -878,6 +880,7 @@ void render(GLFWwindow* window) {
     // ES19: init before the repaint test, not inside it — a control added by a
     // reflow that produced no dirty region still owes its `init` turn.
     radiant_run_behavior_init(ui_context.document);
+    radiant_run_autofocus(ui_context.document);
     // rerender if the document is dirty or needs repaint (e.g., caret changed)
     if (ui_context.document && ui_context.document->state &&
         (ui_context.document->state->is_dirty ||
@@ -1247,6 +1250,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file, const c
         log_notice("view: layout complete, rendering...");
         // Render document
         radiant_run_behavior_init(doc);   // ES19: layout -> init -> render
+        radiant_run_autofocus(doc);       // ES30: package policy -> native focus
         if (doc && doc->view_tree) {
             log_mem_stage("before-render");
             render_html_doc(&ui_context, doc->view_tree, NULL);

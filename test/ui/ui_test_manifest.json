@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "defaults": {
+    "font_dir": "test/layout/data/font",
+    "jobs": 0
+  },
+  "suites": [
+    {
+      "name": "baseline",
+      "globs": ["test/ui/*.json"],
+      "exclude": [
+        "test/ui/dom_*.json",
+        "test/ui/dom_pkg_*.json",
+        "test/ui/svg-dom-contract.json",
+        "test/ui/js-loop-listener-*.json",
+        "test/ui/editable-*.json",
+        "test/ui/rte_*.json",
+        "test/ui/hit_test_*.json",
+        "test/ui/test_webview_*.json",
+        "test/ui/test_caret_*.json",
+        "test/ui/test_editing_*.json",
+        "test/ui/test_form_*.json",
+        "test/ui/test_iframe_*.json",
+        "test/ui/rsc_scale_editing_geometry_matrix.json"
+      ],
+      "tags": ["baseline"]
+    },
+    {
+      "name": "dom",
+      "globs": [
+        "test/ui/dom/*.json",
+        "test/ui/dom_*.json",
+        "test/ui/dom_pkg_*.json"
+      ],
+      "tags": ["dom"]
+    },
+    {
+      "name": "editor",
+      "globs": [
+        "test/ui/editor4b/*.json",
+        "test/ui/editor4c/*.json",
+        "test/ui/editor4c_phase_c/*.json",
+        "test/ui/editable-*.json",
+        "test/ui/rte_*.json",
+        "test/ui/test_caret_*.json",
+        "test/ui/test_editing_*.json",
+        "test/ui/test_form_*.json",
+        "test/ui/test_iframe_*.json",
+        "test/ui/rsc_scale_editing_geometry_matrix.json",
+        "test/ui/svg-dom-contract.json",
+        "test/ui/js-loop-listener-*.json"
+      ],
+      "tags": ["editor"]
+    },
+    {
+      "name": "hit-test",
+      "globs": [
+        "test/ui/hit-test/*.json",
+        "test/ui/hit_test_*.json"
+      ],
+      "tags": ["hit-test"]
+    },
+    {
+      "name": "view",
+      "globs": [
+        "test/view/*.json"
+      ],
+      "default_page": "test/html/index.html",
+      "tags": ["view"]
+    },
+    {
+      "name": "native-gui",
+      "globs": ["test/ui/test_webview_*.json"],
+      "headless": false,
+      "tags": ["native-gui"]
+    }
+  ]
+}

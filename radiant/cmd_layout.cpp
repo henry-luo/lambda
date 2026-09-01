@@ -4209,16 +4209,8 @@ void rebuild_lambda_doc(UiContext* uicon) {
 
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
-    if (state && !focus_has_current(state) &&
-        doc->view_tree && doc->view_tree->root) {
-        View* af = find_matching_input(doc->view_tree->root, "input", nullptr);
-        if (af && af->is_element()) {
-            DomElement* af_elem = lam::dom_require_element(af);
-            if (af_elem->has_attribute("autofocus")) {
-                focus_set(state, af, false);
-                state_store_caret_collapse_to_view_offset(state, af, 0);
-            }
-        }
+    if (state && !focus_has_current(state) && doc->view_tree && doc->view_tree->root) {
+        radiant_run_autofocus(doc);
     }
 
     if (state) {
@@ -4344,6 +4336,13 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             continue;
         }
 
+        // Reactive templates rebuild result nodes, while form/interaction
+        // state belongs to the retained view identity (S9.1.4). Preserve that
+        // identity for structurally corresponding descendants before retiring
+        // the old subtree.
+        view_state_preserve_subtree_identity(state, static_cast<DomNode*>(old_dom),
+                                             static_cast<DomNode*>(new_dom));
+
         if (old_dom->is_popover_open() && new_dom->has_attribute("popover")) {
             // Reconciliation replaces the DOM wrapper, but popover openness is
             // live state and must survive an unrelated class/style mutation.
@@ -4413,19 +4412,7 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     restore_lambda_focus(doc, state, had_focus, &focus_restore);
 
     if (state && !focus_has_current(state)) {
-        for (int i = 0; i < result_count; i++) {
-            if (new_doms[i]) {
-                View* af = find_matching_input(static_cast<View*>(new_doms[i]), "input", nullptr);
-                if (af && af->is_element()) {
-                    DomElement* af_elem = lam::dom_require_element(af);
-                    if (af_elem->has_attribute("autofocus")) {
-                        focus_set(state, af, false);
-                        state_store_caret_collapse_to_view_offset(state, af, 0);
-                        break;
-                    }
-                }
-            }
-        }
+        radiant_run_autofocus(doc);
     }
 
     if (state) {

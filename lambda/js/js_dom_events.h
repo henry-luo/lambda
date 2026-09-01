@@ -185,12 +185,6 @@ Item js_create_native_input_event(const char* type,
     bool is_composing, Item data_transfer, Item target_ranges);
 
 /**
- * Returns true if event has been preventDefault()'d (or, for cancelable
- * legacy paths, returnValue=false). Mirrors the spec's "canceled flag".
- */
-bool js_event_is_default_prevented(Item event);
-
-/**
  * §7.4.6 (U-7) — IE-style `window.event` set/restore helpers for any
  * non-EventTarget native dispatch site. Use around a direct compiled
  * handler invocation:

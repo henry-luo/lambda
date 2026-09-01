@@ -3374,13 +3374,11 @@ char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
                                const char* url);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
 const char* css_font_family_name_from_value(const CssValue* value);
-const char* css_select_font_family(LayoutContext* lycon, const CssValue* value,
-                                   bool require_loadable_face_source);
+const char* css_select_font_family(LayoutContext* lycon, const CssValue* value);
 const char* css_select_font_shorthand_family(LayoutContext* lycon,
                                              const CssValue* shorthand_value,
                                              const CssValue* main_group,
-                                             size_t family_start_index,
-                                             bool require_loadable_face_source);
+                                             size_t family_start_index);
 void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon);
 void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, LayoutContext* lycon);
 DisplayValue resolve_display_value(void* child);

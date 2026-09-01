@@ -967,7 +967,10 @@ MirValue jm_convert_rep(void* owner, MirValue value,
     JsMirTranspiler* mt = (JsMirTranspiler*)owner;
     MIR_reg_t reg = 0;
     if (required == VALUE_REP_ITEM) {
-        reg = jm_box_native_impl(mt, value.reg, value.semantic_type);
+        reg = value.rep == VALUE_REP_RAW_NON_GC_POINTER &&
+            value.semantic_type == LMD_TYPE_STRING
+            ? jm_box_string(mt, value.reg)
+            : jm_box_native_impl(mt, value.reg, value.semantic_type);
     } else if (value.rep == VALUE_REP_ITEM) {
         reg = required == VALUE_REP_F64
             ? jm_emit_unbox_float(mt, value.reg)
@@ -1267,13 +1270,7 @@ bool jm_is_native_type(TypeId tid) {
 static int jm_find_var_scope_depth_for_name(JsMirTranspiler* mt, const char* name) {
     if (!mt || !name) return -1;
     for (int depth = mt->scope_depth; depth >= 0; depth--) {
-        struct hashmap* scope = jm_var_scope_at(mt, depth);
-        if (!scope) continue;
-        JsVarScopeEntry key;
-        memset(&key, 0, sizeof(key));
-        key.name = name;
-        JsVarScopeEntry* found = (JsVarScopeEntry*)hashmap_get(scope, &key);
-        if (found) return depth;
+        if (jm_find_var_at(mt, name, depth)) return depth;
     }
     return -1;
 }
@@ -1281,12 +1278,7 @@ static int jm_find_var_scope_depth_for_name(JsMirTranspiler* mt, const char* nam
 static bool jm_has_outer_binding_before_depth(JsMirTranspiler* mt, const char* name, int inner_depth) {
     if (!mt || !name || inner_depth <= 0) return false;
     for (int depth = inner_depth - 1; depth >= 0; depth--) {
-        struct hashmap* scope = jm_var_scope_at(mt, depth);
-        if (!scope) continue;
-        JsVarScopeEntry key;
-        memset(&key, 0, sizeof(key));
-        key.name = name;
-        if (hashmap_get(scope, &key)) return true;
+        if (jm_find_var_at(mt, name, depth)) return true;
     }
     return false;
 }
@@ -1423,151 +1415,17 @@ MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MIR_reg_t val, JsAstNode* expr)
 MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
 
 // Forward declarations for native expression transpilation
-MIR_reg_t jm_transpile_expression(JsMirTranspiler* mt, JsAstNode* expr);
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 
-// Transpile an expression returning a native register of the target type.
-// Handles literals inline (no boxing), identifiers from typed vars, and
-// recursive expressions. Falls back to unbox from boxed Item when needed.
+// Convert the producer-owned expression value to a numeric ABI lane.
+// Conditionals retain their branch-local native join.
 MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
-                                         TypeId expr_type, TypeId target_type) {
+                                         TypeId target_type) {
     if (target_type == LMD_TYPE_ANY) {
         // A mixed native entry carries this formal as an Item. Reusing the
         // numeric fallback below would coerce an arbitrary JS value merely to
         // satisfy an ABI register type, defeating the boxed slow semantics.
         return jm_transpile_box_item(mt, expr);
-    }
-
-    // Literals: emit native constant directly (bypass boxing)
-    if (expr && expr->node_type == JS_AST_NODE_LITERAL) {
-        JsLiteralNode* lit = (JsLiteralNode*)expr;
-        if (lit->literal_type == JS_LITERAL_NUMBER) {
-            if (target_type == LMD_TYPE_FLOAT) {
-                MIR_reg_t r = jm_new_reg(mt, "dlit", MIR_T_D);
-                jm_emit_reg_op(mt, MIR_DMOV, r, MIR_new_double_op(mt->ctx, lit->value.number_value));
-                return r;
-            } else {
-                MIR_reg_t r = jm_new_reg(mt, "ilit", MIR_T_I64);
-                jm_emit_reg_op(mt, MIR_MOV, r, MIR_new_int_op(mt->ctx, (int64_t)lit->value.number_value));
-                return r;
-            }
-        }
-        if (lit->literal_type == JS_LITERAL_BOOLEAN) {
-            // Native conditional joins use numeric lanes for inferred boolean
-            // returns; unboxing the boxed Item here turned both arms into 0.
-            if (target_type == LMD_TYPE_FLOAT) {
-                MIR_reg_t r = jm_new_reg(mt, "dbool", MIR_T_D);
-                jm_emit_reg_op(mt, MIR_DMOV, r, MIR_new_double_op(mt->ctx, lit->value.boolean_value ? 1.0 : 0.0));
-                return r;
-            }
-            MIR_reg_t r = jm_new_reg(mt, "ibool", MIR_T_I64);
-            jm_emit_reg_op(mt, MIR_MOV, r, MIR_new_int_op(mt->ctx, lit->value.boolean_value ? 1 : 0));
-            return r;
-        }
-    }
-
-    // Identifiers: use native register directly if variable is typed
-    if (expr && expr->node_type == JS_AST_NODE_IDENTIFIER) {
-        JsIdentifierNode* id = (JsIdentifierNode*)expr;
-        const char* vname = jm_var_name(id->name);
-        JsMirVarEntry* var = jm_find_var(mt, vname);
-        if (var && jm_is_native_type(var->type_id)) {
-            if (var->tdz_active) {
-                MIR_reg_t boxed = jm_box_native(mt, var->reg, var->type_id);
-                jm_call_3(mt, "js_check_tdz", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx,
-                        jm_module_name_id(mt, id->name->chars, id->name->len)),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
-                jm_emit_error_lane_propagate_check(mt);
-            }
-            if (target_type == LMD_TYPE_FLOAT)
-                return jm_ensure_native_float(mt, var->reg, var->type_id);
-            else
-                return jm_ensure_native_int(mt, var->reg, var->type_id);
-        }
-        // boxed variable: unbox
-        MIR_reg_t boxed;
-        if (var) {
-            boxed = var->reg;
-        } else if (mt->module_consts) {
-            // check module-level variables (e.g. top-level let/var accessed from for-loop update)
-            JsModuleConstEntry* mc = jm_find_module_const(mt, vname);
-            if (mc && mc->const_type == MCONST_MODVAR) {
-                boxed = jm_load_module_var(mt, (uint32_t)mc->int_val);
-                if (mc->var_kind == JS_VAR_LET || mc->var_kind == JS_VAR_CONST) {
-                    jm_call_3(mt, "js_check_tdz", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx,
-                            jm_module_name_id(mt, id->name->chars, id->name->len)),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int)id->name->len));
-                    jm_emit_error_lane_propagate_check(mt);
-                }
-            } else {
-                boxed = jm_emit_null(mt);
-            }
-        } else {
-            boxed = jm_emit_null(mt);
-        }
-        return jm_normalize_numeric_result(mt, boxed, target_type,
-            LMD_TYPE_ANY, false);
-    }
-
-    // Other expressions: determine if jm_transpile_expression returns native.
-    // Must check specifically whether the native path is actually taken.
-    if (expr && expr->node_type == JS_AST_NODE_BINARY_EXPRESSION) {
-        JsBinaryNode* bin = (JsBinaryNode*)expr;
-        // Determine if the native path is actually taken
-        bool native_binary = jm_is_native_binary_expression(mt, bin);
-        // Comparisons return native 0/1 only when BOTH sides are typed numeric.
-        // With one untyped side, the comparison falls through to boxed runtime
-        // and returns a boxed boolean Item, not a native value.
-        MIR_reg_t result = jm_transpile_expression(mt, expr);
-        if (native_binary) {
-            // Native path was taken: result is native int or double
-            return jm_normalize_numeric_result(mt, result, target_type, expr_type, true);
-        }
-        // Boxed path was taken: result is boxed Item, need to unbox
-        return jm_normalize_numeric_result(mt, result, target_type, expr_type, false);
-    }
-
-    if (expr && expr->node_type == JS_AST_NODE_UNARY_EXPRESSION) {
-        JsUnaryNode* un = (JsUnaryNode*)expr;
-        // Check if unary op takes the native path
-        bool native_unary = jm_is_native_unary_expression(mt, un);
-        MIR_reg_t result = jm_transpile_expression(mt, expr);
-        if (native_unary) {
-            return jm_normalize_numeric_result(mt, result, target_type, expr_type, true);
-        }
-        // Boxed result: unbox
-        return jm_normalize_numeric_result(mt, result, target_type, expr_type, false);
-    }
-
-    if (expr && expr->node_type == JS_AST_NODE_ASSIGNMENT_EXPRESSION) {
-        JsAssignmentNode* asgn = (JsAssignmentNode*)expr;
-        bool native_assign = false;
-        TypeId assign_var_type = LMD_TYPE_ANY;
-        if (asgn->left && asgn->left->node_type == JS_AST_NODE_IDENTIFIER) {
-            JsIdentifierNode* aid = (JsIdentifierNode*)asgn->left;
-            const char* avname = jm_var_name(aid->name);
-            JsMirVarEntry* avar = jm_find_var(mt, avname);
-            native_assign = avar && !avar->from_env &&
-                            (avar->type_id == LMD_TYPE_INT || avar->type_id == LMD_TYPE_FLOAT);
-            if (native_assign) assign_var_type = avar->type_id;
-        }
-        MIR_reg_t result = jm_transpile_expression(mt, expr);
-        if (native_assign) {
-            // use the variable's actual type (not expr_type from get_effective_type)
-            // because P9 widening may have changed the var to FLOAT while
-            // get_effective_type still reports the RHS type (e.g. INT for `J = 0`)
-            if (target_type == LMD_TYPE_FLOAT)
-                return jm_ensure_native_float(mt, result, assign_var_type);
-            else
-                return jm_ensure_native_int(mt, result, assign_var_type);
-        }
-        // Boxed result: use the shared representation conversion.
-        return jm_normalize_numeric_result(mt, result, target_type,
-            LMD_TYPE_ANY, false);
     }
 
     if (expr && expr->node_type == JS_AST_NODE_CONDITIONAL_EXPRESSION) {
@@ -1576,27 +1434,12 @@ MIR_reg_t jm_transpile_as_native(JsMirTranspiler* mt, JsAstNode* expr,
         return jm_transpile_conditional_as_native(mt, (JsConditionalNode*)expr, target_type);
     }
 
-    // Phase 4: Call expressions — if native call, result is already native
-    if (expr && expr->node_type == JS_AST_NODE_CALL_EXPRESSION) {
-        JsCallNode* call = (JsCallNode*)expr;
-
-        JsFuncCollected* fc = jm_resolve_native_call(mt, call);
-        if (fc && jm_call_result_uses_native_register(mt, call, fc)) {
-            // jm_transpile_expression → jm_transpile_call → native call → native result
-            MIR_reg_t result = jm_transpile_expression(mt, expr);
-            if (target_type == LMD_TYPE_FLOAT)
-                return jm_ensure_native_float(mt, result, JM_JS_FACT(fc, return_type));
-            else
-                return jm_ensure_native_int(mt, result, JM_JS_FACT(fc, return_type));
-        }
-        // Non-native call: result is boxed → shared conversion.
-        MIR_reg_t boxed = jm_transpile_expression(mt, expr);
-        return jm_normalize_numeric_result(mt, boxed, target_type,
-            LMD_TYPE_ANY, false);
+    MirValue value = jm_transpile_expression_value(mt, expr);
+    if (value.rep == VALUE_REP_RAW_NON_GC_POINTER) {
+        value = em_require_rep(&mt->em, value, VALUE_REP_ITEM);
     }
-
-    // All other expressions: get boxed value and unbox to target type
-    MIR_reg_t boxed = jm_transpile_box_item(mt, expr);
-    return jm_normalize_numeric_result(mt, boxed, target_type,
-        LMD_TYPE_ANY, false);
+    bool native_result = value.rep == VALUE_REP_I64 || value.rep == VALUE_REP_F64;
+    TypeId result_type = native_result ? value.semantic_type : LMD_TYPE_ANY;
+    return jm_normalize_numeric_result(mt, value.reg, target_type, result_type,
+        native_result);
 }

@@ -710,10 +710,8 @@ Item js_throw_range_error_code(const char* code, const char* message);
 // printf-style variants: format into a bounded buffer and throw. They replace
 // the `char msg[N]; snprintf(...); throw(msg)` stanza at the call sites.
 Item js_throw_type_errorf(const char* format, ...);
-Item js_throw_range_errorf(const char* format, ...);
 Item js_throw_type_error_codef(const char* code, const char* format, ...);
 Item js_throw_range_error_codef(const char* code, const char* format, ...);
-Item js_throw_named_error_textf(const char* type_name, const char* format, ...);
 Item js_throw_error_with_code(const char* code, const char* message);
 
 /**
@@ -800,7 +798,6 @@ void js_release_global_var_module_bindings_from(uint32_t first_module_state_id);
 void js_batch_reset(void);
 void js_intrinsic_state_teardown(void);
 void js_batch_reset_to(int checkpoint_var_count);
-void js_prepare_compiled_preamble_vars(int declaration_count);
 extern int js_batch_execution_mode;
 void js_symbol_registry_batch_reset(void);
 void js_dom_batch_reset(void);

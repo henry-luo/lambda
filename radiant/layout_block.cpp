@@ -4866,6 +4866,8 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                 radiant_document_ensure_state(doc, "layout_iframe");
                 if (!(block->embed)) block->ensure_embed(lycon);
                 block->embed->doc = doc; // assign loaded document to embed property
+                dom_document_set_embedding(doc, lycon->ui_context->document,
+                                           (DomElement*)block);
                 layout_iframe_embedded_doc(lycon, doc, iframe_width, iframe_height);
                 lycon->ui_context->iframe_depth--;
             }

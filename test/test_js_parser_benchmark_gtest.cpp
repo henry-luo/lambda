@@ -7,7 +7,6 @@
 #include <time.h>
 
 #include "../lambda/js/js_transpiler.hpp"
-#include "../lambda/ts/ts_transpiler.hpp"
 #include "../lambda/js/parser/js_parser.h"
 
 namespace {

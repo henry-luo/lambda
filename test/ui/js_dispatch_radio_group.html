@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<body>
+  <input id="r1" type="radio" name="live" checked>
+  <input id="r2" type="radio" name="live">
+  <input id="c1" type="radio" name="canceled" checked>
+  <input id="c2" type="radio" name="canceled">
+  <output id="seen"></output>
+  <button id="trigger" type="button" onclick="runRadioActivation()">run</button>
+  <script>
+    function runRadioActivation() {
+      var r2 = document.getElementById('r2');
+      r2.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+      var c2 = document.getElementById('c2');
+      c2.addEventListener('click', function (event) {
+        document.getElementById('seen').textContent =
+          !document.getElementById('c1').checked && c2.checked ? 'tentative' : 'wrong';
+        event.preventDefault();
+      });
+      c2.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }
+  </script>
+</body>
+</html>

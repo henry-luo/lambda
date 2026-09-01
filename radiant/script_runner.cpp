@@ -1694,7 +1694,7 @@ static Item execute_cached_external_classic(Runtime* runtime,
 
     if (timing) timing->cache_lookups++;
     const JsPreambleState* cached = js_mir_cache_lookup(
-        s_js_mir_cache, JS_MIR_CACHE_EXTERNAL_CLASSIC,
+        s_js_mir_cache, false,
         source, source_len, filename, preamble);
     if (timing) {
         if (cached) timing->cache_hits++;
@@ -1711,7 +1711,7 @@ static Item execute_cached_external_classic(Runtime* runtime,
             return compile_result;
         }
         cached = js_mir_cache_adopt(
-            s_js_mir_cache, JS_MIR_CACHE_EXTERNAL_CLASSIC,
+            s_js_mir_cache, false,
             source, source_len, filename, preamble, &compiled);
         if (cached && timing) timing->cache_compiles++;
         if (!cached) {
@@ -2105,7 +2105,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
     if (s_js_mir_cache && !s_retain_js_state) {
         if (timing) timing->cache_lookups++;
         cached_preamble = js_mir_cache_lookup(
-            s_js_mir_cache, JS_MIR_CACHE_PREAMBLE,
+            s_js_mir_cache, true,
             preamble_buf->str, preamble_buf->length, preamble_filename, nullptr);
         if (timing) {
             if (cached_preamble) timing->cache_hits++;
@@ -2121,7 +2121,7 @@ static Item execute_document_script_tasks_postdom(Runtime* runtime, JsScriptTask
             js_mir_accumulate_last_phase_timing(true);
             if (get_type_id(result) != LMD_TYPE_ERROR) {
                 cached_preamble = js_mir_cache_adopt(
-                    s_js_mir_cache, JS_MIR_CACHE_PREAMBLE,
+                    s_js_mir_cache, true,
                     preamble_buf->str, preamble_buf->length, preamble_filename,
                     nullptr, preamble);
                 if (cached_preamble && timing) timing->cache_compiles++;
@@ -2556,6 +2556,10 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
             // Do NOT destroy heap/pool — they're retained on the document
         } else {
             log_info("execute_document_scripts: releasing transient JS context");
+            // Preserve this ownership fact after cleanup. A post-layout UA
+            // hook must not bind a second evaluator to a document whose JS
+            // realm was intentionally destroyed for a one-shot render.
+            dom_doc->js_realm_released_after_load = true;
             // transient scripts can leave timers rooted in this heap, sometimes
             // without a document pointer; shut down the loop before heap free.
             js_event_loop_shutdown();
@@ -2629,7 +2633,6 @@ static const struct {
     {"onmousemove",  "mousemove"},
     {"onkeydown",    "keydown"},
     {"onkeyup",      "keyup"},
-    {"onkeypress",   "keypress"},
     {"onfocus",      "focus"},
     {"onblur",       "blur"},
     {"onchange",     "change"},
@@ -2836,9 +2839,9 @@ extern "C" void collect_and_compile_event_handlers(DomDocument* dom_doc) {
     }
 
     uint64_t compile_result_home = 0;
-    Item compile_result = transpile_js_to_mir_with_preamble(runtime, compile_buf->str,
-                                                             "<event-handlers>", preamble,
-                                                             &compile_result_home);
+    Item compile_result = transpile_js_to_mir_with_preamble_len(runtime,
+        compile_buf->str, (size_t)compile_buf->length, "<event-handlers>",
+        preamble, &compile_result_home);
     strbuf_free(compile_buf);
 
     TypeId result_type = get_type_id(compile_result);

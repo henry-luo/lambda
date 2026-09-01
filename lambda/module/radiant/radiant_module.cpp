@@ -54,6 +54,7 @@ extern "C" Item js_dom_form_reset_bridge(Item form_item);
 extern "C" bool js_dom_navigate_submit_target(const char* target_name, const char* url);
 extern "C" bool radiant_dispatch_submit_event_from_script(void* form_node,
                                                             void* submitter_node);
+extern "C" Item js_dom_scroll_into_view_bridge(void* dom_elem);
 
 extern "C" Item vmap_new(void);
 extern "C" void vmap_set(Item vmap_item, Item key, Item value);
@@ -1073,6 +1074,106 @@ RADIANT_C_API Item fn_radiant_root(Item doc_item) {
     return radiant_dom_wrap_node(doc->root);
 }
 
+// ES30's traversal surface is deliberately element-only. Text/comment nodes
+// remain invisible to policy, while every returned wrapper still goes through
+// the canonical bridge and its generation check.
+RADIANT_C_API Item fn_radiant_document_root(Item node_item) {
+    DomNode* node = radiant_dom_node_from_item(node_item, "DOCUMENT_ROOT");
+    if (!node) return ItemNull;
+    DomDocument* doc = radiant_dom_document_from_node(node);
+    return doc && doc->root ? radiant_dom_wrap_node(doc->root) : ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_first_element_child(Item node_item) {
+    DomNode* node = radiant_dom_node_from_item(node_item, "FIRST_ELEMENT_CHILD");
+    DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
+    if (!elem) return ItemNull;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        if (child->is_element()) return radiant_dom_wrap_node(child->as_element());
+    }
+    return ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_next_element_sibling(Item node_item) {
+    DomNode* node = radiant_dom_node_from_item(node_item, "NEXT_ELEMENT_SIBLING");
+    if (!node) return ItemNull;
+    for (DomNode* sibling = node->next_sibling; sibling;
+         sibling = sibling->next_sibling) {
+        if (sibling->is_element()) return radiant_dom_wrap_node(sibling->as_element());
+    }
+    return ItemNull;
+}
+
+// ES30: native answers only layout-coupled focus eligibility. The returned
+// snapshot preserves DOM order; focus.ls owns HTML's tabindex ordering.
+RADIANT_C_API Item fn_radiant_focus_candidates(Item root_item) {
+    DomElement* root = radiant_dom_element_from_item(root_item, "FOCUS_CANDIDATES");
+    if (!root) return radiant_array_new_item(0);
+
+    ArrayList* candidates = arraylist_new(16);
+    if (!candidates) return ItemNull;
+    focus_collect_candidates((View*)root, candidates, false);
+
+    RootFrame roots(2);
+    Rooted<Item> result(roots, radiant_array_new_item(candidates->length));
+    Rooted<Item> candidate(roots, ItemNull);
+    for (int i = 0; i < candidates->length; i++) {
+        View* view = static_cast<View*>(candidates->data[i]);
+        candidate.set(radiant_obj_new());
+        radiant_rooted_obj_set(candidate, "node",
+                               radiant_dom_wrap_node((DomElement*)view));
+        int tab_index = focus_tab_index(view);
+        radiant_rooted_obj_set(candidate, "tab_index", radiant_int_item(tab_index));
+        radiant_rooted_obj_set(candidate, "order", radiant_int_item(i));
+        radiant_rooted_obj_set(candidate, "sequential",
+                               radiant_bool_item(is_view_focusable(view)));
+        radiant_array_push_item(result.get(), candidate.get());
+    }
+    arraylist_free(candidates);
+    return result.get();
+}
+
+RADIANT_C_API Item fn_radiant_focused(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "FOCUSED");
+    DocState* state = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
+    return radiant_bool_item(state && focus_get(state) == (View*)elem);
+}
+
+RADIANT_C_API Item fn_radiant_focus_set(Item node_item, Item from_keyboard_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "FOCUS_SET");
+    DocState* state = elem && elem->doc ? (DocState*)elem->doc->state : nullptr;
+    if (!state || !is_view_programmatically_focusable((View*)elem)) {
+        return radiant_bool_item(false);
+    }
+    focus_set(state, (View*)elem, is_truthy(from_keyboard_item));
+    return radiant_bool_item(true);
+}
+
+RADIANT_C_API Item fn_radiant_scroll_into_view(Item node_item) {
+    DomElement* elem = radiant_dom_element_from_item(node_item, "SCROLL_INTO_VIEW");
+    if (!elem) return radiant_bool_item(false);
+    js_dom_scroll_into_view_bridge(elem);
+    return radiant_bool_item(true);
+}
+
+RADIANT_C_API Item fn_radiant_embedding_element(Item node_item) {
+    DomNode* node = radiant_dom_node_from_item(node_item, "EMBEDDING_ELEMENT");
+    if (!node) return ItemNull;
+    DomDocument* doc = radiant_dom_document_from_node(node);
+    DomElement* iframe = dom_document_embedding_element(doc);
+    return iframe ? radiant_dom_wrap_node(iframe) : ItemNull;
+}
+
+RADIANT_C_API Item fn_radiant_embedded_document_root(Item iframe_item) {
+    DomElement* iframe = radiant_dom_element_from_item(iframe_item,
+                                                        "EMBEDDED_DOCUMENT_ROOT");
+    if (!iframe || iframe->tag() != MARKUP_NAME_IFRAME || !iframe->embed ||
+        !iframe->embedp()->doc || !iframe->embedp()->doc->root) {
+        return ItemNull;
+    }
+    return radiant_dom_wrap_node(iframe->embedp()->doc->root);
+}
+
 RADIANT_C_API Item fn_radiant_attr(Item node_item, Item name_item) {
     DomElement* elem = radiant_dom_element_from_item(node_item, "ATTR");
     const char* name = fn_to_cstr(name_item);
@@ -1453,9 +1554,32 @@ RADIANT_C_API Item fn_radiant_submit_event(Item form_item, Item submitter_item) 
     if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
         return radiant_bool_item(false);
     }
-    bool ok = radiant_dispatch_submit_event_from_script(
-        (void*)form, radiant_optional_dom_element(submitter_item));
-    return radiant_bool_item(ok);
+    return radiant_bool_item(radiant_dispatch_submit_event_from_script(
+        (void*)form, radiant_optional_dom_element(submitter_item)));
+}
+
+static bool radiant_is_constraint_control(DomElement* elem) {
+    if (!elem || !elem->tag_name) return false;
+    return strcasecmp(elem->tag_name, "input") == 0 ||
+           strcasecmp(elem->tag_name, "select") == 0 ||
+           strcasecmp(elem->tag_name, "textarea") == 0 ||
+           strcasecmp(elem->tag_name, "button") == 0;
+}
+
+static DomElement* radiant_first_invalid_form_control(DomNode* node,
+                                                       DocState* state) {
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!current->is_element()) continue;
+        DomElement* elem = current->as_element();
+        if (radiant_is_constraint_control(elem) &&
+                state_get_bool(state, elem, STATE_INVALID)) {
+            return elem;
+        }
+        DomElement* nested = radiant_first_invalid_form_control(
+            elem->first_child, state);
+        if (nested) return nested;
+    }
+    return nullptr;
 }
 
 RADIANT_C_API Item fn_radiant_check_validity(Item form_item) {
@@ -1463,11 +1587,28 @@ RADIANT_C_API Item fn_radiant_check_validity(Item form_item) {
     if (!form || !form->tag_name || strcasecmp(form->tag_name, "form") != 0) {
         return radiant_bool_item(false);
     }
-    Item valid = js_dom_check_validity_bridge(form_item);
-    if (!is_truthy(valid)) {
-        js_dom_focus_first_invalid_form_control((void*)form);
+    DomDocument* doc = radiant_dom_document_from_node((DomNode*)form);
+    DocState* state = doc ? radiant_document_ensure_state(doc, "CHECK_VALIDITY")
+                            : nullptr;
+    if (!state) return radiant_bool_item(false);
+
+    // A live author-script realm owns invalid-event dispatch. Reuse its
+    // established validity bridge so every invalid control receives the event.
+    if (doc->js_has_dom_realm) {
+        Item valid = js_dom_check_validity_bridge(form_item);
+        if (!is_truthy(valid)) {
+            js_dom_focus_first_invalid_form_control((void*)form);
+        }
+        return radiant_bool_item(is_truthy(valid));
     }
-    return radiant_bool_item(is_truthy(valid));
+
+    // F3 owns the constraint pass and publishes one canonical :invalid bit.
+    // Submission consumes that verdict directly; rebuilding a JS ValidityState
+    // here crosses into a realm that script-less Lambda evaluators do not own.
+    DomElement* invalid = radiant_first_invalid_form_control(
+        form->first_child, state);
+    if (invalid) focus_set_programmatic(state, (View*)invalid);
+    return radiant_bool_item(invalid == nullptr);
 }
 
 RADIANT_C_API Item fn_radiant_reset_form(Item form_item) {
@@ -1488,7 +1629,62 @@ RADIANT_C_API Item fn_radiant_form_boundary() {
     return radiant_string_item(boundary);
 }
 
+RADIANT_C_API Item fn_radiant_navigation_destination(Item source_item,
+                                                      Item url_item,
+                                                      Item target_root_item) {
+    DomElement* source = radiant_dom_element_from_item(source_item,
+                                                        "NAVIGATION_DESTINATION");
+    DomElement* target_root = radiant_dom_element_from_item(target_root_item,
+                                                             "NAVIGATION_DESTINATION");
+    const char* raw_url = fn_to_cstr(url_item);
+    RootFrame roots(1);
+    Rooted<Item> result(roots, radiant_obj_new());
+    radiant_rooted_obj_set(result, "kind", radiant_string_item("document"));
+    radiant_rooted_obj_set(result, "fragment", ItemNull);
+    if (!source || !source->doc || !target_root || !target_root->doc ||
+        !raw_url || !raw_url[0]) {
+        return result.get();
+    }
+    Url* resolved = source->doc->url
+        ? url_parse_with_base(raw_url, source->doc->url) : url_parse(raw_url);
+    if (!resolved || !url_is_valid(resolved)) {
+        if (resolved) url_destroy(resolved);
+        return result.get();
+    }
+    const char* hash = url_get_hash(resolved);
+    if (hash && hash[0] == '#' && target_root->doc->url &&
+        radiant_urls_match_without_fragment(target_root->doc->url, resolved)) {
+        radiant_rooted_obj_set(result, "kind", radiant_string_item("fragment"));
+        radiant_rooted_obj_set(result, "fragment", radiant_string_item(hash + 1));
+    }
+    url_destroy(resolved);
+    return result.get();
+}
+
 RADIANT_C_API Item fn_radiant_request_navigation(Item request_item) {
+    Item source_item = radiant_obj_get(request_item, "source");
+    if (!radiant_item_is_missing(source_item)) {
+        DomElement* source = radiant_dom_element_from_item(source_item,
+                                                            "REQUEST_NAVIGATION");
+        Item target_item = radiant_obj_get(request_item, "target");
+        DomElement* target = radiant_item_is_missing(target_item) ? nullptr :
+            radiant_dom_element_from_item(target_item, "REQUEST_NAVIGATION");
+        DomElement* fragment = nullptr;
+        Item fragment_item = radiant_obj_get(request_item, "fragment_target");
+        if (!radiant_item_is_missing(fragment_item)) {
+            fragment = radiant_dom_element_from_item(fragment_item,
+                                                      "REQUEST_NAVIGATION");
+        }
+        const char* url = fn_to_cstr(radiant_obj_get(request_item, "url"));
+        const char* kind = fn_to_cstr(radiant_obj_get(request_item, "target_kind"));
+        const char* target_name = fn_to_cstr(radiant_obj_get(request_item,
+                                                              "target_name"));
+        RadiantNavigationTargetKind target_kind = kind && strcmp(kind, "new") == 0
+            ? RADIANT_NAVIGATION_TARGET_NEW : RADIANT_NAVIGATION_TARGET_EXISTING;
+        return radiant_bool_item(radiant_queue_navigation_request(
+            source, url, target, target_kind, target_name, fragment));
+    }
+
     const char* target = fn_to_cstr(radiant_obj_get(request_item, "target"));
     const char* url = fn_to_cstr(radiant_obj_get(request_item, "url"));
     const char* method = fn_to_cstr(radiant_obj_get(request_item, "method"));
@@ -1958,6 +2154,7 @@ RADIANT_C_API Item fn_radiant_caret_surface(Item node_item) {
     int kind = editing_controller_caret_surface_kind(state);
     if (kind == 1) return radiant_string_item("text");
     if (kind == 2) return radiant_string_item("rich");
+    if (kind == 3) return radiant_string_item("textarea");
     return ItemNull;
 }
 
@@ -1966,6 +2163,15 @@ RADIANT_C_API Item fn_radiant_caret_operation(Item node_item, Item op_item,
     const char* op = fn_to_cstr(op_item);
     if (!op || !*op) return (Item){.item = b2it(0)};
     radiant_caret_operation_request(op, is_truthy(extend_item));
+    return (Item){.item = b2it(1)};
+}
+
+// ESO48: key choice stays in the package; native resolves the live scrollport,
+// range and geometry after this behavior-only request returns.
+RADIANT_C_API Item fn_radiant_scroll_operation(Item node_item, Item op_item) {
+    const char* op = fn_to_cstr(op_item);
+    if (!op || !*op) return (Item){.item = b2it(0)};
+    radiant_scroll_operation_request(op);
     return (Item){.item = b2it(1)};
 }
 
@@ -2450,6 +2656,7 @@ static const JubeTypeDef radiant_types[] = {
     {"textarea_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     {"option_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
     {"html_element", JUBE_TYPE_NON_OWNING_HOST, NULL, NULL},
+    {"event", JUBE_TYPE_OWNING_NATIVE, NULL, radiant_dom_event_destroy},
 };
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void) {
@@ -2524,6 +2731,10 @@ RADIANT_C_API const void* radiant_dom_html_element_host_type(void) {
     return &radiant_types[17];
 }
 
+RADIANT_C_API const void* radiant_dom_event_host_type(void) {
+    return &radiant_types[18];
+}
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
 static const JubeFuncDef radiant_functions[] = {
@@ -2531,6 +2742,26 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_load(Item path)", (fn_ptr)fn_radiant_load},
     {"root", "fn(doc: dom_node) -> dom_node", (fn_ptr)fn_radiant_root, JUBE_FN_NONE,
      "Item fn_radiant_root(Item doc)", (fn_ptr)fn_radiant_root},
+    {"document_root", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_document_root, JUBE_FN_NONE,
+     "Item fn_radiant_document_root(Item node)", (fn_ptr)fn_radiant_document_root},
+    {"first_element_child", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_first_element_child, JUBE_FN_NONE,
+     "Item fn_radiant_first_element_child(Item node)", (fn_ptr)fn_radiant_first_element_child},
+    {"next_element_sibling", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_next_element_sibling, JUBE_FN_NONE,
+     "Item fn_radiant_next_element_sibling(Item node)", (fn_ptr)fn_radiant_next_element_sibling},
+    {"focus_candidates", "fn(root: dom_node) -> array", (fn_ptr)fn_radiant_focus_candidates, JUBE_FN_NONE,
+     "Item fn_radiant_focus_candidates(Item root)", (fn_ptr)fn_radiant_focus_candidates},
+    {"focused", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_focused, JUBE_FN_NONE,
+     "Item fn_radiant_focused(Item node)", (fn_ptr)fn_radiant_focused},
+    {"focus_set", "fn(node: dom_node, from_keyboard: bool) -> bool", (fn_ptr)fn_radiant_focus_set, JUBE_FN_NONE,
+     "Item fn_radiant_focus_set(Item node, Item from_keyboard)", (fn_ptr)fn_radiant_focus_set},
+    {"scroll_into_view", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_scroll_into_view, JUBE_FN_NONE,
+     "Item fn_radiant_scroll_into_view(Item node)", (fn_ptr)fn_radiant_scroll_into_view},
+    {"embedding_element", "fn(node: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_embedding_element, JUBE_FN_NONE,
+     "Item fn_radiant_embedding_element(Item node)", (fn_ptr)fn_radiant_embedding_element},
+    {"embedded_document_root", "fn(iframe: dom_node) -> dom_node|null", (fn_ptr)fn_radiant_embedded_document_root, JUBE_FN_NONE,
+     "Item fn_radiant_embedded_document_root(Item iframe)", (fn_ptr)fn_radiant_embedded_document_root},
+    {"navigation_destination", "fn(source: dom_node, url: string, target_root: dom_node) -> map", (fn_ptr)fn_radiant_navigation_destination, JUBE_FN_NONE,
+     "Item fn_radiant_navigation_destination(Item source, Item url, Item target_root)", (fn_ptr)fn_radiant_navigation_destination},
     {"attr", "fn(node: dom_node, name: string) -> string", (fn_ptr)fn_radiant_attr, JUBE_FN_NONE,
      "Item fn_radiant_attr(Item node, Item name)", (fn_ptr)fn_radiant_attr},
     {"set_attr", "fn(node: dom_node, name: string, value: string) -> dom_node", (fn_ptr)fn_radiant_set_attr, JUBE_FN_NONE,
@@ -2634,6 +2865,8 @@ static const JubeFuncDef radiant_functions[] = {
      "Item fn_radiant_caret_surface(Item node)", (fn_ptr)fn_radiant_caret_surface},
     {"caret_operation", "fn(node: dom_node, operation: string, extend: bool) -> bool", (fn_ptr)fn_radiant_caret_operation, JUBE_FN_NONE,
      "Item fn_radiant_caret_operation(Item node, Item operation, Item extend)", (fn_ptr)fn_radiant_caret_operation},
+    {"scroll_operation", "fn(node: dom_node, operation: string) -> bool", (fn_ptr)fn_radiant_scroll_operation, JUBE_FN_NONE,
+     "Item fn_radiant_scroll_operation(Item node, Item operation)", (fn_ptr)fn_radiant_scroll_operation},
     {"open_context_menu", "fn(node: dom_node, enabled_mask: int) -> bool", (fn_ptr)fn_radiant_open_context_menu, JUBE_FN_NONE,
      "Item fn_radiant_open_context_menu(Item node, Item enabled_mask)", (fn_ptr)fn_radiant_open_context_menu},
     {"close_context_menu", "fn(node: dom_node) -> bool", (fn_ptr)fn_radiant_close_context_menu, JUBE_FN_NONE,
@@ -2712,7 +2945,7 @@ static const JubeModuleDef radiant_module = {
     JUBE_ABI_VERSION,
     sizeof(JubeModuleDef),
     "radiant",
-    "0.2.0",
+    "0.3.0",
     "Radiant DOM and layout access",
     radiant_types,
     (int32_t)(sizeof(radiant_types) / sizeof(radiant_types[0])),

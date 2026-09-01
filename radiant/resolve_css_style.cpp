@@ -1338,11 +1338,9 @@ static const char* css_join_font_family_parts(LayoutContext* lycon,
     return combined;
 }
 
-const char* css_select_font_family(LayoutContext* lycon, const CssValue* value,
-                                   bool require_loadable_face_source) {
+const char* css_select_font_family(LayoutContext* lycon, const CssValue* value) {
     if (!value) return NULL;
     if (value->type != CSS_VALUE_TYPE_LIST) return css_font_family_name_from_value(value);
-    (void)require_loadable_face_source;
     // Glyph fallback happens per character, so computed style must retain the
     // authored family order instead of collapsing it to the first loadable face.
     return css_join_font_family_parts(
@@ -1353,9 +1351,7 @@ const char* css_select_font_family(LayoutContext* lycon, const CssValue* value,
 const char* css_select_font_shorthand_family(LayoutContext* lycon,
                                              const CssValue* shorthand_value,
                                              const CssValue* main_group,
-                                             size_t family_start_index,
-                                             bool require_loadable_face_source) {
-    (void)require_loadable_face_source;
+                                             size_t family_start_index) {
     const char* first = main_group && main_group->type == CSS_VALUE_TYPE_LIST
         ? css_join_font_family_parts(
             lycon, main_group, family_start_index,
@@ -4488,7 +4484,7 @@ static void apply_pseudo_font_family(LayoutContext* lycon, FontProp* font,
     const CssValue* value = resolve_var_function(lycon, raw_value);
     if (!value) return;
     if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-        const char* family = css_select_font_family(lycon, value, true);
+        const char* family = css_select_font_family(lycon, value);
         if (family && *family) {
             radiant_retain_font_family(font, lam::PoolPtr<char>((char*)family));
         }
@@ -4543,7 +4539,7 @@ FontProp* layout_resolve_first_line_font(LayoutContext* lycon,
                 first_line_font->font_style = parts.style->data.keyword;
             }
             const char* family = css_select_font_shorthand_family(
-                lycon, value, parts.group, parts.family_start, true);
+                lycon, value, parts.group, parts.family_start);
             if (family && *family) {
                 radiant_retain_font_family(first_line_font,
                     lam::PoolPtr<char>((char*)family));
@@ -7006,7 +7002,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 span->font->font_variant = parts.small_caps
                     ? CSS_VALUE_SMALL_CAPS : CSS_VALUE_NORMAL;
                 const char* font_family_name = css_select_font_shorthand_family(
-                    lycon, value, parts.group, parts.family_start, true);
+                    lycon, value, parts.group, parts.family_start);
                 if (parts.size) {
                     LayoutFontSizeResult resolved = layout_resolve_font_size_value(
                         lycon, parts.size, lycon->font.style, true);
@@ -7083,7 +7079,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 }
             }
             else if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.count > 0) {
-                const char* family = css_select_font_family(lycon, value, true);
+                const char* family = css_select_font_family(lycon, value);
                 if (family) {
                     radiant_retain_font_family(span->font, lam::PoolPtr<char>((char*)family));
                 }

@@ -82,6 +82,7 @@ extern __thread Context* input_context;
 void parse_json(Input* input, const char* json_string);
 
 static bool g_replay_assert_state = false;
+static const char* g_event_result_path = NULL;
 
 static bool sim_target_is_rich_editing_surface(View* target) {
     target = editing_focus_target_from_target(target);
@@ -119,6 +120,10 @@ void event_sim_set_replay_assert_state(bool assert_state) {
     g_replay_assert_state = assert_state;
 }
 
+void event_sim_set_result_path(const char* result_path) {
+    g_event_result_path = result_path;
+}
+
 static EventSimContext* event_sim_create_context() {
     g_pending_input_turns = 0;
     EventSimContext* ctx = (EventSimContext*)mem_calloc(1, sizeof(EventSimContext), MEM_CAT_LAYOUT);
@@ -138,6 +143,7 @@ static EventSimContext* event_sim_create_context() {
     ctx->pass_count = 0;
     ctx->fail_count = 0;
     ctx->test_name = NULL;
+    ctx->result_path = g_event_result_path ? mem_strdup(g_event_result_path, MEM_CAT_LAYOUT) : NULL;
     ctx->device_scale = 1.0f;
     ctx->default_timeout = 2000;
     ctx->replay_assert_state = g_replay_assert_state;
@@ -918,6 +924,14 @@ static void sim_extract_text(View* view, StrBuf* buf) {
 static bool resolve_target(SimEvent* ev, DomDocument* doc, float* out_x, float* out_y) {
     // Priority: selector > text > raw coordinates
     if (ev->target_selector && doc) {
+        // Script-created styles can be applied after the initial retained tree
+        // is laid out. Pointer actions must resolve against the current box
+        // geometry, just as a native input turn does.
+        if (ev->type == SIM_EVENT_CLICK || ev->type == SIM_EVENT_DBLCLICK ||
+            ev->type == SIM_EVENT_MOUSE_DOWN || ev->type == SIM_EVENT_MOUSE_UP ||
+            ev->type == SIM_EVENT_MOUSE_MOVE || ev->type == SIM_EVENT_MOUSE_DRAG) {
+            reflow_html_doc(doc);
+        }
         View* elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
         if (elem) {
             if (ev->has_target_offset) {
@@ -2401,6 +2415,7 @@ void event_sim_free(EventSimContext* ctx) {
     if (ctx->replay_expected_focus_stable_id) mem_free(ctx->replay_expected_focus_stable_id);
     if (ctx->replay_expected_caret_stable_id) mem_free(ctx->replay_expected_caret_stable_id);
     if (ctx->result_file) fclose(ctx->result_file);
+    if (ctx->result_path) mem_free(ctx->result_path);
     if (ctx->event_arena) mem_arena_destroy(ctx->event_arena);
     mem_free(ctx);
 }
@@ -4779,6 +4794,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             else if (strcmp(ev->state_name, ":active") == 0) mask = PSEUDO_STATE_ACTIVE;
             else if (strcmp(ev->state_name, ":focus") == 0) mask = PSEUDO_STATE_FOCUS;
             else if (strcmp(ev->state_name, ":visited") == 0) mask = PSEUDO_STATE_VISITED;
+            else if (strcmp(ev->state_name, ":target") == 0) mask = PSEUDO_STATE_TARGET;
             else if (strcmp(ev->state_name, ":checked") == 0) mask = PSEUDO_STATE_CHECKED;
             else if (strcmp(ev->state_name, ":disabled") == 0) mask = PSEUDO_STATE_DISABLED;
             else if (strcmp(ev->state_name, ":enabled") == 0) mask = PSEUDO_STATE_ENABLED;
@@ -6132,6 +6148,22 @@ void event_sim_print_results(EventSimContext* ctx) {
         fprintf(stderr, " Result: %s\n", ctx->fail_count == 0 ? "PASS" : "FAIL");
     }
     fprintf(stderr, "========================================\n");
+
+    // The human summary remains useful for local runs, but the unified UI
+    // runner consumes this stable protocol instead of scraping presentation
+    // text. Keep the schema intentionally small so new assertions are additive.
+    if (ctx->result_path && ctx->result_path[0]) {
+        FILE* result = fopen(ctx->result_path, "wb");
+        if (result) {
+            fprintf(result,
+                    "{\"version\":1,\"events\":%d,\"assertions\":{\"passed\":%d,\"failed\":%d},\"result\":\"%s\"}\n",
+                    ctx->current_index, ctx->pass_count, ctx->fail_count,
+                    ctx->fail_count == 0 ? "PASS" : "FAIL");
+            fclose(result);
+        } else {
+            log_error("event_sim: failed to write machine result '%s'", ctx->result_path);
+        }
+    }
 
     // Log file as well
     log_info("event_sim: results - %d events, %d assertions passed, %d failed",

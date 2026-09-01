@@ -389,6 +389,7 @@ struct EventSimContext {
     int pass_count;              // assertions passed
     int fail_count;              // assertions failed
     FILE* result_file;           // optional result output file
+    char* result_path;            // optional machine-readable result path
     char* test_name;             // optional test name from JSON
     int viewport_width;          // 0 = use default (1200)
     int viewport_height;         // 0 = use default (800)
@@ -442,6 +443,10 @@ char* event_sim_replay_document_path(const char* jsonl_file);
 // Configure whether replay logs loaded after this call compare the final
 // state.snapshot when simulation completes.
 void event_sim_set_replay_assert_state(bool assert_state);
+
+// Configure a versioned machine-readable result file for the next loaded
+// fixture. The host process owns the argument string; the context copies it.
+void event_sim_set_result_path(const char* result_path);
 
 // Free simulation context
 void event_sim_free(EventSimContext* ctx);

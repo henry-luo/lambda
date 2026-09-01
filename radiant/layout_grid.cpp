@@ -122,10 +122,6 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     lycon->grid_container = grid;
     grid->scratch_mark = mark;
     grid->lycon = lycon;  // Store layout context for intrinsic sizing
-    // Initialize auto-placement cursors (grid lines are 1-indexed)
-    grid->auto_row_cursor = 1;
-    grid->auto_col_cursor = 1;
-
     if (container->embed && container->embedp()->grid) {
         memcpy(grid, container->embedp()->grid, sizeof(GridProp));
         grid->scratch_mark = mark;
@@ -209,8 +205,6 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         cleanup_grid_container(lycon);
         return;
     }
-
-    grid->needs_reflow = false;
 
 }
 // Cleanup grid container resources
@@ -320,7 +314,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
                 container->height = new_h;
             }
         }
-        grid_layout->needs_reflow = false;
         return;
     }
     // Phase 2: Resolve grid template areas
@@ -573,7 +566,6 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     // Note: Phase 8 (content layout) is now handled by layout_grid_multipass.cpp Pass 3
     // The multipass flow calls layout_final_grid_content() after this function returns
 
-    grid_layout->needs_reflow = false;
 }
 // Collect the flattened-tree element nodes that can become grid items.
 int collect_grid_item_nodes(LayoutContext* lycon, ViewBlock* container,

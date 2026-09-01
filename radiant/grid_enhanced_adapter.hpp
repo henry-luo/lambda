@@ -202,10 +202,8 @@ inline void finalize_track_used_sizes(TrackArray& tracks) {
  * @param start Start line number
  * @param end End line number
  * @param end_is_span True if negative end value means "span N", false if it's a negative line number
- * @param explicit_track_count Number of explicit columns (needed to resolve negative line numbers)
  */
-inline int get_span_value_ex(int start, int end, bool end_is_span, int explicit_track_count) {
-    (void)explicit_track_count;
+inline int get_span_value_ex(int start, int end, bool end_is_span) {
     if (start > 0 && end > 0) {
         return end - start;
     } else if (start > 0 && end < 0) {
@@ -284,7 +282,7 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index,
             static_cast<int16_t>(col_end));
     } else if (col_start != 0 && !col_start_is_span) {
         // Definite start position (positive line number)
-        int col_span = get_span_value_ex(col_start, col_end, col_end_is_span, explicit_col_count);
+        int col_span = get_span_value_ex(col_start, col_end, col_end_is_span);
         info.column = GridPlacement::FromStartSpan(static_cast<int16_t>(col_start),
                                                     static_cast<uint16_t>(col_span));
     } else if (col_end < 0 && col_end_is_span) {
@@ -314,7 +312,7 @@ inline GridItemInfo extract_grid_item_info(ViewBlock* item, int item_index,
             static_cast<int16_t>(row_end));
     } else if (row_start != 0 && !row_start_is_span) {
         // Definite start position (positive line number)
-        int row_span = get_span_value_ex(row_start, row_end, row_end_is_span, explicit_row_count);
+        int row_span = get_span_value_ex(row_start, row_end, row_end_is_span);
         info.row = GridPlacement::FromStartSpan(static_cast<int16_t>(row_start),
                                                  static_cast<uint16_t>(row_span));
     } else if (row_end < 0 && row_end_is_span) {

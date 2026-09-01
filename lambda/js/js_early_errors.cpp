@@ -17,7 +17,6 @@
 #include "js_transpiler.hpp"
 #include "js_runtime.h"
 #include "../../lib/log.h"
-#include "../../lib/hashmap.h"
 #include "../../lib/utf.h"
 #include <cstring>
 #include <cstdio>
@@ -68,12 +67,7 @@ static void ee_error(EarlyErrorCtx* ctx, JsAstNode* n, const char* fmt, ...) {
     vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
 
-    js_error(ctx->tp, n->source_span, "%s", buf);
-
-    LambdaSourcePoint point = lambda_source_span_start_point(ctx->tp->source, n->source_span);
-    uint32_t row = point.row + 1;
-    uint32_t col = point.column + 1;
-    fprintf(stderr, "SyntaxError: %s (at line %u, column %u)\n", buf, row, col); // PRINTF_OK: stderr echo of js_error() for early-stage host visibility.
+    js_syntax_error(ctx->tp, n->source_span, buf);
 }
 
 // ---- reserved word tables --------------------------------------------------
@@ -368,122 +362,31 @@ static void check_identifier_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
 
 // ---- Phase 3: destructuring pattern validation -----------------------------
 
-static void check_array_pattern(EarlyErrorCtx* ctx, JsAstNode* node) {
-    if (!node || node->node_type != JS_AST_NODE_ARRAY_PATTERN) return;
-    JsArrayPatternNode* pat = (JsArrayPatternNode*)node;
-
-    // walk elements — if rest is not last, error
-    for (JsAstNode* elem = pat->elements; elem; elem = elem->next) {
-        if (elem->node_type == JS_AST_NODE_REST_ELEMENT) {
-            if (elem->next) {
-                ee_error(ctx, elem, "Rest element must be last element in destructuring pattern");
-            }
-            // rest must not have default value
-            JsSpreadElementNode* rest = (JsSpreadElementNode*)elem;
-            if (rest->argument && rest->argument->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN) {
-                ee_error(ctx, elem, "Rest element may not have a default initializer");
-            }
+static void check_pattern_rest(EarlyErrorCtx* ctx, JsAstNode* items,
+        bool array_pattern) {
+    for (JsAstNode* item = items; item; item = item->next) {
+        bool rest = item->node_type == JS_AST_NODE_REST_ELEMENT ||
+            (!array_pattern && item->node_type == JS_AST_NODE_REST_PROPERTY);
+        if (!rest) continue;
+        if (item->next) {
+            ee_error(ctx, item,
+                "Rest element must be last element in destructuring pattern");
+        }
+        if (array_pattern && ((JsSpreadElementNode*)item)->argument &&
+                ((JsSpreadElementNode*)item)->argument->node_type ==
+                    JS_AST_NODE_ASSIGNMENT_PATTERN) {
+            ee_error(ctx, item,
+                "Rest element may not have a default initializer");
         }
     }
-}
-
-static void check_object_pattern(EarlyErrorCtx* ctx, JsAstNode* node) {
-    if (!node || node->node_type != JS_AST_NODE_OBJECT_PATTERN) return;
-    JsObjectPatternNode* pat = (JsObjectPatternNode*)node;
-
-    // walk properties — rest must be last
-    for (JsAstNode* prop = pat->properties; prop; prop = prop->next) {
-        if (prop->node_type == JS_AST_NODE_REST_ELEMENT || prop->node_type == JS_AST_NODE_REST_PROPERTY) {
-            if (prop->next) {
-                ee_error(ctx, prop, "Rest element must be last element in destructuring pattern");
-            }
-        }
-    }
-}
-
-// ---- Phase 4: block-scope redeclaration ------------------------------------
-
-struct BlockScopeEntry {
-    const char* name;
-    int kind; // JsVarKind
-};
-
-static uint64_t bse_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const BlockScopeEntry* e = (const BlockScopeEntry*)item;
-    return hashmap_sip(e->name, strlen(e->name), seed0, seed1);
-}
-
-static int bse_cmp(const void* a, const void* b, void* udata) {
-    (void)udata;
-    return strcmp(((const BlockScopeEntry*)a)->name, ((const BlockScopeEntry*)b)->name);
-}
-
-static void check_block_redeclarations(EarlyErrorCtx* ctx, JsAstNode* stmts) {
-    // scan a block's statement list for duplicate let/const declarations
-    struct hashmap* scope = hashmap_new(sizeof(BlockScopeEntry), 16, 0, 0, bse_hash, bse_cmp, NULL, NULL);
-
-    for (JsAstNode* s = stmts; s; s = s->next) {
-        if (s->node_type != JS_AST_NODE_VARIABLE_DECLARATION) continue;
-        JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)s;
-        int kind = vd->kind; // 0=var, 1=let, 2=const
-        if (kind == JS_VAR_VAR) continue; // var has function scope, skip
-
-        for (JsAstNode* decl = vd->declarations; decl; decl = decl->next) {
-            if (decl->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
-            JsVariableDeclaratorNode* vdecl = (JsVariableDeclaratorNode*)decl;
-            if (!vdecl->id || vdecl->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
-            JsIdentifierNode* id = (JsIdentifierNode*)vdecl->id;
-            if (!id->name) continue;
-
-            const char* name = id->name->chars;
-            BlockScopeEntry probe = {name, 0};
-            const BlockScopeEntry* existing = (const BlockScopeEntry*)hashmap_get(scope, &probe);
-            if (existing) {
-                ee_error(ctx, (JsAstNode*)id,
-                    "Identifier '%s' has already been declared in this scope", name);
-            } else {
-                BlockScopeEntry entry = {name, kind};
-                hashmap_set(scope, &entry);
-            }
-        }
-
-        // also check for class and function declarations in the same scope
-    }
-
-    // also check for class declarations
-    for (JsAstNode* s = stmts; s; s = s->next) {
-        if (s->node_type == JS_AST_NODE_CLASS_DECLARATION) {
-            JsClassNode* cls = (JsClassNode*)s;
-            if (cls->name) {
-                const char* name = cls->name->chars;
-                BlockScopeEntry probe = {name, 0};
-                const BlockScopeEntry* existing = (const BlockScopeEntry*)hashmap_get(scope, &probe);
-                if (existing) {
-                    ee_error(ctx, s, "Identifier '%s' has already been declared in this scope", name);
-                } else {
-                    BlockScopeEntry entry = {name, JS_VAR_CONST};
-                    hashmap_set(scope, &entry);
-                }
-            }
-        }
-    }
-
-    hashmap_free(scope);
 }
 
 // ---- Phase 5: strict mode --------------------------------------------------
 
 // v17: check if a function has non-simple parameters (defaults, rest, destructuring)
 static bool has_non_simple_params(JsFunctionNode* func) {
-    for (JsAstNode* p = func->params; p; p = p->next) {
-        if (p->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN ||
-            p->node_type == JS_AST_NODE_REST_ELEMENT ||
-            p->node_type == JS_AST_NODE_ARRAY_PATTERN ||
-            p->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-            return true;
-        }
-    }
-    return false;
+    return js_ast_collect_parameter_facts(func ? func->params : NULL)
+        .has_non_simple_params;
 }
 
 // v17: "use strict" in function with non-simple params is SyntaxError
@@ -500,74 +403,33 @@ static void check_duplicate_params(EarlyErrorCtx* ctx, JsFunctionNode* func) {
     // in strict mode or with default/rest/destructuring params, duplicate params are illegal
     if (!func->params) return;
 
-    // detect if function has non-simple parameters
-    bool has_non_simple = false;
-    for (JsAstNode* p = func->params; p; p = p->next) {
-        if (p->node_type == JS_AST_NODE_ASSIGNMENT_PATTERN ||
-            p->node_type == JS_AST_NODE_REST_ELEMENT ||
-            p->node_type == JS_AST_NODE_ARRAY_PATTERN ||
-            p->node_type == JS_AST_NODE_OBJECT_PATTERN) {
-            has_non_simple = true;
-            break;
-        }
-    }
+    JsAstParameterFacts facts = js_ast_collect_parameter_facts(func->params);
 
-    if (!ctx->in_strict && !has_non_simple) return; // sloppy mode with simple params allows dupes
+    if (!ctx->in_strict && !facts.has_non_simple_params) return; // sloppy mode with simple params allows dupes
 
-    // collect param names
-    const char* names[256];
-    int count = 0;
-    for (JsAstNode* p = func->params; p; p = p->next) {
-        JsAstNode* target = p;
-        if (p->node_type == JS_AST_NODE_PARAMETER) {
-            // JsParameter wraps the actual pattern, but we just need the identifier
-            // Check if it has a name child
-        }
-        if (target->node_type == JS_AST_NODE_IDENTIFIER && count < 256) {
-            JsIdentifierNode* id = (JsIdentifierNode*)target;
-            if (id->name) {
-                // check for duplicate
-                for (int i = 0; i < count; i++) {
-                    if (strcmp(names[i], id->name->chars) == 0) {
-                        ee_error(ctx, target, "Duplicate parameter name '%s' not allowed", id->name->chars);
-                        break;
-                    }
-                }
-                names[count++] = id->name->chars;
-            }
-        }
+    if (facts.has_duplicate_param_names && facts.first_duplicate_param &&
+            facts.first_duplicate_param->name) {
+        ee_error(ctx, (JsAstNode*)facts.first_duplicate_param,
+            "Duplicate parameter name '%s' not allowed",
+            facts.first_duplicate_param->name->chars);
     }
+}
+
+static void check_binding_pattern_reserved(EarlyErrorCtx* ctx, JsAstNode* node);
+
+static void check_binding_pattern_reserved_child(JsAstNode* child,
+        void* opaque) {
+    check_binding_pattern_reserved((EarlyErrorCtx*)opaque, child);
 }
 
 static void check_binding_pattern_reserved(EarlyErrorCtx* ctx, JsAstNode* node) {
     if (!node) return;
-    switch (node->node_type) {
-        case JS_AST_NODE_IDENTIFIER:
-            check_identifier_reserved(ctx, node);
-            break;
-        case JS_AST_NODE_ASSIGNMENT_PATTERN:
-            check_binding_pattern_reserved(ctx, ((JsAssignmentPatternNode*)node)->left);
-            break;
-        case JS_AST_NODE_REST_ELEMENT:
-        case JS_AST_NODE_REST_PROPERTY:
-            check_binding_pattern_reserved(ctx, ((JsSpreadElementNode*)node)->argument);
-            break;
-        case JS_AST_NODE_ARRAY_PATTERN:
-            for (JsAstNode* e = ((JsArrayPatternNode*)node)->elements; e; e = e->next)
-                check_binding_pattern_reserved(ctx, e);
-            break;
-        case JS_AST_NODE_OBJECT_PATTERN:
-            for (JsAstNode* p = ((JsObjectPatternNode*)node)->properties; p; p = p->next) {
-                if (p->node_type == JS_AST_NODE_PROPERTY) {
-                    check_binding_pattern_reserved(ctx, ((JsPropertyNode*)p)->value);
-                } else {
-                    check_binding_pattern_reserved(ctx, p);
-                }
-            }
-            break;
-        default:
-            break;
+    if (node->node_type == JS_AST_NODE_IDENTIFIER) {
+        check_identifier_reserved(ctx, node);
+        return;
     }
+    js_ast_visit_binding_pattern_children(node,
+        check_binding_pattern_reserved_child, ctx);
 }
 
 static void check_function_name_reserved(EarlyErrorCtx* ctx, JsFunctionNode* func) {
@@ -599,6 +461,10 @@ static bool regex_pattern_has_line_terminator(const char* pattern, int pattern_l
 static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node);
 static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node);
 static void walk_statements(EarlyErrorCtx* ctx, JsAstNode* stmts);
+
+static void walk_expression_child(JsAstNode* child, void* opaque) {
+    walk_expression((EarlyErrorCtx*)opaque, child);
+}
 
 static void walk_class_for_early_errors(EarlyErrorCtx* ctx, JsClassNode* cls) {
     bool was_strict = ctx->in_strict;
@@ -660,8 +526,7 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
     switch (node->node_type) {
         case JS_AST_NODE_ASSIGNMENT_EXPRESSION:
             check_assignment_target(ctx, node);
-            walk_expression(ctx, ((JsAssignmentNode*)node)->left);
-            walk_expression(ctx, ((JsAssignmentNode*)node)->right);
+            js_ast_visit_children(node, walk_expression_child, ctx);
             break;
 
         case JS_AST_NODE_UNARY_EXPRESSION: {
@@ -674,7 +539,7 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
                 un->operand->node_type == JS_AST_NODE_IDENTIFIER) {
                 ee_error(ctx, node, "Deleting a variable is not allowed in strict mode");
             }
-            walk_expression(ctx, un->operand);
+            js_ast_visit_children(node, walk_expression_child, ctx);
             break;
         }
 
@@ -737,20 +602,10 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             break;
         }
 
-        case JS_AST_NODE_BINARY_EXPRESSION: {
-            JsBinaryNode* bn = (JsBinaryNode*)node;
-            walk_expression(ctx, bn->left);
-            walk_expression(ctx, bn->right);
+        case JS_AST_NODE_BINARY_EXPRESSION:
+        case JS_AST_NODE_CALL_EXPRESSION:
+            js_ast_visit_children(node, walk_expression_child, ctx);
             break;
-        }
-
-        case JS_AST_NODE_CALL_EXPRESSION: {
-            JsCallNode* cn = (JsCallNode*)node;
-            walk_expression(ctx, cn->callee);
-            for (JsAstNode* a = cn->arguments; a; a = a->next)
-                walk_expression(ctx, a);
-            break;
-        }
 
         case JS_AST_NODE_MEMBER_EXPRESSION: {
             JsMemberNode* mn = (JsMemberNode*)node;
@@ -764,12 +619,9 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             break;
         }
 
-        case JS_AST_NODE_ARRAY_EXPRESSION: {
-            JsArrayNode* an = (JsArrayNode*)node;
-            for (JsAstNode* e = an->elements; e; e = e->next)
-                walk_expression(ctx, e);
+        case JS_AST_NODE_ARRAY_EXPRESSION:
+            js_ast_visit_children(node, walk_expression_child, ctx);
             break;
-        }
 
         case JS_AST_NODE_OBJECT_EXPRESSION: {
             JsObjectNode* on = (JsObjectNode*)node;
@@ -784,40 +636,18 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             break;
         }
 
-        case JS_AST_NODE_CONDITIONAL_EXPRESSION: {
-            JsConditionalNode* cn = (JsConditionalNode*)node;
-            walk_expression(ctx, cn->test);
-            walk_expression(ctx, cn->consequent);
-            walk_expression(ctx, cn->alternate);
+        case JS_AST_NODE_CONDITIONAL_EXPRESSION:
+        case JS_AST_NODE_SEQUENCE_EXPRESSION:
+            js_ast_visit_children(node, walk_expression_child, ctx);
             break;
-        }
 
-        case JS_AST_NODE_SEQUENCE_EXPRESSION: {
-            JsSequenceNode* sn = (JsSequenceNode*)node;
-            for (JsAstNode* e = sn->expressions; e; e = e->next)
-                walk_expression(ctx, e);
+        case JS_AST_NODE_TEMPLATE_LITERAL:
+        case JS_AST_NODE_TAGGED_TEMPLATE:
+            js_ast_visit_children(node, walk_expression_child, ctx);
             break;
-        }
-
-        case JS_AST_NODE_TEMPLATE_LITERAL: {
-            JsTemplateLiteralNode* tl = (JsTemplateLiteralNode*)node;
-            for (JsAstNode* e = tl->expressions; e; e = e->next)
-                walk_expression(ctx, e);
-            break;
-        }
-
-        case JS_AST_NODE_TAGGED_TEMPLATE: {
-            JsTaggedTemplateNode* tt = (JsTaggedTemplateNode*)node;
-            walk_expression(ctx, tt->tag);
-            if (tt->quasi) {
-                for (JsAstNode* e = tt->quasi->expressions; e; e = e->next)
-                    walk_expression(ctx, e);
-            }
-            break;
-        }
 
         case JS_AST_NODE_SPREAD_ELEMENT:
-            walk_expression(ctx, ((JsSpreadElementNode*)node)->argument);
+            js_ast_visit_children(node, walk_expression_child, ctx);
             break;
 
         case JS_AST_NODE_YIELD_EXPRESSION:
@@ -848,29 +678,19 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
             break;
         }
 
-        case JS_AST_NODE_NEW_EXPRESSION: {
-            JsCallNode* ne = (JsCallNode*)node;
-            walk_expression(ctx, ne->callee);
-            for (JsAstNode* a = ne->arguments; a; a = a->next)
-                walk_expression(ctx, a);
+        case JS_AST_NODE_NEW_EXPRESSION:
+        case JS_AST_NODE_ASSIGNMENT_PATTERN:
+            js_ast_visit_children(node, walk_expression_child, ctx);
             break;
-        }
-
-        case JS_AST_NODE_ASSIGNMENT_PATTERN: {
-            JsAssignmentPatternNode* ap = (JsAssignmentPatternNode*)node;
-            walk_expression(ctx, ap->left);
-            walk_expression(ctx, ap->right);
-            break;
-        }
 
         case JS_AST_NODE_ARRAY_PATTERN:
-            check_array_pattern(ctx, node);
-            for (JsAstNode* e = ((JsArrayPatternNode*)node)->elements; e; e = e->next)
-                walk_expression(ctx, e);
+            check_pattern_rest(ctx, ((JsArrayPatternNode*)node)->elements, true);
+            js_ast_visit_children(node, walk_expression_child, ctx);
             break;
 
         case JS_AST_NODE_OBJECT_PATTERN:
-            check_object_pattern(ctx, node);
+            check_pattern_rest(ctx, ((JsObjectPatternNode*)node)->properties,
+                false);
             for (JsAstNode* p = ((JsObjectPatternNode*)node)->properties; p; p = p->next) {
                 if (p->node_type == JS_AST_NODE_PROPERTY) {
                     walk_expression(ctx, ((JsPropertyNode*)p)->value);
@@ -882,7 +702,7 @@ static void walk_expression(EarlyErrorCtx* ctx, JsAstNode* node) {
 
         case JS_AST_NODE_REST_ELEMENT:
         case JS_AST_NODE_REST_PROPERTY:
-            walk_expression(ctx, ((JsSpreadElementNode*)node)->argument);
+            js_ast_visit_children(node, walk_expression_child, ctx);
             break;
 
         default:
@@ -896,7 +716,6 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
     switch (node->node_type) {
         case JS_AST_NODE_BLOCK_STATEMENT: {
             JsBlockNode* blk = (JsBlockNode*)node;
-            check_block_redeclarations(ctx, blk->statements);
             walk_statements(ctx, blk->statements);
             break;
         }
@@ -996,54 +815,6 @@ static void walk_statement(EarlyErrorCtx* ctx, JsAstNode* node) {
         case JS_AST_NODE_SWITCH_STATEMENT: {
             JsSwitchNode* sw = (JsSwitchNode*)node;
             walk_expression(ctx, sw->discriminant);
-            // v17: all switch case clauses share one block scope for let/const
-            // collect all let/const declarations across all cases for redeclaration check
-            {
-                struct hashmap* switch_scope = hashmap_new(sizeof(BlockScopeEntry), 16, 0, 0, bse_hash, bse_cmp, NULL, NULL);
-                for (JsAstNode* c = sw->cases; c; c = c->next) {
-                    if (c->node_type == JS_AST_NODE_SWITCH_CASE) {
-                        JsSwitchCaseNode* sc = (JsSwitchCaseNode*)c;
-                        for (JsAstNode* s = sc->consequent; s; s = s->next) {
-                            if (s->node_type == JS_AST_NODE_VARIABLE_DECLARATION) {
-                                JsVariableDeclarationNode* vd = (JsVariableDeclarationNode*)s;
-                                if (vd->kind == JS_VAR_VAR) continue;
-                                for (JsAstNode* decl = vd->declarations; decl; decl = decl->next) {
-                                    if (decl->node_type != JS_AST_NODE_VARIABLE_DECLARATOR) continue;
-                                    JsVariableDeclaratorNode* vdecl = (JsVariableDeclaratorNode*)decl;
-                                    if (!vdecl->id || vdecl->id->node_type != JS_AST_NODE_IDENTIFIER) continue;
-                                    JsIdentifierNode* id = (JsIdentifierNode*)vdecl->id;
-                                    if (!id->name) continue;
-                                    const char* name = id->name->chars;
-                                    BlockScopeEntry probe = {name, 0};
-                                    const BlockScopeEntry* existing = (const BlockScopeEntry*)hashmap_get(switch_scope, &probe);
-                                    if (existing) {
-                                        ee_error(ctx, (JsAstNode*)id,
-                                            "Identifier '%s' has already been declared in this scope", name);
-                                    } else {
-                                        BlockScopeEntry entry = {name, vd->kind};
-                                        hashmap_set(switch_scope, &entry);
-                                    }
-                                }
-                            }
-                            if (s->node_type == JS_AST_NODE_CLASS_DECLARATION) {
-                                JsClassNode* cls = (JsClassNode*)s;
-                                if (cls->name) {
-                                    const char* name = cls->name->chars;
-                                    BlockScopeEntry probe = {name, 0};
-                                    const BlockScopeEntry* existing = (const BlockScopeEntry*)hashmap_get(switch_scope, &probe);
-                                    if (existing) {
-                                        ee_error(ctx, s, "Identifier '%s' has already been declared in this scope", name);
-                                    } else {
-                                        BlockScopeEntry entry = {name, JS_VAR_CONST};
-                                        hashmap_set(switch_scope, &entry);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                hashmap_free(switch_scope);
-            }
             bool saved_in_switch = ctx->in_switch;
             ctx->in_switch = true;
             for (JsAstNode* c = sw->cases; c; c = c->next) {
@@ -1198,6 +969,7 @@ int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast) {
     EarlyErrorCtx ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.tp = tp;
+    ctx.error_count = tp->binding_error_count;
     ctx.in_strict = tp->strict_mode;
 
     // for programs, check top-level "use strict"
@@ -1206,7 +978,6 @@ int js_check_early_errors(JsTranspiler* tp, JsAstNode* ast) {
         if (prog->has_use_strict_directive) {
             ctx.in_strict = true;
         }
-        check_block_redeclarations(&ctx, prog->body);
         walk_statements(&ctx, prog->body);
     } else {
         walk_statement(&ctx, ast);
