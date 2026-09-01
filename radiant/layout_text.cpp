@@ -1404,18 +1404,9 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
     if (!has_rtl_codepoint || cursor == str) return false;
 
     size_t byte_count = (size_t)(cursor - str);
-    for (const unsigned char* glyph = str; glyph < cursor;) {
-        uint32_t codepoint = 0;
-        int bytes = str_utf8_decode(
-            (const char*)glyph, (size_t)(cursor - glyph), &codepoint);
-        if (bytes <= 0) return false;
-        if (font_get_glyph_index(handle, codepoint) == 0) {
-            // CSS Fonts segments a text run at a missing-glyph fallback face;
-            // per-codepoint layout then uses the same fallback metrics as paint.
-            return false;
-        }
-        glyph += bytes;
-    }
+    // CoreText resolves missing glyphs across the full run; rejecting the
+    // primary cmap here would fall back to per-codepoint advances and lose
+    // Arabic joining substitutions.
     TextExtents ext = font_measure_text(
         handle, (const char*)str, (int)byte_count); // INT_CAST_OK: font byte count
     if (ext.width <= 0.0f) return false;
